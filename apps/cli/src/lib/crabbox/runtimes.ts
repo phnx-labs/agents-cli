@@ -21,7 +21,6 @@ import { getAccountInfo } from '../agents.js';
 import { getKeychainToken } from '../secrets/index.js';
 import { getClaudeKeychainService } from '../accounting/usage.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
-import { readClaudeCredentialsBlob } from '../cloud/rush.js';
 
 /**
  * Credential file locations per runtime. `localCandidates` are read in order
@@ -232,8 +231,11 @@ function isClaudeCredentialsBlob(s: string): boolean {
  * versioned home) uses a hash-suffixed service, so we try the bare service first,
  * then enumerate installed version homes (preferring the account whose email
  * matches `preferEmail`, so the token matches the `.claude.json` config we copy).
- * Off macOS the local Claude CLI stores the token in `.credentials.json` already —
- * reuse the rush.ts Linux branch verbatim.
+ * Off macOS the local Claude CLI stores the wrapped rotating blob in
+ * `.credentials.json` already. Read that file here (do NOT call
+ * `readClaudeCredentialsBlob`): that helper is now setup-token-only for Rush
+ * Cloud dispatch (RUSH-2359) and must not be used to detect a native OAuth
+ * login for the SING-1b lease refusal.
  *
  * The reader/service/version helpers are injected so unit tests never touch the
  * real Keychain.
@@ -295,9 +297,20 @@ export async function resolveClaudeCredentialsBlob(opts?: {
     return null;
   }
 
-  // Off darwin: the local Claude CLI already stores the wrapped blob on disk.
+  // Off darwin: the local Claude CLI stores the wrapped rotating blob on disk.
+  // Read it directly so a file-based setup-token (Rush Cloud dispatch) is not
+  // mistaken for a native OAuth login that SING-1b must refuse to copy.
   const home = process.env.AGENTS_REAL_HOME || os.homedir();
-  return readClaudeCredentialsBlob(home);
+  const credsPath = path.join(home, '.claude', '.credentials.json');
+  try {
+    if (fs.existsSync(credsPath)) {
+      const raw = fs.readFileSync(credsPath, 'utf-8').trim();
+      if (raw && isClaudeCredentialsBlob(raw)) return raw;
+    }
+  } catch {
+    /* no readable credentials file */
+  }
+  return null;
 }
 
 /**

@@ -266,8 +266,9 @@ describe('buildDispatchBody', () => {
     expect(mod.buildAccountTokensPayload).toBeUndefined();
     expect(mod.accountTokensFingerprint).toBeUndefined();
     expect(mod.RUSH_CONSENT_PATH).toBeUndefined();
-    // readClaudeCredentialsBlob still exists (the --lease path imports it) but the
-    // cloud dispatch never calls it: the module source has no call site outside its
-    // own definition.
+    // readClaudeCredentialsBlob still exists (Rush Cloud account-manifest dispatch
+    // uses it) but it is setup-token-only — the --lease SING-1b path reads the
+    // wrapped `.credentials.json` / Keychain blob itself and must not go through
+    // this helper (RUSH-2359).
   });
 });

@@ -150,9 +150,12 @@ describe('loadClaudeOauth accessTokenCache never reads the interactive login', (
   });
 
   it('without the opt-in, returns the full interactive credential with its refresh token (run/cloud-export contract)', async () => {
-    // readClaudeCredentialsBlob / isClaudeAuthValid call loadClaudeOauth WITHOUT
-    // accessTokenCache: they legitimately read the interactive credential WITH the
-    // refresh token to run/refresh Claude. Regression guard for that path.
+    // isClaudeAuthValid calls loadClaudeOauth WITHOUT accessTokenCache: it
+    // legitimately reads the interactive credential WITH the refresh token to
+    // run/refresh Claude. Regression guard for that path.
+    // NOTE: readClaudeCredentialsBlob now passes { accessTokenCache: true } and
+    // reads ONLY the file-based setup-token — it no longer goes through this
+    // branch (RUSH-2359).
     const mem = new CountingBackend();
     const prev = setKeychainBackendForTest(mem);
     try {

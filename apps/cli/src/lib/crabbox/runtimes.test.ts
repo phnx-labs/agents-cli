@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -239,6 +239,41 @@ describe('resolveClaudeCredentialsBlob', () => {
       accountEmail: async () => null,
     });
     expect(blob).toBeNull();
+  });
+
+  describe('off-darwin .credentials.json (RUSH-2359 / SING-1b split)', () => {
+    const itOffDarwin = process.platform === 'darwin' ? it.skip : it;
+    let linuxHome: string;
+    let prevRealHome: string | undefined;
+    beforeEach(() => {
+      linuxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-creds-'));
+      prevRealHome = process.env.AGENTS_REAL_HOME;
+      process.env.AGENTS_REAL_HOME = linuxHome;
+      fs.mkdirSync(path.join(linuxHome, '.claude'), { recursive: true });
+    });
+    afterEach(() => {
+      if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+      else process.env.AGENTS_REAL_HOME = prevRealHome;
+      fs.rmSync(linuxHome, { recursive: true, force: true });
+    });
+
+    itOffDarwin('returns the wrapped rotating blob from .credentials.json', async () => {
+      const wrapped = '{"claudeAiOauth":{"accessToken":"tok-live"}}';
+      fs.writeFileSync(path.join(linuxHome, '.claude', '.credentials.json'), wrapped);
+      expect(await resolveClaudeCredentialsBlob()).toBe(wrapped);
+    });
+
+    itOffDarwin('returns null for a setup-token-shaped payload — not a native OAuth blob', async () => {
+      fs.writeFileSync(
+        path.join(linuxHome, '.claude', '.credentials.json'),
+        JSON.stringify({ accessToken: 'sk-ant-oat01-not-a-native-login' }),
+      );
+      expect(await resolveClaudeCredentialsBlob()).toBeNull();
+    });
+
+    itOffDarwin('returns null when .credentials.json is absent', async () => {
+      expect(await resolveClaudeCredentialsBlob()).toBeNull();
+    });
   });
 });
 

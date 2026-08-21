@@ -1703,9 +1703,10 @@ function deleteCachedClaudeOauth(service: string): void {
  * reads Claude Code's interactive login (transmitting that ACL-bound OAuth token
  * to Anthropic's API is what gets it revoked; see the branch body and
  * docs/credential-management.md). It is OFF by default so full-credential
- * callers that refresh (`isClaudeAuthValid` -> `getClaudeAccessToken`) or export
- * the full blob (`readClaudeCredentialsBlob` for Rush Cloud dispatch) still read
- * the interactive login.
+ * callers that refresh (`isClaudeAuthValid` -> `getClaudeAccessToken`) still
+ * read the interactive login. Rush Cloud dispatch (`readClaudeCredentialsBlob`)
+ * now passes `{ accessTokenCache: true }` and never reads the interactive
+ * login (RUSH-2359).
  *
  * `opts.fileOnly` skips the ACL keychain read entirely — setup-token and
  * `.credentials.json` only. Used by the daemon usage refresher so a background

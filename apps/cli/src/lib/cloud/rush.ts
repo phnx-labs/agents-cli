@@ -25,6 +25,7 @@ import { parseSSE } from './stream.js';
 import { listInstalledVersions, getVersionHomePath } from '../installations/versions.js';
 import { getAccountInfo } from '../agents.js';
 import { loadClaudeOauth } from '../accounting/usage.js';
+import { isValidClaudeSetupToken } from '../claude-account-token.js';
 import { selectBalancedVersion } from '../accounting/rotate.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
@@ -172,36 +173,22 @@ function parsePromptCode(body: string): string | null {
 }
 
 /**
- * Read the raw OAuth credentials for one Claude version. On Mac, prefer the
- * Keychain blob (canonical). On Linux/CI, fall back to `.claude/.credentials.json`
- * inside the version home (where the Linux Claude CLI stores its OAuth).
+ * Read the file-based setup-token for one Claude version from the `agents secrets`
+ * auth bundle and return it serialised as an OAuth blob for the Rush server.
  *
- * Returns null when no credentials are findable — caller treats as "version
- * is installed but not signed in" and skips it from the manifest.
+ * MUST read ONLY from the setup-token (`sk-ant-oat01-*`). Never reads the
+ * interactive Keychain login or `.credentials.json`: those are rotating OAuth
+ * tokens the Rush server must not hold. Reading them was the root cause of
+ * RUSH-2359 / incident #1767 (the `claude setup-token` TTY stream was captured
+ * as an Authorization header, crashing every webhook-dispatched run).
  *
- * NOTE: the darwin branch returns the UNWRAPPED oauth sub-object (what the Rush
- * server re-wraps). It is NOT the shape Claude Code reads back from
- * `.credentials.json`. The lease exporter (crabbox/runtimes.ts) therefore only
- * reuses the Linux `.credentials.json` branch here and reads the wrapped raw
- * Keychain payload itself on darwin.
+ * Returns null when no valid setup-token is provisioned — caller treats as
+ * "version is installed but not signed in" and skips it from the manifest.
  */
 export async function readClaudeCredentialsBlob(home: string): Promise<string | null> {
-  if (process.platform === 'darwin') {
-    const oauth = await loadClaudeOauth(home);
-    if (oauth && oauth.accessToken) {
-      return JSON.stringify(oauth);
-    }
-  }
-  const credsPath = path.join(home, '.claude', '.credentials.json');
-  try {
-    if (fs.existsSync(credsPath)) {
-      const raw = fs.readFileSync(credsPath, 'utf-8').trim();
-      if (raw) return raw;
-    }
-  } catch {
-    // fall through to null
-  }
-  return null;
+  const oauth = await loadClaudeOauth(home, { accessTokenCache: true });
+  if (!oauth?.accessToken || !isValidClaudeSetupToken(oauth.accessToken)) return null;
+  return JSON.stringify(oauth);
 }
 
 /**
