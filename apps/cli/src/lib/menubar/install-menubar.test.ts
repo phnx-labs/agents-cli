@@ -343,23 +343,30 @@ describe('mayInstallMenubarHelper', () => {
 // helper in a dead state after a WindowServer disconnect.
 describe('restartMenubarLaunchAgent', () => {
   it('boots out the old job, bootstraps the plist, then kickstarts the service', () => {
-    const calls: Array<{ cmd: string; args: string[] }> = [];
-    const exec = (cmd: string, args: readonly string[]) => {
-      calls.push({ cmd, args: args as string[] });
-      return Buffer.alloc(0);
-    };
+    const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    try {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const exec = (cmd: string, args: readonly string[]) => {
+        calls.push({ cmd, args: args as string[] });
+        return Buffer.alloc(0);
+      };
 
-    restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
+      restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
 
-    // The service target is `serviceLabel()`, not the bare literal: under a
-    // redirected HOME (every test fork, and any sandboxed run) the identifier is
-    // namespaced so this bootout cannot tear down the operator's live helper —
-    // launchctl routes by identifier alone, never by the plist path (RUSH-2639).
-    const target = `gui/501/${serviceLabel()}`;
-    expect(calls).toHaveLength(3);
-    expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', target] });
-    expect(calls[1]).toEqual({ cmd: 'launchctl', args: ['bootstrap', 'gui/501', '/tmp/com.phnx-labs.agents-menubar.plist'] });
-    expect(calls[2]).toEqual({ cmd: 'launchctl', args: ['kickstart', target] });
+      // The service target is `serviceLabel()`, not the bare literal: under a
+      // redirected HOME (every test fork, and any sandboxed run) the identifier is
+      // namespaced so this bootout cannot tear down the operator's live helper —
+      // launchctl routes by identifier alone, never by the plist path (RUSH-2639).
+      const target = `gui/501/${serviceLabel()}`;
+      expect(calls).toHaveLength(3);
+      expect(calls[0]).toEqual({ cmd: 'launchctl', args: ['bootout', target] });
+      expect(calls[1]).toEqual({ cmd: 'launchctl', args: ['bootstrap', 'gui/501', '/tmp/com.phnx-labs.agents-menubar.plist'] });
+      expect(calls[2]).toEqual({ cmd: 'launchctl', args: ['kickstart', target] });
+    } finally {
+      if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
+    }
   });
 
   // The assertion above would pass against a hardcoded label too, so pin the
@@ -381,14 +388,21 @@ describe('restartMenubarLaunchAgent', () => {
   });
 
   it('continues through launchctl errors so a partially-loaded job still gets restarted', () => {
-    const calls: Array<{ cmd: string; args: string[] }> = [];
-    const exec = (cmd: string, args: readonly string[]) => {
-      calls.push({ cmd, args: args as string[] });
-      throw new Error('launchctl failed');
-    };
+    const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    try {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const exec = (cmd: string, args: readonly string[]) => {
+        calls.push({ cmd, args: args as string[] });
+        throw new Error('launchctl failed');
+      };
 
-    expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec)).not.toThrow();
-    expect(calls).toHaveLength(3);
+      expect(() => restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec)).not.toThrow();
+      expect(calls).toHaveLength(3);
+    } finally {
+      if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
+    }
   });
 });
 
@@ -428,6 +442,35 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
     const app = makeAdHocBundle();
     expect(hasDeveloperIdSignature(app)).toBe(false);
     fs.rmSync(path.dirname(app), { recursive: true, force: true });
+  });
+});
+
+// RUSH-2968: launchctl is per-user-session and HOME-independent. A process under a
+// redirected HOME still registers jobs in the REAL launchd, even when the label is
+// namespaced. The registration abstraction must refuse the call and state why.
+darwinOnly('service-manager registration gating (RUSH-2968)', () => {
+  it('never invokes launchctl under a redirected HOME', () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const exec = (cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args: args as string[] });
+      return Buffer.alloc(0);
+    };
+
+    const warnings: string[] = [];
+    const realWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: any, ...rest: any[]) => {
+      warnings.push(String(chunk));
+      return (realWrite as any)(chunk, ...rest);
+    }) as typeof process.stderr.write;
+
+    try {
+      restartMenubarLaunchAgent(501, '/tmp/com.phnx-labs.agents-menubar.plist', exec);
+    } finally {
+      process.stderr.write = realWrite;
+    }
+
+    expect(calls).toHaveLength(0);
+    expect(warnings.join('')).toMatch(/refusing service-manager registration under redirected HOME/);
   });
 });
 

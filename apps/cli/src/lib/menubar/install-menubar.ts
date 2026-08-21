@@ -25,7 +25,7 @@ import { getRuntimeStateDir, getHelpersDir } from '../state.js';
 import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../version.js';
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
-import { namespacedServiceLabel, serviceManifestHomeEnv } from '../service-manifest.js';
+import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -354,6 +354,12 @@ export function restartMenubarLaunchAgent(
   plist: string,
   exec: (cmd: string, args: readonly string[], opts: { stdio: ['ignore', 'ignore', 'ignore'] }) => Buffer = execFileSync,
 ): void {
+  const reg = serviceManagerRegistrationAllowed();
+  if (!reg.allowed) {
+    process.stderr.write(`[agents] ${reg.reason}\n`);
+    return;
+  }
+
   const serviceTarget = `gui/${uid}/${serviceLabel()}`;
   const opts: { stdio: ['ignore', 'ignore', 'ignore'] } = { stdio: ['ignore', 'ignore', 'ignore'] };
   try { exec('launchctl', ['bootout', serviceTarget], opts); } catch { /* may not be loaded */ }
@@ -486,9 +492,12 @@ function menubarSetupNeedsRepoint(): boolean {
 export function disableMenubarService(): void {
   if (!onDarwin()) return;
   const plist = servicePlistPath();
-  const uid = process.getuid?.() ?? 0;
-  try { execFileSync('launchctl', ['bootout', `gui/${uid}/${serviceLabel()}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
-  catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
+  const reg = serviceManagerRegistrationAllowed();
+  if (reg.allowed) {
+    const uid = process.getuid?.() ?? 0;
+    try { execFileSync('launchctl', ['bootout', `gui/${uid}/${serviceLabel()}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
+    catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
+  }
   try { fs.unlinkSync(plist); } catch { /* already gone */ }
   try {
     fs.mkdirSync(path.dirname(disabledSentinelPath()), { recursive: true });

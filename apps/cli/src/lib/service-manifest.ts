@@ -79,3 +79,39 @@ export function serviceManifestHomeEnv(): { HOME: string; AGENTS_REAL_HOME: stri
   const home = process.env.HOME || os.homedir();
   return { HOME: home, AGENTS_REAL_HOME: process.env.AGENTS_REAL_HOME || home };
 }
+
+/**
+ * Whether this process may safely register (or tear down) a service with the
+ * user's real service manager.
+ *
+ * `launchctl` and `systemctl --user` are per-user-session and HOME-independent:
+ * a process running under a redirected HOME still talks to the SAME launchd or
+ * systemd instance as a normal login session. service-manifest.ts namespaces the
+ * job label under a redirected HOME, but that only changes the identifier — the
+ * registration still lands in the real service manager. A hermetic test fork (or
+ * any CLI running under a sandbox HOME) must therefore never touch launchd/
+ * systemd unless it has explicitly opted in.
+ *
+ * `AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1` is the test seam for the
+ * shim/PATH-based tests that intentionally exercise the registration code path
+ * under a redirected HOME. Production code must never set it.
+ */
+export function serviceManagerRegistrationAllowed(): { allowed: boolean; reason: string } {
+  const suffix = isolatedHomeSuffix();
+  if (!suffix) {
+    return { allowed: true, reason: 'production HOME: service-manager registration allowed' };
+  }
+  if (process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME === '1') {
+    return {
+      allowed: true,
+      reason: `test seam AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME allows registration under sandbox-${suffix}`,
+    };
+  }
+  return {
+    allowed: false,
+    reason:
+      `refusing service-manager registration under redirected HOME (sandbox-${suffix}): ` +
+      `launchctl/systemd are per-user-session and HOME-independent, so a sandboxed process ` +
+      `would register in the real service manager (RUSH-2968)`,
+  };
+}

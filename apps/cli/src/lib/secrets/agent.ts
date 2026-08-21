@@ -38,6 +38,7 @@ import { getCliLaunch } from '../cli-entry.js';
 import type { SecretsBundle } from './bundles.js';
 import { GLOBAL_HARNESS, bundleScopeChain } from './scope.js';
 import { deleteLeaseSession, rehydrateSessions, pruneSessionsOnSleep } from './session-store.js';
+import { serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 import { MAX_LEASE_MS, MIN_LEASE_MS } from './lease.js';
 import { selectLeasedEnv, type SecretLease } from './lease.js';
@@ -365,7 +366,12 @@ export function retireLegacySecretsAgentService(): void {
   const plist = servicePlistPath();
   // Only the real LaunchAgents dir is launchd-managed; a relocated (test) dir
   // has no bootstrapped job, so skip launchctl and just remove the plist.
-  if (!process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR) {
+  // Only the real LaunchAgents dir is launchd-managed; a relocated (test) dir
+  // has no bootstrapped job, so skip launchctl and just remove the plist.
+  // Also skip launchctl under a redirected HOME: launchctl is per-user-session
+  // and HOME-independent, so a sandboxed process would still talk to the real
+  // launchd (RUSH-2968).
+  if (!process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR && serviceManagerRegistrationAllowed().allowed) {
     const uid = process.getuid?.() ?? 0;
     try { execFileSync('launchctl', ['bootout', `gui/${uid}/${SERVICE_LABEL}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
     catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }

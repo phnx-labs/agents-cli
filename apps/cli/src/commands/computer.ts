@@ -38,7 +38,7 @@ import { makeClaudeResponder, resolveApiKey, DEFAULT_CLAUDE_MODEL, DEFAULT_CLAUD
 import { TASK_PREVIEW_MAX_CHARS } from '../lib/computer/sessions-list.js';
 import { runComputerSessionsCommand } from './computer-sessions-picker.js';
 import { truncate } from '../lib/feed/events.js';
-import { namespacedServiceLabel, serviceManifestHomeEnv } from '../lib/service-manifest.js';
+import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../lib/service-manifest.js';
 
 // Help groups — mirror `agents browser` so the mental model carries over.
 const COMPUTER_HELP_GROUPS = [
@@ -635,6 +635,12 @@ export async function activateComputerHelperMacLocal(): Promise<{ trusted: boole
 
   const uid = process.getuid?.();
   if (typeof uid !== 'number') throw new Error('cannot resolve uid');
+
+  const reg = serviceManagerRegistrationAllowed();
+  if (!reg.allowed) {
+    throw new Error(reg.reason);
+  }
+
   const domain = `gui/${uid}`;
 
   // Render the policy file BEFORE bootstrap so the daemon reads a fresh allow

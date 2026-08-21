@@ -12,7 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { getDaemonDir } from '../state.js';
-import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv } from '../service-manifest.js';
+import { isolatedHomeSuffix, namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from '../platform/index.js';
 import { listJobs as listAllJobs, type JobConfig } from '../scheduling/routines.js';
 import { syncAllProjectRoutines } from '../routines-project.js';
@@ -1733,6 +1733,8 @@ export { getAgentsBinPath };
  * in fact up. Returns null when the service isn't running or the query fails.
  */
 function readServiceManagerPid(platform: NodeJS.Platform = os.platform()): number | null {
+  const reg = serviceManagerRegistrationAllowed();
+  if (!reg.allowed) return null;
   try {
     if (platform === 'linux') {
       const out = execFileSync('systemctl', ['--user', 'show', '-p', 'MainPID', '--value', daemonSystemdUnitName()],
@@ -1887,60 +1889,70 @@ function startDaemonLocked(agentsBin: string, releaseLock: () => void): { pid: n
     return startDetached({ agentsBin });
   };
 
-  if (platform === 'darwin') {
-    try {
-      const plistPath = getLaunchdPlistPath();
-      const plistDir = path.dirname(plistPath);
-      if (!fs.existsSync(plistDir)) {
-        fs.mkdirSync(plistDir, { recursive: true });
-      }
-      // The plist carries no credential (RUSH-1759 — the daemon reads the OAuth
-      // token itself at startup); still create owner-only atomically to match the
-      // detached path and keep the log/PATH surface owner-private.
-      writeOwnerOnlyServiceManifest(plistPath, generateLaunchdPlist(agentsBin));
+  const reg = serviceManagerRegistrationAllowed();
 
+  if (platform === 'darwin') {
+    if (reg.allowed) {
       try {
-        execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-      } catch { /* not loaded, expected */ }
-      // launchctl prints `Load failed:` and exits 0 when the label is in a
-      // stuck state from a prior session — so a zero exit code isn't proof
-      // of success. If no pid materializes within the window, give up on
-      // launchd and fall through to a plain detached spawn.
-      execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
-      // Launch issued — the child needs this lock to claim (RUSH-2417).
-      releaseLock();
-      const pid = waitForPid(3000) ?? readServiceManagerPid();
-      if (pid) return { pid, method: 'launchd' };
-      // launchctl claimed success but nothing ran. Fall through.
-    } catch {
-      // load threw — fall through to detached spawn
+        const plistPath = getLaunchdPlistPath();
+        const plistDir = path.dirname(plistPath);
+        if (!fs.existsSync(plistDir)) {
+          fs.mkdirSync(plistDir, { recursive: true });
+        }
+        // The plist carries no credential (RUSH-1759 — the daemon reads the OAuth
+        // token itself at startup); still create owner-only atomically to match the
+        // detached path and keep the log/PATH surface owner-private.
+        writeOwnerOnlyServiceManifest(plistPath, generateLaunchdPlist(agentsBin));
+
+        try {
+          execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+        } catch { /* not loaded, expected */ }
+        // launchctl prints `Load failed:` and exits 0 when the label is in a
+        // stuck state from a prior session — so a zero exit code isn't proof
+        // of success. If no pid materializes within the window, give up on
+        // launchd and fall through to a plain detached spawn.
+        execFileSync('launchctl', ['load', plistPath], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+        // Launch issued — the child needs this lock to claim (RUSH-2417).
+        releaseLock();
+        const pid = waitForPid(3000) ?? readServiceManagerPid();
+        if (pid) return { pid, method: 'launchd' };
+        // launchctl claimed success but nothing ran. Fall through.
+      } catch {
+        // load threw — fall through to detached spawn
+      }
+    } else {
+      process.stderr.write(`[agents] ${reg.reason}\n`);
     }
     return detachedFallback();
   }
 
   if (platform === 'linux') {
-    try {
-      const unitPath = getSystemdUnitPath();
-      const unitDir = path.dirname(unitPath);
-      if (!fs.existsSync(unitDir)) {
-        fs.mkdirSync(unitDir, { recursive: true });
+    if (reg.allowed) {
+      try {
+        const unitPath = getSystemdUnitPath();
+        const unitDir = path.dirname(unitPath);
+        if (!fs.existsSync(unitDir)) {
+          fs.mkdirSync(unitDir, { recursive: true });
+        }
+        // Carries no credential (RUSH-1759 — the daemon reads the OAuth token
+        // itself at startup); owner-only to keep the PATH/log surface private.
+        writeOwnerOnlyServiceManifest(unitPath, generateSystemdUnit(agentsBin));
+
+        execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
+        execFileSync('systemctl', ['--user', 'enable', daemonSystemdUnitName()], { encoding: 'utf-8' });
+        execFileSync('systemctl', ['--user', 'start', daemonSystemdUnitName()], { encoding: 'utf-8' });
+
+        // Launch issued — the child needs this lock to claim (RUSH-2417).
+        releaseLock();
+        const pid = waitForPid(3000) ?? readServiceManagerPid();
+        if (pid) return { pid, method: 'systemd' };
+        // systemctl returned success but no PID surfaced — fall through to a
+        // plain detached spawn rather than reporting a null PID.
+      } catch {
+        // start threw — fall through to detached spawn
       }
-      // Carries no credential (RUSH-1759 — the daemon reads the OAuth token
-      // itself at startup); owner-only to keep the PATH/log surface private.
-      writeOwnerOnlyServiceManifest(unitPath, generateSystemdUnit(agentsBin));
-
-      execFileSync('systemctl', ['--user', 'daemon-reload'], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'enable', daemonSystemdUnitName()], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'start', daemonSystemdUnitName()], { encoding: 'utf-8' });
-
-      // Launch issued — the child needs this lock to claim (RUSH-2417).
-      releaseLock();
-      const pid = waitForPid(3000) ?? readServiceManagerPid();
-      if (pid) return { pid, method: 'systemd' };
-      // systemctl returned success but no PID surfaced — fall through to a
-      // plain detached spawn rather than reporting a null PID.
-    } catch {
-      // start threw — fall through to detached spawn
+    } else {
+      process.stderr.write(`[agents] ${reg.reason}\n`);
     }
     return detachedFallback();
   }
@@ -2282,28 +2294,33 @@ export function stopDaemon(): DaemonStopResult {
   const released: string[] = [];
   const surviving: string[] = [];
   let escalated = false;
+  const reg = serviceManagerRegistrationAllowed();
 
   if (platform === 'darwin') {
     const plistPath = getLaunchdPlistPath();
     if (fs.existsSync(plistPath)) {
-      try {
-        execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8' });
-        fs.unlinkSync(plistPath);
-      } catch (err: any) {
-        if (process.env.AGENTS_DEBUG) {
-          console.error(`[debug] launchctl unload failed: ${err.message}`);
+      if (reg.allowed) {
+        try {
+          execFileSync('launchctl', ['unload', plistPath], { encoding: 'utf-8' });
+        } catch (err: any) {
+          if (process.env.AGENTS_DEBUG) {
+            console.error(`[debug] launchctl unload failed: ${err.message}`);
+          }
         }
       }
+      try { fs.unlinkSync(plistPath); } catch { /* plist already removed */ }
     }
   }
 
   if (platform === 'linux') {
-    try {
-      execFileSync('systemctl', ['--user', 'stop', daemonSystemdUnitName()], { encoding: 'utf-8' });
-      execFileSync('systemctl', ['--user', 'disable', daemonSystemdUnitName()], { encoding: 'utf-8' });
-    } catch (err: any) {
-      if (process.env.AGENTS_DEBUG) {
-        console.error(`[debug] systemctl stop failed: ${err.message}`);
+    if (reg.allowed) {
+      try {
+        execFileSync('systemctl', ['--user', 'stop', daemonSystemdUnitName()], { encoding: 'utf-8' });
+        execFileSync('systemctl', ['--user', 'disable', daemonSystemdUnitName()], { encoding: 'utf-8' });
+      } catch (err: any) {
+        if (process.env.AGENTS_DEBUG) {
+          console.error(`[debug] systemctl stop failed: ${err.message}`);
+        }
       }
     }
     const unitPath = getSystemdUnitPath();
