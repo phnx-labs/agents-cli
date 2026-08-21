@@ -18,6 +18,7 @@ import { fetchAllTasks, detectAvailableSources } from './tasks.vscode';
 import { getBuiltInByTitle, configFromDef } from './agents.vscode';
 import { openSingleAgentWithQueue, runHeadlessAgent, focusSessionInTerminal } from './extension';
 import { generateClaudeSessionId } from '../core/prewarm.simple';
+import { cachedInFlight, createTimedCache } from '../core/cachedInFlight';
 import { nudgeSession } from '../mcp/watchdog-bridge';
 import { runAgents, resolveAgentsBin, bootstrapPath } from '../core/agentsBin';
 import { AgentLaunchMode, extractPlanFromSessionJson, planTextToSteps } from '../core/agents';
@@ -1112,19 +1113,36 @@ function cleanupFloorWatchers(): void {
 // feed shows the last good snapshot instead of blanking on a transient error.
 let lastFloorTasks: swarm.TaskSummary[] = [];
 
+// Coalesces concurrent floor rebuilds. Every session-stream fact triggers one
+// (extension.ts), and twenty live agents emit constantly, so without this the
+// rebuilds stack on top of each other and each one re-does the whole scan.
+// A zero TTL means a snapshot is never re-served stale — only genuinely
+// overlapping callers share a run.
+const floorPushes = createTimedCache<void>();
+
 async function pushFloorUpdate(workspacePath?: string): Promise<void> {
   if (!settingsPanel || !floorSubscribed) return;
-  const [floorTerminals, floorTasks] = await Promise.all([
-    getFloorTerminalDetailsForWebview(workspacePath),
-    swarm.fetchTasks(undefined, workspacePath),
-  ]);
-  if (!settingsPanel || !floorSubscribed) return;
-  lastFloorTasks = floorTasks;
-  // RUSH-2039: page the user when a session (Codex included) enters the
-  // approval-waiting state. Edge-triggered so it fires once per wait.
-  notifyNewlyWaiting(floorTerminals);
-  settingsPanel.webview.postMessage({ type: 'allTerminalsData', terminals: floorTerminals });
-  settingsPanel.webview.postMessage({ type: 'tasksData', tasks: floorTasks });
+  await cachedInFlight(floorPushes, workspacePath ?? '', 0, async () => {
+    // Terminals and tasks are posted independently. They used to be awaited
+    // together, which meant the detail panel — whose data is entirely in
+    // `terminals` — waited on `swarm.fetchTasks`, and that ends in an HTTP
+    // request to the Prix API (`fetchCloudRuns`). A slow cloud API held back
+    // the one message the panel actually needs.
+    const floorTerminals = await getFloorTerminalDetailsForWebview(workspacePath);
+    if (!settingsPanel || !floorSubscribed) return;
+    // RUSH-2039: page the user when a session (Codex included) enters the
+    // approval-waiting state. Edge-triggered so it fires once per wait.
+    notifyNewlyWaiting(floorTerminals);
+    settingsPanel.webview.postMessage({ type: 'allTerminalsData', terminals: floorTerminals });
+
+    // Tasks arrive in their own message whenever they are ready. fetchTasks
+    // already absorbs a cloud outage internally and resolves with local data,
+    // so this needs no error branch of its own.
+    const floorTasks = await swarm.fetchTasks(undefined, workspacePath);
+    if (!settingsPanel || !floorSubscribed) return;
+    lastFloorTasks = floorTasks;
+    settingsPanel.webview.postMessage({ type: 'tasksData', tasks: floorTasks });
+  });
 }
 
 /** Called by the window's session-stream follower; no filesystem watcher. */

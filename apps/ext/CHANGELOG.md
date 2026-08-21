@@ -22,6 +22,17 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   that starts writing after the index was built is picked up on the next lookup
   past a 500ms window. Source: `src/vscode/sessions.vscode.ts`.
 
+- **The Fleet payload no longer waits on the cloud API, and rebuilds stop
+  stacking.** `pushFloorUpdate` awaited `getFloorTerminalDetailsForWebview` and
+  `swarm.fetchTasks` together before posting either, and `fetchTasks` ends in an
+  HTTP request to the Prix API (`fetchCloudRuns`). The detail panel renders
+  entirely from the `terminals` message, so a slow cloud API held back the one
+  message it needs. The two now post independently. The rebuild is also wrapped
+  in `cachedInFlight` with a zero TTL, so the rebuilds triggered by every
+  session-stream fact coalesce instead of stacking — a zero TTL coalesces
+  concurrent callers without ever re-serving a stale snapshot. Source:
+  `src/vscode/settings.vscode.ts`, `src/core/cachedInFlight.ts`.
+
 - **The Fleet panel stops burying idle-but-unfinished work below running work
   (RUSH-2838).** The root `AGENTS.md` "Purpose" section makes idle-but-unfinished
   the highest-risk state — the one most likely to be silently abandoned — and says

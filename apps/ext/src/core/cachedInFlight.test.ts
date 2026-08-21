@@ -38,6 +38,28 @@ describe('cachedInFlight', () => {
     expect(calls).toBe(2);
   });
 
+  test('a zero TTL still coalesces concurrent callers but never serves a stale value', async () => {
+    // The contract pushFloorUpdate relies on: overlapping floor rebuilds share
+    // one run, but a later refresh must always re-scan. Giving that call site a
+    // non-zero TTL would post a stale terminal snapshot to the panel.
+    const store = createTimedCache<number>();
+    let calls = 0;
+    const fn = async () => {
+      calls++;
+      await new Promise((r) => setTimeout(r, 5));
+      return calls;
+    };
+    const concurrent = await Promise.all(
+      Array.from({ length: 4 }, () => cachedInFlight(store, 'floor', 0, fn, 1000)),
+    );
+    expect(concurrent).toEqual([1, 1, 1, 1]);
+    expect(calls).toBe(1);
+
+    // Same instant, but no longer in flight — must re-run rather than cache-hit.
+    expect(await cachedInFlight(store, 'floor', 0, fn, 1000)).toBe(2);
+    expect(calls).toBe(2);
+  });
+
   test('keys are independent — one host in flight does not block another', async () => {
     const store = createTimedCache<string>();
     const seen: string[] = [];
