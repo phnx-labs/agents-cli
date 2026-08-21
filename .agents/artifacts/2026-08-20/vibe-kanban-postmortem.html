@@ -1,0 +1,448 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Vibe Kanban post-mortem: 30,000 users, nine harnesses, zero business</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>Vibe Kanban post-mortem: 30,000 users, nine harnesses, zero business</h1>
+<p class="summary">The closest product to the agi-cli launcher slice shut down onstage at AI Engineer Europe on 2026-04-10, still at 30,000 monthly actives. The free local core was the whole product; the $30 seat gated collaboration nobody wanted; a forced cloud migration burned the community eight weeks before the end; and the company had already walked away from the enterprise deals its founder later named as one of only two working business models. Primary sources: the shutdown post, the founder onstage, the GitHub record.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/gtm-strategy.md" target="_blank" rel="noopener">Companion: agi-cli GTM report</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agents-cli/blob/main/.agents/artifacts/2026-08-20/landscape-cli-proxy-browser-computer.md" target="_blank" rel="noopener">Companion: adjacent-category landscape</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=vibekanban.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://www.vibekanban.com/blog/shutdown" target="_blank" rel="noopener">The shutdown post — &quot;Goodbye bloop.&quot;</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">vk-postmortem</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/n%2Fa">n/a</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-20</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#1-timeline-a-company-on-its-third-life" data-toc-for="1-timeline-a-company-on-its-third-life">1. Timeline — a company on its third life</a><a class="toc-item toc-sub" href="#2-the-product-overlap-with-agi-cli-real-at-the-launcher-slice-absent-everywhere-else" data-toc-for="2-the-product-overlap-with-agi-cli-real-at-the-launcher-slice-absent-everywhere-else">2. The product overlap with agi-cli — real at the launcher slice, absent everywhere else</a><a class="toc-item toc-sub" href="#3-why-it-died-the-mechanism-in-order" data-toc-for="3-why-it-died-the-mechanism-in-order">3. Why it died — the mechanism, in order</a><a class="toc-item toc-sub" href="#4-the-afterlife-community-maintained-meant-abandoned" data-toc-for="4-the-afterlife-community-maintained-meant-abandoned">4. The afterlife — &quot;community maintained&quot; meant abandoned</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item" href="#recommendations" data-toc-for="recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>Vibe Kanban is the single most instructive company in agi-cli's category, because
+it is the one whose product overlapped most and whose death is best documented.
+It proved the demand (30,000 monthly actives), shipped the launcher slice first
+(June 2025: multi-agent kanban, worktree parallelism, diff commenting), supported
+nine harnesses at shutdown — and still could not construct a business. This
+report reconstructs what happened from primary sources: the official shutdown
+post, the founder's onstage statement at AI Engineer Europe, the GitHub commit
+and issue record, and the community post-mortems.</p>
+<p>The one-paragraph version: Bloop, a 2021 YC company that had already pivoted
+twice (code search → COBOL modernization → Vibe Kanban) on ~$7.4M of 2021
+money, gave the full single-developer product away as open source and priced a
+$30/user/month cloud tier around collaboration features its solo-developer user
+base did not want. When it tried to force free local users toward the cloud
+tier in February 2026, the community revolted; eight weeks later, on
+2026-04-10, the founder shut the company down live onstage, naming the lesson
+himself: <em>"Everyone who is making money is doing 2 things: selling to
+enterprise, and reselling tokens. We were doing neither."</em> The repo has had
+zero commits since 2026-04-24 and no successor fork has consolidated.</p>
+<p>This also corrects the GTM report's cohort line: Vibe Kanban was not "one or
+two harnesses" — its launcher offered nine (Claude Code, Codex, OpenCode,
+Gemini, AMP, Copilot, Cursor, Droid, Qwen), observed directly in the shipped
+onboarding UI. The correction is folded into <code>gtm-strategy.md</code> §3 in the same
+change that adds this report.</p>
+<h2 id="findings">Findings</h2><h3 id="1-timeline-a-company-on-its-third-life">1. Timeline — a company on its third life</h3><figure>
+<svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Bloop / Vibe Kanban company timeline 2021 to 2026">
+  <line x1="40" y1="125" x2="860" y2="125" stroke="#888888" stroke-width="2"></line>
+  <circle cx="80" cy="125" r="5" fill="#888888"></circle>
+  <text x="80" y="100" text-anchor="middle" font-family="monospace" font-size="12" fill="currentColor">2021</text>
+  <text x="80" y="150" text-anchor="middle" font-size="11" fill="currentColor">Founded, YC</text>
+  <text x="80" y="166" text-anchor="middle" font-size="11" fill="#888888">code search</text>
+  <circle cx="228" cy="125" r="5" fill="#888888"></circle>
+  <text x="228" y="100" text-anchor="middle" font-family="monospace" font-size="12" fill="currentColor">Dec 2021</text>
+  <text x="228" y="150" text-anchor="middle" font-size="11" fill="currentColor">~$7.3M Series A</text>
+  <text x="228" y="166" text-anchor="middle" font-size="11" fill="#888888">last capital raised</text>
+  <circle cx="376" cy="125" r="5" fill="#888888"></circle>
+  <text x="376" y="100" text-anchor="middle" font-family="monospace" font-size="12" fill="currentColor">2023–24</text>
+  <text x="376" y="150" text-anchor="middle" font-size="11" fill="currentColor">Pivot: COBOL→Java</text>
+  <text x="376" y="166" text-anchor="middle" font-size="11" fill="#888888">walks from 6-figure deals</text>
+  <circle cx="524" cy="125" r="5" fill="#84a929"></circle>
+  <text x="524" y="100" text-anchor="middle" font-family="monospace" font-size="12" fill="currentColor">Jun 2025</text>
+  <text x="524" y="150" text-anchor="middle" font-size="11" fill="currentColor">Vibe Kanban launches</text>
+  <text x="524" y="166" text-anchor="middle" font-size="11" fill="#888888">first multi-agent kanban</text>
+  <circle cx="672" cy="125" r="5" fill="#c47a2c"></circle>
+  <text x="672" y="100" text-anchor="middle" font-family="monospace" font-size="12" fill="currentColor">Feb 2026</text>
+  <text x="672" y="150" text-anchor="middle" font-size="11" fill="currentColor">Forced cloud migration</text>
+  <text x="672" y="166" text-anchor="middle" font-size="11" fill="#888888">community revolt (#2746)</text>
+  <circle cx="820" cy="125" r="6" fill="#c0392b"></circle>
+  <text x="820" y="100" text-anchor="middle" font-family="monospace" font-size="12" fill="currentColor">Apr 10 2026</text>
+  <text x="820" y="150" text-anchor="middle" font-size="11" fill="currentColor">Shutdown, onstage</text>
+  <text x="820" y="166" text-anchor="middle" font-size="11" fill="#888888">30,000 MAU</text>
+  <text x="820" y="182" text-anchor="middle" font-size="11" fill="#888888">last commit Apr 24</text>
+  <text x="450" y="225" text-anchor="middle" font-size="12" fill="#888888">~$7.4M total raised, all in 2021 · 16 employees at the end · three product lives on one seed-era balance sheet</text>
+</svg>
+<figcaption>Five years, two pivots, one raise. Vibe Kanban itself lived ten months.</figcaption>
+</figure><p>Bloop AI Limited: incorporated London, 2021-04-26; YC-backed; ~$7.31M Series A
+on 2021-12-15 (LocalGlobe, By The Tower, YC) and no capital after that; 16
+employees at the end. Product lives: AI code search, then COBOL-to-Java
+modernization for enterprises (during which, per the Scaling DevTools podcast
+framing, the founder walked away from six-figure enterprise contracts), then
+Vibe Kanban in June 2025. The shutdown post's own claim of primacy: <em>"We
+launched in June 2025 and were the first to ship multi-agent support, diff
+commenting, live preview, click-to-edit, remote access and many other features
+that are now taken for granted."</em></p>
+<h3 id="2-the-product-overlap-with-agi-cli-real-at-the-launcher-slice-absent-everywhere-else">2. The product overlap with agi-cli — real at the launcher slice, absent everywhere else</h3><p>Observed directly in the shipped onboarding UI (run locally 2026-08-20): a
+coding-agent picker with nine harnesses — Claude Code, Codex, OpenCode, Gemini,
+AMP, Copilot, Cursor, Droid, Qwen — an editor picker, and a warning banner that
+the product <em>"runs AI coding agents with --dangerously-skip-permissions /
+--yolo by default."</em></p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Vibe Kanban</th>
+<th>agi-cli</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Multi-harness launcher</td>
+<td>Yes — nine agents, kanban-shaped</td>
+<td>Yes — 17 active harnesses, CLI-shaped</td>
+</tr>
+<tr>
+<td>Parallel isolation</td>
+<td>Git worktrees per task</td>
+<td>Git worktrees per teammate/change</td>
+</tr>
+<tr>
+<td>Review surface</td>
+<td>Inline diff comments, PR creation</td>
+<td>PR flow + reviewer agents</td>
+</tr>
+<tr>
+<td>Safety model</td>
+<td><code>--yolo</code> by default, banner asks user to watch</td>
+<td>Permission modes, guards, daemon-owned execution</td>
+</tr>
+<tr>
+<td>Fleet / cross-device</td>
+<td>None — one machine, one browser tab</td>
+<td>SSH dispatch, device registry, remote sessions</td>
+</tr>
+<tr>
+<td>Browser / computer tools</td>
+<td>None</td>
+<td><code>agents browser</code>, <code>agents computer</code></td>
+</tr>
+<tr>
+<td>Session corpus</td>
+<td>None (tasks, not transcripts)</td>
+<td>Indexed cross-harness transcript corpus</td>
+</tr>
+</tbody></table>
+<p>The overlap is the slice the GTM report already called vibe-codeable: launch
+agents in parallel worktrees and review the diffs. Every surface that
+compounds — fleet, tool hands, the corpus — was absent. Vibe Kanban is the
+control group for the thesis that the launcher slice alone, even executed
+first and well, is not a defensible product.</p>
+<h3 id="3-why-it-died-the-mechanism-in-order">3. Why it died — the mechanism, in order</h3><p><strong>The free product was the whole product.</strong> <code>npx vibe-kanban</code> gave a solo
+developer everything: board, all nine harnesses, worktree parallelism, diff
+review, PR creation. The $30/user/month tier gated shared issues, comments,
+projects, and organisations — the collaboration layer. The dominant persona
+(a solo developer running agents on one machine) had no reason to pay, ever.
+From the shutdown post: <em>"the vast majority are free users and we couldn't
+find a business model that we could get excited about."</em></p>
+<p><strong>The conversion attempt burned the community.</strong> In February 2026 the team
+pushed free local users toward a migration to the cloud version. GitHub issue
+#2746 ("vibe-kanban is dead for me", opened 2026-02-14) captures the reaction:
+<em>"why i need to 'MIGRATE' whole my projects to 'cloud' version? I don't need
+'cloud' version."</em> The move converted goodwill into churn eight weeks before
+the shutdown.</p>
+<p><strong>The founder's own diagnosis, delivered onstage.</strong> At AI Engineer Europe on
+the day of the announcement (talk: "Software Engineering Is Becoming Plan and
+Review"), captured by swyx: <em>"Everyone who is making money is doing 2 things:
+selling to enterprise, and reselling tokens. We were doing neither."</em> The
+community's sharper phrasing of the same economics, from a post-shutdown
+review: Vibe Kanban was <em>"not a coding agent itself but a button that helped
+users spend thousands of dollars on other agents while collecting a $30
+subscription."</em> All token margin sat with the model providers.</p>
+<p><strong>The company had no lives left.</strong> The two working models the founder named
+were both paths Bloop had structurally foreclosed: enterprise (walked away
+from those contracts in the COBOL era) and token resale (never built). With
+2021-vintage capital, a 16-person team, and two pivots already spent, "no
+business model we could get excited about" ended the company rather than
+funding a third attempt at monetization.</p>
+<h3 id="4-the-afterlife-community-maintained-meant-abandoned">4. The afterlife — "community maintained" meant abandoned</h3><p>The shutdown post promised: <em>"The Vibe Kanban project will live on, open
+source and community maintained"</em> and <em>"We'll release a roadmap for the
+community maintained edition over the next few weeks."</em> The record since:</p>
+<ul>
+<li>Final commits 2026-04-24: the README sunset banner (#3388) and rerouting
+cloud project pages to an export-only page (#3387). Zero commits since.</li>
+<li>534 open issues; repo not archived but effectively read-only. No public
+community roadmap ever appeared.</li>
+<li>The wind-down also degraded the <em>local</em> product: v0.1.44 disabled the
+Projects feature for self-hosted installs too, with an incomplete export
+(issues #3396, #3354) — accepted-shutdown turned into renewed anger.</li>
+<li>Across 2,978 forks, no successor has consolidated; the most visible
+attempt had 3 stars as of 2026-08-20. Most users simply keep running the
+unmaintained OSS build.</li>
+</ul>
+<p>The afterlife detail matters for agi-cli's own OSS posture: "we'll open-source
+it and the community will carry it" did not happen for a 27,869-star project
+with 30,000 monthly actives. Orphaned orchestrators stay orphaned.</p>
+<h2 id="evidence">Evidence</h2><p>Primary sources, all read 2026-08-20:</p>
+<ul>
+<li>Shutdown post: vibekanban.com/blog/shutdown ("Goodbye bloop.", 2026-04-10,
+Louis Knight-Webb) — free-user admission, 30-day cloud window, auto-refunds,
+community-maintained promise, first-to-ship claim.</li>
+<li>Founder onstage: x.com/swyx/status/2050753293601935777 — <em>"shutdown
+Vibe-kanban live onstage at AIE Europe - still with 30,000 MAU"</em> plus the
+enterprise/tokens quote. Talk confirmed on the AIE Europe schedule
+(ai.engineer/europe). The quote is second-hand via swyx — the same sourcing
+caveat the GTM report attached to it.</li>
+<li>GitHub API (api.github.com/repos/BloopAI/vibe-kanban): 27,869 stars, 2,978
+forks, not archived, last push 2026-04-24, 534 open issues, Rust,
+Apache 2.0, created 2025-06-14. Commit and release history confirm the
+Apr 10 announcement / Apr 24 last-commit sequence.</li>
+<li>Community record: GitHub issues #2746 (migration revolt, 2026-02-14), #3396
+and #3354 (broken local Projects post-shutdown); HN thread 44533004 (the
+July 2025 Show HN, 132 comments — early skepticism about parallel-agent
+clashes and telemetry defaults).</li>
+<li>Company history: Tracxn (incorporation, ~$7.31M Series A 2021-12-15,
+LocalGlobe/By The Tower/YC, 16 employees), Scaling DevTools podcast
+("20,000 GitHub stars and walking away from 6-figure deals"), iVoox podcast
+(code search → COBOL pivot).</li>
+<li>Product observation: the shipped onboarding UI run locally on 2026-08-20 —
+nine-harness picker, <code>--yolo</code>-by-default warning banner.</li>
+</ul>
+<p>Not verifiable: the exact Series A amount (aggregator-sourced), whether any
+enterprise Vibe Kanban conversations existed at the end, and the internal
+decision process — no insider account has been published beyond the talk.</p>
+<h2 id="recommendations">Recommendations</h2><ol>
+<li><strong>Treat Vibe Kanban as the control group, not a rival that stumbled.</strong> It
+executed the launcher slice first, well, and with nine harnesses — and
+that slice alone retained users at 30,000 MAU while capturing zero revenue.
+Differentiation and monetization both have to come from the surfaces they
+never built: fleet, tool hands, and the cross-harness corpus.</li>
+<li><strong>Never run the forced-migration play.</strong> Their February 2026 push of free
+local users toward the paid cloud tier converted the community's goodwill
+into public revolt in weeks and is the proximate cause of the ugly ending.
+The GTM report's "free forever on machines you own" line is the standing
+defense; any future paid tier must gate things the free tier never had,
+not fence off things users already relied on.</li>
+<li><strong>Price collaboration only where collaboration is real.</strong> Their $30 seat
+failed because solo developers were the user base and the seat gated team
+features. The GTM report's Act 3 (govern the corpus, sell at enterprise
+altitude to whoever owns the spend) targets buyers who exist; a
+collaboration seat for an audience of solo operators does not.</li>
+<li><strong>Do not count on "the community will maintain it."</strong> A 27,869-star,
+30,000-MAU project produced zero successor maintenance in four months.
+OSS is distribution while the company is alive, not a retirement plan.</li>
+</ol>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0ZW1wbGF0ZTogcmVwb3J0LnYxCnRpdGxlOiAnVmliZSBLYW5iYW4gcG9zdC1tb3J0ZW06IDMwLDAwMCB1c2VycywgbmluZSBoYXJuZXNzZXMsIHplcm8gYnVzaW5lc3MnCnN1bW1hcnk6ICdUaGUgY2xvc2VzdCBwcm9kdWN0IHRvIHRoZSBhZ2ktY2xpIGxhdW5jaGVyIHNsaWNlIHNodXQgZG93biBvbnN0YWdlIGF0IEFJIEVuZ2luZWVyIEV1cm9wZSBvbiAyMDI2LTA0LTEwLCBzdGlsbCBhdCAzMCwwMDAgbW9udGhseSBhY3RpdmVzLiBUaGUgZnJlZSBsb2NhbCBjb3JlIHdhcyB0aGUgd2hvbGUgcHJvZHVjdDsgdGhlICQzMCBzZWF0IGdhdGVkIGNvbGxhYm9yYXRpb24gbm9ib2R5IHdhbnRlZDsgYSBmb3JjZWQgY2xvdWQgbWlncmF0aW9uIGJ1cm5lZCB0aGUgY29tbXVuaXR5IGVpZ2h0IHdlZWtzIGJlZm9yZSB0aGUgZW5kOyBhbmQgdGhlIGNvbXBhbnkgaGFkIGFscmVhZHkgd2Fsa2VkIGF3YXkgZnJvbSB0aGUgZW50ZXJwcmlzZSBkZWFscyBpdHMgZm91bmRlciBsYXRlciBuYW1lZCBhcyBvbmUgb2Ygb25seSB0d28gd29ya2luZyBidXNpbmVzcyBtb2RlbHMuIFByaW1hcnkgc291cmNlczogdGhlIHNodXRkb3duIHBvc3QsIHRoZSBmb3VuZGVyIG9uc3RhZ2UsIHRoZSBHaXRIdWIgcmVjb3JkLicKc3RhdHVzOiBkcmFmdApodW1hbjogYXV0aG9yCmhvc3Q6IGZsZWV0LXdvcmtlcgpzZXNzaW9uOiBuL2EKbGlua3M6CiAgLSBsYWJlbDogJ0NvbXBhbmlvbjogYWdpLWNsaSBHVE0gcmVwb3J0JwogICAgdXJsOiAnaHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpL2Jsb2IvbWFpbi8uYWdlbnRzL2FydGlmYWN0cy8yMDI2LTA4LTIwL2d0bS1zdHJhdGVneS5tZCcKICAtIGxhYmVsOiAnQ29tcGFuaW9uOiBhZGphY2VudC1jYXRlZ29yeSBsYW5kc2NhcGUnCiAgICB1cmw6ICdodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnZW50cy1jbGkvYmxvYi9tYWluLy5hZ2VudHMvYXJ0aWZhY3RzLzIwMjYtMDgtMjAvbGFuZHNjYXBlLWNsaS1wcm94eS1icm93c2VyLWNvbXB1dGVyLm1kJwogIC0gbGFiZWw6ICdUaGUgc2h1dGRvd24gcG9zdCDigJQgIkdvb2RieWUgYmxvb3AuIicKICAgIHVybDogJ2h0dHBzOi8vd3d3LnZpYmVrYW5iYW4uY29tL2Jsb2cvc2h1dGRvd24nCi0tLQoKIyMgU3VtbWFyeQoKVmliZSBLYW5iYW4gaXMgdGhlIHNpbmdsZSBtb3N0IGluc3RydWN0aXZlIGNvbXBhbnkgaW4gYWdpLWNsaSdzIGNhdGVnb3J5LCBiZWNhdXNlCml0IGlzIHRoZSBvbmUgd2hvc2UgcHJvZHVjdCBvdmVybGFwcGVkIG1vc3QgYW5kIHdob3NlIGRlYXRoIGlzIGJlc3QgZG9jdW1lbnRlZC4KSXQgcHJvdmVkIHRoZSBkZW1hbmQgKDMwLDAwMCBtb250aGx5IGFjdGl2ZXMpLCBzaGlwcGVkIHRoZSBsYXVuY2hlciBzbGljZSBmaXJzdAooSnVuZSAyMDI1OiBtdWx0aS1hZ2VudCBrYW5iYW4sIHdvcmt0cmVlIHBhcmFsbGVsaXNtLCBkaWZmIGNvbW1lbnRpbmcpLCBzdXBwb3J0ZWQKbmluZSBoYXJuZXNzZXMgYXQgc2h1dGRvd24g4oCUIGFuZCBzdGlsbCBjb3VsZCBub3QgY29uc3RydWN0IGEgYnVzaW5lc3MuIFRoaXMKcmVwb3J0IHJlY29uc3RydWN0cyB3aGF0IGhhcHBlbmVkIGZyb20gcHJpbWFyeSBzb3VyY2VzOiB0aGUgb2ZmaWNpYWwgc2h1dGRvd24KcG9zdCwgdGhlIGZvdW5kZXIncyBvbnN0YWdlIHN0YXRlbWVudCBhdCBBSSBFbmdpbmVlciBFdXJvcGUsIHRoZSBHaXRIdWIgY29tbWl0CmFuZCBpc3N1ZSByZWNvcmQsIGFuZCB0aGUgY29tbXVuaXR5IHBvc3QtbW9ydGVtcy4KClRoZSBvbmUtcGFyYWdyYXBoIHZlcnNpb246IEJsb29wLCBhIDIwMjEgWUMgY29tcGFueSB0aGF0IGhhZCBhbHJlYWR5IHBpdm90ZWQKdHdpY2UgKGNvZGUgc2VhcmNoIOKGkiBDT0JPTCBtb2Rlcm5pemF0aW9uIOKGkiBWaWJlIEthbmJhbikgb24gfiQ3LjRNIG9mIDIwMjEKbW9uZXksIGdhdmUgdGhlIGZ1bGwgc2luZ2xlLWRldmVsb3BlciBwcm9kdWN0IGF3YXkgYXMgb3BlbiBzb3VyY2UgYW5kIHByaWNlZCBhCiQzMC91c2VyL21vbnRoIGNsb3VkIHRpZXIgYXJvdW5kIGNvbGxhYm9yYXRpb24gZmVhdHVyZXMgaXRzIHNvbG8tZGV2ZWxvcGVyIHVzZXIKYmFzZSBkaWQgbm90IHdhbnQuIFdoZW4gaXQgdHJpZWQgdG8gZm9yY2UgZnJlZSBsb2NhbCB1c2VycyB0b3dhcmQgdGhlIGNsb3VkCnRpZXIgaW4gRmVicnVhcnkgMjAyNiwgdGhlIGNvbW11bml0eSByZXZvbHRlZDsgZWlnaHQgd2Vla3MgbGF0ZXIsIG9uCjIwMjYtMDQtMTAsIHRoZSBmb3VuZGVyIHNodXQgdGhlIGNvbXBhbnkgZG93biBsaXZlIG9uc3RhZ2UsIG5hbWluZyB0aGUgbGVzc29uCmhpbXNlbGY6ICoiRXZlcnlvbmUgd2hvIGlzIG1ha2luZyBtb25leSBpcyBkb2luZyAyIHRoaW5nczogc2VsbGluZyB0bwplbnRlcnByaXNlLCBhbmQgcmVzZWxsaW5nIHRva2Vucy4gV2Ugd2VyZSBkb2luZyBuZWl0aGVyLiIqIFRoZSByZXBvIGhhcyBoYWQKemVybyBjb21taXRzIHNpbmNlIDIwMjYtMDQtMjQgYW5kIG5vIHN1Y2Nlc3NvciBmb3JrIGhhcyBjb25zb2xpZGF0ZWQuCgpUaGlzIGFsc28gY29ycmVjdHMgdGhlIEdUTSByZXBvcnQncyBjb2hvcnQgbGluZTogVmliZSBLYW5iYW4gd2FzIG5vdCAib25lIG9yCnR3byBoYXJuZXNzZXMiIOKAlCBpdHMgbGF1bmNoZXIgb2ZmZXJlZCBuaW5lIChDbGF1ZGUgQ29kZSwgQ29kZXgsIE9wZW5Db2RlLApHZW1pbmksIEFNUCwgQ29waWxvdCwgQ3Vyc29yLCBEcm9pZCwgUXdlbiksIG9ic2VydmVkIGRpcmVjdGx5IGluIHRoZSBzaGlwcGVkCm9uYm9hcmRpbmcgVUkuIFRoZSBjb3JyZWN0aW9uIGlzIGZvbGRlZCBpbnRvIGBndG0tc3RyYXRlZ3kubWRgIMKnMyBpbiB0aGUgc2FtZQpjaGFuZ2UgdGhhdCBhZGRzIHRoaXMgcmVwb3J0LgoKIyMgRmluZGluZ3MKCiMjIyAxLiBUaW1lbGluZSDigJQgYSBjb21wYW55IG9uIGl0cyB0aGlyZCBsaWZlCgo8ZmlndXJlPgo8c3ZnIHZpZXdCb3g9IjAgMCA5MDAgMjYwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iQmxvb3AgLyBWaWJlIEthbmJhbiBjb21wYW55IHRpbWVsaW5lIDIwMjEgdG8gMjAyNiI+CiAgPGxpbmUgeDE9IjQwIiB5MT0iMTI1IiB4Mj0iODYwIiB5Mj0iMTI1IiBzdHJva2U9IiM4ODg4ODgiIHN0cm9rZS13aWR0aD0iMiIvPgogIDxjaXJjbGUgY3g9IjgwIiBjeT0iMTI1IiByPSI1IiBmaWxsPSIjODg4ODg4Ii8+CiAgPHRleHQgeD0iODAiIHk9IjEwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1mYW1pbHk9Im1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iY3VycmVudENvbG9yIj4yMDIxPC90ZXh0PgogIDx0ZXh0IHg9IjgwIiB5PSIxNTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciI+Rm91bmRlZCwgWUM8L3RleHQ+CiAgPHRleHQgeD0iODAiIHk9IjE2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzg4ODg4OCI+Y29kZSBzZWFyY2g8L3RleHQ+CiAgPGNpcmNsZSBjeD0iMjI4IiBjeT0iMTI1IiByPSI1IiBmaWxsPSIjODg4ODg4Ii8+CiAgPHRleHQgeD0iMjI4IiB5PSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+RGVjIDIwMjE8L3RleHQ+CiAgPHRleHQgeD0iMjI4IiB5PSIxNTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciI+fiQ3LjNNIFNlcmllcyBBPC90ZXh0PgogIDx0ZXh0IHg9IjIyOCIgeT0iMTY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSIjODg4ODg4Ij5sYXN0IGNhcGl0YWwgcmFpc2VkPC90ZXh0PgogIDxjaXJjbGUgY3g9IjM3NiIgY3k9IjEyNSIgcj0iNSIgZmlsbD0iIzg4ODg4OCIvPgogIDx0ZXh0IHg9IjM3NiIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPjIwMjPigJMyNDwvdGV4dD4KICA8dGV4dCB4PSIzNzYiIHk9IjE1MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIj5QaXZvdDogQ09CT0zihpJKYXZhPC90ZXh0PgogIDx0ZXh0IHg9IjM3NiIgeT0iMTY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSIjODg4ODg4Ij53YWxrcyBmcm9tIDYtZmlndXJlIGRlYWxzPC90ZXh0PgogIDxjaXJjbGUgY3g9IjUyNCIgY3k9IjEyNSIgcj0iNSIgZmlsbD0iIzg0YTkyOSIvPgogIDx0ZXh0IHg9IjUyNCIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPkp1biAyMDI1PC90ZXh0PgogIDx0ZXh0IHg9IjUyNCIgeT0iMTUwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSJjdXJyZW50Q29sb3IiPlZpYmUgS2FuYmFuIGxhdW5jaGVzPC90ZXh0PgogIDx0ZXh0IHg9IjUyNCIgeT0iMTY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSIjODg4ODg4Ij5maXJzdCBtdWx0aS1hZ2VudCBrYW5iYW48L3RleHQ+CiAgPGNpcmNsZSBjeD0iNjcyIiBjeT0iMTI1IiByPSI1IiBmaWxsPSIjYzQ3YTJjIi8+CiAgPHRleHQgeD0iNjcyIiB5PSIxMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtZmFtaWx5PSJtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9ImN1cnJlbnRDb2xvciI+RmViIDIwMjY8L3RleHQ+CiAgPHRleHQgeD0iNjcyIiB5PSIxNTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9ImN1cnJlbnRDb2xvciI+Rm9yY2VkIGNsb3VkIG1pZ3JhdGlvbjwvdGV4dD4KICA8dGV4dCB4PSI2NzIiIHk9IjE2NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzg4ODg4OCI+Y29tbXVuaXR5IHJldm9sdCAoIzI3NDYpPC90ZXh0PgogIDxjaXJjbGUgY3g9IjgyMCIgY3k9IjEyNSIgcj0iNiIgZmlsbD0iI2MwMzkyYiIvPgogIDx0ZXh0IHg9IjgyMCIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LWZhbWlseT0ibW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSJjdXJyZW50Q29sb3IiPkFwciAxMCAyMDI2PC90ZXh0PgogIDx0ZXh0IHg9IjgyMCIgeT0iMTUwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSJjdXJyZW50Q29sb3IiPlNodXRkb3duLCBvbnN0YWdlPC90ZXh0PgogIDx0ZXh0IHg9IjgyMCIgeT0iMTY2IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSIjODg4ODg4Ij4zMCwwMDAgTUFVPC90ZXh0PgogIDx0ZXh0IHg9IjgyMCIgeT0iMTgyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIiBmaWxsPSIjODg4ODg4Ij5sYXN0IGNvbW1pdCBBcHIgMjQ8L3RleHQ+CiAgPHRleHQgeD0iNDUwIiB5PSIyMjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM4ODg4ODgiPn4kNy40TSB0b3RhbCByYWlzZWQsIGFsbCBpbiAyMDIxIMK3IDE2IGVtcGxveWVlcyBhdCB0aGUgZW5kIMK3IHRocmVlIHByb2R1Y3QgbGl2ZXMgb24gb25lIHNlZWQtZXJhIGJhbGFuY2Ugc2hlZXQ8L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5GaXZlIHllYXJzLCB0d28gcGl2b3RzLCBvbmUgcmFpc2UuIFZpYmUgS2FuYmFuIGl0c2VsZiBsaXZlZCB0ZW4gbW9udGhzLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgpCbG9vcCBBSSBMaW1pdGVkOiBpbmNvcnBvcmF0ZWQgTG9uZG9uLCAyMDIxLTA0LTI2OyBZQy1iYWNrZWQ7IH4kNy4zMU0gU2VyaWVzIEEKb24gMjAyMS0xMi0xNSAoTG9jYWxHbG9iZSwgQnkgVGhlIFRvd2VyLCBZQykgYW5kIG5vIGNhcGl0YWwgYWZ0ZXIgdGhhdDsgMTYKZW1wbG95ZWVzIGF0IHRoZSBlbmQuIFByb2R1Y3QgbGl2ZXM6IEFJIGNvZGUgc2VhcmNoLCB0aGVuIENPQk9MLXRvLUphdmEKbW9kZXJuaXphdGlvbiBmb3IgZW50ZXJwcmlzZXMgKGR1cmluZyB3aGljaCwgcGVyIHRoZSBTY2FsaW5nIERldlRvb2xzIHBvZGNhc3QKZnJhbWluZywgdGhlIGZvdW5kZXIgd2Fsa2VkIGF3YXkgZnJvbSBzaXgtZmlndXJlIGVudGVycHJpc2UgY29udHJhY3RzKSwgdGhlbgpWaWJlIEthbmJhbiBpbiBKdW5lIDIwMjUuIFRoZSBzaHV0ZG93biBwb3N0J3Mgb3duIGNsYWltIG9mIHByaW1hY3k6ICoiV2UKbGF1bmNoZWQgaW4gSnVuZSAyMDI1IGFuZCB3ZXJlIHRoZSBmaXJzdCB0byBzaGlwIG11bHRpLWFnZW50IHN1cHBvcnQsIGRpZmYKY29tbWVudGluZywgbGl2ZSBwcmV2aWV3LCBjbGljay10by1lZGl0LCByZW1vdGUgYWNjZXNzIGFuZCBtYW55IG90aGVyIGZlYXR1cmVzCnRoYXQgYXJlIG5vdyB0YWtlbiBmb3IgZ3JhbnRlZC4iKgoKIyMjIDIuIFRoZSBwcm9kdWN0IG92ZXJsYXAgd2l0aCBhZ2ktY2xpIOKAlCByZWFsIGF0IHRoZSBsYXVuY2hlciBzbGljZSwgYWJzZW50IGV2ZXJ5d2hlcmUgZWxzZQoKT2JzZXJ2ZWQgZGlyZWN0bHkgaW4gdGhlIHNoaXBwZWQgb25ib2FyZGluZyBVSSAocnVuIGxvY2FsbHkgMjAyNi0wOC0yMCk6IGEKY29kaW5nLWFnZW50IHBpY2tlciB3aXRoIG5pbmUgaGFybmVzc2VzIOKAlCBDbGF1ZGUgQ29kZSwgQ29kZXgsIE9wZW5Db2RlLCBHZW1pbmksCkFNUCwgQ29waWxvdCwgQ3Vyc29yLCBEcm9pZCwgUXdlbiDigJQgYW4gZWRpdG9yIHBpY2tlciwgYW5kIGEgd2FybmluZyBiYW5uZXIgdGhhdAp0aGUgcHJvZHVjdCAqInJ1bnMgQUkgY29kaW5nIGFnZW50cyB3aXRoIC0tZGFuZ2Vyb3VzbHktc2tpcC1wZXJtaXNzaW9ucyAvCi0teW9sbyBieSBkZWZhdWx0LiIqCgp8IFN1cmZhY2UgfCBWaWJlIEthbmJhbiB8IGFnaS1jbGkgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgTXVsdGktaGFybmVzcyBsYXVuY2hlciB8IFllcyDigJQgbmluZSBhZ2VudHMsIGthbmJhbi1zaGFwZWQgfCBZZXMg4oCUIDE3IGFjdGl2ZSBoYXJuZXNzZXMsIENMSS1zaGFwZWQgfAp8IFBhcmFsbGVsIGlzb2xhdGlvbiB8IEdpdCB3b3JrdHJlZXMgcGVyIHRhc2sgfCBHaXQgd29ya3RyZWVzIHBlciB0ZWFtbWF0ZS9jaGFuZ2UgfAp8IFJldmlldyBzdXJmYWNlIHwgSW5saW5lIGRpZmYgY29tbWVudHMsIFBSIGNyZWF0aW9uIHwgUFIgZmxvdyArIHJldmlld2VyIGFnZW50cyB8CnwgU2FmZXR5IG1vZGVsIHwgYC0teW9sb2AgYnkgZGVmYXVsdCwgYmFubmVyIGFza3MgdXNlciB0byB3YXRjaCB8IFBlcm1pc3Npb24gbW9kZXMsIGd1YXJkcywgZGFlbW9uLW93bmVkIGV4ZWN1dGlvbiB8CnwgRmxlZXQgLyBjcm9zcy1kZXZpY2UgfCBOb25lIOKAlCBvbmUgbWFjaGluZSwgb25lIGJyb3dzZXIgdGFiIHwgU1NIIGRpc3BhdGNoLCBkZXZpY2UgcmVnaXN0cnksIHJlbW90ZSBzZXNzaW9ucyB8CnwgQnJvd3NlciAvIGNvbXB1dGVyIHRvb2xzIHwgTm9uZSB8IGBhZ2VudHMgYnJvd3NlcmAsIGBhZ2VudHMgY29tcHV0ZXJgIHwKfCBTZXNzaW9uIGNvcnB1cyB8IE5vbmUgKHRhc2tzLCBub3QgdHJhbnNjcmlwdHMpIHwgSW5kZXhlZCBjcm9zcy1oYXJuZXNzIHRyYW5zY3JpcHQgY29ycHVzIHwKClRoZSBvdmVybGFwIGlzIHRoZSBzbGljZSB0aGUgR1RNIHJlcG9ydCBhbHJlYWR5IGNhbGxlZCB2aWJlLWNvZGVhYmxlOiBsYXVuY2gKYWdlbnRzIGluIHBhcmFsbGVsIHdvcmt0cmVlcyBhbmQgcmV2aWV3IHRoZSBkaWZmcy4gRXZlcnkgc3VyZmFjZSB0aGF0CmNvbXBvdW5kcyDigJQgZmxlZXQsIHRvb2wgaGFuZHMsIHRoZSBjb3JwdXMg4oCUIHdhcyBhYnNlbnQuIFZpYmUgS2FuYmFuIGlzIHRoZQpjb250cm9sIGdyb3VwIGZvciB0aGUgdGhlc2lzIHRoYXQgdGhlIGxhdW5jaGVyIHNsaWNlIGFsb25lLCBldmVuIGV4ZWN1dGVkCmZpcnN0IGFuZCB3ZWxsLCBpcyBub3QgYSBkZWZlbnNpYmxlIHByb2R1Y3QuCgojIyMgMy4gV2h5IGl0IGRpZWQg4oCUIHRoZSBtZWNoYW5pc20sIGluIG9yZGVyCgoqKlRoZSBmcmVlIHByb2R1Y3Qgd2FzIHRoZSB3aG9sZSBwcm9kdWN0LioqIGBucHggdmliZS1rYW5iYW5gIGdhdmUgYSBzb2xvCmRldmVsb3BlciBldmVyeXRoaW5nOiBib2FyZCwgYWxsIG5pbmUgaGFybmVzc2VzLCB3b3JrdHJlZSBwYXJhbGxlbGlzbSwgZGlmZgpyZXZpZXcsIFBSIGNyZWF0aW9uLiBUaGUgJDMwL3VzZXIvbW9udGggdGllciBnYXRlZCBzaGFyZWQgaXNzdWVzLCBjb21tZW50cywKcHJvamVjdHMsIGFuZCBvcmdhbmlzYXRpb25zIOKAlCB0aGUgY29sbGFib3JhdGlvbiBsYXllci4gVGhlIGRvbWluYW50IHBlcnNvbmEKKGEgc29sbyBkZXZlbG9wZXIgcnVubmluZyBhZ2VudHMgb24gb25lIG1hY2hpbmUpIGhhZCBubyByZWFzb24gdG8gcGF5LCBldmVyLgpGcm9tIHRoZSBzaHV0ZG93biBwb3N0OiAqInRoZSB2YXN0IG1ham9yaXR5IGFyZSBmcmVlIHVzZXJzIGFuZCB3ZSBjb3VsZG4ndApmaW5kIGEgYnVzaW5lc3MgbW9kZWwgdGhhdCB3ZSBjb3VsZCBnZXQgZXhjaXRlZCBhYm91dC4iKgoKKipUaGUgY29udmVyc2lvbiBhdHRlbXB0IGJ1cm5lZCB0aGUgY29tbXVuaXR5LioqIEluIEZlYnJ1YXJ5IDIwMjYgdGhlIHRlYW0KcHVzaGVkIGZyZWUgbG9jYWwgdXNlcnMgdG93YXJkIGEgbWlncmF0aW9uIHRvIHRoZSBjbG91ZCB2ZXJzaW9uLiBHaXRIdWIgaXNzdWUKIzI3NDYgKCJ2aWJlLWthbmJhbiBpcyBkZWFkIGZvciBtZSIsIG9wZW5lZCAyMDI2LTAyLTE0KSBjYXB0dXJlcyB0aGUgcmVhY3Rpb246Cioid2h5IGkgbmVlZCB0byAnTUlHUkFURScgd2hvbGUgbXkgcHJvamVjdHMgdG8gJ2Nsb3VkJyB2ZXJzaW9uPyBJIGRvbid0IG5lZWQKJ2Nsb3VkJyB2ZXJzaW9uLiIqIFRoZSBtb3ZlIGNvbnZlcnRlZCBnb29kd2lsbCBpbnRvIGNodXJuIGVpZ2h0IHdlZWtzIGJlZm9yZQp0aGUgc2h1dGRvd24uCgoqKlRoZSBmb3VuZGVyJ3Mgb3duIGRpYWdub3NpcywgZGVsaXZlcmVkIG9uc3RhZ2UuKiogQXQgQUkgRW5naW5lZXIgRXVyb3BlIG9uCnRoZSBkYXkgb2YgdGhlIGFubm91bmNlbWVudCAodGFsazogIlNvZnR3YXJlIEVuZ2luZWVyaW5nIElzIEJlY29taW5nIFBsYW4gYW5kClJldmlldyIpLCBjYXB0dXJlZCBieSBzd3l4OiAqIkV2ZXJ5b25lIHdobyBpcyBtYWtpbmcgbW9uZXkgaXMgZG9pbmcgMiB0aGluZ3M6CnNlbGxpbmcgdG8gZW50ZXJwcmlzZSwgYW5kIHJlc2VsbGluZyB0b2tlbnMuIFdlIHdlcmUgZG9pbmcgbmVpdGhlci4iKiBUaGUKY29tbXVuaXR5J3Mgc2hhcnBlciBwaHJhc2luZyBvZiB0aGUgc2FtZSBlY29ub21pY3MsIGZyb20gYSBwb3N0LXNodXRkb3duCnJldmlldzogVmliZSBLYW5iYW4gd2FzICoibm90IGEgY29kaW5nIGFnZW50IGl0c2VsZiBidXQgYSBidXR0b24gdGhhdCBoZWxwZWQKdXNlcnMgc3BlbmQgdGhvdXNhbmRzIG9mIGRvbGxhcnMgb24gb3RoZXIgYWdlbnRzIHdoaWxlIGNvbGxlY3RpbmcgYSAkMzAKc3Vic2NyaXB0aW9uLiIqIEFsbCB0b2tlbiBtYXJnaW4gc2F0IHdpdGggdGhlIG1vZGVsIHByb3ZpZGVycy4KCioqVGhlIGNvbXBhbnkgaGFkIG5vIGxpdmVzIGxlZnQuKiogVGhlIHR3byB3b3JraW5nIG1vZGVscyB0aGUgZm91bmRlciBuYW1lZAp3ZXJlIGJvdGggcGF0aHMgQmxvb3AgaGFkIHN0cnVjdHVyYWxseSBmb3JlY2xvc2VkOiBlbnRlcnByaXNlICh3YWxrZWQgYXdheQpmcm9tIHRob3NlIGNvbnRyYWN0cyBpbiB0aGUgQ09CT0wgZXJhKSBhbmQgdG9rZW4gcmVzYWxlIChuZXZlciBidWlsdCkuIFdpdGgKMjAyMS12aW50YWdlIGNhcGl0YWwsIGEgMTYtcGVyc29uIHRlYW0sIGFuZCB0d28gcGl2b3RzIGFscmVhZHkgc3BlbnQsICJubwpidXNpbmVzcyBtb2RlbCB3ZSBjb3VsZCBnZXQgZXhjaXRlZCBhYm91dCIgZW5kZWQgdGhlIGNvbXBhbnkgcmF0aGVyIHRoYW4KZnVuZGluZyBhIHRoaXJkIGF0dGVtcHQgYXQgbW9uZXRpemF0aW9uLgoKIyMjIDQuIFRoZSBhZnRlcmxpZmUg4oCUICJjb21tdW5pdHkgbWFpbnRhaW5lZCIgbWVhbnQgYWJhbmRvbmVkCgpUaGUgc2h1dGRvd24gcG9zdCBwcm9taXNlZDogKiJUaGUgVmliZSBLYW5iYW4gcHJvamVjdCB3aWxsIGxpdmUgb24sIG9wZW4Kc291cmNlIGFuZCBjb21tdW5pdHkgbWFpbnRhaW5lZCIqIGFuZCAqIldlJ2xsIHJlbGVhc2UgYSByb2FkbWFwIGZvciB0aGUKY29tbXVuaXR5IG1haW50YWluZWQgZWRpdGlvbiBvdmVyIHRoZSBuZXh0IGZldyB3ZWVrcy4iKiBUaGUgcmVjb3JkIHNpbmNlOgoKLSBGaW5hbCBjb21taXRzIDIwMjYtMDQtMjQ6IHRoZSBSRUFETUUgc3Vuc2V0IGJhbm5lciAoIzMzODgpIGFuZCByZXJvdXRpbmcKICBjbG91ZCBwcm9qZWN0IHBhZ2VzIHRvIGFuIGV4cG9ydC1vbmx5IHBhZ2UgKCMzMzg3KS4gWmVybyBjb21taXRzIHNpbmNlLgotIDUzNCBvcGVuIGlzc3VlczsgcmVwbyBub3QgYXJjaGl2ZWQgYnV0IGVmZmVjdGl2ZWx5IHJlYWQtb25seS4gTm8gcHVibGljCiAgY29tbXVuaXR5IHJvYWRtYXAgZXZlciBhcHBlYXJlZC4KLSBUaGUgd2luZC1kb3duIGFsc28gZGVncmFkZWQgdGhlICpsb2NhbCogcHJvZHVjdDogdjAuMS40NCBkaXNhYmxlZCB0aGUKICBQcm9qZWN0cyBmZWF0dXJlIGZvciBzZWxmLWhvc3RlZCBpbnN0YWxscyB0b28sIHdpdGggYW4gaW5jb21wbGV0ZSBleHBvcnQKICAoaXNzdWVzICMzMzk2LCAjMzM1NCkg4oCUIGFjY2VwdGVkLXNodXRkb3duIHR1cm5lZCBpbnRvIHJlbmV3ZWQgYW5nZXIuCi0gQWNyb3NzIDIsOTc4IGZvcmtzLCBubyBzdWNjZXNzb3IgaGFzIGNvbnNvbGlkYXRlZDsgdGhlIG1vc3QgdmlzaWJsZQogIGF0dGVtcHQgaGFkIDMgc3RhcnMgYXMgb2YgMjAyNi0wOC0yMC4gTW9zdCB1c2VycyBzaW1wbHkga2VlcCBydW5uaW5nIHRoZQogIHVubWFpbnRhaW5lZCBPU1MgYnVpbGQuCgpUaGUgYWZ0ZXJsaWZlIGRldGFpbCBtYXR0ZXJzIGZvciBhZ2ktY2xpJ3Mgb3duIE9TUyBwb3N0dXJlOiAid2UnbGwgb3Blbi1zb3VyY2UKaXQgYW5kIHRoZSBjb21tdW5pdHkgd2lsbCBjYXJyeSBpdCIgZGlkIG5vdCBoYXBwZW4gZm9yIGEgMjcsODY5LXN0YXIgcHJvamVjdAp3aXRoIDMwLDAwMCBtb250aGx5IGFjdGl2ZXMuIE9ycGhhbmVkIG9yY2hlc3RyYXRvcnMgc3RheSBvcnBoYW5lZC4KCiMjIEV2aWRlbmNlCgpQcmltYXJ5IHNvdXJjZXMsIGFsbCByZWFkIDIwMjYtMDgtMjA6CgotIFNodXRkb3duIHBvc3Q6IHZpYmVrYW5iYW4uY29tL2Jsb2cvc2h1dGRvd24gKCJHb29kYnllIGJsb29wLiIsIDIwMjYtMDQtMTAsCiAgTG91aXMgS25pZ2h0LVdlYmIpIOKAlCBmcmVlLXVzZXIgYWRtaXNzaW9uLCAzMC1kYXkgY2xvdWQgd2luZG93LCBhdXRvLXJlZnVuZHMsCiAgY29tbXVuaXR5LW1haW50YWluZWQgcHJvbWlzZSwgZmlyc3QtdG8tc2hpcCBjbGFpbS4KLSBGb3VuZGVyIG9uc3RhZ2U6IHguY29tL3N3eXgvc3RhdHVzLzIwNTA3NTMyOTM2MDE5MzU3Nzcg4oCUICoic2h1dGRvd24KICBWaWJlLWthbmJhbiBsaXZlIG9uc3RhZ2UgYXQgQUlFIEV1cm9wZSAtIHN0aWxsIHdpdGggMzAsMDAwIE1BVSIqIHBsdXMgdGhlCiAgZW50ZXJwcmlzZS90b2tlbnMgcXVvdGUuIFRhbGsgY29uZmlybWVkIG9uIHRoZSBBSUUgRXVyb3BlIHNjaGVkdWxlCiAgKGFpLmVuZ2luZWVyL2V1cm9wZSkuIFRoZSBxdW90ZSBpcyBzZWNvbmQtaGFuZCB2aWEgc3d5eCDigJQgdGhlIHNhbWUgc291cmNpbmcKICBjYXZlYXQgdGhlIEdUTSByZXBvcnQgYXR0YWNoZWQgdG8gaXQuCi0gR2l0SHViIEFQSSAoYXBpLmdpdGh1Yi5jb20vcmVwb3MvQmxvb3BBSS92aWJlLWthbmJhbik6IDI3LDg2OSBzdGFycywgMiw5NzgKICBmb3Jrcywgbm90IGFyY2hpdmVkLCBsYXN0IHB1c2ggMjAyNi0wNC0yNCwgNTM0IG9wZW4gaXNzdWVzLCBSdXN0LAogIEFwYWNoZSAyLjAsIGNyZWF0ZWQgMjAyNS0wNi0xNC4gQ29tbWl0IGFuZCByZWxlYXNlIGhpc3RvcnkgY29uZmlybSB0aGUKICBBcHIgMTAgYW5ub3VuY2VtZW50IC8gQXByIDI0IGxhc3QtY29tbWl0IHNlcXVlbmNlLgotIENvbW11bml0eSByZWNvcmQ6IEdpdEh1YiBpc3N1ZXMgIzI3NDYgKG1pZ3JhdGlvbiByZXZvbHQsIDIwMjYtMDItMTQpLCAjMzM5NgogIGFuZCAjMzM1NCAoYnJva2VuIGxvY2FsIFByb2plY3RzIHBvc3Qtc2h1dGRvd24pOyBITiB0aHJlYWQgNDQ1MzMwMDQgKHRoZQogIEp1bHkgMjAyNSBTaG93IEhOLCAxMzIgY29tbWVudHMg4oCUIGVhcmx5IHNrZXB0aWNpc20gYWJvdXQgcGFyYWxsZWwtYWdlbnQKICBjbGFzaGVzIGFuZCB0ZWxlbWV0cnkgZGVmYXVsdHMpLgotIENvbXBhbnkgaGlzdG9yeTogVHJhY3huIChpbmNvcnBvcmF0aW9uLCB+JDcuMzFNIFNlcmllcyBBIDIwMjEtMTItMTUsCiAgTG9jYWxHbG9iZS9CeSBUaGUgVG93ZXIvWUMsIDE2IGVtcGxveWVlcyksIFNjYWxpbmcgRGV2VG9vbHMgcG9kY2FzdAogICgiMjAsMDAwIEdpdEh1YiBzdGFycyBhbmQgd2Fsa2luZyBhd2F5IGZyb20gNi1maWd1cmUgZGVhbHMiKSwgaVZvb3ggcG9kY2FzdAogIChjb2RlIHNlYXJjaCDihpIgQ09CT0wgcGl2b3QpLgotIFByb2R1Y3Qgb2JzZXJ2YXRpb246IHRoZSBzaGlwcGVkIG9uYm9hcmRpbmcgVUkgcnVuIGxvY2FsbHkgb24gMjAyNi0wOC0yMCDigJQKICBuaW5lLWhhcm5lc3MgcGlja2VyLCBgLS15b2xvYC1ieS1kZWZhdWx0IHdhcm5pbmcgYmFubmVyLgoKTm90IHZlcmlmaWFibGU6IHRoZSBleGFjdCBTZXJpZXMgQSBhbW91bnQgKGFnZ3JlZ2F0b3Itc291cmNlZCksIHdoZXRoZXIgYW55CmVudGVycHJpc2UgVmliZSBLYW5iYW4gY29udmVyc2F0aW9ucyBleGlzdGVkIGF0IHRoZSBlbmQsIGFuZCB0aGUgaW50ZXJuYWwKZGVjaXNpb24gcHJvY2VzcyDigJQgbm8gaW5zaWRlciBhY2NvdW50IGhhcyBiZWVuIHB1Ymxpc2hlZCBiZXlvbmQgdGhlIHRhbGsuCgojIyBSZWNvbW1lbmRhdGlvbnMKCjEuICoqVHJlYXQgVmliZSBLYW5iYW4gYXMgdGhlIGNvbnRyb2wgZ3JvdXAsIG5vdCBhIHJpdmFsIHRoYXQgc3R1bWJsZWQuKiogSXQKICAgZXhlY3V0ZWQgdGhlIGxhdW5jaGVyIHNsaWNlIGZpcnN0LCB3ZWxsLCBhbmQgd2l0aCBuaW5lIGhhcm5lc3NlcyDigJQgYW5kCiAgIHRoYXQgc2xpY2UgYWxvbmUgcmV0YWluZWQgdXNlcnMgYXQgMzAsMDAwIE1BVSB3aGlsZSBjYXB0dXJpbmcgemVybyByZXZlbnVlLgogICBEaWZmZXJlbnRpYXRpb24gYW5kIG1vbmV0aXphdGlvbiBib3RoIGhhdmUgdG8gY29tZSBmcm9tIHRoZSBzdXJmYWNlcyB0aGV5CiAgIG5ldmVyIGJ1aWx0OiBmbGVldCwgdG9vbCBoYW5kcywgYW5kIHRoZSBjcm9zcy1oYXJuZXNzIGNvcnB1cy4KMi4gKipOZXZlciBydW4gdGhlIGZvcmNlZC1taWdyYXRpb24gcGxheS4qKiBUaGVpciBGZWJydWFyeSAyMDI2IHB1c2ggb2YgZnJlZQogICBsb2NhbCB1c2VycyB0b3dhcmQgdGhlIHBhaWQgY2xvdWQgdGllciBjb252ZXJ0ZWQgdGhlIGNvbW11bml0eSdzIGdvb2R3aWxsCiAgIGludG8gcHVibGljIHJldm9sdCBpbiB3ZWVrcyBhbmQgaXMgdGhlIHByb3hpbWF0ZSBjYXVzZSBvZiB0aGUgdWdseSBlbmRpbmcuCiAgIFRoZSBHVE0gcmVwb3J0J3MgImZyZWUgZm9yZXZlciBvbiBtYWNoaW5lcyB5b3Ugb3duIiBsaW5lIGlzIHRoZSBzdGFuZGluZwogICBkZWZlbnNlOyBhbnkgZnV0dXJlIHBhaWQgdGllciBtdXN0IGdhdGUgdGhpbmdzIHRoZSBmcmVlIHRpZXIgbmV2ZXIgaGFkLAogICBub3QgZmVuY2Ugb2ZmIHRoaW5ncyB1c2VycyBhbHJlYWR5IHJlbGllZCBvbi4KMy4gKipQcmljZSBjb2xsYWJvcmF0aW9uIG9ubHkgd2hlcmUgY29sbGFib3JhdGlvbiBpcyByZWFsLioqIFRoZWlyICQzMCBzZWF0CiAgIGZhaWxlZCBiZWNhdXNlIHNvbG8gZGV2ZWxvcGVycyB3ZXJlIHRoZSB1c2VyIGJhc2UgYW5kIHRoZSBzZWF0IGdhdGVkIHRlYW0KICAgZmVhdHVyZXMuIFRoZSBHVE0gcmVwb3J0J3MgQWN0IDMgKGdvdmVybiB0aGUgY29ycHVzLCBzZWxsIGF0IGVudGVycHJpc2UKICAgYWx0aXR1ZGUgdG8gd2hvZXZlciBvd25zIHRoZSBzcGVuZCkgdGFyZ2V0cyBidXllcnMgd2hvIGV4aXN0OyBhCiAgIGNvbGxhYm9yYXRpb24gc2VhdCBmb3IgYW4gYXVkaWVuY2Ugb2Ygc29sbyBvcGVyYXRvcnMgZG9lcyBub3QuCjQuICoqRG8gbm90IGNvdW50IG9uICJ0aGUgY29tbXVuaXR5IHdpbGwgbWFpbnRhaW4gaXQuIioqIEEgMjcsODY5LXN0YXIsCiAgIDMwLDAwMC1NQVUgcHJvamVjdCBwcm9kdWNlZCB6ZXJvIHN1Y2Nlc3NvciBtYWludGVuYW5jZSBpbiBmb3VyIG1vbnRocy4KICAgT1NTIGlzIGRpc3RyaWJ1dGlvbiB3aGlsZSB0aGUgY29tcGFueSBpcyBhbGl2ZSwgbm90IGEgcmV0aXJlbWVudCBwbGFuLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

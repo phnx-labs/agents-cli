@@ -119,7 +119,10 @@ neighbours each cover one or two legs — Uzi (CLI-native, worktrees, no fleet),
 Warp's Oz (multi-agent but cloud-hosted and closed), Omnara (steering layer, not
 an execution engine). Most of the funded competition — Conductor, Sculptor,
 Crystal, the late Vibe Kanban — is a **single-machine desktop GUI** wrapping git
-worktrees around one or two harnesses.
+worktrees around local coding-agent CLIs. (Correction, 2026-08-20: an earlier
+revision said "one or two harnesses" — Vibe Kanban's launcher offered nine at
+shutdown. The single-machine, launcher-slice characterization stands; the
+harness count did not. See the Vibe Kanban post-mortem in this directory.)
 
 So the differentiation is real. The problem is what happened to everyone who
 occupied nearby ground. Star counts and repo state below were pulled live from
