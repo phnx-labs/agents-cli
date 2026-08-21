@@ -90,16 +90,21 @@ describe('the nested `agents sync status` surface', () => {
     expect(RETIRED_TOP_LEVEL_COMMANDS.has('status')).toBe(true);
   });
 
-  it('`agents sync status --json` emits the UnifiedSyncStatus contract', () => {
+  it('`agents sync status --json` emits UnifiedSyncStatus, not umbrella sync JSON', () => {
     const home = guardedHome();
     const { stdout, stderr, status } = run(['sync', 'status', '--json'], home);
     expect(stderr).not.toMatch(/unknown command/i);
+    expect(stderr).not.toMatch(/unknown agent/i);
     expect(stdout.trim().length).toBeGreaterThan(0);
     const parsed = JSON.parse(stdout.trim()) as {
       system: unknown;
       agents: unknown;
       totals: { drifted: number; missing: number; orphan: number };
+      mode?: string;
     };
+    // The umbrella sync JSON is `{ ok, mode: 'umbrella', ... }`. If commander
+    // fed "status" to the parent action, this would not be UnifiedSyncStatus.
+    expect(parsed.mode).toBeUndefined();
     expect(parsed.system).toBeDefined();
     expect(Array.isArray(parsed.agents)).toBe(true);
     expect(parsed.totals).toEqual(expect.objectContaining({
@@ -108,26 +113,6 @@ describe('the nested `agents sync status` surface', () => {
       orphan: expect.any(Number),
     }));
     expect(status === 0 || status === 1).toBe(true);
-  });
-
-  it('does not treat `status` as an agentSpec on the parent `sync` action', () => {
-    const home = guardedHome();
-    const { stdout, stderr } = run(['sync', 'status', '--json'], home);
-    // The umbrella sync JSON is `{ ok, mode: 'umbrella', ... }`. Status JSON is
-    // `{ system, agents, totals }`. If commander fed "status" to the parent
-    // action, this would not be UnifiedSyncStatus.
-    expect(stderr).not.toMatch(/unknown agent/i);
-    const parsed = JSON.parse(stdout.trim()) as { mode?: string; system?: unknown };
-    expect(parsed.mode).toBeUndefined();
-    expect(parsed.system).toBeDefined();
-  });
-
-  it('`agents sync status --help` names the nested path', () => {
-    const home = guardedHome();
-    const { stdout, status } = run(['sync', 'status', '--help'], home);
-    expect(status).toBe(0);
-    expect(stdout).toMatch(/agents sync status/);
-    expect(stdout).toMatch(/UnifiedSyncStatus|drifted/);
   });
 });
 

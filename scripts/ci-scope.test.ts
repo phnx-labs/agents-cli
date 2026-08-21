@@ -225,6 +225,20 @@ describe('selectImpact policy', () => {
     expect(plan.checks).toEqual(expect.arrayContaining(['typecheck', 'binary-smoke']));
   });
 
+  test('a bootstrap change carries the group budget, not the 85s default', () => {
+    // Grouped --help lives in bootstrap.ts; a one-line surface edit selects
+    // non-interactive.test.ts (54s) plus command-surface tests. PR #2826 run
+    // 32431700986 measured 93s and failed the 85s gate.
+    const plan = selectImpact({
+      files: ['apps/cli/src/bootstrap.ts'],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.suite).toBe('selected');
+    expect(plan.budget_sec).toBe(120);
+    expect(plan.budget_sec).toBeGreaterThan(IMPACT_BUDGET_SEC);
+  });
+
   test('a sessions change carries the group budget, not the 85s default', () => {
     // Registering a subcommand must touch sessions.ts, which selects the whole
     // sessions* suite — 92s of vitest inside a 122s run. Under the flat 85s

@@ -34,6 +34,12 @@ areas:
     checks: [workflow-policy]
 
 groups:
+  # 120s, not the default 85s. The grouped --help text lives in bootstrap.ts;
+  # any one-line surface edit selects non-interactive.test.ts (54s of vitest)
+  # plus command-surface tests pulled in by the same PR. PR #2826 run
+  # 32431700986 measured 93s of impact (212 tests, all passed) and failed the
+  # 85s gate. Raise this only against a measured run, and lower it when the
+  # non-interactive suite is split.
   - id: cli-bootstrap
     when:
       - apps/cli/src/bootstrap.ts
@@ -49,6 +55,7 @@ groups:
       - apps/cli/src/index.spellcheck.test.ts
       - apps/cli/src/index.tombstones.test.ts
     checks: [typecheck, binary-smoke]
+    budget_sec: 120
 
   - id: command-surface
     when:
