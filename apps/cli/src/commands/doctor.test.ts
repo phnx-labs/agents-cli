@@ -7,9 +7,10 @@ import { fileURLToPath } from 'url';
 import { wrapLine, computeVerdict, computeOverviewHealth, verdictIsAutoFixable, healthBlockLines, asFleetInventory, asRemoteSecretFindings, FLEET_INVENTORY_TIMEOUT_MS } from './doctor.js';
 import { stripRoutingFlags, HOST_ROUTING_SPECS } from '../lib/hosts/remote-cmd.js';
 import { stringWidth, stripAnsi } from '../lib/session/width.js';
-import type { ResourceDiff, VersionResourceReport } from '../lib/doctor-diff.js';
+import { DOCTOR_ALL_KINDS, type DoctorKind, type ResourceDiff, type VersionResourceReport } from '../lib/doctor-diff.js';
 import type { SyncStatusRow, OrphanRow } from '../lib/drift.js';
 import type { FetchStatusMarker } from '../lib/auto-pull.js';
+import { FINDING_SEVERITY } from '../lib/devices/doctor-findings.js';
 
 /** Minimal reconciled report; override the fields a case cares about. */
 function baseReport(over: Partial<VersionResourceReport> = {}): VersionResourceReport {
@@ -118,7 +119,7 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     expect(issue!.fix).toBe('agents repo pull user');
   });
 
-  it('triages a MISSING resource as critical, a DIVERGENT as warning, an EXTRA as info — by name', () => {
+  it('triages a MISSING commands resource as warning, a DIVERGENT as warning, an EXTRA as info — by name', () => {
     const v = computeVerdict(
       baseReport({
         version: '2.1.220',
@@ -134,7 +135,9 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     );
     expect(v.healthy).toBe(false);
     const byCat = Object.fromEntries(v.issues.map((i) => [i.category, i]));
-    expect(byCat['missing'].severity).toBe('critical');
+    // RUSH-2947: a missing 'commands' resource agrees with the fleet-mode rubric
+    // (FINDING_SEVERITY['missing-resource']) — warning, not critical.
+    expect(byCat['missing'].severity).toBe('warning');
     expect(byCat['missing'].subject).toBe('deploy');
     expect(byCat['divergent'].severity).toBe('warning');
     expect(byCat['divergent'].subject).toBe('11-activity-log');
@@ -142,8 +145,59 @@ describe('computeVerdict (doctor per-version triaged health)', () => {
     expect(byCat['extra'].severity).toBe('info');
     expect(byCat['extra'].subject).toBe('ghost');
     expect(byCat['extra'].fix).toBe('agents prune cleanup');
-    // Critical is ordered before warning before info.
-    expect(v.issues.map((i) => i.severity)).toEqual(['critical', 'warning', 'info']);
+    expect(v.issues.map((i) => i.severity)).toEqual(['warning', 'warning', 'info']);
+  });
+
+  it('triages a MISSING hooks or plugins resource as critical', () => {
+    const vHooks = computeVerdict(
+      baseReport({
+        summary: { ok: 0, diff: 0, missing: 1, extra: 0 },
+        kinds: {
+          commands: [], skills: [],
+          hooks: [row('hooks', 'git-guard', 'missing')],
+          rules: [], mcp: [], permissions: [], subagents: [], plugins: [], promptcuts: [],
+        },
+      }),
+    );
+    const hookIssue = vHooks.issues.find((i) => i.category === 'missing');
+    expect(hookIssue!.severity).toBe('critical');
+    expect(hookIssue!.subject).toBe('git-guard');
+
+    const vPlugins = computeVerdict(
+      baseReport({
+        summary: { ok: 0, diff: 0, missing: 1, extra: 0 },
+        kinds: {
+          commands: [], skills: [], hooks: [], rules: [], mcp: [], permissions: [], subagents: [],
+          plugins: [row('plugins', 'swarm', 'missing')],
+          promptcuts: [],
+        },
+      }),
+    );
+    const pluginIssue = vPlugins.issues.find((i) => i.category === 'missing');
+    expect(pluginIssue!.severity).toBe('critical');
+    expect(pluginIssue!.subject).toBe('swarm');
+  });
+
+  it("computeVerdict's missing-resource severity agrees with FINDING_SEVERITY, kind by kind", () => {
+    const kinds = Object.fromEntries(
+      DOCTOR_ALL_KINDS.map((kind) => [kind, [row(kind, `missing-${kind}`, 'missing')]]),
+    ) as VersionResourceReport['kinds'];
+    const v = computeVerdict(baseReport({ summary: { ok: 0, diff: 0, missing: DOCTOR_ALL_KINDS.length, extra: 0 }, kinds }));
+    const bySubject = Object.fromEntries(v.issues.map((i) => [i.subject, i.severity]));
+    const expectedSeverity: Record<DoctorKind, 'critical' | 'warning'> = {
+      commands: FINDING_SEVERITY['missing-resource'],
+      skills: FINDING_SEVERITY['missing-resource'],
+      hooks: FINDING_SEVERITY['missing-hook'],
+      rules: FINDING_SEVERITY['missing-resource'],
+      mcp: FINDING_SEVERITY['missing-resource'],
+      permissions: FINDING_SEVERITY['missing-resource'],
+      subagents: FINDING_SEVERITY['missing-resource'],
+      plugins: FINDING_SEVERITY['missing-plugin'],
+      promptcuts: FINDING_SEVERITY['missing-resource'],
+    };
+    for (const kind of DOCTOR_ALL_KINDS) {
+      expect(bySubject[`missing-${kind}`], `kind '${kind}'`).toBe(expectedSeverity[kind]);
+    }
   });
 
   it('a source-behind-only verdict is NOT auto-fixable (repo pull, not --fix)', () => {

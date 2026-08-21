@@ -855,6 +855,18 @@ export function verdictIsAutoFixable(v: DoctorVerdict): boolean {
 }
 
 /**
+ * Missing-resource severity for one `DoctorKind`, read from `FINDING_SEVERITY`
+ * (the fleet-mode rubric) so target mode agrees with it kind by kind instead of
+ * re-hardcoding its own. Hooks and plugins map to their dedicated critical
+ * finding kinds; every other kind maps to the generic 'missing-resource' warning.
+ */
+function missingResourceSeverity(kind: DoctorKind): IssueSeverity {
+  if (kind === 'hooks') return FINDING_SEVERITY['missing-hook'];
+  if (kind === 'plugins') return FINDING_SEVERITY['missing-plugin'];
+  return FINDING_SEVERITY['missing-resource'];
+}
+
+/**
  * Fold a version report's divergences into a triaged verdict — one severity-tagged
  * finding per unwired hook, missing/divergent/extra resource, and behind-origin
  * source layer, each carrying its subject, plain-English impact, and exact fix. An
@@ -903,15 +915,17 @@ export function computeVerdict(report: VersionResourceReport): DoctorVerdict {
     }
   }
 
-  // ── critical: missing resources (declared in sources, absent from home) ──
+  // ── missing resources (declared in sources, absent from home) — severity
+  // follows FINDING_SEVERITY: hooks/plugins are critical, everything else warns ──
   for (const kind of DOCTOR_ALL_KINDS) {
     for (const r of report.kinds[kind]) {
       if (r.status !== 'missing') continue;
+      const severity = missingResourceSeverity(kind);
       issues.push({
-        severity: 'critical', category: 'missing', subject: r.name,
+        severity, category: 'missing', subject: r.name,
         impact: `declared in sources but absent from the version home (${kind})`,
         fix: fixCmd,
-        text: `${r.name} missing`, color: 'red',
+        text: `${r.name} missing`, color: severity === 'critical' ? 'red' : 'yellow',
       });
     }
   }
