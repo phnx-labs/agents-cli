@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 79,
+  "groups": 78,
   "commands": 565,
   "root": {
     "name": "agents",
@@ -8586,7 +8586,7 @@
           "name": "snapshot",
           "path": "devices snapshot",
           "aliases": [],
-          "description": "One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.",
+          "description": "One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents sync status` for drift.",
           "args": [],
           "options": [
             {
@@ -8655,7 +8655,7 @@
             },
             {
               "flags": "--with-sync",
-              "description": "Include UnifiedSyncStatus (same engine as `agents status`; opt-in)",
+              "description": "Include UnifiedSyncStatus (same engine as `agents sync status`; opt-in)",
               "long": "--with-sync",
               "required": false,
               "optional": false,
@@ -25490,54 +25490,6 @@
       "subcommands": []
     },
     {
-      "name": "status",
-      "path": "status",
-      "aliases": [],
-      "description": "Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.",
-      "args": [],
-      "options": [
-        {
-          "flags": "--json",
-          "description": "Output the machine-readable UnifiedSyncStatus contract",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--yes",
-          "description": "Reconcile everything detected (pull .system if behind + sync drifted/missing resources) without prompting",
-          "long": "--yes",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--cwd <path>",
-          "description": "Resolution cwd for project layer detection (default: process.cwd())",
-          "long": "--cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Show what's out of sync; offer to fix it (interactive)\n      agents status\n\n      # Machine-readable status for the menu-bar / Agency\n      agents status --json\n\n      # Reconcile everything with no prompts (CI / scripts / the \"kick it\" path)\n      agents status --yes",
-      "subcommands": []
-    },
-    {
       "name": "subagents",
       "path": "subagents",
       "aliases": [],
@@ -26030,7 +25982,93 @@
           "negate": false
         }
       ],
-      "subcommands": []
+      "subcommands": [
+        {
+          "name": "status",
+          "path": "sync status",
+          "aliases": [],
+          "description": "Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-D, --device <name>",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "short": "-D",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--remote-cwd <dir>",
+              "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
+              "long": "--remote-cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-tty",
+              "description": "Force non-interactive output for --device runs even from a terminal.",
+              "long": "--no-tty",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--any",
+              "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
+              "long": "--any",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output the machine-readable UnifiedSyncStatus contract",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--yes",
+              "description": "Reconcile everything detected (pull .system if behind + sync drifted/missing resources) without prompting",
+              "long": "--yes",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--cwd <path>",
+              "description": "Resolution cwd for project layer detection (default: process.cwd())",
+              "long": "--cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Show what's out of sync; offer to fix it (interactive)\n      agents sync status\n\n      # Machine-readable status for the menu-bar / Agency\n      agents sync status --json\n\n      # Reconcile everything with no prompts (CI / scripts / the \"kick it\" path)\n      agents sync status --yes",
+          "subcommands": []
+        }
+      ]
     },
     {
       "name": "teams",

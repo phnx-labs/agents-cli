@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough } from './passthrough.js';
+import { flagValue, maybeRunOnHost, maybeRunStandaloneOnHost, passthroughSshOptions, runFleetPassthrough, buildPassthroughForwardedArgs } from './passthrough.js';
 import { machineId } from '../session/sync/config.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
 
@@ -26,6 +26,26 @@ it('pins the configured identity for --device passthrough streams', () => {
     tty: true,
     multiplex: true,
     extraSshArgs: ['-i', '/keys/fleet', '-o', 'IdentitiesOnly=yes'],
+  });
+});
+
+describe('buildPassthroughForwardedArgs — sync status does not inherit --yes', () => {
+  it('appends --yes to umbrella sync when non-interactive', () => {
+    expect(buildPassthroughForwardedArgs('sync', ['sync', '--device', 'peer'], false)).toEqual(['sync', '--yes']);
+  });
+
+  it('does not append --yes to sync status when non-interactive (RUSH-2864)', () => {
+    expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--device', 'peer'], false)).toEqual(['sync', 'status']);
+    expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--no-tty', '--device', 'peer'], false)).toEqual(['sync', 'status']);
+  });
+
+  it('keeps an explicit --yes on sync status', () => {
+    expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--yes', '--device', 'peer'], false)).toEqual(['sync', 'status', '--yes']);
+  });
+
+  it('does not append --yes when interactive', () => {
+    expect(buildPassthroughForwardedArgs('sync', ['sync', '--device', 'peer'], true)).toEqual(['sync']);
+    expect(buildPassthroughForwardedArgs('sync', ['sync', 'status', '--device', 'peer'], true)).toEqual(['sync', 'status']);
   });
 });
 

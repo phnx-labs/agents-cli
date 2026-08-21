@@ -74,11 +74,10 @@ interface RemoteSpec {
  * `add`/`use`/`list`, and none) and were removed.
  */
 export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
-  // status / inspect
+  // inspect
   view: {},
   inspect: {},
   doctor: {},
-  status: {},
   check: {},
   list: {},
   usage: {},
@@ -161,6 +160,35 @@ const STRIP_SPECS: StripSpec[] = [
   { long: 'hosts', takesValue: true },
   { long: 'devices', takesValue: true },
 ];
+
+/** First non-flag token after `group` in argv (the subcommand, robust to leading flags). */
+function firstSubcommand(allArgs: string[], group: string): string | undefined {
+  const idx = allArgs.indexOf(group);
+  return idx >= 0 ? allArgs.slice(idx + 1).find((a) => !a.startsWith('-')) : undefined;
+}
+
+/**
+ * Argv forwarded over SSH for a `--device` passthrough.
+ *
+ * `sync`'s umbrella spec appends `--yes` when there is no TTY so a remote
+ * reconcile does not hang on a picker. `sync status` is inspect-only unless the
+ * caller typed `--yes` themselves: `--yes` on that command is reconcile, not
+ * "don't prompt". Nesting it under `sync` must not inherit the umbrella flag
+ * (RUSH-2864).
+ */
+export function buildPassthroughForwardedArgs(
+  command: string,
+  allArgs: string[],
+  interactive: boolean,
+): string[] {
+  const spec = REMOTE_PASSTHROUGH[command];
+  let forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
+  const skipInheritedYes = command === 'sync' && firstSubcommand(allArgs, 'sync') === 'status';
+  if (!interactive && spec?.nonInteractive && !skipInheritedYes) {
+    forwarded = [...forwarded, ...spec.nonInteractive];
+  }
+  return forwarded;
+}
 
 /** Synthesize a `Host` for a raw `user@host` / bare-alias target (not enrolled). */
 function syntheticHost(target: string): Host {
@@ -609,8 +637,7 @@ export async function maybeRunOnHost(
   // picker is piped into a file or another program.
   const interactive = !!process.stdout.isTTY && !allArgs.includes('--no-tty');
 
-  let forwarded = stripRoutingFlags(allArgs, STRIP_SPECS);
-  if (!interactive && spec.nonInteractive) forwarded = [...forwarded, ...spec.nonInteractive];
+  const forwarded = buildPassthroughForwardedArgs(command, allArgs, interactive);
 
   // The one long-running case: keep the remote team supervisor alive past a
   // disconnect by dispatching it detached (nohup), still streaming live.

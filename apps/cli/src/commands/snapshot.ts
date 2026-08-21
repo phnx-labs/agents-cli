@@ -2,7 +2,7 @@
  * `agents devices snapshot` — one-process consumer snapshot for pollers.
  *
  * Replaces the N× `view --json` + `sessions --active --json` (+ optional feed)
- * fork storm with a single command. Does NOT replace `agents status`, which
+ * fork storm with a single command. Does NOT replace `agents sync status`, which
  * remains the UnifiedSyncStatus sync contract for menubar / Agency drift.
  *
  * JSON shape: {@link FleetSnapshot} in `lib/snapshot.ts` (version: 1).
@@ -87,7 +87,7 @@ function renderHuman(snap: FleetSnapshot): void {
   console.log(
     chalk.gray(
       '\n  Machine-readable: agents devices snapshot --json\n' +
-        '  Sync-only (unchanged): agents status --json',
+        '  Sync-only (unchanged): agents sync status --json',
     ),
   );
 }
@@ -97,7 +97,7 @@ export function registerSnapshotCommand(devicesCmd: Command): void {
     devicesCmd
       .command('snapshot')
       .description(
-        'One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.',
+        'One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents sync status` for drift.',
       ),
   )
     .option('--json', 'Emit the machine-readable FleetSnapshot contract (version 1)')
@@ -106,7 +106,7 @@ export function registerSnapshotCommand(devicesCmd: Command): void {
       'Include remote devices in the sessions gather (same fan-out as `sessions --active`; default is this machine only)',
     )
     .option('--with-feed', 'Include open feed-block summary (needs-you count + compact rows)')
-    .option('--with-sync', 'Include UnifiedSyncStatus (same engine as `agents status`; opt-in)')
+    .option('--with-sync', 'Include UnifiedSyncStatus (same engine as `agents sync status`; opt-in)')
     .option('--agent <name>', 'Restrict inventory to one agent (e.g. claude)');
 
   setHelpSections(cmd, {

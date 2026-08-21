@@ -191,7 +191,7 @@ export interface DriftSummary {
    * True when the install is out of sync: any installed version is stale,
    * never-synced, carries unwired hooks, or has a broken generated hook runtime,
    * OR a source layer is behind origin.
-   * `agents doctor` surfaces it as "run `agents status`"; `agents doctor --check`
+   * `agents doctor` surfaces it as "run `agents sync status`"; `agents doctor --check`
    * maps it to a non-zero exit. Orphans are a `prune` concern, not sync drift, so they do
    * NOT set this flag (mirrors the sync-status engine: an orphan alone never
    * flags needsSync).

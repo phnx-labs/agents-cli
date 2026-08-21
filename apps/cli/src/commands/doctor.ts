@@ -1993,10 +1993,10 @@ export function registerDoctorCommand(program: Command): void {
           console.log(line);
         }
         // Point at the interactive reconcile when anything is out of sync — each
-        // finding carries its own fix, but `agents status` is the one place that
+        // finding carries its own fix, but `agents sync status` is the one place that
         // reviews and applies them together (opt-in, never auto-fires here).
         if (syncRows.some((r) => r.status !== 'fresh' || (r.unwiredHooks ?? 0) > 0) || repoBehindMarkers.some((m) => m.behind > 0)) {
-          console.log(chalk.gray('\nRun `agents status` to review and sync what has drifted.'));
+          console.log(chalk.gray('\nRun `agents sync status` to review and sync what has drifted.'));
         }
         // A routine runs on exactly one device. Each of these named several and
         // used to fire once per device — duplicate agent runs on every schedule.

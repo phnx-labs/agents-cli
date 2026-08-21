@@ -68,7 +68,7 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   });
 
   it('does not recognize removed surface-prune top-level names', () => {
-    for (const name of ['login', 'logout', 'budget', 'bench', 'mine', 'cost', 'output', 'profiles', 'snapshot', 'cp', 'resume', 'roster']) {
+    for (const name of ['login', 'logout', 'budget', 'bench', 'mine', 'cost', 'output', 'profiles', 'snapshot', 'cp', 'resume', 'roster', 'status']) {
       expect(isKnownTopLevelCommand(name)).toBe(false);
     }
   });
@@ -80,7 +80,7 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
     // silently run `agents mcp`.
     expect(RETIRED_TOP_LEVEL_COMMANDS.has('cp')).toBe(true);
     expect(closestTopLevelCommand('cp', KNOWN_TOP_LEVEL_COMMANDS)).toEqual({ closest: 'mcp', minDist: 1 });
-    for (const name of ['login', 'logout', 'budget', 'bench', 'mine', 'cost', 'output', 'profiles', 'snapshot', 'cp', 'webhook', 'resume', 'roster']) {
+    for (const name of ['login', 'logout', 'budget', 'bench', 'mine', 'cost', 'output', 'profiles', 'snapshot', 'cp', 'webhook', 'resume', 'roster', 'status']) {
       expect(RETIRED_TOP_LEVEL_COMMANDS.has(name)).toBe(true);
     }
   });

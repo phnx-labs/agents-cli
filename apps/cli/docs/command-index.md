@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_79 command groups · 565 commands._
+_78 command groups · 565 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -274,7 +274,7 @@ agents devices rm <name>                       Remove a device from the registry
 agents devices role [name] [role]              Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.
 agents devices run <cmd...>                    Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
 agents devices show <name>                     Show the full profile for one device.
-agents devices snapshot                        One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents status` for drift.
+agents devices snapshot                        One-process poll snapshot: install inventory + active sessions (optional feed/sync). Not the sync-status command — use `agents sync status` for drift.
 agents devices status                          Fleet health at a glance: online/offline rollup, a NEEDS ATTENTION list (each with its fix command), and quiet per-device rows grouped by OS. Use --verbose for the full auth/CLI/sync grid.
 agents devices stop <id>                       Terminate a running dispatched task from this machine (SIGTERM the remote process group; marks it failed/143).
 agents devices sync                            Ingest `tailscale status --json` into device profiles. In a terminal, opens a checkbox to register/unregister nodes; with --yes, registers every non-ignored node.
@@ -817,12 +817,6 @@ agents skills view [name]    Read skill metadata (name, description, rules count
 agents ssh <name> [cmd...]  Connect to a registered device. Preflights reachability, picks the right shell, and authenticates (key or password-from-bundle).
 ```
 
-## status — Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.
-
-```
-agents status  Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.
-```
-
 ## subagents — Install specialized agent definitions that parent agents can spawn for focused tasks
 
 ```
@@ -837,6 +831,7 @@ agents subagents view [name]    Show details for a specific subagent (use "list"
 
 ```
 agents sync [agentSpec] [repo]  Make this machine current, or sync resources into one agent
+agents sync status              Unified sync status across the fleet — what is drifted, missing, or behind, with an option to sync it.
 ```
 
 ## teams — Organize AI coding agents into teams that work in parallel on a shared task.
