@@ -109,7 +109,15 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
   const prompt = (a.prompt ?? '').trim()
   const title = !plain && prompt ? firstLine(prompt) : a.name
   const nameTitle = [prompt ? `${a.name} — ${prompt}` : a.name, a.sessionId ? `Session ${a.sessionId}` : ''].filter(Boolean).join('\n')
-  const showTask = !plain && !!prompt
+  // The title already IS the first line of the prompt, so the TASK block only earns its
+  // ~120px when the prompt has MORE than that first line. A single-line prompt ("Make
+  // discovery natural") rendered the identical string twice, so every card on the Fleet
+  // feed looked like it carried a task description and none did.
+  // Compare LINE COUNT, not text: firstLine() strips markdown (#, -, **bold**), so
+  // `prompt !== firstLine(prompt)` is true for ANY single-line prompt containing markup
+  // and would leave the duplicate in place for exactly the cards that read worst.
+  // AgentDecision.tsx:41 guards the same way against restating its question.
+  const showTask = !plain && !!prompt && prompt.trim().includes('\n')
   // Only show the rolling summary line when it adds signal beyond the task block, the
   // response body, and the now-line (it merely echoes the prompt when they match).
   const showSummary =
@@ -258,7 +266,7 @@ function FeedItemImpl({ agent: a, selected, plain, onSelect, onOption, onFreeTex
         </div>
       )}
       {!plain && a.todos.length > 0 && <CardChecklist todos={a.todos} />}
-      {showSummary && <div className="summary">{taskLine}</div>}
+      {showSummary && <div className="summary md">{renderMarkdown(taskLine, { clamp: true })}</div>}
       {showNowline && (
         <div className={`nowline ${stalled ? 'stall' : ''}`}>
           <Icon name="chevR" size={11} /> <span className="v">{a.verb}</span> {a.target}

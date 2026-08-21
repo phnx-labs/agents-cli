@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Icon } from './icons'
 import type { FloorPhase, StructuredQuestion } from './floorModel'
+import { renderMarkdown } from '../../utils/markdown'
 
 // Option-button reply block. Prototype structuredReply(): factory-floor.html:591-597.
 // Used inline in feed items and in the right-pane decision block (rendered by SHELL).
@@ -45,7 +46,7 @@ export function StructuredReply({ question, phase, onOption, onFreeText, onAttac
 
   return (
     <>
-      {questionText && <div className="qtext">{questionText}</div>}
+      {questionText && <div className="qtext md">{renderMarkdown(questionText)}</div>}
       <div className="opts">
         {options.map((o, i) => (
           <button

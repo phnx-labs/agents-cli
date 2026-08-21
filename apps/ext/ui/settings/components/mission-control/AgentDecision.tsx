@@ -2,6 +2,7 @@ import React from 'react'
 import { Icon } from './icons'
 import { StructuredReply } from './StructuredReply'
 import type { FloorAgent } from './floorModel'
+import { renderMarkdown } from '../../utils/markdown'
 
 // The "needs you" decision block at the top of the right detail pane. Surfaces the
 // three things a NEEDS-YOU card used to omit (RUSH-1521): WHY it's blocked (the reason
@@ -54,7 +55,7 @@ export function AgentDecision({ agent: a, error, onOption, onFreeText, onAttach,
         {/* With a structured question, StructuredReply renders the text above its options —
             so only show .qt (the last turn) when there's no such question, avoiding a
             duplicated question line. */}
-        {!a.question && <div className="qt">{a.resp}</div>}
+        {!a.question && <div className="qt md">{renderMarkdown(a.resp)}</div>}
         {a.phase === 'stalled' && (
           <div className="opts">
             <button className="opt primary" onClick={onNudge}>
