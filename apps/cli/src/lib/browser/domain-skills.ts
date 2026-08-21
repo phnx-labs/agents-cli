@@ -2,7 +2,9 @@
  * Domain-skill discovery for `agents browser start`.
  *
  * When a browser task opens a URL, look up a site-specific SKILL.md from
- * `~/.agents/skills/browser/domain-skills/<dir>/SKILL.md` and surface its
+ * `skills/browser/domain-skills/<dir>/SKILL.md` in the layered DotAgents
+ * repos — project > user > system, first layer with a match wins, the same
+ * precedence `resolveResource` in `../resources.ts` applies — and surface its
  * contents so the calling agent gets per-site operating instructions
  * (selectors, gotchas, sign-in quirks) before it starts driving the page.
  *
@@ -15,8 +17,8 @@
  */
 
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { getProjectAgentsDir, getSystemAgentsDir, getUserAgentsDir } from '../state.js';
 
 /** Result of resolving a URL to a domain-skill. */
 export interface ResolvedDomainSkill {
@@ -30,11 +32,24 @@ export interface ResolvedDomainSkill {
   hostname: string;
 }
 
-/** Where domain-skills live. Override via $AGENTS_BROWSER_DOMAIN_SKILLS_DIR for tests. */
-export function domainSkillsRoot(): string {
+/**
+ * Where domain-skills live, in precedence order: project > user > system —
+ * the same layering `resolveResource` applies. A layer whose root does not
+ * exist is simply skipped at resolve time.
+ *
+ * $AGENTS_BROWSER_DOMAIN_SKILLS_DIR overrides the whole list with a single
+ * root, for tests.
+ */
+export function domainSkillsRoots(cwd?: string): string[] {
   const override = process.env.AGENTS_BROWSER_DOMAIN_SKILLS_DIR;
-  if (override) return override;
-  return path.join(os.homedir(), '.agents', 'skills', 'browser', 'domain-skills');
+  if (override) return [override];
+  const sub = ['skills', 'browser', 'domain-skills'];
+  const roots: string[] = [];
+  const projectDir = getProjectAgentsDir(cwd);
+  if (projectDir) roots.push(path.join(projectDir, ...sub));
+  roots.push(path.join(getUserAgentsDir(), ...sub));
+  roots.push(path.join(getSystemAgentsDir(), ...sub));
+  return roots;
 }
 
 /**
@@ -98,18 +113,28 @@ function parseDomainsFrontmatter(content: string): string[] {
   return [];
 }
 
+/** Stderr debug line, gated on AGENTS_DEBUG/DEBUG — same convention as `../teams/debug.ts`. */
+function debug(message: string): void {
+  if (process.env.AGENTS_DEBUG || process.env.DEBUG) console.error(message);
+}
+
 /**
  * Resolve a URL to its matching domain-skill, or null if none.
  *
- * Two-pass strategy:
+ * Roots are searched in `domainSkillsRoots` order (project > user > system);
+ * the first layer with a match wins outright — an earlier layer's
+ * directory-name match beats a later layer's `domains:` pin, mirroring
+ * `resolveResource`'s layer precedence. Within one layer, two passes:
  *   1. Index every SKILL.md in the root and read its `domains:` frontmatter.
  *      If any pinned domain matches a candidate, return that skill.
  *   2. Fall back to directory-name match against the candidate list.
  *
  * Errors (missing root, unreadable file, invalid URL) are swallowed and
- * yield null — domain-skill discovery must never break browser start.
+ * yield null — domain-skill discovery must never break browser start. A miss
+ * logs the roots searched at debug level (AGENTS_DEBUG/DEBUG) so a skill
+ * sitting in an unsearched layer is diagnosable rather than silent.
  */
-export function resolveDomainSkill(url: string): ResolvedDomainSkill | null {
+export function resolveDomainSkill(url: string, cwd?: string): ResolvedDomainSkill | null {
   let hostname: string;
   try {
     hostname = new URL(url).hostname;
@@ -118,54 +143,57 @@ export function resolveDomainSkill(url: string): ResolvedDomainSkill | null {
   }
   if (!hostname) return null;
 
-  const root = domainSkillsRoot();
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(root, { withFileTypes: true });
-  } catch {
-    return null;
-  }
-
   const candidates = hostnameMatchCandidates(hostname);
   if (candidates.length === 0) return null;
   const candidateSet = new Set(candidates);
 
-  type Indexed = { name: string; skillPath: string; content: string; pinned: string[] };
-  const indexed: Indexed[] = [];
-  for (const e of entries) {
-    if (!e.isDirectory()) continue;
-    const skillPath = path.join(root, e.name, 'SKILL.md');
-    let content: string;
+  const roots = domainSkillsRoots(cwd);
+  for (const root of roots) {
+    let entries: fs.Dirent[];
     try {
-      content = fs.readFileSync(skillPath, 'utf-8');
+      entries = fs.readdirSync(root, { withFileTypes: true });
     } catch {
       continue;
     }
-    indexed.push({
-      name: e.name,
-      skillPath,
-      content,
-      pinned: parseDomainsFrontmatter(content),
-    });
-  }
 
-  // Pass 1: explicit `domains:` overrides.
-  for (const s of indexed) {
-    for (const d of s.pinned) {
-      if (candidateSet.has(d)) {
-        return { name: s.name, path: s.skillPath, content: s.content, hostname };
+    type Indexed = { name: string; skillPath: string; content: string; pinned: string[] };
+    const indexed: Indexed[] = [];
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const skillPath = path.join(root, e.name, 'SKILL.md');
+      let content: string;
+      try {
+        content = fs.readFileSync(skillPath, 'utf-8');
+      } catch {
+        continue;
+      }
+      indexed.push({
+        name: e.name,
+        skillPath,
+        content,
+        pinned: parseDomainsFrontmatter(content),
+      });
+    }
+
+    // Pass 1: explicit `domains:` overrides.
+    for (const s of indexed) {
+      for (const d of s.pinned) {
+        if (candidateSet.has(d)) {
+          return { name: s.name, path: s.skillPath, content: s.content, hostname };
+        }
+      }
+    }
+
+    // Pass 2: directory-name match, walking candidates in priority order.
+    const byName = new Map(indexed.map((s) => [s.name.toLowerCase(), s]));
+    for (const c of candidates) {
+      const hit = byName.get(c);
+      if (hit) {
+        return { name: hit.name, path: hit.skillPath, content: hit.content, hostname };
       }
     }
   }
 
-  // Pass 2: directory-name match, walking candidates in priority order.
-  const byName = new Map(indexed.map((s) => [s.name.toLowerCase(), s]));
-  for (const c of candidates) {
-    const hit = byName.get(c);
-    if (hit) {
-      return { name: hit.name, path: hit.skillPath, content: hit.content, hostname };
-    }
-  }
-
+  debug(`[browser] no domain-skill for ${hostname}; searched: ${roots.join(', ')}`);
   return null;
 }

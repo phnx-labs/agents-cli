@@ -1,11 +1,14 @@
 /**
  * Tests for browser domain-skill discovery.
  *
- * Uses a temp directory wired in via $AGENTS_BROWSER_DOMAIN_SKILLS_DIR so we
- * don't touch the user's real ~/.agents/skills tree.
+ * Single-root tests use a temp directory wired in via
+ * $AGENTS_BROWSER_DOMAIN_SKILLS_DIR so we don't touch the user's real
+ * ~/.agents/skills tree. The layered tests build REAL project/user/system
+ * layers under a temp HOME and re-import the module fresh (state.ts resolves
+ * HOME at import time) — no mocking.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -104,5 +107,98 @@ describe('resolveDomainSkill', () => {
     seed('perplexity', '---\ndescription: x\n---\nbody');
     const r = resolveDomainSkill('https://perplexity.ai');
     expect(r?.name).toBe('perplexity');
+  });
+});
+
+describe('layered resolution (project > user > system) — RUSH-2497', () => {
+  let home: string;
+  let savedHome: string | undefined;
+
+  const SUB = ['skills', 'browser', 'domain-skills'];
+
+  function userRoot() {
+    return path.join(home, '.agents', ...SUB);
+  }
+  function systemRoot() {
+    return path.join(home, '.agents', '.system', ...SUB);
+  }
+  function projectRoot(projectDir: string) {
+    return path.join(projectDir, '.agents', ...SUB);
+  }
+
+  function seedIn(root: string, name: string, body: string) {
+    fs.mkdirSync(path.join(root, name), { recursive: true });
+    fs.writeFileSync(path.join(root, name, 'SKILL.md'), body);
+  }
+
+  /** Re-import with the temp HOME in effect — state.ts resolves HOME at import time. */
+  async function freshModule() {
+    vi.resetModules();
+    return import('./domain-skills.js');
+  }
+
+  beforeEach(() => {
+    // The outer suite's env override forces a single root; these tests exercise
+    // the real layered roots, so it must be absent.
+    delete process.env.AGENTS_BROWSER_DOMAIN_SKILLS_DIR;
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'domain-skills-layers-'));
+    savedHome = process.env.HOME;
+    process.env.HOME = home;
+  });
+
+  afterEach(() => {
+    process.env.HOME = savedHome;
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  it('resolves a skill that exists ONLY in the system layer', async () => {
+    seedIn(systemRoot(), 'perplexity', '---\ndescription: system perplexity\n---\n# System Perplexity');
+    const { resolveDomainSkill } = await freshModule();
+    const r = resolveDomainSkill('https://www.perplexity.ai/', home);
+    expect(r?.name).toBe('perplexity');
+    expect(r?.path).toBe(path.join(systemRoot(), 'perplexity', 'SKILL.md'));
+    expect(r?.content).toContain('# System Perplexity');
+  });
+
+  it('user layer beats system for the same skill name', async () => {
+    seedIn(userRoot(), 'slack', '---\ndescription: user slack\n---\n# User Slack');
+    seedIn(systemRoot(), 'slack', '---\ndescription: system slack\n---\n# System Slack');
+    const { resolveDomainSkill } = await freshModule();
+    const r = resolveDomainSkill('https://app.slack.com/client/T1/C1', home);
+    expect(r?.path).toBe(path.join(userRoot(), 'slack', 'SKILL.md'));
+    expect(r?.content).toContain('# User Slack');
+  });
+
+  it('project layer beats user and system', async () => {
+    const projectDir = path.join(home, 'src', 'my-repo');
+    seedIn(projectRoot(projectDir), 'linkedin', '---\ndescription: project\n---\n# Project LinkedIn');
+    seedIn(userRoot(), 'linkedin', '---\ndescription: user\n---\n# User LinkedIn');
+    seedIn(systemRoot(), 'linkedin', '---\ndescription: system\n---\n# System LinkedIn');
+    const { resolveDomainSkill } = await freshModule();
+    const r = resolveDomainSkill('https://www.linkedin.com/feed/', projectDir);
+    expect(r?.path).toBe(path.join(projectRoot(projectDir), 'linkedin', 'SKILL.md'));
+    expect(r?.content).toContain('# Project LinkedIn');
+  });
+
+  it('falls through a layer that has skills but no match for this hostname', async () => {
+    seedIn(userRoot(), 'notion', '---\ndescription: user notion\n---\n# Notion');
+    seedIn(systemRoot(), 'higgsfield', '---\ndescription: system higgsfield\n---\n# Higgsfield');
+    const { resolveDomainSkill } = await freshModule();
+    const r = resolveDomainSkill('https://higgsfield.ai/', home);
+    expect(r?.name).toBe('higgsfield');
+    expect(r?.path).toBe(path.join(systemRoot(), 'higgsfield', 'SKILL.md'));
+  });
+
+  it('$AGENTS_BROWSER_DOMAIN_SKILLS_DIR remains a SINGLE-root override — the system layer is not searched', async () => {
+    seedIn(systemRoot(), 'perplexity', '---\ndescription: system\n---\nbody');
+    const override = fs.mkdtempSync(path.join(os.tmpdir(), 'domain-skills-override-'));
+    process.env.AGENTS_BROWSER_DOMAIN_SKILLS_DIR = override;
+    try {
+      const { resolveDomainSkill } = await freshModule();
+      expect(resolveDomainSkill('https://www.perplexity.ai/', home)).toBeNull();
+    } finally {
+      delete process.env.AGENTS_BROWSER_DOMAIN_SKILLS_DIR;
+      fs.rmSync(override, { recursive: true, force: true });
+    }
   });
 });
