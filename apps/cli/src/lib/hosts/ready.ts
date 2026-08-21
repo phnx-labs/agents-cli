@@ -14,6 +14,7 @@ import type { Host } from './types.js';
 import { hostIdentityArgs, sshTargetFor } from './types.js';
 import { remoteShellFor, buildWindowsAgentsCommand, encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './remote-cmd.js';
 import { resolveRemoteOsSync } from './remote-os.js';
+import { isDeadVerdict, type AuthVerdict } from '../auth-health.js';
 
 /** Resolve this CLI's own version by walking up to the nearest package.json. */
 export function localCliVersion(): string | null {
@@ -254,6 +255,7 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
       agent?: string;
       versions?: Array<{
         signedIn?: boolean;
+        authVerdict?: AuthVerdict | null;
         usageStatus?: 'available' | 'rate_limited' | 'out_of_credits' | null;
       }>;
     }>;
@@ -262,8 +264,11 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
     const verdicts = (row.versions ?? []).flatMap((version) => {
       if (typeof version.signedIn !== 'boolean') return [];
       const throttled = version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits';
-      const ready = version.signedIn && !throttled;
-      return [{ ready, pickerEligible: ready || !version.signedIn }];
+      const authBlocked = version.authVerdict !== null
+        && version.authVerdict !== undefined
+        && isDeadVerdict(version.authVerdict);
+      const ready = version.signedIn && !authBlocked && !throttled;
+      return [{ ready, pickerEligible: ready || !version.signedIn || authBlocked }];
     });
     if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
     return {

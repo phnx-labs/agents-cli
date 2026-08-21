@@ -80,7 +80,9 @@
   shows its own installed versions and accounts. Automatic picker placement
   prefers a ready account, retains signed-out/revoked login targets, and
   excludes devices whose picker would contain only rate-limited or
-  out-of-credit rows. Source: `apps/cli/src/commands/exec.ts`,
+  out-of-credit rows. `agents view --json` now exposes each version's cached
+  `authVerdict` so remote and local placement apply the same revoked-token gate.
+  Source: `apps/cli/src/commands/{exec,view}.ts`,
   `apps/cli/src/lib/{smart-launch,hosts/dispatch,hosts/ready}.ts`.
 
 - **Plan-tier gates for `agents accounts` and `agents insights` (RUSH-2424).** A new `apps/cli/src/lib/entitlement.ts` reads the live subscription tier from `GET /api/v1/billing/subscription?agent=agi-cli` (the session token in `~/.rush/user.yaml`), caches it on disk for 15 minutes, and stays offline-tolerant: a stale cache is honored over a failed network call, and no session file at all resolves straight to the free tier. `agents accounts add` / `name` / `attach` now cap registered accounts at 3 per harness on free, 10 on paid/admin — a 4th add on free refuses before any write (`free plan is capped at 3 claude accounts (3/3). agents upgrade — up to 10 per harness.`) and the 3rd prints a one-line notice. Downgrading a plan never deletes a credential: over-cap accounts fall out of `accounts switch`/`set-default` (excluded from `listSwitchableAccounts`) and are listed `dormant (upgrade to reactivate)` in `agents accounts`. `agents insights` keeps top-line counts, harness mix, `insights mix`, and `agents perf` free on every tier; the Friction / Friction-thrash / Dissatisfaction-corrections sections, grouping `--by account` (the default), and `--narrative` are paid — a gated section is replaced by the in-voice notice `Friction and account-split analysis are on the paid plan.` in both the text report and `--json` (a new `plan: {tierName, isPaid}` field, `groups: null` when the account breakdown is gated, and the friction/correction facet keys stripped per group otherwise). Source: `apps/cli/src/lib/entitlement.ts`, `apps/cli/src/commands/accounts.ts`, `apps/cli/src/commands/insights.ts`.

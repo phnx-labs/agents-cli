@@ -43,6 +43,22 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
     }).toString('utf-8');
   }
 
+  function viewJson(): { versions: Array<{ version: string; authVerdict: string | null }> } {
+    return JSON.parse(execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'view', 'codex', '--json'], {
+      cwd: process.cwd(),
+      env: {
+        ...process.env,
+        HOME: home,
+        PATH: `${path.join(home, 'npm-global', 'bin')}:${process.env.PATH}`,
+        SHELL: '/bin/bash',
+        AGENTS_NO_NUDGE: '1',
+        AGENTS_SYNC_MACHINE_ID: 'view-json-test-host',
+        FORCE_COLOR: '0',
+      },
+      stdio: ['ignore', 'pipe', 'inherit'],
+    }).toString('utf-8')) as { versions: Array<{ version: string; authVerdict: string | null }> };
+  }
+
   beforeEach(() => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'view-isolated-'));
     // The user's own globally-installed codex, laid out the way npm does it.
@@ -89,5 +105,22 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
     expect(out).toContain('Not Managed by Agents CLI');
     expect(out).toContain(`${GLOBAL_VERSION} (global)`);
     expect(out).not.toContain('(isolated)');
+  }, 120_000);
+
+  it('emits each installed version auth verdict in JSON for remote placement', () => {
+    plantVersion('9.9.4', { isolated: false });
+    const cacheDir = path.join(home, '.agents', '.cache');
+    fs.mkdirSync(cacheDir, { recursive: true });
+    fs.writeFileSync(path.join(cacheDir, '.auth-health.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        'view-json-test-host:codex:9.9.4': { verdict: 'revoked', checkedAt: 1 },
+      },
+    }));
+
+    expect(viewJson().versions).toContainEqual(expect.objectContaining({
+      version: '9.9.4',
+      authVerdict: 'revoked',
+    }));
   }, 120_000);
 });

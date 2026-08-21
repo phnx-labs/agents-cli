@@ -1,6 +1,7 @@
 import type { ConfiguredModelSource } from './models.js';
 import type { ProfileSummary } from './profiles.js';
 import type { AgentId } from './types.js';
+import type { AuthVerdict } from './auth-health.js';
 
 export type SyncState = 'synced' | 'new' | 'modified' | 'deleted';
 
@@ -10,6 +11,8 @@ export interface ViewJsonVersion {
   isolated: boolean;
   isIsolatedDefault: boolean;
   signedIn: boolean;
+  /** Live cached authentication verdict for this installed version. */
+  authVerdict: AuthVerdict | null;
   email: string | null;
   accountId?: string | null;
   organizationType?: string | null;

@@ -1424,6 +1424,8 @@ export function parseResourceSections(
  */
 export async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set<ResourceSection>): Promise<ViewJsonAgent[]> {
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
+  const authCache = readAuthHealthCache();
+  const host = machineId();
   const wantResources = !!resourceSections && resourceSections.size > 0;
   // Only pay for the git-status + resource scans when resources were requested.
   const resourceSync = wantResources ? await loadResourceSyncData() : null;
@@ -1482,6 +1484,7 @@ export async function collectAgentsJson(filterAgentId?: AgentId, resourceSection
       isolated: isVersionIsolated(agentId, version),
       isIsolatedDefault: getIsolatedDefault(agentId) === version,
       signedIn: info.signedIn,
+      authVerdict: authCache[authCacheKey(host, agentId, version)]?.verdict ?? null,
       email: info.email,
       accountId: info.accountId,
       organizationType: info.organizationType ?? null,
@@ -1998,8 +2001,8 @@ Output:
   - With agent name: versions for that agent, showing which is the default
   - With a custom harness name: that harness's host, model, provider, and auth
   - With agent@version: detailed breakdown of resources synced to that version
-  - With --json: structured JSON with version, isDefault, signedIn, email, plan,
-    usageStatus, per-window usedPercent, lastActive, and path
+  - With --json: structured JSON with version, isDefault, signedIn, authVerdict,
+    email, plan, usageStatus, per-window usedPercent, lastActive, and path
   - With --prune: plan of which older versions will be removed, then confirm
   - With --prune --dry-run: preview only, no deletions
 `)

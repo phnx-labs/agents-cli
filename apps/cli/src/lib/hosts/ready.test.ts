@@ -85,6 +85,16 @@ describe('viewAgentSignedIn', () => {
       pickerEligible: false,
     });
   });
+
+  it('keeps a remotely revoked credential picker-eligible without ranking it as ready', () => {
+    const view = JSON.stringify([{ agent: 'claude', versions: [
+      { signedIn: true, authVerdict: 'revoked', usageStatus: 'available' },
+    ] }]);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: false,
+      pickerEligible: true,
+    });
+  });
 });
 
 describe('parseReadyProbe', () => {

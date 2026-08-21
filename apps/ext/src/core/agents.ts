@@ -285,8 +285,8 @@ export function isAgentRunner(agentKey: string): boolean {
 }
 
 /** Every agent runner launches through `agents run`, locally or across an SSH
- * host boundary — balanced account/version rotation is applied uniformly. Shell
- * is the only thing that stays a raw terminal (it is not an `agents run` agent). */
+ * host boundary. The launch target chooses picker or automatic account
+ * selection; shell alone stays a raw terminal because it is not an agent. */
 export function usesManagedAgentLaunch(agentKey: string, _targetHost?: string): boolean {
   return isAgentRunner(agentKey);
 }
