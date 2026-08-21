@@ -4,7 +4,7 @@ import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import type { JobConfig } from '../scheduling/routines.js';
-import { generateCodexConfig, generateCursorConfig } from '../sandbox.js';
+import { generateCodexConfig, generateCursorConfig, linkHostGhConfig, prepareJobHome, cleanJobHome } from '../sandbox.js';
 
 const tempDirs: string[] = [];
 
@@ -96,6 +96,43 @@ describe('generateCursorConfig', () => {
     } finally {
       if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
       else process.env.XDG_CONFIG_HOME = previous;
+    }
+  });
+});
+
+describe('linkHostGhConfig / prepareJobHome (RUSH-2860 — forward host gh auth)', () => {
+  it.skipIf(process.platform === 'win32')('links the same-host gh config dir into the overlay', () => {
+    const overlayHome = createOverlayHome();
+    const realGhDir = createOverlayHome();
+    fs.writeFileSync(path.join(realGhDir, 'hosts.yml'), 'github.com:\n    oauth_token: gho_test\n', { mode: 0o600 });
+    const previous = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = realGhDir;
+    try {
+      linkHostGhConfig(overlayHome);
+      expect(fs.realpathSync(path.join(overlayHome, '.config', 'gh'))).toBe(fs.realpathSync(realGhDir));
+      expect(fs.existsSync(path.join(overlayHome, '.config', 'gh', 'hosts.yml'))).toBe(true);
+    } finally {
+      if (previous === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previous;
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('prepareJobHome links gh config for any harness (not just cursor)', () => {
+    const realGhDir = createOverlayHome();
+    fs.writeFileSync(path.join(realGhDir, 'hosts.yml'), 'github.com:\n    oauth_token: gho_test\n', { mode: 0o600 });
+    const previous = process.env.GH_CONFIG_DIR;
+    process.env.GH_CONFIG_DIR = realGhDir;
+    const job = makeJobConfig();
+    job.name = `rush-2860-gh-${Date.now()}`;
+    job.agent = 'claude';
+    try {
+      const overlayHome = prepareJobHome(job);
+      expect(fs.existsSync(path.join(overlayHome, '.config', 'gh', 'hosts.yml'))).toBe(true);
+      expect(fs.realpathSync(path.join(overlayHome, '.config', 'gh'))).toBe(fs.realpathSync(realGhDir));
+    } finally {
+      cleanJobHome(job.name);
+      if (previous === undefined) delete process.env.GH_CONFIG_DIR;
+      else process.env.GH_CONFIG_DIR = previous;
     }
   });
 });

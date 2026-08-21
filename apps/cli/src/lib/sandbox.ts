@@ -46,6 +46,14 @@ const ENV_ALLOWLIST = [
   'VISUAL',
   'NO_COLOR',
   'FORCE_COLOR',
+  // GitHub CLI — same host credentials interactive `agents run` already sees.
+  // Without these, a sandboxed monitor `--run` child has no gh auth even when
+  // the daemon user is logged in (RUSH-2860).
+  'GH_TOKEN',
+  'GH_HOST',
+  'GH_ENTERPRISE_TOKEN',
+  'GITHUB_TOKEN',
+  'GH_CONFIG_DIR',
 ];
 
 /** Tools safe to grant as wildcards (no filesystem access). */
@@ -64,6 +72,33 @@ function tomlString(value: string): string {
   return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
+/**
+ * Absolute path to this host's `gh` config directory (`hosts.yml` + `config.yml`),
+ * or null when the host has never run `gh auth login`. Prefer `GH_CONFIG_DIR` when
+ * the parent already pinned one; otherwise `$XDG_CONFIG_HOME/gh` or `~/.config/gh`.
+ */
+export function resolveHostGhConfigDir(): string | null {
+  // Honor an explicit pin only when it actually exists; otherwise fall through
+  // to the default locations so a stale/broken GH_CONFIG_DIR cannot hide a
+  // healthy ~/.config/gh (RUSH-2860).
+  if (process.env.GH_CONFIG_DIR && fs.existsSync(process.env.GH_CONFIG_DIR)) {
+    return process.env.GH_CONFIG_DIR;
+  }
+  const configHome = process.env.XDG_CONFIG_HOME || path.join(resolveRealHome(), '.config');
+  const ghDir = path.join(configHome, 'gh');
+  return fs.existsSync(ghDir) ? ghDir : null;
+}
+
+/** True when this host holds usable GitHub CLI auth (hosts.yml or a token env). */
+export function hostHasGhAuth(): boolean {
+  if (process.env.GH_TOKEN || process.env.GH_ENTERPRISE_TOKEN || process.env.GITHUB_TOKEN) {
+    return true;
+  }
+  const dir = resolveHostGhConfigDir();
+  if (!dir) return false;
+  return fs.existsSync(path.join(dir, 'hosts.yml'));
+}
+
 /** Build a restricted environment for a sandboxed process, setting HOME to the overlay. */
 export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, string>): Record<string, string> {
   const env: Record<string, string> = {
@@ -75,6 +110,18 @@ export function buildSpawnEnv(overlayHome: string, extraEnv?: Record<string, str
     if (process.env[key]) {
       env[key] = process.env[key]!;
     }
+  }
+
+  // Pin GH_CONFIG_DIR at the REAL host config so `gh` does not look under the
+  // disposable overlay HOME (which has no hosts.yml). Same posture as linking
+  // Cursor's auth.json — forward the credentials the daemon user already holds
+  // (RUSH-2860). Always prefer resolveHostGhConfigDir over a stale allowlisted
+  // value; an explicit extraEnv GH_CONFIG_DIR still wins below.
+  const hostGh = resolveHostGhConfigDir();
+  if (hostGh) {
+    env.GH_CONFIG_DIR = hostGh;
+  } else {
+    delete env.GH_CONFIG_DIR;
   }
 
   if (extraEnv) {
@@ -114,11 +161,77 @@ export function prepareJobHome(config: JobConfig): string {
     generateCursorConfig(overlayHome);
   }
 
+  // Host tool credentials / setup the overlay HOME would otherwise hide.
+  // Cursor already links its own auth above; gh + ~/.agents are harness-agnostic
+  // and needed by every sandboxed `--run` that shells out to `gh` or `agents`
+  // (RUSH-2860 — monitor merge agents saw "not logged into any GitHub hosts"
+  // and "agents-cli is not set up" while the daemon user was fine).
+  linkHostGhConfig(overlayHome);
+  linkHostAgentsDir(overlayHome);
+
   if (config.allow?.dirs) {
     symlinkAllowedDirs(overlayHome, config.allow.dirs);
   }
 
   return overlayHome;
+}
+
+/**
+ * Link this host's `gh` config directory into the disposable overlay so
+ * `$HOME/.config/gh` resolves even when `GH_CONFIG_DIR` is unset. Mirrors
+ * `generateCursorConfig`: same-host credentials, never copied to another box.
+ */
+export function linkHostGhConfig(overlayHome: string): void {
+  const realGhDir = resolveHostGhConfigDir();
+  if (!realGhDir || !fs.existsSync(realGhDir)) return;
+
+  const overlayGhDir = path.join(overlayHome, '.config', 'gh');
+  if (fs.existsSync(overlayGhDir)) return;
+  fs.mkdirSync(path.dirname(overlayGhDir), { recursive: true });
+  try {
+    createLink(realGhDir, overlayGhDir);
+  } catch {
+    /* cross-volume or link creation refused: GH_CONFIG_DIR in buildSpawnEnv is the backup */
+  }
+}
+
+/**
+ * Link the real `~/.agents` into the overlay so a nested `agents` CLI started
+ * under the sandboxed HOME still finds the system repo / setup sentinel. Without
+ * this, `ensureInitialized` reads `$HOME/.agents/.system` on the empty overlay
+ * and prints "agents-cli is not set up" (RUSH-2860).
+ */
+export function linkHostAgentsDir(overlayHome: string): void {
+  const realAgents = getUserAgentsDir();
+  if (!fs.existsSync(realAgents)) return;
+  const overlayAgents = path.join(overlayHome, '.agents');
+  if (fs.existsSync(overlayAgents)) return;
+  try {
+    createLink(realAgents, overlayAgents);
+  } catch {
+    /* link refused: AGENTS_USER_DIR is still set for shims; nested agents CLI may still fail closed */
+  }
+}
+
+/**
+ * Refuse to launch a sandboxed child when THIS host holds GitHub auth but the
+ * spawn env would hide it. The RUSH-2860 failure mode was silent: the monitor
+ * fire recorded `ok` (spawn succeeded) while every `gh` call inside the child
+ * failed. Prefer forwarding (buildSpawnEnv / linkHostGhConfig); this assert is
+ * the regression tripwire — if forwarding ever regresses, fail loud at spawn
+ * instead of recording a hollow success. No-ops when the host has no gh auth
+ * (jobs that do not need GitHub still run).
+ */
+export function assertSandboxForwardsHostGhAuth(spawnEnv: Record<string, string>): void {
+  if (!hostHasGhAuth()) return;
+  if (spawnEnv.GH_TOKEN || spawnEnv.GH_ENTERPRISE_TOKEN || spawnEnv.GITHUB_TOKEN) return;
+  if (spawnEnv.GH_CONFIG_DIR && fs.existsSync(path.join(spawnEnv.GH_CONFIG_DIR, 'hosts.yml'))) return;
+  if (spawnEnv.HOME && fs.existsSync(path.join(spawnEnv.HOME, '.config', 'gh', 'hosts.yml'))) return;
+  throw new Error(
+    "sandbox spawn would hide this host's GitHub auth from the child " +
+      '(no GH_CONFIG_DIR / ~/.config/gh / GH_TOKEN). Refusing to launch — ' +
+      'the agent would record ok then fail every gh call (RUSH-2860).',
+  );
 }
 
 /** Link this host's Cursor login and CLI config into the disposable overlay. */

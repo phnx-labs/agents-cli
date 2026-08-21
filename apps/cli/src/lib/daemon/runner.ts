@@ -40,7 +40,7 @@ import type { ResolvedExecutionContext, PlacementMode } from '../routine-context
 import { getRunsDir, getUserAgentsDir, readMeta, getDaemonDir } from '../state.js';
 import type { AgentId } from '../types.js';
 import { shortCodexHome } from '../codex-home.js';
-import { prepareJobHome, buildSpawnEnv, getJobHomePath } from '../sandbox.js';
+import { prepareJobHome, buildSpawnEnv, getJobHomePath, assertSandboxForwardsHostGhAuth } from '../sandbox.js';
 import { resolveModel, buildReasoningFlags } from '../models.js';
 import { createTimer, redactPrompt, emitRoutineEnd } from '../feed/events.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
@@ -1516,6 +1516,9 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
     }
   }
 
+  // RUSH-2860: if this host holds gh auth, the sandbox child MUST see it.
+  if (useSandbox) assertSandboxForwardsHostGhAuth(baseEnv);
+
   const meta: RunMeta = {
     jobName: config.name,
     runId,
@@ -2119,6 +2122,10 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
       })()
     // Non-command path only: config.agent is always set here (command/workflow branch earlier).
     : buildRoutineSpawnEnv(baseEnv, config.agent! as AgentId, version, config.timezone, overlayHome);
+
+  // RUSH-2860: if this host holds gh auth, the sandbox child MUST see it —
+  // otherwise monitors runs records ok while every gh call inside fails.
+  if (useSandbox) assertSandboxForwardsHostGhAuth(spawnEnv);
 
   const effectiveAgent: AgentId = config.workflow
     ? 'claude'

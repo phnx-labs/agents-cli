@@ -178,7 +178,11 @@ agents monitors remove <name>
   `--action-timeout` with routines), dispatched through `executeJobDetached`.
   Takes a native harness id or a custom harness name (`agents harness list`);
   a custom harness is delegated to `agents run <name>` and pins its own host
-  version and auth.
+  version and auth. The sandboxed child inherits this host's GitHub CLI auth
+  (`GH_CONFIG_DIR` / `~/.config/gh`) the same way interactive `agents run`
+  does — a `--run` that shells out to `gh` is not a hollow success when the
+  daemon user is already logged in (RUSH-2860; see [routines.md §Sandbox
+  Isolation](routines.md#sandbox-isolation)).
 - `--routine <name>` — fire an existing routine (attach a monitor to a routine).
 - `--notify [channel]` — notify the owner through the one channel seam
   (`lookupTransport` → provider). The recipient and normal channel come from

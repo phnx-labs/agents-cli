@@ -1035,6 +1035,15 @@ The agent can only:
 - Use tools listed in `allow.tools`
 - Cannot access `~/.ssh`, `~/.gitconfig`, etc.
 
+**Host tool credentials the overlay would otherwise hide are forwarded**
+(RUSH-2860): `prepareJobHome` links this machine's `~/.config/gh` (or
+`$GH_CONFIG_DIR`) and `~/.agents` into the overlay, and `buildSpawnEnv` pins
+`GH_CONFIG_DIR` / forwards `GH_TOKEN`/`GITHUB_TOKEN` so a sandboxed monitor
+`--run` child sees the same GitHub CLI auth as interactive `agents run`. If
+this host holds gh auth but the spawn env would hide it, the runner refuses to
+launch (fail loud) rather than recording a hollow `ok` fire. Same-host only —
+credentials are never copied to another box.
+
 When an agent routine finishes, agents-cli copies the agent transcript out of
 the overlay before the next run recreates it. The durable copy lives beside the
 run metadata:
