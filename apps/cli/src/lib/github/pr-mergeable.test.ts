@@ -14,6 +14,7 @@ import { promisify } from 'util';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalizeRepo,
+  listMergeableRefs,
   projectRepoSlugs,
   selectListedMergeable,
   type GhExec,
@@ -117,6 +118,31 @@ describe('selectListedMergeable', () => {
   });
 });
 
+describe('listMergeableRefs', () => {
+  it('canonicalizes the slug and prints owner/repo#n for an approved+green PR', async () => {
+    const gh = ghFromTable({
+      'repo view phnx-labs/agents-cli --json nameWithOwner --jq .nameWithOwner': 'phnx-labs/agi-cli\n',
+      'pr list --repo phnx-labs/agi-cli --author @me --state open --limit 50 --json number,reviewDecision,statusCheckRollup':
+        JSON.stringify([{ number: 2847, reviewDecision: '', statusCheckRollup: GREEN }]),
+      'api repos/phnx-labs/agi-cli/pulls/2847/reviews --cache 60s': '[]',
+      'api repos/phnx-labs/agi-cli/issues/2847/comments --cache 60s': JSON.stringify([{ body: APPROVE_2847 }]),
+    });
+    expect(await listMergeableRefs({ gh, repos: ['phnx-labs/agents-cli'] }))
+      .toBe('phnx-labs/agi-cli#2847');
+  });
+
+  it('is empty when the only candidate is unapproved', async () => {
+    const gh = ghFromTable({
+      'repo view phnx-labs/agi-cli --json nameWithOwner --jq .nameWithOwner': 'phnx-labs/agi-cli\n',
+      'pr list --repo phnx-labs/agi-cli --author @me --state open --limit 50 --json number,reviewDecision,statusCheckRollup':
+        JSON.stringify([{ number: 2849, reviewDecision: '', statusCheckRollup: GREEN }]),
+      'api repos/phnx-labs/agi-cli/pulls/2849/reviews --cache 60s': '[]',
+      'api repos/phnx-labs/agi-cli/issues/2849/comments --cache 60s': '[]',
+    });
+    expect(await listMergeableRefs({ gh, repos: ['phnx-labs/agi-cli'] })).toBe('');
+  });
+});
+
 describe('ghExec color env', () => {
   it('gh --json from this process is parseable even when FORCE_COLOR is set', async () => {
     const { ghExec } = await import('./pr-mergeable.js');
@@ -140,7 +166,11 @@ describe('live gh --repo from a non-repo cwd (RUSH-2848 defect 1)', () => {
   it('returns JSON, not "fatal: not a git repository"', async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'pr-mergeable-cwd-'));
     try {
-      const env = { ...process.env, CLICOLOR: '0', NO_COLOR: '1', GH_NO_COLOR: '1', GH_PAGER: 'cat' };
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      env.CLICOLOR = '0';
+      env.NO_COLOR = '1';
+      env.GH_NO_COLOR = '1';
+      env.GH_PAGER = 'cat';
       delete env.CLICOLOR_FORCE;
       delete env.FORCE_COLOR;
       delete env.GH_FORCE_TTY;

@@ -42,7 +42,11 @@ export type GhExec = (args: string[]) => Promise<string>;
  * pin GH_NO_COLOR for every gh spawn.
  */
 function ghEnv(): NodeJS.ProcessEnv {
-  const env = { ...process.env, CLICOLOR: '0', NO_COLOR: '1', GH_NO_COLOR: '1', GH_PAGER: 'cat' };
+  const env: NodeJS.ProcessEnv = { ...process.env };
+  env.CLICOLOR = '0';
+  env.NO_COLOR = '1';
+  env.GH_NO_COLOR = '1';
+  env.GH_PAGER = 'cat';
   delete env.CLICOLOR_FORCE;
   delete env.FORCE_COLOR;
   delete env.GH_FORCE_TTY;

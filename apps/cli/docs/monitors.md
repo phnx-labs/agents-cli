@@ -52,12 +52,20 @@ fires use.
 ### Built-in: `pr-merge-on-green`
 
 Opt-in. Polls every 5 minutes for **this user's** open PRs that are CI-green and
-non-author-approved, then dispatches `claude` to rebase-merge them. The poll is
-`agents _internal mergeable-prs` (also the Python script next to the YAML in
-`.agents-system`): it passes `--repo` for every registered project slug so it
-works from the daemon's non-repo cwd, and it accepts either a GitHub `APPROVED`
-review or an APPROVE verdict comment on that PR — the same rule as
-`merge-guard.sh`. Observation is a line of `owner/repo#n` refs; empty is silent.
+non-author-approved, then dispatches `claude` to rebase-merge them.
+
+The **built-in YAML** lives in `gh:phnx-labs/.agents-system` (`monitors/pr-merge-on-green.yml`)
+and polls `monitors/pr-merge-on-green.sh` — `gh search prs` plus `gh pr view --repo`,
+verdict via `pr-verdict.py` (the same file `merge-guard.sh` calls). Companion:
+phnx-labs/.agents-system#347.
+
+This CLI also ships a hidden helper with the **same verdict rules**
+(`hasApproveVerdict` / `isCiGreen` match that python), listing registered
+project slugs instead of a global search:
+
+```bash
+agents _internal mergeable-prs    # owner/repo#n, or empty
+```
 
 ```bash
 agents monitors enable pr-merge-on-green
