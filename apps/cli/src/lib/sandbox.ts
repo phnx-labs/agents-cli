@@ -172,7 +172,7 @@ export function prepareJobHome(config: JobConfig): string {
   // at a predictable path inside the overlay, through a writable symlink, in a
   // child whose prompt can carry untrusted text from a watched source. The
   // separate "agents-cli is not set up" defect (state.ts ignores AGENTS_USER_DIR)
-  // gets its own scoped change.
+  // gets its own scoped change: RUSH-2954.
   linkHostGhConfig(overlayHome);
 
   if (config.allow?.dirs) {
