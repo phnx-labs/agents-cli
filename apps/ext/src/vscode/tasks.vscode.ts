@@ -3,17 +3,17 @@
 // `agents tickets` command is gone (RUSH-2932).
 
 import { execFile } from 'child_process';
-import * as os from 'os';
-import * as path from 'path';
 import { promisify } from 'util';
 import * as vscode from 'vscode';
+import { resolveExecutable } from '../core/binResolve';
+import { LINEAR_NOT_FOUND_MESSAGE, resolveLinearBin } from '../core/linearBin';
 import { TaskSource, TaskSourceSettings } from '../core/settings';
 import {
   CycleInfo,
   UnifiedTask,
   githubToUnifiedTask,
   groupTasksBySource,
-  linearToUnifiedTask,
+  linearCliIssueToUnifiedTask,
 } from '../core/tasks';
 
 const execFileAsync = promisify(execFile);
@@ -32,23 +32,11 @@ interface TicketsListResult {
   };
 }
 
-function hostPath(): string {
-  const dirs = [
-    path.join(os.homedir(), '.local', 'bin'),
-    path.join(os.homedir(), '.agents', 'shims'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-  ];
-  return [...dirs, process.env.PATH ?? ''].join(':');
-}
-
 async function runCli(bin: string, args: string[], cwd?: string): Promise<string> {
   const { stdout } = await execFileAsync(bin, args, {
     cwd,
     timeout: 15_000,
     maxBuffer: 16 * 1024 * 1024,
-    env: { ...process.env, PATH: hostPath() },
   });
   return stdout;
 }
@@ -59,32 +47,32 @@ function errorMessage(error: unknown): string {
 }
 
 async function readLinear(cwd?: string): Promise<{ tickets: UnifiedTask[]; cycleInfo: CycleInfo | null }> {
-  const stdout = await runCli('linear', ['tasks', '--json'], cwd);
+  const linearBin = resolveLinearBin();
+  if (!linearBin) throw new Error(LINEAR_NOT_FOUND_MESSAGE);
+  const stdout = await runCli(linearBin, ['tasks', '--json'], cwd);
   const data = JSON.parse(stdout) as {
     cycle?: { name?: string; startsAt?: string; endsAt?: string };
-    issues?: Parameters<typeof linearToUnifiedTask>[0][];
+    issues?: Array<Parameters<typeof linearCliIssueToUnifiedTask>[0]>;
   };
   const cycle = data.cycle;
   const cycleInfo = cycle?.startsAt && cycle?.endsAt
     ? { name: String(cycle.name ?? ''), startsAt: String(cycle.startsAt), endsAt: String(cycle.endsAt) }
     : null;
-  const tickets = (Array.isArray(data.issues) ? data.issues : []).map((issue) => linearToUnifiedTask({
-    ...issue,
-    id: issue.identifier,
-    identifier: issue.identifier,
-  }));
+  const tickets = (Array.isArray(data.issues) ? data.issues : []).map((issue) => linearCliIssueToUnifiedTask(issue));
   return { tickets, cycleInfo };
 }
 
 async function readGithub(cwd?: string, assignedOnly = false): Promise<UnifiedTask[]> {
-  const repo = (await runCli('gh', ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], cwd)).trim();
+  const ghBin = resolveExecutable('gh');
+  if (!ghBin) throw new Error('GitHub CLI (gh) not found on PATH or in common install locations.');
+  const repo = (await runCli(ghBin, ['repo', 'view', '--json', 'nameWithOwner', '-q', '.nameWithOwner'], cwd)).trim();
   if (!repo) throw new Error('No GitHub repository resolved for this workspace.');
   const args = [
     'issue', 'list', '--repo', repo, '--state', 'open', '--limit', '50',
     '--json', 'number,title,state,labels,assignees,url,body,createdAt',
   ];
   if (assignedOnly) args.push('--assignee', '@me');
-  const stdout = await runCli('gh', args, cwd);
+  const stdout = await runCli(ghBin, args, cwd);
   const issues = JSON.parse(stdout) as Array<{
     id?: number;
     number: number;

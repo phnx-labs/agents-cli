@@ -3,6 +3,7 @@ import {
   buildTaskDispatchPrompt,
   extractImageUrls,
   githubToUnifiedTask,
+  linearCliIssueToUnifiedTask,
   linearToUnifiedTask,
 } from './tasks';
 
@@ -97,6 +98,20 @@ describe('linearToUnifiedTask comments + images', () => {
       url: 'https://linear.app/acme/issue/RUSH-10',
     });
     expect(task.metadata.images).toBeUndefined();
+  });
+});
+
+describe('linearCliIssueToUnifiedTask', () => {
+  test('maps linear-cli JSON (identifier, no GraphQL id) to linear:<identifier>', () => {
+    const task = linearCliIssueToUnifiedTask({
+      identifier: 'RUSH-2650',
+      title: 'Decide founding team',
+      state: { name: 'Todo', type: 'unstarted' },
+      priority: 1,
+      url: 'https://linear.app/getrush/issue/RUSH-2650',
+    });
+    expect(task.id).toBe('linear:RUSH-2650');
+    expect(task.metadata.identifier).toBe('RUSH-2650');
   });
 });
 

@@ -174,6 +174,18 @@ export function linearToUnifiedTask(
   };
 }
 
+/**
+ * linear-cli `tasks --json` issues have `identifier` and no GraphQL `id`.
+ * Pin the card id to `linear:<identifier>` so dropping that mapping cannot
+ * silently produce `linear:undefined` (RUSH-2932).
+ */
+export function linearCliIssueToUnifiedTask(
+  issue: Omit<Parameters<typeof linearToUnifiedTask>[0], 'id'> & { identifier: string },
+  repo: string | null = null,
+): UnifiedTask {
+  return linearToUnifiedTask({ ...issue, id: issue.identifier }, repo);
+}
+
 // Convert GitHub issue to UnifiedTask. `repo` is the detected "owner/name".
 export function githubToUnifiedTask(
   issue: {
