@@ -377,6 +377,68 @@ export async function getClaudeProjectRoots(homeDir: string = homedir()): Promis
   return roots;
 }
 
+// Resolving a Claude transcript means finding one filename under ~343 project
+// dirs spread across ~10 version roots. The floor rebuild calls this once per
+// agent terminal (terminals.vscode.ts:1068), so the naive stat-every-candidate
+// walk costs O(agents x projectDirs): measured on a real home, 20 agents in the
+// last root took 5,911 statx + 1,192 getdents64 (726ms), and 20 agents with no
+// transcript took exactly 343 x 20 = 6,860 statx (740ms). Nothing debounces the
+// rebuild, so those walks stack and the detail panel stays empty.
+//
+// Two caches remove that without changing what the function returns:
+//   - resolvedClaudePaths: sessionId -> path. A transcript does not move, so a
+//     hit costs one stat to confirm the file is still there. Only successful
+//     resolutions are cached; caching a miss would hide a session that has not
+//     written its transcript yet.
+//   - claudeFileIndex: filename -> path, built by listing each project dir once
+//     (~343 getdents). Every agent in the same refresh shares that one listing
+//     instead of issuing its own 343 stats.
+// How long a built index may be reused for a hit.
+const CLAUDE_INDEX_TTL_MS = 5_000;
+// How long a *miss* against the index is trusted. Past this the index is
+// rebuilt once and re-checked, so a session that started writing since the
+// build still resolves promptly. This must stay well under the reuse TTL:
+// without it a miss would wait out the full TTL, which would delay Copy
+// Session ID / Resume on a just-launched agent.
+const CLAUDE_INDEX_MISS_AUTHORITY_MS = 500;
+
+const resolvedClaudePaths = new Map<string, string>();
+
+let claudeFileIndex: { homeDir: string; builtAt: number; files: Map<string, string> } | null = null;
+
+async function buildClaudeFileIndex(homeDir: string): Promise<Map<string, string>> {
+  const files = new Map<string, string>();
+  for (const root of await getClaudeProjectRoots(homeDir)) {
+    for (const project of await safeReaddir(root)) {
+      if (!project.isDirectory()) continue;
+      const dir = path.join(root, project.name);
+      for (const entry of await safeReaddir(dir)) {
+        if (!entry.isFile()) continue;
+        // First writer wins, which is the root/project order the sequential
+        // walk returned on — the index must not pick a different duplicate.
+        if (!files.has(entry.name)) files.set(entry.name, path.join(dir, entry.name));
+      }
+    }
+  }
+  return files;
+}
+
+async function getClaudeFileIndex(homeDir: string, maxAgeMs: number): Promise<Map<string, string>> {
+  const now = Date.now();
+  if (claudeFileIndex && claudeFileIndex.homeDir === homeDir && now - claudeFileIndex.builtAt < maxAgeMs) {
+    return claudeFileIndex.files;
+  }
+  const files = await buildClaudeFileIndex(homeDir);
+  claudeFileIndex = { homeDir, builtAt: now, files };
+  return files;
+}
+
+/** Drop the Claude path caches. Exported so tests do not leak state between cases. */
+export function clearSessionPathCache(): void {
+  resolvedClaudePaths.clear();
+  claudeFileIndex = null;
+}
+
 export async function getSessionPathBySessionId(
   sessionId: string,
   agentType: 'claude' | 'codex' | 'gemini' | 'opencode' | 'cursor' | 'copilot' | 'antigravity' | 'grok' | 'kimi' | 'droid',
@@ -388,18 +450,30 @@ export async function getSessionPathBySessionId(
       // We know the exact filename: {sessionId}.jsonl
       // Just find it under ~/.claude/projects/*/ or shim paths
       const filename = `${sessionId}.jsonl`;
-      const roots = await getClaudeProjectRoots(homeDir);
+      const cacheKey = `${homeDir} ${sessionId}`;
 
-      // Search each root's project subdirectories for the file
-      for (const root of roots) {
-        const projects = await safeReaddir(root);
-        for (const project of projects) {
-          if (!project.isDirectory()) continue;
-          const filePath = path.join(root, project.name, filename);
-          if (await safeStat(filePath)) return filePath;
-        }
+      // Every candidate is confirmed with a single stat before it is returned.
+      // Neither cache can notice a transcript deleted or moved since it was
+      // populated, and one stat is the whole budget the old walk spent on its
+      // 343rd candidate anyway.
+      const confirm = async (candidate: string | undefined): Promise<string | undefined> =>
+        candidate && (await safeStat(candidate)) ? candidate : undefined;
+
+      const cached = await confirm(resolvedClaudePaths.get(cacheKey));
+      if (cached) return cached;
+      resolvedClaudePaths.delete(cacheKey);
+
+      let indexed = await confirm((await getClaudeFileIndex(homeDir, CLAUDE_INDEX_TTL_MS)).get(filename));
+      if (!indexed) {
+        // Re-check against an index no older than the miss-authority window.
+        // Rebuilding once here is shared by every other unresolved session in
+        // the same refresh; re-walking per session is what made this function
+        // O(agents x projectDirs) in the first place.
+        indexed = await confirm((await getClaudeFileIndex(homeDir, CLAUDE_INDEX_MISS_AUTHORITY_MS)).get(filename));
       }
-      return undefined;
+      if (!indexed) return undefined;
+      resolvedClaudePaths.set(cacheKey, indexed);
+      return indexed;
     }
     case 'codex': {
       const root = path.join(homedir(), '.codex', 'sessions');

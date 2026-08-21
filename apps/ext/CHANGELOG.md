@@ -6,6 +6,22 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.328] - 2026-08-20
 
+- **The session detail panel stops stalling once a workspace has ~20 agents open.**
+  Resolving a Claude transcript meant stat-ing one filename under every project dir
+  of every Claude version root, with no cache, and the floor rebuild did that once
+  per agent terminal on every refresh. Measured on a real home (10 roots, 343
+  project dirs): 20 agents whose transcripts sit in the last root cost **5,911
+  `statx` + 1,192 `getdents64`, 726ms**; 20 agents with no transcript yet cost
+  exactly 343 x 20 = **6,860 `statx`, 740ms**. Nothing debounces the rebuild, so
+  those walks stacked and the panel — which has no fetch, spinner or timeout of its
+  own — simply rendered empty until they drained. `getSessionPathBySessionId` now
+  builds a filename index by listing each project dir once and memoises each
+  resolved path, so the same two cases cost **0 and 20 `statx`, ~70ms**. A candidate
+  from either cache is still confirmed with a single `stat`, so a transcript that
+  was deleted or moved re-resolves instead of serving a dead path, and a session
+  that starts writing after the index was built is picked up on the next lookup
+  past a 500ms window. Source: `src/vscode/sessions.vscode.ts`.
+
 - **The Fleet panel stops burying idle-but-unfinished work below running work
   (RUSH-2838).** The root `AGENTS.md` "Purpose" section makes idle-but-unfinished
   the highest-risk state — the one most likely to be silently abandoned — and says
