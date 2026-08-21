@@ -11,6 +11,7 @@ import {
   getUsageInfo,
   getUsageInfoForIdentity,
   writeClaudeUsageCache,
+  readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
   deriveUsageHeadroom,
   formatUsageSummary,
@@ -367,6 +368,76 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
 
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toBe('stale');
+  });
+});
+
+describe('expired cached windows are unknown, not 0%', () => {
+  // The two-week freeze (2026-08-05..20): Anthropic 429'd every account's
+  // usage read, the cache never refreshed, and the deserializer zeroed each
+  // expired window but KEPT it — so `agents view` drew "S: 0% (now)" and
+  // deriveUsageStatusFromSnapshot said 'available' for accounts that were
+  // actually rate-limited (RUSH-2858). Expired windows must be dropped, and an
+  // all-expired snapshot must read as no-data so the honest "usage unavailable"
+  // path renders instead.
+  let cacheDir: string;
+  let prevPath: string | null;
+  const usageKey = 'claude:org=expired-window-test';
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-usage-exp-'));
+    prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
+  });
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(prevPath);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  const window = (over: Partial<UsageSnapshot['windows'][number]>): UsageSnapshot['windows'][number] => ({
+    key: 'week',
+    label: 'Current week',
+    shortLabel: 'W',
+    usedPercent: 91,
+    resetsAt: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000),
+    windowMinutes: 10080,
+    ...over,
+  });
+
+  it('drops an expired window and keeps a fresh one', () => {
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(Date.now() - 6 * 60 * 60 * 1000),
+      windows: [
+        // Session window reset an hour ago: whatever burned since is unknown.
+        window({ key: 'session', shortLabel: 'S', usedPercent: 100, resetsAt: new Date(Date.now() - 60 * 60 * 1000), windowMinutes: 300 }),
+        window({}),
+      ],
+    });
+
+    const snapshot = readClaudeUsageCache(usageKey);
+
+    expect(snapshot?.windows.map((w) => w.key)).toEqual(['week']);
+    expect(snapshot?.windows[0]?.usedPercent).toBe(91);
+  });
+
+  it('deserializes an all-expired snapshot to null and deletes the cache entry', () => {
+    const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: twoWeeksAgo,
+      windows: [
+        window({ key: 'session', shortLabel: 'S', usedPercent: 100, resetsAt: new Date(twoWeeksAgo.getTime() + 5 * 60 * 60 * 1000), windowMinutes: 300 }),
+        window({ resetsAt: new Date(twoWeeksAgo.getTime() + 4 * 24 * 60 * 60 * 1000) }),
+      ],
+    });
+
+    expect(readClaudeUsageCache(usageKey)).toBeNull();
+
+    // Self-cleaning: the dead entry is gone, not resurrected on the next read.
+    const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
+    expect(raw[usageKey]).toBeUndefined();
   });
 });
 
