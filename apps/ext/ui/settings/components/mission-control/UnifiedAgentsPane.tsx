@@ -2206,7 +2206,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               selected={selectedFloorAgent?.id === c[0].id}
               plain={plain}
               onSelect={selectFloorAgent}
-              error={replyErrors.get(a.id)}
+              error={replyErrors.get(c[0].id)}
               onOption={onAgentOption}
               onFreeText={replyToAgent}
               onAttach={onAttachScreenshot}

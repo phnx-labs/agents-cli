@@ -1,7 +1,16 @@
+import { GlobalRegistrator } from '@happy-dom/global-registrator'
+
+if (typeof globalThis.document === 'undefined') GlobalRegistrator.register()
+
 import { expect, test, describe } from 'bun:test'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import type { TerminalDetail } from '../../types'
 import { REMOTE_STALE_MS, THROUGHPUT_TICK_MS } from './floorRefresh'
+
+const { UnifiedAgentsPane } = await import('./UnifiedAgentsPane')
 
 // Source-level regression guards: the Floor must not reintroduce 3s local /
 // 45s remote setInterval polls or the 140ms throughput React timer.
@@ -86,4 +95,50 @@ describe('Floor poll / timer budget (no recurring probes)', () => {
       /Array\.isArray\(msg\.projects\)[\s\S]*?setManagedProjects\(msg\.projects as ManagedProject\[\]\)[\s\S]*?setProjectCommandError\(null\)/,
     )
   })
+})
+
+test('renders a single waiting question through the pane question-cluster path', () => {
+  const now = Date.now()
+  const terminal: TerminalDetail = {
+    id: 'terminal-1',
+    agentType: 'claude',
+    label: 'migration-agent',
+    autoLabel: null,
+    createdAt: now - 60_000,
+    index: 0,
+    sessionId: 'session-1',
+    firstUserMessage: 'Choose the migration strategy',
+    status: 'running',
+    lastActivityTimestamp: new Date(now).toISOString(),
+    currentActivity: 'Waiting for a migration decision',
+    waitingForInput: true,
+    recentToolCalls: [{
+      name: 'AskUserQuestion',
+      input: {
+        questions: [{
+          question: 'Drop the old table?',
+          header: 'Migration',
+          options: [
+            { label: 'Drop it', description: 'Remove the legacy table' },
+            { label: 'Keep it', description: 'Preserve the legacy table' },
+          ],
+        }],
+      },
+    }],
+  }
+
+  const html = renderToStaticMarkup(React.createElement(UnifiedAgentsPane, {
+    terminals: [terminal],
+    tasks: [],
+    tasksLoading: false,
+    unifiedTasks: [],
+    unifiedTasksLoading: false,
+    onDispatch: () => {},
+    search: '',
+    onSearch: () => {},
+  }))
+
+  expect(html).toContain('Drop the old table?')
+  expect(html).toContain('Drop it')
+  expect(html).toContain('Keep it')
 })
