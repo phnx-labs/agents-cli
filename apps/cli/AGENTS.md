@@ -518,8 +518,12 @@ The interactive UI is three picker variants in `src/lib/picker.ts`: `itemPicker`
 (single-select, `space` toggles preview), `dynamicPicker` (async data source, used
 by the session browser, `tab` toggles preview), and a multi-select variant. All
 render a right/bottom **preview pane** built by `buildPreview(session)` in
-`src/commands/sessions-picker.ts` — a header (agent/model/cwd/tokens/ticket/PR) plus
-`formatCompactPreview` (prompt, files/changes, hooks, errors, tests, last response).
+`src/commands/sessions-picker.ts` — a header (title/agent/model/cwd/ticket/PR) plus
+`formatCompactPreview`'s verb-led rows (RUSH-2757): `Asked` (originating prompt),
+`Doing` (checklist/team/sub-agents), `Made` (file deltas, artifacts, plan, PR),
+`Health` (errors + test verdict), `Cost` (msgs/tokens + tool mix), `Latest` (the
+full last message, wrapped), and one width-capped `Details ▸` fold (session id,
+skills, plugins, hooks, links, dirs, repos).
 `agents sessions preview <uuid-or-prefix>` uses the same card without the picker.
 ID-shaped selectors go through the indexed fleet resolver, remote cards render on
 their owning peer, and the normalized digest is cached in SQLite against the

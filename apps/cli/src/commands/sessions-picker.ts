@@ -438,7 +438,7 @@ export function buildPreview(session: SessionMeta): string {
   const header = formatHeader(safe, events);
   const body = parseError
     ? '  ' + chalk.red(`Failed to parse session: ${parseError}`)
-    : formatCompactPreview(digest!, safe);
+    : formatCompactPreview(digest!, safe, events);
   const output = [header, '', body].filter(Boolean).join('\n');
   previewCache.set(cacheKey, output);
   return output;
@@ -453,8 +453,6 @@ const DOT = chalk.gray(' · ');
 function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   const model = extractModel(events) || session.model;
   const { createdAgo, lastActiveAgo, duration } = extractTiming(session, events);
-  const totalMessages = session.messageCount ?? countMessages(events);
-  const totalTokens = session.tokenCount;
 
   // Line 1: Agent v version · shortId · model · account
   const line1: string[] = [];
@@ -479,17 +477,6 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
   if (createdAgo) line2.push(chalk.gray('created ') + chalk.white(createdAgo + ' ago'));
   if (lastActiveAgo) line2.push(chalk.gray('last active ') + chalk.white(lastActiveAgo + ' ago'));
   if (duration) line2.push(chalk.gray('lasted ') + chalk.white(duration));
-
-  // Line 3: N msgs · T tokens · [label ·] uuid
-  const line3: string[] = [];
-  if (totalMessages !== undefined) {
-    line3.push(chalk.bold.white(String(totalMessages)) + chalk.gray(` msg${totalMessages === 1 ? '' : 's'}`));
-  }
-  if (totalTokens !== undefined) {
-    line3.push(chalk.bold.white(formatTokens(totalTokens)) + chalk.gray(' tokens'));
-  }
-  if (session.filePath) line3.push(chalk.gray(linkPath(session.filePath, session.id)));
-  else line3.push(chalk.gray(session.id));
 
   // Line 4: ticket + PR — clickable when a URL is resolvable (OSC 8 hyperlink),
   // plain text otherwise. Only rendered when the session carries either.
@@ -519,7 +506,6 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
     ...titleLines,
     line1.join(DOT),
     line2.join(DOT),
-    line3.join(DOT),
     ...(line4.length ? [line4.join(DOT)] : []),
   ].join('\n');
 }
@@ -568,24 +554,21 @@ export function formatTeamLineage(session: SessionMeta): string {
 
 function formatMetaOnlyBody(session: SessionMeta): string {
   const lines: string[] = [];
+  const termWidth = process.stdout.columns || 80;
+  const valueWidth = termWidth - VERB_GUTTER - 5;
+
+  // Same verb-led rows as the digest body (RUSH-2757), from SessionMeta alone.
   if (session.topic) {
-    lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(session.topic.trim(), (process.stdout.columns || 80) - 12)));
-  }
-  const teamLine = formatTeamLineage(session);
-  if (teamLine) {
-    lines.push(chalk.cyan('Team:   ') + teamLine);
+    lines.push(verbLabel('Asked') + chalk.white(`"${truncate(session.topic.trim(), valueWidth)}"`));
   }
   const compact = formatTodoCompact(session.todos);
-  if (compact) {
-    lines.push(chalk.cyan('Todos: ') + chalk.white(compact));
+  const teamLine = formatTeamLineage(session);
+  const doing = [compact ? chalk.white(compact) : '', teamLine].filter(Boolean);
+  if (doing.length) {
+    lines.push(verbLabel('Doing') + doing.join(DOT));
   }
-  const termWidth = process.stdout.columns || 80;
   for (const l of session.todos?.items?.length ? renderTodos(session.todos.items, termWidth) : []) {
-    lines.push(l);
-  }
-  const dirs = session.recentDirectoriesTouched?.slice(0, DIRS_TOUCHED_MAX) ?? [];
-  if (dirs.length) {
-    lines.push(chalk.cyan('Dirs:   ') + chalk.white(dirs.join(chalk.gray(' · '))));
+    lines.push('  ' + l);
   }
   // `plan` is the whole ExitPlanMode markdown, not a path — summarize it. The
   // pane is height-clamped anyway, so pasting the blob would just push every
@@ -593,9 +576,24 @@ function formatMetaOnlyBody(session: SessionMeta): string {
   const planLines = session.plan?.trim() ? session.plan.trim().split('\n') : [];
   if (planLines.length) {
     const head = truncate(planLines[0].replace(/^#+\s*/, ''), termWidth - 20);
-    lines.push(chalk.cyan('Plan:   ') + chalk.white(head) + chalk.gray(` · ${planLines.length} lines`));
+    lines.push(verbLabel('Made') + chalk.white(head) + chalk.gray(` · plan, ${planLines.length} lines`));
   }
-  if (lines.length === 0) return '';
+  const cost: string[] = [];
+  if (session.messageCount !== undefined) {
+    cost.push(chalk.white(String(session.messageCount)) + chalk.gray(` msg${session.messageCount === 1 ? '' : 's'}`));
+  }
+  if (session.tokenCount !== undefined) {
+    cost.push(chalk.white(formatTokens(session.tokenCount)) + chalk.gray(' tokens'));
+  }
+  if (cost.length) {
+    lines.push(verbLabel('Cost') + cost.join(DOT));
+  }
+  const dirs = session.recentDirectoriesTouched?.slice(0, DIRS_TOUCHED_MAX) ?? [];
+  const details: string[] = [
+    session.filePath ? chalk.gray(linkPath(session.filePath, session.id.slice(0, 8))) : chalk.gray(session.id.slice(0, 8)),
+    ...dirs.map(d => chalk.gray(d)),
+  ];
+  lines.push(verbLabel('Details ▸') + joinWidthCapped(details, valueWidth));
   return lines.map(l => '  ' + l).join('\n');
 }
 
@@ -808,7 +806,14 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
   };
 }
 
-function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta): string {
+// Verb-led row gutter (RUSH-2757): every row label pads to this width so the
+// values align into one scannable column. 'Details ▸' is the widest label.
+const VERB_GUTTER = 9;
+function verbLabel(v: string): string {
+  return chalk.cyan(v.padEnd(VERB_GUTTER)) + ' ';
+}
+
+function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta, events?: SessionEvent[]): string {
   const {
     firstUser, lastAssistant, filesRead, toolCalls, planFile, todos,
     subAgentCount, toolTags, changes: chg, dirs, repos, artifacts, skills, plugins,
@@ -817,45 +822,34 @@ function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta
 
   const lines: string[] = [];
   const termWidth = process.stdout.columns || 80;
+  const valueWidth = termWidth - VERB_GUTTER - 5;
 
-  // Originating user prompt (first non-system user turn).
-  if (firstUser) {
-    const first = extractSessionTopic(firstUser) || cleanSessionPrompt(firstUser).split('\n').find(l => l.trim()) || '';
-    if (first) {
-      lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(first.trim(), termWidth - 12)));
-    }
-  } else if (session.topic && !isSyntheticUserMessage(session.topic)) {
-    lines.push(chalk.cyan('Prompt: ') + chalk.white(truncate(session.topic.trim(), termWidth - 12)));
+  // Asked — the originating user prompt (first non-system user turn), quoted.
+  const asked = firstUser
+    ? (extractSessionTopic(firstUser) || cleanSessionPrompt(firstUser).split('\n').find(l => l.trim()) || '')
+    : (session.topic && !isSyntheticUserMessage(session.topic) ? session.topic : '');
+  if (asked.trim()) {
+    lines.push(verbLabel('Asked') + chalk.white(`"${truncate(asked.trim(), valueWidth)}"`));
   }
 
-  // Compact checklist: ✓done/total · current step (RUSH-2045).
+  // Doing — the work in motion: checklist progress (RUSH-2045), team lineage,
+  // sub-agent fan-out. The full checklist renders indented beneath.
   const compact = formatTodoCompact(todos);
-  if (compact) {
-    lines.push(chalk.cyan('Todos: ') + chalk.white(compact));
+  const teamLine = formatTeamLineage(session);
+  const doing = [
+    compact ? chalk.white(compact) : '',
+    teamLine,
+    subAgentCount ? chalk.gray(`${subAgentCount} sub-agent${subAgentCount === 1 ? '' : 's'}`) : '',
+  ].filter(Boolean);
+  if (doing.length) {
+    lines.push(verbLabel('Doing') + doing.join(DOT));
   }
   const todosRendered = todos?.items?.length ? renderTodos(todos.items, termWidth) : [];
-  if (todosRendered.length > 0) {
-    for (const l of todosRendered) lines.push('  ' + l);
-  }
+  for (const l of todosRendered) lines.push('  ' + l);
 
-  // Recent activity = directories touched (not raw tool calls). Prefer a
-  // parser-supplied dirsTouched when present; else derive from event paths.
-  // Width-capped: a long Dirs line used to wrap and swamp the whole pane.
-  if (dirs.length) {
-    lines.push(chalk.cyan('Dirs:    ') + joinWidthCapped(dirs, termWidth - 12));
-  }
-
-  // Repos worked in (basename of each `.git` root under the touched paths).
-  if (repos.length) {
-    lines.push(chalk.cyan('Repos:   ') + chalk.white(repos.slice(0, 4).join(chalk.gray(' · '))));
-  }
-
-  const teamLine = formatTeamLineage(session);
-  if (teamLine) {
-    lines.push(chalk.cyan('Team:    ') + teamLine);
-  }
-
-  const activity: string[] = [];
+  // Made — what the session produced: file deltas, reads, artifacts (named +
+  // clickable), the plan file, and the PR when the session carries one.
+  const made: string[] = [];
   const changed = chg.created + chg.modified + chg.deleted;
   if (changed) {
     const parts = [
@@ -863,81 +857,62 @@ function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta
       chg.modified ? chalk.yellow(`~${chg.modified}`) : '',
       chg.deleted ? chalk.red(`−${chg.deleted}`) : '',
     ].filter(Boolean).join(' ');
-    activity.push(`${parts} ${chalk.gray('changed')}`);
+    made.push(`${parts} ${chalk.gray('changed')}`);
   }
-  if (filesRead) activity.push(chalk.gray(`${filesRead} read`));
-  if (toolCalls) activity.push(chalk.gray(`${toolCalls} tool${toolCalls === 1 ? '' : 's'}`));
-  if (activity.length) {
-    lines.push(chalk.cyan('Changes:  ') + activity.join(chalk.gray(' · ')));
-  }
-
-  // Documents the session produced (`.agents/artifacts|plans|reports`, other
-  // *.md/*.html creations) — the files a human browses later, named + clickable.
+  if (filesRead) made.push(chalk.gray(`${filesRead} read`));
   if (artifacts.length) {
-    const shown = artifacts.slice(0, 5).map(a => linkPath(a.path, a.basename));
-    const more = artifacts.length > 5 ? chalk.gray(` · +${artifacts.length - 5} more`) : '';
-    lines.push(chalk.cyan('Artifacts: ') + shown.join(chalk.gray(' · ')) + more);
+    const shown = artifacts.slice(0, 2).map(a => linkPath(a.path, a.basename));
+    const more = artifacts.length > 2 ? chalk.gray(` +${artifacts.length - 2}`) : '';
+    made.push(shown.join(chalk.gray(' · ')) + more);
+  }
+  if (planFile) {
+    made.push(chalk.white(linkPath(planFile, planFile.split('/').pop() || planFile)));
+  }
+  if (session.prUrl) {
+    made.push(chalk.blue(linkUrl(session.prUrl, session.prNumber ? `PR#${session.prNumber}` : 'PR')));
+  }
+  if (made.length) {
+    lines.push(verbLabel('Made') + made.join(DOT));
   }
 
-  // Skills invoked (plugin skills included — they ride the same Skill tool).
-  if (skills.length) {
-    const shown = skills.slice(0, 5).map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : ''));
-    const more = skills.length > 5 ? chalk.gray(` · +${skills.length - 5} more`) : '';
-    lines.push(chalk.cyan('Skills:  ') + shown.join(chalk.gray(' · ')) + more);
-  }
-
-  if (plugins.length) {
-    lines.push(chalk.cyan('Plugins: ') + chalk.white(plugins.slice(0, 5).join(chalk.gray(' · '))));
-  }
-
-  // Hooks fired (Claude transcripts record firings; other harnesses don't).
-  if (hooks.length) {
-    const shown = hooks.slice(0, 4).map(h =>
-      chalk.white(h.name) + (h.count > 1 ? chalk.gray(` ×${h.count}`) : '') + (h.failed ? chalk.red(` (${h.failed} failed)`) : ''));
-    const more = hooks.length > 4 ? chalk.gray(` · +${hooks.length - 4} more`) : '';
-    lines.push(chalk.cyan('Hooks:   ') + shown.join(chalk.gray(' · ')) + more);
-  }
-
-  // Links mentioned in the conversation — clickable (OSC 8), tracker-classified.
-  if (links.length) {
-    const shown = links.slice(0, 5).map(l => chalk.blue(linkUrl(l.url, l.label)));
-    const more = links.length > 5 ? chalk.gray(` · +${links.length - 5} more`) : '';
-    lines.push(chalk.cyan('Links:   ') + shown.join(chalk.gray(' · ')) + more);
-  }
-
-  // Error tally, mirroring the full summary's Errors section in one line.
+  // Health — error tally + the last test/build verdict; absent when both clean.
+  const health: string[] = [];
   if (errorCount) {
-    lines.push(chalk.cyan('Errors:  ') + chalk.red(`${errorCount} failure${errorCount === 1 ? '' : 's'}`) + chalk.gray(` — first: ${firstError || 'unknown'}`));
+    health.push(chalk.red(`${errorCount} failure${errorCount === 1 ? '' : 's'}`) + chalk.gray(` — first: ${firstError || 'unknown'}`));
   }
-
-  const metadata = [
-    ...toolTags,
-    subAgentCount ? `${subAgentCount} sub-agent${subAgentCount === 1 ? '' : 's'}` : '',
-  ].filter(Boolean);
-  if (metadata.length) {
-    lines.push(chalk.cyan('Meta:     ') + chalk.gray(metadata.join(' · ')));
-  }
-
-  // Tool mix (top 4) — what kind of work this was.
-  if (hist.length) {
-    lines.push(chalk.cyan('Tools:    ') + chalk.gray(hist.map(h => `${h.tool} ${h.count}`).join(' · ')));
-  }
-
-  // Last test/build verdict.
   if (test?.ok) {
     const bits = [
       test.passed !== undefined ? chalk.green(`${test.passed} pass`) : '',
       test.failed ? chalk.red(`${test.failed} fail`) : '',
     ].filter(Boolean).join(chalk.gray(' · '));
     const mark = test.failed ? chalk.red('✗') : chalk.green('✓');
-    lines.push(chalk.cyan('Tests:    ') + `${mark} ${test.runner}${bits ? ' ' + bits : ''}`);
+    health.push(`${mark} ${test.runner}${bits ? ' ' + bits : ''}`);
+  }
+  if (health.length) {
+    lines.push(verbLabel('Health') + health.join(DOT));
   }
 
-  if (planFile) {
-    const basename = planFile.split('/').pop() || planFile;
-    lines.push(chalk.cyan('Plan: ') + chalk.white(linkPath(planFile, basename)));
+  // Cost — volume: messages, tokens (moved here from the header's old line 3),
+  // and the top of the tool mix.
+  const totalMessages = session.messageCount ?? (events ? countMessages(events) : undefined);
+  const cost: string[] = [];
+  if (totalMessages !== undefined) {
+    cost.push(chalk.white(String(totalMessages)) + chalk.gray(` msg${totalMessages === 1 ? '' : 's'}`));
+  }
+  if (session.tokenCount !== undefined) {
+    cost.push(chalk.white(formatTokens(session.tokenCount)) + chalk.gray(' tokens'));
+  }
+  if (hist.length) {
+    cost.push(chalk.gray(hist.map(h => `${h.tool} ${h.count}`).join(' · ')));
+  } else if (toolCalls) {
+    cost.push(chalk.gray(`${toolCalls} tool${toolCalls === 1 ? '' : 's'}`));
+  }
+  if (cost.length) {
+    lines.push(verbLabel('Cost') + cost.join(DOT));
   }
 
+  // Latest — the agent's last message, full and wrapped to the pane (the densest
+  // line in the preview; parts 1-2 of RUSH-2757 made it wrap instead of clip).
   if (lastAssistant) {
     const maxLines = todosRendered.length > 0 || compact ? LAST_RESPONSE_MAX_LINES_WITH_TODOS : LAST_RESPONSE_MAX_LINES;
     // Content sits at column 4 (outer body indent + the '  ' prefix below), so
@@ -945,14 +920,26 @@ function formatCompactPreview(digest: SessionPreviewDigest, session: SessionMeta
     const rendered = renderLastResponse(lastAssistant, maxLines, terminalWidth() - 4);
     if (rendered.length > 0) {
       lines.push('');
-      lines.push(chalk.cyan('Last response:'));
+      lines.push(chalk.cyan('Latest'));
       for (const l of rendered) lines.push('  ' + l);
     }
   }
 
-  if (lines.length === 0) {
-    lines.push(chalk.gray('No activity recorded in this session.'));
-  }
+  // Details ▸ — the folded long tail: session id, skills, plugins, hooks, links,
+  // dirs, repos, capability tags. One width-capped line instead of seven labeled
+  // rows (a long tail used to wrap and swamp the whole pane); links stay
+  // clickable (OSC 8), hook failures stay red.
+  const details: string[] = [
+    session.filePath ? chalk.gray(linkPath(session.filePath, session.id.slice(0, 8))) : chalk.gray(session.id.slice(0, 8)),
+    ...skills.slice(0, 3).map(s => chalk.white(s.name) + (s.count > 1 ? chalk.gray(` ×${s.count}`) : '')),
+    ...plugins.slice(0, 3).map(p => chalk.white(p)),
+    ...hooks.slice(0, 3).map(h => chalk.white(h.name) + (h.failed ? chalk.red(` (${h.failed} failed)`) : '')),
+    ...links.slice(0, 3).map(l => chalk.blue(linkUrl(l.url, l.label))),
+    ...dirs.map(d => chalk.gray(d)),
+    ...repos.slice(0, 2).map(r => chalk.gray(r)),
+    ...toolTags.map(t => chalk.gray(t)),
+  ];
+  lines.push(verbLabel('Details ▸') + joinWidthCapped(details, valueWidth));
 
   return lines.map(l => '  ' + l).join('\n');
 }
@@ -1039,19 +1026,25 @@ const SLUG_WORKTREE_RE = /--agents-worktrees-(.+)$/;
  * Join display tokens with ` · `, stopping before the line exceeds `maxWidth`
  * and appending `… +N more` for the rest. Keeps the Dirs line on one row.
  */
+/**
+ * Join pre-styled items with ` · ` up to a visible width, then `… +N more`.
+ * Width is measured ANSI-aware (stringWidth), so colored / OSC 8-linked items
+ * are not miscounted; items arrive already styled and are not recolored.
+ */
 function joinWidthCapped(items: string[], maxWidth: number): string {
-  const sep = ' · ';
   let out = '';
+  let width = 0;
   let shown = 0;
   for (const item of items) {
-    const next = shown === 0 ? item : out + sep + item;
-    if (shown > 0 && next.length > maxWidth) break;
-    out = next;
+    const itemWidth = stringWidth(item);
+    const nextWidth = shown === 0 ? itemWidth : width + 3 + itemWidth;
+    if (shown > 0 && nextWidth > maxWidth) break;
+    out = shown === 0 ? item : out + DOT + item;
+    width = nextWidth;
     shown++;
   }
   const remaining = items.length - shown;
-  const suffix = remaining > 0 ? ` … +${remaining} more` : '';
-  return chalk.white(out) + (suffix ? chalk.gray(suffix) : '');
+  return out + (remaining > 0 ? chalk.gray(` … +${remaining} more`) : '');
 }
 
 /** Relativize a file path to its parent dir, short enough for one preview line. */

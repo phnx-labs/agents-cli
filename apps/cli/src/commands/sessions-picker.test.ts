@@ -230,18 +230,19 @@ describe('buildPreview — ticket + PR links line', () => {
       buildPreview(mk({ todos, topic: 'Land the checklist views', project: 'agents-cli' })),
     );
     expect(preview).toContain('✓1/2 · A5 wiring runner');
-    expect(preview).toContain('Todos:');
+    // Compact checklist rides the Doing verb row (RUSH-2757 part 3).
+    expect(preview).toContain('Doing');
     // Originating prompt falls back to topic when there is no transcript.
-    expect(preview).toContain('Prompt:');
+    expect(preview).toContain('Asked');
     expect(preview).toContain('Land the checklist views');
     // Identity: shortId + project still in the header.
     expect(preview).toContain('linktest');
     expect(preview).toContain('agents-cli');
   });
 
-  it('handles empty todos gracefully (no Todos: line)', () => {
+  it('handles empty todos gracefully (no Doing row)', () => {
     const preview = stripVTControlCharacters(buildPreview(mk({ topic: 'no checklist' })));
-    expect(preview).not.toContain('Todos:');
+    expect(preview).not.toContain('Doing');
     expect(preview).not.toContain('✓');
   });
 });
@@ -266,18 +267,56 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
         filePath,
         cwd: dir,
       })));
-      expect(preview).toContain('Skills:');
+      // Skills / hooks / links / dirs / repos fold into the ONE width-capped
+      // Details ▸ row (RUSH-2757 part 3); artifacts ride Made, errors ride
+      // Health. Items past the 80-col cap collapse into the `… +N more` tail
+      // rather than wrapping and swamping the pane.
+      expect(preview).toContain('Details ▸');
       expect(preview).toContain('teams');
-      expect(preview).toContain('Hooks:');
       expect(preview).toContain('SessionStart:startup');
-      expect(preview).toContain('Links:');
       expect(preview).toContain('RUSH-2076');
-      expect(preview).toContain('Artifacts:');
+      expect(preview).toContain('Made');
       expect(preview).toContain('plan.html');
-      expect(preview).toContain('Errors:');
+      expect(preview).toContain('Health');
       expect(preview).toContain('1 failure');
-      expect(preview).toContain('Repos:');
-      expect(preview).toContain(path.basename(dir));
+      expect(preview.split('\n').filter(l => l.includes('Details ▸'))).toHaveLength(1);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('groups metadata into verb-led rows in scan order, with Cost carrying msgs + tokens (RUSH-2757 part 3)', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-verbs-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, [
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:00.000Z', message: { role: 'user', content: 'Ship the verb rows' } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:10.000Z', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'e1', name: 'Edit', input: { file_path: path.join(dir, 'a.ts') } }] } }),
+        JSON.stringify({ type: 'user', timestamp: '2026-08-01T14:00:11.000Z', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'e1', is_error: true, content: 'boom' }] } }),
+        JSON.stringify({ type: 'assistant', timestamp: '2026-08-01T14:00:12.000Z', message: { role: 'assistant', content: [{ type: 'text', text: 'Rows are in.' }] } }),
+      ].join('\n') + '\n');
+      const preview = stripVTControlCharacters(buildPreview(mk({
+        id: 'verb-rows-session',
+        shortId: 'verbrows',
+        filePath,
+        cwd: dir,
+        messageCount: 4,
+        tokenCount: 1234,
+      })));
+      // The verb rows appear in the approved scan order.
+      const order = ['Asked', 'Made', 'Health', 'Cost', 'Latest', 'Details ▸']
+        .map(v => preview.indexOf(v));
+      expect(order.every(i => i >= 0)).toBe(true);
+      expect([...order].sort((a, b) => a - b)).toEqual(order);
+      // Asked quotes the originating prompt.
+      expect(preview).toMatch(/Asked\s+"Ship the verb rows"/);
+      // Cost carries msgs + tokens — moved out of the header's old line 3, so
+      // they appear exactly once in the whole card.
+      expect(preview).toMatch(/Cost\s+4 msgs/);
+      expect(preview.split('msgs').length - 1).toBe(1);
+      // The full last message renders under Latest, not "Last response:".
+      expect(preview).toContain('Rows are in.');
+      expect(preview).not.toContain('Last response:');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -297,11 +336,14 @@ describe('buildPreview — highlight lines (skills, hooks, links, artifacts, err
         filePath,
         cwd: dir,
       })));
+      // A clean transcript gets no Health row and no folded highlight names —
+      // Details still renders (it always carries the session id).
+      expect(preview).not.toContain('Health');
       expect(preview).not.toContain('Skills:');
       expect(preview).not.toContain('Hooks:');
       expect(preview).not.toContain('Links:');
       expect(preview).not.toContain('Artifacts:');
-      expect(preview).not.toContain('Errors:');
+      expect(preview).toContain('Details ▸');
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -669,25 +711,25 @@ describe('formatHeader — leads with the session title (RUSH-2757)', () => {
     expect(out.indexOf('Land the guard hardening')).toBeLessThan(out.indexOf('Claude'));
   });
 
-  it('does NOT lead with the topic — topic is the Prompt line, never duplicated as a title', () => {
+  it('does NOT lead with the topic — topic is the Asked row, never duplicated as a title', () => {
     // Regression: the title must not fall back to session.topic, because topic is
-    // already rendered as "Prompt: <topic>". Leading with it duplicated the text.
+    // already rendered on the Asked row. Leading with it duplicated the text.
     const topic = 'Refactor the session picker';
     const out = stripVTControlCharacters(buildPreview(mk({ topic })));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
     // The agent line leads, not the topic.
     expect(lines[0].startsWith('Claude')).toBe(true);
-    // The topic appears exactly once (as the Prompt line), not twice.
+    // The topic appears exactly once (on the Asked row), not twice.
     const occurrences = out.split(topic).length - 1;
     expect(occurrences).toBe(1);
-    expect(out).toContain('Prompt: ' + topic);
+    expect(out).toMatch(/Asked\s+"Refactor the session picker"/);
   });
 
-  it('shows both title and Prompt when a label AND a topic exist (they are different text)', () => {
+  it('shows both title and Asked when a label AND a topic exist (they are different text)', () => {
     const out = stripVTControlCharacters(buildPreview(mk({ label: 'Guard hardening', topic: 'harden the tree guard' })));
     const lines = out.split('\n').filter(l => l.trim().length > 0);
     expect(lines[0]).toBe('Guard hardening'); // label leads
-    expect(out).toContain('Prompt: harden the tree guard'); // topic still shown, not dropped
+    expect(out).toMatch(/Asked\s+"harden the tree guard"/); // topic still shown, not dropped
   });
 
   it('renders no title line when there is no label', () => {
