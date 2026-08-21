@@ -3399,8 +3399,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         let exitCode: number;
         let ranAgent = agent;
         let ranVersion = defaultVersion;
-        if (fallback.length > 0) {
-          // fallback requires a prompt — enforced above, narrow the type here.
+        if (fallback.length > 0 || (rotationResult !== null && prompt !== undefined && !options.interactive)) {
+          // Fallback and balanced runs need captured output so a clean-exit
+          // session-limit refusal can update account availability.
           // The sink reports which chain entry actually executed (may differ from
           // the primary after a rate-limit handoff) so the audit record is honest.
           const sink: { agent?: AgentId; version?: string } = {};

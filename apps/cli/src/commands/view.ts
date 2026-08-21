@@ -1497,6 +1497,12 @@ export async function collectAgentsJson(filterAgentId?: AgentId, resourceSection
             resetsAt: w.resetsAt ? w.resetsAt.toISOString() : null,
           }))
         : [],
+      unavailable: snapshot?.unavailable
+        ? {
+            reason: snapshot.unavailable.reason,
+            resetsAt: snapshot.unavailable.resetsAt.toISOString(),
+          }
+        : undefined,
       lastActive: info.lastActive ? info.lastActive.toISOString() : null,
       path: getVersionDir(agentId, version),
       configuredModel: resolveConfiguredModel(agentId, version),

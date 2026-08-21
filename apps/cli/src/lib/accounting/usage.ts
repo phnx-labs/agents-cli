@@ -218,6 +218,11 @@ export interface UsageSnapshot {
   // otherwise comes from the local auth file via AccountInfo.plan; this field
   // lets a network usage fetch surface a plan the local credential can't.
   plan?: string | null;
+  /** A refusal observed from a real harness run, independent of API windows. */
+  unavailable?: {
+    reason: 'session_limit';
+    resetsAt: Date;
+  };
 }
 
 /** Usage data plus any error encountered while fetching. */
@@ -322,6 +327,10 @@ interface CachedUsageSnapshot {
   capturedAt: string | null;
   windows: CachedUsageWindow[];
   plan?: string | null;
+  unavailable?: {
+    reason: 'session_limit';
+    resetsAt: string;
+  };
 }
 
 /** Parsed rate-limit data extracted from a Codex session file. */
@@ -650,6 +659,9 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
+    if (snapshot.unavailable?.reason === 'session_limit') {
+      parts.push(chalk.yellow(`session-limited (${formatResetHint(snapshot.unavailable.resetsAt)})`));
+    }
     // Compact rows show BLOCKING windows — the same set
     // deriveUsageStatusFromSnapshot uses for the rate-limited badge — so an
     // account throttled by its month window (Droid meters on 5h/week/month)
@@ -723,7 +735,11 @@ export function formatUsageSummary(
 export function deriveUsageStatusFromSnapshot(
   snapshot: UsageSnapshot | null | undefined
 ): 'available' | 'rate_limited' | null {
-  if (!snapshot || snapshot.windows.length === 0) return null;
+  if (!snapshot) return null;
+  if (snapshot.unavailable && snapshot.unavailable.resetsAt.getTime() > Date.now()) {
+    return 'rate_limited';
+  }
+  if (snapshot.windows.length === 0) return null;
   const blocking = snapshot.windows.filter((window) => window.key !== 'sonnet_week');
   const windows = blocking.length > 0 ? blocking : snapshot.windows;
   const maxUsed = Math.max(...windows.map((window) => window.usedPercent));
@@ -1893,7 +1909,14 @@ export function writeClaudeUsageCache(
       // Re-read under the lock so a concurrent daemon tick / agents view
       // refresh cannot drop another account's row (lost update).
       const cache = readClaudeUsageCacheFile(cachePath);
-      cache[usageKey] = serializeClaudeUsageSnapshot(snapshot);
+      const prior = cache[usageKey];
+      const priorReset = parseDateValue(prior?.unavailable?.resetsAt);
+      cache[usageKey] = serializeClaudeUsageSnapshot({
+        ...snapshot,
+        unavailable: priorReset && priorReset.getTime() > Date.now()
+          ? { reason: 'session_limit', resetsAt: priorReset }
+          : snapshot.unavailable,
+      });
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
   } catch {
@@ -1933,6 +1956,9 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
   return {
     capturedAt: snapshot.capturedAt?.toISOString() || null,
     plan: snapshot.plan ?? null,
+    unavailable: snapshot.unavailable
+      ? { reason: snapshot.unavailable.reason, resetsAt: snapshot.unavailable.resetsAt.toISOString() }
+      : undefined,
     windows: snapshot.windows.map((window) => ({
       key: window.key,
       label: window.label,
@@ -1971,7 +1997,12 @@ function deserializeClaudeUsageSnapshot(
     }))
     .filter((window) => isCachedUsageWindowFresh(window, capturedAt, now));
 
-  if (windows.length === 0) {
+  const unavailableReset = parseDateValue(snapshot.unavailable?.resetsAt);
+  const unavailable = unavailableReset && unavailableReset.getTime() > now.getTime()
+    ? { reason: 'session_limit' as const, resetsAt: unavailableReset }
+    : undefined;
+
+  if (windows.length === 0 && !unavailable) {
     return null;
   }
 
@@ -1981,7 +2012,69 @@ function deserializeClaudeUsageSnapshot(
     capturedAt,
     windows,
     plan: snapshot.plan ?? null,
+    unavailable,
   };
+}
+
+/**
+ * Persist a Claude session-limit refusal from a real run until its stated reset.
+ * This quota is not part of Anthropic's five-hour/weekly usage response.
+ */
+export function noteClaudeSessionLimit(
+  usageKey: string,
+  resetsAt: Date,
+  cachePath = getClaudeUsageCachePath(),
+): void {
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      const existing = cache[usageKey] ?? { capturedAt: null, windows: [] };
+      cache[usageKey] = {
+        ...existing,
+        unavailable: { reason: 'session_limit', resetsAt: resetsAt.toISOString() },
+      };
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
+}
+
+/** Parse Claude's `hit your session limit · resets …` refusal. */
+export function parseClaudeSessionLimitReset(text: string, nowMs = Date.now()): Date | null {
+  if (!/hit your session limit/i.test(text)) return null;
+  const match = /resets\s+([^.;!\n]+)/i.exec(text);
+  if (!match) return null;
+  const segment = match[1].trim();
+  const timeZone = /\(([A-Za-z_]+\/[A-Za-z_]+)\)/.exec(segment)?.[1];
+  const timePart = segment.replace(/\([A-Za-z_]+\/[A-Za-z_]+\)/, '').trim();
+  const absolute = Date.parse(timePart);
+  if (!Number.isNaN(absolute) && absolute > nowMs) return new Date(absolute);
+  const clock = /(\d{1,2})(?::(\d{2}))?\s*(am|pm)/i.exec(timePart);
+  if (!clock) return null;
+  let hour = Number(clock[1]) % 12;
+  if (clock[3].toLowerCase() === 'pm') hour += 12;
+  const minute = clock[2] ? Number(clock[2]) : 0;
+  try {
+    if (!timeZone) {
+      const result = new Date(nowMs);
+      result.setHours(hour, minute, 0, 0);
+      if (result.getTime() <= nowMs) result.setDate(result.getDate() + 1);
+      return result;
+    }
+    const parts = new Intl.DateTimeFormat('en-US', {
+      timeZone, hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit',
+    }).formatToParts(new Date(nowMs));
+    const part = (type: string) => Number(parts.find((item) => item.type === type)?.value ?? 0);
+    const wallNow = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour') % 24, part('minute'));
+    const offset = wallNow - nowMs;
+    let result = Date.UTC(part('year'), part('month') - 1, part('day'), hour, minute) - offset;
+    if (result <= nowMs) result += 24 * 60 * 60 * 1000;
+    return new Date(result);
+  } catch {
+    return null;
+  }
 }
 
 /** Check whether a cached usage window is still relevant (not expired or reset). */

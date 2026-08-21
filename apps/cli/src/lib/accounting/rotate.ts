@@ -203,7 +203,7 @@ export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
   const snapshot = candidate.usageSnapshot;
-  if (snapshot && snapshot.windows.length > 0) {
+  if (snapshot) {
     // Eligibility mirrors the `agents view` throttle badge exactly
     // (deriveUsageStatusFromSnapshot): an account maxed on ANY blocking window —
     // including the 5-hour session window — cannot serve the next request, so it
@@ -212,7 +212,8 @@ function hasUsageAvailable(candidate: RotateCandidate): boolean {
     // stayed "eligible" and the router kept launching into it while `ag view`
     // showed it rate-limited. Capacity *weighting* still ranks eligible accounts
     // by weekly headroom; this gate only decides can-it-run-right-now.
-    return deriveUsageStatusFromSnapshot(snapshot) !== 'rate_limited';
+    const status = deriveUsageStatusFromSnapshot(snapshot);
+    if (status !== null) return status !== 'rate_limited';
   }
 
   // No live snapshot: fall back to the coarse cached status.

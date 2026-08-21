@@ -12,6 +12,9 @@ import {
   getUsageInfoForIdentity,
   writeClaudeUsageCache,
   readClaudeUsageCache,
+  noteClaudeSessionLimit,
+  parseClaudeSessionLimitReset,
+  deriveUsageStatusFromSnapshot,
   setClaudeUsageCachePathForTest,
   deriveUsageHeadroom,
   formatUsageSummary,
@@ -440,6 +443,45 @@ describe('expired cached windows are unknown, not 0%', () => {
     // Self-cleaning: the dead entry is gone, not resurrected on the next read.
     const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
     expect(raw[usageKey]).toBeUndefined();
+  });
+});
+
+describe('observed Claude session limits', () => {
+  let cacheDir: string;
+  let prevPath: string | null;
+  const usageKey = 'claude:org=session-limited-test';
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-session-limit-'));
+    prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
+  });
+
+  afterEach(() => {
+    setClaudeUsageCachePathForTest(prevPath);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  it('parses the real Claude refusal and persists it independently of usage windows', () => {
+    const now = Date.parse('2026-08-20T17:00:00-07:00');
+    const reset = parseClaudeSessionLimitReset(
+      "You've hit your session limit · resets 6:20pm (America/Los_Angeles)",
+      now,
+    );
+    expect(reset?.toISOString()).toBe('2026-08-21T01:20:00.000Z');
+
+    const persistedReset = new Date(Date.now() + 60 * 60 * 1000);
+    noteClaudeSessionLimit(usageKey, persistedReset);
+    const snapshot = readClaudeUsageCache(usageKey, undefined, new Date(now));
+    expect(snapshot?.windows).toEqual([]);
+    expect(snapshot?.unavailable).toEqual({ reason: 'session_limit', resetsAt: persistedReset });
+    expect(deriveUsageStatusFromSnapshot(snapshot)).toBe('rate_limited');
+    expect(formatUsageSummary('Max', snapshot)).toContain('session-limited');
+  });
+
+  it('drops the observed limit after its reset', () => {
+    const reset = new Date(NOW + 60_000);
+    noteClaudeSessionLimit(usageKey, reset);
+    expect(readClaudeUsageCache(usageKey, undefined, new Date(NOW + 60_001))).toBeNull();
   });
 });
 

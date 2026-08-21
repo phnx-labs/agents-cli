@@ -29,7 +29,13 @@ import {
 } from './rotate.js';
 import { runWithFallback } from '../exec.js';
 import type { AgentId } from '../types.js';
-import type { UsageSnapshot, UsageWindowKey } from './usage.js';
+import {
+  noteClaudeSessionLimit,
+  readClaudeUsageCache,
+  setClaudeUsageCachePathForTest,
+  type UsageSnapshot,
+  type UsageWindowKey,
+} from './usage.js';
 
 /**
  * Build a healthy RotateCandidate (signed in, no live snapshot
@@ -347,6 +353,31 @@ process.exit(0);
     expect(code).toBe(1);
     // Ran the primary exactly once — a plain failure is surfaced, not retried.
     expect(fs.readFileSync(stateFile, 'utf8')).toBe('1');
+  });
+});
+
+describe('balanced excludes an account refused by Claude session quota (RUSH-2858)', () => {
+  it('uses the persisted real-run state instead of treating missing bars as 0%', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-session-limit-'));
+    const previous = setClaudeUsageCachePathForTest(path.join(root, 'usage.json'));
+    try {
+      const limitedKey = 'claude:org=limited';
+      noteClaudeSessionLimit(limitedKey, new Date(Date.now() + 60 * 60 * 1000));
+      const limited = candidate({
+        version: '2.1.221',
+        usageKey: limitedKey,
+        usageSnapshot: readClaudeUsageCache(limitedKey),
+      });
+      const healthy = candidate({ version: '2.1.222' });
+
+      const result = pickBalancedCandidate([limited, healthy]);
+
+      expect(result?.picked.version).toBe('2.1.222');
+      expect(result?.excluded.map((entry) => entry.version)).toEqual(['2.1.221']);
+    } finally {
+      setClaudeUsageCachePathForTest(previous);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

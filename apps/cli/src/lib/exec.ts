@@ -38,6 +38,8 @@ import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
 import { resolveConfigVersion } from './harness/exec-config-version.js';
+import { getAccountInfo } from './agents.js';
+import { getUsageLookupKey, noteClaudeSessionLimit, parseClaudeSessionLimitReset } from './accounting/usage.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -2390,12 +2392,20 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
       throw err;
     }
 
-    if (result.exitCode === 0) return 0;
+    const output = `${result.stderr}\n${result.stdout}`;
+    const sessionLimitReset = agent === 'claude' ? parseClaudeSessionLimitReset(output) : null;
+    if (sessionLimitReset && version) {
+      const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
+      const usageKey = getUsageLookupKey(account);
+      if (usageKey) noteClaudeSessionLimit(usageKey, sessionLimitReset);
+    }
+
+    if (result.exitCode === 0 && !sessionLimitReset) return 0;
 
     const isLast = i === chain.length - 1;
-    if (isLast) return result.exitCode;
+    if (isLast) return result.exitCode || 1;
 
-    if (!detectRateLimit(result.stderr) && !detectRateLimit(result.stdout)) {
+    if (!sessionLimitReset && !detectRateLimit(result.stderr) && !detectRateLimit(result.stdout)) {
       return result.exitCode;
     }
 

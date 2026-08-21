@@ -190,7 +190,7 @@ agents run claude@
 agents run codex@ "review this branch"
 ```
 
-`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one. When every account is rate-limited, the run exits nonzero naming each excluded account and the earliest window reset (use `--strategy pinned` to force the default) -- it never launches into an exhausted account.
+`--strategy balanced` spreads work across available versions of the same agent -- useful when you have multiple accounts and want to avoid burning through one. When a Claude run reports a session limit, agents-cli records the stated reset time, shows `session-limited` in `agents view`, and excludes that account until the reset. When every account is rate-limited, the run exits nonzero naming each excluded account and the earliest window reset (use `--strategy pinned` to force the default) -- it never launches into an exhausted account.
 
 ### Don't care which harness? `agents run auto`
 
