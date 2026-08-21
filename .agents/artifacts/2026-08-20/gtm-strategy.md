@@ -20,6 +20,10 @@ links:
     url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/developer-pain-reddit.md'
   - label: 'Companion: how the winners actually charge'
     url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/how-winners-charge.md'
+  - label: 'Companion: the GitHub-stars playbook (case studies)'
+    url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/github-stars-playbook.md'
+  - label: 'Companion: monetization options (earlier pass)'
+    url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-19/monetize-agents-cli.md'
 ---
 
 ## Summary
@@ -65,6 +69,24 @@ make: this is a 277,892-line product with no paying users, competing in a
 category where the OSS lane has a demonstrated zero-revenue ceiling, while you
 also carry Rush and Prix at zero revenue. Section *Recommendations* ends with
 that fork rather than resolving it.
+
+## This is the one page — the companion reports it pulls from
+
+This document is the single source of truth for the agi-cli GTM state. Everything
+below folds up from four companion reports; read this page for the decision, open a
+companion only for the underlying receipts. All are committed under
+`.agents/artifacts/` and linked in the header.
+
+| Companion | What it holds | Feeds |
+| --- | --- | --- |
+| `developer-pain-reddit.md` | Demand-side pain mined from 389 Reddit threads | Finding 6, Addendum 2 |
+| `how-winners-charge.md` | How Devin / Cursor / Cline actually price (unit, buyer, margin layer) | Recommendations Act 3, Addendum 2 |
+| `github-stars-playbook.md` | Case studies of star growth (Herdr 5→404pt, OpenClaw, a 99th-pct Show HN) | Recommendations Act 2 (the launch) |
+| `monetize-agents-cli.md` (2026-08-19) | The earlier monetization-options pass this strategy supersedes | Historical context |
+
+The two **Addenda** at the end of this page carry what is newest: measured PostHog
+traffic (the real funnel) and the demand-side + pricing synthesis. Start at the
+Summary, end at the Addenda.
 
 ## Findings
 
