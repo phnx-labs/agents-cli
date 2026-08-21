@@ -1,14 +1,14 @@
 /**
- * `agents audit` — thin alias of `agents events --include runs`.
+ * `agents events audit` — thin alias of `agents events --include runs`.
  *
  * New run-dispatch outcomes land in the unified event stream as `run.dispatched`
  * (see lib/audit/log.ts::recordDispatchedRun). This command does not own a
  * separate store or query path — it only sets the default family filter.
  *
- *   agents audit              ≡ agents events --include runs
- *   agents audit list         ≡ same
- *   agents audit verify       walks the legacy hash-chain file if present
- *                             (pre-unification history only)
+ *   agents events audit              ≡ agents events --include runs
+ *   agents events audit list         ≡ same
+ *   agents events audit verify       walks the legacy hash-chain file if present
+ *                                    (pre-unification history only)
  */
 
 import type { Command } from 'commander';
@@ -20,19 +20,19 @@ import {
 } from '../lib/audit/log.js';
 import { addEventsReadOptions, runEventsCommand, type EventsOptions } from './events.js';
 
-export function registerAuditCommands(program: Command): void {
+export function registerAuditCommands(events: Command): void {
   const audit = addEventsReadOptions(
-    program
+    events
       .command('audit')
       .description('Alias of `agents events --include runs` — dispatched-run outcomes'),
     false,
   )
     .addHelpText('after', `
 Examples:
-  agents audit                         Same as: agents events --include runs
-  agents audit --since 7d --json
-  agents audit list                    Muscle-memory alias of bare audit
-  agents audit verify                  Legacy hash-chain file only (if present)
+  agents events audit                  Same as: agents events --include runs
+  agents events audit --since 7d --json
+  agents events audit list             Muscle-memory alias of bare audit
+  agents events audit verify           Legacy hash-chain file only (if present)
 `)
     .action((_options: EventsOptions, command: Command) => {
       const opts = command.optsWithGlobals() as EventsOptions;
@@ -43,7 +43,7 @@ Examples:
 
   audit
     .command('list')
-    .description('Alias of `agents audit` / `agents events --include runs`')
+    .description('Alias of `agents events audit` / `agents events --include runs`')
     .action((_options: EventsOptions, command: Command) => {
       const parent = command.parent;
       const opts = {

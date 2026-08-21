@@ -1,4 +1,4 @@
-// The delete path for `agents artifacts share delete` / `agents unshare` — an authed DELETE
+// The delete path for `agents artifacts share delete` / `agents artifacts unshare` — an authed DELETE
 // to the Worker, which already implements it (worker-template.ts). Mirrors
 // publish.ts: pure target-resolution logic is exported for tests, the network
 // calls (a status check + a delete) sit behind an injectable DI seam.

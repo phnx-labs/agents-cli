@@ -1,6 +1,7 @@
 /**
  * Client for the Rush account layer (`api.prix.dev`) — backs `agents auth` and
- * `agents org`. `agents org` maps to `/api/v1/spaces`, not `/api/v1/orgs`: spaces
+ * `agents auth space` (canonical) / `agents org` (deprecated alias). `agents auth space`
+ * maps to `/api/v1/spaces`, not `/api/v1/orgs`: spaces
  * already carry the free-tier caps (1 owned space, 3 members) and can exist
  * standalone with no parent organization, matching a "just want a team" CLI flow
  * better than the heavier enterprise-tenancy `orgs` routes (domain, SSO). See

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_75 command groups · 562 commands._
+_72 command groups · 561 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -55,29 +55,31 @@ agents artifacts                            Publish agent-made artifacts (plans,
 agents artifacts setup                      Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.
 agents artifacts share [file]               Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).
 agents artifacts share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
-agents artifacts share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.
+agents artifacts share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.
 agents artifacts share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
 agents artifacts share list                 List the pages you've published to your share namespace (human table; --json for scripts).
 agents artifacts share revisions <target>   Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).
 agents artifacts share status               Show the configured share endpoint and namespace.
 agents artifacts share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
+agents artifacts unshare <targets...>       Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 ```
 
-## audit — Alias of `agents events --include runs` — dispatched-run outcomes
+## auth — Sign in to your Prix account (spaces, paid tiers)
 
 ```
-agents audit         Alias of `agents events --include runs` — dispatched-run outcomes
-agents audit list    Alias of `agents audit` / `agents events --include runs`
-agents audit verify  Walk the legacy hash-chain file (pre-unification history only)
-```
-
-## auth — Sign in to your Rush account (shared by `agents org` and paid tiers)
-
-```
-agents auth         Sign in to your Rush account (shared by `agents org` and paid tiers)
-agents auth login   Sign in via the device-code flow
-agents auth logout  Clear the local `agents auth login` session
-agents auth whoami  Show the signed-in account
+agents auth                            Sign in to your Prix account (spaces, paid tiers)
+agents auth login                      Sign in via the device-code flow
+agents auth logout                     Clear the local `agents auth login` session
+agents auth space                      Create and manage a Prix space (invite collaborators)
+agents auth space create <name>        Create a space (free tier: 1 owned space)
+agents auth space invite <email>       Invite (or directly add) a member
+agents auth space leave [space]        Leave a space you do not own
+agents auth space list                 List spaces you own or belong to
+agents auth space members [space]      List a space's members
+agents auth space remove <email>       Remove a member from a space
+agents auth space role <email> <role>  Change a member's role (owner-only for admin)
+agents auth space view [space]         Show one space (defaults to your only space)
+agents auth whoami                     Show the signed-in account
 ```
 
 ## beta — Enable or disable preview features like factory.
@@ -282,10 +284,13 @@ agents doctor [target]  Diagnose CLI availability, sync status, and resource div
 ## events — Read the unified event stream (ops + activity + run dispatch)
 
 ```
-agents events         Read the unified event stream (ops + activity + run dispatch)
-agents events emit    Record events produced outside this process (reads JSONL on stdin)
-agents events rotate  Apply event retention and the storage ceiling immediately
-agents events stats   Show aggregate event statistics
+agents events               Read the unified event stream (ops + activity + run dispatch)
+agents events audit         Alias of `agents events --include runs` — dispatched-run outcomes
+agents events audit list    Alias of `agents events audit` / `agents events --include runs`
+agents events audit verify  Walk the legacy hash-chain file (pre-unification history only)
+agents events emit          Record events produced outside this process (reads JSONL on stdin)
+agents events rotate        Apply event retention and the storage ceiling immediately
+agents events stats         Show aggregate event statistics
 ```
 
 ## feed — Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
@@ -359,6 +364,7 @@ agents insights secrets-hot        Mix recipe: secrets-hot
 agents insights session-volume     Mix recipe: session-volume
 agents insights token-ratio        Mix recipe: token-ratio
 agents insights tools-per-session  Mix recipe: tools-per-session
+agents insights trends             Alias of `mix` — former top-level `agents trends`
 ```
 
 ## inspect — Inspect one installed agent harness at one version (not a model), or a DotAgents repo — paths, capabilities, resources, and hook capable/on-disk/wired state.
@@ -483,10 +489,10 @@ agents open status      Report whether the agents:// URL scheme handler is regis
 agents open unregister  Remove the agents:// URL scheme handler.
 ```
 
-## org — Create and manage a team (a Rush "space") you can share with `agents auth login` collaborators
+## org — Deprecated alias of `agents auth space` — create and manage a Prix space
 
 ```
-agents org                      Create and manage a team (a Rush "space") you can share with `agents auth login` collaborators
+agents org                      Deprecated alias of `agents auth space` — create and manage a Prix space
 agents org create <name>        Create a space (free tier: 1 owned space)
 agents org invite <email>       Invite (or directly add) a member
 agents org leave [space]        Leave a space you do not own
@@ -757,6 +763,7 @@ agents sessions insights secrets-hot        Mix recipe: secrets-hot
 agents sessions insights session-volume     Mix recipe: session-volume
 agents sessions insights token-ratio        Mix recipe: token-ratio
 agents sessions insights tools-per-session  Mix recipe: tools-per-session
+agents sessions insights trends             Alias of `mix` — former top-level `agents trends`
 agents sessions migrate [session-id]        Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
 agents sessions migrations                  Show the migration ledger — sessions handed off to/from other machines.
 agents sessions optimize                    Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
@@ -868,33 +875,10 @@ agents trash list [agent]      List soft-deleted version directories (optionally
 agents trash restore <target>  Restore a soft-deleted version (e.g. "claude@2.1.110") back to ~/.agents/.history/versions/
 ```
 
-## trends — Deprecated alias of `agents insights mix` — counter recipes over sessions + usage.db
-
-```
-agents trends                    Deprecated alias of `agents insights mix` — counter recipes over sessions + usage.db
-agents trends browser-activity   Mix recipe: browser-activity
-agents trends harness-mix        Mix recipe: harness-mix
-agents trends mix                Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)
-agents trends model-mix          Mix recipe: model-mix
-agents trends query              Raw usage-event query (usage.db)
-agents trends recipes            List baked mix-recipe ids
-agents trends resource-mix       Mix recipe: resource-mix
-agents trends secrets-hot        Mix recipe: secrets-hot
-agents trends session-volume     Mix recipe: session-volume
-agents trends token-ratio        Mix recipe: token-ratio
-agents trends tools-per-session  Mix recipe: tools-per-session
-```
-
 ## uninstall — Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
 
 ```
 agents uninstall  Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.
-```
-
-## unshare — Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
-
-```
-agents unshare <targets...>  Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 ```
 
 ## update — Move a frozen agent installation to a new release, keeping its name and every reference to it

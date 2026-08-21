@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Command } from 'commander';
-import { parseRole, registerOrgCommand, resolveInviteRole } from './org.js';
+import { parseRole, registerAuthSpaceCommand, registerOrgCommand, resolveInviteRole } from './org.js';
 import { getHelpSections } from '../lib/help.js';
 
 describe('parseRole', () => {
@@ -44,8 +44,9 @@ describe('registerOrgCommand', () => {
   });
 
   it('maps to spaces, not orgs, in its own help text', () => {
-    expect(org!.description()).toMatch(/space/i);
+    expect(org!.description()).toMatch(/deprecated alias of `agents auth space`/i);
     const sections = getHelpSections(org!);
+    expect(sections.notes).toMatch(/Deprecated alias of `agents auth space`/);
     expect(sections.notes).toMatch(/Maps to the Rush backend's \/api\/v1\/spaces/);
   });
 
@@ -60,5 +61,20 @@ describe('registerOrgCommand', () => {
       const hasJson = sub.options.some(o => o.long === '--json');
       expect(hasJson, `${sub.name()} is missing --json`).toBe(true);
     }
+  });
+});
+
+describe('registerAuthSpaceCommand', () => {
+  const program = new Command();
+  const auth = program.command('auth');
+  registerAuthSpaceCommand(auth);
+  const space = auth.commands.find(c => c.name() === 'space');
+
+  it('nests the same space tree under auth, without a deprecation note', () => {
+    expect(space).toBeDefined();
+    expect(space!.commands.map(c => c.name())).toEqual(['create', 'list', 'view', 'invite', 'members', 'role', 'remove', 'leave']);
+    const sections = getHelpSections(space!);
+    expect(sections.examples).toContain('agents auth space create');
+    expect(sections.notes).not.toMatch(/Deprecated/);
   });
 });

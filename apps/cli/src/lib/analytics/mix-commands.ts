@@ -7,9 +7,8 @@
  * usage.db) still exists — it is now `agents insights mix` and the recipe
  * subcommands below. Latency stays on `agents perf`; quota on `agents usage`.
  *
- * `agents trends` remains a thin deprecated alias registered from
- * `commands/trends.ts` that shares this same registration — no second copy of
- * the recipe tree.
+ * Former top-level `agents trends` is gone. The nested spelling
+ * `agents insights trends` is an alias of `agents insights mix`.
  */
 
 import type { Command } from 'commander';
@@ -78,43 +77,18 @@ export function renderMixDashboard(days: number, asJson: boolean, bannerLabel = 
   for (const section of dash.sections) printMixSection(section);
 }
 
-/** One-line deprecation for the retired top-level `agents trends` spelling. */
-export function printTrendsDeprecation(): void {
-  console.error(chalk.yellow(
-    'agents trends is deprecated — use `agents insights mix` (or `agents insights <recipe>`).',
-  ));
-}
-
-export interface RegisterMixCommandsOptions {
-  /**
-   * When true, every action prints the trends deprecation line first. Used only
-   * by the thin top-level `agents trends` alias — the real tree under insights
-   * never sets this.
-   */
-  deprecated?: boolean;
-  /**
-   * Banner label for the multi-recipe dashboard (default: agents insights mix).
-   * The deprecated alias passes `agents insights mix` still, so callers learn
-   * the new name even when they typed trends.
-   */
-  dashboardBanner?: string;
-}
-
 /**
- * Attach counter-mix subcommands to a parent (typically `insights` or the
- * deprecated `trends` alias).
+ * Attach counter-mix subcommands to a parent (typically `insights`).
  *
  * Layout:
- *   <parent> mix                 multi-recipe board (default for trends alias)
+ *   <parent> mix                 multi-recipe board
+ *   <parent> trends              alias of mix (former top-level `agents trends`)
  *   <parent> recipes             list recipe ids
  *   <parent> query               raw usage.db rows
  *   <parent> harness-mix|…       one baked recipe
  */
-export function registerMixCommands(parent: Command, opts: RegisterMixCommandsOptions = {}): void {
-  const before = (): void => {
-    if (opts.deprecated) printTrendsDeprecation();
-  };
-  const banner = opts.dashboardBanner ?? 'agents insights mix';
+export function registerMixCommands(parent: Command): void {
+  const banner = 'agents insights mix';
 
   const mix = parent
     .command('mix')
@@ -122,7 +96,6 @@ export function registerMixCommands(parent: Command, opts: RegisterMixCommandsOp
     .option('--days <n>', 'Days of history to include', '7')
     .option('--json', 'Emit JSON instead of tables')
     .action(function summary(this: Command) {
-      before();
       const o = this.opts() as MixOpts;
       renderMixDashboard(parseMixDays(o.days), Boolean(o.json), banner);
     });
@@ -157,7 +130,6 @@ export function registerMixCommands(parent: Command, opts: RegisterMixCommandsOp
     .description('List baked mix-recipe ids')
     .option('--json', 'Emit JSON')
     .action((o: { json?: boolean }) => {
-      before();
       const list = listRecipes();
       if (o.json) {
         console.log(JSON.stringify(list, null, 2));
@@ -177,7 +149,6 @@ export function registerMixCommands(parent: Command, opts: RegisterMixCommandsOp
     .option('--limit <n>', 'Max rows', '40')
     .option('--json', 'Emit JSON')
     .action((o: { kind?: string; name?: string; event?: string; days?: string; limit?: string; json?: boolean }) => {
-      before();
       const win = analyticsWindow(parseMixDays(o.days));
       const kind = o.kind && (USAGE_KINDS as readonly string[]).includes(o.kind)
         ? o.kind as UsageKind
@@ -221,7 +192,6 @@ export function registerMixCommands(parent: Command, opts: RegisterMixCommandsOp
       .option('--days <n>', 'Days of history', '7')
       .option('--json', 'Emit JSON')
       .action(function recipeAction(this: Command) {
-        before();
         const parentOpts = this.parent?.opts?.() as MixOpts | undefined;
         const o = { ...parentOpts, ...(this.opts() as MixOpts) };
         const win = analyticsWindow(parseMixDays(o.days));
@@ -237,40 +207,25 @@ export function registerMixCommands(parent: Command, opts: RegisterMixCommandsOp
         printMixSection(section);
       });
   }
-}
 
-/**
- * Thin top-level `agents trends` alias: same mix tree, deprecation on every path,
- * default action = mix board (old `agents trends` with no subcommand).
- */
-export function registerDeprecatedTrendsAlias(program: Command): void {
-  const trends = program
+  // Nested home for the former top-level `agents trends` spelling.
+  const trends = parent
     .command('trends')
-    .description('Deprecated alias of `agents insights mix` — counter recipes over sessions + usage.db')
+    .description('Alias of `mix` — former top-level `agents trends`')
     .option('--days <n>', 'Days of history to include', '7')
     .option('--json', 'Emit JSON instead of tables')
     .action(function summary(this: Command) {
-      printTrendsDeprecation();
       const o = this.opts() as MixOpts;
-      renderMixDashboard(parseMixDays(o.days), Boolean(o.json), 'agents insights mix');
+      renderMixDashboard(parseMixDays(o.days), Boolean(o.json), banner);
     });
-
   setHelpSections(trends, {
     examples: `
-      # Prefer the canonical spelling
+      agents insights trends
       agents insights mix
-
-      # Still works (prints a deprecation line)
-      agents trends
-      agents trends harness-mix --json
     `,
     notes: `
-      \`agents trends\` is a compatibility alias. New code and agent briefs should use
-      \`agents insights mix\` / \`agents insights <recipe>\`. Behavioural report remains
-      bare \`agents insights\`. Latency remains \`agents perf\`.
+      \`agents insights trends\` is the nested spelling of the former top-level
+      \`agents trends\`. Prefer \`agents insights mix\`.
     `,
   });
-
-  // Same subcommands as insights, with deprecation on every fire.
-  registerMixCommands(trends, { deprecated: true, dashboardBanner: 'agents insights mix' });
 }

@@ -12,6 +12,7 @@ import {
   startDeviceAuthorization,
   writePrixSession,
 } from '../lib/prix-account.js';
+import { registerAuthSpaceCommand } from './org.js';
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -97,7 +98,7 @@ function runAuthLogout(): void {
 }
 
 export function registerAuthCommand(program: Command): void {
-  const auth = program.command('auth').description('Sign in to your Rush account (shared by `agents org` and paid tiers)');
+  const auth = program.command('auth').description('Sign in to your Prix account (spaces, paid tiers)');
 
   auth.command('login').description('Sign in via the device-code flow').action(() => runOrDie(() => runAuthLogin()));
 
@@ -109,11 +110,15 @@ export function registerAuthCommand(program: Command): void {
 
   auth.command('logout').description('Clear the local `agents auth login` session').action(() => runOrDie(() => runAuthLogout()));
 
+  registerAuthSpaceCommand(auth);
+
   setHelpSections(auth, {
     examples: `agents auth login
 agents auth whoami
 agents auth whoami --json
-agents auth logout`,
-    notes: "`agents auth login` writes its own session, separate from \`rush login\`'s \`~/.rush/user.yaml\` — \`agents auth logout\` never signs you out of \`rush\`. If you're already signed in via \`rush login\`, \`agents auth whoami\`/\`agents org\` use that session automatically; no separate login is required.",
+agents auth logout
+agents auth space create acme-team
+agents auth space invite dev@example.com --role admin`,
+    notes: "`agents auth login` writes its own session, separate from \`rush login\`'s \`~/.rush/user.yaml\` — \`agents auth logout\` never signs you out of \`rush\`. If you're already signed in via \`rush login\`, \`agents auth whoami\`/\`agents auth space\` use that session automatically; no separate login is required. \`agents org\` is a deprecated alias of \`agents auth space\`.",
   });
 }

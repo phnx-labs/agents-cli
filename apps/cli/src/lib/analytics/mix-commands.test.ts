@@ -9,7 +9,7 @@ import * as path from 'path';
 import { Command } from 'commander';
 import Database from '../sqlite.js';
 import { closeUsageDb, recordUsage } from './usage-db.js';
-import { registerMixCommands, registerDeprecatedTrendsAlias } from './mix-commands.js';
+import { registerMixCommands } from './mix-commands.js';
 
 const tmpDirs: string[] = [];
 let prevNoTrack: string | undefined;
@@ -122,32 +122,20 @@ describe('insights mix registration', () => {
   });
 });
 
-describe('deprecated trends alias', () => {
-  it('prints one deprecation line and still returns the mix dashboard', async () => {
+describe('nested insights trends alias of mix', () => {
+  it('returns the mix dashboard without a deprecation line', async () => {
     const program = new Command();
     program.exitOverride();
-    registerDeprecatedTrendsAlias(program);
+    const insights = program.command('insights');
+    insights.action(() => {});
+    registerMixCommands(insights);
 
     const { out, err } = await capture(async () => {
-      await program.parseAsync(['node', 'agents', 'trends', '--json']);
+      await program.parseAsync(['node', 'agents', 'insights', 'trends', '--json']);
     });
-    expect(err).toMatch(/agents trends is deprecated/i);
-    expect(err).toMatch(/agents insights mix/);
+    expect(err).not.toMatch(/deprecated/i);
     const parsed = JSON.parse(out);
     expect(parsed.window.days).toBe(7);
     expect(parsed.sections.length).toBeGreaterThan(0);
-  });
-
-  it('forwards recipe subcommands with the same deprecation line', async () => {
-    const program = new Command();
-    program.exitOverride();
-    registerDeprecatedTrendsAlias(program);
-
-    const { out, err } = await capture(async () => {
-      await program.parseAsync(['node', 'agents', 'trends', 'secrets-hot', '--json']);
-    });
-    expect(err).toMatch(/deprecated/i);
-    const parsed = JSON.parse(out);
-    expect(parsed.section.id).toBe('secrets-hot');
   });
 });

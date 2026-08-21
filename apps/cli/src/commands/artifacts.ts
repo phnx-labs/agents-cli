@@ -39,7 +39,7 @@ export function registerArtifactsCommands(program: Command): void {
 
       # What's live in your namespace, and taking one down
       agents artifacts share list
-      agents unshare my-plan-a1b2
+      agents artifacts unshare my-plan-a1b2
 
       # Endpoint health, and pushing a new Worker template to it
       agents artifacts share status
@@ -52,13 +52,12 @@ export function registerArtifactsCommands(program: Command): void {
   --account/--token/--domain/--analytics-token, or run non-interactively, and it
   provisions directly with what you named.
 
-  agents unshare <targets...> stays a top-level alias of
-  agents artifacts share delete.
+  agents artifacts unshare <targets...> is the nested alias of
+  agents artifacts share delete. Top-level \`agents unshare\` is gone.
 
   Full reference: apps/cli/docs/share.md.
     `,
   });
 
-  // Top-level, deliberately: see registerUnshareCommand in commands/share.ts.
-  registerUnshareCommand(program);
+  registerUnshareCommand(artifactsCmd);
 }

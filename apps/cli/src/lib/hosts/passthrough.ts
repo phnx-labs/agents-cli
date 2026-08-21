@@ -117,7 +117,6 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   restore: {},
   worktree: {},
   events: {},
-  audit: {},
   feedback: {},
   pty: {},
   tmux: {},

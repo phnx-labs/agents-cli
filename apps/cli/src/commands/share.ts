@@ -353,7 +353,7 @@ export function parseShareRevisions(key: string, body: string): ShareRevisionsRe
 }
 
 /** Fetch and parse the retained prior versions of one published slug. `target`
- * accepts the same three forms as `agents unshare` (a full URL, `<user>/<slug>`,
+ * accepts the same three forms as `agents artifacts unshare` (a full URL, `<user>/<slug>`,
  * or a bare slug resolved against the caller's own namespace) — reuses
  * {@link resolveDeleteTarget} rather than re-deriving the key. */
 export async function runShareRevisions(
@@ -432,7 +432,7 @@ interface ShareDeleteCliOpts {
 }
 
 /** Shared handler for `agents artifacts share delete <targets...>` and the
- * top-level `agents unshare <targets...>` alias. Deletes each target independently and
+ * nested `agents artifacts unshare <targets...>` alias. Deletes each target independently and
  * continues past a failed one (rm-style), reporting all results and exiting
  * non-zero if any target failed to verify as gone.
  *
@@ -485,19 +485,19 @@ const SHARE_DELETE_EXAMPLES = `
 
       # Delete by <user>/<slug>, or a bare slug in your own namespace
       agents artifacts share delete octocat/my-plan-a1b2
-      agents unshare my-plan-a1b2
+      agents artifacts unshare my-plan-a1b2
 
       # Several at once
-      agents unshare my-plan-a1b2 old-report-9f3c
+      agents artifacts unshare my-plan-a1b2 old-report-9f3c
 
       # Keep the cover image up (rare — you usually want both gone)
-      agents unshare my-plan-a1b2 --keep-cover
+      agents artifacts unshare my-plan-a1b2 --keep-cover
 
       # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)
-      agents unshare my-plan-a1b2 --keep-revisions
+      agents artifacts unshare my-plan-a1b2 --keep-revisions
 
       # Don't error if it's already gone
-      agents unshare my-plan-a1b2 --if-exists
+      agents artifacts unshare my-plan-a1b2 --if-exists
 `;
 
 const SHARE_DELETE_NOTES = `
@@ -511,12 +511,13 @@ const SHARE_DELETE_NOTES = `
   down. Pass --keep-revisions to leave them (they still expire via the bucket's
   lifecycle rule on their own schedule either way).
 
-  agents artifacts share delete === agents unshare (same command, different name).
+  agents artifacts share delete === agents artifacts unshare (same command, different name).
 `;
 
 /**
  * Register the `share` subtree under its parent group — `agents artifacts share`
- * (see commands/artifacts.ts). The top-level `agents unshare` alias is a sibling
+ * (see commands/artifacts.ts). `agents artifacts unshare` is the nested alias
+ * registered via {@link registerUnshareCommand} on the artifacts group.
  * registration on the ROOT program, so it is {@link registerUnshareCommand}, not
  * part of this subtree.
  */
@@ -635,7 +636,7 @@ ${SHARE_DELETE_NOTES}
   const shareDeleteCmd = registerShareDeleteOptions(
     shareCmd
       .command('delete <targets...>')
-      .description('Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.'),
+      .description('Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.'),
   );
   setHelpSections(shareDeleteCmd, { examples: SHARE_DELETE_EXAMPLES, notes: SHARE_DELETE_NOTES });
   shareDeleteCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
@@ -808,7 +809,7 @@ ${SHARE_DELETE_NOTES}
       # Prior versions kept under this slug (bare slug — your own namespace)
       agents artifacts share revisions q3-report
 
-      # By <user>/<slug> or full URL, same target forms as 'agents unshare'
+      # By <user>/<slug> or full URL, same target forms as 'agents artifacts unshare'
       agents artifacts share revisions octocat/q3-report
       agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report
 
@@ -853,14 +854,12 @@ ${SHARE_DELETE_NOTES}
 }
 
 /**
- * Register the top-level `agents unshare <targets...>` alias of
- * `agents artifacts share delete`. It takes the ROOT program (not the artifacts
- * group) because it is deliberately a top-level convenience verb — taking a page
- * down is the one artifact action typed often enough to keep at the root.
+ * Register `agents artifacts unshare <targets...>` as the nested alias of
+ * `agents artifacts share delete`. Top-level `agents unshare` is retired.
  */
-export function registerUnshareCommand(program: Command): void {
+export function registerUnshareCommand(artifactsCmd: Command): void {
   const unshareCmd = registerShareDeleteOptions(
-    program
+    artifactsCmd
       .command('unshare <targets...>')
       .description('Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).'),
   );

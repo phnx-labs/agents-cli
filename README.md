@@ -1203,7 +1203,7 @@ agents artifacts share plan.html --json                     # URL object for pla
 agents artifacts share list --agent claude                  # everything published, filterable
 agents artifacts share revisions fleet                      # prior versions kept under a slug
 agents artifacts share status                               # show the endpoint
-agents unshare fleet                                        # take a published link (+ its OG cover) down
+agents artifacts unshare fleet                              # take a published link (+ its OG cover) down
 ```
 
 `agents artifacts share` closes the loop: an agent makes work (a plan, a viz, a report),
@@ -1232,7 +1232,7 @@ Republishing an existing slug keeps the prior version as a revision by default
 (`--no-revision` to skip); `agents artifacts share revisions <slug>` shows the retained
 history, newest first.
 
-`agents artifacts share delete <targets...>` (alias `agents unshare`) takes a page down — pass a
+`agents artifacts share delete <targets...>` (alias `agents artifacts unshare`) takes a page down — pass a
 full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace); several
 targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
 (`--keep-cover` opts out) and verifies the page actually 404s before reporting success —

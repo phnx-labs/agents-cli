@@ -78,8 +78,6 @@ export const loadFactory: ModuleLoader = async () => (await import('../commands/
 export const loadUsage: ModuleLoader = async () => (await import('../commands/usage.js')).registerUsageCommand;
 export const loadInsights: ModuleLoader = async () => (await import('../commands/insights.js')).registerInsightsCommand;
 export const loadPerf: ModuleLoader = async () => (await import('../commands/perf.js')).registerPerfCommand;
-// Thin deprecated alias of `agents insights mix` — no second mix implementation.
-export const loadTrends: ModuleLoader = async () => (await import('../commands/trends.js')).registerTrendsCommand;
 export const loadPty: ModuleLoader = async () => (await import('../commands/pty.js')).registerPtyCommands;
 export const loadTmux: ModuleLoader = async () => (await import('../commands/tmux.js')).registerTmuxCommands;
 export const loadWatchdog: ModuleLoader = async () => (await import('../commands/watchdog.js')).registerWatchdogCommand;
@@ -100,10 +98,8 @@ export const loadSend: ModuleLoader = async () => (await import('../commands/sen
 export const loadFeed: ModuleLoader = async () => (await import('../commands/feed.js')).registerFeedCommand;
 export const loadMailboxes: ModuleLoader = async () => (await import('../commands/mailboxes.js')).registerMailboxesCommand;
 export const loadServe: ModuleLoader = async () => (await import('../commands/serve.js')).registerServeCommand;
-// Registers the `artifacts` group (with `share` + `setup` under it) AND the
-// top-level `unshare` alias — see commands/artifacts.ts.
+// Registers the `artifacts` group (`share` + `setup` + nested `unshare`).
 export const loadArtifacts: ModuleLoader = async () => (await import('../commands/artifacts.js')).registerArtifactsCommands;
-export const loadAudit: ModuleLoader = async () => (await import('../commands/audit.js')).registerAuditCommands;
 export const loadWebhooks: ModuleLoader = async () => (await import('../commands/webhook.js')).registerWebhooksCommand;
 export const loadHumans: ModuleLoader = async () => (await import('../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../commands/accounts.js')).registerAccountsCommand;
@@ -198,7 +194,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   usage: [loadUsage],
   insights: [loadInsights],
   perf: [loadPerf],
-  trends: [loadTrends],
   pty: [loadPty],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
@@ -230,10 +225,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   mailbox: [loadMailboxes],
   serve: [loadServe],
   artifacts: [loadArtifacts],
-  // `unshare` is a top-level convenience alias of `artifacts share delete` (see
-  // commands/share.ts) — same module, registered as its own program.command().
-  unshare: [loadArtifacts],
-  audit: [loadAudit],
   webhooks: [loadWebhooks],
   humans: [loadHumans],
   daemon: [loadDaemon],

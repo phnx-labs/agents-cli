@@ -289,11 +289,16 @@ Observe (read the fleet — no store merge):
   feed                            Needs-you inbox (open blocks waiting on you); agent posts = feed --filter updates
   sessions --active               Live agents (who is running right now)
   events                          Unified ops + activity event trail
-  audit                           Tamper-evident run-dispatch log (not events)
+  events audit                    Dispatched-run outcomes (alias of events --include runs)
   sync status                     Sync/drift only (not the live fleet snapshot)
   devices snapshot                One-process inventory + active sessions poll
 
-Credentials:
+Identity (Prix account — shared with paid tiers):
+  auth login                      Sign in via the device-code flow
+  auth whoami                     Show the signed-in Prix user
+  auth space                      Create and manage a space (invite collaborators)
+
+Credentials (harness keys, not your Prix user):
   harness                         Custom (host CLI + model + auth) harnesses; replaces former profiles command
   secrets                         Keychain-backed env bundles; synced vault: secrets vault unlock|lock
   accounts                        Provider credentials + native OAuth logout

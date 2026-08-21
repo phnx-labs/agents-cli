@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 75,
-  "commands": 562,
+  "groups": 72,
+  "commands": 561,
   "root": {
     "name": "agents",
     "path": "",
@@ -780,8 +780,8 @@
           "negate": false
         }
       ],
-      "examples": "# One-time: provision your own endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Publish — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
-      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning. It runs the interactive wizard only when you\n  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/\n  --account/--token/--domain/--analytics-token, or run non-interactively, and it\n  provisions directly with what you named.\n\n  agents unshare <targets...> stays a top-level alias of\n  agents artifacts share delete.\n\n  Full reference: apps/cli/docs/share.md.",
+      "examples": "# One-time: provision your own endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Publish — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents artifacts unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
+      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning. It runs the interactive wizard only when you\n  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/\n  --account/--token/--domain/--analytics-token, or run non-interactively, and it\n  provisions directly with what you named.\n\n  agents artifacts unshare <targets...> is the nested alias of\n  agents artifacts share delete. Top-level `agents unshare` is gone.\n\n  Full reference: apps/cli/docs/share.md.",
       "subcommands": [
         {
           "name": "setup",
@@ -1012,8 +1012,8 @@
               "negate": false
             }
           ],
-          "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents artifacts share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Human title + structured metadata, shown in the gallery and share list\n      agents artifacts share ./out/plan.html --label \"Q3 fleet plan\" --meta kind=plan --meta ticket=RUSH-2683\n\n      # Republish without keeping the previous version as a revision\n      agents artifacts share ./out/plan.html --slug q3-report --no-revision\n\n      # Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
-          "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents artifacts share list; the direct URL is still world-readable\n  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  Every publish carries provenance auto-captured from the exec env/git/clock\n  (agent, session, host, repo, date) — never invented, only sent when present —\n  plus a label (explicit --label/--title, else derived from the HTML <title>,\n  frontmatter title, or filename; never blocks on a prompt) and any --meta\n  key=value pairs. Republishing an existing slug keeps the prior version as a\n  retained revision by default; see 'agents artifacts share revisions'.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+          "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents artifacts share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Human title + structured metadata, shown in the gallery and share list\n      agents artifacts share ./out/plan.html --label \"Q3 fleet plan\" --meta kind=plan --meta ticket=RUSH-2683\n\n      # Republish without keeping the previous version as a revision\n      agents artifacts share ./out/plan.html --slug q3-report --no-revision\n\n      # Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents artifacts unshare my-plan-a1b2\n\n      # Several at once\n      agents artifacts unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents artifacts unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents artifacts unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents artifacts unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
+          "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents artifacts share list; the direct URL is still world-readable\n  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  Every publish carries provenance auto-captured from the exec env/git/clock\n  (agent, session, host, repo, date) — never invented, only sent when present —\n  plus a label (explicit --label/--title, else derived from the HTML <title>,\n  frontmatter title, or filename; never blocks on a prompt) and any --meta\n  key=value pairs. Republishing an existing slug keeps the prior version as a\n  retained revision by default; see 'agents artifacts share revisions'.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents artifacts unshare (same command, different name).",
           "subcommands": [
             {
               "name": "analytics",
@@ -1039,7 +1039,7 @@
               "name": "delete",
               "path": "artifacts share delete",
               "aliases": [],
-              "description": "Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Top-level alias: agents unshare.",
+              "description": "Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.",
               "args": [
                 {
                   "name": "targets",
@@ -1105,8 +1105,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
-              "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents unshare (same command, different name).",
+              "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents artifacts unshare my-plan-a1b2\n\n      # Several at once\n      agents artifacts unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents artifacts unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents artifacts unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents artifacts unshare my-plan-a1b2 --if-exists",
+              "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents artifacts unshare (same command, different name).",
               "subcommands": []
             },
             {
@@ -1255,7 +1255,7 @@
                   "negate": false
                 }
               ],
-              "examples": "# Prior versions kept under this slug (bare slug — your own namespace)\n      agents artifacts share revisions q3-report\n\n      # By <user>/<slug> or full URL, same target forms as 'agents unshare'\n      agents artifacts share revisions octocat/q3-report\n      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report\n\n      # Machine-readable, and a bare slug resolved against another namespace\n      agents artifacts share revisions q3-report --revisions-json\n      agents artifacts share revisions q3-report --for-user octocat",
+              "examples": "# Prior versions kept under this slug (bare slug — your own namespace)\n      agents artifacts share revisions q3-report\n\n      # By <user>/<slug> or full URL, same target forms as 'agents artifacts unshare'\n      agents artifacts share revisions octocat/q3-report\n      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report\n\n      # Machine-readable, and a bare slug resolved against another namespace\n      agents artifacts share revisions q3-report --revisions-json\n      agents artifacts share revisions q3-report --for-user octocat",
               "notes": "A revision is created automatically on every republish of an existing slug\n  (pass --no-revision at publish time to skip it) — this is history, never\n  shown on the public gallery or in 'agents artifacts share list' beyond its\n  count. Each revision's own URL is still directly reachable and honors its own\n  recorded expiry.",
               "subcommands": []
             },
@@ -1348,187 +1348,60 @@
               "subcommands": []
             }
           ]
-        }
-      ]
-    },
-    {
-      "name": "audit",
-      "path": "audit",
-      "aliases": [],
-      "description": "Alias of `agents events --include runs` — dispatched-run outcomes",
-      "args": [],
-      "options": [
-        {
-          "flags": "--include <families>",
-          "description": "Only these families (comma-sep): ops, activity, commands, runs, security",
-          "long": "--include",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
         },
         {
-          "flags": "--exclude <families>",
-          "description": "Drop these families (comma-sep): ops, activity, commands, runs, security",
-          "long": "--exclude",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--module <name>",
-          "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
-          "long": "--module",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--command <path>",
-          "description": "Only this command path — prefix match (e.g. \"teams create\")",
-          "long": "--command",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--event <type>",
-          "description": "Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)",
-          "long": "--event",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": []
-        },
-        {
-          "flags": "--agent <name>",
-          "description": "Only events tagged with this agent",
-          "long": "--agent",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--caller <kind>",
-          "description": "Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)",
-          "long": "--caller",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--level <level>",
-          "description": "Only this level: audit, warn, info, debug",
-          "long": "--level",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--session <id>",
-          "description": "Only events from this session (the provenance sessionId) — e.g. trace which session read a secret",
-          "long": "--session",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--bundle <name>",
-          "description": "Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle",
-          "long": "--bundle",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--since <time>",
-          "description": "Only events newer than this (e.g. 2h, 7d, or ISO date)",
-          "long": "--since",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--limit <n>",
-          "description": "Max records to show; 0 for no cap (default 50)",
-          "long": "--limit",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "50"
-        },
-        {
-          "flags": "--json",
-          "description": "Output raw records as JSON",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-f, --follow",
-          "description": "Tail today's operational log live",
-          "short": "-f",
-          "long": "--follow",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "list",
-          "path": "audit list",
+          "name": "unshare",
+          "path": "artifacts unshare",
           "aliases": [],
-          "description": "Alias of `agents audit` / `agents events --include runs`",
-          "args": [],
+          "description": "Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).",
+          "args": [
+            {
+              "name": "targets",
+              "required": true,
+              "variadic": true,
+              "description": ""
+            }
+          ],
           "options": [
             {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
+              "flags": "--keep-cover",
+              "description": "leave the sibling <slug>.png OG cover in place (default: delete it too)",
+              "long": "--keep-cover",
               "required": false,
               "optional": false,
               "variadic": false,
               "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "verify",
-          "path": "audit verify",
-          "aliases": [],
-          "description": "Walk the legacy hash-chain file (pre-unification history only)",
-          "args": [],
-          "options": [
+            },
+            {
+              "flags": "--keep-revisions",
+              "description": "leave retained revisions (<slug>/rev-*) in place (default: delete them too)",
+              "long": "--keep-revisions",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--if-exists",
+              "description": "treat an already-missing target as a no-op success instead of an error",
+              "long": "--if-exists",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--github-user <user>",
+              "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
+              "long": "--github-user",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "--json",
-              "description": "Output the result as JSON",
+              "description": "emit machine-readable results",
               "long": "--json",
               "required": false,
               "optional": false,
@@ -1546,6 +1419,8 @@
               "negate": false
             }
           ],
+          "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents artifacts unshare my-plan-a1b2\n\n      # Several at once\n      agents artifacts unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents artifacts unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents artifacts unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents artifacts unshare my-plan-a1b2 --if-exists",
+          "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents artifacts unshare (same command, different name).",
           "subcommands": []
         }
       ]
@@ -1554,7 +1429,7 @@
       "name": "auth",
       "path": "auth",
       "aliases": [],
-      "description": "Sign in to your Rush account (shared by `agents org` and paid tiers)",
+      "description": "Sign in to your Prix account (spaces, paid tiers)",
       "args": [],
       "options": [
         {
@@ -1568,8 +1443,8 @@
           "negate": false
         }
       ],
-      "examples": "agents auth login\nagents auth whoami\nagents auth whoami --json\nagents auth logout",
-      "notes": "`agents auth login` writes its own session, separate from `rush login`'s `~/.rush/user.yaml` — `agents auth logout` never signs you out of `rush`. If you're already signed in via `rush login`, `agents auth whoami`/`agents org` use that session automatically; no separate login is required.",
+      "examples": "agents auth login\nagents auth whoami\nagents auth whoami --json\nagents auth logout\nagents auth space create acme-team\nagents auth space invite dev@example.com --role admin",
+      "notes": "`agents auth login` writes its own session, separate from `rush login`'s `~/.rush/user.yaml` — `agents auth logout` never signs you out of `rush`. If you're already signed in via `rush login`, `agents auth whoami`/`agents auth space` use that session automatically; no separate login is required. `agents org` is a deprecated alias of `agents auth space`.",
       "subcommands": [
         {
           "name": "login",
@@ -1610,6 +1485,371 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "space",
+          "path": "auth space",
+          "aliases": [],
+          "description": "Create and manage a Prix space (invite collaborators)",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents auth space create acme-team\nagents auth space list\nagents auth space view acme-team\nagents auth space invite dev@example.com --role admin\nagents auth space members\nagents auth space role dev@example.com admin\nagents auth space remove dev@example.com\nagents auth space leave acme-team",
+          "notes": "Maps to the Rush backend's /api/v1/spaces (the free-tier team primitive), not /api/v1/orgs. Free tier: 1 owned space, 3 members per space. Every command needs `agents auth login` (or a `rush login` session) first. `--space` is only needed once you belong to more than one space. The leftover `agents org` spelling still works and prints a deprecation line.",
+          "subcommands": [
+            {
+              "name": "create",
+              "path": "auth space create",
+              "aliases": [],
+              "description": "Create a space (free tier: 1 owned space)",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--slug <slug>",
+                  "description": "Override the derived slug",
+                  "long": "--slug",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--description <text>",
+                  "description": "Optional description",
+                  "long": "--description",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "invite",
+              "path": "auth space invite",
+              "aliases": [],
+              "description": "Invite (or directly add) a member",
+              "args": [
+                {
+                  "name": "email",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--role <role>",
+                  "description": "admin | member",
+                  "long": "--role",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": "member"
+                },
+                {
+                  "flags": "--space <id-or-slug>",
+                  "description": "Space to invite into (defaults to your only space)",
+                  "long": "--space",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "leave",
+              "path": "auth space leave",
+              "aliases": [],
+              "description": "Leave a space you do not own",
+              "args": [
+                {
+                  "name": "space",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "auth space list",
+              "aliases": [],
+              "description": "List spaces you own or belong to",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "members",
+              "path": "auth space members",
+              "aliases": [],
+              "description": "List a space's members",
+              "args": [
+                {
+                  "name": "space",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "remove",
+              "path": "auth space remove",
+              "aliases": [],
+              "description": "Remove a member from a space",
+              "args": [
+                {
+                  "name": "email",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--space <id-or-slug>",
+                  "description": "Space to remove from (defaults to your only space)",
+                  "long": "--space",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "role",
+              "path": "auth space role",
+              "aliases": [],
+              "description": "Change a member's role (owner-only for admin)",
+              "args": [
+                {
+                  "name": "email",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "role",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--space <id-or-slug>",
+                  "description": "Space to change (defaults to your only space)",
+                  "long": "--space",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "view",
+              "path": "auth space view",
+              "aliases": [],
+              "description": "Show one space (defaults to your only space)",
+              "args": [
+                {
+                  "name": "space",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "whoami",
@@ -9100,6 +9340,205 @@
       ],
       "subcommands": [
         {
+          "name": "audit",
+          "path": "events audit",
+          "aliases": [],
+          "description": "Alias of `agents events --include runs` — dispatched-run outcomes",
+          "args": [],
+          "options": [
+            {
+              "flags": "--include <families>",
+              "description": "Only these families (comma-sep): ops, activity, commands, runs, security",
+              "long": "--include",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--exclude <families>",
+              "description": "Drop these families (comma-sep): ops, activity, commands, runs, security",
+              "long": "--exclude",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--module <name>",
+              "description": "Only events from this group (e.g. teams, secrets, activity, daemon, routine, watchdog, browser)",
+              "long": "--module",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--command <path>",
+              "description": "Only this command path — prefix match (e.g. \"teams create\")",
+              "long": "--command",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--event <type>",
+              "description": "Only this typed event (repeatable, e.g. secrets.get, run.dispatched, pr.opened)",
+              "long": "--event",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--agent <name>",
+              "description": "Only events tagged with this agent",
+              "long": "--agent",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--caller <kind>",
+              "description": "Only this caller kind (claude-code, codex, gemini, cursor, terminal, script)",
+              "long": "--caller",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--level <level>",
+              "description": "Only this level: audit, warn, info, debug",
+              "long": "--level",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--session <id>",
+              "description": "Only events from this session (the provenance sessionId) — e.g. trace which session read a secret",
+              "long": "--session",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--bundle <name>",
+              "description": "Only events carrying this bundle in their payload — e.g. `--module secrets --bundle share` for every read of the share bundle",
+              "long": "--bundle",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--since <time>",
+              "description": "Only events newer than this (e.g. 2h, 7d, or ISO date)",
+              "long": "--since",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--limit <n>",
+              "description": "Max records to show; 0 for no cap (default 50)",
+              "long": "--limit",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "50"
+            },
+            {
+              "flags": "--json",
+              "description": "Output raw records as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-f, --follow",
+              "description": "Tail today's operational log live",
+              "short": "-f",
+              "long": "--follow",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "list",
+              "path": "events audit list",
+              "aliases": [],
+              "description": "Alias of `agents events audit` / `agents events --include runs`",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "verify",
+              "path": "events audit verify",
+              "aliases": [],
+              "description": "Walk the legacy hash-chain file (pre-unification history only)",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Output the result as JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        },
+        {
           "name": "emit",
           "path": "events emit",
           "aliases": [],
@@ -10604,7 +11043,7 @@
         }
       ],
       "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. `agents trends` is a deprecated alias of the mix tree.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
       "subcommands": [
         {
           "name": "browser-activity",
@@ -11284,6 +11723,47 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "trends",
+          "path": "insights trends",
+          "aliases": [],
+          "description": "Alias of `mix` — former top-level `agents trends`",
+          "args": [],
+          "options": [
+            {
+              "flags": "--days <n>",
+              "description": "Days of history to include",
+              "long": "--days",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "7"
+            },
+            {
+              "flags": "--json",
+              "description": "Emit JSON instead of tables",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents insights trends\n      agents insights mix",
+          "notes": "`agents insights trends` is the nested spelling of the former top-level\n      `agents trends`. Prefer `agents insights mix`.",
           "subcommands": []
         }
       ]
@@ -13869,7 +14349,7 @@
       "name": "org",
       "path": "org",
       "aliases": [],
-      "description": "Create and manage a team (a Rush \"space\") you can share with `agents auth login` collaborators",
+      "description": "Deprecated alias of `agents auth space` — create and manage a Prix space",
       "args": [],
       "options": [
         {
@@ -13884,7 +14364,7 @@
         }
       ],
       "examples": "agents org create acme-team\nagents org list\nagents org view acme-team\nagents org invite dev@example.com --role admin\nagents org members\nagents org role dev@example.com admin\nagents org remove dev@example.com\nagents org leave acme-team",
-      "notes": "Maps to the Rush backend's /api/v1/spaces (the free-tier team primitive), not /api/v1/orgs. Free tier: 1 owned space, 3 members per space. Every command needs `agents auth login` (or a `rush login` session) first. `--space` is only needed once you belong to more than one space.",
+      "notes": "Deprecated alias of `agents auth space`. Maps to the Rush backend's /api/v1/spaces (the free-tier team primitive), not /api/v1/orgs. Free tier: 1 owned space, 3 members per space. Every command needs `agents auth login` (or a `rush login` session) first. `--space` is only needed once you belong to more than one space.",
       "subcommands": [
         {
           "name": "create",
@@ -23370,7 +23850,7 @@
             }
           ],
           "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. `agents trends` is a deprecated alias of the mix tree.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
           "subcommands": [
             {
               "name": "browser-activity",
@@ -23828,6 +24308,47 @@
                   "negate": false
                 }
               ],
+              "subcommands": []
+            },
+            {
+              "name": "trends",
+              "path": "sessions insights trends",
+              "aliases": [],
+              "description": "Alias of `mix` — former top-level `agents trends`",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--days <n>",
+                  "description": "Days of history to include",
+                  "long": "--days",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": "7"
+                },
+                {
+                  "flags": "--json",
+                  "description": "Emit JSON instead of tables",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "agents insights trends\n      agents insights mix",
+              "notes": "`agents insights trends` is the nested spelling of the former top-level\n      `agents trends`. Prefer `agents insights mix`.",
               "subcommands": []
             }
           ]
@@ -28054,506 +28575,6 @@
       ]
     },
     {
-      "name": "trends",
-      "path": "trends",
-      "aliases": [],
-      "description": "Deprecated alias of `agents insights mix` — counter recipes over sessions + usage.db",
-      "args": [],
-      "options": [
-        {
-          "flags": "--days <n>",
-          "description": "Days of history to include",
-          "long": "--days",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "7"
-        },
-        {
-          "flags": "--json",
-          "description": "Emit JSON instead of tables",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Prefer the canonical spelling\n      agents insights mix\n\n      # Still works (prints a deprecation line)\n      agents trends\n      agents trends harness-mix --json",
-      "notes": "`agents trends` is a compatibility alias. New code and agent briefs should use\n      `agents insights mix` / `agents insights <recipe>`. Behavioural report remains\n      bare `agents insights`. Latency remains `agents perf`.",
-      "subcommands": [
-        {
-          "name": "browser-activity",
-          "path": "trends browser-activity",
-          "aliases": [],
-          "description": "Mix recipe: browser-activity",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "harness-mix",
-          "path": "trends harness-mix",
-          "aliases": [],
-          "description": "Mix recipe: harness-mix",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "mix",
-          "path": "trends mix",
-          "aliases": [],
-          "description": "Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history to include",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON instead of tables",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights harness-mix --json\n\n      # Raw usage events\n      agents insights query --kind secret --days 7\n\n      # List baked recipe ids\n      agents insights recipes",
-          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents usage`.\n      Skill/slash-command popularity is `agents sessions stats`.",
-          "subcommands": []
-        },
-        {
-          "name": "model-mix",
-          "path": "trends model-mix",
-          "aliases": [],
-          "description": "Mix recipe: model-mix",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "query",
-          "path": "trends query",
-          "aliases": [],
-          "description": "Raw usage-event query (usage.db)",
-          "args": [],
-          "options": [
-            {
-              "flags": "--kind <kind>",
-              "description": "One of: secret, agent, skill, plugin, browser, computer",
-              "long": "--kind",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--name <name>",
-              "description": "Resource name filter",
-              "long": "--name",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--event <event>",
-              "description": "Event name filter",
-              "long": "--event",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--limit <n>",
-              "description": "Max rows",
-              "long": "--limit",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "40"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "recipes",
-          "path": "trends recipes",
-          "aliases": [],
-          "description": "List baked mix-recipe ids",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "resource-mix",
-          "path": "trends resource-mix",
-          "aliases": [],
-          "description": "Mix recipe: resource-mix",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "secrets-hot",
-          "path": "trends secrets-hot",
-          "aliases": [],
-          "description": "Mix recipe: secrets-hot",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "session-volume",
-          "path": "trends session-volume",
-          "aliases": [],
-          "description": "Mix recipe: session-volume",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "token-ratio",
-          "path": "trends token-ratio",
-          "aliases": [],
-          "description": "Mix recipe: token-ratio",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "tools-per-session",
-          "path": "trends tools-per-session",
-          "aliases": [],
-          "description": "Mix recipe: tools-per-session",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
       "name": "uninstall",
       "path": "uninstall",
       "aliases": [],
@@ -28601,80 +28622,6 @@
       ],
       "examples": "# Preview everything that would change, without touching anything\n      agents uninstall --dry-run\n\n      # Restore your configs and move ~/.agents aside (recoverable)\n      agents uninstall\n\n      # Same, but hard-delete ~/.agents (no recovery)\n      agents uninstall --purge",
       "notes": "- Restores every ~/.<agent> that agents-cli adopted; a real config it never adopted is left untouched.\n      - Releases adopted launchers and strips the shim directory from your shell PATH.\n      - Without --purge, ~/.agents is moved to ~/.agents.removed-<timestamp> so nothing is lost.\n      - The CLI cannot delete its own running binary; it prints the final 'npm uninstall -g' step for you.",
-      "subcommands": []
-    },
-    {
-      "name": "unshare",
-      "path": "unshare",
-      "aliases": [],
-      "description": "Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).",
-      "args": [
-        {
-          "name": "targets",
-          "required": true,
-          "variadic": true,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "--keep-cover",
-          "description": "leave the sibling <slug>.png OG cover in place (default: delete it too)",
-          "long": "--keep-cover",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--keep-revisions",
-          "description": "leave retained revisions (<slug>/rev-*) in place (default: delete them too)",
-          "long": "--keep-revisions",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--if-exists",
-          "description": "treat an already-missing target as a no-op success instead of an error",
-          "long": "--if-exists",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--github-user <user>",
-          "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
-          "long": "--github-user",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "emit machine-readable results",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents unshare my-plan-a1b2\n\n      # Several at once\n      agents unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents unshare my-plan-a1b2 --if-exists",
-      "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents unshare (same command, different name).",
       "subcommands": []
     },
     {

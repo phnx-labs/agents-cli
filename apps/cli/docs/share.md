@@ -7,8 +7,9 @@ and you open the link to see if it worked.
 
 > **Moved in RUSH-2580.** The commands used to be top-level `agents share …`, with
 > provisioning split across `agents share setup` and `agents setup share`. They are now
-> `agents artifacts share …` and one `agents artifacts setup`. `agents unshare` is
-> unchanged.
+> `agents artifacts share …` and one `agents artifacts setup`. Taking a page down
+> is `agents artifacts unshare` (alias of `agents artifacts share delete`). Top-level
+> `agents unshare` is gone (RUSH-2989).
 
 ## Overview
 
@@ -21,7 +22,7 @@ agents artifacts share plan.html --json                       # machine-readable
 agents artifacts share status                                 # show endpoint, namespace, analytics, template
 agents artifacts share analytics                              # link to the Web Analytics dashboard
 agents artifacts share update                                 # re-deploy the Worker to the latest template
-agents unshare fleet                                          # take the link (+ its OG cover) down
+agents artifacts unshare fleet                                # take the link (+ its OG cover) down
 ```
 
 `setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
@@ -225,7 +226,7 @@ their canonical entry — they are history, not additional public pages.
 > plain last-write-wins would have been pre-revisions, but it silently breaks the
 > "default keep-all" guarantee above for that narrow case. Tracked as RUSH-2701.
 `agents artifacts share revisions <target>` accepts the same three target forms as
-`agents unshare` (full URL, `<user>/<slug>`, or a bare slug resolved against
+`agents artifacts unshare` (full URL, `<user>/<slug>`, or a bare slug resolved against
 your own namespace) and reads the Worker's `?revisions=json` route:
 
 ```json
@@ -286,7 +287,7 @@ synced config exists and the token is already available.
 | `agents sessions share <session> [--public] [--slug s] [--label text] [--expire spec] [--reasoning omit\|fold\|include] [--force] [--no-cover]` | Render one session as a redacted, self-contained page and publish it under `session-<shortId>`; print the link, or the full publish result with `--json`. **Unlisted unless `--public`**, and emails are masked before the scan runs (see [Sharing a session](#sharing-a-session)). |
 | `agents artifacts share list [--github-user u] [--agent name] [--session id] [--label-contains substr] [--json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--json` (see [Listing your shares](#listing-your-shares) below). `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
 | `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). Flags named `--for-user`/`--revisions-json`, not `--github-user`/`--json` — see the note below. |
-| `agents artifacts share delete <targets...>` / `agents unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
+| `agents artifacts share delete <targets...>` / `agents artifacts unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
 | `agents artifacts setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. It runs the interactive wizard (provision, join, or update an existing endpoint) only when you type **no** endpoint flag on a TTY; type any of `--bundle`/`--worker`/`--bucket`/`--account`/`--token`/`--domain`/`--analytics-token`, or run non-interactively, and it provisions directly with what you named — matching what the retired `agents share setup` did. |
 | `agents artifacts share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
 | `agents artifacts share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
@@ -348,17 +349,17 @@ endpoint; `agents artifacts share status` tells you whether an update is due (se
 
 ## Deleting a share
 
-`agents artifacts share delete <targets...>` (alias `agents unshare`) takes a published page down.
+`agents artifacts share delete <targets...>` (alias `agents artifacts unshare`) takes a published page down.
 It accepts several targets at once, in any of the three forms `agents artifacts share <file>` can
 produce or that you'd copy off a link:
 
 ```bash
-agents unshare https://share.agents-cli.sh/octocat/fleet-status-9f3c   # full URL
-agents unshare octocat/fleet-status-9f3c                               # <user>/<slug>
-agents unshare fleet-status-9f3c                                       # bare slug — resolved
+agents artifacts unshare https://share.agents-cli.sh/octocat/fleet-status-9f3c   # full URL
+agents artifacts unshare octocat/fleet-status-9f3c                               # <user>/<slug>
+agents artifacts unshare fleet-status-9f3c                                       # bare slug — resolved
                                                                         # against YOUR namespace,
                                                                         # the same way publish does
-agents unshare fleet-status-9f3c old-report --if-exists                # several at once
+agents artifacts unshare fleet-status-9f3c old-report --if-exists      # several at once
 ```
 
 By default it also deletes the sibling `<slug>.png` OG cover — a republish over a slug
@@ -407,9 +408,9 @@ the link can read the content, and the Worker serves it to them.
   file before upload and exits non-zero when it finds them — pass `--force` only when
   you have audited the page. This is the mechanical backstop for the RUSH-2428 incident
   (a report with account emails published world-readable by routine).
-- **A page can be taken down manually with `agents unshare`.** For anything that needs
+- **A page can be taken down manually with `agents artifacts unshare`.** For anything that needs
   to come down before expiry (or immediately, on an accidental publish of sensitive
-  content), `agents unshare <link>` deletes the page and its OG cover and verifies both
+  content), `agents artifacts unshare <link>` deletes the page and its OG cover and verifies both
   404 before reporting success — see [Deleting a share](#deleting-a-share).
 - **A true auth-gated read is a future option, not shipped.** For content that must be
   genuinely private rather than merely unlisted, the intended path is an opt-in,

@@ -12,10 +12,10 @@ whose *consumer* and *axis* match your question, not whichever you remember firs
 | Command | Role (one line) | Source | Consumer |
 |---|---|---|---|
 | **`events`** | **The one timeline.** Ops (secrets, keychain, daemon, browser, computer, command.*, teams, …) + agent activity + run-dispatch outcomes (`run.dispatched`). Filter with `--include`/`--exclude` families (`ops`, `activity`, `commands`, `runs`, `security`). | dated `events/*.jsonl` + per-session `activity/*.jsonl`, merged by `readUnifiedEvents` | Audit, debugging, monitoring (human + machine) |
-| **`audit`** | **Thin alias of `events --include runs`.** Legacy hash-chain file is verify-only for old history. | same events engine | Governance / quick run list |
+| **`events audit`** | **Thin alias of `events --include runs`.** Nested under events (RUSH-2989). Legacy hash-chain file is verify-only for old history. | same events engine | Governance / quick run list |
 | **`logs`** | **Thin alias of `events`.** Subcommands `audit`/`stats`/`rotate` re-dispatch. Content lives on `sessions` / `hosts logs`. | same events engine | Muscle-memory |
 | **`perf`** | **Latency rollups.** p50/p99 for hooks, CLI commands, and `agent.run` timings. Indexed SQLite — not a full scan of the audit log. Not popularity, not behaviour. | `~/.agents/.cache/perf/perf.db` (disposable) | Humans optimizing boot/run cost + `--json` |
-| **`insights`** | **How work looks — one verb, two engines.** Bare = behavioural report (transcript content, account split). `insights mix` / recipes = cheap counters (harness/model/token/secrets). Former top-level `agents trends` is a deprecated alias of the mix tree only. | behaviour: `sessions.db` + `session_insights`; mix: `sessions.db` + `usage.db` | Human + `--json` |
+| **`insights`** | **How work looks — one verb, two engines.** Bare = behavioural report (transcript content, account split). `insights mix` / `insights trends` / recipes = cheap counters (harness/model/token/secrets). Former top-level `agents trends` is gone (RUSH-2989). | behaviour: `sessions.db` + `session_insights`; mix: `sessions.db` + `usage.db` | Human + `--json` |
 | **`feed`** | **Needs-you inbox + status posts.** Open blocks (decisions agents are waiting on) + `feed post` milestones. The agent progress stream is `feed --filter updates` (deliberate posts, not tool noise). Scope with `--project`. Former top-level `agents inbox` is gone (RUSH-2984) — use `agents feed`. | `.history/feed/*` + active sessions | Humans (operator inbox) + agents (progress) |
 | **`output`** | **Productivity accounting.** Token burn vs shipped output (PRs, commits) across agents — the "was it worth it" axis. (`agents cost` is the pure $-and-duration sibling.) | `sessions.db` + git/gh | Human + `--json` |
 | **`sessions`** / **`roster`** | **Live agent roster + transcripts.** `roster` ≡ `sessions --active`. Browse/read past transcripts under `sessions`. `sessions stats` = skill/slash invocation leaderboard. | live pid/transcript probe + `sessions.db` | Human + `--json` |
@@ -36,9 +36,8 @@ with different stores, but the surface taught the wrong model.
 | **`agents sessions stats`** | Which *skills/slash-commands* were explicitly invoked? | `session_resource_usage` index |
 
 **Do not re-split mix into a peer top-level command.** Latency stays on `perf` so
-it is never confused with popularity or behaviour. `agents trends` remains only as
-a thin deprecated alias that prints one line and runs the mix tree
-(`commands/trends.ts` → `lib/analytics/mix-commands.ts`).
+it is never confused with popularity or behaviour. Former top-level `agents trends`
+is `agents insights mix` (also `agents insights trends`).
 
 ### Observe aliases (Phase 3)
 
@@ -161,19 +160,16 @@ timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
 Resource and session **frequency** under the `insights` verb — **not** model quota
 (`agents usage`) and **not** latency (`agents perf`). Implementation:
 `apps/cli/src/lib/analytics/` (recipes + `mix-commands.ts`); CLI entry is
-`apps/cli/src/commands/insights.ts` (registers the mix tree). The retired top-level
-spelling `agents trends` is a thin deprecated alias in `commands/trends.ts` only.
+`apps/cli/src/commands/insights.ts` (registers the mix tree). Former top-level
+`agents trends` is `agents insights mix` (also `agents insights trends`).
 
 ```
 agents insights mix                     # auto recipe board (skips empty sections)
 agents insights mix --days 30           # window
+agents insights trends                  # nested spelling of the former top-level
 agents insights harness-mix --json      # one baked recipe
 agents insights query --kind secret     # raw warehouse rows
 agents insights recipes                 # list recipe ids
-
-# Deprecated alias (prints one line, same mix tree)
-agents trends
-agents trends harness-mix --json
 ```
 
 | Store | Path | Holds |

@@ -31,7 +31,7 @@
  * the coaching prose by piping the AGGREGATE (never raw transcripts) through a headless
  * `claude -p`.
  *
- * `agents trends` is a thin deprecated alias of the mix tree only (see commands/trends.ts).
+ * Former top-level `agents trends` is `agents insights mix` / `agents insights trends`.
  */
 
 import type { Command } from 'commander';
@@ -752,7 +752,8 @@ function configureInsightsCommand(cmd: Command): void {
         \`agents insights mix\`      — cheap counters from sessions.db + usage.db
       Latency is \`agents perf\` (not mix). Quota is \`agents usage\`. Spend is
       \`agents insights cost\`; shipped output is \`agents insights output\`. Skill/slash popularity
-      is \`agents sessions stats\`. \`agents trends\` is a deprecated alias of the mix tree.
+      is \`agents sessions stats\`. Former top-level \`agents trends\` is \`agents insights mix\`
+      (also \`agents insights trends\`).
 
       The behavioural report parses in-scope transcripts once and caches facets; later runs
       re-read only files that changed. \`--refresh\` forces a full re-read.

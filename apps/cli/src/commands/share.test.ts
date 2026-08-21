@@ -49,7 +49,7 @@ async function freshShareModules() {
 
 /**
  * A root program carrying the REAL surface — `agents artifacts share ...` plus
- * the top-level `agents unshare` alias. Registering share.ts against a bare
+ * nested `agents artifacts unshare`. Registering share.ts against a bare
  * `new Command()` would give `agents share ...`, a shape the CLI no longer has
  * (RUSH-2580), so every CLI-level assertion goes through this.
  */
@@ -863,7 +863,7 @@ describe('runShareRevisions', () => {
     expect(result.count).toBe(0);
   });
 
-  it('accepts a full URL target, same as agents unshare', async () => {
+  it('accepts a full URL target, same as agents artifacts unshare', async () => {
     const { share } = await freshShareModules();
     const config = await currentConfig(share);
     const seen: string[] = [];

@@ -11,7 +11,7 @@ describe('registerAuthCommand', () => {
   it('registers login/whoami/logout, never top-level login/logout (RETIRED_TOP_LEVEL_COMMANDS)', () => {
     expect(auth).toBeDefined();
     const names = auth!.commands.map(c => c.name());
-    expect(names).toEqual(['login', 'whoami', 'logout']);
+    expect(names).toEqual(['login', 'whoami', 'logout', 'space']);
     // These must be nested under `auth`, never registered as bare top-level names —
     // 'login'/'logout' are in RETIRED_TOP_LEVEL_COMMANDS and must not resurrect.
     expect(program.commands.some(c => c.name() === 'login')).toBe(false);

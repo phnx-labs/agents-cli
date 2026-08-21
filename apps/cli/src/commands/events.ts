@@ -7,7 +7,7 @@
  * (per-session activity: plans, PRs, worktrees, sub-agents, artifacts). Run-dispatch
  * outcomes land here as `run.dispatched` (readable via `--include runs`).
  *
- * `agents audit` and `agents logs` are thin aliases of this command.
+ * `agents events audit` and `agents logs` are thin aliases of this command.
  *
  * Filter with sessions-style `--include` / `--exclude` families (ops, activity,
  * commands, runs, security) plus field filters (`--module`, `--event`, …).
@@ -21,6 +21,7 @@ import { readUnifiedEvents } from '../lib/event-stream.js';
 import { parseFamilyList, EVENT_FAMILIES, type EventFamily } from '../lib/event-families.js';
 import { ingestBatch } from '../lib/events-ingest.js';
 import { setHelpSections } from '../lib/help.js';
+import { registerAuditCommands } from './audit.js';
 
 /**
  * Resolve `--limit` into a record cap. `0` means "no cap" — without it there is
@@ -369,9 +370,8 @@ Examples:
   agents events -f                       Live tail (operational)
   agents events stats
   agents events rotate --days 7
-
-  agents audit                           Alias of: events --include runs
-  agents logs                            Alias of: events`)
+  agents events audit                    Alias of: events --include runs
+  agents logs                            Run log viewer (also aliases events audit/stats/rotate)`)
     .action((_options: EventsOptions, command: Command) =>
       runEventsCommand(command.optsWithGlobals() as EventsOptions));
 
@@ -392,6 +392,8 @@ Examples:
     .option('--days <n>', 'Retention period in days (default 7)', '7')
     .option('--max-mb <n>', 'Total event storage ceiling in MiB (default 50)', '50')
     .action((opts: { days?: string; maxMb?: string }) => runEventsRotate(opts));
+
+  registerAuditCommands(events);
 }
 
 /** Shared by `events rotate` and the `logs rotate` alias. */

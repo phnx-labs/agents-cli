@@ -120,12 +120,13 @@ describe('agents artifacts group', () => {
     expect(out).not.toContain(`'${DEFAULT_CF_BUNDLE}' bundle`);
   });
 
-  it('keeps `unshare` a TOP-LEVEL alias, not a member of the artifacts group', () => {
+  it('nests `unshare` under the artifacts group (RUSH-2989)', () => {
     const program = new Command();
     program.exitOverride();
     registerArtifactsCommands(program);
-    expect(program.commands.map((c) => c.name()).sort()).toEqual(['artifacts', 'unshare']);
-    const unshare = program.commands.find((c) => c.name() === 'unshare');
+    expect(program.commands.map((c) => c.name())).toEqual(['artifacts']);
+    const artifacts = program.commands.find((c) => c.name() === 'artifacts');
+    const unshare = artifacts?.commands.find((c) => c.name() === 'unshare');
     expect(unshare?.registeredArguments.map((a) => a.name())).toEqual(['targets']);
   });
 });
@@ -135,9 +136,10 @@ describe('the retired `agents share` top-level surface', () => {
     const program = await buildFullCommandTree();
     const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
     expect(names).not.toContain('share');
+    expect(names).not.toContain('unshare');
     expect(names).toContain('artifacts');
-    expect(names).toContain('unshare');
     expect(isKnownTopLevelCommand('share')).toBe(false);
+    expect(isKnownTopLevelCommand('unshare')).toBe(false);
     expect(isKnownTopLevelCommand('artifacts')).toBe(true);
   });
 
@@ -145,7 +147,7 @@ describe('the retired `agents share` top-level surface', () => {
     expect(RETIRED_TOP_LEVEL_COMMANDS.has('share')).toBe(true);
     // Guard the exact hazard the set exists for: whatever the spellchecker
     // picks as nearest, the retirement is what stops it from being run.
-    const { minDist } = closestTopLevelCommand('share', ['unshare', 'search', 'artifacts']);
+    const { minDist } = closestTopLevelCommand('share', ['search', 'artifacts']);
     expect(minDist).toBeGreaterThan(0);
   });
 });
