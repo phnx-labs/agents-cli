@@ -1,8 +1,10 @@
 /**
- * Alias command -- create top-level shim binaries that expand to `agents <subcommand>`.
+ * `agents setup alias` -- create top-level shim binaries that expand to
+ * `agents <subcommand>`. Nested under setup because the user is configuring
+ * this machine's PATH shortcuts, not operating a separate noun (RUSH-2965).
  *
- * Generates executable scripts in ~/.agents/shims/ (already on PATH from the
- * standard agents-cli install). Running `teams` becomes equivalent to
+ * Generates executable scripts in ~/.agents/.cache/shims/ (already on PATH from
+ * the standard agents-cli install). Running `teams` becomes equivalent to
  * `agents teams`. Aliases are tracked in ~/.agents/aliases.json so we can
  * list, regenerate, or remove them without scanning the shims directory
  * (which also holds agent CLI shims like claude/codex/gemini).
@@ -15,10 +17,13 @@ import * as path from 'path';
 import { getUserAgentsDir } from '../lib/state.js';
 import { getShimsDir } from '../lib/installations/shims.js';
 import { ALL_AGENT_IDS, AGENTS } from '../lib/agents.js';
-
-const ALIASES_FILE = path.join(getUserAgentsDir(), 'aliases.json');
+import { setHelpSections } from '../lib/help.js';
 
 interface AliasMap { [name: string]: string }
+
+function aliasesFile(): string {
+  return path.join(getUserAgentsDir(), 'aliases.json');
+}
 
 /** Names that would clobber an agent CLI shim or the `agents` binary itself. */
 function reservedNames(): Set<string> {
@@ -28,9 +33,10 @@ function reservedNames(): Set<string> {
 }
 
 function readAliases(): AliasMap {
-  if (!fs.existsSync(ALIASES_FILE)) return {};
+  const file = aliasesFile();
+  if (!fs.existsSync(file)) return {};
   try {
-    const parsed = JSON.parse(fs.readFileSync(ALIASES_FILE, 'utf-8'));
+    const parsed = JSON.parse(fs.readFileSync(file, 'utf-8'));
     return parsed && typeof parsed === 'object' ? parsed as AliasMap : {};
   } catch {
     return {};
@@ -38,8 +44,9 @@ function readAliases(): AliasMap {
 }
 
 function writeAliases(map: AliasMap): void {
-  fs.mkdirSync(path.dirname(ALIASES_FILE), { recursive: true });
-  fs.writeFileSync(ALIASES_FILE, JSON.stringify(map, null, 2) + '\n', 'utf-8');
+  const file = aliasesFile();
+  fs.mkdirSync(path.dirname(file), { recursive: true });
+  fs.writeFileSync(file, JSON.stringify(map, null, 2) + '\n', 'utf-8');
 }
 
 function shimPath(name: string): string {
@@ -63,10 +70,31 @@ function isAliasShim(filePath: string): boolean {
   }
 }
 
-export function registerAliasCommand(program: Command): void {
-  const cmd = program
+/** Register `agents setup alias` under the parent `setup` command. */
+export function registerAliasCommand(setupCmd: Command): void {
+  const cmd = setupCmd
     .command('alias')
     .description('Create shorthand binaries that expand to `agents <subcommand>`');
+
+  setHelpSections(cmd, {
+    examples: `
+      # Make \`teams\` run \`agents teams\`
+      agents setup alias add teams
+
+      # Shorthand for a longer expansion
+      agents setup alias add sess sessions preview
+
+      agents setup alias list
+      agents setup alias remove teams
+    `,
+    notes: `
+      Writes an executable shim into ~/.agents/.cache/shims/ (already on PATH after
+      \`agents setup\`) and records it in ~/.agents/aliases.json.
+
+      Names that collide with the agents binary or an agent CLI (claude, codex,
+      grok, …) are refused. Top-level \`agents alias\` is gone — use this group.
+    `,
+  });
 
   cmd
     .command('add <name> [expansion...]')
@@ -135,7 +163,7 @@ export function registerAliasCommand(program: Command): void {
       const entries = Object.entries(map);
 
       if (entries.length === 0) {
-        console.log(chalk.gray('No aliases. Try: agents alias add teams'));
+        console.log(chalk.gray('No aliases. Try: agents setup alias add teams'));
         return;
       }
 

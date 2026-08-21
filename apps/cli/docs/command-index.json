@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 77,
+  "groups": 76,
   "commands": 563,
   "root": {
     "name": "agents",
@@ -648,111 +648,6 @@
       "examples": "# Install the latest version of an agent\n      agents add claude@latest\n\n      # Install the oldest published version of an agent\n      agents add claude@oldest\n\n      # Install a specific version (reproducibility)\n      agents add claude@2.1.112\n\n      # Install multiple agents at once\n      agents add claude@latest codex@0.116.0\n\n      # Lock a version to this project only (won't affect global default)\n      agents add claude@2.1.100 --project\n\n      # Install a clean, separate copy that leaves your existing setup alone\n      agents add claude@2.1.112 --isolated",
       "notes": "- The first version you install becomes the default automatically.\n      - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.\n      - Multi-account: each installed version has separate auth, so you can install the same agent twice for two accounts.\n      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.",
       "subcommands": []
-    },
-    {
-      "name": "alias",
-      "path": "alias",
-      "aliases": [],
-      "description": "Create shorthand binaries that expand to `agents <subcommand>`",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "add",
-          "path": "alias add",
-          "aliases": [],
-          "description": "Create an alias shim. If expansion is omitted, defaults to <name>.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            },
-            {
-              "name": "expansion",
-              "required": false,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "alias list",
-          "aliases": [
-            "ls"
-          ],
-          "description": "Show installed aliases",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "remove",
-          "path": "alias remove",
-          "aliases": [
-            "rm"
-          ],
-          "description": "Delete an alias shim",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
     },
     {
       "name": "apply",
@@ -24811,9 +24706,116 @@
           "negate": false
         }
       ],
-      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog",
-      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
+      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog\n      agents setup alias add teams",
+      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n        agents setup alias add teams  # PATH shorthand: teams runs agents teams\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
       "subcommands": [
+        {
+          "name": "alias",
+          "path": "setup alias",
+          "aliases": [],
+          "description": "Create shorthand binaries that expand to `agents <subcommand>`",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Make `teams` run `agents teams`\n      agents setup alias add teams\n\n      # Shorthand for a longer expansion\n      agents setup alias add sess sessions preview\n\n      agents setup alias list\n      agents setup alias remove teams",
+          "notes": "Writes an executable shim into ~/.agents/.cache/shims/ (already on PATH after\n      `agents setup`) and records it in ~/.agents/aliases.json.\n\n      Names that collide with the agents binary or an agent CLI (claude, codex,\n      grok, …) are refused. Top-level `agents alias` is gone — use this group.",
+          "subcommands": [
+            {
+              "name": "add",
+              "path": "setup alias add",
+              "aliases": [],
+              "description": "Create an alias shim. If expansion is omitted, defaults to <name>.",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "expansion",
+                  "required": false,
+                  "variadic": true,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "setup alias list",
+              "aliases": [
+                "ls"
+              ],
+              "description": "Show installed aliases",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "remove",
+              "path": "setup alias remove",
+              "aliases": [
+                "rm"
+              ],
+              "description": "Delete an alias shim",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        },
         {
           "name": "browser",
           "path": "setup browser",

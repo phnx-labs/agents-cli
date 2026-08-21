@@ -28,6 +28,7 @@ import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
+import { registerAliasCommand } from './alias.js';
 import { runPreferencesStep } from './setup-preferences.js';
 import { getConfiguredDefaultProfileName, getProfile, getAutoDetectedProfile, isProfileLaunchableHere } from '../lib/browser/profiles.js';
 import { listInstalledBrowsers } from '../lib/browser/chrome.js';
@@ -414,7 +415,7 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|mine|secrets|fleet`.
+  // Capability subcommands: `agents setup browser|computer|mine|secrets|fleet|alias`.
   // Share/artifact publishing is set up by `agents artifacts setup` (RUSH-2580);
   // the hub below still offers it as a phase via runShareWizard.
   registerSetupBrowserCommand(setupCmd);
@@ -423,6 +424,7 @@ export function registerSetupCommand(program: Command): void {
   registerSetupSecretsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
   registerSetupWatchdogCommand(setupCmd);
+  registerAliasCommand(setupCmd);
   setupCmd.command('status')
     .description('Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.')
     .option('--json', 'print machine-readable JSON')
@@ -447,6 +449,7 @@ export function registerSetupCommand(program: Command): void {
       agents setup secrets
       agents setup fleet
       agents setup watchdog
+      agents setup alias add teams
     `,
     notes: `
       What it does:
@@ -462,6 +465,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup secrets     # choose secrets backend/policy defaults + import
         agents setup fleet       # discover Tailscale devices + configure SSH access
         agents setup watchdog    # choose which devices run the daemon watchdog pass
+        agents setup alias add teams  # PATH shorthand: teams runs agents teams
 
       To install CLIs from agents.yaml and sync resources into version homes:
         agents sync --local -y

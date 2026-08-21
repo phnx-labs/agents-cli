@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_77 command groups · 563 commands._
+_76 command groups · 563 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -40,15 +40,6 @@ agents accounts view <name>                 Show safe account metadata, custody,
 
 ```
 agents add <specs...>  Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
-```
-
-## alias — Create shorthand binaries that expand to `agents <subcommand>`
-
-```
-agents alias                            Create shorthand binaries that expand to `agents <subcommand>`
-agents alias add <name> [expansion...]  Create an alias shim. If expansion is omitted, defaults to <name>.
-agents alias list                       Show installed aliases
-agents alias remove <name>              Delete an alias shim
 ```
 
 ## apply — Reconcile the fleet to a declared profile: install agents and sync config.
@@ -787,18 +778,22 @@ agents sessions watch                       Stream canonical live and recoverabl
 ## setup — Set up agents-cli, or re-open the capability onboarding hub.
 
 ```
-agents setup                     Set up agents-cli, or re-open the capability onboarding hub.
-agents setup browser             Set up `agents browser` — detect an installed browser and create the default profile.
-agents setup computer            Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
-agents setup fleet               Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
-agents setup mine                White-label the CLI — mint your own personally-named binary (e.g. `jack`).
-agents setup mine init <name>    Mint your own branded CLI that runs every agents verb under <name>
-agents setup mine list           Show your brands and what each has turned off
-agents setup mine remove <name>  Remove a brand (its shim + config)
-agents setup mine toggle <name>  Enable/disable features for a brand
-agents setup secrets             Configure `agents secrets` defaults and optionally import existing secrets.
-agents setup status              Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.
-agents setup watchdog            Choose the devices where the daemon watchdog pass runs.
+agents setup                                  Set up agents-cli, or re-open the capability onboarding hub.
+agents setup alias                            Create shorthand binaries that expand to `agents <subcommand>`
+agents setup alias add <name> [expansion...]  Create an alias shim. If expansion is omitted, defaults to <name>.
+agents setup alias list                       Show installed aliases
+agents setup alias remove <name>              Delete an alias shim
+agents setup browser                          Set up `agents browser` — detect an installed browser and create the default profile.
+agents setup computer                         Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
+agents setup fleet                            Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.
+agents setup mine                             White-label the CLI — mint your own personally-named binary (e.g. `jack`).
+agents setup mine init <name>                 Mint your own branded CLI that runs every agents verb under <name>
+agents setup mine list                        Show your brands and what each has turned off
+agents setup mine remove <name>               Remove a brand (its shim + config)
+agents setup mine toggle <name>               Enable/disable features for a brand
+agents setup secrets                          Configure `agents secrets` defaults and optionally import existing secrets.
+agents setup status                           Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.
+agents setup watchdog                         Choose the devices where the daemon watchdog pass runs.
 ```
 
 ## skills — Add domain-specific capabilities to agents via packaged SKILL.md files

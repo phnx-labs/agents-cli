@@ -2116,7 +2116,7 @@ export function pruneOrphanedCommandShim(fileName: string): boolean {
   } catch {
     return false;
   }
-  if (content.includes('# Alias shim:')) return false; // a user `agents alias` — leave it
+  if (content.includes('# Alias shim:')) return false; // a user `agents setup alias` shim — leave it
   const bin = readAgentsBinFromShim(shimPath);
   if (!bin) return false; // not an AGENTS_BIN-baked shim
   if (fs.existsSync(bin)) return false; // its install is still alive — leave it

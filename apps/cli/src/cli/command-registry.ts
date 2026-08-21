@@ -80,7 +80,6 @@ export const loadInsights: ModuleLoader = async () => (await import('../commands
 export const loadPerf: ModuleLoader = async () => (await import('../commands/perf.js')).registerPerfCommand;
 // Thin deprecated alias of `agents insights mix` — no second mix implementation.
 export const loadTrends: ModuleLoader = async () => (await import('../commands/trends.js')).registerTrendsCommand;
-export const loadAlias: ModuleLoader = async () => (await import('../commands/alias.js')).registerAliasCommand;
 export const loadPty: ModuleLoader = async () => (await import('../commands/pty.js')).registerPtyCommands;
 export const loadTmux: ModuleLoader = async () => (await import('../commands/tmux.js')).registerTmuxCommands;
 export const loadWatchdog: ModuleLoader = async () => (await import('../commands/watchdog.js')).registerWatchdogCommand;
@@ -200,7 +199,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   insights: [loadInsights],
   perf: [loadPerf],
   trends: [loadTrends],
-  alias: [loadAlias],
   pty: [loadPty],
   tmux: [loadTmux],
   watchdog: [loadWatchdog],
