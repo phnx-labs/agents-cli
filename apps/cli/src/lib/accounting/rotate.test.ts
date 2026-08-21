@@ -505,6 +505,42 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     expect(['2.1.181', '2.1.207']).toContain(result.picked.version);
   });
 
+  it('a verified MINORITY does not capture every launch — the 429-throttled regime', () => {
+    // The 2026-08-20 incident: the usage endpoint 429-throttles a machine, so
+    // each refresh cycle confirms exactly one account. Narrowing to verified
+    // made `choose` run over a one-element list — the same account picked on
+    // every launch, which kept refreshing its own snapshot and locked the loop
+    // in. One fresh account among eight stale ones must not be a pin.
+    const fresh1 = candidate({ version: '2.1.219', usageSnapshot: fresh(10) });
+    const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
+      .map((version) => candidate({ version, usageSnapshot: dayOld(0) }));
+
+    const picks = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      picks.add(pickBalancedCandidate([fresh1, ...stale], NOW)!.picked.version);
+    }
+
+    // Weighted-random over the whole pool: with near-equal weights, 200 draws
+    // landing on one account has probability ~(1/8)^199 — a distribution with
+    // a single member means the narrowing collapse is back.
+    expect(picks.size).toBeGreaterThan(1);
+  });
+
+  it('verified coverage of half the pool still narrows to the verified set', () => {
+    // ceil(4/2) = 2 verified of 4: representative — stale candidates must not
+    // dilute a majority-confirmed picture.
+    const verifiedA = candidate({ version: '2.1.219', usageSnapshot: fresh(10) });
+    const verifiedB = candidate({ version: '2.1.220', usageSnapshot: fresh(20) });
+    const staleA = candidate({ version: '2.1.181', usageSnapshot: dayOld(0) });
+    const staleB = candidate({ version: '2.1.207', usageSnapshot: dayOld(0) });
+
+    for (let i = 0; i < 50; i++) {
+      const result = pickBalancedCandidate([staleA, verifiedA, staleB, verifiedB], NOW)!;
+      expect(['2.1.219', '2.1.220']).toContain(result.picked.version);
+      expect(result.usageUnverified).toBe(false);
+    }
+  });
+
   it('a verified rate-limited account is still excluded outright, not merely deprioritized', () => {
     const limited = candidate({ version: '2.1.170', usageSnapshot: fresh(100) });
     const ok = candidate({ version: '2.1.219', usageSnapshot: fresh(20) });

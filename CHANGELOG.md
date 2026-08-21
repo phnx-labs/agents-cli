@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **Balanced rotation no longer pins every launch to one account when the usage
+  refresher is throttled (RUSH-2858).** `preferVerified` narrowed the candidate
+  pool to accounts with a <5-minute usage snapshot before the weighted-random
+  draw. Under Anthropic's per-machine 429 throttling of the usage endpoint,
+  exactly one account tends to be that fresh at any moment, so the "random"
+  draw ran over a one-element list and `--strategy balanced` launched the same
+  account/version every time — and launching into it kept its snapshot fresh,
+  locking the loop in while the other accounts were never picked or probed.
+  Verified-only narrowing now applies only when verified accounts cover at
+  least half the pool; below that, the whole pool competes, with fresh accounts
+  weighted by their confirmed numbers and stale/unknown ones at the default
+  full weight. Source: `apps/cli/src/lib/accounting/rotate.ts`
+  (`preferVerified`).
+
 - **`agents doctor --fix` names the exact removal command for a duplicate install it will not purge, and the multi-install banner only advertises `--fix` when it can really resolve the peer (RUSH-2705).** A healthy `>=1.22.30` duplicate
   global (for example a second install under nvm) was detected and nagged about on
   every command, but `--fix` deliberately never deletes it and ended on

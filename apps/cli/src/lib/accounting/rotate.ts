@@ -411,13 +411,28 @@ export function pickBalancedCandidate(
 }
 
 /**
- * Choose from the VERIFIED candidates when any exist, else from the whole pool.
+ * Choose from the VERIFIED candidates when they are a representative share of
+ * the pool (at least half), else from the whole pool.
  *
  * An eligible account whose usage we could not confirm is a guess, not a green
  * light: the snapshot reads "48% used" with equal confidence whether it was
  * captured a minute or three days ago, and a box whose refresh is failing stays
  * wrong indefinitely. Confirmed headroom therefore beats apparent headroom, even
  * when the unconfirmed number looks better.
+ *
+ * But narrowing to a verified MINORITY inverts the safety. When the usage
+ * endpoint 429-throttles a machine, each refresh cycle confirms roughly one
+ * account before backing off — so "verified" is a singleton, `choose` runs over
+ * a one-element list, and every launch lands on the same account. Launching
+ * into it refreshes that account's snapshot again, so it stays the only
+ * verified candidate while the rest are never picked and never probed: the
+ * rotation degrades to a fixed pin that burns one account to its weekly cap
+ * while its siblings idle (observed 2026-08-20 across yosemite-s0/s1 — the
+ * "same version every time under --strategy balanced" incident). Verified-only
+ * choice is therefore applied only when the verified set covers at least half
+ * the pool; below that the whole pool competes, with fresh candidates weighted
+ * by their confirmed numbers and stale/unknown ones at the default full weight
+ * `capacityWeight` already assigns to "no signal".
  *
  * `healthy` deliberately keeps every eligible candidate rather than just the
  * verified ones. Declining to *pick* an account on stale data and declining to
@@ -432,8 +447,9 @@ function preferVerified(
   choose: (from: RotateCandidate[]) => RotateCandidate,
 ): { picked: RotateCandidate; usageUnverified: boolean } {
   const verified = pool.filter((c) => isUsageVerified(c, nowMs));
+  const representative = verified.length >= Math.ceil(pool.length / 2);
   return {
-    picked: choose(verified.length > 0 ? verified : pool),
+    picked: choose(representative ? verified : pool),
     usageUnverified: verified.length === 0,
   };
 }
