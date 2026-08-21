@@ -44,6 +44,7 @@ import {
   resolveVersion,
   resolveVersionAlias,
   listInstalledVersions,
+  healDanglingVersionPointers,
   getAvailableResources,
   getActuallySyncedResources,
   getProjectOnlyResources,
@@ -58,6 +59,7 @@ import {
   getVersionHomePath,
   type ResourceSelection,
   type SyncResult,
+  type HealedVersionPointers,
   type AvailableResources,
 } from '../lib/installations/versions.js';
 import { capableAgents } from '../lib/capabilities.js';
@@ -619,6 +621,28 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   const cwd = opts.cwd || process.cwd();
   const force = !!opts.force;
 
+  // RUSH-2471: self-heal any version pointer (global/isolated default, ~/.<agent>
+  // symlink) left aimed at a version that is no longer installed BEFORE resolving
+  // the version to sync. Skipped on --dry-run since it mutates on-disk pointers.
+  let healed: HealedVersionPointers = {};
+  if (!opts.dryRun) {
+    healed = await healDanglingVersionPointers(agentId, cwd);
+    if (!quiet && !json) {
+      if (healed.globalDefault) {
+        const to = healed.globalDefault.to ? `@${healed.globalDefault.to}` : 'none';
+        outLog(chalk.yellow(`Reassigned ${agentLabel(agentId)} default from @${healed.globalDefault.from} (not installed) to ${to}.`));
+      }
+      if (healed.isolatedDefault) {
+        const to = healed.isolatedDefault.to ? `@${healed.isolatedDefault.to}` : 'none';
+        outLog(chalk.yellow(`Reassigned ${agentLabel(agentId)} isolated default from @${healed.isolatedDefault.from} (not installed) to ${to}.`));
+      }
+      if (healed.configSymlink) {
+        outLog(chalk.yellow(`Repointed ${agentLabel(agentId)} config symlink from @${healed.configSymlink.from} (not installed) to @${healed.configSymlink.to}.`));
+      }
+    }
+  }
+  const healedPointers = Object.keys(healed).length > 0 ? { healedPointers: healed } : {};
+
   // Promote to @all when no version can be resolved and multiple are installed.
   // Replaces the old "no default version pinned" error: bare `agents sync claude`
   // with multiple installed versions and no pinned default now syncs them all.
@@ -688,6 +712,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
         mode: 'agent-all',
         agent: agentId,
         repo: repoScope,
+        ...healedPointers,
         versions: versions.map(({ version: v, result }) => ({
           version: v,
           commands: !!result.commands,
@@ -894,6 +919,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   if (json) {
     emitJson({
       ...agentSyncJson(agentId, version, result),
+      ...healedPointers,
       projectCompile: projectCompile
         ? {
             compiled: !!projectCompile.compiled,

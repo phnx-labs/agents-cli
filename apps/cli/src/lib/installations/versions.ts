@@ -43,6 +43,7 @@ import {
   getConfigSymlinkVersion,
   ensureClaudeInsideSymlink,
   assertIsolationBoundary,
+  isIsolationProtected,
 } from './shims.js';
 import { importInstallScriptBinary } from '../import.js';
 import {
@@ -61,6 +62,7 @@ import {
   isVersionIsolated,
   listInstalledVersions,
   pickCanonicalGlobalBinaryVersion,
+  resolveVersion,
 } from './store.js';
 export * from './store.js';
 import { INSTALLATION_RECORD_FILE } from './types.js';
@@ -1922,6 +1924,79 @@ export function removeAllVersions(agent: AgentId): number {
   return removed;
 }
 
+export interface HealedVersionPointers {
+  /** Global default reassigned off a not-installed version (`to: null` = cleared). */
+  globalDefault?: { from: string; to: string | null };
+  /** Isolated default (bare `agents run <agent>`) reassigned off a not-installed version. */
+  isolatedDefault?: { from: string; to: string | null };
+  /** `~/.<agent>` config symlink repointed off a not-installed version. */
+  configSymlink?: { from: string; to: string };
+}
+
+/**
+ * Repoint an agent's version pointers — the global/isolated default and the
+ * `~/.<agent>` config symlink — off any version that is no longer installed, so
+ * neither `agents sync`/`agents run` resolution nor the conventional-path home
+ * can land on a dead version (RUSH-2471).
+ *
+ * How a pointer goes dangling: {@link removeVersion} reassigns the defaults and
+ * clears the config symlink only when IT removes the pointed-at version. A
+ * version-home whose launch binary disappears by any other route — grok
+ * self-updated its per-version binary out from under the old dir, a manual
+ * delete, a half-finished install that seeded the home but never landed the
+ * binary — leaves the default and/or the symlink pointing at something
+ * {@link isVersionInstalled} reports as gone.
+ *
+ * Called from the sync resolve path so the invariant self-heals. Mirrors
+ * {@link removeVersion}'s reassignment: the global default prefers the newest
+ * NON-isolated survivor else clears; the isolated default prefers the newest
+ * remaining isolated copy else clears. The symlink is repointed at the now-healed
+ * resolved default, else the newest installed non-isolated version. A symlink
+ * already on an installed version, a real (non-symlink) config dir, and an
+ * isolated-only agent are left untouched.
+ */
+export async function healDanglingVersionPointers(
+  agent: AgentId,
+  cwd: string,
+): Promise<HealedVersionPointers> {
+  const healed: HealedVersionPointers = {};
+  const installed = listInstalledVersions(agent);
+
+  const globalDefault = getGlobalDefault(agent);
+  if (globalDefault !== null && !isVersionInstalled(agent, globalDefault)) {
+    const promotable = installed.filter((v) => !isVersionIsolated(agent, v));
+    const to = promotable.length > 0 ? promotable[promotable.length - 1] : undefined;
+    setGlobalDefault(agent, to);
+    healed.globalDefault = { from: globalDefault, to: to ?? null };
+  }
+
+  const isolatedDefault = getIsolatedDefault(agent);
+  if (isolatedDefault !== null && !isVersionInstalled(agent, isolatedDefault)) {
+    const survivors = installed.filter((v) => isVersionIsolated(agent, v));
+    const to = survivors.length > 0 ? survivors[survivors.length - 1] : undefined;
+    setIsolatedDefault(agent, to);
+    healed.isolatedDefault = { from: isolatedDefault, to: to ?? null };
+  }
+
+  const current = getConfigSymlinkVersion(agent);
+  const nonIsolated = installed.filter((v) => !isVersionIsolated(agent, v));
+  if (
+    current !== null &&
+    !isVersionInstalled(agent, current) &&
+    !isIsolationProtected(agent) &&
+    nonIsolated.length > 0
+  ) {
+    const pinned = resolveVersion(agent, cwd);
+    const target =
+      pinned && isVersionInstalled(agent, pinned) && !isVersionIsolated(agent, pinned)
+        ? pinned
+        : nonIsolated[nonIsolated.length - 1];
+    const result = await switchConfigSymlink(agent, target);
+    if (result.success) healed.configSymlink = { from: current, to: target };
+  }
+
+  return healed;
+}
 
 /**
  * Normalize a user-supplied @version token across CLI subcommands.

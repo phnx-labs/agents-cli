@@ -150,6 +150,14 @@ Key behaviors:
 - Real directories are backed up before being replaced with symlinks
 - Subsequent switches just update the symlink target (no new backups)
 - Each version has isolated auth in its `home/` directory
+- `agents sync <agent>` self-heals **dangling version pointers**: the global
+  default, the isolated default, and the `~/.<agent>` config symlink are each
+  repointed off any version that is no longer installed before the sync resolves
+  a version. The default goes to the newest non-isolated installed version
+  (never auto-promoting an isolated install), the symlink to the resolved default
+  else the newest non-isolated installed version. A pointer already on an
+  installed version, a real config directory, and isolated-only agents are left
+  untouched (`healDanglingVersionPointers`, RUSH-2471).
 
 ## Uninstalling (reversing adoption)
 
