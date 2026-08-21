@@ -41,12 +41,15 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   exactly 343 x 20 = **6,860 `statx`, 740ms**. Nothing debounces the rebuild, so
   those walks stacked and the panel — which has no fetch, spinner or timeout of its
   own — simply rendered empty until they drained. `getSessionPathBySessionId` now
-  builds a filename index by listing each project dir once and memoises each
-  resolved path, so the same two cases cost **0 and 20 `statx`, ~70ms**. A candidate
-  from either cache is still confirmed with a single `stat`, so a transcript that
-  was deleted or moved re-resolves instead of serving a dead path, and a session
-  that starts writing after the index was built is picked up on the next lookup
-  past a 500ms window. Source: `src/vscode/sessions.vscode.ts`.
+  builds one shared filename index and memoises each resolved path. Measured with
+  the real concurrent caller pattern over four refreshes, 20 resolvable agents drop
+  from **15,196 to 1,478 `getdents64`** calls; 20 agents with no transcript drop
+  from **58,516 to 3,644 `getdents64`**, and the miss refresh falls from **501ms to
+  109ms**. A candidate from either cache is still confirmed with a single `stat`,
+  so a transcript that was deleted or moved re-resolves instead of serving a dead
+  path, and a session that starts writing after the index was built is picked up on
+  the next lookup past a 500ms window. Source:
+  `src/vscode/sessions.vscode.ts`.
 
 - **The Fleet payload no longer waits on the cloud API, and rebuilds stop
   stacking.** `pushFloorUpdate` awaited `getFloorTerminalDetailsForWebview` and
