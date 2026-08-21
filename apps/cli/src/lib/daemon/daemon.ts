@@ -2307,6 +2307,8 @@ export function stopDaemon(): DaemonStopResult {
             console.error(`[debug] launchctl unload failed: ${err.message}`);
           }
         }
+      } else {
+        process.stderr.write(`[agents] ${reg.reason}\n`);
       }
       try { fs.unlinkSync(plistPath); } catch { /* plist already removed */ }
     }
@@ -2322,6 +2324,8 @@ export function stopDaemon(): DaemonStopResult {
           console.error(`[debug] systemctl stop failed: ${err.message}`);
         }
       }
+    } else {
+      process.stderr.write(`[agents] ${reg.reason}\n`);
     }
     const unitPath = getSystemdUnitPath();
     if (fs.existsSync(unitPath)) {

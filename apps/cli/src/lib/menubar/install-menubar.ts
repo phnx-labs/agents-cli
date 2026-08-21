@@ -497,6 +497,8 @@ export function disableMenubarService(): void {
     const uid = process.getuid?.() ?? 0;
     try { execFileSync('launchctl', ['bootout', `gui/${uid}/${serviceLabel()}`], { stdio: ['ignore', 'ignore', 'ignore'] }); }
     catch { try { execFileSync('launchctl', ['unload', '-w', plist], { stdio: ['ignore', 'ignore', 'ignore'] }); } catch { /* not loaded */ } }
+  } else {
+    process.stderr.write(`[agents] ${reg.reason}\n`);
   }
   try { fs.unlinkSync(plist); } catch { /* already gone */ }
   try {
