@@ -21,30 +21,42 @@ links:
 State as of 2026-08-20: **15 stars, 17 open issues, 0 labelled `good first issue`,
 0 topics on three sibling repos, nothing posted to any venue.**
 
-Four decisions are yours. Everything else is work I can execute once those land.
+**2 of 26 tasks are complete.** Four decisions are yours; everything else is work I
+can execute once those land.
 
 <figure>
-<svg viewBox="0 0 760 150" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Progress bar showing 1 of 18 launch tasks complete, 4 decisions pending">
-  <text x="20" y="24" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#8a8a8a">LAUNCH READINESS</text>
+<svg viewBox="0 0 760 250" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Progress bars for all five phases: 2 of 26 launch tasks complete, plus 4 decisions pending">
+  <text x="20" y="24" font-family="system-ui, sans-serif" font-size="12" font-weight="600" fill="#8a8a8a">LAUNCH READINESS — 2 of 26 tasks complete</text>
 
-  <text x="20" y="56" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Decisions</text>
-  <rect x="120" y="45" width="600" height="14" rx="3" fill="#e8e8e8"/>
-  <rect x="120" y="45" width="0" height="14" rx="3" fill="#4d7c0f"/>
-  <text x="728" y="56" font-family="ui-monospace, monospace" font-size="11" fill="#b45309">0 / 4</text>
+  <text x="20" y="56" font-family="ui-monospace, monospace" font-size="11" fill="#b45309">Decisions</text>
+  <rect x="150" y="45" width="540" height="14" rx="3" fill="#e8e8e8"/>
+  <text x="700" y="56" font-family="ui-monospace, monospace" font-size="11" fill="#b45309">0 / 4</text>
 
-  <text x="20" y="86" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Page fixes</text>
-  <rect x="120" y="75" width="600" height="14" rx="3" fill="#e8e8e8"/>
-  <rect x="120" y="75" width="120" height="14" rx="3" fill="#4d7c0f"/>
-  <text x="728" y="86" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">1 / 5</text>
+  <text x="20" y="86" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Phase 0 · bugs</text>
+  <rect x="150" y="75" width="540" height="14" rx="3" fill="#e8e8e8"/>
+  <text x="700" y="86" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0 / 4</text>
 
-  <text x="20" y="116" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Placement</text>
-  <rect x="120" y="105" width="600" height="14" rx="3" fill="#e8e8e8"/>
-  <rect x="120" y="105" width="0" height="14" rx="3" fill="#4d7c0f"/>
-  <text x="728" y="116" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0 / 5</text>
+  <text x="20" y="116" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Phase 1 · page</text>
+  <rect x="150" y="105" width="540" height="14" rx="3" fill="#e8e8e8"/>
+  <rect x="150" y="105" width="108" height="14" rx="3" fill="#4d7c0f"/>
+  <text x="700" y="116" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">1 / 5</text>
 
-  <text x="20" y="140" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">Research and drafting are done and merged. Execution has not started.</text>
+  <text x="20" y="146" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Phase 2 · lists</text>
+  <rect x="150" y="135" width="540" height="14" rx="3" fill="#e8e8e8"/>
+  <text x="700" y="146" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0 / 5</text>
+
+  <text x="20" y="176" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Phase 3 · ignition</text>
+  <rect x="150" y="165" width="540" height="14" rx="3" fill="#e8e8e8"/>
+  <text x="700" y="176" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">0 / 8</text>
+
+  <text x="20" y="206" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">Phase 4 · cadence</text>
+  <rect x="150" y="195" width="540" height="14" rx="3" fill="#e8e8e8"/>
+  <rect x="150" y="195" width="135" height="14" rx="3" fill="#4d7c0f"/>
+  <text x="700" y="206" font-family="ui-monospace, monospace" font-size="11" fill="#7a7a7a">1 / 4</text>
+
+  <text x="20" y="238" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">Research and drafting are done and merged. Execution against a venue has not started.</text>
 </svg>
-<figcaption>One of eighteen tasks complete. The research phase is finished; nothing has been executed against a venue.</figcaption>
+<figcaption>All five phases, 26 rows total. The two complete are the README hero fix (Phase 1) and the already-running weekly release cadence (Phase 4). Decisions are shown separately because they gate the rest rather than being tasks.</figcaption>
 </figure>
 
 ## Findings
@@ -112,7 +124,7 @@ is the differentiated one and no competitor demo shows it.
 
 | ✓ | Target | Owner | Notes |
 | --- | --- | --- | --- |
-| ☐ | `affaan-m/everything-claude-code` | Me | 163k stars — the single biggest one |
+| ☐ | `affaan-m/ECC` (was `everything-claude-code`) | Me | **241,474 stars** — the single biggest one. Renamed since the research; use the current path |
 | ☐ | `hesreallyhim/awesome-claude-code` | Me | |
 | ☐ | `sst/opencode` adjacent-tool lists | Me | |
 | ☐ | `punkpeye/awesome-mcp-servers` | Me | Only if an MCP surface genuinely qualifies |
@@ -153,7 +165,7 @@ those that took the spike and stopped.
 
 | Milestone | Benchmark | Current |
 | --- | --- | --- |
-| Trending eligibility | ~50 stars/day | 0.18/day |
+| Trending eligibility | ~50 stars/day | **0.12/day** since the repo was created 2026-04-20 (15 stars / 122 days); 0.18/day if measured from the first star on 2026-05-30 |
 | A coordinated launch | ~1,000 stars in 72h | never attempted |
 | Genuine traction | ~6,000 stars in 7 days | — |
 

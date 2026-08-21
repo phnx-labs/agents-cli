@@ -16,8 +16,9 @@ links:
 
 ## Summary
 
-The repo has **15 stars in 194 days** (first star 2026-05-30, latest 2026-08-20).
-That is 0.18 stars/day. Language-specific GitHub Trending starts at roughly
+The repo has **15 stars in 122 days** (created 2026-04-20; first star 2026-05-30,
+latest 2026-08-20). That is **0.12 stars/day** since creation, or 0.18/day measured
+from the first star. Language-specific GitHub Trending starts at roughly
 **50 stars/day**. Nothing in the current setup is within two orders of magnitude
 of the discovery threshold, and no coordinated launch has ever been run.
 
@@ -149,8 +150,9 @@ Every number below was pulled live from the GitHub and npm APIs on 2026-08-20.
 
 | Signal | Measured value | What it implies |
 | --- | --- | --- |
-| Stars, `phnx-labs/agi-cli` | **15** | ~0.18/day since the first star |
-| First star to today | 2026-05-30 to 2026-08-20 (82 days) | 194 days since repo creation |
+| Stars, `phnx-labs/agi-cli` | **15** | 0.12/day since creation; 0.18/day since the first star |
+| Repo created | 2026-04-20 | **122 days** to 2026-08-20 |
+| First star to today | 2026-05-30 to 2026-08-20 | 82 days |
 | Stars, `muqsitnawaz/agents-cli` | **3** | Split equity; resolved 2026-08-20 by making it private |
 | Traffic on the mirror | **3 views / 3 uniques in 14 days** | No discovery surface at all |
 | Topics on `agi-cli` | 10, which is fine | `.agents-system`, `.agents-extras`, `homebrew-tap` have **0** |
@@ -176,10 +178,10 @@ visitors will read as a broken embed.
 ### Star trajectory against a launch benchmark
 
 <figure>
-<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two panels comparing this repo's 15 stars over 194 days against a coordinated launch reaching 1000 stars in 72 hours">
+<svg viewBox="0 0 760 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Two panels comparing this repo's 15 stars over 122 days against a coordinated launch reaching 1000 stars in 72 hours">
   <text x="20" y="24" font-family="system-ui, sans-serif" font-size="13" font-weight="600" fill="#8a8a8a">ACTUAL — agi-cli</text>
   <text x="20" y="52" font-family="ui-monospace, monospace" font-size="22" font-weight="700" fill="#b45309">15 stars</text>
-  <text x="20" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">194 days · 0.18 per day</text>
+  <text x="20" y="70" font-family="system-ui, sans-serif" font-size="11" fill="#7a7a7a">122 days · 0.12 per day</text>
   <line x1="60" y1="250" x2="340" y2="250" stroke="#8a8a8a" stroke-width="1"/>
   <line x1="60" y1="100" x2="340" y2="100" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"/>
   <line x1="60" y1="175" x2="340" y2="175" stroke="#c9c9c9" stroke-width="1" stroke-dasharray="3 3"/>
@@ -246,13 +248,16 @@ was wrong, and the reason matters for the launch plan.
 **`google/agents-cli` exists and has 5,693 stars.** Created 2026-04-08, described
 as "The CLI and skills that turn any coding assistant into an expert at creating,
 evaluating, and deploying AI agents on Google Cloud," with docs at
-`google.github.io/agents-cli`. This repo was created first (2026-02-08), but
-Google now holds roughly 380x the stars on that exact name.
+`google.github.io/agents-cli`. Google's repo actually **predates this one**:
+`phnx-labs/agi-cli` was created 2026-04-20, twelve days after Google's. The
+*project* is older — the original `muqsitnawaz/agents-cli` dates to 2026-02-08,
+two months before Google's — but the repo carrying the name today does not.
 
 | Name | Owner | Stars | Created |
 | --- | --- | --- | --- |
 | `google/agents-cli` | Google | **5,693** | 2026-04-08 |
-| `phnx-labs/agi-cli` | this project | 15 | 2026-02-08 |
+| `phnx-labs/agi-cli` | this project | 15 | 2026-04-20 |
+| `muqsitnawaz/agents-cli` (origin, now private) | this project | 3 | 2026-02-08 |
 
 So the rebrand to `agi-cli` was defensive and necessary, not brand churn. Renaming
 back would mean competing head-on for a query Google already owns, on a page with
