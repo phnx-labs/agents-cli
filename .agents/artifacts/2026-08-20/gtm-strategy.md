@@ -16,6 +16,10 @@ links:
     url: 'https://linear.app/phnx/issue/RUSH-2581'
   - label: 'phnx-labs/agi-cli'
     url: 'https://github.com/phnx-labs/agi-cli'
+  - label: 'Companion: developer pain, from 389 Reddit threads'
+    url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/developer-pain-reddit.md'
+  - label: 'Companion: how the winners actually charge'
+    url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/how-winners-charge.md'
 ---
 
 ## Summary
@@ -43,13 +47,18 @@ on 2026-04-10 because it "couldn't find a business model." Roo Code (3M installs
 shut down 2026-05-15. Terragon shut down 2026-02-09. In the same window Devin
 ($492M ARR), Cursor ($2B ARR) and Factory ($1.5B valuation) raised nine and ten
 figures. Every casualty was free and open. Every winner was hosted and paid.
+*(Corrected 2026-08-21: Cursor's figure is stale — ~$4B ARR by June 2026, and
+SpaceX's $60B all-stock acquisition of Anysphere closed 2026-08-14; sourcing in
+the companion pricing report linked below. The asymmetry only sharpened.)*
 
 That third fact is the one that should change the plan. The existing launch
 playbook optimizes for stars. Stars are not the win condition — three teams
 proved that by getting them and dying anyway. So the sequence is: **open the
 front door, instrument for retention rather than installs, and pick the
 monetization model the survivors used** — a hosted team layer — rather than the
-one the casualties tried.
+one the casualties tried. *(How the survivors' pricing actually works — the unit,
+the buyer, the margin layer — is now reconstructed with sources in Addendum 2 and
+the companion report it links.)*
 
 The uncomfortable corollary, stated plainly because it is a decision only you can
 make: this is a 277,892-line product with no paying users, competing in a
@@ -661,3 +670,50 @@ Closing it is one dashboard action: add **Zone → Analytics → Read** to the t
 
 *Pulled 2026-08-21 via HogQL against PostHog project 299876; every query is
 reproducible with `agents secrets exec posthog.com -- <curl to /api/projects/@current/query/>`.*
+
+## Addendum 2 — demand-side receipts and the winners' pricing mechanics (2026-08-21)
+
+Two follow-up questions were asked after this report was first read, and both
+answers are now merged as companion artifacts in this directory. This addendum
+carries what changes for the plan; the receipts live in the companions.
+
+### What developers actually complain about ([developer-pain-reddit.md](developer-pain-reddit.md))
+
+A live harvest of the coding-agent subreddits (389 unique posts, 18 threads
+comment-harvested through the operator's own logged-in browser, June–August 2026
+weighted as current state) confirms the demand this report could only infer:
+
+- **The #1 pain by engagement is usage-limit volatility**, not just scarcity —
+  the rules changing weekly is its own complaint, and the community reads
+  Anthropic's goodwill extensions as churn signals.
+- **Multi-account stacking is the crude coping form** — real and current (six
+  open-source account-switchers exist for it), but gray-zone and ban-feared.
+- **Power users already run provider portfolios** — Claude + Codex + a cheap
+  executor, split by role, with cross-model review — and hand-build cheap-model
+  offload to protect their subscriptions. The unsolved seams they name are
+  context-across-switches, fleet visibility, and remote control: this product's
+  surfaces, described by people who do not know it exists.
+- Consequence for Act 2: the launch copy should be written in these threads'
+  own words — the pain table in the companion maps each quoted complaint to the
+  agi-cli surface that answers it.
+
+### How the winners actually charge ([how-winners-charge.md](how-winners-charge.md))
+
+The §Summary line "every winner was hosted and paid" now has its mechanics,
+sourced and dated:
+
+- **The unit is metered agent consumption, not seats** — Devin's ACUs, Cursor's
+  credit pool at API rates, Copilot's AI Credits (June 2026). The whole category
+  converged on consumption metering within twelve months. The casualties charged
+  seats for collaboration on top of a free complete product.
+- **The buyer that makes the math work is the enterprise** — Cursor's reported
+  split: enterprise accounts margin-positive, individuals loss-making; Cognition
+  bought Windsurf for its enterprise book and 6.7x'd revenue in eleven months.
+- **Margin comes from owning the layer underneath** — Cursor only reached gross-
+  margin profitability (April 2026) after its own Composer model absorbed enough
+  routing; first parties are playing the same game from the other side.
+- Consequence for Act 3: "monetize the team layer" gets a mechanical spec —
+  free local core, **metered hosted consumption** (cloud sessions, gateway,
+  control plane) sold org-level, with the meter visible before the bill
+  (Cursor's July 2025 apology is the cautionary tale). Feature-gating the local
+  tool is the casualty pattern; metering hosted compute is the survivor pattern.
