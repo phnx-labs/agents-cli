@@ -1,0 +1,669 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fleet opens every tabless session as an agent editor tab</title>
+<style>
+:root{--font-body:"DejaVu Sans",Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:"DejaVu Sans",Inter,system-ui,sans-serif;--font-mono:"DejaVu Sans Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#f7f8f4;--surface:#ffffff;--surface-alt:#eef1e9;--line:#d8ddd1;--text:#171a16;--muted:#596253;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#a16207;--danger:#dc2626;--artifact-fg:#171a16;--artifact-muted:#596253;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:28px;--mobile-page-padding:14px;--hero-top:42px;--hero-bottom:28px;--section-spacing:38px;--figure-spacing:24px;--panel-padding:18px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:8px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#333333;--text:#e8e8e8;--muted:#888888;--accent:#a3e635;--accent-alt:#22d3ee;--warn:#facc15;--danger:#f87171;--artifact-fg:#e8e8e8;--artifact-muted:#888888;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#f7f8f4;--surface:#ffffff;--surface-alt:#eef1e9;--line:#d8ddd1;--text:#171a16;--muted:#596253;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#a16207;--danger:#dc2626;--artifact-fg:#171a16;--artifact-muted:#596253;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#333333;--text:#e8e8e8;--muted:#888888;--accent:#a3e635;--accent-alt:#22d3ee;--warn:#facc15;--danger:#f87171;--artifact-fg:#e8e8e8;--artifact-muted:#888888;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#f7f8f4;--surface:#ffffff;--surface-alt:#eef1e9;--line:#d8ddd1;--text:#171a16;--muted:#596253;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#a16207;--danger:#dc2626;--artifact-fg:#171a16;--artifact-muted:#596253;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">AGI</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-proposed">proposed</span></div>
+<h1>Fleet opens every tabless session as an agent editor tab</h1>
+<p class="summary">Replace AGI EXT Fleet's raw SSH/tmux bottom-panel terminals with one registered editor tab per tabless session. The extension owns presentation; the hidden CLI lifecycle dispatcher decides whether the tab attaches to a live pane or recovers an ended session on its origin device.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Verified on fresh origin/main at 804d796c6.<span class="meta-sep" aria-hidden="true">·</span>Current Fleet handlers create unregistered bottom-panel terminals and hand-roll SSH/tmux commands.<span class="meta-sep" aria-hidden="true">·</span>The registered editor-tab constructor already exists in apps/ext/src/vscode/extension.ts.<span class="meta-sep" aria-hidden="true">·</span>Direct sessions resume by id is strict recovery today; Fleet therefore needs the lifecycle-focused sessions focus path, not a blind resume substitution.</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/RUSH-2783/agi-ext-fleet-resume-reopens-remote-sessions-as-panel-terminals-not" target="_blank" rel="noopener">Linear · RUSH-2783</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">rush-2783-visual-plan</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2783</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">anonymized fleet worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/plan-only">plan-only</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-21</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#intent" data-toc-for="intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#behavior-current-and-proposed" data-toc-for="behavior-current-and-proposed"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Behavior — current and proposed</a><a class="toc-item toc-sub" href="#the-visible-state-model" data-toc-for="the-visible-state-model">The visible state model</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Proposed changes</a><a class="toc-item toc-sub" href="#1-add-an-internal-in-place-lifecycle-mode-to-the-cli" data-toc-for="1-add-an-internal-in-place-lifecycle-mode-to-the-cli">1. Add an internal in-place lifecycle mode to the CLI</a><a class="toc-item toc-sub" href="#2-preserve-the-metadata-the-editor-tab-constructor-needs" data-toc-for="2-preserve-the-metadata-the-editor-tab-constructor-needs">2. Preserve the metadata the editor-tab constructor needs</a><a class="toc-item toc-sub" href="#3-replace-transport-shaped-messages-with-one-typed-intent" data-toc-for="3-replace-transport-shaped-messages-with-one-typed-intent">3. Replace transport-shaped messages with one typed intent</a><a class="toc-item toc-sub" href="#4-generalize-the-registered-editor-tab-constructor" data-toc-for="4-generalize-the-registered-editor-tab-constructor">4. Generalize the registered editor-tab constructor</a><a class="toc-item toc-sub" href="#5-delete-the-duplicate-transport-path-and-update-the-visible-copy" data-toc-for="5-delete-the-duplicate-transport-path-and-update-the-visible-copy">5. Delete the duplicate transport path and update the visible copy</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Public interface</a><a class="toc-item" href="#files" data-toc-for="files"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Files</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item toc-sub" href="#automated" data-toc-for="automated">Automated</a><a class="toc-item toc-sub" href="#end-to-end-on-the-installed-extension" data-toc-for="end-to-end-on-the-installed-extension">End to end on the installed extension</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">13&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ul>
+<li><strong>Visible contract:</strong> an existing AGI EXT tab still says <strong>Focus</strong>; every session without a tab says <strong>Open in agent tab</strong>; bulk selection says <strong>Open N in agent tabs</strong>.</li>
+<li><strong>One-tab invariant:</strong> one click creates at most one registered editor tab. A repeated click focuses that tab instead of creating a duplicate.</li>
+<li><strong>Lifecycle ownership:</strong> AGI EXT chooses the surface; <code>agents sessions focus &lt;id&gt; --in-place</code> chooses live attach versus origin-side recovery.</li>
+<li><strong>Failure contract:</strong> a row with no canonical session id is disabled inline; an unreachable origin or unsupported harness fails visibly inside the opened tab.</li>
+<li><strong>Compatibility:</strong> no new public command or extension setting. <code>--in-place</code> is an internal option on the already-hidden <code>sessions focus</code> dispatcher.</li>
+</ul>
+<h2 id="intent">Intent</h2><p>When a person reopens work from AGI EXT Fleet, the agent should return where agents normally live: a named, icon-bearing <strong>editor tab</strong>. It should not appear as a small raw shell in VS Code's bottom panel, and Fleet should not decide how to reach or recover the process.</p>
+<p>The requested scope is all tabless sessions, local or remote, in any lifecycle state. If the tab already exists, Fleet focuses it. If the row is tabless and has a session id, Fleet opens an agent tab and lets the CLI resolve the correct attach or recovery path.</p>
+<h2 id="current-architecture">Current architecture</h2><div class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 1180 430" role="img" aria-label="Current and proposed architecture for opening Fleet sessions" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow-neutral" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10 z" fill="#7d8992"></path></marker>
+    <marker id="arrow-bad" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10 z" fill="#f87171"></path></marker>
+    <marker id="arrow-good" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10 z" fill="#a3e635"></path></marker>
+  </defs>
+
+  <text x="22" y="28" fill="#f87171" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="700">CURRENT — Fleet owns both the UI surface and remote transport</text>
+  <rect x="22" y="48" width="205" height="74" rx="10" fill="#1a1414" stroke="#f87171"></rect>
+  <text x="38" y="77" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">SessionsPane</text>
+  <text x="38" y="100" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">Resume / Focus click</text>
+  <line x1="227" y1="85" x2="276" y2="85" stroke="#f87171" stroke-width="2" marker-end="url(#arrow-bad)"></line>
+  <rect x="278" y="48" width="230" height="74" rx="10" fill="#1a1414" stroke="#f87171"></rect>
+  <text x="294" y="77" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">openTerminalForAgent</text>
+  <text x="294" y="100" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">chooses terminal / tmux / focus</text>
+  <line x1="508" y1="85" x2="557" y2="85" stroke="#f87171" stroke-width="2" marker-end="url(#arrow-bad)"></line>
+  <rect x="559" y="48" width="270" height="74" rx="10" fill="#1a1414" stroke="#f87171"></rect>
+  <text x="575" y="77" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">settings.vscode.ts</text>
+  <text x="575" y="100" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">raw ssh / tmux command builder</text>
+  <line x1="829" y1="85" x2="878" y2="85" stroke="#f87171" stroke-width="2" marker-end="url(#arrow-bad)"></line>
+  <rect x="880" y="48" width="278" height="74" rx="10" fill="#2a0f0f" stroke="#f87171" stroke-width="2"></rect>
+  <text x="896" y="77" fill="#fecaca" font-family="JetBrains Mono, monospace" font-size="13">VS Code bottom panel</text>
+  <text x="896" y="100" fill="#fca5a5" font-family="Inter, system-ui, sans-serif" font-size="12">unregistered · stale route · duplicate path</text>
+
+  <text x="22" y="184" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="700">PROPOSED — extension owns the tab; CLI owns lifecycle and routing</text>
+  <rect x="22" y="204" width="205" height="74" rx="10" fill="#111810" stroke="#a3e635"></rect>
+  <text x="38" y="233" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">SessionsPane</text>
+  <text x="38" y="256" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">Open in agent tab</text>
+  <line x1="227" y1="241" x2="276" y2="241" stroke="#a3e635" stroke-width="2" marker-end="url(#arrow-good)"></line>
+  <rect x="278" y="204" width="230" height="74" rx="10" fill="#111810" stroke="#a3e635"></rect>
+  <text x="294" y="233" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">openFleetSession</text>
+  <text x="294" y="256" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">typed presentation intent</text>
+  <line x1="508" y1="241" x2="557" y2="241" stroke="#a3e635" stroke-width="2" marker-end="url(#arrow-good)"></line>
+  <rect x="559" y="204" width="270" height="74" rx="10" fill="#111810" stroke="#a3e635"></rect>
+  <text x="575" y="233" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">openAgentSessionTerminal</text>
+  <text x="575" y="256" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">editor tab · register · dedupe</text>
+  <line x1="829" y1="241" x2="878" y2="241" stroke="#a3e635" stroke-width="2" marker-end="url(#arrow-good)"></line>
+  <rect x="880" y="204" width="278" height="74" rx="10" fill="#14200e" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="896" y="232" fill="#d9f99d" font-family="JetBrains Mono, monospace" font-size="13">agent editor tab</text>
+  <text x="896" y="255" fill="#bef264" font-family="Inter, system-ui, sans-serif" font-size="12">agents sessions focus ID --in-place</text>
+
+  <line x1="1019" y1="278" x2="1019" y2="323" stroke="#7d8992" stroke-width="2" marker-end="url(#arrow-neutral)"></line>
+  <rect x="752" y="326" width="406" height="77" rx="10" fill="#101418" stroke="#7d8992"></rect>
+  <text x="768" y="353" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">CLI lifecycle dispatcher</text>
+  <text x="768" y="376" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">live pane → attach · ended pane → origin-side recovery</text>
+  <text x="768" y="394" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="12">no raw routing or session classification in the webview</text>
+</svg>
+</div><p>The bug is the lower-level ownership boundary, not just terminal placement. The renderer picks a tmux rail, the VS Code host builds transport commands, and the terminal is created without an editor location or AGI EXT registration. That creates four user-visible failures from one architectural violation: bottom-panel placement, missing agent identity, stale SSH routing, and duplicate lifecycle logic.</p>
+<table>
+<thead>
+<tr>
+<th>Current component</th>
+<th>Evidence on fresh <code>origin/main</code></th>
+<th>Problem</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>UnifiedAgentsPane.tsx</code></td>
+<td><code>openTerminalForAgent</code> prioritizes <code>focusRemoteSession</code>, then <code>focusSession</code></td>
+<td>Renderer chooses transport rather than expressing “open this session.”</td>
+</tr>
+<tr>
+<td><code>settings.vscode.ts</code></td>
+<td><code>focusRemoteSession</code> builds <code>ssh -t … tmux attach</code>; remote <code>focusSession</code> creates another panel terminal</td>
+<td>Extension duplicates CLI routing and creates the wrong surface.</td>
+</tr>
+<tr>
+<td><code>remoteSessions.ts</code></td>
+<td><code>buildRemoteFocusCommand</code> hand-builds remote <code>sessions resume … --local</code></td>
+<td>A second lifecycle command path can drift from the CLI contract.</td>
+</tr>
+<tr>
+<td><code>extension.ts</code></td>
+<td><code>openResumedSessionTerminal</code> already uses <code>location: viewColumn.Active</code>, registration, icon, host and session metadata</td>
+<td>The correct editor-tab presentation exists but Fleet bypasses it.</td>
+</tr>
+<tr>
+<td><code>sessions-resume.ts</code></td>
+<td>direct id defaults to strict resume unless lifecycle flags are present</td>
+<td>Blindly changing Fleet to <code>resume --vscodium</code> can fork a live copy.</td>
+</tr>
+</tbody></table>
+<h2 id="behavior-current-and-proposed">Behavior — current and proposed</h2><div class="artifact-behavior">
+  <div class="artifact-behavior-panel artifact-panel" data-state="current" data-evidence="mockup">
+    <h4>Current — “Resume” opens attach shells in the bottom panel</h4>
+    <svg viewBox="0 0 560 360" role="img" aria-label="Mockup of current AGI EXT session card and raw attach terminals in VS Code bottom panel" xmlns="http://www.w3.org/2000/svg">
+      <rect width="560" height="360" rx="12" fill="#0a0a0a"></rect>
+      <rect x="0" y="0" width="560" height="34" rx="12" fill="#181818"></rect>
+      <circle cx="18" cy="17" r="5" fill="#f87171"></circle><circle cx="35" cy="17" r="5" fill="#facc15"></circle><circle cx="52" cy="17" r="5" fill="#a3e635"></circle>
+      <text x="76" y="22" fill="#888" font-family="Inter, system-ui, sans-serif" font-size="12">AGI EXT · Fleet</text>
+      <rect x="14" y="48" width="532" height="106" rx="8" fill="#141414" stroke="#333"></rect>
+      <text x="28" y="73" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">CX  Fix session recovery</text>
+      <text x="28" y="94" fill="#888" font-family="Inter, system-ui, sans-serif" font-size="11">worker-a · crashed · 18 minutes ago</text>
+      <rect x="422" y="66" width="105" height="32" rx="5" fill="#a3e635"></rect>
+      <text x="447" y="87" fill="#0a0a0a" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="12">Resume</text>
+      <text x="28" y="128" fill="#fca5a5" font-family="Inter, system-ui, sans-serif" font-size="11">Click creates an unregistered panel shell</text>
+      <rect x="0" y="172" width="560" height="188" fill="#1a0f0f"></rect>
+      <rect x="0" y="172" width="560" height="28" fill="#222"></rect>
+      <text x="14" y="190" fill="#bbb" font-family="Inter, system-ui, sans-serif" font-size="10">PROBLEMS   OUTPUT   DEBUG CONSOLE   <tspan fill="#f87171">TERMINAL</tspan></text>
+      <text x="16" y="226" fill="#f5d0d0" font-family="JetBrains Mono, monospace" font-size="10">$ ssh -t 'worker-a' 'tmux -S … attach'</text>
+      <text x="16" y="250" fill="#f87171" font-family="JetBrains Mono, monospace" font-size="10">ssh: connection timed out</text>
+      <rect x="390" y="203" width="170" height="157" fill="#231111"></rect>
+      <text x="402" y="227" fill="#fca5a5" font-family="JetBrains Mono, monospace" font-size="10">attach fix-session</text>
+      <text x="402" y="250" fill="#d6b4b4" font-family="JetBrains Mono, monospace" font-size="10">attach release</text>
+      <text x="402" y="273" fill="#d6b4b4" font-family="JetBrains Mono, monospace" font-size="10">attach tests</text>
+    </svg>
+  </div>
+
+  <div class="artifact-behavior-panel artifact-panel" data-state="proposed" data-evidence="mockup">
+    <h4>Proposed — “Open in agent tab” creates one normal agent editor tab</h4>
+    <svg viewBox="0 0 560 360" role="img" aria-label="Mockup of proposed AGI EXT session card and registered agent editor tab" xmlns="http://www.w3.org/2000/svg">
+      <rect width="560" height="360" rx="12" fill="#0a0a0a"></rect>
+      <rect x="0" y="0" width="560" height="34" rx="12" fill="#181818"></rect>
+      <circle cx="18" cy="17" r="5" fill="#f87171"></circle><circle cx="35" cy="17" r="5" fill="#facc15"></circle><circle cx="52" cy="17" r="5" fill="#a3e635"></circle>
+      <text x="76" y="22" fill="#888" font-family="Inter, system-ui, sans-serif" font-size="12">AGI EXT · Fleet</text>
+      <rect x="14" y="48" width="532" height="106" rx="8" fill="#141414" stroke="#333"></rect>
+      <text x="28" y="73" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">CX  Fix session recovery</text>
+      <text x="28" y="94" fill="#888" font-family="Inter, system-ui, sans-serif" font-size="11">worker-a · crashed · 18 minutes ago</text>
+      <rect x="383" y="66" width="144" height="32" rx="5" fill="#a3e635"></rect>
+      <text x="397" y="87" fill="#0a0a0a" font-family="Inter, system-ui, sans-serif" font-weight="700" font-size="11">Open in agent tab</text>
+      <text x="28" y="128" fill="#bef264" font-family="Inter, system-ui, sans-serif" font-size="11">Repeated click focuses this same tab</text>
+      <rect x="0" y="172" width="560" height="188" fill="#0d1510"></rect>
+      <rect x="0" y="172" width="560" height="31" fill="#1b241e"></rect>
+      <rect x="8" y="176" width="184" height="27" rx="5" fill="#26372a" stroke="#a3e635"></rect>
+      <text x="20" y="194" fill="#d9f99d" font-family="JetBrains Mono, monospace" font-size="10">CX · Fix session recovery</text>
+      <rect x="198" y="176" width="133" height="27" rx="5" fill="#171f19"></rect>
+      <text x="210" y="194" fill="#8da694" font-family="JetBrains Mono, monospace" font-size="10">CC · Release</text>
+      <text x="18" y="237" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="10">$ agents sessions focus ag-codex-8c21 --in-place</text>
+      <text x="18" y="265" fill="#a3e635" font-family="JetBrains Mono, monospace" font-size="10">Attached to live pane on origin device</text>
+      <text x="18" y="293" fill="#888" font-family="JetBrains Mono, monospace" font-size="10">session ag-codex-8c21 · registered · editor tab</text>
+    </svg>
+  </div>
+</div><h3 id="the-visible-state-model">The visible state model</h3><div class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 1180 500" role="img" aria-label="Decision flow for opening or focusing a Fleet session" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="flow-arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto"><path d="M0,0 L9,5 L0,10 z" fill="#7d8992"></path></marker></defs>
+  <rect x="32" y="198" width="160" height="64" rx="10" fill="#141414" stroke="#a3e635"></rect>
+  <text x="58" y="226" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="13">Fleet action</text>
+  <text x="52" y="247" fill="#888" font-family="Inter, system-ui, sans-serif" font-size="11">one row or bulk</text>
+  <line x1="192" y1="230" x2="253" y2="230" stroke="#7d8992" stroke-width="2" marker-end="url(#flow-arrow)"></line>
+
+  <polygon points="330,152 407,230 330,308 253,230" fill="#101418" stroke="#a3e635"></polygon>
+  <text x="287" y="224" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="12">registered tab</text>
+  <text x="311" y="243" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="12">exists?</text>
+  <line x1="330" y1="152" x2="330" y2="91" stroke="#7d8992" stroke-width="2" marker-end="url(#flow-arrow)"></line>
+  <text x="342" y="126" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="11">yes</text>
+  <rect x="250" y="28" width="160" height="62" rx="10" fill="#14200e" stroke="#a3e635"></rect>
+  <text x="286" y="54" fill="#d9f99d" font-family="JetBrains Mono, monospace" font-size="13">Focus tab</text>
+  <text x="274" y="75" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="11">no new process</text>
+  <line x1="407" y1="230" x2="474" y2="230" stroke="#7d8992" stroke-width="2" marker-end="url(#flow-arrow)"></line>
+  <text x="426" y="219" fill="#facc15" font-family="Inter, system-ui, sans-serif" font-size="11">no</text>
+
+  <polygon points="550,152 627,230 550,308 473,230" fill="#101418" stroke="#a3e635"></polygon>
+  <text x="514" y="224" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="12">canonical</text>
+  <text x="514" y="243" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="12">session id?</text>
+  <line x1="550" y1="308" x2="550" y2="383" stroke="#7d8992" stroke-width="2" marker-end="url(#flow-arrow)"></line>
+  <text x="562" y="352" fill="#f87171" font-family="Inter, system-ui, sans-serif" font-size="11">no</text>
+  <rect x="463" y="386" width="174" height="72" rx="10" fill="#1a1414" stroke="#f87171"></rect>
+  <text x="490" y="413" fill="#fecaca" font-family="JetBrains Mono, monospace" font-size="12">Disable action</text>
+  <text x="480" y="436" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="11">refresh-and-retry reason</text>
+  <line x1="627" y1="230" x2="694" y2="230" stroke="#7d8992" stroke-width="2" marker-end="url(#flow-arrow)"></line>
+  <text x="646" y="219" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="11">yes</text>
+
+  <rect x="696" y="189" width="194" height="82" rx="10" fill="#14200e" stroke="#a3e635"></rect>
+  <text x="715" y="218" fill="#d9f99d" font-family="JetBrains Mono, monospace" font-size="12">Create + register tab</text>
+  <text x="715" y="241" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="11">icon · title · cwd · host</text>
+  <text x="715" y="258" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="11">one session-id key</text>
+  <line x1="890" y1="230" x2="950" y2="230" stroke="#7d8992" stroke-width="2" marker-end="url(#flow-arrow)"></line>
+
+  <rect x="952" y="174" width="198" height="112" rx="10" fill="#101418" stroke="#a3e635"></rect>
+  <text x="970" y="204" fill="#e8e8e8" font-family="JetBrains Mono, monospace" font-size="12">CLI focus --in-place</text>
+  <text x="970" y="230" fill="#bef264" font-family="Inter, system-ui, sans-serif" font-size="11">live rail → attach</text>
+  <text x="970" y="252" fill="#bef264" font-family="Inter, system-ui, sans-serif" font-size="11">ended rail → recover</text>
+  <text x="970" y="274" fill="#fca5a5" font-family="Inter, system-ui, sans-serif" font-size="11">error → visible in tab</text>
+
+  <rect x="696" y="329" width="454" height="129" rx="10" fill="#0f0f0f" stroke="#333"></rect>
+  <text x="714" y="357" fill="#888" font-family="JetBrains Mono, monospace" font-size="11">Invariant</text>
+  <text x="714" y="383" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="12">The webview never asks “tmux or resume?”</text>
+  <text x="714" y="407" fill="#e8e8e8" font-family="Inter, system-ui, sans-serif" font-size="12">The extension never asks “local or SSH?”</text>
+  <text x="714" y="431" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="12">The CLI re-checks live state at execution time.</text>
+</svg>
+</div><h2 id="purpose">Purpose</h2><p>This restores the product boundary documented by both components:</p>
+<ul>
+<li>AGI EXT is a thin presentation client. It owns editor tabs, titles, icons, registration and focus.</li>
+<li>agents-cli owns session discovery, live-rail validation, device routing and recovery policy.</li>
+</ul>
+<p>The design also closes the race the older plan left open. A pane can die after Fleet renders it. If Fleet constructs a raw tmux attach command, the user gets a dead terminal. If Fleet blindly runs strict resume, a live headless process can be copied. The hidden in-place dispatcher re-reads current state after the editor tab exists, then attaches or recovers in that same tab.</p>
+<div class="artifact-callout">
+The key change is not “put the terminal in a different location.” It is “create exactly one normal agent tab, then let the CLI perform the authoritative lifecycle decision inside it.”
+</div><h2 id="proposed-changes">Proposed changes</h2><h3 id="1-add-an-internal-in-place-lifecycle-mode-to-the-cli">1. Add an internal in-place lifecycle mode to the CLI</h3><p><code>apps/cli/src/commands/focus.ts</code> remains the single attach/recover decision. Add the internal <code>--in-place</code> option to the already-hidden <code>focus</code> command. It changes only the no-attach fallback: recover in the current TTY instead of asking the terminal engine to create another tab.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">export interface FocusOptions {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  local?: boolean;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  attachOnly?: boolean;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  inPlace?: boolean;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> </span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">const cmd = program</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  .command('focus', { hidden: true })</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  .option('--in-place', 'Internal: recover in this terminal; never open another surface')</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> </span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">export function selectFallback(attachOnly: boolean | undefined): UnreachableFallback {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  return attachOnly ? refuseFallback : resumeInNewTab;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export function selectFallback(opts: Pick&lt;FocusOptions, 'attachOnly' | 'inPlace'&gt;): UnreachableFallback {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (opts.attachOnly &amp;&amp; opts.inPlace) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    throw new Error('--attach-only and --in-place cannot be combined');</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (opts.attachOnly) return refuseFallback;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (opts.inPlace) return recoverInCurrentTerminal;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  return resumeInNewTab;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span></pre></div><p>Extract the existing origin-side recovery body so the ordinary exact-id path and the race fallback share it rather than duplicating a third recovery implementation.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">async function recoverResolvedInCurrentTerminal(meta: SessionMeta, remote?: string): Promise&lt;void&gt; {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (remote) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    const rc = await runOnPeer(sessionRecoveryRunArgs(meta), remote, { tty: true });</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    if (rc === 'no-target') failUnreachableOrigin(meta, remote);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    return;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  await resumeSessionInPlace(meta);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">}</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">const recoverInCurrentTerminal: UnreachableFallback = async (active, remote) =&gt; {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const meta = await richMetaById(active.sessionId ?? '');</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (!meta) return failMissingSession(active.sessionId);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  await recoverResolvedInCurrentTerminal(meta, remote);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">};</span></span></pre></div><p>The internal command AGI EXT runs is:</p>
+<pre><code>agents sessions focus &lt;session-id&gt; --in-place
+</code></pre>
+<h3 id="2-preserve-the-metadata-the-editor-tab-constructor-needs">2. Preserve the metadata the editor-tab constructor needs</h3><p><code>RemoteSessionLike</code> already carries <code>agentType</code> and <code>cwd</code>; <code>toFloorAgentFromRemote</code> drops them. Preserve both on <code>FloorAgent</code> and on every adapter. This is presentation metadata only, not lifecycle policy.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">export interface FloorAgent {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  id: string</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  host: string</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  sessionId?: string</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  agentType: string</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  cwd?: string</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> </span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">return {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  id,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  host: r.host,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  sessionId: r.sessionId,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  agentType: r.agentType,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  cwd: r.cwd,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span></pre></div><h3 id="3-replace-transport-shaped-messages-with-one-typed-intent">3. Replace transport-shaped messages with one typed intent</h3><p>Add one renderer-to-host message to <code>apps/ext/ui/settings/shared/protocol.ts</code>. Remove the legacy <code>focusSession</code> variant and the untyped <code>focusRemoteSession</code> payload after every call site moves.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">export type FloorInbound =</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  | { type: 'focusSession'; sessionId: string; host?: string }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  | {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      type: 'openFleetSession'</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      sessionId: string</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      agentType: string</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      cwd?: string</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      host?: string</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    }</span></span></pre></div><p><code>UnifiedAgentsPane.tsx</code> becomes a surface decision with three outcomes only: focus an existing registered terminal, open a tab for an identified tabless session, or show a disabled action when no id exists.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">const openTerminalForAgent = useCallback((agent: FloorAgent) =&gt; {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  if (agent.reply.kind === 'terminal' &amp;&amp; agent.reply.terminalId) {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    postMessage({ type: 'focusTerminal', terminalId: agent.reply.terminalId })</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    return</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  }</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  if (agent.reply.kind === 'tmux' &amp;&amp; agent.reply.muxTarget) {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    postMessage({ type: 'focusRemoteSession', ... })</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    return</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  }</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  if (agent.sessionId) {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    postMessage({ type: 'focusSession', sessionId: agent.sessionId, host: agent.host })</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    postMessage({</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      type: 'openFleetSession',</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      sessionId: agent.sessionId,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      agentType: agent.agentType,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      cwd: agent.cwd,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      host: agent.host,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    })</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  }</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}, [])</span></span></pre></div><h3 id="4-generalize-the-registered-editor-tab-constructor">4. Generalize the registered editor-tab constructor</h3><p>Refactor <code>openResumedSessionTerminal</code> into a small shared constructor, <code>openAgentSessionTerminal</code>, that receives the command to run. Command-palette Resume still supplies <code>buildVersionedResumeCommand</code>; Fleet supplies <code>buildFocusInPlaceCommand</code>. The helper deduplicates by session id before allocating a terminal.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">async function openResumedSessionTerminal(context, session): Promise&lt;boolean&gt; {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version, session.host)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">async function openAgentSessionTerminal(context, session, command): Promise&lt;boolean&gt; {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  const existing = terminals.getBySessionId(session.id)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (existing) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    existing.terminal.show(false)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    return true</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  const terminal = vscode.window.createTerminal({</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    iconPath: agentConfig.iconPath,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    location: { viewColumn: vscode.ViewColumn.Active },</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    name: title,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    cwd: session.cwd,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    env: buildAgentTerminalEnv(...),</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    isTransient: true,</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  })</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  terminals.register(...)</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  terminals.setSessionId(terminal, session.id)</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  terminals.setAgentType(terminal, agentKey)</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  terminal.sendText(resumeCmd)</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  terminal.sendText(command)</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">const openResumedSessionTerminal = (context, session) =&gt;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  openAgentSessionTerminal(context, session, buildVersionedResumeCommand(...))</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">const openFleetSessionTerminal = (context, session) =&gt;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  openAgentSessionTerminal(context, session, buildFocusInPlaceCommand(session.id))</span></span></pre></div><p>Keep command construction pure and testable beside the existing resume builder in <code>apps/ext/src/core/prewarm.ts</code>.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export function buildFocusInPlaceCommand(sessionId: string): string {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  return `agents sessions focus ${shellQuoteArg(sessionId)} --in-place`;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">}</span></span></pre></div><h3 id="5-delete-the-duplicate-transport-path-and-update-the-visible-copy">5. Delete the duplicate transport path and update the visible copy</h3><p>In <code>settings.vscode.ts</code>, replace both remote panel handlers with <code>openFleetSessionTerminal</code>. Delete <code>focusSessionInTerminal</code>, <code>buildRemoteFocusCommand</code>, its raw SSH tests, and every <code>focusRemoteSession</code> caller once <code>rg</code> proves there is no remaining consumer.</p>
+<p>In Sessions and card actions:</p>
+<table>
+<thead>
+<tr>
+<th>Row state</th>
+<th>Primary action</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Registered AGI EXT terminal exists</td>
+<td><strong>Focus</strong></td>
+<td>Show existing editor tab.</td>
+</tr>
+<tr>
+<td>Tabless + canonical session id</td>
+<td><strong>Open in agent tab</strong></td>
+<td>Create one registered editor tab and run lifecycle focus inside it.</td>
+</tr>
+<tr>
+<td>Bulk selection of N openable rows</td>
+<td><strong>Open N in agent tabs</strong></td>
+<td>One registered tab per unique session id.</td>
+</tr>
+<tr>
+<td>No canonical session id</td>
+<td>Disabled <strong>Open in agent tab</strong></td>
+<td>Inline reason: “Session ID unavailable; refresh and retry.”</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public interface</h2><p>There is no new public command, command-palette item, config key or API. The implementation adds two internal contracts:</p>
+<table>
+<thead>
+<tr>
+<th>Contract</th>
+<th>Exact name</th>
+<th>Stability</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CLI lifecycle option</td>
+<td><code>agents sessions focus &lt;id&gt; --in-place</code></td>
+<td>Internal; <code>focus</code> is already hidden.</td>
+</tr>
+<tr>
+<td>Webview intent</td>
+<td><code>openFleetSession</code></td>
+<td>Internal typed renderer-to-extension protocol.</td>
+</tr>
+</tbody></table>
+<p>Existing public surfaces remain unchanged:</p>
+<pre><code># History/picker recovery remains the public user workflow.
+agents sessions resume
+
+# Existing internal lifecycle behavior remains attach-if-live, recover-if-ended.
+agents sessions focus &lt;session-id&gt;
+</code></pre>
+<h2 id="files">Files</h2><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Planned change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/cli/src/commands/focus.ts</code></td>
+<td>Add internal <code>--in-place</code>; centralize current-terminal recovery; fail loud on contradictory options.</td>
+</tr>
+<tr>
+<td><code>apps/cli/src/commands/focus.test.ts</code></td>
+<td>Exercise real live/dead tmux rails and the in-place fallback without mocks.</td>
+</tr>
+<tr>
+<td><code>apps/ext/src/core/prewarm.ts</code> + existing colocated test</td>
+<td>Add the quoted <code>buildFocusInPlaceCommand</code>.</td>
+</tr>
+<tr>
+<td><code>apps/ext/ui/settings/components/mission-control/floorModel.ts</code> + test</td>
+<td>Preserve <code>agentType</code> / <code>cwd</code>; add the pure open-action resolver.</td>
+</tr>
+<tr>
+<td><code>apps/ext/ui/settings/components/mission-control/floorAdapter.ts</code> + test</td>
+<td>Carry metadata through local and remote adapters.</td>
+</tr>
+<tr>
+<td><code>apps/ext/ui/settings/shared/protocol.ts</code> + protocol test</td>
+<td>Add <code>openFleetSession</code>; remove stale focus messages.</td>
+</tr>
+<tr>
+<td><code>apps/ext/ui/settings/components/mission-control/UnifiedAgentsPane.tsx</code></td>
+<td>Route all tabless identified sessions through the typed open intent; update singular/bulk copy and unavailable state.</td>
+</tr>
+<tr>
+<td><code>apps/ext/src/vscode/extension.ts</code></td>
+<td>Generalize the registered editor-tab constructor and dedupe by session id.</td>
+</tr>
+<tr>
+<td><code>apps/ext/src/vscode/settings.vscode.ts</code></td>
+<td>Handle <code>openFleetSession</code>; remove both raw panel-terminal handlers.</td>
+</tr>
+<tr>
+<td><code>apps/ext/src/core/remoteSessions.ts</code> + test</td>
+<td>Delete <code>buildRemoteFocusCommand</code> and isolated SSH quoting tests after the last caller moves.</td>
+</tr>
+<tr>
+<td><code>apps/ext/AGENTS.md</code>, <code>apps/ext/README.md</code>, <code>apps/ext/CHANGELOG.md</code></td>
+<td>Document Fleet's editor-tab behavior.</td>
+</tr>
+<tr>
+<td><code>apps/cli/AGENTS.md</code>, <code>apps/cli/docs/sessions.md</code>, <code>apps/cli/docs/specifications.md</code>, <code>apps/cli/CHANGELOG.md</code></td>
+<td>Record the hidden in-place lifecycle contract and its no-second-surface invariant.</td>
+</tr>
+</tbody></table>
+<p>The open PR #2847 moves session remote fan-out files. It does not change this behavior, but implementation must re-anchor <code>focus.ts</code> imports and session-module paths on fresh <code>origin/main</code> before editing.</p>
+<h2 id="plan">Plan</h2><div class="checklist"><div class="checklist-head">0 / 8 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Claim RUSH-2783 and create a feature worktree from freshly fetched <code>origin/main</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add CLI <code>focus --in-place</code>, centralize recovery, and land the real lifecycle tests first.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Carry <code>agentType</code> / <code>cwd</code> through Floor models and replace the transport-shaped protocol.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Generalize the registered editor-tab constructor, add session-id dedupe, and remove raw SSH/tmux handlers.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update <strong>Focus</strong> / <strong>Open in agent tab</strong> / <strong>Open N in agent tabs</strong> copy and the missing-id inline state.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update component docs, specifications and both changelogs; audit the companion <code>.agents-system</code> session guidance and record whether any consumer needs a change.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Run CLI remote tests and extension tests/build; inspect the real AGI EXT surface on the interactive macOS host.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Attach before/after proof to the implementation PR, obtain non-author review, merge on green, release the affected package/surface, and verify the installed version.</span></li></ul></div>
+<h2 id="validation">Validation</h2><h3 id="automated">Automated</h3><pre><code># CLI: canonical remote suite from apps/cli
+bun run test:remote
+
+# Extension: real package boundaries from apps/ext
+bun test
+bun run compile:ext
+scripts/build.sh &lt;version&gt;
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Invariant</th>
+<th>Test signal</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Existing tab focuses</td>
+<td>Terminal registry returns the same terminal; terminal count is unchanged.</td>
+</tr>
+<tr>
+<td>Live local tmux session</td>
+<td>New editor tab attaches in place; no recovery command spawns.</td>
+</tr>
+<tr>
+<td>Live remote tmux session</td>
+<td>New editor tab connects through CLI focus and joins the pane; no raw Fleet SSH builder remains.</td>
+</tr>
+<tr>
+<td>Pane dies between render and click</td>
+<td>CLI liveness recheck recovers inside the already-created tab; no second tab.</td>
+</tr>
+<tr>
+<td>Local or remote session with no attach rail</td>
+<td>Origin-side recovery runs in the created tab; exactly one terminal is registered.</td>
+</tr>
+<tr>
+<td>Crashed / closed / abandoned session</td>
+<td>Recovery resolver chooses the healthy same-harness path on the origin device.</td>
+</tr>
+<tr>
+<td>Missing id</td>
+<td>Action is disabled with the inline refresh reason; nothing silently no-ops.</td>
+</tr>
+<tr>
+<td>Bulk open</td>
+<td>One tab per unique session id; re-running the action focuses existing tabs.</td>
+</tr>
+</tbody></table>
+<h3 id="end-to-end-on-the-installed-extension">End to end on the installed extension</h3><ol>
+<li>Capture the current Fleet behavior with a tabless remote session: card, click, and bottom-panel terminal.</li>
+<li>Install the feature VSIX on the interactive macOS host without replacing the production <code>agents</code> CLI.</li>
+<li>Exercise one existing tab, one local tabless session, one live remote tmux session, one crashed remote session, and one live no-tmux session.</li>
+<li>Use the bulk action on a mixed selection, then repeat it.</li>
+<li>Confirm the editor area contains one icon-bearing registered tab per session id, the bottom panel contains no <code>attach …</code> terminals, and Copy Session ID / Resume / Fork see the opened tabs.</li>
+<li>After merge and extension release, repeat the flow against the installed Marketplace build and capture the deployed result.</li>
+</ol>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Why it matters</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>“Resume” is replaced with a broader open action</td>
+<td>A live tabless session is not being resumed; it is being attached or recovered.</td>
+<td>Use <strong>Open in agent tab</strong> for tabless rows; reserve <strong>Focus</strong> for an existing tab.</td>
+</tr>
+<tr>
+<td>Pane liveness changes after the UI snapshot</td>
+<td>A precomputed tmux command can attach a dead pane.</td>
+<td>CLI probes immediately before attach; <code>--in-place</code> keeps fallback in the same editor tab.</td>
+</tr>
+<tr>
+<td>Double-click / repeated bulk action</td>
+<td>Duplicate agent copies are costly and confusing.</td>
+<td>Host-side <code>getBySessionId</code> dedupe is authoritative; renderer state is only an optimization.</td>
+</tr>
+<tr>
+<td>Unsupported or missing agent type</td>
+<td>The editor tab cannot get a trustworthy icon/config.</td>
+<td>Preserve <code>agentType</code> from the CLI; fail visibly before creating a false shell tab.</td>
+</tr>
+<tr>
+<td>Session module refactor lands first</td>
+<td>PR #2847 moves remote fan-out paths.</td>
+<td>Re-fetch and re-run the import/file audit before implementation; keep behavior changes in canonical owners.</td>
+</tr>
+<tr>
+<td>Hidden CLI surface becomes accidental public API</td>
+<td>Internal flags can escape into docs or autocomplete.</td>
+<td>Keep <code>focus</code> hidden, document only in internal architecture/spec text, and expose no command-palette entry.</td>
+</tr>
+<tr>
+<td>Companion guidance still teaches old behavior</td>
+<td>Fleet agents may keep invoking a stale command.</td>
+<td>Audit the <code>.agents-system</code> consumers of <code>sessions focus/resume</code>; link a companion PR only if the audit finds a caller.</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2><ul>
+<li><a class="link-pill" href="https://linear.app/getrush/issue/RUSH-2783/agi-ext-fleet-resume-reopens-remote-sessions-as-panel-terminals-not" title="https://linear.app/getrush/issue/RUSH-2783/agi-ext-fleet-resume-reopens-remote-sessions-as-panel-terminals-not" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">RUSH-2783 — AGI EXT: Fleet Resume reopens remote sessions as panel terminals, not agent editor tabs</span></a></li>
+<li>Plan source and rendered HTML live together under <code>.agents/artifacts/2026-08-21/</code> and will be committed in the plan PR.</li>
+<li>The implementation PR should link this plan and RUSH-2783; the Linear ticket should link both PRs so navigation works in both directions.</li>
+</ul>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://linear.app/getrush/issue/RUSH-2783/agi-ext-fleet-resume-reopens-remote-sessions-as-panel-terminals-not" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">RUSH-2783 — AGI EXT: Fleet Resume reopens remote sessions as panel terminals, not agent editor tabs</span><span class="reference-host">linear.app</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogbmF0aXZlCnRpdGxlOiAiRmxlZXQgb3BlbnMgZXZlcnkgdGFibGVzcyBzZXNzaW9uIGFzIGFuIGFnZW50IGVkaXRvciB0YWIiCnN1bW1hcnk6ID4KICBSZXBsYWNlIEFHSSBFWFQgRmxlZXQncyByYXcgU1NIL3RtdXggYm90dG9tLXBhbmVsIHRlcm1pbmFscyB3aXRoIG9uZSByZWdpc3RlcmVkCiAgZWRpdG9yIHRhYiBwZXIgdGFibGVzcyBzZXNzaW9uLiBUaGUgZXh0ZW5zaW9uIG93bnMgcHJlc2VudGF0aW9uOyB0aGUgaGlkZGVuIENMSQogIGxpZmVjeWNsZSBkaXNwYXRjaGVyIGRlY2lkZXMgd2hldGhlciB0aGUgdGFiIGF0dGFjaGVzIHRvIGEgbGl2ZSBwYW5lIG9yIHJlY292ZXJzCiAgYW4gZW5kZWQgc2Vzc2lvbiBvbiBpdHMgb3JpZ2luIGRldmljZS4Kc3RhdHVzOiBwcm9wb3NlZAp0cmFja2luZzogIlJVU0gtMjc4MyIKcHJvamVjdDogIkFHSSIKcmVwb3NpdG9yeTogInBobngtbGFicy9hZ2VudHMtY2xpIgpoYXJuZXNzOiAiQ29kZXgiCmFnZW50OiAiQ29kZXgiCmhvc3Q6ICJhbm9ueW1pemVkIGZsZWV0IHdvcmtlciIKc2Vzc2lvbjogInBsYW4tb25seSIKZGF0ZTogIjIwMjYtMDgtMjEiCmxpbmtzOgogIC0gbGFiZWw6ICJMaW5lYXIgwrcgUlVTSC0yNzgzIgogICAgdXJsOiAiaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvaXNzdWUvUlVTSC0yNzgzL2FnaS1leHQtZmxlZXQtcmVzdW1lLXJlb3BlbnMtcmVtb3RlLXNlc3Npb25zLWFzLXBhbmVsLXRlcm1pbmFscy1ub3QiCmZhY3RzOgogIC0gIlZlcmlmaWVkIG9uIGZyZXNoIG9yaWdpbi9tYWluIGF0IDgwNGQ3OTZjNi4iCiAgLSAiQ3VycmVudCBGbGVldCBoYW5kbGVycyBjcmVhdGUgdW5yZWdpc3RlcmVkIGJvdHRvbS1wYW5lbCB0ZXJtaW5hbHMgYW5kIGhhbmQtcm9sbCBTU0gvdG11eCBjb21tYW5kcy4iCiAgLSAiVGhlIHJlZ2lzdGVyZWQgZWRpdG9yLXRhYiBjb25zdHJ1Y3RvciBhbHJlYWR5IGV4aXN0cyBpbiBhcHBzL2V4dC9zcmMvdnNjb2RlL2V4dGVuc2lvbi50cy4iCiAgLSAiRGlyZWN0IHNlc3Npb25zIHJlc3VtZSBieSBpZCBpcyBzdHJpY3QgcmVjb3ZlcnkgdG9kYXk7IEZsZWV0IHRoZXJlZm9yZSBuZWVkcyB0aGUgbGlmZWN5Y2xlLWZvY3VzZWQgc2Vzc2lvbnMgZm9jdXMgcGF0aCwgbm90IGEgYmxpbmQgcmVzdW1lIHN1YnN0aXR1dGlvbi4iCi0tLQoKIyMgRm9jdXMgZm9yIHJldmlldwoKLSAqKlZpc2libGUgY29udHJhY3Q6KiogYW4gZXhpc3RpbmcgQUdJIEVYVCB0YWIgc3RpbGwgc2F5cyAqKkZvY3VzKio7IGV2ZXJ5IHNlc3Npb24gd2l0aG91dCBhIHRhYiBzYXlzICoqT3BlbiBpbiBhZ2VudCB0YWIqKjsgYnVsayBzZWxlY3Rpb24gc2F5cyAqKk9wZW4gTiBpbiBhZ2VudCB0YWJzKiouCi0gKipPbmUtdGFiIGludmFyaWFudDoqKiBvbmUgY2xpY2sgY3JlYXRlcyBhdCBtb3N0IG9uZSByZWdpc3RlcmVkIGVkaXRvciB0YWIuIEEgcmVwZWF0ZWQgY2xpY2sgZm9jdXNlcyB0aGF0IHRhYiBpbnN0ZWFkIG9mIGNyZWF0aW5nIGEgZHVwbGljYXRlLgotICoqTGlmZWN5Y2xlIG93bmVyc2hpcDoqKiBBR0kgRVhUIGNob29zZXMgdGhlIHN1cmZhY2U7IGBhZ2VudHMgc2Vzc2lvbnMgZm9jdXMgPGlkPiAtLWluLXBsYWNlYCBjaG9vc2VzIGxpdmUgYXR0YWNoIHZlcnN1cyBvcmlnaW4tc2lkZSByZWNvdmVyeS4KLSAqKkZhaWx1cmUgY29udHJhY3Q6KiogYSByb3cgd2l0aCBubyBjYW5vbmljYWwgc2Vzc2lvbiBpZCBpcyBkaXNhYmxlZCBpbmxpbmU7IGFuIHVucmVhY2hhYmxlIG9yaWdpbiBvciB1bnN1cHBvcnRlZCBoYXJuZXNzIGZhaWxzIHZpc2libHkgaW5zaWRlIHRoZSBvcGVuZWQgdGFiLgotICoqQ29tcGF0aWJpbGl0eToqKiBubyBuZXcgcHVibGljIGNvbW1hbmQgb3IgZXh0ZW5zaW9uIHNldHRpbmcuIGAtLWluLXBsYWNlYCBpcyBhbiBpbnRlcm5hbCBvcHRpb24gb24gdGhlIGFscmVhZHktaGlkZGVuIGBzZXNzaW9ucyBmb2N1c2AgZGlzcGF0Y2hlci4KCiMjIEludGVudAoKV2hlbiBhIHBlcnNvbiByZW9wZW5zIHdvcmsgZnJvbSBBR0kgRVhUIEZsZWV0LCB0aGUgYWdlbnQgc2hvdWxkIHJldHVybiB3aGVyZSBhZ2VudHMgbm9ybWFsbHkgbGl2ZTogYSBuYW1lZCwgaWNvbi1iZWFyaW5nICoqZWRpdG9yIHRhYioqLiBJdCBzaG91bGQgbm90IGFwcGVhciBhcyBhIHNtYWxsIHJhdyBzaGVsbCBpbiBWUyBDb2RlJ3MgYm90dG9tIHBhbmVsLCBhbmQgRmxlZXQgc2hvdWxkIG5vdCBkZWNpZGUgaG93IHRvIHJlYWNoIG9yIHJlY292ZXIgdGhlIHByb2Nlc3MuCgpUaGUgcmVxdWVzdGVkIHNjb3BlIGlzIGFsbCB0YWJsZXNzIHNlc3Npb25zLCBsb2NhbCBvciByZW1vdGUsIGluIGFueSBsaWZlY3ljbGUgc3RhdGUuIElmIHRoZSB0YWIgYWxyZWFkeSBleGlzdHMsIEZsZWV0IGZvY3VzZXMgaXQuIElmIHRoZSByb3cgaXMgdGFibGVzcyBhbmQgaGFzIGEgc2Vzc2lvbiBpZCwgRmxlZXQgb3BlbnMgYW4gYWdlbnQgdGFiIGFuZCBsZXRzIHRoZSBDTEkgcmVzb2x2ZSB0aGUgY29ycmVjdCBhdHRhY2ggb3IgcmVjb3ZlcnkgcGF0aC4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIHZpZXdCb3g9IjAgMCAxMTgwIDQzMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJDdXJyZW50IGFuZCBwcm9wb3NlZCBhcmNoaXRlY3R1cmUgZm9yIG9wZW5pbmcgRmxlZXQgc2Vzc2lvbnMiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhcnJvdy1uZXV0cmFsIiBtYXJrZXJXaWR0aD0iMTAiIG1hcmtlckhlaWdodD0iMTAiIHJlZlg9IjgiIHJlZlk9IjUiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOSw1IEwwLDEwIHoiIGZpbGw9IiM3ZDg5OTIiLz48L21hcmtlcj4KICAgIDxtYXJrZXIgaWQ9ImFycm93LWJhZCIgbWFya2VyV2lkdGg9IjEwIiBtYXJrZXJIZWlnaHQ9IjEwIiByZWZYPSI4IiByZWZZPSI1IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDksNSBMMCwxMCB6IiBmaWxsPSIjZjg3MTcxIi8+PC9tYXJrZXI+CiAgICA8bWFya2VyIGlkPSJhcnJvdy1nb29kIiBtYXJrZXJXaWR0aD0iMTAiIG1hcmtlckhlaWdodD0iMTAiIHJlZlg9IjgiIHJlZlk9IjUiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOSw1IEwwLDEwIHoiIGZpbGw9IiNhM2U2MzUiLz48L21hcmtlcj4KICA8L2RlZnM+CgogIDx0ZXh0IHg9IjIyIiB5PSIyOCIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiPkNVUlJFTlQg4oCUIEZsZWV0IG93bnMgYm90aCB0aGUgVUkgc3VyZmFjZSBhbmQgcmVtb3RlIHRyYW5zcG9ydDwvdGV4dD4KICA8cmVjdCB4PSIyMiIgeT0iNDgiIHdpZHRoPSIyMDUiIGhlaWdodD0iNzQiIHJ4PSIxMCIgZmlsbD0iIzFhMTQxNCIgc3Ryb2tlPSIjZjg3MTcxIi8+CiAgPHRleHQgeD0iMzgiIHk9Ijc3IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+U2Vzc2lvbnNQYW5lPC90ZXh0PgogIDx0ZXh0IHg9IjM4IiB5PSIxMDAiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5SZXN1bWUgLyBGb2N1cyBjbGljazwvdGV4dD4KICA8bGluZSB4MT0iMjI3IiB5MT0iODUiIHgyPSIyNzYiIHkyPSI4NSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3ctYmFkKSIvPgogIDxyZWN0IHg9IjI3OCIgeT0iNDgiIHdpZHRoPSIyMzAiIGhlaWdodD0iNzQiIHJ4PSIxMCIgZmlsbD0iIzFhMTQxNCIgc3Ryb2tlPSIjZjg3MTcxIi8+CiAgPHRleHQgeD0iMjk0IiB5PSI3NyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPm9wZW5UZXJtaW5hbEZvckFnZW50PC90ZXh0PgogIDx0ZXh0IHg9IjI5NCIgeT0iMTAwIiBmaWxsPSIjOWNhM2FmIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+Y2hvb3NlcyB0ZXJtaW5hbCAvIHRtdXggLyBmb2N1czwvdGV4dD4KICA8bGluZSB4MT0iNTA4IiB5MT0iODUiIHgyPSI1NTciIHkyPSI4NSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3ctYmFkKSIvPgogIDxyZWN0IHg9IjU1OSIgeT0iNDgiIHdpZHRoPSIyNzAiIGhlaWdodD0iNzQiIHJ4PSIxMCIgZmlsbD0iIzFhMTQxNCIgc3Ryb2tlPSIjZjg3MTcxIi8+CiAgPHRleHQgeD0iNTc1IiB5PSI3NyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPnNldHRpbmdzLnZzY29kZS50czwvdGV4dD4KICA8dGV4dCB4PSI1NzUiIHk9IjEwMCIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPnJhdyBzc2ggLyB0bXV4IGNvbW1hbmQgYnVpbGRlcjwvdGV4dD4KICA8bGluZSB4MT0iODI5IiB5MT0iODUiIHgyPSI4NzgiIHkyPSI4NSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3ctYmFkKSIvPgogIDxyZWN0IHg9Ijg4MCIgeT0iNDgiIHdpZHRoPSIyNzgiIGhlaWdodD0iNzQiIHJ4PSIxMCIgZmlsbD0iIzJhMGYwZiIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI4OTYiIHk9Ijc3IiBmaWxsPSIjZmVjYWNhIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+VlMgQ29kZSBib3R0b20gcGFuZWw8L3RleHQ+CiAgPHRleHQgeD0iODk2IiB5PSIxMDAiIGZpbGw9IiNmY2E1YTUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj51bnJlZ2lzdGVyZWQgwrcgc3RhbGUgcm91dGUgwrcgZHVwbGljYXRlIHBhdGg8L3RleHQ+CgogIDx0ZXh0IHg9IjIyIiB5PSIxODQiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIj5QUk9QT1NFRCDigJQgZXh0ZW5zaW9uIG93bnMgdGhlIHRhYjsgQ0xJIG93bnMgbGlmZWN5Y2xlIGFuZCByb3V0aW5nPC90ZXh0PgogIDxyZWN0IHg9IjIyIiB5PSIyMDQiIHdpZHRoPSIyMDUiIGhlaWdodD0iNzQiIHJ4PSIxMCIgZmlsbD0iIzExMTgxMCIgc3Ryb2tlPSIjYTNlNjM1Ii8+CiAgPHRleHQgeD0iMzgiIHk9IjIzMyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPlNlc3Npb25zUGFuZTwvdGV4dD4KICA8dGV4dCB4PSIzOCIgeT0iMjU2IiBmaWxsPSIjOWNhM2FmIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+T3BlbiBpbiBhZ2VudCB0YWI8L3RleHQ+CiAgPGxpbmUgeDE9IjIyNyIgeTE9IjI0MSIgeDI9IjI3NiIgeTI9IjI0MSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3ctZ29vZCkiLz4KICA8cmVjdCB4PSIyNzgiIHk9IjIwNCIgd2lkdGg9IjIzMCIgaGVpZ2h0PSI3NCIgcng9IjEwIiBmaWxsPSIjMTExODEwIiBzdHJva2U9IiNhM2U2MzUiLz4KICA8dGV4dCB4PSIyOTQiIHk9IjIzMyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPm9wZW5GbGVldFNlc3Npb248L3RleHQ+CiAgPHRleHQgeD0iMjk0IiB5PSIyNTYiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj50eXBlZCBwcmVzZW50YXRpb24gaW50ZW50PC90ZXh0PgogIDxsaW5lIHgxPSI1MDgiIHkxPSIyNDEiIHgyPSI1NTciIHkyPSIyNDEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93LWdvb2QpIi8+CiAgPHJlY3QgeD0iNTU5IiB5PSIyMDQiIHdpZHRoPSIyNzAiIGhlaWdodD0iNzQiIHJ4PSIxMCIgZmlsbD0iIzExMTgxMCIgc3Ryb2tlPSIjYTNlNjM1Ii8+CiAgPHRleHQgeD0iNTc1IiB5PSIyMzMiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5vcGVuQWdlbnRTZXNzaW9uVGVybWluYWw8L3RleHQ+CiAgPHRleHQgeD0iNTc1IiB5PSIyNTYiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5lZGl0b3IgdGFiIMK3IHJlZ2lzdGVyIMK3IGRlZHVwZTwvdGV4dD4KICA8bGluZSB4MT0iODI5IiB5MT0iMjQxIiB4Mj0iODc4IiB5Mj0iMjQxIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNhcnJvdy1nb29kKSIvPgogIDxyZWN0IHg9Ijg4MCIgeT0iMjA0IiB3aWR0aD0iMjc4IiBoZWlnaHQ9Ijc0IiByeD0iMTAiIGZpbGw9IiMxNDIwMGUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iODk2IiB5PSIyMzIiIGZpbGw9IiNkOWY5OWQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj5hZ2VudCBlZGl0b3IgdGFiPC90ZXh0PgogIDx0ZXh0IHg9Ijg5NiIgeT0iMjU1IiBmaWxsPSIjYmVmMjY0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+YWdlbnRzIHNlc3Npb25zIGZvY3VzIElEIC0taW4tcGxhY2U8L3RleHQ+CgogIDxsaW5lIHgxPSIxMDE5IiB5MT0iMjc4IiB4Mj0iMTAxOSIgeTI9IjMyMyIgc3Ryb2tlPSIjN2Q4OTkyIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3ctbmV1dHJhbCkiLz4KICA8cmVjdCB4PSI3NTIiIHk9IjMyNiIgd2lkdGg9IjQwNiIgaGVpZ2h0PSI3NyIgcng9IjEwIiBmaWxsPSIjMTAxNDE4IiBzdHJva2U9IiM3ZDg5OTIiLz4KICA8dGV4dCB4PSI3NjgiIHk9IjM1MyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPkNMSSBsaWZlY3ljbGUgZGlzcGF0Y2hlcjwvdGV4dD4KICA8dGV4dCB4PSI3NjgiIHk9IjM3NiIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPmxpdmUgcGFuZSDihpIgYXR0YWNoIMK3IGVuZGVkIHBhbmUg4oaSIG9yaWdpbi1zaWRlIHJlY292ZXJ5PC90ZXh0PgogIDx0ZXh0IHg9Ijc2OCIgeT0iMzk0IiBmaWxsPSIjOWNhM2FmIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+bm8gcmF3IHJvdXRpbmcgb3Igc2Vzc2lvbiBjbGFzc2lmaWNhdGlvbiBpbiB0aGUgd2VidmlldzwvdGV4dD4KPC9zdmc+CjwvZGl2PgoKVGhlIGJ1ZyBpcyB0aGUgbG93ZXItbGV2ZWwgb3duZXJzaGlwIGJvdW5kYXJ5LCBub3QganVzdCB0ZXJtaW5hbCBwbGFjZW1lbnQuIFRoZSByZW5kZXJlciBwaWNrcyBhIHRtdXggcmFpbCwgdGhlIFZTIENvZGUgaG9zdCBidWlsZHMgdHJhbnNwb3J0IGNvbW1hbmRzLCBhbmQgdGhlIHRlcm1pbmFsIGlzIGNyZWF0ZWQgd2l0aG91dCBhbiBlZGl0b3IgbG9jYXRpb24gb3IgQUdJIEVYVCByZWdpc3RyYXRpb24uIFRoYXQgY3JlYXRlcyBmb3VyIHVzZXItdmlzaWJsZSBmYWlsdXJlcyBmcm9tIG9uZSBhcmNoaXRlY3R1cmFsIHZpb2xhdGlvbjogYm90dG9tLXBhbmVsIHBsYWNlbWVudCwgbWlzc2luZyBhZ2VudCBpZGVudGl0eSwgc3RhbGUgU1NIIHJvdXRpbmcsIGFuZCBkdXBsaWNhdGUgbGlmZWN5Y2xlIGxvZ2ljLgoKfCBDdXJyZW50IGNvbXBvbmVudCB8IEV2aWRlbmNlIG9uIGZyZXNoIGBvcmlnaW4vbWFpbmAgfCBQcm9ibGVtIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGBVbmlmaWVkQWdlbnRzUGFuZS50c3hgIHwgYG9wZW5UZXJtaW5hbEZvckFnZW50YCBwcmlvcml0aXplcyBgZm9jdXNSZW1vdGVTZXNzaW9uYCwgdGhlbiBgZm9jdXNTZXNzaW9uYCB8IFJlbmRlcmVyIGNob29zZXMgdHJhbnNwb3J0IHJhdGhlciB0aGFuIGV4cHJlc3Npbmcg4oCcb3BlbiB0aGlzIHNlc3Npb24u4oCdIHwKfCBgc2V0dGluZ3MudnNjb2RlLnRzYCB8IGBmb2N1c1JlbW90ZVNlc3Npb25gIGJ1aWxkcyBgc3NoIC10IOKApiB0bXV4IGF0dGFjaGA7IHJlbW90ZSBgZm9jdXNTZXNzaW9uYCBjcmVhdGVzIGFub3RoZXIgcGFuZWwgdGVybWluYWwgfCBFeHRlbnNpb24gZHVwbGljYXRlcyBDTEkgcm91dGluZyBhbmQgY3JlYXRlcyB0aGUgd3Jvbmcgc3VyZmFjZS4gfAp8IGByZW1vdGVTZXNzaW9ucy50c2AgfCBgYnVpbGRSZW1vdGVGb2N1c0NvbW1hbmRgIGhhbmQtYnVpbGRzIHJlbW90ZSBgc2Vzc2lvbnMgcmVzdW1lIOKApiAtLWxvY2FsYCB8IEEgc2Vjb25kIGxpZmVjeWNsZSBjb21tYW5kIHBhdGggY2FuIGRyaWZ0IGZyb20gdGhlIENMSSBjb250cmFjdC4gfAp8IGBleHRlbnNpb24udHNgIHwgYG9wZW5SZXN1bWVkU2Vzc2lvblRlcm1pbmFsYCBhbHJlYWR5IHVzZXMgYGxvY2F0aW9uOiB2aWV3Q29sdW1uLkFjdGl2ZWAsIHJlZ2lzdHJhdGlvbiwgaWNvbiwgaG9zdCBhbmQgc2Vzc2lvbiBtZXRhZGF0YSB8IFRoZSBjb3JyZWN0IGVkaXRvci10YWIgcHJlc2VudGF0aW9uIGV4aXN0cyBidXQgRmxlZXQgYnlwYXNzZXMgaXQuIHwKfCBgc2Vzc2lvbnMtcmVzdW1lLnRzYCB8IGRpcmVjdCBpZCBkZWZhdWx0cyB0byBzdHJpY3QgcmVzdW1lIHVubGVzcyBsaWZlY3ljbGUgZmxhZ3MgYXJlIHByZXNlbnQgfCBCbGluZGx5IGNoYW5naW5nIEZsZWV0IHRvIGByZXN1bWUgLS12c2NvZGl1bWAgY2FuIGZvcmsgYSBsaXZlIGNvcHkuIHwKCiMjIEJlaGF2aW9yIOKAlCBjdXJyZW50IGFuZCBwcm9wb3NlZAoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtYmVoYXZpb3IiPgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LWJlaGF2aW9yLXBhbmVsIGFydGlmYWN0LXBhbmVsIiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJtb2NrdXAiPgogICAgPGg0PkN1cnJlbnQg4oCUIOKAnFJlc3VtZeKAnSBvcGVucyBhdHRhY2ggc2hlbGxzIGluIHRoZSBib3R0b20gcGFuZWw8L2g0PgogICAgPHN2ZyB2aWV3Qm94PSIwIDAgNTYwIDM2MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJNb2NrdXAgb2YgY3VycmVudCBBR0kgRVhUIHNlc3Npb24gY2FyZCBhbmQgcmF3IGF0dGFjaCB0ZXJtaW5hbHMgaW4gVlMgQ29kZSBib3R0b20gcGFuZWwiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgICAgIDxyZWN0IHdpZHRoPSI1NjAiIGhlaWdodD0iMzYwIiByeD0iMTIiIGZpbGw9IiMwYTBhMGEiLz4KICAgICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjU2MCIgaGVpZ2h0PSIzNCIgcng9IjEyIiBmaWxsPSIjMTgxODE4Ii8+CiAgICAgIDxjaXJjbGUgY3g9IjE4IiBjeT0iMTciIHI9IjUiIGZpbGw9IiNmODcxNzEiLz48Y2lyY2xlIGN4PSIzNSIgY3k9IjE3IiByPSI1IiBmaWxsPSIjZmFjYzE1Ii8+PGNpcmNsZSBjeD0iNTIiIGN5PSIxNyIgcj0iNSIgZmlsbD0iI2EzZTYzNSIvPgogICAgICA8dGV4dCB4PSI3NiIgeT0iMjIiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5BR0kgRVhUIMK3IEZsZWV0PC90ZXh0PgogICAgICA8cmVjdCB4PSIxNCIgeT0iNDgiIHdpZHRoPSI1MzIiIGhlaWdodD0iMTA2IiByeD0iOCIgZmlsbD0iIzE0MTQxNCIgc3Ryb2tlPSIjMzMzIi8+CiAgICAgIDx0ZXh0IHg9IjI4IiB5PSI3MyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPkNYICBGaXggc2Vzc2lvbiByZWNvdmVyeTwvdGV4dD4KICAgICAgPHRleHQgeD0iMjgiIHk9Ijk0IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+d29ya2VyLWEgwrcgY3Jhc2hlZCDCtyAxOCBtaW51dGVzIGFnbzwvdGV4dD4KICAgICAgPHJlY3QgeD0iNDIyIiB5PSI2NiIgd2lkdGg9IjEwNSIgaGVpZ2h0PSIzMiIgcng9IjUiIGZpbGw9IiNhM2U2MzUiLz4KICAgICAgPHRleHQgeD0iNDQ3IiB5PSI4NyIgZmlsbD0iIzBhMGEwYSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZvbnQtc2l6ZT0iMTIiPlJlc3VtZTwvdGV4dD4KICAgICAgPHRleHQgeD0iMjgiIHk9IjEyOCIgZmlsbD0iI2ZjYTVhNSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPkNsaWNrIGNyZWF0ZXMgYW4gdW5yZWdpc3RlcmVkIHBhbmVsIHNoZWxsPC90ZXh0PgogICAgICA8cmVjdCB4PSIwIiB5PSIxNzIiIHdpZHRoPSI1NjAiIGhlaWdodD0iMTg4IiBmaWxsPSIjMWEwZjBmIi8+CiAgICAgIDxyZWN0IHg9IjAiIHk9IjE3MiIgd2lkdGg9IjU2MCIgaGVpZ2h0PSIyOCIgZmlsbD0iIzIyMiIvPgogICAgICA8dGV4dCB4PSIxNCIgeT0iMTkwIiBmaWxsPSIjYmJiIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCI+UFJPQkxFTVMgICBPVVRQVVQgICBERUJVRyBDT05TT0xFICAgPHRzcGFuIGZpbGw9IiNmODcxNzEiPlRFUk1JTkFMPC90c3Bhbj48L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjE2IiB5PSIyMjYiIGZpbGw9IiNmNWQwZDAiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj4kIHNzaCAtdCAnd29ya2VyLWEnICd0bXV4IC1TIOKApiBhdHRhY2gnPC90ZXh0PgogICAgICA8dGV4dCB4PSIxNiIgeT0iMjUwIiBmaWxsPSIjZjg3MTcxIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+c3NoOiBjb25uZWN0aW9uIHRpbWVkIG91dDwvdGV4dD4KICAgICAgPHJlY3QgeD0iMzkwIiB5PSIyMDMiIHdpZHRoPSIxNzAiIGhlaWdodD0iMTU3IiBmaWxsPSIjMjMxMTExIi8+CiAgICAgIDx0ZXh0IHg9IjQwMiIgeT0iMjI3IiBmaWxsPSIjZmNhNWE1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+YXR0YWNoIGZpeC1zZXNzaW9uPC90ZXh0PgogICAgICA8dGV4dCB4PSI0MDIiIHk9IjI1MCIgZmlsbD0iI2Q2YjRiNCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmF0dGFjaCByZWxlYXNlPC90ZXh0PgogICAgICA8dGV4dCB4PSI0MDIiIHk9IjI3MyIgZmlsbD0iI2Q2YjRiNCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmF0dGFjaCB0ZXN0czwvdGV4dD4KICAgIDwvc3ZnPgogIDwvZGl2PgoKICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvci1wYW5lbCBhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8aDQ+UHJvcG9zZWQg4oCUIOKAnE9wZW4gaW4gYWdlbnQgdGFi4oCdIGNyZWF0ZXMgb25lIG5vcm1hbCBhZ2VudCBlZGl0b3IgdGFiPC9oND4KICAgIDxzdmcgdmlld0JveD0iMCAwIDU2MCAzNjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iTW9ja3VwIG9mIHByb3Bvc2VkIEFHSSBFWFQgc2Vzc2lvbiBjYXJkIGFuZCByZWdpc3RlcmVkIGFnZW50IGVkaXRvciB0YWIiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgICAgIDxyZWN0IHdpZHRoPSI1NjAiIGhlaWdodD0iMzYwIiByeD0iMTIiIGZpbGw9IiMwYTBhMGEiLz4KICAgICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjU2MCIgaGVpZ2h0PSIzNCIgcng9IjEyIiBmaWxsPSIjMTgxODE4Ii8+CiAgICAgIDxjaXJjbGUgY3g9IjE4IiBjeT0iMTciIHI9IjUiIGZpbGw9IiNmODcxNzEiLz48Y2lyY2xlIGN4PSIzNSIgY3k9IjE3IiByPSI1IiBmaWxsPSIjZmFjYzE1Ii8+PGNpcmNsZSBjeD0iNTIiIGN5PSIxNyIgcj0iNSIgZmlsbD0iI2EzZTYzNSIvPgogICAgICA8dGV4dCB4PSI3NiIgeT0iMjIiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5BR0kgRVhUIMK3IEZsZWV0PC90ZXh0PgogICAgICA8cmVjdCB4PSIxNCIgeT0iNDgiIHdpZHRoPSI1MzIiIGhlaWdodD0iMTA2IiByeD0iOCIgZmlsbD0iIzE0MTQxNCIgc3Ryb2tlPSIjMzMzIi8+CiAgICAgIDx0ZXh0IHg9IjI4IiB5PSI3MyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiPkNYICBGaXggc2Vzc2lvbiByZWNvdmVyeTwvdGV4dD4KICAgICAgPHRleHQgeD0iMjgiIHk9Ijk0IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+d29ya2VyLWEgwrcgY3Jhc2hlZCDCtyAxOCBtaW51dGVzIGFnbzwvdGV4dD4KICAgICAgPHJlY3QgeD0iMzgzIiB5PSI2NiIgd2lkdGg9IjE0NCIgaGVpZ2h0PSIzMiIgcng9IjUiIGZpbGw9IiNhM2U2MzUiLz4KICAgICAgPHRleHQgeD0iMzk3IiB5PSI4NyIgZmlsbD0iIzBhMGEwYSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtd2VpZ2h0PSI3MDAiIGZvbnQtc2l6ZT0iMTEiPk9wZW4gaW4gYWdlbnQgdGFiPC90ZXh0PgogICAgICA8dGV4dCB4PSIyOCIgeT0iMTI4IiBmaWxsPSIjYmVmMjY0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+UmVwZWF0ZWQgY2xpY2sgZm9jdXNlcyB0aGlzIHNhbWUgdGFiPC90ZXh0PgogICAgICA8cmVjdCB4PSIwIiB5PSIxNzIiIHdpZHRoPSI1NjAiIGhlaWdodD0iMTg4IiBmaWxsPSIjMGQxNTEwIi8+CiAgICAgIDxyZWN0IHg9IjAiIHk9IjE3MiIgd2lkdGg9IjU2MCIgaGVpZ2h0PSIzMSIgZmlsbD0iIzFiMjQxZSIvPgogICAgICA8cmVjdCB4PSI4IiB5PSIxNzYiIHdpZHRoPSIxODQiIGhlaWdodD0iMjciIHJ4PSI1IiBmaWxsPSIjMjYzNzJhIiBzdHJva2U9IiNhM2U2MzUiLz4KICAgICAgPHRleHQgeD0iMjAiIHk9IjE5NCIgZmlsbD0iI2Q5Zjk5ZCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPkNYIMK3IEZpeCBzZXNzaW9uIHJlY292ZXJ5PC90ZXh0PgogICAgICA8cmVjdCB4PSIxOTgiIHk9IjE3NiIgd2lkdGg9IjEzMyIgaGVpZ2h0PSIyNyIgcng9IjUiIGZpbGw9IiMxNzFmMTkiLz4KICAgICAgPHRleHQgeD0iMjEwIiB5PSIxOTQiIGZpbGw9IiM4ZGE2OTQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5DQyDCtyBSZWxlYXNlPC90ZXh0PgogICAgICA8dGV4dCB4PSIxOCIgeT0iMjM3IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+JCBhZ2VudHMgc2Vzc2lvbnMgZm9jdXMgYWctY29kZXgtOGMyMSAtLWluLXBsYWNlPC90ZXh0PgogICAgICA8dGV4dCB4PSIxOCIgeT0iMjY1IiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+QXR0YWNoZWQgdG8gbGl2ZSBwYW5lIG9uIG9yaWdpbiBkZXZpY2U8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjE4IiB5PSIyOTMiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIj5zZXNzaW9uIGFnLWNvZGV4LThjMjEgwrcgcmVnaXN0ZXJlZCDCtyBlZGl0b3IgdGFiPC90ZXh0PgogICAgPC9zdmc+CiAgPC9kaXY+CjwvZGl2PgoKIyMjIFRoZSB2aXNpYmxlIHN0YXRlIG1vZGVsCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIHZpZXdCb3g9IjAgMCAxMTgwIDUwMCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJEZWNpc2lvbiBmbG93IGZvciBvcGVuaW5nIG9yIGZvY3VzaW5nIGEgRmxlZXQgc2Vzc2lvbiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8ZGVmcz48bWFya2VyIGlkPSJmbG93LWFycm93IiBtYXJrZXJXaWR0aD0iMTAiIG1hcmtlckhlaWdodD0iMTAiIHJlZlg9IjgiIHJlZlk9IjUiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOSw1IEwwLDEwIHoiIGZpbGw9IiM3ZDg5OTIiLz48L21hcmtlcj48L2RlZnM+CiAgPHJlY3QgeD0iMzIiIHk9IjE5OCIgd2lkdGg9IjE2MCIgaGVpZ2h0PSI2NCIgcng9IjEwIiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiNhM2U2MzUiLz4KICA8dGV4dCB4PSI1OCIgeT0iMjI2IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+RmxlZXQgYWN0aW9uPC90ZXh0PgogIDx0ZXh0IHg9IjUyIiB5PSIyNDciIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5vbmUgcm93IG9yIGJ1bGs8L3RleHQ+CiAgPGxpbmUgeDE9IjE5MiIgeTE9IjIzMCIgeDI9IjI1MyIgeTI9IjIzMCIgc3Ryb2tlPSIjN2Q4OTkyIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjZmxvdy1hcnJvdykiLz4KCiAgPHBvbHlnb24gcG9pbnRzPSIzMzAsMTUyIDQwNywyMzAgMzMwLDMwOCAyNTMsMjMwIiBmaWxsPSIjMTAxNDE4IiBzdHJva2U9IiNhM2U2MzUiLz4KICA8dGV4dCB4PSIyODciIHk9IjIyNCIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPnJlZ2lzdGVyZWQgdGFiPC90ZXh0PgogIDx0ZXh0IHg9IjMxMSIgeT0iMjQzIiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+ZXhpc3RzPzwvdGV4dD4KICA8bGluZSB4MT0iMzMwIiB5MT0iMTUyIiB4Mj0iMzMwIiB5Mj0iOTEiIHN0cm9rZT0iIzdkODk5MiIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2Zsb3ctYXJyb3cpIi8+CiAgPHRleHQgeD0iMzQyIiB5PSIxMjYiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj55ZXM8L3RleHQ+CiAgPHJlY3QgeD0iMjUwIiB5PSIyOCIgd2lkdGg9IjE2MCIgaGVpZ2h0PSI2MiIgcng9IjEwIiBmaWxsPSIjMTQyMDBlIiBzdHJva2U9IiNhM2U2MzUiLz4KICA8dGV4dCB4PSIyODYiIHk9IjU0IiBmaWxsPSIjZDlmOTlkIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+Rm9jdXMgdGFiPC90ZXh0PgogIDx0ZXh0IHg9IjI3NCIgeT0iNzUiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5ubyBuZXcgcHJvY2VzczwvdGV4dD4KICA8bGluZSB4MT0iNDA3IiB5MT0iMjMwIiB4Mj0iNDc0IiB5Mj0iMjMwIiBzdHJva2U9IiM3ZDg5OTIiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNmbG93LWFycm93KSIvPgogIDx0ZXh0IHg9IjQyNiIgeT0iMjE5IiBmaWxsPSIjZmFjYzE1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+bm88L3RleHQ+CgogIDxwb2x5Z29uIHBvaW50cz0iNTUwLDE1MiA2MjcsMjMwIDU1MCwzMDggNDczLDIzMCIgZmlsbD0iIzEwMTQxOCIgc3Ryb2tlPSIjYTNlNjM1Ii8+CiAgPHRleHQgeD0iNTE0IiB5PSIyMjQiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5jYW5vbmljYWw8L3RleHQ+CiAgPHRleHQgeD0iNTE0IiB5PSIyNDMiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5zZXNzaW9uIGlkPzwvdGV4dD4KICA8bGluZSB4MT0iNTUwIiB5MT0iMzA4IiB4Mj0iNTUwIiB5Mj0iMzgzIiBzdHJva2U9IiM3ZDg5OTIiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNmbG93LWFycm93KSIvPgogIDx0ZXh0IHg9IjU2MiIgeT0iMzUyIiBmaWxsPSIjZjg3MTcxIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+bm88L3RleHQ+CiAgPHJlY3QgeD0iNDYzIiB5PSIzODYiIHdpZHRoPSIxNzQiIGhlaWdodD0iNzIiIHJ4PSIxMCIgZmlsbD0iIzFhMTQxNCIgc3Ryb2tlPSIjZjg3MTcxIi8+CiAgPHRleHQgeD0iNDkwIiB5PSI0MTMiIGZpbGw9IiNmZWNhY2EiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5EaXNhYmxlIGFjdGlvbjwvdGV4dD4KICA8dGV4dCB4PSI0ODAiIHk9IjQzNiIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPnJlZnJlc2gtYW5kLXJldHJ5IHJlYXNvbjwvdGV4dD4KICA8bGluZSB4MT0iNjI3IiB5MT0iMjMwIiB4Mj0iNjk0IiB5Mj0iMjMwIiBzdHJva2U9IiM3ZDg5OTIiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNmbG93LWFycm93KSIvPgogIDx0ZXh0IHg9IjY0NiIgeT0iMjE5IiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+eWVzPC90ZXh0PgoKICA8cmVjdCB4PSI2OTYiIHk9IjE4OSIgd2lkdGg9IjE5NCIgaGVpZ2h0PSI4MiIgcng9IjEwIiBmaWxsPSIjMTQyMDBlIiBzdHJva2U9IiNhM2U2MzUiLz4KICA8dGV4dCB4PSI3MTUiIHk9IjIxOCIgZmlsbD0iI2Q5Zjk5ZCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPkNyZWF0ZSArIHJlZ2lzdGVyIHRhYjwvdGV4dD4KICA8dGV4dCB4PSI3MTUiIHk9IjI0MSIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPmljb24gwrcgdGl0bGUgwrcgY3dkIMK3IGhvc3Q8L3RleHQ+CiAgPHRleHQgeD0iNzE1IiB5PSIyNTgiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5vbmUgc2Vzc2lvbi1pZCBrZXk8L3RleHQ+CiAgPGxpbmUgeDE9Ijg5MCIgeTE9IjIzMCIgeDI9Ijk1MCIgeTI9IjIzMCIgc3Ryb2tlPSIjN2Q4OTkyIiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjZmxvdy1hcnJvdykiLz4KCiAgPHJlY3QgeD0iOTUyIiB5PSIxNzQiIHdpZHRoPSIxOTgiIGhlaWdodD0iMTEyIiByeD0iMTAiIGZpbGw9IiMxMDE0MTgiIHN0cm9rZT0iI2EzZTYzNSIvPgogIDx0ZXh0IHg9Ijk3MCIgeT0iMjA0IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+Q0xJIGZvY3VzIC0taW4tcGxhY2U8L3RleHQ+CiAgPHRleHQgeD0iOTcwIiB5PSIyMzAiIGZpbGw9IiNiZWYyNjQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5saXZlIHJhaWwg4oaSIGF0dGFjaDwvdGV4dD4KICA8dGV4dCB4PSI5NzAiIHk9IjI1MiIgZmlsbD0iI2JlZjI2NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPmVuZGVkIHJhaWwg4oaSIHJlY292ZXI8L3RleHQ+CiAgPHRleHQgeD0iOTcwIiB5PSIyNzQiIGZpbGw9IiNmY2E1YTUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIj5lcnJvciDihpIgdmlzaWJsZSBpbiB0YWI8L3RleHQ+CgogIDxyZWN0IHg9IjY5NiIgeT0iMzI5IiB3aWR0aD0iNDU0IiBoZWlnaHQ9IjEyOSIgcng9IjEwIiBmaWxsPSIjMGYwZjBmIiBzdHJva2U9IiMzMzMiLz4KICA8dGV4dCB4PSI3MTQiIHk9IjM1NyIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPkludmFyaWFudDwvdGV4dD4KICA8dGV4dCB4PSI3MTQiIHk9IjM4MyIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPlRoZSB3ZWJ2aWV3IG5ldmVyIGFza3Mg4oCcdG11eCBvciByZXN1bWU/4oCdPC90ZXh0PgogIDx0ZXh0IHg9IjcxNCIgeT0iNDA3IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiI+VGhlIGV4dGVuc2lvbiBuZXZlciBhc2tzIOKAnGxvY2FsIG9yIFNTSD/igJ08L3RleHQ+CiAgPHRleHQgeD0iNzE0IiB5PSI0MzEiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5UaGUgQ0xJIHJlLWNoZWNrcyBsaXZlIHN0YXRlIGF0IGV4ZWN1dGlvbiB0aW1lLjwvdGV4dD4KPC9zdmc+CjwvZGl2PgoKIyMgUHVycG9zZQoKVGhpcyByZXN0b3JlcyB0aGUgcHJvZHVjdCBib3VuZGFyeSBkb2N1bWVudGVkIGJ5IGJvdGggY29tcG9uZW50czoKCi0gQUdJIEVYVCBpcyBhIHRoaW4gcHJlc2VudGF0aW9uIGNsaWVudC4gSXQgb3ducyBlZGl0b3IgdGFicywgdGl0bGVzLCBpY29ucywgcmVnaXN0cmF0aW9uIGFuZCBmb2N1cy4KLSBhZ2VudHMtY2xpIG93bnMgc2Vzc2lvbiBkaXNjb3ZlcnksIGxpdmUtcmFpbCB2YWxpZGF0aW9uLCBkZXZpY2Ugcm91dGluZyBhbmQgcmVjb3ZlcnkgcG9saWN5LgoKVGhlIGRlc2lnbiBhbHNvIGNsb3NlcyB0aGUgcmFjZSB0aGUgb2xkZXIgcGxhbiBsZWZ0IG9wZW4uIEEgcGFuZSBjYW4gZGllIGFmdGVyIEZsZWV0IHJlbmRlcnMgaXQuIElmIEZsZWV0IGNvbnN0cnVjdHMgYSByYXcgdG11eCBhdHRhY2ggY29tbWFuZCwgdGhlIHVzZXIgZ2V0cyBhIGRlYWQgdGVybWluYWwuIElmIEZsZWV0IGJsaW5kbHkgcnVucyBzdHJpY3QgcmVzdW1lLCBhIGxpdmUgaGVhZGxlc3MgcHJvY2VzcyBjYW4gYmUgY29waWVkLiBUaGUgaGlkZGVuIGluLXBsYWNlIGRpc3BhdGNoZXIgcmUtcmVhZHMgY3VycmVudCBzdGF0ZSBhZnRlciB0aGUgZWRpdG9yIHRhYiBleGlzdHMsIHRoZW4gYXR0YWNoZXMgb3IgcmVjb3ZlcnMgaW4gdGhhdCBzYW1lIHRhYi4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPgpUaGUga2V5IGNoYW5nZSBpcyBub3Qg4oCccHV0IHRoZSB0ZXJtaW5hbCBpbiBhIGRpZmZlcmVudCBsb2NhdGlvbi7igJ0gSXQgaXMg4oCcY3JlYXRlIGV4YWN0bHkgb25lIG5vcm1hbCBhZ2VudCB0YWIsIHRoZW4gbGV0IHRoZSBDTEkgcGVyZm9ybSB0aGUgYXV0aG9yaXRhdGl2ZSBsaWZlY3ljbGUgZGVjaXNpb24gaW5zaWRlIGl0LuKAnQo8L2Rpdj4KCiMjIFByb3Bvc2VkIGNoYW5nZXMKCiMjIyAxLiBBZGQgYW4gaW50ZXJuYWwgaW4tcGxhY2UgbGlmZWN5Y2xlIG1vZGUgdG8gdGhlIENMSQoKYGFwcHMvY2xpL3NyYy9jb21tYW5kcy9mb2N1cy50c2AgcmVtYWlucyB0aGUgc2luZ2xlIGF0dGFjaC9yZWNvdmVyIGRlY2lzaW9uLiBBZGQgdGhlIGludGVybmFsIGAtLWluLXBsYWNlYCBvcHRpb24gdG8gdGhlIGFscmVhZHktaGlkZGVuIGBmb2N1c2AgY29tbWFuZC4gSXQgY2hhbmdlcyBvbmx5IHRoZSBuby1hdHRhY2ggZmFsbGJhY2s6IHJlY292ZXIgaW4gdGhlIGN1cnJlbnQgVFRZIGluc3RlYWQgb2YgYXNraW5nIHRoZSB0ZXJtaW5hbCBlbmdpbmUgdG8gY3JlYXRlIGFub3RoZXIgdGFiLgoKYGBgZGlmZgogZXhwb3J0IGludGVyZmFjZSBGb2N1c09wdGlvbnMgewogICBsb2NhbD86IGJvb2xlYW47CiAgIGF0dGFjaE9ubHk/OiBib29sZWFuOworICBpblBsYWNlPzogYm9vbGVhbjsKIH0KCiBjb25zdCBjbWQgPSBwcm9ncmFtCiAgIC5jb21tYW5kKCdmb2N1cycsIHsgaGlkZGVuOiB0cnVlIH0pCisgIC5vcHRpb24oJy0taW4tcGxhY2UnLCAnSW50ZXJuYWw6IHJlY292ZXIgaW4gdGhpcyB0ZXJtaW5hbDsgbmV2ZXIgb3BlbiBhbm90aGVyIHN1cmZhY2UnKQoKLWV4cG9ydCBmdW5jdGlvbiBzZWxlY3RGYWxsYmFjayhhdHRhY2hPbmx5OiBib29sZWFuIHwgdW5kZWZpbmVkKTogVW5yZWFjaGFibGVGYWxsYmFjayB7Ci0gIHJldHVybiBhdHRhY2hPbmx5ID8gcmVmdXNlRmFsbGJhY2sgOiByZXN1bWVJbk5ld1RhYjsKK2V4cG9ydCBmdW5jdGlvbiBzZWxlY3RGYWxsYmFjayhvcHRzOiBQaWNrPEZvY3VzT3B0aW9ucywgJ2F0dGFjaE9ubHknIHwgJ2luUGxhY2UnPik6IFVucmVhY2hhYmxlRmFsbGJhY2sgeworICBpZiAob3B0cy5hdHRhY2hPbmx5ICYmIG9wdHMuaW5QbGFjZSkgeworICAgIHRocm93IG5ldyBFcnJvcignLS1hdHRhY2gtb25seSBhbmQgLS1pbi1wbGFjZSBjYW5ub3QgYmUgY29tYmluZWQnKTsKKyAgfQorICBpZiAob3B0cy5hdHRhY2hPbmx5KSByZXR1cm4gcmVmdXNlRmFsbGJhY2s7CisgIGlmIChvcHRzLmluUGxhY2UpIHJldHVybiByZWNvdmVySW5DdXJyZW50VGVybWluYWw7CisgIHJldHVybiByZXN1bWVJbk5ld1RhYjsKIH0KYGBgCgpFeHRyYWN0IHRoZSBleGlzdGluZyBvcmlnaW4tc2lkZSByZWNvdmVyeSBib2R5IHNvIHRoZSBvcmRpbmFyeSBleGFjdC1pZCBwYXRoIGFuZCB0aGUgcmFjZSBmYWxsYmFjayBzaGFyZSBpdCByYXRoZXIgdGhhbiBkdXBsaWNhdGluZyBhIHRoaXJkIHJlY292ZXJ5IGltcGxlbWVudGF0aW9uLgoKYGBgZGlmZgorYXN5bmMgZnVuY3Rpb24gcmVjb3ZlclJlc29sdmVkSW5DdXJyZW50VGVybWluYWwobWV0YTogU2Vzc2lvbk1ldGEsIHJlbW90ZT86IHN0cmluZyk6IFByb21pc2U8dm9pZD4geworICBpZiAocmVtb3RlKSB7CisgICAgY29uc3QgcmMgPSBhd2FpdCBydW5PblBlZXIoc2Vzc2lvblJlY292ZXJ5UnVuQXJncyhtZXRhKSwgcmVtb3RlLCB7IHR0eTogdHJ1ZSB9KTsKKyAgICBpZiAocmMgPT09ICduby10YXJnZXQnKSBmYWlsVW5yZWFjaGFibGVPcmlnaW4obWV0YSwgcmVtb3RlKTsKKyAgICByZXR1cm47CisgIH0KKyAgYXdhaXQgcmVzdW1lU2Vzc2lvbkluUGxhY2UobWV0YSk7Cit9CgorY29uc3QgcmVjb3ZlckluQ3VycmVudFRlcm1pbmFsOiBVbnJlYWNoYWJsZUZhbGxiYWNrID0gYXN5bmMgKGFjdGl2ZSwgcmVtb3RlKSA9PiB7CisgIGNvbnN0IG1ldGEgPSBhd2FpdCByaWNoTWV0YUJ5SWQoYWN0aXZlLnNlc3Npb25JZCA/PyAnJyk7CisgIGlmICghbWV0YSkgcmV0dXJuIGZhaWxNaXNzaW5nU2Vzc2lvbihhY3RpdmUuc2Vzc2lvbklkKTsKKyAgYXdhaXQgcmVjb3ZlclJlc29sdmVkSW5DdXJyZW50VGVybWluYWwobWV0YSwgcmVtb3RlKTsKK307CmBgYAoKVGhlIGludGVybmFsIGNvbW1hbmQgQUdJIEVYVCBydW5zIGlzOgoKYGBgYmFzaAphZ2VudHMgc2Vzc2lvbnMgZm9jdXMgPHNlc3Npb24taWQ+IC0taW4tcGxhY2UKYGBgCgojIyMgMi4gUHJlc2VydmUgdGhlIG1ldGFkYXRhIHRoZSBlZGl0b3ItdGFiIGNvbnN0cnVjdG9yIG5lZWRzCgpgUmVtb3RlU2Vzc2lvbkxpa2VgIGFscmVhZHkgY2FycmllcyBgYWdlbnRUeXBlYCBhbmQgYGN3ZGA7IGB0b0Zsb29yQWdlbnRGcm9tUmVtb3RlYCBkcm9wcyB0aGVtLiBQcmVzZXJ2ZSBib3RoIG9uIGBGbG9vckFnZW50YCBhbmQgb24gZXZlcnkgYWRhcHRlci4gVGhpcyBpcyBwcmVzZW50YXRpb24gbWV0YWRhdGEgb25seSwgbm90IGxpZmVjeWNsZSBwb2xpY3kuCgpgYGBkaWZmCiBleHBvcnQgaW50ZXJmYWNlIEZsb29yQWdlbnQgewogICBpZDogc3RyaW5nCiAgIGhvc3Q6IHN0cmluZwogICBzZXNzaW9uSWQ/OiBzdHJpbmcKKyAgYWdlbnRUeXBlOiBzdHJpbmcKKyAgY3dkPzogc3RyaW5nCiB9CgogcmV0dXJuIHsKICAgaWQsCiAgIGhvc3Q6IHIuaG9zdCwKICAgc2Vzc2lvbklkOiByLnNlc3Npb25JZCwKKyAgYWdlbnRUeXBlOiByLmFnZW50VHlwZSwKKyAgY3dkOiByLmN3ZCwKIH0KYGBgCgojIyMgMy4gUmVwbGFjZSB0cmFuc3BvcnQtc2hhcGVkIG1lc3NhZ2VzIHdpdGggb25lIHR5cGVkIGludGVudAoKQWRkIG9uZSByZW5kZXJlci10by1ob3N0IG1lc3NhZ2UgdG8gYGFwcHMvZXh0L3VpL3NldHRpbmdzL3NoYXJlZC9wcm90b2NvbC50c2AuIFJlbW92ZSB0aGUgbGVnYWN5IGBmb2N1c1Nlc3Npb25gIHZhcmlhbnQgYW5kIHRoZSB1bnR5cGVkIGBmb2N1c1JlbW90ZVNlc3Npb25gIHBheWxvYWQgYWZ0ZXIgZXZlcnkgY2FsbCBzaXRlIG1vdmVzLgoKYGBgZGlmZgogZXhwb3J0IHR5cGUgRmxvb3JJbmJvdW5kID0KLSAgfCB7IHR5cGU6ICdmb2N1c1Nlc3Npb24nOyBzZXNzaW9uSWQ6IHN0cmluZzsgaG9zdD86IHN0cmluZyB9CisgIHwgeworICAgICAgdHlwZTogJ29wZW5GbGVldFNlc3Npb24nCisgICAgICBzZXNzaW9uSWQ6IHN0cmluZworICAgICAgYWdlbnRUeXBlOiBzdHJpbmcKKyAgICAgIGN3ZD86IHN0cmluZworICAgICAgaG9zdD86IHN0cmluZworICAgIH0KYGBgCgpgVW5pZmllZEFnZW50c1BhbmUudHN4YCBiZWNvbWVzIGEgc3VyZmFjZSBkZWNpc2lvbiB3aXRoIHRocmVlIG91dGNvbWVzIG9ubHk6IGZvY3VzIGFuIGV4aXN0aW5nIHJlZ2lzdGVyZWQgdGVybWluYWwsIG9wZW4gYSB0YWIgZm9yIGFuIGlkZW50aWZpZWQgdGFibGVzcyBzZXNzaW9uLCBvciBzaG93IGEgZGlzYWJsZWQgYWN0aW9uIHdoZW4gbm8gaWQgZXhpc3RzLgoKYGBgZGlmZgogY29uc3Qgb3BlblRlcm1pbmFsRm9yQWdlbnQgPSB1c2VDYWxsYmFjaygoYWdlbnQ6IEZsb29yQWdlbnQpID0+IHsKICAgaWYgKGFnZW50LnJlcGx5LmtpbmQgPT09ICd0ZXJtaW5hbCcgJiYgYWdlbnQucmVwbHkudGVybWluYWxJZCkgewogICAgIHBvc3RNZXNzYWdlKHsgdHlwZTogJ2ZvY3VzVGVybWluYWwnLCB0ZXJtaW5hbElkOiBhZ2VudC5yZXBseS50ZXJtaW5hbElkIH0pCiAgICAgcmV0dXJuCiAgIH0KLSAgaWYgKGFnZW50LnJlcGx5LmtpbmQgPT09ICd0bXV4JyAmJiBhZ2VudC5yZXBseS5tdXhUYXJnZXQpIHsKLSAgICBwb3N0TWVzc2FnZSh7IHR5cGU6ICdmb2N1c1JlbW90ZVNlc3Npb24nLCAuLi4gfSkKLSAgICByZXR1cm4KLSAgfQogICBpZiAoYWdlbnQuc2Vzc2lvbklkKSB7Ci0gICAgcG9zdE1lc3NhZ2UoeyB0eXBlOiAnZm9jdXNTZXNzaW9uJywgc2Vzc2lvbklkOiBhZ2VudC5zZXNzaW9uSWQsIGhvc3Q6IGFnZW50Lmhvc3QgfSkKKyAgICBwb3N0TWVzc2FnZSh7CisgICAgICB0eXBlOiAnb3BlbkZsZWV0U2Vzc2lvbicsCisgICAgICBzZXNzaW9uSWQ6IGFnZW50LnNlc3Npb25JZCwKKyAgICAgIGFnZW50VHlwZTogYWdlbnQuYWdlbnRUeXBlLAorICAgICAgY3dkOiBhZ2VudC5jd2QsCisgICAgICBob3N0OiBhZ2VudC5ob3N0LAorICAgIH0pCiAgIH0KIH0sIFtdKQpgYGAKCiMjIyA0LiBHZW5lcmFsaXplIHRoZSByZWdpc3RlcmVkIGVkaXRvci10YWIgY29uc3RydWN0b3IKClJlZmFjdG9yIGBvcGVuUmVzdW1lZFNlc3Npb25UZXJtaW5hbGAgaW50byBhIHNtYWxsIHNoYXJlZCBjb25zdHJ1Y3RvciwgYG9wZW5BZ2VudFNlc3Npb25UZXJtaW5hbGAsIHRoYXQgcmVjZWl2ZXMgdGhlIGNvbW1hbmQgdG8gcnVuLiBDb21tYW5kLXBhbGV0dGUgUmVzdW1lIHN0aWxsIHN1cHBsaWVzIGBidWlsZFZlcnNpb25lZFJlc3VtZUNvbW1hbmRgOyBGbGVldCBzdXBwbGllcyBgYnVpbGRGb2N1c0luUGxhY2VDb21tYW5kYC4gVGhlIGhlbHBlciBkZWR1cGxpY2F0ZXMgYnkgc2Vzc2lvbiBpZCBiZWZvcmUgYWxsb2NhdGluZyBhIHRlcm1pbmFsLgoKYGBgZGlmZgotYXN5bmMgZnVuY3Rpb24gb3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWwoY29udGV4dCwgc2Vzc2lvbik6IFByb21pc2U8Ym9vbGVhbj4gewotICBjb25zdCByZXN1bWVDbWQgPSBidWlsZFZlcnNpb25lZFJlc3VtZUNvbW1hbmQoYWdlbnRLZXksIHNlc3Npb24uaWQsIHNlc3Npb24udmVyc2lvbiwgc2Vzc2lvbi5ob3N0KQorYXN5bmMgZnVuY3Rpb24gb3BlbkFnZW50U2Vzc2lvblRlcm1pbmFsKGNvbnRleHQsIHNlc3Npb24sIGNvbW1hbmQpOiBQcm9taXNlPGJvb2xlYW4+IHsKKyAgY29uc3QgZXhpc3RpbmcgPSB0ZXJtaW5hbHMuZ2V0QnlTZXNzaW9uSWQoc2Vzc2lvbi5pZCkKKyAgaWYgKGV4aXN0aW5nKSB7CisgICAgZXhpc3RpbmcudGVybWluYWwuc2hvdyhmYWxzZSkKKyAgICByZXR1cm4gdHJ1ZQorICB9CiAgIGNvbnN0IHRlcm1pbmFsID0gdnNjb2RlLndpbmRvdy5jcmVhdGVUZXJtaW5hbCh7CiAgICAgaWNvblBhdGg6IGFnZW50Q29uZmlnLmljb25QYXRoLAogICAgIGxvY2F0aW9uOiB7IHZpZXdDb2x1bW46IHZzY29kZS5WaWV3Q29sdW1uLkFjdGl2ZSB9LAogICAgIG5hbWU6IHRpdGxlLAogICAgIGN3ZDogc2Vzc2lvbi5jd2QsCiAgICAgZW52OiBidWlsZEFnZW50VGVybWluYWxFbnYoLi4uKSwKICAgICBpc1RyYW5zaWVudDogdHJ1ZSwKICAgfSkKICAgdGVybWluYWxzLnJlZ2lzdGVyKC4uLikKICAgdGVybWluYWxzLnNldFNlc3Npb25JZCh0ZXJtaW5hbCwgc2Vzc2lvbi5pZCkKICAgdGVybWluYWxzLnNldEFnZW50VHlwZSh0ZXJtaW5hbCwgYWdlbnRLZXkpCi0gIHRlcm1pbmFsLnNlbmRUZXh0KHJlc3VtZUNtZCkKKyAgdGVybWluYWwuc2VuZFRleHQoY29tbWFuZCkKIH0KKworY29uc3Qgb3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWwgPSAoY29udGV4dCwgc2Vzc2lvbikgPT4KKyAgb3BlbkFnZW50U2Vzc2lvblRlcm1pbmFsKGNvbnRleHQsIHNlc3Npb24sIGJ1aWxkVmVyc2lvbmVkUmVzdW1lQ29tbWFuZCguLi4pKQorCitjb25zdCBvcGVuRmxlZXRTZXNzaW9uVGVybWluYWwgPSAoY29udGV4dCwgc2Vzc2lvbikgPT4KKyAgb3BlbkFnZW50U2Vzc2lvblRlcm1pbmFsKGNvbnRleHQsIHNlc3Npb24sIGJ1aWxkRm9jdXNJblBsYWNlQ29tbWFuZChzZXNzaW9uLmlkKSkKYGBgCgpLZWVwIGNvbW1hbmQgY29uc3RydWN0aW9uIHB1cmUgYW5kIHRlc3RhYmxlIGJlc2lkZSB0aGUgZXhpc3RpbmcgcmVzdW1lIGJ1aWxkZXIgaW4gYGFwcHMvZXh0L3NyYy9jb3JlL3ByZXdhcm0udHNgLgoKYGBgZGlmZgorZXhwb3J0IGZ1bmN0aW9uIGJ1aWxkRm9jdXNJblBsYWNlQ29tbWFuZChzZXNzaW9uSWQ6IHN0cmluZyk6IHN0cmluZyB7CisgIHJldHVybiBgYWdlbnRzIHNlc3Npb25zIGZvY3VzICR7c2hlbGxRdW90ZUFyZyhzZXNzaW9uSWQpfSAtLWluLXBsYWNlYDsKK30KYGBgCgojIyMgNS4gRGVsZXRlIHRoZSBkdXBsaWNhdGUgdHJhbnNwb3J0IHBhdGggYW5kIHVwZGF0ZSB0aGUgdmlzaWJsZSBjb3B5CgpJbiBgc2V0dGluZ3MudnNjb2RlLnRzYCwgcmVwbGFjZSBib3RoIHJlbW90ZSBwYW5lbCBoYW5kbGVycyB3aXRoIGBvcGVuRmxlZXRTZXNzaW9uVGVybWluYWxgLiBEZWxldGUgYGZvY3VzU2Vzc2lvbkluVGVybWluYWxgLCBgYnVpbGRSZW1vdGVGb2N1c0NvbW1hbmRgLCBpdHMgcmF3IFNTSCB0ZXN0cywgYW5kIGV2ZXJ5IGBmb2N1c1JlbW90ZVNlc3Npb25gIGNhbGxlciBvbmNlIGByZ2AgcHJvdmVzIHRoZXJlIGlzIG5vIHJlbWFpbmluZyBjb25zdW1lci4KCkluIFNlc3Npb25zIGFuZCBjYXJkIGFjdGlvbnM6Cgp8IFJvdyBzdGF0ZSB8IFByaW1hcnkgYWN0aW9uIHwgUmVzdWx0IHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IFJlZ2lzdGVyZWQgQUdJIEVYVCB0ZXJtaW5hbCBleGlzdHMgfCAqKkZvY3VzKiogfCBTaG93IGV4aXN0aW5nIGVkaXRvciB0YWIuIHwKfCBUYWJsZXNzICsgY2Fub25pY2FsIHNlc3Npb24gaWQgfCAqKk9wZW4gaW4gYWdlbnQgdGFiKiogfCBDcmVhdGUgb25lIHJlZ2lzdGVyZWQgZWRpdG9yIHRhYiBhbmQgcnVuIGxpZmVjeWNsZSBmb2N1cyBpbnNpZGUgaXQuIHwKfCBCdWxrIHNlbGVjdGlvbiBvZiBOIG9wZW5hYmxlIHJvd3MgfCAqKk9wZW4gTiBpbiBhZ2VudCB0YWJzKiogfCBPbmUgcmVnaXN0ZXJlZCB0YWIgcGVyIHVuaXF1ZSBzZXNzaW9uIGlkLiB8CnwgTm8gY2Fub25pY2FsIHNlc3Npb24gaWQgfCBEaXNhYmxlZCAqKk9wZW4gaW4gYWdlbnQgdGFiKiogfCBJbmxpbmUgcmVhc29uOiDigJxTZXNzaW9uIElEIHVuYXZhaWxhYmxlOyByZWZyZXNoIGFuZCByZXRyeS7igJ0gfAoKIyMgUHVibGljIGludGVyZmFjZQoKVGhlcmUgaXMgbm8gbmV3IHB1YmxpYyBjb21tYW5kLCBjb21tYW5kLXBhbGV0dGUgaXRlbSwgY29uZmlnIGtleSBvciBBUEkuIFRoZSBpbXBsZW1lbnRhdGlvbiBhZGRzIHR3byBpbnRlcm5hbCBjb250cmFjdHM6Cgp8IENvbnRyYWN0IHwgRXhhY3QgbmFtZSB8IFN0YWJpbGl0eSB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBDTEkgbGlmZWN5Y2xlIG9wdGlvbiB8IGBhZ2VudHMgc2Vzc2lvbnMgZm9jdXMgPGlkPiAtLWluLXBsYWNlYCB8IEludGVybmFsOyBgZm9jdXNgIGlzIGFscmVhZHkgaGlkZGVuLiB8CnwgV2VidmlldyBpbnRlbnQgfCBgb3BlbkZsZWV0U2Vzc2lvbmAgfCBJbnRlcm5hbCB0eXBlZCByZW5kZXJlci10by1leHRlbnNpb24gcHJvdG9jb2wuIHwKCkV4aXN0aW5nIHB1YmxpYyBzdXJmYWNlcyByZW1haW4gdW5jaGFuZ2VkOgoKYGBgYmFzaAojIEhpc3RvcnkvcGlja2VyIHJlY292ZXJ5IHJlbWFpbnMgdGhlIHB1YmxpYyB1c2VyIHdvcmtmbG93LgphZ2VudHMgc2Vzc2lvbnMgcmVzdW1lCgojIEV4aXN0aW5nIGludGVybmFsIGxpZmVjeWNsZSBiZWhhdmlvciByZW1haW5zIGF0dGFjaC1pZi1saXZlLCByZWNvdmVyLWlmLWVuZGVkLgphZ2VudHMgc2Vzc2lvbnMgZm9jdXMgPHNlc3Npb24taWQ+CmBgYAoKIyMgRmlsZXMKCnwgRmlsZSB8IFBsYW5uZWQgY2hhbmdlIHwKfCAtLS0gfCAtLS0gfAp8IGBhcHBzL2NsaS9zcmMvY29tbWFuZHMvZm9jdXMudHNgIHwgQWRkIGludGVybmFsIGAtLWluLXBsYWNlYDsgY2VudHJhbGl6ZSBjdXJyZW50LXRlcm1pbmFsIHJlY292ZXJ5OyBmYWlsIGxvdWQgb24gY29udHJhZGljdG9yeSBvcHRpb25zLiB8CnwgYGFwcHMvY2xpL3NyYy9jb21tYW5kcy9mb2N1cy50ZXN0LnRzYCB8IEV4ZXJjaXNlIHJlYWwgbGl2ZS9kZWFkIHRtdXggcmFpbHMgYW5kIHRoZSBpbi1wbGFjZSBmYWxsYmFjayB3aXRob3V0IG1vY2tzLiB8CnwgYGFwcHMvZXh0L3NyYy9jb3JlL3ByZXdhcm0udHNgICsgZXhpc3RpbmcgY29sb2NhdGVkIHRlc3QgfCBBZGQgdGhlIHF1b3RlZCBgYnVpbGRGb2N1c0luUGxhY2VDb21tYW5kYC4gfAp8IGBhcHBzL2V4dC91aS9zZXR0aW5ncy9jb21wb25lbnRzL21pc3Npb24tY29udHJvbC9mbG9vck1vZGVsLnRzYCArIHRlc3QgfCBQcmVzZXJ2ZSBgYWdlbnRUeXBlYCAvIGBjd2RgOyBhZGQgdGhlIHB1cmUgb3Blbi1hY3Rpb24gcmVzb2x2ZXIuIHwKfCBgYXBwcy9leHQvdWkvc2V0dGluZ3MvY29tcG9uZW50cy9taXNzaW9uLWNvbnRyb2wvZmxvb3JBZGFwdGVyLnRzYCArIHRlc3QgfCBDYXJyeSBtZXRhZGF0YSB0aHJvdWdoIGxvY2FsIGFuZCByZW1vdGUgYWRhcHRlcnMuIHwKfCBgYXBwcy9leHQvdWkvc2V0dGluZ3Mvc2hhcmVkL3Byb3RvY29sLnRzYCArIHByb3RvY29sIHRlc3QgfCBBZGQgYG9wZW5GbGVldFNlc3Npb25gOyByZW1vdmUgc3RhbGUgZm9jdXMgbWVzc2FnZXMuIHwKfCBgYXBwcy9leHQvdWkvc2V0dGluZ3MvY29tcG9uZW50cy9taXNzaW9uLWNvbnRyb2wvVW5pZmllZEFnZW50c1BhbmUudHN4YCB8IFJvdXRlIGFsbCB0YWJsZXNzIGlkZW50aWZpZWQgc2Vzc2lvbnMgdGhyb3VnaCB0aGUgdHlwZWQgb3BlbiBpbnRlbnQ7IHVwZGF0ZSBzaW5ndWxhci9idWxrIGNvcHkgYW5kIHVuYXZhaWxhYmxlIHN0YXRlLiB8CnwgYGFwcHMvZXh0L3NyYy92c2NvZGUvZXh0ZW5zaW9uLnRzYCB8IEdlbmVyYWxpemUgdGhlIHJlZ2lzdGVyZWQgZWRpdG9yLXRhYiBjb25zdHJ1Y3RvciBhbmQgZGVkdXBlIGJ5IHNlc3Npb24gaWQuIHwKfCBgYXBwcy9leHQvc3JjL3ZzY29kZS9zZXR0aW5ncy52c2NvZGUudHNgIHwgSGFuZGxlIGBvcGVuRmxlZXRTZXNzaW9uYDsgcmVtb3ZlIGJvdGggcmF3IHBhbmVsLXRlcm1pbmFsIGhhbmRsZXJzLiB8CnwgYGFwcHMvZXh0L3NyYy9jb3JlL3JlbW90ZVNlc3Npb25zLnRzYCArIHRlc3QgfCBEZWxldGUgYGJ1aWxkUmVtb3RlRm9jdXNDb21tYW5kYCBhbmQgaXNvbGF0ZWQgU1NIIHF1b3RpbmcgdGVzdHMgYWZ0ZXIgdGhlIGxhc3QgY2FsbGVyIG1vdmVzLiB8CnwgYGFwcHMvZXh0L0FHRU5UUy5tZGAsIGBhcHBzL2V4dC9SRUFETUUubWRgLCBgYXBwcy9leHQvQ0hBTkdFTE9HLm1kYCB8IERvY3VtZW50IEZsZWV0J3MgZWRpdG9yLXRhYiBiZWhhdmlvci4gfAp8IGBhcHBzL2NsaS9BR0VOVFMubWRgLCBgYXBwcy9jbGkvZG9jcy9zZXNzaW9ucy5tZGAsIGBhcHBzL2NsaS9kb2NzL3NwZWNpZmljYXRpb25zLm1kYCwgYGFwcHMvY2xpL0NIQU5HRUxPRy5tZGAgfCBSZWNvcmQgdGhlIGhpZGRlbiBpbi1wbGFjZSBsaWZlY3ljbGUgY29udHJhY3QgYW5kIGl0cyBuby1zZWNvbmQtc3VyZmFjZSBpbnZhcmlhbnQuIHwKClRoZSBvcGVuIFBSICMyODQ3IG1vdmVzIHNlc3Npb24gcmVtb3RlIGZhbi1vdXQgZmlsZXMuIEl0IGRvZXMgbm90IGNoYW5nZSB0aGlzIGJlaGF2aW9yLCBidXQgaW1wbGVtZW50YXRpb24gbXVzdCByZS1hbmNob3IgYGZvY3VzLnRzYCBpbXBvcnRzIGFuZCBzZXNzaW9uLW1vZHVsZSBwYXRocyBvbiBmcmVzaCBgb3JpZ2luL21haW5gIGJlZm9yZSBlZGl0aW5nLgoKIyMgUGxhbgoKLSBbIF0gQ2xhaW0gUlVTSC0yNzgzIGFuZCBjcmVhdGUgYSBmZWF0dXJlIHdvcmt0cmVlIGZyb20gZnJlc2hseSBmZXRjaGVkIGBvcmlnaW4vbWFpbmAuCi0gWyBdIEFkZCBDTEkgYGZvY3VzIC0taW4tcGxhY2VgLCBjZW50cmFsaXplIHJlY292ZXJ5LCBhbmQgbGFuZCB0aGUgcmVhbCBsaWZlY3ljbGUgdGVzdHMgZmlyc3QuCi0gWyBdIENhcnJ5IGBhZ2VudFR5cGVgIC8gYGN3ZGAgdGhyb3VnaCBGbG9vciBtb2RlbHMgYW5kIHJlcGxhY2UgdGhlIHRyYW5zcG9ydC1zaGFwZWQgcHJvdG9jb2wuCi0gWyBdIEdlbmVyYWxpemUgdGhlIHJlZ2lzdGVyZWQgZWRpdG9yLXRhYiBjb25zdHJ1Y3RvciwgYWRkIHNlc3Npb24taWQgZGVkdXBlLCBhbmQgcmVtb3ZlIHJhdyBTU0gvdG11eCBoYW5kbGVycy4KLSBbIF0gVXBkYXRlICoqRm9jdXMqKiAvICoqT3BlbiBpbiBhZ2VudCB0YWIqKiAvICoqT3BlbiBOIGluIGFnZW50IHRhYnMqKiBjb3B5IGFuZCB0aGUgbWlzc2luZy1pZCBpbmxpbmUgc3RhdGUuCi0gWyBdIFVwZGF0ZSBjb21wb25lbnQgZG9jcywgc3BlY2lmaWNhdGlvbnMgYW5kIGJvdGggY2hhbmdlbG9nczsgYXVkaXQgdGhlIGNvbXBhbmlvbiBgLmFnZW50cy1zeXN0ZW1gIHNlc3Npb24gZ3VpZGFuY2UgYW5kIHJlY29yZCB3aGV0aGVyIGFueSBjb25zdW1lciBuZWVkcyBhIGNoYW5nZS4KLSBbIF0gUnVuIENMSSByZW1vdGUgdGVzdHMgYW5kIGV4dGVuc2lvbiB0ZXN0cy9idWlsZDsgaW5zcGVjdCB0aGUgcmVhbCBBR0kgRVhUIHN1cmZhY2Ugb24gdGhlIGludGVyYWN0aXZlIG1hY09TIGhvc3QuCi0gWyBdIEF0dGFjaCBiZWZvcmUvYWZ0ZXIgcHJvb2YgdG8gdGhlIGltcGxlbWVudGF0aW9uIFBSLCBvYnRhaW4gbm9uLWF1dGhvciByZXZpZXcsIG1lcmdlIG9uIGdyZWVuLCByZWxlYXNlIHRoZSBhZmZlY3RlZCBwYWNrYWdlL3N1cmZhY2UsIGFuZCB2ZXJpZnkgdGhlIGluc3RhbGxlZCB2ZXJzaW9uLgoKIyMgVmFsaWRhdGlvbgoKIyMjIEF1dG9tYXRlZAoKYGBgYmFzaAojIENMSTogY2Fub25pY2FsIHJlbW90ZSBzdWl0ZSBmcm9tIGFwcHMvY2xpCmJ1biBydW4gdGVzdDpyZW1vdGUKCiMgRXh0ZW5zaW9uOiByZWFsIHBhY2thZ2UgYm91bmRhcmllcyBmcm9tIGFwcHMvZXh0CmJ1biB0ZXN0CmJ1biBydW4gY29tcGlsZTpleHQKc2NyaXB0cy9idWlsZC5zaCA8dmVyc2lvbj4KYGBgCgp8IEludmFyaWFudCB8IFRlc3Qgc2lnbmFsIHwKfCAtLS0gfCAtLS0gfAp8IEV4aXN0aW5nIHRhYiBmb2N1c2VzIHwgVGVybWluYWwgcmVnaXN0cnkgcmV0dXJucyB0aGUgc2FtZSB0ZXJtaW5hbDsgdGVybWluYWwgY291bnQgaXMgdW5jaGFuZ2VkLiB8CnwgTGl2ZSBsb2NhbCB0bXV4IHNlc3Npb24gfCBOZXcgZWRpdG9yIHRhYiBhdHRhY2hlcyBpbiBwbGFjZTsgbm8gcmVjb3ZlcnkgY29tbWFuZCBzcGF3bnMuIHwKfCBMaXZlIHJlbW90ZSB0bXV4IHNlc3Npb24gfCBOZXcgZWRpdG9yIHRhYiBjb25uZWN0cyB0aHJvdWdoIENMSSBmb2N1cyBhbmQgam9pbnMgdGhlIHBhbmU7IG5vIHJhdyBGbGVldCBTU0ggYnVpbGRlciByZW1haW5zLiB8CnwgUGFuZSBkaWVzIGJldHdlZW4gcmVuZGVyIGFuZCBjbGljayB8IENMSSBsaXZlbmVzcyByZWNoZWNrIHJlY292ZXJzIGluc2lkZSB0aGUgYWxyZWFkeS1jcmVhdGVkIHRhYjsgbm8gc2Vjb25kIHRhYi4gfAp8IExvY2FsIG9yIHJlbW90ZSBzZXNzaW9uIHdpdGggbm8gYXR0YWNoIHJhaWwgfCBPcmlnaW4tc2lkZSByZWNvdmVyeSBydW5zIGluIHRoZSBjcmVhdGVkIHRhYjsgZXhhY3RseSBvbmUgdGVybWluYWwgaXMgcmVnaXN0ZXJlZC4gfAp8IENyYXNoZWQgLyBjbG9zZWQgLyBhYmFuZG9uZWQgc2Vzc2lvbiB8IFJlY292ZXJ5IHJlc29sdmVyIGNob29zZXMgdGhlIGhlYWx0aHkgc2FtZS1oYXJuZXNzIHBhdGggb24gdGhlIG9yaWdpbiBkZXZpY2UuIHwKfCBNaXNzaW5nIGlkIHwgQWN0aW9uIGlzIGRpc2FibGVkIHdpdGggdGhlIGlubGluZSByZWZyZXNoIHJlYXNvbjsgbm90aGluZyBzaWxlbnRseSBuby1vcHMuIHwKfCBCdWxrIG9wZW4gfCBPbmUgdGFiIHBlciB1bmlxdWUgc2Vzc2lvbiBpZDsgcmUtcnVubmluZyB0aGUgYWN0aW9uIGZvY3VzZXMgZXhpc3RpbmcgdGFicy4gfAoKIyMjIEVuZCB0byBlbmQgb24gdGhlIGluc3RhbGxlZCBleHRlbnNpb24KCjEuIENhcHR1cmUgdGhlIGN1cnJlbnQgRmxlZXQgYmVoYXZpb3Igd2l0aCBhIHRhYmxlc3MgcmVtb3RlIHNlc3Npb246IGNhcmQsIGNsaWNrLCBhbmQgYm90dG9tLXBhbmVsIHRlcm1pbmFsLgoyLiBJbnN0YWxsIHRoZSBmZWF0dXJlIFZTSVggb24gdGhlIGludGVyYWN0aXZlIG1hY09TIGhvc3Qgd2l0aG91dCByZXBsYWNpbmcgdGhlIHByb2R1Y3Rpb24gYGFnZW50c2AgQ0xJLgozLiBFeGVyY2lzZSBvbmUgZXhpc3RpbmcgdGFiLCBvbmUgbG9jYWwgdGFibGVzcyBzZXNzaW9uLCBvbmUgbGl2ZSByZW1vdGUgdG11eCBzZXNzaW9uLCBvbmUgY3Jhc2hlZCByZW1vdGUgc2Vzc2lvbiwgYW5kIG9uZSBsaXZlIG5vLXRtdXggc2Vzc2lvbi4KNC4gVXNlIHRoZSBidWxrIGFjdGlvbiBvbiBhIG1peGVkIHNlbGVjdGlvbiwgdGhlbiByZXBlYXQgaXQuCjUuIENvbmZpcm0gdGhlIGVkaXRvciBhcmVhIGNvbnRhaW5zIG9uZSBpY29uLWJlYXJpbmcgcmVnaXN0ZXJlZCB0YWIgcGVyIHNlc3Npb24gaWQsIHRoZSBib3R0b20gcGFuZWwgY29udGFpbnMgbm8gYGF0dGFjaCDigKZgIHRlcm1pbmFscywgYW5kIENvcHkgU2Vzc2lvbiBJRCAvIFJlc3VtZSAvIEZvcmsgc2VlIHRoZSBvcGVuZWQgdGFicy4KNi4gQWZ0ZXIgbWVyZ2UgYW5kIGV4dGVuc2lvbiByZWxlYXNlLCByZXBlYXQgdGhlIGZsb3cgYWdhaW5zdCB0aGUgaW5zdGFsbGVkIE1hcmtldHBsYWNlIGJ1aWxkIGFuZCBjYXB0dXJlIHRoZSBkZXBsb3llZCByZXN1bHQuCgojIyBSaXNrcwoKfCBSaXNrIHwgV2h5IGl0IG1hdHRlcnMgfCBNaXRpZ2F0aW9uIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IOKAnFJlc3VtZeKAnSBpcyByZXBsYWNlZCB3aXRoIGEgYnJvYWRlciBvcGVuIGFjdGlvbiB8IEEgbGl2ZSB0YWJsZXNzIHNlc3Npb24gaXMgbm90IGJlaW5nIHJlc3VtZWQ7IGl0IGlzIGJlaW5nIGF0dGFjaGVkIG9yIHJlY292ZXJlZC4gfCBVc2UgKipPcGVuIGluIGFnZW50IHRhYioqIGZvciB0YWJsZXNzIHJvd3M7IHJlc2VydmUgKipGb2N1cyoqIGZvciBhbiBleGlzdGluZyB0YWIuIHwKfCBQYW5lIGxpdmVuZXNzIGNoYW5nZXMgYWZ0ZXIgdGhlIFVJIHNuYXBzaG90IHwgQSBwcmVjb21wdXRlZCB0bXV4IGNvbW1hbmQgY2FuIGF0dGFjaCBhIGRlYWQgcGFuZS4gfCBDTEkgcHJvYmVzIGltbWVkaWF0ZWx5IGJlZm9yZSBhdHRhY2g7IGAtLWluLXBsYWNlYCBrZWVwcyBmYWxsYmFjayBpbiB0aGUgc2FtZSBlZGl0b3IgdGFiLiB8CnwgRG91YmxlLWNsaWNrIC8gcmVwZWF0ZWQgYnVsayBhY3Rpb24gfCBEdXBsaWNhdGUgYWdlbnQgY29waWVzIGFyZSBjb3N0bHkgYW5kIGNvbmZ1c2luZy4gfCBIb3N0LXNpZGUgYGdldEJ5U2Vzc2lvbklkYCBkZWR1cGUgaXMgYXV0aG9yaXRhdGl2ZTsgcmVuZGVyZXIgc3RhdGUgaXMgb25seSBhbiBvcHRpbWl6YXRpb24uIHwKfCBVbnN1cHBvcnRlZCBvciBtaXNzaW5nIGFnZW50IHR5cGUgfCBUaGUgZWRpdG9yIHRhYiBjYW5ub3QgZ2V0IGEgdHJ1c3R3b3J0aHkgaWNvbi9jb25maWcuIHwgUHJlc2VydmUgYGFnZW50VHlwZWAgZnJvbSB0aGUgQ0xJOyBmYWlsIHZpc2libHkgYmVmb3JlIGNyZWF0aW5nIGEgZmFsc2Ugc2hlbGwgdGFiLiB8CnwgU2Vzc2lvbiBtb2R1bGUgcmVmYWN0b3IgbGFuZHMgZmlyc3QgfCBQUiAjMjg0NyBtb3ZlcyByZW1vdGUgZmFuLW91dCBwYXRocy4gfCBSZS1mZXRjaCBhbmQgcmUtcnVuIHRoZSBpbXBvcnQvZmlsZSBhdWRpdCBiZWZvcmUgaW1wbGVtZW50YXRpb247IGtlZXAgYmVoYXZpb3IgY2hhbmdlcyBpbiBjYW5vbmljYWwgb3duZXJzLiB8CnwgSGlkZGVuIENMSSBzdXJmYWNlIGJlY29tZXMgYWNjaWRlbnRhbCBwdWJsaWMgQVBJIHwgSW50ZXJuYWwgZmxhZ3MgY2FuIGVzY2FwZSBpbnRvIGRvY3Mgb3IgYXV0b2NvbXBsZXRlLiB8IEtlZXAgYGZvY3VzYCBoaWRkZW4sIGRvY3VtZW50IG9ubHkgaW4gaW50ZXJuYWwgYXJjaGl0ZWN0dXJlL3NwZWMgdGV4dCwgYW5kIGV4cG9zZSBubyBjb21tYW5kLXBhbGV0dGUgZW50cnkuIHwKfCBDb21wYW5pb24gZ3VpZGFuY2Ugc3RpbGwgdGVhY2hlcyBvbGQgYmVoYXZpb3IgfCBGbGVldCBhZ2VudHMgbWF5IGtlZXAgaW52b2tpbmcgYSBzdGFsZSBjb21tYW5kLiB8IEF1ZGl0IHRoZSBgLmFnZW50cy1zeXN0ZW1gIGNvbnN1bWVycyBvZiBgc2Vzc2lvbnMgZm9jdXMvcmVzdW1lYDsgbGluayBhIGNvbXBhbmlvbiBQUiBvbmx5IGlmIHRoZSBhdWRpdCBmaW5kcyBhIGNhbGxlci4gfAoKIyMgVHJhY2tpbmcKCi0gW1JVU0gtMjc4MyDigJQgQUdJIEVYVDogRmxlZXQgUmVzdW1lIHJlb3BlbnMgcmVtb3RlIHNlc3Npb25zIGFzIHBhbmVsIHRlcm1pbmFscywgbm90IGFnZW50IGVkaXRvciB0YWJzXShodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9pc3N1ZS9SVVNILTI3ODMvYWdpLWV4dC1mbGVldC1yZXN1bWUtcmVvcGVucy1yZW1vdGUtc2Vzc2lvbnMtYXMtcGFuZWwtdGVybWluYWxzLW5vdCkKLSBQbGFuIHNvdXJjZSBhbmQgcmVuZGVyZWQgSFRNTCBsaXZlIHRvZ2V0aGVyIHVuZGVyIGAuYWdlbnRzL2FydGlmYWN0cy8yMDI2LTA4LTIxL2AgYW5kIHdpbGwgYmUgY29tbWl0dGVkIGluIHRoZSBwbGFuIFBSLgotIFRoZSBpbXBsZW1lbnRhdGlvbiBQUiBzaG91bGQgbGluayB0aGlzIHBsYW4gYW5kIFJVU0gtMjc4MzsgdGhlIExpbmVhciB0aWNrZXQgc2hvdWxkIGxpbmsgYm90aCBQUnMgc28gbmF2aWdhdGlvbiB3b3JrcyBpbiBib3RoIGRpcmVjdGlvbnMuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
