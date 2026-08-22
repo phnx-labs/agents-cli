@@ -3161,8 +3161,8 @@ a machine-wide process sweep.)
   postcondition check. `stopDaemon` now runs `stopResidueArtifacts`
   (`lib/daemon/daemon.ts:1596-1640`) unconditionally on both paths, reclaiming residue from a
   provably dead owner and leaving alone anything a live successor owns
-  (`daemon.test.ts` covers both the escalated-reclaim case and the live-owner-protection
-  case). Both socket teardowns now await the real `net.Server` `'close'` event instead of
+  (`daemon.registry.test.ts` covers both the escalated-reclaim case and the
+  live-owner-protection case). Both socket teardowns now await the real `net.Server` `'close'` event instead of
   firing and forgetting: the secrets broker via `closeServerBounded`
   (`lib/secrets/agent.ts:928-941`, `:953-973`, RUSH-2421) and the browser IPC server via
   `BrowserIPCServer.stop` (`lib/browser/ipc.ts:284-295`, bounded by
