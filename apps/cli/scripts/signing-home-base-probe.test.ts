@@ -144,17 +144,14 @@ describe('signing home-base probe: a new home base recovers via origin (RUSH-254
   });
 });
 
-describe('home-base probes: they cannot advance a release', () => {
-  it.each([
-    ['signing', PROBE],
-    ['promote', path.resolve(__dirname, 'promote-home-base-probe.sh')],
-  ])('the %s probe performs no git/gh/npm mutations', (_name, probePath) => {
+describe('signing home-base probe: it cannot advance a release', () => {
+  it('the probe performs no git/gh/npm mutations', () => {
     // The whole point is to fail BEFORE the merge + tag. A probe that itself ran
     // a mutation would defeat that, so assert the executable body carries none.
     // Strip comment lines and string-literal contents first, so a "npm publish"
     // in the docblock or an error string is not mistaken for a command.
     const code = fs
-      .readFileSync(probePath, 'utf-8')
+      .readFileSync(PROBE, 'utf-8')
       .split('\n')
       .filter((l) => !l.trim().startsWith('#'))
       .map((l) => l.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''"))
@@ -170,6 +167,8 @@ describe('home-base probes: they cannot advance a release', () => {
 });
 
 describe('release.sh: the preflight gates the mutating phases', () => {
+  // The promote-readiness preflight (assert_promote_home_base) and its fail-loud
+  // harness are covered in promote-home-base-probe.test.ts (RUSH-3026).
   it('does not call assert_signing_home_base on the ordinary promote path', () => {
     const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const call = lines.findIndex((l) => l.trim() === 'assert_signing_home_base');
@@ -178,85 +177,5 @@ describe('release.sh: the preflight gates the mutating phases', () => {
     expect(lines.some((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l))).toBe(true);
     expect(lines.some((l) => /^git push origin "v\$TARGET"$/.test(l))).toBe(true);
   });
-
-  it('calls assert_promote_home_base BEFORE the first mutating phase (RUSH-3026)', () => {
-    // The RUSH-2535 shape: an unready home base must abort before merge+tag,
-    // not after. On origin/main the old signing preflight was defined but never
-    // invoked; the promote preflight is wired in and must precede the release
-    // PR / merge / tag machinery.
-    const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
-    const call = lines.findIndex((l) => l.trim() === 'assert_promote_home_base');
-    expect(call, 'assert_promote_home_base must be invoked').toBeGreaterThanOrEqual(0);
-    const merge = lines.findIndex((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l));
-    const tag = lines.findIndex((l) => /^git push origin "v\$TARGET"$/.test(l));
-    expect(merge).toBeGreaterThan(call);
-    expect(tag).toBeGreaterThan(call);
-  });
 });
 
-/**
- * Execute the REAL `assert_signing_home_base` function body under the same
- * `set -euo pipefail` release.sh runs with. The static ordering test above
- * proves the call is placed right; this proves the function itself fails LOUD.
- *
- * The bug this guards (found in review of the first cut): `out="$(cmd)"; rc=$?`
- * under errexit terminates the script AT the assignment when the probe fails,
- * before `rc=$?` runs -- so the diagnostic dump and the `die` message were dead
- * code and the release aborted with no stated reason. The `&& rc=0 || rc=$?`
- * form is what keeps the die branch reachable.
- */
-function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: string } {
-  // Extract the function definition (from its header to the first line that is a
-  // bare `}` at column 0) rather than sourcing release.sh, which executes.
-  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
-  const start = lines.findIndex((l) => l.startsWith('assert_promote_home_base() {'));
-  expect(start, 'assert_promote_home_base() { not found').toBeGreaterThanOrEqual(0);
-  const end = lines.findIndex((l, i) => i > start && l === '}');
-  expect(end, 'closing } for assert_promote_home_base not found').toBeGreaterThan(start);
-  const fnBody = lines.slice(start, end + 1).join('\n');
-
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'assert-preflight-'));
-  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
-  // Stand in for the probe with a real script on the exact path the function
-  // invokes (`scripts/promote-home-base-probe.sh`, run in ON_HOME_BASE mode).
-  const stub =
-    probeExit === 'fail'
-      ? "#!/usr/bin/env bash\nprintf 'promote-probe: gh is not authenticated\\n' >&2\nexit 1\n"
-      : '#!/usr/bin/env bash\necho OK\nexit 0\n';
-  fs.writeFileSync(path.join(dir, 'scripts/promote-home-base-probe.sh'), stub, { mode: 0o755 });
-
-  // Harness: the real release.sh errexit settings + minimal stubs for the shell
-  // helpers the function calls, then the real function body, then invoke it.
-  const harness = [
-    'set -euo pipefail',
-    'ON_HOME_BASE=true',
-    'RELEASE_HOME_BASE=testbox',
-    'bold(){ :; }',
-    "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
-    "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
-    fnBody,
-    'assert_promote_home_base',
-  ].join('\n');
-  const harnessPath = path.join(dir, 'harness.sh');
-  fs.writeFileSync(harnessPath, harness);
-  const r = spawnSync('bash', [harnessPath], { cwd: dir, encoding: 'utf-8' });
-  return { status: r.status, out: `${r.stdout}${r.stderr}` };
-}
-
-describe('release.sh: assert_promote_home_base fails loud under set -e', () => {
-  it('aborts with the actionable die message when the probe fails', () => {
-    const { status, out } = runAssert('fail');
-    expect(status).not.toBe(0);
-    // The die branch MUST run -- the bug was that errexit skipped it entirely.
-    expect(out).toContain('DIE:');
-    expect(out).toContain('cannot promote + publish');
-    expect(out).toContain('promote-probe: gh is not authenticated'); // the probe's diagnostic is surfaced
-  });
-
-  it('reports phase_ok and exits 0 when the probe passes', () => {
-    const { status, out } = runAssert('pass');
-    expect(status).toBe(0);
-    expect(out).toContain('PHASE_OK:');
-    expect(out).not.toContain('DIE:');
-  });
-});
