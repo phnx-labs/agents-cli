@@ -186,12 +186,18 @@ enum Clip {
             // is looking, and say what to grant.
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
+            // Name the actual install path so the user knows which app to grant —
+            // Bundle.main.bundlePath is the real running bundle, not a guess, so a
+            // dev build or a relocated install still points at the right entry.
             Notifier.post(
                 title: "Paste needs Accessibility",
                 body: "Copied \(text) to the clipboard instead — press Cmd-V to paste it. "
-                    + "Grant \"Agents Menu Bar\" in System Settings > Privacy & Security > "
-                    + "Accessibility to have the hotkey type it for you.",
-                subtitle: "System Settings > Privacy & Security > Accessibility")
+                    + "Grant \"\(Bundle.main.bundlePath)\" access in System Settings > "
+                    + "Privacy & Security > Accessibility to have the hotkey type it for you.",
+                subtitle: "System Settings > Privacy & Security > Accessibility",
+                // Click opens the Accessibility pane directly — one less place the
+                // user has to hunt for the right settings row.
+                url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
             return
         }
         let pb = NSPasteboard.general

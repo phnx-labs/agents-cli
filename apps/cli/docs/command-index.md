@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_71 command groups · 559 commands._
+_71 command groups · 560 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -428,6 +428,7 @@ agents memory view <name>    Print a memory fact (winning layer)
 ```
 agents menubar          Manage AGI Menu (running sessions, agents awaiting input, routines)
 agents menubar disable  Stop and remove AGI Menu (stays off across upgrades)
+agents menubar doctor   Diagnose AGI Menu: install path, version skew, signing identity, stale process
 agents menubar enable   Install and start AGI Menu (launches at login)
 agents menubar setup    Configure AGI Menu end-to-end: one instance, started at login
 agents menubar status   Show whether AGI Menu is installed and running

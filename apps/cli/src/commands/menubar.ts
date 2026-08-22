@@ -15,8 +15,10 @@ import {
   disableMenubarService,
   getMenubarStatus,
   runMenubarSetup,
+  buildMenubarDoctorReport,
   type MenubarStatus,
   type SetupResult,
+  type MenubarDoctorReport,
 } from '../lib/menubar/install-menubar.js';
 
 function notMac(): boolean {
@@ -84,6 +86,36 @@ function printSetupResult(r: SetupResult): void {
     console.log(chalk.green('AGI Menu configured.') + chalk.gray('  One agents mark, started at login.'));
   } else {
     console.log(chalk.red('AGI Menu not fully configured.') + chalk.gray('  See the failed step above.'));
+  }
+}
+
+function printDoctorReport(r: MenubarDoctorReport): void {
+  console.log(chalk.bold('AGI Menu doctor\n'));
+  console.log(`  install path       ${r.installPath ? chalk.gray(r.installPath) : chalk.red('not installed')}`);
+  console.log(`  installed version  ${r.installedVersion ? chalk.gray(r.installedVersion) : chalk.gray('unknown')}`);
+  console.log(`  CLI version        ${chalk.gray(r.currentVersion)}${r.versionMatches ? '' : chalk.yellow('  (mismatch — `agents menubar setup` updates it)')}`);
+
+  const identity = r.signingIdentity === 'developer-id'
+    ? chalk.green('Developer ID (update-stable)')
+    : r.signingIdentity === 'ad-hoc'
+      ? chalk.red('ad-hoc (unstable — Accessibility grant breaks on every update)')
+      : chalk.gray('unknown (nothing installed)');
+  console.log(`  signing identity   ${identity}`);
+  console.log(`  running            ${r.running ? chalk.green('yes') : chalk.gray('no')}`);
+
+  if (r.staleRunningProcess.length > 0) {
+    for (const p of r.staleRunningProcess) {
+      const mark = p.stale
+        ? chalk.red('started BEFORE the on-disk bundle — running the OLD binary')
+        : chalk.green('matches the on-disk bundle');
+      console.log(`  pid ${String(p.pid).padEnd(10)} ${mark}`);
+    }
+  }
+
+  if (r.accessibilityHintNeeded) {
+    console.log(chalk.yellow('\n  Accessibility grant may not be trusted for the current binary.'));
+    console.log(chalk.gray('  Run `agents menubar setup` to reinstall + restart the helper, then grant access:'));
+    console.log(chalk.gray('  open "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"'));
   }
 }
 
@@ -194,6 +226,39 @@ export function registerMenubarCommands(program: Command): void {
       }
       printStatus(s);
     });
+
+  const doctor = menubar
+    .command('doctor')
+    .description('Diagnose AGI Menu: install path, version skew, signing identity, stale process')
+    .option('--json', 'Emit machine-readable JSON')
+    .action((options: { json?: boolean }) => {
+      const r = buildMenubarDoctorReport();
+      if (options.json) {
+        process.stdout.write(JSON.stringify(r) + '\n');
+        return;
+      }
+      if (r.platform !== 'darwin') {
+        console.log(chalk.yellow('AGI Menu is macOS only.'));
+        return;
+      }
+      printDoctorReport(r);
+    });
+
+  setHelpSections(doctor, {
+    examples: `
+      # Why did Accessibility ask again after an update?
+      agents menubar doctor
+    `,
+    notes: `
+      Read-only — never installs, restarts, or resets anything. Reports the
+      installed bundle's signing identity (ad-hoc signing breaks the
+      Accessibility grant on every update; Developer ID is stable across
+      updates) and whether a live helper pid started before the on-disk
+      bundle's last write — the sign that a running process is still the
+      binary an update just replaced. \`agents menubar setup\` is the fix for
+      anything this flags.
+    `,
+  });
 
   // Bare `agents menubar` -> status.
   menubar.action(() => {

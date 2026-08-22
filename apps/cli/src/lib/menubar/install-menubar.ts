@@ -368,6 +368,48 @@ export function restartMenubarLaunchAgent(
 }
 
 /**
+ * Force a running helper off the binary that was just swapped underneath it.
+ *
+ * `installMenubarLaunchAgentOnUpgrade()` calls this after a heal actually
+ * replaces the on-disk bundle (a version bump or the ad-hoc -> Developer ID
+ * transition — see `menubarHealReplacedBundle`). `restartMenubarLaunchAgent`
+ * (run moments earlier via `installAndStartService`) already attempts
+ * bootout+bootstrap+kickstart, but that targets the GUI launchd domain and
+ * fails silently — `launchctl kickstart -k gui/<uid>/<label>` prints "Could not
+ * find service ... in domain for user gui" — from a shell with no Aqua session,
+ * which is the ordinary case for `agents` invoked from a terminal/tmux/ssh
+ * session rather than literally the login item (verified live). When that
+ * happens the plist and on-disk bundle are current but the LIVE process is
+ * still the old binary, so it requests Accessibility under the OLD code
+ * identity and the grant never sticks.
+ *
+ * `kickstart -k` (force-restart, unlike the bare kickstart already tried) is
+ * attempted first since it is the clean launchd-native path when it works. If
+ * launchd has no record of the service in this context either, fall back to
+ * ending the specific pid(s) already confirmed to be running the installed
+ * bundle (`ownProcesses`, resolved by the caller via `liveMenubarProcesses`) —
+ * never a broad pkill. The launchd plist has `KeepAlive=true`, so the ended
+ * process is relaunched from the swapped binary within seconds.
+ */
+export function restartMenubarHelperAfterSwap(
+  uid: number,
+  ownProcesses: readonly MenubarProcess[],
+  exec: (cmd: string, args: readonly string[], opts: { stdio: ['ignore', 'ignore', 'ignore'] }) => Buffer = execFileSync,
+  kill: (pid: number) => void = endProcess,
+): void {
+  const reg = serviceManagerRegistrationAllowed();
+  if (!reg.allowed) return;
+  const target = `gui/${uid}/${serviceLabel()}`;
+  const opts: { stdio: ['ignore', 'ignore', 'ignore'] } = { stdio: ['ignore', 'ignore', 'ignore'] };
+  try {
+    exec('launchctl', ['kickstart', '-k', target], opts);
+    return;
+  } catch {
+    for (const p of ownProcesses) kill(p.pid);
+  }
+}
+
+/**
  * Install + start the menu-bar helper as a launchd user service (idempotent).
  * Clears the sticky opt-out, installs the .app, writes the plist, and
  * bootstraps it into the GUI domain. Returns false on non-darwin or when no
@@ -440,6 +482,26 @@ function menubarSetupStale(): boolean {
     currentVersion: getCliVersion(),
     execExists: fs.existsSync(installedExecutablePath()),
   });
+}
+
+/**
+ * Pure decision (no I/O): did THIS heal actually replace bundle content a live
+ * process could be running stale, as opposed to a plist-only repoint?
+ *
+ * `stale` (version bump or missing exec) and `needsDevIdHeal` (ad-hoc ->
+ * Developer ID) both mean the shipped `.app` differs from what is already
+ * installed — the exact condition under which a running helper can be left on
+ * an old code identity after `enableMenubarService` swaps the bundle. A
+ * repoint-only heal (`menubarSetupNeedsRepoint()` alone, same version, same
+ * signing identity) does NOT count: RUSH-3005 already owns the churn from
+ * mixed-Node-interpreter repoints, and restarting the helper on every one of
+ * those would double that churn rather than fix this bug.
+ */
+export function menubarHealReplacedBundle(opts: {
+  stale: boolean;
+  needsDevIdHeal: boolean;
+}): boolean {
+  return opts.stale || opts.needsDevIdHeal;
 }
 
 /**
@@ -680,7 +742,8 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     // installed copy is still ad-hoc while the shipped source is Developer ID
     // (older heal path; Accessibility re-prompts until the identity is restored).
     const needsDevIdHeal = installedNeedsDevIdHeal();
-    if (!(menubarSetupStale() || menubarSetupNeedsRepoint() || needsDevIdHeal)) return;
+    const stale = menubarSetupStale();
+    if (!(stale || menubarSetupNeedsRepoint() || needsDevIdHeal)) return;
     // ...but a copy that does not own the helper only gets to act on that drift
     // once per cooldown. Without the gate every coexisting install recopies the
     // bundle on every invocation, killing the live helper on a loop (#2109).
@@ -689,7 +752,22 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     // false without installing when the bundle fails the Gatekeeper check, and
     // stamping first would spend the shared cooldown on a no-op — locking every
     // non-owner out for another hour while nothing had been fixed.
-    if (enableMenubarService({ clearOptOut: false })) stampMenubarHeal();
+    if (enableMenubarService({ clearOptOut: false })) {
+      stampMenubarHeal();
+      // One-time: the ad-hoc -> Developer ID transition leaves a dead TCC row
+      // under the old identity (tccutil on zion reset it 11 times across
+      // machines that made this jump) — clear it so the fresh grant sticks.
+      if (shouldMigrateMenubarTcc({ needsDevIdHeal, alreadyMigrated: menubarTccAlreadyMigrated() })) {
+        resetMenubarAccessibilityTcc();
+      }
+      // Only a REAL content swap (version bump or the Dev-ID transition) can
+      // leave a running process on stale code — a plist-only repoint (handled
+      // above by menubarSetupNeedsRepoint alone) is RUSH-3005's churn to own,
+      // not this heal's to restart on top of.
+      if (menubarHealReplacedBundle({ stale, needsDevIdHeal })) {
+        restartMenubarHelperAfterSwap(process.getuid?.() ?? 0, liveMenubarProcesses().own);
+      }
+    }
   } catch {
     /* never block startup on the menu bar */
   }
@@ -701,6 +779,53 @@ function installedNeedsDevIdHeal(): boolean {
   if (!src || !fs.existsSync(installedAppPath())) return false;
   if (hasDeveloperIdSignature(installedAppPath())) return false;
   return hasDeveloperIdSignature(src);
+}
+
+/** Marker written once the one-time ad-hoc -> Developer ID TCC migration has
+ *  run on this machine, next to the version/heal stamps. */
+function tccMigrationMarkerPath(): string {
+  return path.join(installDir(), '.menubar-tcc-migrated');
+}
+
+function menubarTccAlreadyMigrated(): boolean {
+  return fs.existsSync(tccMigrationMarkerPath());
+}
+
+/**
+ * Pure decision (no I/O): run the one-time `tccutil reset Accessibility` only
+ * on a real ad-hoc -> Developer ID transition, and only once ever. A machine
+ * that was always Developer ID never accumulated a dead TCC row under an
+ * ad-hoc identity, so resetting there would just force a needless re-prompt;
+ * a machine that already migrated must not be reset again on every heal.
+ */
+export function shouldMigrateMenubarTcc(opts: {
+  needsDevIdHeal: boolean;
+  alreadyMigrated: boolean;
+}): boolean {
+  return opts.needsDevIdHeal && !opts.alreadyMigrated;
+}
+
+/**
+ * Reset the stale Accessibility grant TCC recorded against the pre-migration
+ * ad-hoc identity, then stamp the marker so this never runs again on this
+ * machine. Targets `SERVICE_LABEL_BASE` — the bundle's actual
+ * `CFBundleIdentifier`/codesign `--identifier` (menubar/scripts/build.sh) that
+ * TCC keys grants to — not the namespaced `serviceLabel()`, which exists only
+ * to keep launchd job labels apart under a redirected HOME (RUSH-2639) and is
+ * never the app's real identity. Best-effort: a missing/failing `tccutil`
+ * (older macOS, a sandboxed test HOME) must never block the heal that just
+ * fixed the signing identity itself.
+ */
+export function resetMenubarAccessibilityTcc(
+  exec: (cmd: string, args: readonly string[], opts: { stdio: ['ignore', 'ignore', 'ignore'] }) => Buffer = execFileSync,
+): void {
+  try {
+    exec('tccutil', ['reset', 'Accessibility', SERVICE_LABEL_BASE], { stdio: ['ignore', 'ignore', 'ignore'] });
+  } catch { /* best effort — a missing/failing tccutil must not block the heal */ }
+  try {
+    fs.mkdirSync(installDir(), { recursive: true });
+    fs.writeFileSync(tccMigrationMarkerPath(), new Date().toISOString());
+  } catch { /* best effort */ }
 }
 
 /** One step of `agents menubar setup`, and how it came out. */
@@ -942,5 +1067,109 @@ export function getMenubarStatus(): MenubarStatus {
     instances: own,
     foreignInstances: foreign,
     disabledByUser: menubarDisabledByUser(),
+  };
+}
+
+/** Read-only diagnostic for `agents menubar doctor` — probes, never mutates. */
+export interface MenubarDoctorReport {
+  platform: string;
+  installPath: string | null;
+  installedVersion: string | null;
+  currentVersion: string;
+  versionMatches: boolean;
+  /** `unknown` on non-darwin or when nothing is installed to inspect. */
+  signingIdentity: 'developer-id' | 'ad-hoc' | 'unknown';
+  running: boolean;
+  /** A live helper pid started before the installed bundle's on-disk mtime —
+   *  it is running the binary that has since been swapped underneath it. */
+  staleRunningProcess: PidStaleness[];
+  /** Grant likely needs to be re-made: an ad-hoc identity breaks on every
+   *  update, or a live process is confirmed to predate the current bundle. */
+  accessibilityHintNeeded: boolean;
+}
+
+/** One live pid checked against the bundle's on-disk mtime. */
+export interface PidStaleness {
+  pid: number;
+  stale: boolean;
+}
+
+/**
+ * Pure comparison (no I/O) behind the stale-process check: a helper pid that
+ * started before the bundle on disk was last written is still running the
+ * PREVIOUS binary — the exact condition `restartMenubarHelperAfterSwap` exists
+ * to fix. Millisecond epoch timestamps in, so the truth table is unit-testable
+ * without a live process or filesystem.
+ */
+export function isMenubarProcessStaleAgainstBundle(pidStartedAtMs: number, bundleMtimeMs: number): boolean {
+  return pidStartedAtMs < bundleMtimeMs;
+}
+
+/** Wall-clock start time of a live pid via `ps`, or null if it can't be read. */
+function pidStartTimeMs(pid: number): number | null {
+  const r = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf-8',
+  });
+  if (r.status !== 0) return null;
+  const raw = (r.stdout || '').trim();
+  if (!raw) return null;
+  const t = new Date(raw).getTime();
+  return Number.isNaN(t) ? null : t;
+}
+
+/**
+ * `agents menubar doctor` — everything a human needs to tell "why did
+ * Accessibility ask again" apart from "the helper is genuinely broken":
+ * install path, version skew, whether the signing identity is update-stable,
+ * and whether a live process predates the bundle it's supposed to be running.
+ * Read-only: no install, no restart, no TCC reset — `agents menubar setup`
+ * remains the command that fixes what this reports.
+ */
+export function buildMenubarDoctorReport(): MenubarDoctorReport {
+  if (!onDarwin()) {
+    return {
+      platform: process.platform,
+      installPath: null,
+      installedVersion: null,
+      currentVersion: getCliVersion(),
+      versionMatches: false,
+      signingIdentity: 'unknown',
+      running: false,
+      staleRunningProcess: [],
+      accessibilityHintNeeded: false,
+    };
+  }
+  const status = getMenubarStatus();
+  const appPath = status.installedApp;
+  const signingIdentity: MenubarDoctorReport['signingIdentity'] = appPath
+    ? (hasDeveloperIdSignature(appPath) ? 'developer-id' : 'ad-hoc')
+    : 'unknown';
+
+  let staleRunningProcess: PidStaleness[] = [];
+  if (appPath && status.instances.length > 0) {
+    try {
+      const bundleMtimeMs = fs.statSync(installedExecutablePath()).mtimeMs;
+      staleRunningProcess = status.instances
+        .map((p) => {
+          const startedAt = pidStartTimeMs(p.pid);
+          return startedAt === null
+            ? null
+            : { pid: p.pid, stale: isMenubarProcessStaleAgainstBundle(startedAt, bundleMtimeMs) };
+        })
+        .filter((p): p is PidStaleness => p !== null);
+    } catch { /* exec vanished mid-check — report no staleness rather than throw */ }
+  }
+
+  return {
+    platform: process.platform,
+    installPath: appPath,
+    installedVersion: status.installedVersion,
+    currentVersion: status.currentVersion,
+    versionMatches: status.installedVersion === status.currentVersion,
+    signingIdentity,
+    running: status.running,
+    staleRunningProcess,
+    accessibilityHintNeeded: signingIdentity === 'ad-hoc' || staleRunningProcess.some((p) => p.stale),
   };
 }

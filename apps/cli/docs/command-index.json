@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 71,
-  "commands": 559,
+  "commands": 560,
   "root": {
     "name": "agents",
     "path": "",
@@ -13018,6 +13018,37 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "doctor",
+          "path": "menubar doctor",
+          "aliases": [],
+          "description": "Diagnose AGI Menu: install path, version skew, signing identity, stale process",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Why did Accessibility ask again after an update?\n      agents menubar doctor",
+          "notes": "Read-only — never installs, restarts, or resets anything. Reports the\n      installed bundle's signing identity (ad-hoc signing breaks the\n      Accessibility grant on every update; Developer ID is stable across\n      updates) and whether a live helper pid started before the on-disk\n      bundle's last write — the sign that a running process is still the\n      binary an update just replaced. `agents menubar setup` is the fix for\n      anything this flags.",
           "subcommands": []
         },
         {

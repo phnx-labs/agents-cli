@@ -338,6 +338,7 @@ agents menubar setup      # configure end-to-end: one instance, started at login
 agents menubar enable     # install + start the launchd login service
 agents menubar disable    # stop + remove it (sticky opt-out)
 agents menubar status     # installed / running, versions, staleness; --json
+agents menubar doctor     # read-only: signing identity, stale-process check; --json
 ```
 
 `setup` is the command to reach for when the menu bar is wrong — a duplicate
@@ -375,6 +376,15 @@ duplicate menu-bar icon** — see [One instance, always](#one-instance-always).
 global chords — which of the two won is not answerable from a process list, so
 status reports the conflict rather than a winner. See
 [Do not hand-launch the helper](#do-not-hand-launch-the-helper).
+
+`doctor` is read-only — it never installs, restarts, or resets anything.
+It answers "why did Accessibility ask again after an update": the installed
+bundle's signing identity (`ad-hoc` re-prompts on every update; `Developer ID`
+is update-stable since 6fa36f73a), and whether a live helper pid started
+**before** the installed bundle's on-disk mtime — the stale-process case where
+the upgrade self-heal swapped the bundle but the running process is still the
+binary that predates it. `agents menubar setup` is the fix for anything it
+flags.
 
 ## One instance, always
 
@@ -437,7 +447,23 @@ The helper is a launchd user service (`com.phnx-labs.agents-menubar`,
   a newer release ships a newer helper (or the installed copy goes missing), the
   self-heal re-copies the bundle, rewrites the plist, and restarts it — so
   `npm update` actually moves users onto the new helper instead of leaving the
-  old one running.
+  old one running. `launchctl kickstart -k` against the GUI domain does not
+  resolve from a shell with no Aqua session (an ordinary terminal/tmux/ssh
+  invocation of `agents`), so a real content swap (a version bump, or the
+  ad-hoc -> Developer ID identity migration below) falls back to ending the
+  live helper pid directly — launchd's `KeepAlive` relaunches it from the
+  swapped binary. Without this, a running helper could keep requesting
+  Accessibility under the OLD code identity after an update, and the grant
+  never stuck (RUSH-3019). A plist-only interpreter repoint (same version,
+  same identity — RUSH-3005) does not trigger a restart on top of its own.
+- **Ad-hoc -> Developer ID identity migration.** A machine whose install
+  predates Developer ID signing (6fa36f73a) gets its bundle re-signed on the
+  next heal; TCC keys the Accessibility grant to the signing identity, so the
+  old ad-hoc grant is dead weight the user never sees removed. The heal runs
+  `tccutil reset Accessibility com.phnx-labs.agents-menubar` exactly once per
+  machine (stamped in `.menubar-tcc-migrated`, next to `.menubar-version`),
+  clearing the stale row so the fresh Developer-ID prompt is a clean grant
+  rather than a re-prompt fighting old TCC state.
 - **One owner, when several installs coexist.** The helper lives at one path, but
   every agents-cli copy on the box runs the self-heal. The plist's `AGENTS_ENTRY`
   records the owner, and only the owner re-copies the bundle freely — otherwise
@@ -574,6 +600,7 @@ the current bundle on any version bump.
 | `~/Library/Application Support/agents-cli/MenubarHelper.app` | installed helper bundle |
 | `~/Library/Application Support/agents-cli/.menubar-version` | installed-version stamp |
 | `~/Library/Application Support/agents-cli/.menubar-last-heal` | last self-heal reinstall, epoch ms — the non-owner takeover cooldown |
+| `~/Library/Application Support/agents-cli/.menubar-tcc-migrated` | marks the one-time ad-hoc -> Developer ID `tccutil reset Accessibility` as done |
 | `~/.agents/.cache/state/menubar.disabled` | sticky opt-out marker |
 | `~/.agents/.cache/helpers/menubar/menubar.log` | helper stdout / stderr |
 | `~/.agents/.history/menubar/recent-tickets.json` | tickets filed from the quick-dispatch panel (RECENT TICKETS) |

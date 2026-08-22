@@ -10,11 +10,16 @@ import {
   generateServicePlist,
   hasDeveloperIdSignature,
   isMenubarStale,
+  isMenubarProcessStaleAgainstBundle,
+  menubarHealReplacedBundle,
   menubarPlistNeedsRepoint,
   mayInstallMenubarHelper,
   processesToEnd,
+  resetMenubarAccessibilityTcc,
+  restartMenubarHelperAfterSwap,
   restartMenubarLaunchAgent,
   serviceLabel,
+  shouldMigrateMenubarTcc,
 } from './install-menubar.js';
 
 // Regression guard for the STOLEN-HOTKEY blind spot. Status used
@@ -528,5 +533,162 @@ describe('generateServicePlist — launchd crash-loop throttle', () => {
     expect(plist).toContain('<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"');
     expect(plist.match(/<dict>/g)?.length).toBe(plist.match(/<\/dict>/g)?.length);
     expect(plist.trimEnd().endsWith('</plist>')).toBe(true);
+  });
+});
+
+// Regression guard for the STALE-PROCESS bug (RUSH-3019): the upgrade self-heal
+// swapped the on-disk bundle but never restarted the running helper, so it kept
+// requesting Accessibility under the OLD code identity and the grant never
+// stuck. `menubarHealReplacedBundle` is the pure gate that decides when a heal
+// changed content a live process could be stale against, as opposed to a
+// plist-only repoint (RUSH-3005's churn, not this bug's).
+describe('menubarHealReplacedBundle', () => {
+  it('is true on a version-bump stale heal', () => {
+    expect(menubarHealReplacedBundle({ stale: true, needsDevIdHeal: false })).toBe(true);
+  });
+
+  it('is true on the ad-hoc -> Developer ID transition', () => {
+    expect(menubarHealReplacedBundle({ stale: false, needsDevIdHeal: true })).toBe(true);
+  });
+
+  it('is true when both fire together', () => {
+    expect(menubarHealReplacedBundle({ stale: true, needsDevIdHeal: true })).toBe(true);
+  });
+
+  it('is false for a plist-only repoint — same version, same identity', () => {
+    // This is exactly the mixed-Node-interpreter case RUSH-3005 already owns;
+    // restarting the helper here too would double that churn.
+    expect(menubarHealReplacedBundle({ stale: false, needsDevIdHeal: false })).toBe(false);
+  });
+});
+
+describe('restartMenubarHelperAfterSwap', () => {
+  const OWN = [{ pid: 74027, executable: '/x/MenubarHelper' }];
+
+  it('kickstarts -k the launchd job and does not fall back when it succeeds', () => {
+    const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    try {
+      const calls: Array<{ cmd: string; args: string[] }> = [];
+      const exec = (cmd: string, args: readonly string[]) => {
+        calls.push({ cmd, args: args as string[] });
+        return Buffer.alloc(0);
+      };
+      const killed: number[] = [];
+      restartMenubarHelperAfterSwap(501, OWN, exec, (pid) => killed.push(pid));
+
+      const target = `gui/501/${serviceLabel()}`;
+      expect(calls).toEqual([{ cmd: 'launchctl', args: ['kickstart', '-k', target] }]);
+      expect(killed).toEqual([]);
+    } finally {
+      if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
+    }
+  });
+
+  // The exact failure verified live: `launchctl kickstart -k` against the GUI
+  // domain throws from a shell with no Aqua session ("Could not find service
+  // ... in domain for user gui"). The fallback must end the confirmed-own pids
+  // so launchd's KeepAlive relaunches from the swapped binary.
+  it('falls back to ending the own pid(s) when kickstart -k fails', () => {
+    const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    try {
+      const exec = () => { throw new Error('Could not find service ... in domain for user gui'); };
+      const killed: number[] = [];
+      restartMenubarHelperAfterSwap(501, OWN, exec, (pid) => killed.push(pid));
+      expect(killed).toEqual([74027]);
+    } finally {
+      if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
+    }
+  });
+
+  it('never touches launchd or kills anything under a redirected HOME with no test seam', () => {
+    const exec = vi.fn(() => Buffer.alloc(0));
+    const kill = vi.fn();
+    // No AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME set — the hermetic test
+    // HOME (tests/setup.ts) must refuse registration, same as
+    // restartMenubarLaunchAgent (RUSH-2968).
+    restartMenubarHelperAfterSwap(501, OWN, exec, kill);
+    expect(exec).not.toHaveBeenCalled();
+    expect(kill).not.toHaveBeenCalled();
+  });
+
+  it('ends nothing when no own process is confirmed running', () => {
+    const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = '1';
+    try {
+      const exec = () => { throw new Error('no such service'); };
+      const killed: number[] = [];
+      restartMenubarHelperAfterSwap(501, [], exec, (pid) => killed.push(pid));
+      expect(killed).toEqual([]);
+    } finally {
+      if (savedAllow === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedAllow;
+    }
+  });
+});
+
+// Regression guard for the 11-stale-TCC-rows finding (RUSH-3019): a machine that
+// moved from an ad-hoc signature to Developer ID (6fa36f73a) keeps a dead TCC
+// grant recorded against the old identity forever unless something resets it.
+// The reset must run exactly once per machine, never on a machine that was
+// always Developer ID (nothing stale to clear there).
+describe('shouldMigrateMenubarTcc', () => {
+  it('migrates on a real ad-hoc -> Developer ID transition not yet migrated', () => {
+    expect(shouldMigrateMenubarTcc({ needsDevIdHeal: true, alreadyMigrated: false })).toBe(true);
+  });
+
+  it('never re-runs once already migrated', () => {
+    expect(shouldMigrateMenubarTcc({ needsDevIdHeal: true, alreadyMigrated: true })).toBe(false);
+  });
+
+  it('never runs when there is no Dev-ID transition', () => {
+    expect(shouldMigrateMenubarTcc({ needsDevIdHeal: false, alreadyMigrated: false })).toBe(false);
+  });
+});
+
+describe('resetMenubarAccessibilityTcc', () => {
+  // tests/setup.ts redirects HOME to a fork-private sandbox for the whole
+  // suite, so installDir() already resolves under it — no extra sandboxing
+  // needed, and the injected exec means the real `tccutil` binary is never
+  // invoked here.
+  it('resets Accessibility under the bundle identifier and stamps the marker', () => {
+    const calls: Array<{ cmd: string; args: string[] }> = [];
+    const exec = (cmd: string, args: readonly string[]) => {
+      calls.push({ cmd, args: args as string[] });
+      return Buffer.alloc(0);
+    };
+    resetMenubarAccessibilityTcc(exec);
+    expect(calls).toEqual([{ cmd: 'tccutil', args: ['reset', 'Accessibility', 'com.phnx-labs.agents-menubar'] }]);
+    const marker = path.join(os.homedir(), 'Library', 'Application Support', 'agents-cli', '.menubar-tcc-migrated');
+    expect(fs.existsSync(marker)).toBe(true);
+    fs.rmSync(marker, { force: true });
+  });
+
+  it('still stamps the marker when tccutil fails — a missing binary must not block the heal', () => {
+    const exec = () => { throw new Error('tccutil: command not found'); };
+    resetMenubarAccessibilityTcc(exec);
+    const marker = path.join(os.homedir(), 'Library', 'Application Support', 'agents-cli', '.menubar-tcc-migrated');
+    expect(fs.existsSync(marker)).toBe(true);
+    fs.rmSync(marker, { force: true });
+  });
+});
+
+// Regression guard for the stale-process diagnostic behind `agents menubar
+// doctor`: a live pid that started before the installed bundle's last write is
+// still running the binary an update swapped out from under it.
+describe('isMenubarProcessStaleAgainstBundle', () => {
+  it('is stale when the pid started before the bundle was last written', () => {
+    expect(isMenubarProcessStaleAgainstBundle(1_000, 2_000)).toBe(true);
+  });
+
+  it('is not stale when the pid started after the bundle was last written', () => {
+    expect(isMenubarProcessStaleAgainstBundle(2_000, 1_000)).toBe(false);
+  });
+
+  it('is not stale on an exact tie', () => {
+    expect(isMenubarProcessStaleAgainstBundle(1_000, 1_000)).toBe(false);
   });
 });
