@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isFreshFleetAuthSnapshot, isCachedFleetAuthProbeFresh, AUTH_PROBE_MAX_AGE_MS, runActiveSessionsWarmTick } from './daemon-ticks.js';
+import { isFreshFleetAuthSnapshot, isCachedFleetAuthProbeFresh, shouldReuseCachedAuthProbe, AUTH_PROBE_MAX_AGE_MS, runActiveSessionsWarmTick } from './daemon-ticks.js';
 import {
   readActiveSessionsCache,
   setActiveSessionsSnapshotPathForTest,
@@ -50,6 +50,22 @@ describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, d
 
   it('re-probes when ANY row is stale, so one aged account cannot pin the rest to a stale verdict', () => {
     expect(isCachedFleetAuthProbeFresh([row(now - 60_000), row(now - (AUTH_PROBE_MAX_AGE_MS + 1))], now)).toBe(false);
+  });
+
+  // force=true is the on-demand `agents devices ping [--strict]` contract: it must
+  // NEVER reuse the throttled cached verdict, or --strict silently passes a revoked
+  // account whose cache row is still inside the 20-minute window. Both runFleetPing
+  // call sites pass force:true for exactly this reason (RUSH-2998).
+  it('force always re-probes, even against a perfectly fresh cache', () => {
+    const freshCache = [row(now - 60_000)];
+    expect(shouldReuseCachedAuthProbe(false, freshCache, now)).toBe(true);  // periodic tick reuses
+    expect(shouldReuseCachedAuthProbe(true, freshCache, now)).toBe(false);  // on-demand ping re-probes
+  });
+
+  it('force never rescues an empty or stale cache into a reuse either', () => {
+    expect(shouldReuseCachedAuthProbe(true, [], now)).toBe(false);
+    expect(shouldReuseCachedAuthProbe(false, [], now)).toBe(false);
+    expect(shouldReuseCachedAuthProbe(false, [row(now - (AUTH_PROBE_MAX_AGE_MS + 1))], now)).toBe(false);
   });
 });
 

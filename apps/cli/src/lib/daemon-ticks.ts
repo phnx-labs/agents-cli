@@ -55,6 +55,23 @@ export function isCachedFleetAuthProbeFresh(
 }
 
 /**
+ * Whether the tick may reuse the cached auth verdict instead of re-probing the
+ * rate-limited endpoint. `force` (an on-demand `agents devices ping`) ALWAYS
+ * re-probes — the whole point of the command is a genuinely live verdict, and
+ * missing this `!force` is exactly how a `--strict` check silently passed a
+ * revoked account (the second `runFleetPing` call site, RUSH-2998). Pure —
+ * unit-tested so that inversion cannot regress unnoticed.
+ */
+export function shouldReuseCachedAuthProbe(
+  force: boolean,
+  cached: AuthProbeRow[],
+  now: number,
+  maxAgeMs: number = AUTH_PROBE_MAX_AGE_MS,
+): boolean {
+  return !force && isCachedFleetAuthProbeFresh(cached, now, maxAgeMs);
+}
+
+/**
  * Fleet cache warm: publish THIS host's row for the caches `agents fleet
  * status` / `agents devices list` read (PUBLISH-OWN / READ-UNION, RUSH-2061).
  *
@@ -92,7 +109,7 @@ export async function refreshLocalFleetAuthState(
       // AUTH_PROBE_MAX_AGE_MS; reuse the last real verdict in between (RUSH-2998).
       // Fleet status publishes every tick regardless — it does not ride that endpoint.
       const cached = readFleetAuthRows(self);
-      const reuse = !force && isCachedFleetAuthProbeFresh(cached, requestedAt);
+      const reuse = shouldReuseCachedAuthProbe(force, cached, requestedAt);
       const authRows = reuse ? cached : await probeLocalFleetAuth({ cliVersion: getCliVersion() });
       if (!reuse) writeFleetAuthRows(self, authRows);
       const row = await publishLocalFleetStatus(self);

@@ -833,7 +833,12 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const planned = planFleetTargets(reg);
   const results: FleetPingHostResult[] = [];
 
-  const { authRows: localRows } = await refreshLocalFleetAuthState();
+  // force: same as the --local worker below — this command promises a real
+  // request for every account and --strict gates on it, so the self row must
+  // never reuse the periodic tick's rate-limit-throttled cached verdict. Each
+  // remote peer is force-probed via its own `devices ping --local` worker (see
+  // probeRemoteAuth); the self row must match (RUSH-2998).
+  const { authRows: localRows } = await refreshLocalFleetAuthState({ force: true });
   results.push({ host: self, rows: localRows });
 
   const remoteTargets: FleetStatusTarget[] = remoteFleetTargets(planned, self).map((t) => ({
