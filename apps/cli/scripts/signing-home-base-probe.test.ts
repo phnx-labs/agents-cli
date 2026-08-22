@@ -144,14 +144,17 @@ describe('signing home-base probe: a new home base recovers via origin (RUSH-254
   });
 });
 
-describe('signing home-base probe: it cannot advance a release', () => {
-  it('the probe performs no git/gh/npm mutations', () => {
+describe('home-base probes: they cannot advance a release', () => {
+  it.each([
+    ['signing', PROBE],
+    ['promote', path.resolve(__dirname, 'promote-home-base-probe.sh')],
+  ])('the %s probe performs no git/gh/npm mutations', (_name, probePath) => {
     // The whole point is to fail BEFORE the merge + tag. A probe that itself ran
     // a mutation would defeat that, so assert the executable body carries none.
     // Strip comment lines and string-literal contents first, so a "npm publish"
     // in the docblock or an error string is not mistaken for a command.
     const code = fs
-      .readFileSync(PROBE, 'utf-8')
+      .readFileSync(probePath, 'utf-8')
       .split('\n')
       .filter((l) => !l.trim().startsWith('#'))
       .map((l) => l.replace(/"[^"]*"/g, '""').replace(/'[^']*'/g, "''"))
@@ -175,6 +178,20 @@ describe('release.sh: the preflight gates the mutating phases', () => {
     expect(lines.some((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l))).toBe(true);
     expect(lines.some((l) => /^git push origin "v\$TARGET"$/.test(l))).toBe(true);
   });
+
+  it('calls assert_promote_home_base BEFORE the first mutating phase (RUSH-3026)', () => {
+    // The RUSH-2535 shape: an unready home base must abort before merge+tag,
+    // not after. On origin/main the old signing preflight was defined but never
+    // invoked; the promote preflight is wired in and must precede the release
+    // PR / merge / tag machinery.
+    const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
+    const call = lines.findIndex((l) => l.trim() === 'assert_promote_home_base');
+    expect(call, 'assert_promote_home_base must be invoked').toBeGreaterThanOrEqual(0);
+    const merge = lines.findIndex((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l));
+    const tag = lines.findIndex((l) => /^git push origin "v\$TARGET"$/.test(l));
+    expect(merge).toBeGreaterThan(call);
+    expect(tag).toBeGreaterThan(call);
+  });
 });
 
 /**
@@ -192,21 +209,21 @@ function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: st
   // Extract the function definition (from its header to the first line that is a
   // bare `}` at column 0) rather than sourcing release.sh, which executes.
   const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
-  const start = lines.findIndex((l) => l.startsWith('assert_signing_home_base() {'));
-  expect(start, 'assert_signing_home_base() { not found').toBeGreaterThanOrEqual(0);
+  const start = lines.findIndex((l) => l.startsWith('assert_promote_home_base() {'));
+  expect(start, 'assert_promote_home_base() { not found').toBeGreaterThanOrEqual(0);
   const end = lines.findIndex((l, i) => i > start && l === '}');
-  expect(end, 'closing } for assert_signing_home_base not found').toBeGreaterThan(start);
+  expect(end, 'closing } for assert_promote_home_base not found').toBeGreaterThan(start);
   const fnBody = lines.slice(start, end + 1).join('\n');
 
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'assert-preflight-'));
   fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
   // Stand in for the probe with a real script on the exact path the function
-  // invokes (`scripts/signing-home-base-probe.sh`, run in ON_HOME_BASE mode).
+  // invokes (`scripts/promote-home-base-probe.sh`, run in ON_HOME_BASE mode).
   const stub =
     probeExit === 'fail'
-      ? "#!/usr/bin/env bash\nprintf 'MISSING: no cert\\n' >&2\nexit 1\n"
+      ? "#!/usr/bin/env bash\nprintf 'promote-probe: gh is not authenticated\\n' >&2\nexit 1\n"
       : '#!/usr/bin/env bash\necho OK\nexit 0\n';
-  fs.writeFileSync(path.join(dir, 'scripts/signing-home-base-probe.sh'), stub, { mode: 0o755 });
+  fs.writeFileSync(path.join(dir, 'scripts/promote-home-base-probe.sh'), stub, { mode: 0o755 });
 
   // Harness: the real release.sh errexit settings + minimal stubs for the shell
   // helpers the function calls, then the real function body, then invoke it.
@@ -218,7 +235,7 @@ function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: st
     "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
     "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
     fnBody,
-    'assert_signing_home_base',
+    'assert_promote_home_base',
   ].join('\n');
   const harnessPath = path.join(dir, 'harness.sh');
   fs.writeFileSync(harnessPath, harness);
@@ -226,15 +243,14 @@ function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: st
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
-describe('release.sh: assert_signing_home_base fails loud under set -e', () => {
+describe('release.sh: assert_promote_home_base fails loud under set -e', () => {
   it('aborts with the actionable die message when the probe fails', () => {
     const { status, out } = runAssert('fail');
     expect(status).not.toBe(0);
     // The die branch MUST run -- the bug was that errexit skipped it entirely.
     expect(out).toContain('DIE:');
-    expect(out).toContain('not a provisioned signing home base');
-    expect(out).toContain('RUSH-2541');
-    expect(out).toContain('MISSING: no cert'); // the probe's diagnostic is surfaced
+    expect(out).toContain('cannot promote + publish');
+    expect(out).toContain('promote-probe: gh is not authenticated'); // the probe's diagnostic is surfaced
   });
 
   it('reports phase_ok and exits 0 when the probe passes', () => {

@@ -174,8 +174,13 @@ echo
 # from the tag (the throwaway worktree has no store), publishes those bytes, and
 # re-attaches the verified helper zip. It does NOT create its own worktree.
 run_home_base_phase() {
-  [[ "$(uname)" == "Darwin" ]] \
-    || die "the home base ($RELEASE_HOME_BASE) must be macOS (npm token + helper-asset attach)"
+  # No platform gate: this phase is promote-only (download attested tgz, verify,
+  # install-smoke, npm publish, re-attach the reused helper zip) — nothing here
+  # signs or notarizes, so a Linux home base works (RUSH-3026). The tarball no
+  # longer carries the version-stamped signed CLI binary; its two .app helpers
+  # are manifest-reused, already-signed artifacts. The gray line doubles as the
+  # deterministic routing sentinel release.test.ts asserts --device reached here.
+  gray "home base: $RELEASE_HOME_BASE (promote-only -- no signing on this path)"
   command -v npm >/dev/null  || die "npm not found on $RELEASE_HOME_BASE"
   command -v node >/dev/null || die "node not found on $RELEASE_HOME_BASE"
   command -v git >/dev/null  || die "git not found on $RELEASE_HOME_BASE"
@@ -405,7 +410,7 @@ mkdir -p "\$WT/apps/cli/bin"
 # rather than \`clone\`, i.e. plausibly a brand-new fleet home base -- trips
 # errexit on the assignment itself and kills the phase silently, before the
 # very next line's "main" fallback ever runs. Same anti-pattern, same fix
-# assert_signing_home_base above already uses for this reason.
+# assert_promote_home_base uses for this reason.
 DEFAULT_BRANCH="\$(git -C "\$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" || true
 [ -n "\$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="main"
 if [ -f "\$WT/apps/cli/bin/embedded.provisionprofile" ]; then
@@ -455,21 +460,21 @@ route_home_base_phase() {
   fi
 }
 
-# ----- Signing home-base preflight (fail fast BEFORE any mutation) -----
-# The privileged phase above (build + sign + notarize + npm publish) only runs at
-# the very END of the release, AFTER the PR is merged and the tag pushed. If the
-# resolved home base cannot sign -- the documented "mac-mini is down, use
-# --device zion" fallback on a box that was never provisioned as a signing home
-# base -- that failure lands after the two irreversible acts, leaving a
-# tagged-but-UNPUBLISHED release (RUSH-2535: npm stuck at 1.22.35 with v1.22.36
-# tagged). This runs the readiness probe ON the home base (inline if we ARE it,
-# else the same `agents ssh` hop route_home_base_phase uses) and aborts here --
-# before the crabbox/PR/merge/tag phases -- when the box is not provisioned. The
-# probe is read-only (scripts/signing-home-base-probe.sh: no git/gh/npm
-# mutations), so this hop can never itself advance the release.
-assert_signing_home_base() {
-  local out rc probe="scripts/signing-home-base-probe.sh"
-  bold "Preflight: verifying $RELEASE_HOME_BASE is a provisioned signing home base..."
+# ----- Promote home-base preflight (fail fast BEFORE any mutation) -----
+# The home-base phase above is promote-only (download attested tgz, verify,
+# install-smoke, npm publish, re-attach the reused helper zip) and runs at the
+# very END of the release, AFTER the PR is merged and the tag pushed. If the
+# resolved home base cannot promote -- no npm token bundle, no gh auth -- that
+# failure lands after the two irreversible acts, leaving a tagged-but-UNPUBLISHED
+# release (the RUSH-2535 shape). This runs the readiness probe ON the home base
+# (inline if we ARE it, else the same `agents ssh` hop route_home_base_phase
+# uses) and aborts here -- before the crabbox/PR/merge/tag phases -- when the box
+# is not ready. Signing provisioning (cert/keychain/provisionprofile) is NOT
+# probed: nothing on the promote path signs (RUSH-3026); helper signing has its
+# own path and runs only when helper sources change.
+assert_promote_home_base() {
+  local out rc probe="scripts/promote-home-base-probe.sh"
+  bold "Preflight: verifying $RELEASE_HOME_BASE can promote + publish..."
   # Capture rc with `&& rc=0 || rc=$?`, NOT `out="$(cmd)"; rc=$?`: under this
   # script's `set -euo pipefail`, a bare failing assignment trips errexit and
   # kills the script AT that line, before `rc=$?` runs -- so the diagnostic dump
@@ -480,19 +485,19 @@ assert_signing_home_base() {
     out="$(bash "$probe" 2>&1)" && rc=0 || rc=$?
   elif command -v agents >/dev/null 2>&1; then
     # Ship THIS worktree's fresh probe over stdin and run it in the home base's
-    # own checkout dir, so its git rev-parse resolves that box's provisionprofile.
-    # Piping (bash -s) -- not invoking a remote path -- because the home base's
-    # on-disk checkout may predate this script (route_home_base_phase makes the
-    # same choice for the same reason). Snippet on stdin; $HOME expands remotely.
+    # own checkout dir. Piping (bash -s) -- not invoking a remote path -- because
+    # the home base's on-disk checkout may predate this script
+    # (route_home_base_phase makes the same choice for the same reason).
+    # $HOME expands remotely.
     out="$(agents ssh "$RELEASE_HOME_BASE" -- 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)" && rc=0 || rc=$?
   else
     out="$(ssh "$RELEASE_HOME_BASE" 'cd $HOME/src/github.com/muqsitnawaz/agents-cli && bash -s' < "$probe" 2>&1)" && rc=0 || rc=$?
   fi
   if [[ "$rc" != "0" ]]; then
     printf '%s\n' "$out" | sed 's/^/  /' >&2
-    die "device $RELEASE_HOME_BASE is not a provisioned signing home base (missing provisionprofile/cert/notarytool creds) -- releases can only sign on a provisioned Mac; pass --device <provisioned-mac> or bring mac-mini online. Provisioning a new home base is RUSH-2541."
+    die "device $RELEASE_HOME_BASE cannot promote + publish (see probe output above) -- fix the named gap or pass --device <ready-box>"
   fi
-  phase_ok "$RELEASE_HOME_BASE is a provisioned signing home base"
+  phase_ok "$RELEASE_HOME_BASE can promote + publish (npm token + gh auth verified)"
 }
 
 # ----- Validate version bump -----
@@ -898,6 +903,13 @@ PKG_BUMPED=false
 
 phase "Preflight + version validation complete" "$THIS_HOST"
 phase_ok "isolated origin/$DEFAULT_BRANCH, bump $BUMP ($PHNX_LATEST -> $TARGET), type check + tarball preview done"
+
+# Fail fast BEFORE any mutation when the resolved home base cannot publish.
+# On origin/main this probe existed but was never invoked (dead since the
+# RUSH-2666 rewrite), so an unready home base failed only AFTER merge+tag --
+# the exact tagged-but-unpublished shape RUSH-2535 documented. Wired here, it
+# aborts before the attestation/PR/merge/tag phases (RUSH-3026).
+assert_promote_home_base
 
 # ----- Short-circuit: already published -----
 # Registry is the source of truth. If the version is live, the release happened;

@@ -595,7 +595,7 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 |---|---|---|---|
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
 | Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) | `src/lib/menubar/install-menubar.ts` |
-| Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **Yes** (signed + notarized, arm64 Mach-O at `dist/bin/agents`) | `scripts/postinstall.js` |
+| Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **No** — dropped from the tarball (RUSH-3026); macOS installs fall back to the JS entrypoint until it returns as a per-release GitHub asset | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/computer/ssh-tunnel.ts` |
 
@@ -670,14 +670,17 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 |---|---|---|
 | Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
 | CI / tests (Linux) | a **crabbox** workspace (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) reclaims an available warm box and syncs into `~/workspaces/<repo>-<task>`; it warms capacity only when the shared pool has none — **dynamic, never a hardcoded or release-exclusive instance** |
-| Build, sign+notarize, npm publish, computer-helper | a **Mac home base** | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
+| Promote attested tgz + npm publish + computer-helper re-attach | the **home base** (any OS — promote-only, RUSH-3026) | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
-The home base is a Mac that holds the Developer ID cert + npm publish rights.
-It defaults to `mac-mini` and is overridable with **`--device <name>`** to drive
-the release from another Mac when mac-mini is down. Not an env
-var: a flag with a default. The macOS-only sign/notarize + the npm tarball's
-signed binaries mean the home base must be a Mac; a Linux worker can *drive* the
-release but not be the home base. The crabbox is **not** hardcoded.
+The home base holds the npm publish token + gh auth. It defaults to `mac-mini`
+and is overridable with **`--device <name>`**. Not an env var: a flag with a
+default. Since RUSH-3026 the home-base phase is **promote-only** (download the
+attested tarball, verify, install-smoke, `npm publish`, re-attach the reused
+helper zip) — nothing on it signs or notarizes, so **any OS works as the home
+base**, Linux included. `assert_promote_home_base` preflights it (tools + gh
+auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
+first mutation. Helper signing is a separate, source-change-only path and still
+needs a provisioned Mac. The crabbox is **not** hardcoded.
 
 **A `--device` fallback must ALREADY be a provisioned signing home base — it is
 not turnkey.** Signing + notarizing + publishing needs, on that box: the
@@ -1026,22 +1029,20 @@ bundle's signature — which is how the flock fd-inheritance deadlock escaped. D
 add `MENUBAR_DUMP` / `MENUBAR_PROMPT_PREVIEW` to the gate: those reach AppKit and
 need a GUI session.
 
-**Standalone `agents` binary (#315).** Every release also builds `dist/bin/agents`
-(`bun build --compile`, arm64 Mach-O), signs it (Developer ID + hardened runtime +
-the JIT entitlement in `scripts/bun-jit-entitlements.plist` — bun's JavaScriptCore
-needs MAP_JIT or the binary dies on startup), and notarizes it via
-[`scripts/sign-cli-binary.sh`](scripts/sign-cli-binary.sh); on macOS `postinstall`
-points the alias shims and the `~/.local/bin/agents`/`ag` links at it, with a
-run-probe fallback to the JS entrypoint (mitigation 1 of #315 — the unsigned
-node-shebang shim is what EDR flags). Unlike the `.app` helpers it embeds the
-release version, so it is rebuilt **every** release on the home base (`release.sh`
-injects Apple creds via the `apple.com` bundle in the headless context). `prepack`
-gates it with
-[`scripts/verify-cli-binary.sh`](scripts/verify-cli-binary.sh): sha pin at
-`scripts/agents-cli-bin.sha256` (gitignored — a per-release artifact paired to the
-sign run, unlike the helper's committed pin), an embedded-version check so a stale
-binary can't ship, and `codesign --verify` + Developer ID authority where codesign
-exists. Bare Mach-Os can't be stapled; Gatekeeper/EDR fetch the ticket online.
+**Standalone `agents` binary (#315) — no longer in the tarball (RUSH-3026).**
+The signed arm64 Mach-O (`bun build --compile` → Developer ID + hardened runtime +
+the JIT entitlement in `scripts/bun-jit-entitlements.plist`, notarized via
+[`scripts/sign-cli-binary.sh`](scripts/sign-cli-binary.sh)) embeds the release
+version, so shipping it inside the npm tarball forced a Mac rebuild + sign on
+**every** release — the single artifact that chained publishing to a provisioned
+Mac even when nothing native changed. It is dropped from `package.json` `files`
+and from the `prepack` gates; `postinstall`'s existing run-probe falls back to
+the JS entrypoint when `dist/bin/agents` is absent, so macOS installs keep
+working (the pre-#315 status quo, at the cost of the EDR mitigation until the
+binary returns as a per-release GitHub asset — tracked in RUSH-3026).
+[`scripts/verify-cli-binary.sh`](scripts/verify-cli-binary.sh) and the signing
+machinery are retained for that asset path; a Mac producer still builds + signs
+the binary locally, it just no longer ships in the tarball.
 
 **The `@swarmify/agents-cli` shim is frozen at 1.19.x — do NOT "catch it up."** It's a
 legacy re-export not published since v1.20.0; `release.sh` publishes only `@phnx-labs`.

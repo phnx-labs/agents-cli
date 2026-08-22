@@ -78,22 +78,22 @@ describeRelease('release.sh --device flag', () => {
 describeDeviceResolution('release.sh --device resolution', () => {
   it('defaults the home base to mac-mini when --device is omitted', () => {
     const { out } = runRelease('1.2.3', '--home-base-phase');
-    expect(out).toContain('home base (mac-mini) must be macOS');
+    expect(out).toContain('home base: mac-mini (promote-only');
   });
 
   it('routes the privileged phase to --device <name>', () => {
     const { out } = runRelease('1.2.3', '--device', 'zion', '--home-base-phase');
-    expect(out).toContain('home base (zion) must be macOS');
+    expect(out).toContain('home base: zion (promote-only');
   });
 
   it('accepts --host as an alias for --device', () => {
     const { out } = runRelease('1.2.3', '--host', 'pinnacles', '--home-base-phase');
-    expect(out).toContain('home base (pinnacles) must be macOS');
+    expect(out).toContain('home base: pinnacles (promote-only');
   });
 
   it('accepts the --device=<name> glued form', () => {
     const { out } = runRelease('1.2.3', '--device=zion', '--home-base-phase');
-    expect(out).toContain('home base (zion) must be macOS');
+    expect(out).toContain('home base: zion (promote-only');
   });
 });
 
