@@ -168,6 +168,32 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
     // The pid file still points at the single owning process throughout.
     expect(readDaemonPid()).toBe(process.pid);
   });
+
+  // RUSH-3021: the vitest suite itself runs under a redirected HOME
+  // (tests/setup.ts), which is exactly the state this gate keys on. Without
+  // the gate, this call would attempt a real detached launch into the
+  // sandbox HOME — the leaked child that outlives its test and races the
+  // temp-home teardown rm (ENOTEMPTY; #2860's reviewer flagged the gap).
+  // Fails on ungated code: startDaemon() would return a spawn attempt
+  // (non-null) and write a pid file.
+  it('refuses to LAUNCH under a redirected HOME (no seam), while reporting stays allowed', () => {
+    const savedSeam = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    try {
+      removeDaemonPid();
+      expect(isDaemonRunning()).toBe(false);
+      expect(ensureDaemonStarted()).toBeNull();
+      expect(readDaemonPid()).toBeNull();
+
+      // Reporting an already-live daemon is untouched by the gate (the
+      // already-running branch sits above it).
+      writeDaemonPid(process.pid);
+      expect(ensureDaemonStarted()?.method).toBe('already-running');
+    } finally {
+      if (savedSeam === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+      else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedSeam;
+    }
+  });
 });
 
 // RUSH-2418: `daemon-health.ts`'s `consecutiveFailures` was write-only telemetry

@@ -74,4 +74,4 @@ NODE_TLS_REJECT_UNAUTHORIZED=0
 | `extra inputs are not permitted` | Bedrock validator rejecting Claude Code experimental fields forwarded by the gateway | Set `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1`, `CLAUDE_CODE_ATTRIBUTION_HEADER=0`, `DISABLE_PROMPT_CACHING=1` |
 | `self signed certificate in certificate chain` / `unable to verify the first certificate` | Corporate CA not in Node's trust store | Add the CA bundle via `NODE_EXTRA_CA_CERTS=/path/to/ca.pem`; for a trusted intra-cluster gateway `NODE_TLS_REJECT_UNAUTHORIZED=0` is acceptable |
 | `model not found` / 404 | Wrong model id format | Use `<provider-account>/<model-id>` from the TrueFoundry catalog, not the raw Anthropic name |
-| 401 / 403 | Token expired or wrong scope | `agents harness login truefoundry` to rotate |
+| 401 / 403 | Token expired or wrong scope | `agents accounts set-key truefoundry` to rotate |

@@ -5,7 +5,7 @@ activity up into one progress card. It is a **definition layer over the existing
 `--project` convention**, not a replacement — an undefined slug resolves exactly as
 before.
 
-> Beta. Enable with `agents beta enable projects` (the command tree is hidden until then).
+> Graduated out of beta — `agents projects` is always on. A leftover `beta.enabled: [projects]` entry is ignored.
 
 ## Why
 

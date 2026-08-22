@@ -1194,8 +1194,7 @@ function registerDevicesCommands(program: Command): void {
   // `agents fleet capture` — snapshot live state into agents.yaml fleet:.
   registerFleetCaptureCommand(devicesCmd);
 
-  // `agents fleet apply` — same reconcile engine as the top-level `agents apply`,
-  // surfaced under the fleet tree for discoverability.
+  // `agents fleet apply` — canonical fleet reconcile (top-level apply is retired).
   registerFleetApplyAlias(devicesCmd);
 
   devicesCmd

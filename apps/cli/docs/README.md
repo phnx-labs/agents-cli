@@ -52,7 +52,7 @@ How agi-cli is laid out on disk and how it decides what to load.
 
 | Doc | What it covers |
 |---|---|
-| [Fleet profile sync](fleet.md) | `agents apply` — reconcile every device to a declared `fleet:` profile: install agents and sync config. Native logins stay device-local; provider accounts sync explicitly. |
+| [Fleet profile sync](fleet.md) | `agents fleet apply` — reconcile every device to a declared `fleet:` profile: install agents and sync config. Native logins stay device-local; provider accounts sync explicitly. |
 | [Teams](teams.md) | Multi-agent DAG teams, boundary contracts, `--watch` supervisor, `--worktree` isolation, `--cloud` dispatch. |
 | Tickets | Use `linear` (linear-cli) for Linear, `gh issue` for GitHub. The former top-level `agents tickets` command is gone (RUSH-2932). |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |

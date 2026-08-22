@@ -40,7 +40,7 @@ export const SCHEMA_VERSION = 39;
  * rows with a lower version are treated as stale — the same mechanism
  * TOOL_INDEX_VERSION gives the tool backfill).
  */
-export const RESOURCE_INDEX_VERSION = 1;
+const RESOURCE_INDEX_VERSION = 1;
 
 /**
  * Canonicalize a file path for use as a scan_ledger key. The same physical
@@ -405,10 +405,10 @@ CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(st
  */
 /** Bump when facet extraction changes so cached rows recompute (stalls-by-model v6). */
 export const INSIGHTS_EXTRACTOR_VERSION = 6;
-export const PREVIEW_EXTRACTOR_VERSION = 1;
+const PREVIEW_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
-export interface SessionRow {
+interface SessionRow {
   id: string;
   short_id: string;
   agent: string;
@@ -1326,7 +1326,7 @@ export function closeDB(): void {
   }
 }
 
-export interface FtsOptimizeResult {
+interface FtsOptimizeResult {
   table: string;
   segmentsBefore: number;
   segmentsAfter: number;
@@ -1571,7 +1571,7 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
  * written by the Claude scan (B-2) and consumed on the next scan to decide
  * full-vs-incremental and to hydrate the resume.
  */
-export interface ParserStateRow {
+interface ParserStateRow {
   parserState: string | null;
   contentText: string | null;
   fileMtimeMs: number;
@@ -2916,7 +2916,7 @@ export function countSessions(options: QueryOptions = {}): number {
 }
 
 /** One grouped row in a cost/duration rollup. */
-export interface UsageRollupRow {
+interface UsageRollupRow {
   /**
    * Grouping key value: the agent id, project name, ISO date (YYYY-MM-DD), or
    * account identity (`claude:org=<uuid>` / `unattributed:<reason>`).
@@ -3145,7 +3145,7 @@ export type UsageRollupGroup = 'agent' | 'project' | 'day' | 'account';
  * Account rotation is NOT done here — that stays on live rate-limit windows
  * via `--strategy balanced` / rotate.ts.
  */
-export type AffinityGroup = 'machine' | 'agent' | 'machine_agent';
+type AffinityGroup = 'machine' | 'agent' | 'machine_agent';
 
 export interface AffinityRow {
   /** Group key: machine name, agent id, or "machine\\tagent". */
@@ -3421,7 +3421,7 @@ function stampResourceLedger(
 }
 
 /** Outcome of a resource-usage backfill run. */
-export interface ResourceBackfillResult {
+interface ResourceBackfillResult {
   /** Sessions considered (matched the filter, had a real transcript). */
   scanned: number;
   /** Sessions (re)parsed and written this run. */
@@ -3540,7 +3540,7 @@ export function teamSpawners(): Map<string, TeamSpawner> {
 }
 
 /** A session with its cost, for the top-N-by-cost listing. */
-export interface TopCostSession {
+interface TopCostSession {
   meta: SessionMeta;
   costUsd: number;
   durationMs: number;
@@ -3690,7 +3690,7 @@ export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionM
 }
 
 /** A single full-text search result with ranking score. */
-export interface FtsHit {
+interface FtsHit {
   sessionId: string;
   score: number;
   matchedTerms: string[];
@@ -3838,14 +3838,6 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   return hits.slice(0, limit);
 }
 
-/** Return the total row counts for the sessions and FTS5 tables (diagnostic). */
-export function getRowCount(): { sessions: number; textRows: number } {
-  const db = getDB();
-  const sessions = (db.prepare(`SELECT COUNT(*) AS c FROM sessions`).get() as { c: number }).c;
-  const textRows = (db.prepare(`SELECT COUNT(*) AS c FROM session_text`).get() as { c: number }).c;
-  return { sessions, textRows };
-}
-
 /**
  * Rewrite file_path for all sessions whose path starts with oldPrefix, replacing
  * it with newPrefix + the unchanged suffix. Also clears the matching scan_ledger
@@ -3877,7 +3869,7 @@ export function updateSessionFilePaths(oldPrefix: string, newPrefix: string): nu
 // ─── Tool sessions: durable browser / computer-use metadata (RUSH-2549) ──────
 
 /** Per-kind capture tallies for a browser task. Counts only -- never the bytes. */
-export interface BrowserCaptureCounts {
+interface BrowserCaptureCounts {
   screenshot: number;
   pdf: number;
   recording: number;
@@ -3885,7 +3877,7 @@ export interface BrowserCaptureCounts {
 }
 
 /** One durable browser-task row. `machine` defaults to this device. */
-export interface BrowserSessionRecord {
+interface BrowserSessionRecord {
   task: string;
   profile: string;
   sessionId?: string;
@@ -3900,7 +3892,7 @@ export interface BrowserSessionRecord {
 }
 
 /** One durable computer-use invocation row. `machine` defaults to this device. */
-export interface ComputerSessionRecord {
+interface ComputerSessionRecord {
   invocationId: string;
   sessionId?: string;
   launchId?: string;
@@ -4005,7 +3997,7 @@ export function recordComputerSession(record: ComputerSessionRecord): void {
 }
 
 /** A stored browser row as read back, with counts rehydrated. */
-export interface StoredBrowserSession extends Required<Pick<BrowserSessionRecord, 'task' | 'profile'>> {
+interface StoredBrowserSession extends Required<Pick<BrowserSessionRecord, 'task' | 'profile'>> {
   sessionId?: string;
   launchId?: string;
   actor?: string;
@@ -4088,7 +4080,7 @@ export function getBrowserSessionRecord(profile: string, task: string): StoredBr
 }
 
 /** A stored computer-use invocation as read back. */
-export interface StoredComputerSession {
+interface StoredComputerSession {
   invocationId: string;
   sessionId?: string;
   launchId?: string;
@@ -4122,9 +4114,9 @@ interface ComputerSessionRow {
  * times a day, so an unbounded table would grow without limit and be read in
  * full on every listing.
  */
-export const TOOL_SESSION_MAX_AGE_DAYS = 365;
+const TOOL_SESSION_MAX_AGE_DAYS = 365;
 /** Default ceiling on rows one listing will read. */
-export const TOOL_SESSION_LIST_LIMIT = 2000;
+const TOOL_SESSION_LIST_LIMIT = 2000;
 
 /**
  * Drop tool-session rows past {@link TOOL_SESSION_MAX_AGE_DAYS}.

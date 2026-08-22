@@ -138,4 +138,30 @@ describe('publishFile with injected uploader', () => {
       'https://share.example.com/octocat/cover-page',
     ]);
   });
+
+  it('publishes when accountId is empty — only baseUrl + WRITE_TOKEN are required (RUSH-2837)', async () => {
+    const htmlPath = path.join(tmpDir, 'partial.html');
+    fs.writeFileSync(htmlPath, '<!doctype html><title>Partial</title>');
+    const uploads: string[] = [];
+
+    const result = await publish.publishFile(htmlPath, {
+      slug: 'partial-config',
+      githubUser: 'octocat',
+      cover: false,
+      provenance: {},
+      config: {
+        baseUrl: 'https://share.example.com',
+        accountId: '',
+        workerName: 'agents-share',
+        bucketName: 'agents-share',
+      },
+      uploader: async (url) => {
+        uploads.push(url);
+        return { ok: true, status: 200, url };
+      },
+    });
+
+    expect(result.url).toBe('https://share.example.com/octocat/partial-config');
+    expect(uploads).toEqual(['https://share.example.com/octocat/partial-config']);
+  });
 });

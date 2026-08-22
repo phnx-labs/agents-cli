@@ -2,7 +2,7 @@
  * Software Factory CLI — submits Linear issues to a remote orchestrator.
  *
  * Requires FACTORY_FLOOR_URL pointing at a Factory-compatible endpoint.
- * Beta-gated; enable with `agents beta enable factory`.
+ * Beta-gated; enable with `agents setup beta enable factory`.
  */
 import type { Command } from 'commander';
 import chalk from 'chalk';

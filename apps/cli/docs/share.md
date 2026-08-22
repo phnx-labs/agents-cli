@@ -279,6 +279,14 @@ bundle to a peer with `agents secrets export share --device <box>`; local agent,
 teammate, and supported cloud launches inject the token automatically when the
 synced config exists and the token is already available.
 
+**Publish vs provision.** `agents artifacts share <file>` needs `share.baseUrl` plus
+`WRITE_TOKEN`. `accountId` / worker / bucket are for `setup`/`update` only. An empty
+`accountId: ""` (or a config from before that field existed) is still a configured
+endpoint — `status` prints it, and publish uses it. `status` says "Not configured"
+only when `baseUrl` is absent. If a partial `writeMeta` used to delete the whole
+`share:` block, that is a bug (RUSH-2837); the writer now leaves `share:` in place
+when a write simply omitted the key.
+
 ## Command reference
 
 | Command | What it does |

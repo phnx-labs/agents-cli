@@ -574,7 +574,7 @@ never runs that command, so it routes explicitly via `resumeOnOwnerIfRemote`.
 peer-owned session, since reaching it with one means a caller skipped its routing
 step.
 
-The hop uses `runOnPeer` ([`src/lib/session/remote-list.ts`](src/lib/session/remote-list.ts)),
+The hop uses `runOnPeer` ([`src/lib/session/remote/remote-list.ts`](src/lib/session/remote/remote-list.ts)),
 not the `--device` passthrough. Two reasons: the passthrough re-discovers locally and
 dead-ends for a session that exists only on the peer, and it marks the run
 `AGENTS_FLEET_REMOTE` — a one-shot command may carry that consent marker, but a

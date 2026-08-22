@@ -255,6 +255,30 @@ describe('runShareUpdate', () => {
     await expect(share.runShareUpdate({})).rejects.toThrow(/Run 'agents artifacts setup'/);
   });
 
+  it('uses --account when share.accountId is empty rather than treating the endpoint as missing (RUSH-2837)', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: '',
+      workerName: 'worker-existing',
+      bucketName: 'bucket-existing',
+    });
+    config.storeWriteToken('the-original-write-token');
+    const seen: CloudflareRequest[] = [];
+    await share.runShareUpdate({
+      token: 'cf-token',
+      account: 'acct_from_flag',
+      request: async (req) => {
+        seen.push(req);
+        return {};
+      },
+    });
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_from_flag/workers/scripts/worker-existing',
+      '/accounts/acct_from_flag/workers/scripts/worker-existing/secrets',
+    ]);
+  });
+
   it('reuses the existing account/worker/bucket/token from config — never re-provisions', async () => {
     const { share, config } = await freshShareModules();
     config.writeShareConfig({
@@ -482,6 +506,34 @@ describe('share status and analytics namespace display', () => {
     await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
 
     expect(loggedOutput()).toContain('unknown');
+  });
+
+  it('status reports the endpoint when accountId is empty instead of "Not configured" (RUSH-2837)', async () => {
+    const { artifacts, config } = await freshShareModules();
+    fs.mkdirSync(path.join(tmpHome, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.agents', 'agents.yaml'),
+      [
+        'share:',
+        '  baseUrl: https://share.agents-cli.sh',
+        '  accountId: ""',
+        '  workerName: agents-share',
+        '  bucketName: agents-share',
+        '',
+      ].join('\n'),
+    );
+    // Re-import so readMeta sees the yaml we just wrote (module cache was
+    // populated by writeShareConfig in sibling tests via a reset).
+    expect(config.readShareConfig()?.baseUrl).toBe('https://share.agents-cli.sh');
+    installFakeGh('gh-only-user');
+
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
+
+    const out = loggedOutput();
+    expect(out).toContain('https://share.agents-cli.sh');
+    expect(out).toContain('account missing');
+    expect(out).not.toMatch(/Not configured/);
   });
 
   it('shows the template as current right after `agents artifacts share update` and outdated once the hash is stale', async () => {

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import type { ActiveSession } from './active.js';
+import type { ActiveSession } from '../active.js';
 import { SessionWatchState, sessionWatchRowKey, watchLocalSessions } from './watch.js';
 
 const row = (sessionId: string, status: ActiveSession['status'] = 'running'): ActiveSession => ({

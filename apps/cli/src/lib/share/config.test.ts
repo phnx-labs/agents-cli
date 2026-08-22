@@ -95,6 +95,63 @@ describe('share config', () => {
     expect(fs.readFileSync(path.join(HOME, '.agents', 'agents.yaml'), 'utf8')).toContain('share:');
   });
 
+  it('treats an empty accountId as publishable config, not "not set up" (RUSH-2837)', () => {
+    fs.mkdirSync(path.join(HOME, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(HOME, '.agents', 'agents.yaml'),
+      [
+        'share:',
+        '  baseUrl: https://share.agents-cli.sh',
+        '  accountId: ""',
+        '  workerName: agents-share',
+        '  bucketName: agents-share',
+        '  domain: share.agents-cli.sh',
+        '',
+      ].join('\n'),
+    );
+
+    expect(readShareConfig()).toEqual({
+      baseUrl: 'https://share.agents-cli.sh',
+      accountId: '',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+      domain: 'share.agents-cli.sh',
+    });
+  });
+
+  it('returns null only when baseUrl is missing — worker/bucket default', () => {
+    fs.mkdirSync(path.join(HOME, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(HOME, '.agents', 'agents.yaml'),
+      'share:\n  baseUrl: https://share.example.com/\n',
+    );
+
+    expect(readShareConfig()).toEqual({
+      baseUrl: 'https://share.example.com',
+      accountId: '',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+  });
+
+  it('does not persist an empty accountId over a stored one', () => {
+    writeShareConfig({
+      baseUrl: 'https://share.example.com',
+      accountId: 'acct_keep',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+    writeShareConfig({
+      baseUrl: 'https://share.example.com',
+      accountId: '',
+      workerName: 'agents-share',
+      bucketName: 'agents-share',
+    });
+
+    expect(readShareConfig()?.accountId).toBe('acct_keep');
+    expect(fs.readFileSync(path.join(HOME, '.agents', 'agents.yaml'), 'utf8')).not.toMatch(/accountId:\s*[\"']{2}/);
+  });
+
   it('stores the raw Worker write token in the share secrets bundle as WRITE_TOKEN', () => {
     storeWriteToken('write-token-1');
 

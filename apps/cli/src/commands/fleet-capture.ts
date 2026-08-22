@@ -1,7 +1,7 @@
 /**
  * `agents fleet capture` (alias surface of `agents devices capture`) — snapshot
  * the live environment into the `fleet:` block of `agents.yaml` so a fresh
- * machine can reconstruct it with `agents apply`.
+ * machine can reconstruct it with `agents fleet apply`.
  *
  * Local-read + local-write, zero SSH. Records device NAMES only (never IPs or
  * usernames — those are re-resolved live from Tailscale at apply-time), plus the
@@ -103,7 +103,7 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
           `${inputs.secretsBundles?.length ?? 0} secret bundle(s), ${inputs.routines?.length ?? 0} routine(s).`,
       ),
   );
-  console.log(chalk.gray('  Wrote agents.yaml → fleet:. Push it (`agents repo push`) and run `agents apply` on any machine.'));
+  console.log(chalk.gray('  Wrote agents.yaml → fleet:. Push it (`agents repo push`) and run `agents fleet apply` on any machine.'));
 }
 
 /** Attach `capture` to the `devices`/`fleet` command tree. */

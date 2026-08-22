@@ -138,7 +138,7 @@ export function readFleetFile(filePath: string): FleetManifest {
   }
   const fleet = (doc as Record<string, unknown>).fleet;
   if (fleet === undefined) {
-    throw new Error(`${filePath} has no fleet: block. Add one to declare the profile (see \`agents apply --help\`).`);
+    throw new Error(`${filePath} has no fleet: block. Add one to declare the profile (see \`agents fleet apply --help\`).`);
   }
   return parseFleetManifest(fleet);
 }

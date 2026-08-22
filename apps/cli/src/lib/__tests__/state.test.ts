@@ -220,6 +220,28 @@ describe('readMeta merges agents.yaml from both repos', () => {
     expect(out).toContain('source: set-by-write'); // the write that triggered it landed
   });
 
+  it('does not drop share: when a partial writeMeta omits it (RUSH-2837)', () => {
+    fs.writeFileSync(
+      path.join(userDir, 'agents.yaml'),
+      [
+        'share:',
+        '  baseUrl: https://share.agents-cli.sh',
+        '  accountId: cba808419c971547b1634aec0a7bf795',
+        '  workerName: agents-share',
+        '  bucketName: agents-share',
+        '',
+      ].join('\n'),
+    );
+    runStateScript(testDir, `
+      const { writeMeta } = await import(${JSON.stringify(modulePath)});
+      writeMeta({ run: { claude: { strategy: 'balanced' } } });
+    `);
+    const out = fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf8');
+    expect(out).toContain('baseUrl: https://share.agents-cli.sh');
+    expect(out).toContain('accountId: cba808419c971547b1634aec0a7bf795');
+    expect(out).toContain('strategy: balanced');
+  });
+
   it('does not lose concurrent updateMeta callback writes', async () => {
     // Hold the meta lock through the callback longer than the old count-bounded
     // retry budget (~750ms). The loser of the race must wait this out and still

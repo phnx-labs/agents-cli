@@ -26,8 +26,8 @@ import {
   remoteListCommand,
   sshCapture,
 } from './remote-list.js';
-import type { DeviceProfile } from '../devices/registry.js';
-import { TOOL_QUERY_MAX_CALL_ROWS } from './tool-index.js';
+import type { DeviceProfile } from '../../devices/registry.js';
+import { TOOL_QUERY_MAX_CALL_ROWS } from '../tool-index.js';
 
 interface RealSshPeer {
   port: number;

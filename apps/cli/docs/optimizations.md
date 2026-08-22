@@ -313,6 +313,6 @@ Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
 | `src/lib/hosts/progress.ts` | One combined round-trip/cycle + adaptive backoff; `splitProgressOutput` |
 | `src/lib/hosts/ready.ts` | `readyProbe` collapses 3 probes into 1 |
 | `src/commands/hosts.ts` | Thread the probe result through `maybeBootstrap` (drop duplicate probe) |
-| `src/lib/session/remote.ts` | Import canonical `SSH_OPTS` + `controlOpts` (drop private copy) |
+| `src/lib/session/remote/remote.ts` | Import canonical `SSH_OPTS` + `controlOpts` (drop private copy) |
 | `src/commands/secrets.ts` | Route the remote push through `sshExec` |
 | `src/lib/computer/ssh-tunnel.ts` | `buildTunnelArgs` composes `SSH_OPTS` (inherits keepalive) |

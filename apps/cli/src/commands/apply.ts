@@ -1,10 +1,11 @@
 /**
- * `agents apply` (alias `ag apply`) — reconcile the whole fleet to a declared
- * profile in one command: install agents-cli + agents and sync config. Native
+ * `agents fleet apply` / `agents devices apply` — reconcile the whole fleet
+ * to a declared profile: install agents-cli + agents and sync config. Native
  * harness logins remain device-local; portable provider credentials move only
  * through explicit `agents accounts sync`.
  *
  * The manifest is the `fleet:` block of any `-f` file (default `agents.yaml`).
+ * Top-level `agents apply` is retired (RUSH-2981).
  */
 
 import * as fs from 'fs';
@@ -328,9 +329,7 @@ function reportResults(results: DeviceApplyResult[]): void {
 }
 
 /**
- * Attach the reconcile options + action to a command node. Shared by the
- * top-level `agents apply` and its `agents fleet apply` alias so the two can
- * never drift — identical flags, identical engine.
+ * Attach the reconcile options + action to a command node.
  */
 export function configureApplyCommand(cmd: Command): Command {
   return cmd
@@ -355,33 +354,10 @@ export function configureApplyCommand(cmd: Command): Command {
     });
 }
 
-export function registerApplyCommand(program: Command): void {
-  const applyCmd = configureApplyCommand(program.command('apply'));
-  setHelpSections(applyCmd, {
-    examples: `
-      # Preview what would change across the fleet
-      agents apply --plan -f agents.yaml
-
-      # Bring every device to the profile (installs + config sync; native login stays local)
-      ag apply -f agents.yaml
-
-      # One device only
-      agents apply --device yosemite-s1 -y
-
-      # Replicate every claude version on this machine onto a fresh box
-      agents apply --agent claude@all --device yosemite-s0 -y
-
-      # Install a specific pinned version on one device
-      agents apply --agent claude@2.1.207 --device yosemite-s0
-    `,
-  });
-}
-
 /**
- * Surface `agents apply` under the fleet command tree as `agents fleet apply`
- * (and `agents devices apply`). Same reconcile engine as the top-level command —
- * a discoverability alias for users who reach for `fleet` as the verb. Kept in
- * lockstep via {@link configureApplyCommand}.
+ * Canonical surface: `agents fleet apply` / `agents devices apply`.
+ * Top-level `agents apply` is retired (RUSH-2981) — not a noun, already nested
+ * here. Same reconcile engine, kept in lockstep via {@link configureApplyCommand}.
  */
 export function registerFleetApplyAlias(devicesCmd: Command): void {
   const sub = configureApplyCommand(devicesCmd.command('apply'));
@@ -392,6 +368,12 @@ export function registerFleetApplyAlias(devicesCmd: Command): void {
 
       # Reconcile every device to the profile
       agents fleet apply -y
+
+      # One device only
+      agents fleet apply --device yosemite-s1 -y
+
+      # Replicate every claude version on this machine onto a fresh box
+      agents fleet apply --agent claude@all --device yosemite-s0 -y
     `,
   });
 }

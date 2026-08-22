@@ -1,7 +1,9 @@
 # Profiles
 
 > **Surface note:** the top-level `agents profiles` command was removed.
-> Use `agents harness add|fork|edit|list|view|remove` and `agents harness login|logout <provider>`.
+> Use `agents harness add|fork|edit|list|view|remove`. Provider API keys are
+> accounts: `agents accounts add|set-key|remove` (RUSH-2981 removed
+> `agents harness login|logout`).
 > Profile YAML under `~/.agents/profiles/` is unchanged.
 
 
@@ -148,9 +150,9 @@ Profile YAML `host.agent` selects which binary is spawned. Env vars override def
 | `harness add <name> --key-stdin` | Read API key from stdin (CI-safe) | `echo $KEY \| agents harness add kimi --key-stdin` |
 | `harness add <name> --force` | Overwrite an existing profile | `agents harness add kimi --force` |
 | `harness remove <name>` / `rm` | Delete a profile (keychain token is kept) | `agents harness remove kimi` |
-| `harness login <provider>` | Store or rotate the API key for a provider | `agents harness login openrouter` |
-| `harness login <provider> --key-stdin` | Read key from stdin | `echo $KEY \| agents harness login openrouter --key-stdin` |
-| `harness logout <provider>` | Remove a stored provider key from Keychain | `agents harness logout openrouter` |
+| `accounts add <name>` | Store a provider API key as a durable account | `agents accounts add openrouter --provider openrouter --auth api-key` |
+| `accounts set-key <name>` | Rotate an account credential (or `--from-secrets bundle:key` for CI) | `agents accounts set-key openrouter` |
+| `accounts remove <name>` | Remove an account and its device-local credential | `agents accounts remove openrouter` |
 
 ## Built-in Presets
 
@@ -238,7 +240,7 @@ Fields sourced from `Profile` interface at `src/lib/profiles.ts:19-73`.
 
 ```bash
 # Store the OpenRouter key once (all openrouter presets reuse it)
-agents harness login openrouter
+agents accounts add openrouter --provider openrouter --auth api-key
 
 # Add Kimi (interactive use — reasoning model)
 agents harness add kimi
@@ -269,7 +271,7 @@ auth:
 Then store the key and verify:
 
 ```bash
-agents harness login ollama    # or: echo "your-key" | agents harness add local-llama --key-stdin
+agents accounts add ollama --provider ollama --auth api-key    # or: echo "your-key" | agents harness add local-llama --key-stdin
 agents harness view local-llama
 agents run local-llama "hello"
 ```
@@ -279,14 +281,14 @@ agents run local-llama "hello"
 Rotation applies to all profiles that share the same provider key:
 
 ```bash
-agents harness login openrouter   # prompts for new key, overwrites the old one
+agents accounts set-key openrouter   # prompts for new key, overwrites the old one
 # All kimi, kimi-chat, minimax, glm, qwen, deepseek profiles pick it up immediately
 ```
 
-To rotate via stdin (CI):
+To rotate non-interactively (CI), import from an `agents secrets` entry:
 
 ```bash
-echo "$NEW_KEY" | agents harness login openrouter --key-stdin
+agents accounts set-key openrouter --from-secrets openrouter.ai:OPENROUTER_API_KEY
 ```
 
 ### 4. List and inspect configured profiles
@@ -312,7 +314,7 @@ agents harness remove kimi
 # Other openrouter profiles are unaffected
 
 # To fully remove the key too:
-agents harness logout openrouter
+agents accounts remove openrouter
 ```
 
 ### 7. Run a profile on a leased box

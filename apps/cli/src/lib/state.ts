@@ -1052,6 +1052,12 @@ function serializeCentral(central: Record<string, unknown>): string {
     // config data-loss bug). A known device key lingering in the synced file is
     // still removed — it belongs in the per-machine file, not here.
     if (!(k in central) && KNOWN_META_KEYS.has(k)) {
+      // RUSH-2837: a partial writeMeta (reconstructed Meta missing `share`)
+      // deleted the share endpoint from agents.yaml and synced that deletion
+      // fleet-wide. `share` is restored only by setup/join — never drop it
+      // just because this write omitted the key. Explicit `share: null` still
+      // goes through doc.set above.
+      if (k === 'share') continue;
       doc.delete(k);
       changed = true;
     }

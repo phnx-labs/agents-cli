@@ -223,12 +223,12 @@ describe('buildFleetAttentionItems (only real, actionable problems)', () => {
     expect(offline[0].fix).toBe('check the box');
   });
 
-  it('merges config drift and a stark CLI gap into one `agents apply` item per box', () => {
+  it('merges config drift and a stark CLI gap into one `agents fleet apply` item per box', () => {
     const report = buildFleetHealthReport([
       row({ name: 'multi', online: 'online', sync: stale, clis: clis(1, 9) }),
     ]);
     const items = buildFleetAttentionItems(report);
-    const apply = items.filter((i) => i.fix === 'agents apply multi');
+    const apply = items.filter((i) => i.fix === 'agents fleet apply --device multi');
     expect(apply).toHaveLength(1); // one line, not two
     expect(apply[0].detail).toContain('config drift');
     expect(apply[0].detail).toContain('only 1 of 9');
