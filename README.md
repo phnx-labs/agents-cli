@@ -1507,7 +1507,7 @@ For full transparency: `agi-cli` keeps a local event log at `~/.agents/.cache/lo
 
 macOS and Linux. Windows via WSL works but isn't first-class yet.
 
-**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents harness login`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
+**macOS-only features:** Keychain-based secrets (`agents secrets`, `agents accounts add`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
 
 Interactive tmux-backed runs require tmux 3.2 or newer.
 

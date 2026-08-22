@@ -61,5 +61,5 @@ Without `drop_params: true` these surface as `400 Bad Request` from the upstream
 |---|---|---|
 | Tool calls degrade to plain text | LiteLLM Anthropic pass-through adapter `tool_use` bug | Use vLLM's native Anthropic endpoint instead — see [vllm.md](vllm.md) |
 | `400 Bad Request: unknown parameter 'thinking'` (or similar) | Upstream doesn't accept Anthropic-only fields | Add `drop_params: true` and the field to `additional_drop_params` |
-| 401 / `Invalid proxy server token` | Wrong master/virtual key | `agents harness login litellm` to rotate |
+| 401 / `Invalid proxy server token` | Wrong master/virtual key | `agents accounts set-key litellm` to rotate |
 | `Model ... not in model_list` | Profile's `ANTHROPIC_MODEL` doesn't match any alias in `config.yaml` | Use the exact alias from your LiteLLM `model_list:` |

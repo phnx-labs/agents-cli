@@ -51,5 +51,5 @@ The base URL pattern is `<resource>.services.ai.azure.com/anthropic` — note th
 |---|---|---|
 | Requests still hit `api.anthropic.com` | claude-code#11937 — Foundry env vars not picked up | Pin a Claude Code version that honors `CLAUDE_CODE_USE_FOUNDRY=1`; verify with `--debug` |
 | 404 on `/anthropic` path | Base URL missing the `/anthropic` suffix | Set `ANTHROPIC_BASE_URL=https://<resource>.services.ai.azure.com/anthropic` exactly |
-| 401 / 403 | Wrong key or key from a different Foundry resource | Rotate via `agents harness login foundry` |
+| 401 / 403 | Wrong key or key from a different Foundry resource | Rotate via `agents accounts set-key foundry` |
 | `extra inputs are not permitted` | Upstream Bedrock validator (Foundry-relayed) | Apply the `DISABLE_PROMPT_CACHING=1` + `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=1` + `CLAUDE_CODE_ATTRIBUTION_HEADER=0` triplet |
