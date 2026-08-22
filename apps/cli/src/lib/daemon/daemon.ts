@@ -1839,6 +1839,16 @@ export function ensureDaemonStarted(): { pid: number | null; method: string } | 
   // so a stale failure streak can't make a healthy daemon read as absent to
   // callers that branch on this return (e.g. secrets/agent.ts).
   if (isDaemonRunning()) return startDaemon();
+  // RUSH-3021: never LAUNCH a daemon from a redirected (sandbox/test) HOME.
+  // #2860 gated service-manager registration on this signal but left the
+  // detached spawn itself ungated, so a test-spawned CLI could fork a daemon
+  // into the test's temp HOME; the child outlives the test and races its
+  // recursive teardown rm (ENOTEMPTY). Placed after the already-running branch
+  // — reporting a live daemon stays allowed, same as the circuit breaker.
+  // AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME=1 is the test seam for suites
+  // that exercise daemon startup deliberately; `agents daemon start` remains
+  // the operator override.
+  if (!serviceManagerRegistrationAllowed().allowed) return null;
   // RUSH-2418: the auto-start circuit breaker. A daemon that dies during
   // startup would otherwise be relaunched by EVERY foreground command that
   // wants one (secrets unlock, browser start, watchdog, ...) — an
