@@ -29,7 +29,7 @@ import {
 // routines.test.ts (measured ~194s of test time) so vitest can parallelize
 // the file across worker forks. Shared fixtures: routines.test-fixture.ts.
 
-const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector } = createDaemonHarness();
+const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome } = createDaemonHarness('run');
 registerLeakDetector();
 
 describeRoutines('routines edit transaction', () => {
@@ -54,7 +54,7 @@ describeRoutines('routines edit transaction', () => {
 
 describeRoutines('routines add one-shot-looking --schedule', () => {
   it('warns, persists runOnce, and keeps JSON stdout parseable', async () => {
-    const home = makeHome({ registry });
+    const home = makeDaemonHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     let pid: number | null = null;
     try {
@@ -544,7 +544,7 @@ describeRoutines('routines edit — headless context repair', () => {
 // cgraph-mcp processes on every five-minute tick while the test suite ran.
 describeRoutines('daemon env isolation — AGENTS_HISTORY_DIR must not leak (RUSH-2545)', () => {
   it('daemon process carries AGENTS_HISTORY_DIR inside the test tmpHome, not the real production dir', async () => {
-    const home = makeHome();
+    const home = makeDaemonHome();
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     let pid: number | null = null;
     try {

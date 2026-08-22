@@ -39,8 +39,10 @@ export function makeHome(opts: {
   projectJobs?: Record<string, unknown>[];
   registry?: Record<string, unknown>;
   deviceRoutines?: Record<string, string[]>;
+  /** Full mkdtemp prefix override — the daemon harness scopes its leak sweep by it. */
+  tmpPrefix?: string;
 } = {}): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-routines-test-'));
+  const home = fs.mkdtempSync(opts.tmpPrefix ?? path.join(os.tmpdir(), 'agents-routines-test-'));
   const agentsDir = path.join(home, '.agents');
   const routinesDir = path.join(agentsDir, 'routines');
   const projectDir = path.join(home, 'project');
@@ -143,12 +145,22 @@ export function isProcessAlive(pid: number): boolean {
  * set MUST be private to the file that spawned it, since vitest's per-file
  * fork isolation means the leak sweep only ever needs to answer for what THIS
  * file started.
+ *
+ * `fileSlug` MUST be unique per test file: it names the mkdtemp prefix
+ * `makeDaemonHome` uses, and the CI leak sweep matches ONLY that prefix.
+ * The suite slices run in parallel forks, so a sweep over the shared
+ * `agents-routines-test-` prefix would catch a sibling file's still-running
+ * daemon and kill it mid-test — exactly what failed the first CI run of the
+ * RUSH-2819 split (run 32552954164: add's sweep killed a live daemon whose
+ * HOME belonged to a concurrently running slice).
  */
-export function createDaemonHarness(): {
+export function createDaemonHarness(fileSlug: string): {
   startIsolatedDaemon: (home: string) => { child: ReturnType<typeof spawn>; pidPromise: Promise<number | null> };
   stopIsolatedDaemon: (child: ReturnType<typeof spawn>) => Promise<void>;
   registerLeakDetector: () => void;
+  makeDaemonHome: (opts?: Omit<Parameters<typeof makeHome>[0], 'tmpPrefix'>) => string;
 } {
+  const homePrefix = path.join(os.tmpdir(), `agents-routines-${fileSlug}-`);
   /**
    * Every daemon pid spawned via `startIsolatedDaemon` in this file, live for as
    * long as `stopIsolatedDaemon` has not yet reaped it. Backstops the per-test
@@ -252,11 +264,13 @@ export function createDaemonHarness(): {
    *  1. Always: nothing THIS run spawned via `startIsolatedDaemon` may still be
    *     alive — `trackedDaemonPids` is only ever non-empty here if a bug (not
    *     an external kill) let one slip past its own test's `finally`.
-   *  2. CI only (no concurrent developer session could produce a false
-   *     positive there): sweep for any OTHER live `__daemon-run` process whose
-   *     HOME sits under this file's own fixture prefix — a leak from a
-   *     previous interrupted run of this same suite. POSIX-only (`/proc`);
-   *     best-effort and skipped where `/proc` is unavailable (macOS CI legs).
+   *  2. CI only: sweep for any OTHER live `__daemon-run` process whose HOME
+   *     sits under THIS FILE's unique `agents-routines-<fileSlug>-` prefix —
+   *     a leak from a previous interrupted run of this same file. Scoped to
+   *     the per-file prefix because sibling slices run in parallel forks and
+   *     legitimately have live daemons under their own prefixes. POSIX-only
+   *     (`/proc`); best-effort and skipped where `/proc` is unavailable
+   *     (macOS CI legs).
    *
    * Either check force-kills what it finds and fails the suite — a silent
    * "still running, we'll get it next time" is exactly how the original three
@@ -279,7 +293,7 @@ export function createDaemonHarness(): {
       trackedDaemonPids.clear();
 
       if (process.env.CI && process.platform !== 'win32') {
-        const prefix = path.join(os.tmpdir(), 'agents-routines-test-');
+        const prefix = homePrefix;
         let psOut = '';
         try {
           psOut = execFileSync('ps', ['-eo', 'pid=,args='], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
@@ -298,7 +312,7 @@ export function createDaemonHarness(): {
             home = homeVar ? homeVar.slice(5) : null;
           } catch { continue; } // /proc unreadable (macOS, permissions) — best-effort only
           if (!home || !home.startsWith(prefix)) continue;
-          leaks.push(`pid ${pid} HOME=${home} (leaked from a previous interrupted run of this suite)`);
+          leaks.push(`pid ${pid} HOME=${home} (leaked from a previous interrupted run of this file)`);
           killDaemon(pid);
         }
       }
@@ -312,7 +326,12 @@ export function createDaemonHarness(): {
     });
   }
 
-  return { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector };
+  /** makeHome under this file's unique prefix — REQUIRED for any home a daemon runs against. */
+  function makeDaemonHome(opts: Omit<Parameters<typeof makeHome>[0], 'tmpPrefix'> = {}): string {
+    return makeHome({ ...opts, tmpPrefix: homePrefix });
+  }
+
+  return { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome };
 }
 
 export const baseJob = {

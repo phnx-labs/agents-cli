@@ -20,7 +20,7 @@ import {
 // (measured ~194s of test time) so vitest can parallelize the file across
 // worker forks. Shared fixtures: routines.test-fixture.ts.
 
-const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector } = createDaemonHarness();
+const { startIsolatedDaemon, stopIsolatedDaemon, registerLeakDetector, makeDaemonHome } = createDaemonHarness('add');
 registerLeakDetector();
 
 describeRoutines('routines add help', () => {
@@ -99,7 +99,7 @@ describeRoutines('routines add --agent unsupported by the local daemon (RUSH-210
 
 describeRoutines('routines add --on aliases', () => {
   it('accepts the pr GitHub alias and writes the canonical trigger event', async () => {
-    const home = makeHome({ registry });
+    const home = makeDaemonHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     let pid: number | null = null;
     try {
@@ -137,7 +137,7 @@ describeRoutines('routines add --on aliases', () => {
 
 describeRoutines('routines add --json', () => {
   it('emits only the created routine id and status on stdout', async () => {
-    const home = makeHome({ registry });
+    const home = makeDaemonHome({ registry });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     let pid: number | null = null;
     try {
@@ -216,7 +216,7 @@ describeRoutines('routines add --devices empty/whitespace fails closed', () => {
   });
 
   it('successfully persists --devices with valid names against a running daemon', async () => {
-    const home = makeHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
+    const home = makeDaemonHome({ registry: { 'yosemite-s0': registry['yosemite-s0'] } });
     let daemon: ReturnType<typeof startIsolatedDaemon> | undefined;
     let pid: number | null = null;
     try {
