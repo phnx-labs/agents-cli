@@ -347,7 +347,7 @@ describe('launch contract — every runner uses the managed launch builder', () 
       // Automatic account selection on an explicit device.
       expect(buildAgentLaunchCommand(
         key, null, undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s1' },
-      )).toBe(`agents run ${key} --interactive --host 'yosemite-s1' --strategy balanced --mode auto`);
+      )).toBe(`agents run ${key} --interactive --device 'yosemite-s1' --strategy balanced --mode auto`);
     }
   });
 
@@ -368,7 +368,7 @@ describe('launch contract — every runner uses the managed launch builder', () 
     expect(buildAgentLaunchCommand(
       'claude', null, undefined, undefined, undefined, undefined, undefined,
       { host: 'yosemite-s0', accountPicker: true },
-    )).toBe("agents run claude@ --interactive --host 'yosemite-s0' --mode auto");
+    )).toBe("agents run claude@ --interactive --device 'yosemite-s0' --mode auto");
   });
 
   test('account picker rejects a version pin or automatic strategy', () => {
@@ -386,7 +386,7 @@ describe('launch contract — every runner uses the managed launch builder', () 
     const cmd = buildAgentLaunchCommand(
       'grok', null, undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s1' },
     );
-    expect(cmd).toBe("agents run grok --interactive --host 'yosemite-s1' --strategy balanced --mode auto");
+    expect(cmd).toBe("agents run grok --interactive --device 'yosemite-s1' --strategy balanced --mode auto");
     expect(cmd).not.toContain('cursor-agent');
   });
 });
@@ -438,7 +438,7 @@ describe('buildAgentLaunchCommand', () => {
 
   test('host flag is shell-quoted and included', () => {
     const cmd = buildAgentLaunchCommand('codex', null, undefined, undefined, undefined, undefined, undefined, { host: 'mac-mini' });
-    expect(cmd).toContain("--host 'mac-mini'");
+    expect(cmd).toContain("--device 'mac-mini'");
   });
 
   test('ordinary remote launch sends a local Mac workspace as portable --cwd', () => {
@@ -446,7 +446,7 @@ describe('buildAgentLaunchCommand', () => {
       'codex', null, undefined, undefined, undefined, undefined, undefined,
       { host: 'linux-box', cwd: '/Users/muqsit/src/agents-cli' },
     );
-    expect(cmd).toContain("--host 'linux-box'");
+    expect(cmd).toContain("--device 'linux-box'");
     expect(cmd).toContain("--cwd '/Users/muqsit/src/agents-cli'");
     expect(cmd).not.toContain('--remote-cwd');
   });
@@ -489,12 +489,12 @@ describe('buildAgentLaunchCommand', () => {
     expect(cmd).toContain("--project 'agents-cli'");
   });
 
-  test('a picked-host launch with a matched project emits --host and --project, never --cwd', () => {
+  test('a picked-host launch with a matched project emits --device and --project, never --cwd', () => {
     const cmd = buildAgentLaunchCommand(
       'codex', null, undefined, undefined, undefined, undefined, undefined,
       { host: 'mac-mini', project: 'agents-cli' },
     );
-    expect(cmd).toContain("--host 'mac-mini'");
+    expect(cmd).toContain("--device 'mac-mini'");
     expect(cmd).toContain("--project 'agents-cli'");
     expect(cmd).not.toContain('--cwd');
     expect(cmd).not.toContain('--remote-cwd');
@@ -522,11 +522,11 @@ describe('buildAgentLaunchCommand', () => {
   // RUSH-2025: Pick Host / Auto Host / New Claude (Auto) launch with BOTH a host
   // and --strategy balanced so the CLI's account rotation routes around a
   // signed-out / throttled version on the chosen device.
-  test('balanced strategy + host emit --host and --strategy balanced together', () => {
+  test('balanced strategy + host emit --device and --strategy balanced together', () => {
     const cmd = buildAgentLaunchCommand(
       'claude', 'sess-1', undefined, undefined, undefined, 'balanced', undefined, { host: 'yosemite-s0' },
     );
-    expect(cmd).toContain("--host 'yosemite-s0'");
+    expect(cmd).toContain("--device 'yosemite-s0'");
     expect(cmd).toContain('--strategy balanced');
   });
 
@@ -543,7 +543,7 @@ describe('buildAgentLaunchCommand', () => {
       'claude', 'sess-2', undefined, undefined, '2.1.170', 'balanced', undefined, { host: 'yosemite-s1' },
     );
     expect(cmd).toContain('claude@2.1.170');
-    expect(cmd).toContain("--host 'yosemite-s1'");
+    expect(cmd).toContain("--device 'yosemite-s1'");
     expect(cmd).not.toContain('--strategy');
   });
 });
@@ -563,12 +563,12 @@ describe('wrapNativeAgentCommand (RUSH-2593)', () => {
     expect(wrapped).toContain('exit 0');
   });
 
-  test('agent terminal with --host: exit-code gate wraps the full --host command', () => {
+  test('agent terminal with --device: exit-code gate wraps the full --device command', () => {
     const cmd = buildAgentLaunchCommand('claude', null, undefined, undefined, undefined, undefined, undefined, { host: 'yosemite-s0' });
     const wrapped = wrapNativeAgentCommand(cmd, false);
     expect(wrapped.startsWith('exec ')).toBe(false);
     expect(wrapped).toMatch(/^agents run claude --interactive/);
-    expect(wrapped).toContain("--host 'yosemite-s0'");
+    expect(wrapped).toContain("--device 'yosemite-s0'");
     expect(wrapped).toContain('ec=$?');
   });
 

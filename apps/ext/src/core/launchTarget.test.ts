@@ -97,7 +97,7 @@ describe('registered harness launch commands', () => {
       expect(buildNewAgentLaunchCommand({
         ...registration.launchOptions(),
         host: 'worker-box',
-      })).toBe(`agents run ${agent.key}@ --interactive --host 'worker-box' --mode auto`);
+      })).toBe(`agents run ${agent.key}@ --interactive --device 'worker-box' --mode auto`);
     }
   });
 
@@ -118,7 +118,7 @@ describe('registered harness launch commands', () => {
 
     const [ask] = harnessLaunchRegistrations('claude', 'agents.newClaude', () => 'ask');
     expect(buildNewAgentLaunchCommand({ ...ask.launchOptions(), host: 'worker-box' })).toBe(
-      "agents run claude@ --interactive --host 'worker-box' --mode auto",
+      "agents run claude@ --interactive --device 'worker-box' --mode auto",
     );
   });
 });

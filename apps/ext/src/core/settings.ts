@@ -34,7 +34,7 @@ export interface QuickLaunchSlot {
   label?: string;         // Display label for dashboard
   // Where ⌘⇧<n> spawns this agent. Omitted or 'local' = this machine (today's
   // behavior). A registered device name = offload onto that host over SSH via
-  // `agents run --host`. 'balanced' = pick the least-busy online device at
+  // `agents run --device`. 'balanced' = pick the least-busy online device at
   // launch time (see balancePool).
   runOn?: string;
   // When runOn === 'balanced', restrict the candidate pool to these device

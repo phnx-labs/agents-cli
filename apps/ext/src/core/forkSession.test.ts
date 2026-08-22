@@ -40,7 +40,7 @@ describe('buildForkSessionRequest', () => {
       request.agentKey, 'new-session', undefined, undefined, undefined, request.strategy, undefined,
       { host: request.host, local: request.local },
     );
-    expect(command).toContain("--host 'yosemite-s0'");
+    expect(command).toContain("--device 'yosemite-s0'");
     expect(command).toContain('--session-id new-session');
     expect(command).toContain('--strategy balanced');
   });
@@ -102,7 +102,7 @@ describe('buildForkSessionRequest with a picked device', () => {
     expect(buildAgentLaunchCommand(
       request.agentKey, 'fork-session', undefined, undefined, undefined, request.strategy, undefined,
       { host: request.host, local: request.local },
-    )).toContain("--host 'yosemite-m0'");
+    )).toContain("--device 'yosemite-m0'");
   });
 
   test('keeps the same harness and balanced rotation when the machine changes', () => {

@@ -4,7 +4,7 @@
  * Reads the shared `agents sessions watch --json` projection for every tab.
  * No per-tab subprocesses or extension-owned freshness cache.
  *
- * Placement flags: uses `--host` / local only — never `--where`.
+ * Placement flags: uses `--device` / local only — never `--where`.
  */
 
 import * as os from 'os';
@@ -18,7 +18,7 @@ export const ACTIVE_MAP_TTL_LOCAL_MS = 3_000;
 export const ACTIVE_MAP_TTL_REMOTE_MS = 8_000;
 /** Hard ceiling on the local CLI subprocess. */
 export const ACTIVE_MAP_TIMEOUT_LOCAL_MS = 5_000;
-/** Hard ceiling on a remote `--host` active fetch (SSH + CLI). */
+/** Hard ceiling on a remote `--device` active fetch (SSH + CLI). */
 export const ACTIVE_MAP_TIMEOUT_REMOTE_MS = 10_000;
 
 const LOCAL_CACHE_KEY = '__local__';

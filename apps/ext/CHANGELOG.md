@@ -10,8 +10,11 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   name (RUSH-3011).** A tab no longer locks onto an early `/continue …` title:
   the existing fleet session stream reconciles later harness-generated names
   into matching tabs, while user-set labels remain authoritative. Raw slash
-  commands are no longer accepted as task-title topics. Source:
-  `src/core/sessionTabLabelSync.ts`, `src/vscode/extension.ts`.
+  commands are no longer accepted as task-title topics. Explicit remote launch,
+  resume/fork, and host-inventory commands now emit the CLI's canonical
+  `--device` flag instead of the retired `--host` spelling. Source:
+  `src/core/sessionTabLabelSync.ts`, `src/core/{agents,hostInventory,resumeInBest}.ts`,
+  `src/vscode/extension.ts`.
 
 ## [0.9.329] - 2026-08-20
 

@@ -136,10 +136,12 @@ recent working path that regressed.
 | Claude's first prompt and generated title now remain separate. | `apps/cli/src/lib/session/discover.ts:3837-3857` returns `topic: state.topic` and `label: state.customTitle || state.aiTitle`. |
 | The indexed row exposes the title through the canonical field. | `apps/cli/src/lib/session/discover.ts:1598-1601` assigns transcript/live names to `SessionMeta.label`. |
 | Empty metadata cannot erase a prior name. | `apps/cli/src/lib/session/db.ts:2379-2384` skips null/blank refinements. |
+| The daemon publishes the indexed label, not the raw live-row placeholder. | `apps/cli/src/lib/session/session-cache.ts` backfills gathered active rows before writing the canonical snapshot and journal. |
 | Raw slash commands are provisional, not task names. | `apps/ext/src/core/sessionTabLabelSync.ts:16-21` recognizes wrappers and raw slash commands. |
 | Manual labels remain authoritative. | `apps/ext/src/core/sessionTabLabelSync.ts:37-45` refuses a canonical update when a genuine manual label exists. |
 | The editor consumes the existing stream transition. | `apps/ext/src/vscode/extension.ts:3641-3678` reconciles matching tabs; `apps/ext/src/vscode/extension.ts:5320-5324` invokes it only after an accepted stream event. |
 | A generated title stays replaceable after reload. | `apps/ext/src/core/sessions.persist.ts` stores `autoLabel`; `apps/ext/src/vscode/terminals.vscode.ts` restores it separately from a user label. |
+| Explicit remote actions use the current fleet-routing vocabulary. | `apps/ext/src/core/agents.ts`, `hostInventory.ts`, and `resumeInBest.ts` emit `--device`; `--host` is retired by the CLI. |
 
 ## Proposed Changes
 
@@ -153,6 +155,12 @@ recent working path that regressed.
 +   topic: state.topic,
 +   label,
   };
+```
+
+```diff
+  const sessions = await gather();
++ backfillActiveRowsFromIndex(sessions);
+  for (const s of sessions) applyImmutableMemo(s);
 ```
 
 ```diff
@@ -177,6 +185,11 @@ recent working path that regressed.
   });
 ```
 
+```diff
+- command += ` --host ${shquote(host)}`;
++ command += ` --device ${shquote(host)}`;
+```
+
 ## Public Interface
 
 No command or flag is added. The existing `agents sessions` JSON shape already
@@ -190,12 +203,16 @@ only the editor-tab presentation derived from an accepted stream event.
   every boundary.
 - A title arriving in an appended JSONL chunk must update the indexed label
   without changing topic.
+- The canonical daemon snapshot and journal must backfill that indexed label
+  before `sessions watch` publishes the live row.
 - A stream label must replace the reported `/continue …` auto-label, including
   the reload migration where an older extension promoted it to manual.
 - A genuine manual label, an unlabelled stream row, and an already-current tab
   must remain unchanged.
 - The packaged extension must be installed on the interactive editor and the
   shipped tab visually inspected after the fleet session produces a name.
+- Explicit remote launch, resume/fork, and host inventory must use `--device`
+  and must not emit the retired `--host` flag.
 
 ## Risks
 

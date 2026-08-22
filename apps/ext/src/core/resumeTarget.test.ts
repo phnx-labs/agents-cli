@@ -53,7 +53,7 @@ describe('buildAgentRunLaunchCommand', () => {
 
   it('stays on the session device when one is given', () => {
     expect(buildAgentRunLaunchCommand('codex', 'mac-mini')).toBe(
-      "agents run codex --interactive --host 'mac-mini'",
+      "agents run codex --interactive --device 'mac-mini'",
     );
   });
 

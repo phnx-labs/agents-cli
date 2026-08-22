@@ -213,7 +213,7 @@ export function buildAgentLaunchCommand(
   // `agents devices` and runs interactive-on-host. Emitted for ANY agent so
   // grok/kimi/droid (which launch as raw binaries locally) get host parity.
   if (host) {
-    command += ` --host ${shquote(host)}`;
+    command += ` --device ${shquote(host)}`;
     if (cwd) command += ` --cwd ${shquote(cwd)}`;
     if (remoteCwd) command += ` --remote-cwd ${shquote(remoteCwd)}`;
   }

@@ -86,10 +86,10 @@ export interface EditorTerminal {
   pid?: number;             // Shell process ID
   messageQueue: string[];   // Queued messages to send after terminal ready
   sessionId?: string;       // CLI session ID (for resume, history reading)
-  host?: string;            // Device the agent runs on when offloaded via `agents run --host`;
+  host?: string;            // Device the agent runs on when offloaded via `agents run --device`;
                             // undefined for a local tab. The session's transcript lives on THAT
                             // machine, so every by-session lookup (label, preview, resume) has to
-                            // route through `--host <name>` instead of the local filesystem.
+                            // route through `--device <name>` instead of the local filesystem.
   agentType?: SessionAgentType; // Agent type for session operations
   version?: string;         // Pinned agent version ("2.1.113"); undefined when unknown
   account?: string;         // Resolved account email for this terminal when known

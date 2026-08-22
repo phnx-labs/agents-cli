@@ -85,7 +85,7 @@ describe('buildAgentRunLaunchCommand', () => {
 
   test('host is shell-quoted', () => {
     expect(buildAgentRunLaunchCommand('claude', 'yosemite-s0')).toBe(
-      "agents run claude --interactive --host 'yosemite-s0'",
+      "agents run claude --interactive --device 'yosemite-s0'",
     );
   });
 
@@ -101,7 +101,7 @@ describe('buildAgentRunLaunchCommand', () => {
   test('quotes a device name so it cannot break out of the command', () => {
     const hostile = "a'; echo pwned; #";
     expect(buildAgentRunLaunchCommand('claude', hostile)).toBe(
-      `agents run claude --interactive --host 'a'\\''; echo pwned; #'`,
+      `agents run claude --interactive --device 'a'\\''; echo pwned; #'`,
     );
   });
 });
@@ -115,14 +115,14 @@ describe('buildAutoRunLaunchCommand', () => {
 
   test('host is shell-quoted; --session-id is always passed (claude-only on the CLI side)', () => {
     expect(buildAutoRunLaunchCommand({ host: 'yosemite-s0', sessionId: 'new-id' })).toBe(
-      "agents run auto --interactive --host 'yosemite-s0' --session-id new-id",
+      "agents run auto --interactive --device 'yosemite-s0' --session-id new-id",
     );
   });
 
   test('quotes a device name so it cannot break out of the command', () => {
     const hostile = "a'; echo pwned; #";
     expect(buildAutoRunLaunchCommand({ host: hostile, sessionId: 'new-id' })).toBe(
-      `agents run auto --interactive --host 'a'\\''; echo pwned; #' --session-id new-id`,
+      `agents run auto --interactive --device 'a'\\''; echo pwned; #' --session-id new-id`,
     );
   });
 });
