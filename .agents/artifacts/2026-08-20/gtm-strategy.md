@@ -94,6 +94,30 @@ The two **Addenda** at the end of this page carry what is newest: measured PostH
 traffic (the real funnel) and the demand-side + pricing synthesis. Start at the
 Summary, end at the Addenda.
 
+## Why every neighbour died — and the specific counter for each
+
+Five companies in this exact category shipped, got traction, and either shut down
+or proved the free lane has a revenue ceiling — all within the last seven months.
+Each died of a **nameable, repeatable mistake**, and the plan below is built as the
+direct inverse of each one. This table is the whole thesis; the Findings and
+Recommendations that follow are the evidence and the build order.
+
+| # | Failure mode (how they died) | Who it killed | Our counter | Why the counter holds |
+| --- | --- | --- | --- | --- |
+| 1 | **Monetized at the prosumer altitude** — a ~$20–50/user/month seat. They *did* charge; the price point just doesn't sustain a company. | Vibe Kanban ($30/seat, 27,867★, dead), Terragon ($25/$50, dead) | Paid tier only at **enterprise altitude** — SSO/SAML, RBAC, audit trail, spend attribution, data residency — sold to a budget holder, not a developer. | The founder who died at 30k MAU said it outright: *"Everyone making money is selling to enterprise and reselling tokens. We were doing neither."* The survivors (Cursor, Devin, Factory) all sell hosted+paid; **Cline skips the middle seat entirely** (free → Enterprise custom). |
+| 2 | **Apache-2.0 gave away pricing power** — forks redistributed the work as fast as it shipped. | Roo Code (3M installs, dead; forked into Kilo Code, ZooCode) | CLI stays Apache-2.0 (the distribution asset); the **paid enterprise surface is source-available**, license-key-capped so it can't be re-sold as a competing product. | Roo Code's own successor did exactly this relicensing after the forks bled it — *"you can't offer substantially similar functionality as a competing commercial product."* MongoDB/Elastic/HashiCorp/Redis all made the same move and all judged it commercially necessary. |
+| 3 | **Optimized for stars, not retention** — vanity traction that didn't convert. | All three casualties (27,867 / 24,332 / 256 ★) | Launch **win-condition is retention, not stars**: *20 people outside the fleet who ran agi-cli on two separate days in one week, and whom you can contact.* | Vibe Kanban had 27,867 stars and still died. Stars are the metric that was present at every death; two-day retention is the one that would have predicted a different outcome. |
+| 4 | **Thin slice of the problem** — a single-machine desktop GUI wrapping git worktrees. | Conductor, Sculptor, Crystal, Vibe Kanban | The genuine **positioning whitespace**: across 21 tools nothing else combines CLI-first + real multi-harness + **cross-device SSH fleet** + one surface (sessions/teams/secrets/browser/computer). | The differentiation is measured (Finding 3), and it's the exact axis — many machines, many harnesses, one control plane — that a single-machine GUI structurally cannot reach. |
+| 5 | **(The trap we must not walk into)** the headline pitch — "reuse your Max subscription" via account rotation — has **no monetizable precedent** and sits against provider terms. | Would be *us* if the paid tier were built on subscription-sharing | Paid tier lives in **enterprise API-key / Bedrock / Vertex** territory, where metering and automation are permitted (OpenRouter's 5%-of-routed-value model), **not** on subscription reuse. | Finding 4c: no successful *paid* wrapper of a subscription seat exists; Anthropic's Consumer Terms forbid credential sharing; OpenClaw itself calls subscription-reuse unstable for shared automation. The free tool can reuse subscriptions; the *paid* one cannot be built on it. |
+
+**The one-line synthesis:** every casualty monetized a thin, forkable, free product
+at a prosumer price and counted stars. The plan is the inverse on all four axes —
+a broad, un-forkable **enterprise governance layer** over the free CLI, sold to a
+budget holder, measured by retention — and it deliberately avoids the one
+foundation (subscription-sharing) that has no legal or commercial precedent. The
+single hard prerequisite is the identity substrate (RUSH-2581): SSO/RBAC/audit all
+hang off a principal model the system does not have yet, so that is the first build.
+
 ## Findings
 
 ### 1. The traction metrics are self-inflicted, and each one fails a different way
