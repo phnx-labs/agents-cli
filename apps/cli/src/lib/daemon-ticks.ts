@@ -38,6 +38,14 @@ export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRo
   const minimumCapturedAt = requestedAt - 2 * 60_000;
   const { withRefreshLease } = await import('./refresh-coordinator.js');
   const { readFleetStatus, publishLocalFleetStatus } = await import('./fleet-status.js');
+  // Only the usage-primary host fires the live provider probe. A subscriber
+  // probing `/oauth/usage` on every 3-minute tick multiplied the fleet's
+  // request rate against one per-account quota until the endpoint 429'd every
+  // account and the shared backoff froze the usage cache (RUSH-2998). Mirror the
+  // usage-refresh publisher/subscriber split so exactly one box hits the endpoint.
+  const { resolveUsagePrimaryHost } = await import('./device-config.js');
+  const { usageRefreshRole } = await import('./usage-fleet.js');
+  const liveProbe = usageRefreshRole(resolveUsagePrimaryHost() ?? undefined, self) === 'publisher';
   return withRefreshLease({
     scope: 'auth',
     key: self,
@@ -50,7 +58,7 @@ export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRo
     // every provider a second time.
     isCompleted: (value) => isFreshFleetAuthSnapshot(value, minimumCapturedAt),
     refresh: async () => {
-      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion() });
+      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion(), liveProbe });
       writeFleetAuthRows(self, authRows);
       const row = await publishLocalFleetStatus(self);
       return { row, authRows };

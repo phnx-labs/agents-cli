@@ -394,14 +394,22 @@ export function writeAuthHealthEntries(entries: Record<string, AuthHealth>): voi
  * hits the provider; for everyone else it reports a best-effort local verdict
  * (`unverified` when a credential is present, `unconfigured` otherwise) — never
  * masquerading as `live`.
+ *
+ * `liveProbe: false` forces the local-verdict path even for the network agents.
+ * Only the usage-primary host may fire the live `/oauth/usage` probe; a
+ * subscriber that also probed it multiplied the fleet's request rate against one
+ * per-account quota until the endpoint 429'd every account and the shared
+ * backoff parked usage fleet-wide, freezing the usage cache (RUSH-2998). A
+ * subscriber reports `unverified` for a present credential instead — the live
+ * throttle state still reaches it through the primary's replicated usage cache.
  */
 export async function probeAuthHealth(
   agent: AgentId,
   home: string | undefined,
-  opts?: { cliVersion?: string | null; info?: AccountInfo | null },
+  opts?: { cliVersion?: string | null; info?: AccountInfo | null; liveProbe?: boolean },
 ): Promise<AuthHealth> {
   const checkedAt = Date.now();
-  if (LIVE_PROBE_AGENTS.has(agent)) {
+  if (opts?.liveProbe !== false && LIVE_PROBE_AGENTS.has(agent)) {
     let probe: ProviderProbe;
     if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion);
     else if (agent === 'kimi') probe = await probeKimiStatus(home);
@@ -491,8 +499,16 @@ export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
 export async function probeLocalFleetAuth(opts?: {
   cliVersion?: string | null;
   agents?: readonly AgentId[];
+  /**
+   * Fire the live provider probe (default true). The daemon fleet-cache warm
+   * sets this false on a usage subscriber so only the usage-primary host hits
+   * `/oauth/usage`; a subscriber reports the local verdict instead of adding to
+   * the fleet's per-account request rate (RUSH-2998).
+   */
+  liveProbe?: boolean;
 }): Promise<AuthProbeRow[]> {
   const agentIds = opts?.agents ?? ALL_AGENT_IDS;
+  const liveProbe = opts?.liveProbe !== false;
 
   interface LocalInstall extends FleetAuthInstall {
     home: string;
@@ -518,11 +534,14 @@ export async function probeLocalFleetAuth(opts?: {
   // Probe once per (agent, account) — but only for the network-probing agents
   // that can actually 429; best-effort agents stay per-install (see
   // groupFleetAuthInstalls). Groups run in parallel: they target distinct
-  // accounts, so no same-account concurrency is left to trip the throttle.
+  // accounts, so no same-account concurrency is left to trip the throttle. On a
+  // usage subscriber (liveProbe=false) nothing hits the network, so account
+  // grouping gains nothing and would collapse distinct homes' local verdicts —
+  // keep every install its own group there.
   const perGroup = await Promise.all(
-    groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent)).map(async (group): Promise<AuthProbeRow[]> => {
+    groupFleetAuthInstalls(installs, (inst) => liveProbe && LIVE_PROBE_AGENTS.has(inst.agent)).map(async (group): Promise<AuthProbeRow[]> => {
       const rep = group.probe;
-      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info });
+      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, liveProbe });
       health.account = authAccountLabel(rep.info);
       if (health.verdict === 'unconfigured') return [];
       return group.members.map((inst) => ({
