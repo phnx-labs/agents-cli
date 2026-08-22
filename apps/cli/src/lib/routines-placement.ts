@@ -31,7 +31,7 @@ export type PlacementTarget =
  * `config.devices` is the *firing* allowlist only (which daemon may fire the
  * job). It is intentionally NOT used as an execution pool filter — otherwise
  * the double-fire pin (`devices: [self]`) would collapse fleet placement to
- * always-local. Control / offline / no-address devices are never chosen.
+ * always-local. Offline / no-address devices are never chosen.
  */
 export function pickFleetDevice(
   _config?: Pick<JobConfig, 'devices'>,
