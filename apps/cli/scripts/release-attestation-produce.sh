@@ -261,6 +261,16 @@ if [[ -x scripts/release-manifest.sh ]]; then
       && [[ -f "$MANIFEST_FILE" ]]; then
       gray "Seeded the helper manifest from $PRIOR_TAG (unchanged helpers carry forward)."
     else
+      # Say WHY the seed did not happen. Silently falling through means a
+      # misconfigured gh looks identical to "there is no prior release", in a
+      # script whose whole job is operator-facing clarity.
+      if ! command -v gh >/dev/null 2>&1; then
+        gray "No gh on PATH — starting a fresh helper manifest."
+      elif [[ -z "${PRIOR_TAG:-}" ]]; then
+        gray "No prior release to seed from — starting a fresh helper manifest."
+      else
+        gray "$PRIOR_TAG carries no release-manifest.json — starting a fresh helper manifest."
+      fi
       scripts/release-manifest.sh new --cli-version "$CLI_VERSION_MANIFEST" --cli-tree "$TREE" \
         > "$MANIFEST_FILE"
     fi

@@ -7,6 +7,7 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -343,6 +344,45 @@ describe('release-attestation-produce.sh', () => {
 // are plain placeholder files standing in for what the Darwin-only sign block
 // would have built; the manifest step only checks the files exist and hashes
 // them, so this is enough to exercise it on Linux CI without a real signing box.
+/**
+ * A prior release's `release-manifest.json`, built with the shipped generator
+ * so the seed fixture matches what a real GitHub release carries.
+ */
+function priorReleaseManifest(root: string, computerMacDigest: string): string {
+  const file = path.join(root, 'prior-release-manifest.json');
+  const created = spawnSync(
+    'bash',
+    [MANIFEST_SCRIPT, 'new', '--cli-version', 'prev-1.0.0', '--cli-tree', 'deadbeef'],
+    { encoding: 'utf-8' },
+  );
+  if (created.status !== 0) throw new Error(created.stderr || created.stdout);
+  fs.writeFileSync(file, created.stdout);
+  // `put` verifies the asset exists on disk, so give it a real one in a temp
+  // dist/ and run from there — the same shape a signing box would have.
+  fs.mkdirSync(path.join(root, 'dist'), { recursive: true });
+  const asset = path.join(root, 'dist/ComputerHelper.app.zip');
+  fs.writeFileSync(asset, 'prior release helper asset\n');
+  // put refuses a declared digest that does not match the real bytes, so
+  // compute it rather than asserting a placeholder.
+  const assetDigest =
+    'sha256:' + createHash('sha256').update(fs.readFileSync(asset)).digest('hex');
+  const put = spawnSync(
+    'bash',
+    [
+      MANIFEST_SCRIPT, 'put', '--file', file,
+      '--helper', 'computer-mac',
+      '--helper-version', 'prev-1.0.0',
+      '--input-digest', computerMacDigest,
+      '--asset-digest', assetDigest,
+      '--asset-path', 'dist/ComputerHelper.app.zip',
+      '--platform', 'darwin',
+    ],
+    { encoding: 'utf-8', cwd: root },
+  );
+  if (put.status !== 0) throw new Error(put.stderr || put.stdout);
+  return fs.readFileSync(file, 'utf-8').trim();
+}
+
 function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
   manifestDigests: Record<'computer-mac' | 'keychain' | 'menubar', string>;
 } {
@@ -463,6 +503,83 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
       { encoding: 'utf-8' },
     );
     expect(required.status, required.stdout + required.stderr).toBe(0);
+  });
+
+  /**
+   * RUSH-2970 trap 1. A fresh attestation store has no recorded computer-mac
+   * inputDigest, so the helper loop below reads "input changed" and dies
+   * telling the operator to run publish-computer-helper-mac.sh — which does
+   * not write a manifest, so re-running the producer hits the identical error.
+   * Every hand-cut release walked into that loop. The producer now seeds the
+   * manifest from the last published release first.
+   *
+   * `gh` is stubbed on the fixture's fake-bin PATH so this exercises the real
+   * seed branch without a network call or a GitHub account.
+   */
+  it('seeds the manifest from the last release instead of dead-ending on a fresh store', () => {
+    const root = tmp('attest-produce-manifest-seed-');
+    const fx = buildManifestFixture(root);
+    // Built with the real generator, so the fixture is a manifest the shipped
+    // tooling actually produces rather than a hand-rolled shape.
+    const priorManifest = priorReleaseManifest(root, fx.manifestDigests['computer-mac']);
+    // A `gh` that answers exactly the two calls the seed makes.
+    fs.writeFileSync(
+      path.join(fx.fakebin, 'gh'),
+      '#!/usr/bin/env bash\n' +
+        'if [[ "$1" == release && "$2" == list ]]; then echo v9.9.8; exit 0; fi\n' +
+        'if [[ "$1" == release && "$2" == download ]]; then\n' +
+        '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
+        `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${priorManifest}\nMANIFEST\n` +
+        '  exit 0\n' +
+        'fi\n' +
+        'exit 1\n',
+    );
+    fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
+
+    const result = runProduce(fx);
+
+    expect(result.status, result.stdout + result.stderr).toBe(0);
+    expect(result.stdout + result.stderr).toContain('Seeded the helper manifest from v9.9.8');
+    // The dead-end this fix exists to remove must NOT have fired.
+    expect(result.stdout + result.stderr).not.toContain('helper computer-mac input changed');
+
+    const manifest = JSON.parse(fs.readFileSync(path.join(fx.store, 'release-manifest.json'), 'utf-8'));
+    // The seeded computer-mac record carried forward, so the unchanged helper
+    // needed no rebuild — the whole point.
+    expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
+    // …and the seed did not disable the check: the other helpers were still
+    // recorded fresh against this tree.
+    for (const helper of ['keychain', 'menubar'] as const) {
+      expect(manifest.helpers[helper].inputDigest).toBe(fx.manifestDigests[helper]);
+    }
+  });
+
+  /**
+   * The seed is a convenience, never a way to smuggle a changed helper through:
+   * if the prior release's computer-mac digest does not match this tree, the
+   * producer must still fail closed.
+   */
+  it('still fails closed when the seeded computer-mac record does not match this tree', () => {
+    const root = tmp('attest-produce-manifest-seed-drift-');
+    const fx = buildManifestFixture(root);
+    const staleManifest = priorReleaseManifest(root, 'sha256:' + 'b'.repeat(64));
+    fs.writeFileSync(
+      path.join(fx.fakebin, 'gh'),
+      '#!/usr/bin/env bash\n' +
+        'if [[ "$1" == release && "$2" == list ]]; then echo v9.9.8; exit 0; fi\n' +
+        'if [[ "$1" == release && "$2" == download ]]; then\n' +
+        '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
+        `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${staleManifest}\nMANIFEST\n` +
+        '  exit 0\n' +
+        'fi\n' +
+        'exit 1\n',
+    );
+    fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
+
+    const result = runProduce(fx);
+
+    expect(result.status).not.toBe(0);
+    expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
   });
 
   it('fails closed when computer-mac drifts with no prior record to carry forward', () => {

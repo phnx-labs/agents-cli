@@ -69,3 +69,90 @@ describe('release-worktree.sh', () => {
     expect(fs.readdirSync(path.join(caller, '.agents/worktrees'))).toEqual([]);
   });
 });
+
+/**
+ * Builds a caller repo whose `release.sh` stub records the environment it was
+ * handed, so a test can assert what the wrapper exported into it.
+ */
+function callerRepoRecordingEnv(root: string): string {
+  const remote = path.join(root, 'remote.git');
+  const caller = path.join(root, 'caller');
+  git(root, 'init', '--bare', remote);
+  git(root, 'clone', remote, caller);
+  git(caller, 'config', 'user.name', 'Release Test');
+  git(caller, 'config', 'user.email', 'release-test@example.com');
+  fs.mkdirSync(path.join(caller, 'apps/cli/scripts'), { recursive: true });
+  fs.mkdirSync(path.join(caller, '.agents/worktrees'), { recursive: true });
+  fs.copyFileSync(SCRIPT, path.join(caller, 'apps/cli/scripts/release-worktree.sh'));
+  fs.writeFileSync(
+    path.join(caller, 'apps/cli/scripts/release.sh'),
+    '#!/usr/bin/env bash\nset -euo pipefail\n' +
+      'printf "STORE=%s\\n" "${RELEASE_ATTESTATION_DIR:-<unset>}"\n',
+  );
+  fs.chmodSync(path.join(caller, 'apps/cli/scripts/release.sh'), 0o755);
+  git(caller, 'add', '.');
+  git(caller, 'commit', '-m', 'initial');
+  git(caller, 'branch', '-M', 'main');
+  git(caller, 'push', '-u', 'origin', 'main');
+  git(remote, 'symbolic-ref', 'HEAD', 'refs/heads/main');
+  git(caller, 'remote', 'set-head', 'origin', '--auto');
+  return caller;
+}
+
+/**
+ * RUSH-2970 trap 2: `release.sh` re-execs into a throwaway worktree, where
+ * REPO_ROOT resolves to the worktree — so the attestation store the producer
+ * wrote in the CALLER's checkout was invisible and `require` reported
+ * "missing exact attestation key" with `?` for every key component, reading
+ * like a key mismatch rather than a wrong directory.
+ */
+describe('release-worktree.sh — the attestation store the caller owns', () => {
+  it('exports RELEASE_ATTESTATION_DIR to the caller store when the caller has one', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-store-'));
+    roots.push(root);
+    const caller = callerRepoRecordingEnv(root);
+    fs.mkdirSync(path.join(caller, '.release-attestations'), { recursive: true });
+
+    const result = spawnSync(
+      'bash',
+      [path.join(caller, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      { cwd: caller, encoding: 'utf-8', env: { ...process.env, RELEASE_ATTESTATION_DIR: '' } },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(`STORE=${path.join(caller, '.release-attestations')}`);
+  });
+
+  it('never overrides an explicit RELEASE_ATTESTATION_DIR', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-store-'));
+    roots.push(root);
+    const caller = callerRepoRecordingEnv(root);
+    fs.mkdirSync(path.join(caller, '.release-attestations'), { recursive: true });
+    const explicit = path.join(root, 'operator-chosen-store');
+    fs.mkdirSync(explicit, { recursive: true });
+
+    const result = spawnSync(
+      'bash',
+      [path.join(caller, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      { cwd: caller, encoding: 'utf-8', env: { ...process.env, RELEASE_ATTESTATION_DIR: explicit } },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe(`STORE=${explicit}`);
+  });
+
+  it('leaves it unset when the caller has no store, rather than inventing a path', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'release-worktree-store-'));
+    roots.push(root);
+    const caller = callerRepoRecordingEnv(root);
+
+    const result = spawnSync(
+      'bash',
+      [path.join(caller, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      { cwd: caller, encoding: 'utf-8', env: { ...process.env, RELEASE_ATTESTATION_DIR: '' } },
+    );
+
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('STORE=<unset>');
+  });
+});
