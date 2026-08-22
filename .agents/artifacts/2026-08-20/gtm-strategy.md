@@ -22,6 +22,10 @@ links:
     url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/how-winners-charge.md'
   - label: 'Companion: the GitHub-stars playbook (case studies)'
     url: 'https://github.com/phnx-labs/agi-cli/blob/main/.agents/artifacts/2026-08-20/github-stars-playbook.md'
+  - label: 'Show HN: Bento — the 99.9th-percentile reference launch'
+    url: 'https://news.ycombinator.com/item?id=49008211'
+  - label: 'Show HN: TurboFieldfare — the impossible-number reference launch'
+    url: 'https://news.ycombinator.com/item?id=49098510'
 ---
 
 ## Summary
@@ -802,3 +806,177 @@ sourced and dated:
   control plane) sold org-level, with the meter visible before the bill
   (Cursor's July 2025 apology is the cautionary tale). Feature-gating the local
   tool is the casualty pattern; metering hosted compute is the survivor pattern.
+
+## Addendum 3 — who, what job, why the extreme Show HN posts win, and why pricing killed the casualties (2026-08-21)
+
+The prior draft answered the eventual enterprise buyer but blurred that buyer
+with the person the launch must reach. It also listed the features of high-scoring
+Show HN titles without showing the full launch anatomy, and compressed the pricing
+failures into a quadrant. This addendum answers those three gaps directly.
+
+### Who the launch targets — one user now, one buyer later
+
+The launch does **not** target every developer, generic "AI teams," or an
+enterprise procurement lead. It targets a narrower beachhead:
+
+> **A coding-agent power user who already runs at least two harnesses, has work
+> stranded across terminals or machines, and personally maintains scripts,
+> account switchers, handoff files, or dashboards to keep the work moving.**
+
+The Reddit corpus gives this person observable qualifying behavior rather than a
+persona invented from demographics. They split planning, implementation, and
+review across Claude, Codex, Gemini, or cheap executors; hit limits they cannot
+predict; lose context when they switch; and want to see or steer work away from
+the laptop. They are already paying the workflow tax. agi-cli replaces the glue
+they wrote themselves.
+
+| Stage | Person | Trigger | Promise | Proof they should see |
+| --- | --- | --- | --- | --- |
+| Launch user | Individual power user / technical founder | Two or more agent CLIs, several concurrent sessions, or work spread across machines | One command plane; context survives harness, account, and device changes | A real mixed-harness job completed with one durable session record |
+| Internal champion | Staff engineer, platform engineer, or AI enablement lead | The hand-built workflow spreads to several developers | Standardize the workflow without forcing one model vendor | Shared profiles, reproducible teams, fleet visibility, searchable history |
+| Eventual buyer | Engineering leader accountable for AI spend and agent access | The organization needs governance over an adopted workflow | Govern spend and actions already happening | SSO/RBAC, audit history, attribution, policy, managed execution |
+
+This sequence matters. Marketing enterprise governance before individual power
+users adopt the workflow asks a buyer to govern an empty system. Marketing only
+"save money with multiple accounts" attracts a gray-zone workaround seeker and
+makes the product interchangeable with six account switchers. The wedge is
+**continuity across a provider portfolio**; rotation is one supporting mechanism.
+
+### A concrete research job — the Reddit pain study as a repeatable demo
+
+"Research" should not mean opening several chat tabs and asking each model for an
+opinion. The job needs a bounded question, source acquisition, independent roles,
+a reconciliation seam, and a checkable artifact. The research already completed
+for this report is the right demo subject because it is real, visual, and
+impossible to fake with one polished answer:
+
+> **Question:** What problems are coding-agent power users reporting now, and
+> which of those problems does agi-cli actually solve?
+
+The demo run:
+
+1. **Collector:** use the logged-in browser on the machine that can reach Reddit;
+   sweep 16 query/subreddit combinations and save structured results.
+2. **Qualitative reader:** open the highest-signal threads and extract the top
+   comment trees, preserving date, score, permalink, and exact wording.
+3. **Recency auditor:** reject stale evidence as current state and split durable
+   pains from one-week incidents. This is the step that corrected the original
+   six-month-old suspension example.
+4. **Product mapper:** map each repeated pain to a shipped agi-cli surface, and
+   mark complaints the product does not solve instead of stretching the claim.
+5. **Adversarial reviewer:** challenge the synthesis for selection bias, missing
+   citations, unsupported causality, and launch copy that overclaims.
+6. **Composer:** reconcile the tracks into one rendered report with a thread
+   index and a decision table.
+
+The observable output is not "five agents said research is complete." It is the
+existing companion report: **389 unique posts, approximately 800 comments from
+18 deeply read threads, every cited thread indexed, stale evidence demoted, and
+eight pain-to-product mappings.** That makes a good demo because the seams are
+visible: a remote browser acquires evidence, different harnesses can analyze it,
+the session corpus preserves the chain, and one artifact carries the result.
+
+The launch video should show this as a compressed before/after, not a feature
+tour: one research brief enters; collectors visibly fan out; one worker is routed
+to the browser-capable machine; findings return; the reviewer rejects one stale
+claim; the final HTML report opens. The claim is concrete: **"One brief, multiple
+models and machines, one cited report — with the stale claim caught before it
+shipped."**
+
+### What the 99.9th-percentile Show HN launch actually looks like
+
+In the measured set of **1,581 Show HN posts since 2025-01-01**, the 99.9th
+percentile is roughly the top **two** posts, not a useful description of the
+median. The median remains 2 points. The extreme tail is useful because it shows
+the complete package required for an outlier; it is not a forecast that copying
+the title produces the score.
+
+| Layer | Bento — 1,033 points in the frozen dataset | TurboFieldfare — 919 points in the frozen dataset | What agi-cli must learn |
+| --- | --- | --- | --- |
+| One-glance claim | "An entire PowerPoint in one HTML file" | "Gemma 4 26B in 2 GB RAM" | State a surprising result, not a category label |
+| Familiar anchor | PowerPoint, HTML file | Gemma, RAM, M-series Mac | Borrow concepts readers can evaluate instantly |
+| Constraint | One portable file; offline; no login | A 14 GB quantized model on an 8 GB machine | Make the obstacle tangible |
+| Immediate proof | Link opens directly into the editor; examples and guestbook are live | Repo explains the SSD expert-streaming trick; app produces measured tokens/second | Let readers test the central claim before trusting the prose |
+| Technical reveal | JSON data plus an editor, presenter, printer, save path, and encrypted relay inside the artifact | Routed experts stream from SSD while the GPU runs the shared layer | Explain the non-obvious mechanism in plain technical language |
+| Honest tradeoff | Collaboration uses a blind relay; the core remains offline | Lower memory buys lower speed; model download is still 15 GB | Name the cost before commenters discover it |
+| Thread fuel | Portability, standards, PowerPoint replacement, security, file longevity | mmap comparison, SSD wear, thermal behavior, speed, model support | Give experts several real claims to interrogate |
+| Builder behavior | A detailed first comment explains why it exists and how it is built | The author answers benchmarks and competing approaches with numbers | Stay present and answer the hard comparison questions |
+
+The shared anatomy is **artifact first, claim second, explanation third**:
+
+1. A result a reader can restate after seeing only the title.
+2. A live artifact or repository that proves the exact result immediately.
+3. A first comment that explains the origin, mechanism, boundaries, and tradeoff.
+4. Enough technical specificity for skeptical experts to have a substantive
+   argument rather than a branding argument.
+5. An author who answers comparisons directly instead of defending every choice.
+
+agi-cli currently has a weaker candidate title — "Open-source CLI that runs 16
+coding agents across your own machines." It has the number and open-source cue,
+but "runs" is a capability inventory, not a demonstrated result. The research
+job above supplies the missing artifact. A title shaped for the extreme-tail
+mechanics would be:
+
+> **Show HN: One research brief, 16 coding agents, one cited report**
+
+That title should run only if the linked page opens directly on the completed
+research artifact and a short recording shows the fan-out, the cross-machine
+browser hop, the rejected stale claim, and the final report. Without that proof,
+the original title A is more honest.
+
+### Why pricing killed the adjacent products — the causal chain
+
+"Pricing caused the failure" does not mean the number `$30` was inherently too
+high. The failure was a chain in which the **unit charged, value withheld, buyer,
+and cost base did not line up**.
+
+#### Vibe Kanban: the paid tier sat beside the value
+
+1. The free local product already completed the solo user's core job: orchestrate
+   several coding agents.
+2. The $30/user/month tier withheld collaboration and hosted conveniences, not
+   more of the core outcome.
+3. The active user was a solo developer or founder, so adding a seat did not
+   increase that user's value; it introduced a feature they often did not need.
+4. Open source removed switching friction and made self-hosting or forking a
+   credible answer to the paywall.
+5. The company therefore had attention and usage but no paid event tied to the
+   work users valued. Its founder's post-mortem reduces the missing mechanics to
+   two: enterprise sales and token resale. It had neither.
+
+#### Roo Code and Continue.dev: bring-your-own-key removes the meter
+
+1. Their tools created value locally while the user bought inference directly
+   from model providers.
+2. Usage growth increased Anthropic/OpenAI revenue, not the orchestrator's
+   revenue; the tool owned no metered resource that became more valuable with
+   use.
+3. Apache-licensed code made feature gates easy to route around and enabled
+   forks to redistribute improvements.
+4. A team/governance layer can be valuable, but only after an enterprise buying
+   motion exists. Continue.dev built that layer without the enterprise book and
+   was acquired by a company that had one; Roo's successor moved toward hosted,
+   consumption-shaped execution and a licence that protects the paid surface.
+
+#### Flat-rate agent subscriptions: the price promises the wrong cost curve
+
+1. A human seat has roughly fixed monthly revenue; an agent can consume wildly
+   different inference per task.
+2. Heavy users therefore become the worst-margin customers under "unlimited" or
+   loosely capped plans.
+3. Vendors respond with opaque limits and moving allowances, which creates the
+   exact volatility and distrust found in the Reddit corpus.
+4. Consumption pricing fixes the unit mismatch but introduces bill shock unless
+   usage is visible and capped. Cursor's public apology and refunds show that a
+   correct unit can still fail when the meter is not legible.
+5. The durable versions combine a visible meter, enterprise contracts, and an
+   owned model or infrastructure layer that keeps the inference spread from
+   disappearing.
+
+The implication for agi-cli is narrower than "charge for agents." Keep the
+local, bring-your-own-subscription workflow free. Charge only when agi-cli itself
+supplies a scarce, growing resource: managed execution, hosted relay/gateway,
+retained organizational history, policy enforcement, or governed fleet capacity.
+Tie the paid unit to that resource, expose the meter before the run, cap it by
+default, and sell governance only after the launch user has pulled the workflow
+into an organization.
