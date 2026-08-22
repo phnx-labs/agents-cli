@@ -484,6 +484,34 @@ describe('share status and analytics namespace display', () => {
     expect(loggedOutput()).toContain('unknown');
   });
 
+  it('status reports the endpoint when accountId is empty instead of "Not configured" (RUSH-2837)', async () => {
+    const { artifacts, config } = await freshShareModules();
+    fs.mkdirSync(path.join(tmpHome, '.agents'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpHome, '.agents', 'agents.yaml'),
+      [
+        'share:',
+        '  baseUrl: https://share.agents-cli.sh',
+        '  accountId: ""',
+        '  workerName: agents-share',
+        '  bucketName: agents-share',
+        '',
+      ].join('\n'),
+    );
+    // Re-import so readMeta sees the yaml we just wrote (module cache was
+    // populated by writeShareConfig in sibling tests via a reset).
+    expect(config.readShareConfig()?.baseUrl).toBe('https://share.agents-cli.sh');
+    installFakeGh('gh-only-user');
+
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
+
+    const out = loggedOutput();
+    expect(out).toContain('https://share.agents-cli.sh');
+    expect(out).toContain('account missing');
+    expect(out).not.toMatch(/Not configured/);
+  });
+
   it('shows the template as current right after `agents artifacts share update` and outdated once the hash is stale', async () => {
     const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({

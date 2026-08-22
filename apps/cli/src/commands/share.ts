@@ -721,7 +721,10 @@ ${SHARE_DELETE_NOTES}
         return;
       }
       console.log(`${chalk.bold('endpoint')}  ${chalk.green(cfg.baseUrl)}`);
-      console.log(chalk.dim(`worker ${cfg.workerName} · bucket ${cfg.bucketName} · account ${cfg.accountId}`));
+      console.log(chalk.dim(`worker ${cfg.workerName} · bucket ${cfg.bucketName} · account ${cfg.accountId || 'missing'}`));
+      if (!cfg.accountId) {
+        console.log(chalk.dim('account id empty — publish still uses baseUrl + WRITE_TOKEN; `agents artifacts share update` needs --account or join'));
+      }
       const user = await resolveGitHubUsername();
       console.log(`${chalk.bold('namespace')} ${user ? chalk.cyan(`${cfg.baseUrl}/${user}`) : chalk.yellow('unknown — set gh auth or github.user')}`);
       console.log(`${chalk.bold('analytics')} ${analyticsEnabled(cfg) ? chalk.green('enabled') : chalk.dim('not configured')}`);
@@ -989,6 +992,11 @@ export async function runShareUpdate(opts: {
   const cfg = readShareConfig();
   if (!cfg) {
     throw new Error("Not configured. Run 'agents artifacts setup' (to provision) or 'agents artifacts share join' first.");
+  }
+  if (!cfg.accountId && !opts.account) {
+    throw new Error(
+      "Share endpoint has no Cloudflare account id — `agents artifacts share update` cannot call the API. Pass --account <id>, or re-run 'agents artifacts share join'.",
+    );
   }
 
   const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle ?? DEFAULT_CF_BUNDLE, {

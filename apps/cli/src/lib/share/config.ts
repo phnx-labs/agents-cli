@@ -52,24 +52,59 @@ export function readWriteTokenEnv(env: NodeJS.ProcessEnv = process.env): string 
   return token ? token : null;
 }
 
-/** Read the persisted endpoint config, or null if `agents artifacts setup` / `agents artifacts share join` never ran. */
+/** Trim; empty / whitespace-only strings are absent. */
+function nonempty(v: string | undefined): string | undefined {
+  const t = v?.trim();
+  return t ? t : undefined;
+}
+
+/**
+ * Read the persisted endpoint config, or null if there is no `share.baseUrl`.
+ *
+ * Publish talks only to `baseUrl` with `WRITE_TOKEN`. `accountId` / worker /
+ * bucket are provisioning metadata for `setup`/`update`. Requiring all four
+ * (and treating `accountId: ""` as missing) made `status` and publish both
+ * report "not set up" on an endpoint that still worked — RUSH-2837.
+ */
 export function readShareConfig(): ShareConfig | null {
   const s = readMeta().share;
-  if (!s?.baseUrl || !s.accountId || !s.workerName || !s.bucketName) return null;
+  const baseUrl = nonempty(s?.baseUrl)?.replace(/\/+$/, '');
+  if (!baseUrl) return null;
   return {
-    baseUrl: s.baseUrl.replace(/\/+$/, ''),
-    accountId: s.accountId,
-    workerName: s.workerName,
-    bucketName: s.bucketName,
-    domain: s.domain,
-    analyticsToken: s.analyticsToken,
-    templateHash: s.templateHash,
+    baseUrl,
+    accountId: nonempty(s?.accountId) ?? '',
+    workerName: nonempty(s?.workerName) ?? DEFAULT_WORKER_NAME,
+    bucketName: nonempty(s?.bucketName) ?? DEFAULT_BUCKET_NAME,
+    domain: nonempty(s?.domain),
+    analyticsToken: nonempty(s?.analyticsToken),
+    templateHash: nonempty(s?.templateHash),
   };
 }
 
-/** Persist the endpoint config to `agents.yaml` (syncs across the fleet). */
+/** Persist the endpoint config to `agents.yaml` (syncs across the fleet).
+ * Empty strings never overwrite a previously stored value and are not written
+ * back as `accountId: ""` (that form made {@link readShareConfig} return null
+ * under the old all-fields-required check, and it is still useless). */
 export function writeShareConfig(cfg: ShareConfig): void {
-  updateMeta((meta) => ({ ...meta, share: { ...meta.share, ...cfg } }));
+  updateMeta((meta) => {
+    const prev = meta.share ?? {};
+    const next: NonNullable<typeof meta.share> = { ...prev };
+    const assign = (key: 'baseUrl' | 'accountId' | 'workerName' | 'bucketName' | 'domain' | 'analyticsToken' | 'templateHash', incoming: string | undefined) => {
+      const v = nonempty(incoming);
+      if (v) next[key] = v;
+    };
+    assign('baseUrl', cfg.baseUrl);
+    assign('accountId', cfg.accountId);
+    assign('workerName', cfg.workerName);
+    assign('bucketName', cfg.bucketName);
+    assign('domain', cfg.domain);
+    assign('analyticsToken', cfg.analyticsToken);
+    assign('templateHash', cfg.templateHash);
+    for (const key of Object.keys(next) as (keyof typeof next)[]) {
+      if (typeof next[key] === 'string' && !nonempty(next[key])) delete next[key];
+    }
+    return { ...meta, share: next };
+  });
 }
 
 /** A fresh 32-byte hex write token. */
