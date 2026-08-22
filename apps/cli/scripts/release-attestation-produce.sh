@@ -162,6 +162,21 @@ if [[ "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   ' || die "signed helper build failed"
 else
   gray "Not on a macOS signing box -- skipping helper sign/build; npm pack's prepack gates decide."
+  # Seed the already-signed helper .apps from the caller checkout (RUSH-3026).
+  # The ordinary release never rebuilds an unchanged helper, and this fresh
+  # worktree has an empty bin/ -- without seeding, every non-Mac producer died
+  # at prepack, which chained attestation production (and therefore releases)
+  # to a Mac. The prepack gates still decide: the keychain app must match the
+  # tree's committed sha pin and the menubar app must be present, so a wrong or
+  # tampered seed fails the pack exactly as before. Seeding is copy-if-absent
+  # only -- a Darwin producer's freshly signed apps are never overwritten.
+  for app in "Agents CLI.app" "MenubarHelper.app"; do
+    if [[ ! -d "bin/$app" && -d "$REPO_ROOT/apps/cli/bin/$app" ]]; then
+      mkdir -p bin
+      cp -R "$REPO_ROOT/apps/cli/bin/$app" "bin/$app"
+      gray "seeded bin/$app from the caller checkout (already-signed; prepack gates verify it)"
+    fi
+  done
 fi
 
 bold "Building (bun run build)..."

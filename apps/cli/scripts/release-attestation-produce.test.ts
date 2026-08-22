@@ -141,6 +141,44 @@ function runProduce(fx: ReturnType<typeof buildFixture>, extraArgs: string[] = [
 }
 
 describe('release-attestation-produce.sh', () => {
+  it('seeds the already-signed helper apps from the caller checkout on a non-Mac producer (RUSH-3026)', () => {
+    // The producer's fresh worktree has an empty bin/ (the .apps are untracked),
+    // so before this fix every non-Mac producer died at prepack — chaining
+    // attestation production, and therefore releases, to a Mac. The caller
+    // checkout's already-signed apps must be seeded copy-if-absent; the prepack
+    // gates still verify them.
+    const root = tmp('attest-produce-seed-');
+    const fx = buildFixture(root);
+    // Untracked, already-signed apps exist only in the CALLER checkout.
+    for (const [app, binName] of [
+      ['Agents CLI.app', 'Agents CLI'],
+      ['MenubarHelper.app', 'MenubarHelper'],
+    ] as const) {
+      const dir = path.join(fx.caller, 'apps/cli/bin', app, 'Contents/MacOS');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, binName), 'signed-bytes\n');
+    }
+    const result = runProduce(fx, ['--keep']);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('seeded bin/Agents CLI.app');
+    expect(out).toContain('seeded bin/MenubarHelper.app');
+    // The kept worktree genuinely carries the seeded apps where prepack looks.
+    const kept = out.match(/kept worktree for inspection: (\S+)/);
+    expect(kept, out).toBeTruthy();
+    expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI'))).toBe(true);
+    expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/MenubarHelper'))).toBe(true);
+  });
+
+  it('does not seed when the caller checkout has no apps (nothing to reuse; gates decide)', () => {
+    const root = tmp('attest-produce-noseed-');
+    const fx = buildFixture(root);
+    const result = runProduce(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).toBe(0); // fake npm pack has no prepack gates
+    expect(out).not.toContain('seeded bin/');
+  });
+
   it('runs the suite, packs the tarball, and writes a passing attestation for the exact tree', () => {
     const root = tmp('attest-produce-');
     const fx = buildFixture(root);
