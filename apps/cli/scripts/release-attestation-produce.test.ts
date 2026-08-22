@@ -159,7 +159,9 @@ describe('release-attestation-produce.sh', () => {
       fs.writeFileSync(path.join(dir, binName), 'signed-bytes\n');
     }
     const result = runProduce(fx, ['--keep']);
-    const out = result.stdout + result.stderr;
+    // Strip ANSI color codes so the path capture below is not polluted by the
+    // gray() escape sequences the producer wraps its lines in.
+    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
     expect(result.status, out).toBe(0);
     expect(out).toContain('seeded bin/Agents CLI.app');
     expect(out).toContain('seeded bin/MenubarHelper.app');
