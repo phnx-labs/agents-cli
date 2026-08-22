@@ -9,12 +9,12 @@
  */
 
 import { spawnSync } from 'child_process';
-import { isControlDevice, type DeviceProfile, type DeviceRegistry } from './registry.js';
+import type { DeviceProfile, DeviceRegistry } from './registry.js';
 import { isSelfHost } from './self-host.js';
 import { buildSshInvocation, sshTargetFor, writeAskpassShim } from './connect.js';
 import type { DeviceStats } from './health.js';
 
-export type FleetSkipReason = 'offline' | 'no-address' | 'control';
+export type FleetSkipReason = 'offline' | 'no-address';
 
 /** npm dist-tags / semver pins only — rejects shell metacharacters. */
 export const FLEET_VERSION_RE = /^[A-Za-z0-9._-]+$/;
@@ -50,7 +50,6 @@ export interface FanOutDeviceResult<T> {
 /**
  * Classify each registered device for a fleet operation.
  *
- * - Control-only device (a cockpit, e.g. a paired iPhone) → skip `control`
  * - Tailscale-offline → skip `offline`
  * - No address → skip `no-address`
  * - Everything else is a target (including this machine, reached over ssh when
@@ -60,11 +59,6 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
   const names = Object.keys(reg).sort();
   return names.map((name) => {
     const device = reg[name];
-    // A control device drives the fleet but never runs agents — never a target
-    // for update/run/stats, whatever its platform reads as.
-    if (isControlDevice(device)) {
-      return { device, skip: 'control' as const };
-    }
     if (device.tailscale && !device.tailscale.online) {
       return { device, skip: 'offline' as const };
     }
@@ -79,10 +73,7 @@ export function planFleetTargets(reg: DeviceRegistry): FleetTarget[] {
 
 /**
  * Remote fan-out targets for the fleet health/drift gates (`fleet status`,
- * `doctor --check --devices`): every planned device except this machine and control-only
- * cockpits. A control device never runs agents (mirrors doctor's fan-out, which
- * drops it via `isControlDevice`), so counting it as unreachable/drift would make
- * the CI gate fail on every run for a fleet that merely has a cockpit registered.
+ * `doctor --check --devices`): every planned device except this machine.
  * Offline / no-address devices are kept — those are genuine faults a gate should
  * surface — so their `skip` reason still flows through as an `unreachable` row.
  */
@@ -91,7 +82,7 @@ export function remoteFleetTargets(planned: FleetTarget[], self: string): FleetT
   // device referenced by its dnsName slipped past the bare name check and got a
   // remote version+doctor dial back to THIS box, which orphaned on timeout and
   // piled up (RUSH-2114). `isSelfHost` matches every alias the box answers to.
-  return planned.filter((t) => t.device.name !== self && !isSelfHost(t.device.name) && t.skip !== 'control');
+  return planned.filter((t) => t.device.name !== self && !isSelfHost(t.device.name));
 }
 
 /**
@@ -110,7 +101,7 @@ export function remoteFleetTargets(planned: FleetTarget[], self: string): FleetT
  * minutes is the only false-negative window — it renders `unreachable` until the
  * next stats warm, which beats letting it hang the status glance for 45s.
  *
- * An existing skip (control/offline/no-address from {@link planFleetTargets})
+ * An existing skip (offline/no-address from {@link planFleetTargets})
  * always wins — those are classified before any probe.
  */
 export function fleetHealthSkip(
@@ -129,8 +120,6 @@ export function skipLabel(reason: FleetSkipReason): string {
       return 'offline';
     case 'no-address':
       return 'no address';
-    case 'control':
-      return 'control device';
   }
 }
 

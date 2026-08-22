@@ -29,7 +29,6 @@
 import * as http from 'http';
 import type { AgentId } from '../types.js';
 import type { DeviceProfile } from '../devices/registry.js';
-import { isControlDevice } from '../devices/registry.js';
 import { loadDevices } from '../devices/registry.js';
 import { deviceIdentityArgs, fleetDialTarget } from '../devices/connect.js';
 import { planFleetTargets } from '../devices/fleet.js';
@@ -528,7 +527,7 @@ export interface DetectOptions {
 }
 
 /**
- * Resolve the online (non-control) fleet devices, then compute pending logins
+ * Resolve the online fleet devices, then compute pending logins
  * from the shared auth-health cache (populated by `agents fleet ping`). Thin I/O
  * over the pure {@link selectLoginTargets}. Devices/agents can be narrowed by the
  * caller's flags; the default agent set is every agent with a defined flow.
@@ -537,7 +536,7 @@ export async function detectPending(opts: DetectOptions = {}): Promise<PendingLo
   const reg = await loadDevices();
   const self = machineId();
   const online = planFleetTargets(reg)
-    .filter((t) => !t.skip && t.device.name !== self && !isControlDevice(t.device))
+    .filter((t) => !t.skip && t.device.name !== self)
     .map((t) => t.device);
 
   const deviceFilter = opts.devices && opts.devices.length > 0 ? new Set(opts.devices) : null;

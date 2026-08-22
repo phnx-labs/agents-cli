@@ -19,12 +19,6 @@
  *
  * `auto.pool all` turns the allowlist off; `personal` stays excluded, because a
  * machine the user sits at is marked precisely so agents stay off it.
- *
- * Paired cockpits (an iPhone/iPad, `role: control` in the device registry, set
- * by `agents devices pair-ios`) are excluded by the CALLER that reads the
- * registry — `listOnlineDeviceNames` in `lib/smart-launch.ts` — not here. That
- * role is machine-local by nature and already has a home; duplicating it in the
- * shared config would be a second store for one concept.
  */
 import { autoPoolMode, listConfiguredDeviceRoles, type AutoPoolMode, type ConfiguredDeviceRole } from '../device-config.js';
 import { normalizeHost } from '../machine-id.js';

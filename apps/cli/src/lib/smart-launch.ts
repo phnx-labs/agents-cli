@@ -8,7 +8,7 @@
 
 import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
-import { isControlDevice, loadDevicesSync } from './devices/registry.js';
+import { loadDevicesSync } from './devices/registry.js';
 import { describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
 import { probePoolSignals } from './teams/placement-probe.js';
@@ -69,9 +69,7 @@ export function sampleWeighted(
  * paths (`resolveDeviceAuto`, `resolveDeviceAffinity`) get their candidates, so
  * marking workers moves every `--device auto` at once instead of one surface.
  *
- * Paired cockpits (`role: control` in the device registry) are dropped here,
- * where the registry is already being read — they are control surfaces, not
- * compute. It CAN return an empty list — a fleet where every marked worker is
+ * It CAN return an empty list — a fleet where every marked worker is
  * offline, or where this box is the only candidate and is marked `personal`. That is a
  * real answer, and both callers fail loud on it rather than falling back to the
  * local machine (which would be the exact box the operator marked personal to
@@ -86,9 +84,6 @@ export function listOnlineDeviceNames(localName: string = localMachineId()): str
       const online = d.tailscale?.online;
       // No tailscale snapshot → treat as candidate (registry-only box).
       if (online === false) continue;
-      // A paired cockpit (iPhone/iPad) is a control surface, not compute — it
-      // is never dialed for a session, so it is never a placement candidate.
-      if (isControlDevice(d)) continue;
       names.add(normalizeHost(name));
     }
   } catch {

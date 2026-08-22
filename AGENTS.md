@@ -9,9 +9,8 @@ from one place.
 
 **Two main projects live here:** (a) the **agents CLI** — [`apps/cli`](apps/cli),
 the published `@phnx-labs/agents-cli` — and (b) the **CLI's VS Code extension,
-AGI EXT** — [`apps/ext`](apps/ext). Everything else (`apps/ios`,
-`native/computer-*`, `packages/*`) is a **helper app / library for one feature**,
-not a main project.
+AGI EXT** — [`apps/ext`](apps/ext). Everything else (`native/computer-*`,
+`packages/*`) is a **helper app / library for one feature**, not a main project.
 
 **This file is the repo map + repo-wide policy — it deliberately stays shallow.**
 **Read the nearest component `AGENTS.md` (recursively) before working in it** — for
@@ -49,7 +48,6 @@ to fold away, while an idle session that is unfinished is exactly the one to rai
 apps/
   cli/        @phnx-labs/agents-cli — the `agents`/`ag` CLI (the published npm package)
   ext/        AGI EXT — the VS Code extension + its React UI + Electron app (publisher: swarmify, swarm-ext)
-  ios/        Fleet Cockpit — iOS/iPadOS control-plane app (AnchorKit SwiftPM lib + Cockpit SwiftUI); steers the fleet, never a compute worker
 native/
   computer-mac/   Swift daemon behind `agents computer` (Accessibility + screen capture)
   computer-win/   C#/.NET daemon behind `agents computer` on Windows (UI Automation)
@@ -64,7 +62,6 @@ assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in 
 |---|---|---|
 | [`apps/cli`](apps/cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](apps/cli/AGENTS.md) · [README.md](apps/cli/README.md) |
 | [`apps/ext`](apps/ext) | AGI EXT VS Code extension — spawns agent terminals as tabs, Fleet dashboard, dispatch | [AGENTS.md](apps/ext/AGENTS.md) · [README.md](apps/ext/README.md) |
-| [`apps/ios`](apps/ios) | Fleet Cockpit — iOS/iPadOS control-plane app over the anchor (`agents serve --control`) | [AGENTS.md](apps/ios/AGENTS.md) · [README.md](apps/ios/README.md) |
 | [`native/computer-mac`](native/computer-mac) | macOS `agents computer` backend (Swift) | [AGENTS.md](native/computer-mac/AGENTS.md) · [README.md](native/computer-mac/README.md) |
 | [`native/computer-win`](native/computer-win) | Windows `agents computer` backend (C#/.NET) | [AGENTS.md](native/computer-win/AGENTS.md) · [README.md](native/computer-win/README.md) |
 | [`packages/session-tracker`](packages/session-tracker) | Live-session **writer** (SessionStart hook) | [AGENTS.md](packages/session-tracker/AGENTS.md) · [README.md](packages/session-tracker/README.md) |
@@ -120,7 +117,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   that can *act* on this machine or another fleet device — launch/resume/kill a session,
   fire a routine or monitor, inject into a terminal, rotate an account — has exactly ONE
   scheduler and ONE executor: the agents-cli daemon (`agents __daemon-run`) or a CLI
-  command it drives. UI surfaces (the ext, the menubar, the iOS app) are **thin
+  command it drives. UI surfaces (the ext, the menubar) are **thin
   wrappers**: they render state and offer controls that call the CLI; they MUST NOT own
   a timer, watcher, or loop that detects a condition and acts on it. Detection and
   decision live in the CLI, which holds the first-party state (sessions.db, usage

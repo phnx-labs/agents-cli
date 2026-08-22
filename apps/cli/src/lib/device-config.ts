@@ -318,8 +318,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description:
       "What this device is for, fleet-wide: 'worker' (a box agents run on) or 'personal' (a machine you sit at — never " +
       'picked automatically). Marking ANY device worker turns automatic placement into an allowlist: `--device auto` then ' +
-      'picks only from the marked workers. (A paired iPhone/iPad cockpit is marked control by `agents devices pair-ios` ' +
-      'and is excluded from placement by that role, not this key.)',
+      'picks only from the marked workers.',
     validate: (v) =>
       (DEVICE_ROLES as readonly string[]).includes(v as string)
         ? null

@@ -25,7 +25,7 @@ import {
 } from '../ssh-exec.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { resolveExplicitTargetSet } from '../devices/resolve-target.js';
-import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
+import { loadDevices, isDialableDevice, type DeviceProfile } from '../devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../hosts/remote-cmd.js';
 import { gatherRemoteAgentsJson, type RemoteAgentsJsonParseResult } from '../remote-agents-json.js';
 import { machineId, normalizeHost } from './sync/config.js';
@@ -232,7 +232,7 @@ export interface RemoteListResult {
 /** Keep browse and tool-search fan-out on the same automatic peer set. */
 export function isAutomaticSessionPeer(d: DeviceProfile, self: string): boolean {
   if (!isDialableDevice(d)) return false;
-  if (normalizeHost(d.name) === self || isControlDevice(d)) return false;
+  if (normalizeHost(d.name) === self) return false;
   return d.platform === 'windows' || d.platform === 'linux' || d.platform === 'macos';
 }
 

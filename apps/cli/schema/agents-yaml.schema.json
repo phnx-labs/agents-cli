@@ -108,7 +108,7 @@
         "role": {
           "type": "string",
           "enum": ["worker", "personal"],
-          "description": "Device scope. What this device is for, fleet-wide (`agents devices role <name> <role>`). Marking any device 'worker' makes `--device auto` an allowlist over the marked workers; a 'personal' device is never picked automatically. A paired cockpit's 'control' role lives in that box's own device registry (agents devices pair-ios), not here."
+          "description": "Device scope. What this device is for, fleet-wide (`agents devices role <name> <role>`). Marking any device 'worker' makes `--device auto` an allowlist over the marked workers; a 'personal' device is never picked automatically."
         },
         "autoLaunchEnabled": {
           "type": "boolean",

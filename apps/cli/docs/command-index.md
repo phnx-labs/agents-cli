@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_72 command groups · 561 commands._
+_71 command groups · 559 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -258,7 +258,6 @@ agents devices lease setup                     One-time credential setup so `age
 agents devices lease stop <slug>               Stop (release) a leased crabbox box now.
 agents devices list                            List registered devices with platform, address, reachability, and live resource headroom.
 agents devices login                           Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
-agents devices pair-ios [name]                 Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
 agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
 agents devices register <name>                 Register a discovered node and sync the approval through agents.yaml fleet.discovery.
@@ -730,12 +729,6 @@ agents secrets view [name]                         Show a bundle. Keychain value
 
 ```
 agents send [text]  Deliver a message through a channel provider (imessage, slack, desktop, mailbox, …). Prefer --text/--to flags.
-```
-
-## serve — Read-only local web companion: team diffs, routines, and cloud status (binds 127.0.0.1 only).
-
-```
-agents serve  Read-only local web companion: team diffs, routines, and cloud status (binds 127.0.0.1 only).
 ```
 
 ## sessions — Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.

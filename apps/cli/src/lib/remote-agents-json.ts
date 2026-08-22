@@ -19,7 +19,7 @@ import {
 } from './ssh-exec.js';
 import { deviceIdentityArgs, sshTargetFor } from './devices/connect.js';
 import { resolveExplicitTargets } from './devices/resolve-target.js';
-import { loadDevices, isControlDevice, isDialableDevice, type DeviceProfile } from './devices/registry.js';
+import { loadDevices, isDialableDevice, type DeviceProfile } from './devices/registry.js';
 import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from './hosts/remote-cmd.js';
 import { machineId, normalizeHost } from './machine-id.js';
 
@@ -209,11 +209,6 @@ export async function gatherRemoteAgentsJson<T>(
       // fallback — see isDialableDevice (mirrors session/remote-list.ts).
       if (!isDialableDevice(device)) continue;
       if (normalizeHost(device.name) === self) continue;
-      // Control-only devices (a phone/tablet cockpit) drive the fleet but never
-      // run agents — never dial them, whatever their platform reads as. Keyed on
-      // role, not platform, so this holds even for a control device that carries
-      // a real OS value (mirrors the skip in session/remote-list.ts).
-      if (isControlDevice(device)) continue;
       if (!['windows', 'linux', 'macos'].includes(device.platform)) continue;
       try {
         targets.push({

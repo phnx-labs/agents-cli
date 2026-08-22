@@ -9,7 +9,7 @@ const LOADED_COMMAND_NAMES = [
   'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
   'teams', 'cloud', 'message', 'send', 'notify', 'feed',
-  'mailboxes', 'mailbox', 'serve', 'artifacts', 'webhooks',
+  'mailboxes', 'mailbox', 'artifacts', 'webhooks',
   'humans', 'daemon',
 ] as const;
 
@@ -49,10 +49,13 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * (linear-cli) (RUSH-2932). `alias` moved under `agents setup alias` (RUSH-2965).
  * `inbox` was a pure alias of `agents feed` (RUSH-2984). `unshare` nested under
  * `agents artifacts unshare` (RUSH-2989). `audit` nested under `agents events audit`.
- * `trends` nested under `agents insights mix` / `insights trends`.
+ * `trends` nested under `agents insights mix` / `insights trends`. `serve` (the
+ * read-only local web companion + `--control` anchor) was removed with the
+ * unshipped iOS Fleet Cockpit it existed for (RUSH-3001).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
+  'serve',
   'login',
   'logout',
   'budget',

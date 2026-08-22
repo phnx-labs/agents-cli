@@ -86,8 +86,8 @@ describe('synced device discovery policy', () => {
     // The concrete failure this guards: registering 12 devices on machine B,
     // then approving/ignoring just ONE device on machine A and syncing. Every
     // device absent from the synced policy — including ones registered by a
-    // path that never writes a policy entry (pair-ios, daemon/umbrella
-    // auto-refresh, pre-existing registrations) — must survive reconcile.
+    // path that never writes a policy entry (daemon/umbrella auto-refresh,
+    // pre-existing registrations) — must survive reconcile.
     const { getDevice, isIgnored, reconcileDeviceDiscoveryPolicies, setDeviceDiscoveryStatus, upsertDevice } = await freshModules();
     await upsertDevice('never-in-policy', {
       platform: 'linux',

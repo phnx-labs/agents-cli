@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 72,
-  "commands": 561,
+  "groups": 71,
+  "commands": 559,
   "root": {
     "name": "agents",
     "path": "",
@@ -8404,43 +8404,6 @@
           "subcommands": []
         },
         {
-          "name": "pair-ios",
-          "path": "devices pair-ios",
-          "aliases": [],
-          "description": "Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.",
-          "args": [
-            {
-              "name": "name",
-              "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--port <n>",
-              "description": "Anchor control port to advertise to the app",
-              "long": "--port",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "4477"
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "ping",
           "path": "devices ping",
           "aliases": [],
@@ -8660,7 +8623,7 @@
             }
           ],
           "examples": "agents devices role                          # who is marked what, and what --device auto would pick\n      agents devices role yosemite-s0 worker       # agents spin up here\n      agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only\n      agents devices role zion personal            # your laptop — keep automatic placement off it\n      agents devices role yosemite-s0 --clear      # unmark\n      agents devices role --json                   # machine-readable",
-          "notes": "Roles live in that device's tracked per-device doc\n      (devices/<name>/agents.yaml config.role) and travel with\n      'agents repo push/pull', so a mark set on one box is the whole fleet's\n      answer.\n\n      Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI\n      EXT launch commands, which all resolve placement through the CLI):\n        no device marked  -> every online device, as before\n        any worker marked -> ONLY the marked workers\n        personal          -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; a personal\n      box stays excluded, since that is what the mark is for.\n\n      A paired iPhone/iPad cockpit is a separate role: 'agents devices pair-ios'\n      marks it control in that box's device registry, and the fleet never dials\n      it — including for placement. This command does not set that role.",
+          "notes": "Roles live in that device's tracked per-device doc\n      (devices/<name>/agents.yaml config.role) and travel with\n      'agents repo push/pull', so a mark set on one box is the whole fleet's\n      answer.\n\n      Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI\n      EXT launch commands, which all resolve placement through the CLI):\n        no device marked  -> every online device, as before\n        any worker marked -> ONLY the marked workers\n        personal          -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; a personal\n      box stays excluded, since that is what the mark is for.",
           "subcommands": []
         },
         {
@@ -22676,67 +22639,6 @@
       ],
       "examples": "# Flag-first envelope (preferred)\n      agents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\n      agents send --to owner --text \"need a decision on the release\"\n      agents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\n      agents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n      # Attach a local file\n      agents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n      # Owner alias without the notify verb\n      agents send --to owner --text \"wiring test\"\n\n      # Legacy positional text still works\n      agents send \"hi\" --channel desktop --to local\n\n      # Dry-run (resolve provider, no delivery)\n      agents send --to owner --text \"probe\" --dry-run --json",
       "notes": "Planes (do not mix them up):\n    send / notify     - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
-      "subcommands": []
-    },
-    {
-      "name": "serve",
-      "path": "serve",
-      "aliases": [],
-      "description": "Read-only local web companion: team diffs, routines, and cloud status (binds 127.0.0.1 only).",
-      "args": [],
-      "options": [
-        {
-          "flags": "-p, --port <n>",
-          "description": "Port to bind on 127.0.0.1",
-          "short": "-p",
-          "long": "--port",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "4477"
-        },
-        {
-          "flags": "--interval <ms>",
-          "description": "SSE refresh cadence in milliseconds",
-          "long": "--interval",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "3000"
-        },
-        {
-          "flags": "--control",
-          "description": "Authenticated control mode (RUSH-1731): adds bearer-gated POST /api/run and /api/session/:id/message so the iOS cockpit can dispatch + steer. Enables binding beyond loopback — pair a device with `agents devices pair-ios`.",
-          "long": "--control",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": false
-        },
-        {
-          "flags": "--bind <addr>",
-          "description": "Address to bind in --control mode (e.g. your tailnet IP, or 0.0.0.0). Ignored without --control; read-only serve is always loopback.",
-          "long": "--bind",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "127.0.0.1"
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
       "subcommands": []
     },
     {

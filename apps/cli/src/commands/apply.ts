@@ -14,7 +14,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { setHelpSections } from '../lib/help.js';
 import { machineId } from '../lib/session/sync/config.js';
-import { loadDevices, isControlDevice, type DeviceProfile } from '../lib/devices/registry.js';
+import { loadDevices, type DeviceProfile } from '../lib/devices/registry.js';
 import { isHostPinned, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired } from '../lib/fleet/manifest.js';
@@ -199,10 +199,7 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   }
 
   const registry = await loadDevices();
-  // Control devices (a cockpit) never run agents — exclude them from the
-  // reconcile set entirely so `agents apply` doesn't try to install/sync/login
-  // onto a paired phone.
-  const all = Object.values(registry).filter((d) => !isControlDevice(d));
+  const all = Object.values(registry);
   const online = all.filter((d) => d.tailscale?.online === true).map((d) => d.name);
   const registered = all.map((d) => d.name);
 

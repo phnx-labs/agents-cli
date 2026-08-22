@@ -163,7 +163,7 @@ describe('roles read from the per-device docs', () => {
     expect(() => mod.setConfigValue('role', 'buildbox', { device: 'yosemite-s0' })).toThrow(/worker \| personal/);
   });
 
-  it('refuses control — that role lives in the per-machine registry, set by pair-ios', async () => {
+  it('refuses control — this shared config key only ever accepts worker | personal', async () => {
     const mod = await freshPool();
     expect(() => mod.setConfigValue('role', 'control', { device: 'iphone' })).toThrow(/worker \| personal/);
   });

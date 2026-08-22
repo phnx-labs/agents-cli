@@ -66,9 +66,9 @@ export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus
  * Only devices with an EXPLICIT entry in the synced policy are touched. A
  * device absent from the map is left alone, whether or not the map itself is
  * defined — the map is not treated as authoritative-by-omission, because not
- * every local registration path writes a policy entry (pair-ios control
- * devices, daemon/umbrella auto-refresh, and any device registered before this
- * feature shipped). Wiping those on the next `agents repo pull user` would be
+ * every local registration path writes a policy entry (daemon/umbrella
+ * auto-refresh, and any device registered before this feature shipped).
+ * Wiping those on the next `agents repo pull user` would be
  * silent, fleet-wide data loss for a decision (e.g. "ignore this one iPad")
  * that never meant to touch them.
  */

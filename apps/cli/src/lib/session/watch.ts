@@ -3,7 +3,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { loadDevices, isControlDevice, isDialableDevice } from '../devices/registry.js';
+import { loadDevices, isDialableDevice } from '../devices/registry.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import { SSH_OPTS, controlOpts, shellQuote } from '../ssh-exec.js';
@@ -224,7 +224,6 @@ export async function watchFleetSessions(options: WatchFleetOptions): Promise<vo
   const self = machineId();
   const peers = Object.values(devices).filter((device) =>
     isDialableDevice(device)
-    && !isControlDevice(device)
     && normalizeHost(device.name) !== self
     && ['windows', 'linux', 'macos'].includes(device.platform),
   );

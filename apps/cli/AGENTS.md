@@ -410,16 +410,8 @@ the allowlist off. When roles leave the pool empty, **both** resolvers throw
 `personal` box is the outcome the mark exists to prevent. Unlike the machine-local
 keys, `role` is **shared**: it lives in that device's tracked
 `devices/<name>/agents.yaml` `config.role` and syncs with `agents repo
-push/pull`, because every box has to agree on where agents may land.
-
-The vocabulary stops at `worker | personal` on purpose. A paired cockpit's
-`control` role is the pre-existing `DeviceRole` in
-[`src/lib/devices/registry.ts`](src/lib/devices/registry.ts), written by
-`agents devices pair-ios` into that box's own registry and read by the
-`isControlDevice()` dial filters. Those filters read each machine's LOCAL
-registry, so accepting `control` in the shared key would promise a fleet-wide
-dial exclusion it cannot deliver — placement simply skips control devices where
-it already reads the registry (`listOnlineDeviceNames`).
+push/pull`, because every box has to agree on where agents may land. The
+vocabulary is `worker | personal` only.
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via

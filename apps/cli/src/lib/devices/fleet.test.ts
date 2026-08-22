@@ -26,7 +26,6 @@ function device(overrides: Partial<DeviceProfile> & { name: string }): DevicePro
     address: overrides.address ?? { via: 'manual', dnsName: `${overrides.name}.ts.net` },
     auth: overrides.auth ?? { method: 'key' },
     tailscale: overrides.tailscale,
-    role: overrides.role,
     createdAt: overrides.createdAt ?? now,
     updatedAt: overrides.updatedAt ?? now,
   };
@@ -53,36 +52,17 @@ describe('planFleetTargets', () => {
     const plan = planFleetTargets(reg);
     expect(plan[0].skip).toBe('no-address');
   });
-
-  it('skips a control device (a cockpit) even when online with a real platform', () => {
-    const reg: DeviceRegistry = {
-      worker: device({ name: 'worker', tailscale: { online: true, direct: true } }),
-      phone: device({
-        name: 'phone',
-        platform: 'linux', // a real platform — must still be skipped by role
-        role: 'control',
-        tailscale: { online: true, direct: true },
-      }),
-    };
-    const byName = Object.fromEntries(planFleetTargets(reg).map((t) => [t.device.name, t]));
-    expect(byName.worker.skip).toBeUndefined();
-    expect(byName.phone.skip).toBe('control'); // update/run/list never dial it
-  });
 });
 
 describe('remoteFleetTargets (fleet health/drift gate targeting)', () => {
-  it('drops this machine and control cockpits, but keeps offline/no-address as faults', () => {
+  it('drops this machine, but keeps offline/no-address as faults', () => {
     const reg: DeviceRegistry = {
       zion: device({ name: 'zion', tailscale: { online: true, direct: true } }), // self
       worker: device({ name: 'worker', tailscale: { online: true, direct: true } }),
-      cockpit: device({ name: 'cockpit', role: 'control', tailscale: { online: true, direct: true } }),
       dead: device({ name: 'dead', tailscale: { online: false, direct: false, lastSeen: 'y' } }),
     };
     const targets = remoteFleetTargets(planFleetTargets(reg), 'zion');
     const byName = Object.fromEntries(targets.map((t) => [t.device.name, t]));
-    // A registered cockpit must NOT reach the fan-out — otherwise the CI gate
-    // (doctor --check --devices / fleet status --strict) fails on every run for its skip.
-    expect(byName.cockpit).toBeUndefined();
     expect(byName.zion).toBeUndefined(); // self is probed in-process, not fanned out
     expect(byName.worker.skip).toBeUndefined(); // a real probe target
     expect(byName.dead.skip).toBe('offline'); // genuine fault — kept, surfaces as unreachable
@@ -104,11 +84,9 @@ describe('fleetHealthSkip (gate version+doctor dials on the reachability verdict
     expect(fleetHealthSkip(undefined, undefined)).toBeUndefined();
   });
 
-  it('keeps a pre-classified skip (offline/no-address/control) untouched', () => {
+  it('keeps a pre-classified skip (offline/no-address) untouched', () => {
     expect(fleetHealthSkip('offline', stats('x', true))).toBe('offline');
     expect(fleetHealthSkip('no-address', undefined)).toBe('no-address');
-    // Even if the stats probe reached it, an existing skip reason wins.
-    expect(fleetHealthSkip('control', stats('cockpit', true))).toBe('control');
   });
 
   it('an unreachable-planned target never triggers a version/doctor probe', async () => {

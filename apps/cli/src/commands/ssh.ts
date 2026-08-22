@@ -39,8 +39,6 @@ import {
 } from '../lib/devices/registry.js';
 import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
 import { collectReachabilityWriteBacks, deviceOnlineState } from '../lib/devices/reachability.js';
-import { addControlToken } from '../lib/serve/token.js';
-import { DEFAULT_SERVE_PORT } from '../lib/serve/server.js';
 import {
   nodeToDeviceInput,
   parseTailscaleStatus,
@@ -1169,7 +1167,7 @@ function registerDevicesCommands(program: Command): void {
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'render'] },
-    { title: 'Fleet operations', names: ['update', 'run', 'login', 'pair-ios', 'capture', 'apply'] },
+    { title: 'Fleet operations', names: ['update', 'run', 'login', 'capture', 'apply'] },
   ]);
 
   devicesCmd
@@ -1432,13 +1430,7 @@ function registerDevicesCommands(program: Command): void {
    *
    * A role written here lands in that device's tracked per-device doc
    * (`devices/<name>/agents.yaml` `config.role`) and syncs with repo
-   * push/pull. The vocabulary is deliberately `worker | personal` only: a
-   * paired cockpit's `control` role lives in the per-machine device registry,
-   * is written by `agents devices pair-ios`, and is what the existing
-   * dial-exclusion filters (`isControlDevice`) read. Accepting `control` here
-   * too would promise a fleet-wide dial exclusion this key cannot deliver —
-   * those filters read each box's own registry, so the mark would only hold
-   * on the machine that ran the command.
+   * push/pull. The vocabulary is deliberately `worker | personal` only.
    */
   const runDevicesRole = async (
     name: string | undefined,
@@ -1694,10 +1686,6 @@ function registerDevicesCommands(program: Command): void {
 
       Turn the allowlist off with 'agents config set auto.pool all'; a personal
       box stays excluded, since that is what the mark is for.
-
-      A paired iPhone/iPad cockpit is a separate role: 'agents devices pair-ios'
-      marks it control in that box's device registry, and the fleet never dials
-      it — including for placement. This command does not set that role.
     `,
   });
 
@@ -2149,50 +2137,6 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
         console.error(chalk.red(err.message));
         process.exit(1);
       }
-    });
-
-  devicesCmd
-    .command('pair-ios [name]')
-    .description('Pair an iPhone/iPad cockpit (RUSH-1733): mint a control token for `agents serve --control` and mark the device control-only. The token is shown ONCE — enter it in the app. Run this on the anchor.')
-    .option('--port <n>', 'Anchor control port to advertise to the app', String(DEFAULT_SERVE_PORT))
-    .action(async (name: string | undefined, opts: { port?: string }) => {
-      const label = (name || 'iphone').trim();
-      // Mint the bearer token — hash-only on disk, raw shown once (see serve/token.ts).
-      const { id, token } = addControlToken(label);
-      // If a device with this name is already registered (e.g. discovered over
-      // Tailscale as an `unknown`-platform node), mark it control-only so the
-      // fleet stops trying to dial it for sessions/placement.
-      let marked = false;
-      let unknownName = false;
-      if (name) {
-        const existing = await getDevice(name);
-        if (existing) {
-          await upsertDevice(name, { role: 'control' });
-          setDeviceDiscoveryStatus(name, 'approved');
-          marked = true;
-        } else {
-          unknownName = true;
-        }
-      }
-      const port = parseInt(opts.port ?? '', 10) || DEFAULT_SERVE_PORT;
-
-      console.log(chalk.green(`Paired cockpit '${label}'`) + chalk.gray(` (token id ${id})`));
-      if (marked) console.log(chalk.gray(`Marked device '${name}' role=control — the fleet won't dial it.`));
-      if (unknownName) {
-        console.log(
-          chalk.yellow(`Note: no registered device named '${name}' — token minted, but no device was marked role=control.`) +
-            chalk.gray(` Run \`agents devices sync\` first if this phone should appear in the fleet.`),
-        );
-      }
-      console.log();
-      console.log(chalk.bold('Control token (shown once — enter it in the app):'));
-      console.log('  ' + chalk.cyan(token));
-      console.log();
-      console.log('On the anchor, expose the control server on your tailnet:');
-      console.log(chalk.gray(`  agents serve --control --bind <anchor-tailnet-ip> --port ${port}`));
-      console.log('Then point the app at:');
-      console.log(chalk.gray(`  http://<anchor-tailnet-ip>:${port}   (Bearer: the token above)`));
-      console.log(chalk.yellow('Keep the control server on the tailnet — never public Funnel.'));
     });
 
   devicesCmd

@@ -21,8 +21,8 @@
 //   - GET  /<slug>             — backward-compat flat slug (legacy shares before
 //     per-user namespaces).
 //
-// Emitted as a string (mirrors src/lib/serve/page.ts `renderPage()`), so it compiles
-// into `dist/**` and ships with no package.json#files change. `provision.ts` uploads
+// Emitted as a string, so it compiles into `dist/**` and ships with no
+// package.json#files change. `provision.ts` uploads
 // this verbatim as an ES-module Worker with a BUCKET (R2) binding + a WRITE_TOKEN secret.
 
 /**

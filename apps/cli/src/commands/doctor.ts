@@ -26,7 +26,7 @@ import { IsolationBoundaryError } from '../lib/installations/shims.js';
 import { explainIsolationBoundary } from '../lib/isolation-boundary-report.js';
 import { addHostOption } from '../lib/hosts/option.js';
 import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
-import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
+import { loadDevices } from '../lib/devices/registry.js';
 import { fanOutDevices, planFleetTargets, remoteFleetTargets, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
 import { enterDoctorOverviewGate, invalidateDoctorOverviewCache, writeDoctorOverviewCache } from '../lib/devices/doctor-overview-cache.js';
 import { fleetDialTarget } from '../lib/devices/connect.js';
@@ -298,9 +298,6 @@ async function resolveFleetTargets(opts: DoctorOptions): Promise<FleetTarget[]> 
     // Normalize names so zion/ZION/zion.local all match machineId() and we never
     // self-SSH the local box during fleet probes (RUSH-2114).
     .filter((d) => normalizeHost(d.name) !== localName)
-    // Control devices (a cockpit) never run agents — skip them in the fleet
-    // fan-out (an explicit --device <name> still resolves above).
-    .filter((d) => !isControlDevice(d))
     .map((d) => ({
       name: d.name,
       sshTarget: d.name,

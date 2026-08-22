@@ -63,10 +63,7 @@ lives in one place (`src/lib/devices/pool.ts`) and every automatic-placement
 caller reads it, so `agents run --device auto`, `agents teams add --device auto`,
 `agents ssh auto`, and the AGI EXT `New <Harness>` commands agree. Widen it back
 with `agents config set auto.pool all`; a `personal` box stays excluded, since
-that is what the mark is for. A paired cockpit (iPhone/iPad) is a separate,
-pre-existing role — `agents devices pair-ios` marks it `control` in that box's
-device registry and the fleet never dials it, so it is not a placement candidate
-either.
+that is what the mark is for.
 
 An empty pool is an error, not a shrug: with workers marked and none of them
 reachable, `--device auto` fails loud naming the fix rather than quietly running

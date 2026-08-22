@@ -27,7 +27,7 @@ import { normalizeHost } from '../machine-id.js';
 import { readMeta } from '../state.js';
 import { isSshConfigHost } from './ssh-config.js';
 import { resolveRemoteOsSync } from './remote-os.js';
-import { loadDevices, isControlDevice, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
+import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import { isDeviceAuto, resolveDeviceAffinity, type DeviceAffinityPlan } from '../smart-launch.js';
 import { localMachineId } from '../session/origin-machine.js';
@@ -62,8 +62,8 @@ export function getAllProviders(): HostProvider[] {
  * A resolved host, carrying the live {@link DeviceProfile} when the token
  * matched a registered device (by normalized name). The device reference lets
  * the `agents ssh` wrapper reach auth/shell/tailscale metadata a plain `Host`
- * doesn't hold, and lets dispatch callers apply the device-only refusals
- * (control device, password auth) without re-reading the registry.
+ * doesn't hold, and lets dispatch callers apply the device-only refusal
+ * (password auth) without re-reading the registry.
  */
 export interface ResolvedHost extends Host {
   device?: DeviceProfile;
@@ -193,7 +193,7 @@ export interface MatchHostOptions {
  * all resolve the same way regardless of which subcommand called.
  *
  * Non-throwing: returns null on an injection-guard failure or an unresolved bare
- * token. Device-only refusals (control device, password auth) are NOT applied
+ * token. The device-only refusal (password auth) is NOT applied
  * here — that is the dispatch wrapper's job ({@link resolveHost}), so the fan-out
  * and `agents ssh` paths, which handle those cases differently, aren't forced
  * into a dispatch verdict.
@@ -289,8 +289,7 @@ export async function listAllHosts(): Promise<Host[]> {
  * caller consumes (`run --device`, the generic passthrough, teams placement, the
  * cloud host provider, doctor, funnel, remote secrets). Grammar and merge come
  * from {@link matchHost}; on top, this layer applies the device-only dispatch
- * refusals so they hold even when an inline overlay shadows the device:
- *   - a control device (a paired iPhone) can never be a dispatch target;
+ * refusal so it holds even when an inline overlay shadows the device:
  *   - a password-auth device throws the typed {@link DeviceOffloadUnsupportedError}
  *     (offload rides `BatchMode=yes` ssh, which can't answer a prompt);
  *   - an addressless device has nothing to dial.
@@ -302,11 +301,6 @@ export async function resolveHost(name: string): Promise<Host | null> {
   const host = await matchHost(name);
   if (!host) return null;
   if (host.device) {
-    if (isControlDevice(host.device)) {
-      throw new Error(
-        `Device "${host.device.name}" is a control device (a cockpit), not an executor — it can't run agents. Dispatch to a worker device instead.`,
-      );
-    }
     if (host.device.auth.method === 'password') {
       throw new DeviceOffloadUnsupportedError(host.device.name);
     }

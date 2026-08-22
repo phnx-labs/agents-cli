@@ -15,7 +15,7 @@ import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as yaml from 'yaml';
-import { loadDevices, isControlDevice } from '../lib/devices/registry.js';
+import { loadDevices } from '../lib/devices/registry.js';
 import { readMeta, updateMeta, getDevicePinsPath } from '../lib/state.js';
 import { machineId } from '../lib/machine-id.js';
 import { listBundles } from '../lib/secrets/bundles.js';
@@ -50,10 +50,9 @@ function agentsFromPins(names: string[]): Record<string, string[]> {
 async function runCapture(opts: CaptureOptions): Promise<void> {
   const meta = readMeta();
 
-  // Roster: registered, non-control device names only.
+  // Roster: every registered device name.
   const registry = await loadDevices();
   let names = Object.values(registry)
-    .filter((d) => !isControlDevice(d))
     .map((d) => d.name)
     .sort();
   if (opts.device) {

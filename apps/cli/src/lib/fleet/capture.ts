@@ -21,7 +21,7 @@ import type {
 } from './types.js';
 
 export interface CaptureInputs {
-  /** Registered, non-control device names to record (the roster — names only). */
+  /** Registered device names to record (the roster — names only). */
   devices: string[];
   /** Optional per-device agent specs (e.g. from `--from-pins`), keyed by name. */
   agentsByDevice?: Record<string, string[]>;
