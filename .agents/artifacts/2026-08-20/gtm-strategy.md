@@ -2,7 +2,7 @@
 kind: report
 template: report.v1
 title: 'agi-cli GTM: the numbers, the graveyard, and the one bet worth making'
-summary: 'The 18,542 monthly npm downloads are the fleet installing itself — r=0.965 against our own release cadence. Roughly 19 humans visited the public repo landing page in 14 days, and the front door serves a bash script instead of the landing page. Meanwhile the best-funded OSS product in this exact category shut down at 27,867 stars for want of a business model. Pricing is not the question yet.'
+summary: 'The 18,542 monthly npm downloads are the fleet installing itself — r=0.965 against our own release cadence. Measured human traffic is ~145 browsers/30d (~61 confirmed-external), and the front door already content-negotiates correctly (browsers get the landing page, curl gets the installer) — the earlier "serves a bash script" finding was a testing artifact. Meanwhile the best-funded OSS product in this exact category shut down at 27,867 stars for want of a business model. Pricing is not the question yet.'
 status: draft
 human: author
 host: fleet-worker
@@ -38,10 +38,15 @@ published averaged 1,057 downloads and days we did not averaged 179. Last week
 August 2 — and `latest` (`1.22.41`) does not appear in the top 20. Humans install
 `latest` once. CI pins a version and reinstalls it forever.
 
-**2. The front door serves a shell script.** `https://agi-cli.sh/` returns the
-797-byte installer as its root document. The real landing page — hero video,
-comparison table, benchmark chart — exists at `app/page.tsx` in `agents-cli-web`
-and is not being served at the root. Every link in the launch plan points there.
+**2. The front door already works — the earlier "serves a shell script" finding
+was a testing artifact.** `curl https://agi-cli.sh/` returns the 797-byte installer
+*by design* (so `curl … | sh` keeps working), but a **browser** gets the full
+landing page: the Pages Function `functions/index.ts` sniffs the User-Agent and
+serves `app/page.tsx` to browsers, the script to shell clients. **Verified
+2026-08-21:** a Chrome UA returns the 139 KB landing page, and `agents-cli.sh`
+301-redirects to the canonical `agi-cli.sh`. The earlier revision curled the URL,
+got the script, and wrongly concluded humans see it — they do not. This defect
+does not exist.
 
 **3. The category's best case is a shutdown notice.** Vibe Kanban reached
 **27,867 stars** and $7.4M raised doing multi-agent orchestration, and shut down
@@ -115,19 +120,23 @@ agi-cli tomorrow and loved it, nothing in the current stack would reveal it.
 That is a monetization blocker before it is a privacy stance: you cannot
 interview, price, or convert users you cannot see.
 
-### 2. Three front-door defects, all cheap, all blocking the launch that is already planned
+### 2. Two front-door defects, both cheap (the third, "root serves a script," was a false alarm)
 
 The launch playbook (`.agents/artifacts/2026-08-20/launch-venues-and-posts.md`)
-is well-researched and ready. It will underperform against these three defects,
-each independently fixable in hours.
+is well-researched and ready. Two genuine defects remain, each fixable in hours.
 
-- **The root domain serves the installer.** `curl -sIL https://agi-cli.sh/`
-  returns `200` with the bash script as the document body; `/docs` correctly
-  serves the Next app. `scripts/release.sh:115` states the intent as
-  `pattern A: root=docs, /install.sh=script` — so the deployed state contradicts
-  the deploy script's own description. Note also that `release.sh` still targets
-  `CUSTOM_DOMAIN="agents-cli.sh"`, which now 301s to `agi-cli.sh`, and the local
-  `agents-cli-web` checkout is **29 commits behind** `origin/main`.
+- **~~The root domain serves the installer.~~ Corrected 2026-08-21 — not a defect.**
+  An earlier revision ran `curl -sIL https://agi-cli.sh/`, got the bash script, and
+  concluded the root was broken for humans. It is not: the Pages Function
+  `functions/index.ts` User-Agent-sniffs — shell clients (`curl|wget|fetch|
+  powershell|httpie|libcurl`) get the installer so `curl … | sh` works, and
+  **browsers get the landing page**. Verified live 2026-08-21: a Chrome UA on
+  `https://agi-cli.sh/` returns the 139 KB Next landing page, and `agents-cli.sh`
+  301-redirects to the canonical `agi-cli.sh`. The `release.sh` `pattern A` comment
+  is loosely worded but the deployed behavior is correct. (Still worth a cleanup:
+  `release.sh` still names `CUSTOM_DOMAIN="agents-cli.sh"`, and the local
+  `agents-cli-web` checkout was 29 commits behind at the time — housekeeping, not a
+  launch blocker.)
 - **The hero demo renders as a blue link.** `README.md` points at
   `https://agi-cli.sh/demo.mp4`. GitHub only embeds video hosted on its own
   `user-attachments` domain; the rendered README contains zero `<video>`
@@ -469,14 +478,14 @@ dashboard): ~38,946 requests/month vs ~103 humans — machines ≫ people, ~380:
 
 ## Recommendations
 
-### Act 1 — Make users detectable, and open the front door (this week)
+### Act 1 — Make users detectable, and finish the front-door housekeeping (this week)
 
 None of this is growth work. It is the precondition for knowing whether any
 growth work succeeded.
 
 | # | Action | Why it blocks everything else |
 | --- | --- | --- |
-| 1 | Serve the landing page at `agi-cli.sh/`, move the installer to `/install.sh` only | Every launch link currently lands on a bash script |
+| 1 | ~~Serve the landing page at `agi-cli.sh/`~~ **Already done** (verified 2026-08-21): `functions/index.ts` serves browsers the landing page, `curl` the installer; `agents-cli.sh` 301s to `agi-cli.sh`. Only housekeeping left (update `release.sh` `CUSTOM_DOMAIN`, catch up the web checkout). | — no longer a blocker |
 | 2 | Ship opt-out anonymous telemetry: install, first run, weekly-active, top commands | Today no real user is detectable by any mechanism |
 | 3 | Collapse the identity: one package name, one domain, one public repo | A visitor cannot tell what to type |
 | 4 | Re-upload the hero demo to GitHub `user-attachments` so it renders | The best asset above the fold reads as broken |
@@ -588,7 +597,8 @@ between two honest positions, and they imply very different calendars:
 1. **agi-cli is the business.** It gets Act 1, Act 2, and the identity/team-tier
    work above, and it gets most of your attention for the next quarter.
 2. **agi-cli is distribution and credibility for something else.** Then Act 1
-   still happens — a broken front door helps nothing — but Act 3 does not, the
+   still happens — detectability and a polished front door help nothing if skipped
+   — but Act 3 does not, the
    team tier is never built, and agi-cli gets a fixed small share of attention
    while the revenue work happens in Rush or the code-review product.
 
@@ -676,11 +686,12 @@ and some Google prefetch noise. Quote the 61, not the 145.
 | `getrush.ai` | 38 | 61 |
 | `*.pages.dev` (preview) | ~4 | 4 |
 
-`agi-cli.sh` draws **103 real humans in 30 days even though its root serves the
-797-byte installer** — the Next app renders on sub-paths, so the humans arrive and
-land on a page that is half-broken above the fold. Act 1, item 1 (serve the landing
-page at `/`) is therefore a fix to a page 103 humans already reach this month, not
-a bet on traffic that does not exist yet.
+`agi-cli.sh` draws **103 real humans in 30 days**, and — corrected 2026-08-21 —
+those humans **do** get the real landing page: the root Pages Function serves
+`app/page.tsx` to browsers and the installer only to `curl`/shell clients (verified
+with a Chrome UA). So the 103 are landing on the working page, not a broken one; the
+earlier "root serves a script to humans" reading was a `curl`-testing artifact. The
+opportunity is converting those 103 better, not un-breaking a door that already works.
 
 ### The conversion leak, now measured
 
