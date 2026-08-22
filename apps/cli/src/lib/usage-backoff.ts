@@ -39,9 +39,15 @@
  * one — monotonicity is structural rather than argued, and there is no lock to
  * go stale on a path every usage read touches. Elapsed files are swept on read.
  *
- * Deliberately per-provider, not per-account: the endpoint throttles the caller,
- * and the observed 429 hit all five accounts on the box at once. Backing off one
- * account while the others keep firing would not clear the penalty.
+ * Scoped per ACCOUNT when the caller knows one, per provider otherwise
+ * (RUSH-3036). The first cut was deliberately provider-wide — the 2026-08-03
+ * incident 429'd every account on the box at once, so per-provider looked
+ * sufficient. It was not: the quotas proved per-account, and a provider-wide
+ * park let the first throttled account in a refresh pass starve every account
+ * after it in the loop's fixed iteration order — the same four accounts read
+ * 'usage unavailable' across passes while their siblings refreshed. An
+ * account-scoped penalty parks only that account; a penalty recorded with no
+ * account identity stays provider-wide and still parks everything.
  */
 import * as fs from 'fs';
 import * as path from 'path';
