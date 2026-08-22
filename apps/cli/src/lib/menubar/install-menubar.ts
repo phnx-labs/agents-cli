@@ -455,12 +455,18 @@ function menubarSetupStale(): boolean {
 export function menubarPlistNeedsRepoint(opts: {
   plistEntry: string | null;
   plistNode: string | null;
+  plistNodeExists: boolean;
   activeEntry: string | null;
   activeNode: string | null;
 }): boolean {
   if (!opts.activeEntry) return false; // can't resolve the running install — don't churn
   if (opts.plistEntry !== opts.activeEntry) return true;
-  if (opts.activeNode && opts.plistNode !== opts.activeNode) return true;
+  // The entry path owns the helper. The same installed CLI may be invoked through
+  // several compatible Node interpreters (nvm, Homebrew, a parent process's
+  // process.execPath). Re-pointing merely because those valid interpreter paths
+  // differ makes every invocation replace and relaunch the shared helper. Keep the
+  // recorded interpreter until it disappears; then repoint to the active one.
+  if (opts.activeNode && (!opts.plistNode || !opts.plistNodeExists)) return true;
   return false;
 }
 
@@ -477,9 +483,11 @@ function readPlistEnvValue(key: string): string | null {
 
 /** True when the installed plist points at a different install than the active one. */
 function menubarSetupNeedsRepoint(): boolean {
+  const plistNode = readPlistEnvValue('AGENTS_NODE');
   return menubarPlistNeedsRepoint({
     plistEntry: readPlistEnvValue('AGENTS_ENTRY'),
-    plistNode: readPlistEnvValue('AGENTS_NODE'),
+    plistNode,
+    plistNodeExists: Boolean(plistNode) && fs.existsSync(plistNode as string),
     activeEntry: resolveCliEntry(),
     activeNode: process.execPath,
   });

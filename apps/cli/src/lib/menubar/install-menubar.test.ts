@@ -160,24 +160,38 @@ describe('menubarPlistNeedsRepoint', () => {
   const nvmNode = '/Users/me/.nvm/versions/node/v24/bin/node';
   const bunNode = '/Users/me/.bun/bin/node';
 
+  const check = (overrides: Partial<Parameters<typeof menubarPlistNeedsRepoint>[0]>) =>
+    menubarPlistNeedsRepoint({
+      plistEntry: bun,
+      plistNode: bunNode,
+      plistNodeExists: true,
+      activeEntry: bun,
+      activeNode: bunNode,
+      ...overrides,
+    });
+
   it('re-points when the plist entry differs from the active install', () => {
-    expect(menubarPlistNeedsRepoint({ plistEntry: nvm, plistNode: nvmNode, activeEntry: bun, activeNode: bunNode })).toBe(true);
+    expect(check({ plistEntry: nvm, plistNode: nvmNode })).toBe(true);
   });
 
-  it('re-points when only the node interpreter drifted (same entry path)', () => {
-    expect(menubarPlistNeedsRepoint({ plistEntry: bun, plistNode: nvmNode, activeEntry: bun, activeNode: bunNode })).toBe(true);
+  it('keeps a valid recorded interpreter when the same install runs under another Node', () => {
+    expect(check({ plistNode: nvmNode })).toBe(false);
+  });
+
+  it('re-points when the recorded interpreter no longer exists', () => {
+    expect(check({ plistNode: nvmNode, plistNodeExists: false })).toBe(true);
   });
 
   it('does NOT re-point when the plist already matches the active install', () => {
-    expect(menubarPlistNeedsRepoint({ plistEntry: bun, plistNode: bunNode, activeEntry: bun, activeNode: bunNode })).toBe(false);
+    expect(check({})).toBe(false);
   });
 
   it('does NOT re-point (churn) when the active entry cannot be resolved (dev/tsx run)', () => {
-    expect(menubarPlistNeedsRepoint({ plistEntry: bun, plistNode: bunNode, activeEntry: null, activeNode: null })).toBe(false);
+    expect(check({ activeEntry: null, activeNode: null })).toBe(false);
   });
 
   it('re-points a plist that has no baked entry yet (older install)', () => {
-    expect(menubarPlistNeedsRepoint({ plistEntry: null, plistNode: null, activeEntry: bun, activeNode: bunNode })).toBe(true);
+    expect(check({ plistEntry: null, plistNode: null, plistNodeExists: false })).toBe(true);
   });
 });
 
