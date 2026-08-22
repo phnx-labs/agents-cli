@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 67,
-  "commands": 535,
+  "groups": 68,
+  "commands": 546,
   "root": {
     "name": "agents",
     "path": "",
@@ -1308,6 +1308,380 @@
           ],
           "examples": "# Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents artifacts unshare my-plan-a1b2\n\n      # Several at once\n      agents artifacts unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents artifacts unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents artifacts unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents artifacts unshare my-plan-a1b2 --if-exists",
           "notes": "A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents artifacts unshare (same command, different name).",
+          "subcommands": []
+        }
+      ]
+    },
+    {
+      "name": "auth",
+      "path": "auth",
+      "aliases": [],
+      "description": "Sign in to Phoenix ID — the account layer behind spaces and plan tiers",
+      "args": [],
+      "options": [
+        {
+          "flags": "-h, --help",
+          "description": "Show help",
+          "short": "-h",
+          "long": "--help",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        }
+      ],
+      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
+      "notes": "Sign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).",
+      "subcommands": [
+        {
+          "name": "login",
+          "path": "auth login",
+          "aliases": [],
+          "description": "Sign in with the device-code flow",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "logout",
+          "path": "auth logout",
+          "aliases": [],
+          "description": "Clear this machine's session (no other device is affected)",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "space",
+          "path": "auth space",
+          "aliases": [],
+          "description": "Spaces — share work with teammates",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "create",
+              "path": "auth space create",
+              "aliases": [],
+              "description": "Create a space",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--slug <slug>",
+                  "description": "URL-safe name (defaults to a slug of <name>)",
+                  "long": "--slug",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "invite",
+              "path": "auth space invite",
+              "aliases": [],
+              "description": "Invite someone to a space",
+              "args": [
+                {
+                  "name": "email",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--space <space>",
+                  "description": "Which space (defaults to your only one)",
+                  "long": "--space",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--role <role>",
+                  "description": "admin or member",
+                  "long": "--role",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": "member"
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "auth space list",
+              "aliases": [],
+              "description": "Spaces you belong to",
+              "args": [],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "members",
+              "path": "auth space members",
+              "aliases": [],
+              "description": "Who is in a space",
+              "args": [
+                {
+                  "name": "space",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "remove",
+              "path": "auth space remove",
+              "aliases": [],
+              "description": "Remove a member (or yourself) from a space",
+              "args": [
+                {
+                  "name": "email",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--space <space>",
+                  "description": "Which space (defaults to your only one)",
+                  "long": "--space",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "role",
+              "path": "auth space role",
+              "aliases": [],
+              "description": "Change a member's role (owner only for admin)",
+              "args": [
+                {
+                  "name": "email",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "role",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--space <space>",
+                  "description": "Which space (defaults to your only one)",
+                  "long": "--space",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Machine-readable output",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        },
+        {
+          "name": "whoami",
+          "path": "auth whoami",
+          "aliases": [],
+          "description": "Show the signed-in account",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Machine-readable output",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
           "subcommands": []
         }
       ]

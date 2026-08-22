@@ -1002,6 +1002,29 @@ agents browser profiles create cloud \
 
 ---
 
+## Sign in
+
+`agents auth` signs this machine in to **Phoenix ID** — the Phoenix Labs account layer that spaces and plan tiers hang off. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
+
+```bash
+agents auth login                        # shows a code, opens a Phoenix-branded page
+agents auth whoami                       # who this machine is signed in as (--json)
+agents auth logout                       # clears THIS machine; no other device is touched
+
+agents auth space create "Design Team"   # spaces are the team primitive
+agents auth space list                   # spaces you belong to
+agents auth space invite ada@example.com --role member
+agents auth space members                # who is in it
+agents auth space role ada@example.com admin
+agents auth space remove ada@example.com # or remove yourself to leave
+```
+
+The session lives in this machine's agents state dir, so `logout` here signs out nothing else. Every command takes `--json`. `PHOENIX_ID_BASE` points the CLI at a different account service (a local one, for instance) and defaults to production.
+
+Distinct from **Accounts** below: this is *your human identity*; those are the *harness credentials* an agent runs under.
+
+---
+
 ## Accounts
 
 Give a provider credential a durable name once, reuse it everywhere -- across harnesses, across machines.

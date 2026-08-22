@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_67 command groups · 535 commands._
+_68 command groups · 546 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -56,6 +56,22 @@ agents artifacts share revisions <target>   Show the retained prior versions of 
 agents artifacts share status               Show the configured share endpoint and namespace.
 agents artifacts share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
 agents artifacts unshare <targets...>       Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
+```
+
+## auth — Sign in to Phoenix ID — the account layer behind spaces and plan tiers
+
+```
+agents auth                            Sign in to Phoenix ID — the account layer behind spaces and plan tiers
+agents auth login                      Sign in with the device-code flow
+agents auth logout                     Clear this machine's session (no other device is affected)
+agents auth space                      Spaces — share work with teammates
+agents auth space create <name>        Create a space
+agents auth space invite <email>       Invite someone to a space
+agents auth space list                 Spaces you belong to
+agents auth space members [space]      Who is in a space
+agents auth space remove <email>       Remove a member (or yourself) from a space
+agents auth space role <email> <role>  Change a member's role (owner only for admin)
+agents auth whoami                     Show the signed-in account
 ```
 
 ## browser — Launch and drive browser profiles via the Chrome DevTools Protocol. Power-tool for the `browser` skill.

@@ -146,11 +146,12 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
   auth
     .command('logout')
     .description("Clear this machine's session (no other device is affected)")
-    .action(() => {
-      const session = readSession();
-      clearSession();
-      console.log(session ? chalk.green(`Signed out ${session.email ?? 'this machine'}.`) : chalk.gray('Already signed out.'));
-    });
+    .action(() =>
+      runOrDie(() => {
+        const session = readSession();
+        clearSession();
+        console.log(session ? chalk.green(`Signed out ${session.email ?? 'this machine'}.`) : chalk.gray('Already signed out.'));
+      }));
 
   const space = auth.command('space').description('Spaces — share work with teammates');
 
@@ -171,11 +172,15 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
     .command('create <name>')
     .description('Create a space')
     .option('--slug <slug>', 'URL-safe name (defaults to a slug of <name>)')
-    .action((name: string, o: { slug?: string }) =>
-      runOrDie(async () => {
+    .option('--json', 'Machine-readable output')
+    .action((name: string, o: { slug?: string; json?: boolean }, command: Command) => {
+      const json = !!o.json || !!command.optsWithGlobals().json;
+      return runOrDie(async () => {
         const created = await createSpace({ name, slug: o.slug ?? slugify(name) });
+        if (json) return console.log(JSON.stringify(created, null, 2));
         console.log(chalk.green(`Created ${created.name} (${created.slug}).`));
-      }));
+      }, { json });
+    });
 
   space
     .command('members [space]')
@@ -196,46 +201,58 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
     .description('Invite someone to a space')
     .option('--space <space>', 'Which space (defaults to your only one)')
     .option('--role <role>', 'admin or member', 'member')
-    .action((email: string, o: { space?: string; role?: string }) =>
-      runOrDie(async () => {
+    .option('--json', 'Machine-readable output')
+    .action((email: string, o: { space?: string; role?: string; json?: boolean }, command: Command) => {
+      const json = !!o.json || !!command.optsWithGlobals().json;
+      return runOrDie(async () => {
         if (o.role !== 'admin' && o.role !== 'member') {
           throw new Error(`--role must be admin or member (got '${o.role}').`);
         }
         const target = await requireSpace(o.space);
         const result = await createSpaceInvite(target.id, { email, role: o.role });
+        if (json) return console.log(JSON.stringify(result, null, 2));
         console.log(
           result.member_added
             ? chalk.green(`Added ${email} to ${target.name} as ${o.role}.`)
             : chalk.green(`Invited ${email} to ${target.name} as ${o.role}. Invite code: ${result.invite_code}`),
         );
-      }));
+      }, { json });
+    });
 
   space
     .command('role <email> <role>')
     .description('Change a member\'s role (owner only for admin)')
     .option('--space <space>', 'Which space (defaults to your only one)')
-    .action((email: string, role: string, o: { space?: string }) =>
-      runOrDie(async () => {
+    .option('--json', 'Machine-readable output')
+    .action((email: string, role: string, o: { space?: string; json?: boolean }, command: Command) => {
+      const json = !!o.json || !!command.optsWithGlobals().json;
+      return runOrDie(async () => {
         if (role !== 'admin' && role !== 'member') {
           throw new Error(`role must be admin or member (got '${role}').`);
         }
         const target = await requireSpace(o.space);
         const member = resolveMemberFromList(await listSpaceMembers(target.id), email);
         if (!member) throw new Error(`${email} is not in ${target.name}.`);
-        await updateSpaceMemberRole(target.id, member.user_id, role);
+        const updated = await updateSpaceMemberRole(target.id, member.user_id, role);
+        if (json) return console.log(JSON.stringify(updated, null, 2));
         console.log(chalk.green(`${email} is now ${role} in ${target.name}.`));
-      }));
+      }, { json });
+    });
 
   space
     .command('remove <email>')
     .description('Remove a member (or yourself) from a space')
     .option('--space <space>', 'Which space (defaults to your only one)')
-    .action((email: string, o: { space?: string }) =>
-      runOrDie(async () => {
+    .option('--json', 'Machine-readable output')
+    .action((email: string, o: { space?: string; json?: boolean }, command: Command) => {
+      const json = !!o.json || !!command.optsWithGlobals().json;
+      return runOrDie(async () => {
         const target = await requireSpace(o.space);
         const member = resolveMemberFromList(await listSpaceMembers(target.id), email);
         if (!member) throw new Error(`${email} is not in ${target.name}.`);
         await removeSpaceMember(target.id, member.user_id);
+        if (json) return console.log(JSON.stringify({ removed: true, email, space: target.slug }, null, 2));
         console.log(chalk.green(`Removed ${email} from ${target.name}.`));
-      }));
+      }, { json });
+    });
 }
