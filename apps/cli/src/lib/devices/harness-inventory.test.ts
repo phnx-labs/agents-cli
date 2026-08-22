@@ -48,6 +48,33 @@ function row(overrides: Partial<HarnessRow> = {}): HarnessRow {
 }
 
 describe('summarizeQuota', () => {
+
+  it('an out_of_credits marker blocks readiness even with no live windows (RUSH-3018)', () => {
+    // The normal state hours/days after a run: cached windows have expired, so
+    // only the persisted refusal marker remains. It must NOT read as available.
+    const snap: UsageSnapshot = {
+      source: 'live', sourceLabel: 'live', capturedAt: null, windows: [],
+      unavailable: { reason: 'out_of_credits' },
+    };
+    // accountStatus 'available' is the coarse hardcoded value for a signed-in Claude.
+    const q = summarizeQuota(snap, null, 'available');
+    expect(q.status).toBe('out_of_credits');
+    expect(computeReady(true, q)).toEqual({ ready: false, reason: 'out of credits' });
+  });
+
+  it('an unexpired session_limit marker with no windows blocks; an expired one does not', () => {
+    const future: UsageSnapshot = {
+      source: 'live', sourceLabel: 'live', capturedAt: null, windows: [],
+      unavailable: { reason: 'session_limit', resetsAt: new Date(Date.now() + 3600_000) },
+    };
+    expect(summarizeQuota(future, null, 'available').status).toBe('rate_limited');
+    const past: UsageSnapshot = {
+      source: 'live', sourceLabel: 'live', capturedAt: null, windows: [],
+      unavailable: { reason: 'session_limit', resetsAt: new Date(Date.now() - 1000) },
+    };
+    // expired marker → falls through to the coarse available status
+    expect(summarizeQuota(past, null, 'available').status).toBe('available');
+  });
   it('returns null status and no percent when there is no snapshot', () => {
     expect(summarizeQuota(null)).toEqual(quota(null, null));
     expect(summarizeQuota(snapshot([]))).toEqual(quota(null, null));

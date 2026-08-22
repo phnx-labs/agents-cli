@@ -2134,6 +2134,28 @@ export function detectOutOfCredits(text: string): boolean {
 }
 
 /**
+ * Classify what a Claude run's output + exit code means for the account's
+ * persisted refusal marker. Pure and exported so the persist/clear decision is
+ * unit-tested on the real path (runWithFallback can't be driven with a real
+ * `claude` spawn in tests). Precedence: a session-limit reset wins (it carries a
+ * clock), then a clock-less billing exhaustion, then a clean success clears any
+ * stale marker; anything else leaves the marker untouched.
+ */
+export type ClaudeRefusalAction =
+  | { action: 'note_session'; resetsAt: Date }
+  | { action: 'note_out_of_credits' }
+  | { action: 'clear' }
+  | { action: 'none' };
+
+export function classifyClaudeRunRefusal(output: string, exitCode: number): ClaudeRefusalAction {
+  const sessionLimitReset = parseClaudeSessionLimitReset(output);
+  if (sessionLimitReset) return { action: 'note_session', resetsAt: sessionLimitReset };
+  if (detectOutOfCredits(output)) return { action: 'note_out_of_credits' };
+  if (exitCode === 0) return { action: 'clear' };
+  return { action: 'none' };
+}
+
+/**
  * Patterns that indicate an authentication failure — the agent is logged out,
  * its token was revoked, or the session expired. These are the user-visible
  * strings a logged-out agent surfaces (observed across the routine-run corpus).
@@ -2407,18 +2429,23 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
     }
 
     const output = `${result.stderr}\n${result.stdout}`;
-    const sessionLimitReset = agent === 'claude' ? parseClaudeSessionLimitReset(output) : null;
-    // A billing exhaustion (tokens/credits out, spend cap) is a distinct,
-    // clock-less refusal — persist it so rotation stops re-picking a dead
-    // account every launch, and clear any prior marker when a run SUCCEEDS.
-    const outOfCredits = agent === 'claude' && !sessionLimitReset && detectOutOfCredits(output);
+    // Persist a per-account refusal marker so rotation stops re-picking a
+    // known-dead account: a session-limit recovers on its clock, a billing
+    // exhaustion (tokens/credits) recovers only on a later successful run, and a
+    // clean run clears any stale marker. Decision extracted + unit-tested in
+    // classifyClaudeRunRefusal.
+    const sessionLimitReset =
+      agent === 'claude' ? parseClaudeSessionLimitReset(output) : null;
     if (agent === 'claude' && version) {
-      const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
-      const usageKey = getUsageLookupKey(account);
-      if (usageKey) {
-        if (sessionLimitReset) noteClaudeSessionLimit(usageKey, sessionLimitReset);
-        else if (outOfCredits) noteClaudeOutOfCredits(usageKey);
-        else if (result.exitCode === 0) clearClaudeAccountRefusal(usageKey);
+      const refusal = classifyClaudeRunRefusal(output, result.exitCode ?? 1);
+      if (refusal.action !== 'none') {
+        const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
+        const usageKey = getUsageLookupKey(account);
+        if (usageKey) {
+          if (refusal.action === 'note_session') noteClaudeSessionLimit(usageKey, refusal.resetsAt);
+          else if (refusal.action === 'note_out_of_credits') noteClaudeOutOfCredits(usageKey);
+          else if (refusal.action === 'clear') clearClaudeAccountRefusal(usageKey);
+        }
       }
     }
 

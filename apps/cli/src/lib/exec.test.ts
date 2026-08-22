@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -1134,5 +1134,36 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
     const env = buildExecEnv(execOpts({ agent: 'claude', version, prompt: 'do the thing' }));
 
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBe('sk-ant-oat01-alpha');
+  });
+});
+
+
+describe('classifyClaudeRunRefusal (RUSH-3018 — persist/clear decision on the real path)', () => {
+  it('detectOutOfCredits matches billing exhaustion but NOT a time-window rate limit', () => {
+    expect(detectOutOfCredits("You're out of usage credits")).toBe(true);
+    expect(detectOutOfCredits("hit your org's monthly spend limit")).toBe(true);
+    // A pure rate limit must NOT be classified as out-of-credits, or it would
+    // wrongly become clock-less and never recover.
+    expect(detectOutOfCredits('You have hit your session limit · resets 11:20pm')).toBe(false);
+    expect(detectOutOfCredits('rate limit exceeded, try again')).toBe(false);
+  });
+
+  it('a session-limit refusal wins and carries its reset clock', () => {
+    const r = classifyClaudeRunRefusal('You have hit your session limit · resets 11:20pm', 1);
+    expect(r.action).toBe('note_session');
+    if (r.action === 'note_session') expect(r.resetsAt).toBeInstanceOf(Date);
+  });
+
+  it('a billing exhaustion is note_out_of_credits (no clock)', () => {
+    expect(classifyClaudeRunRefusal("You're out of usage credits", 1)).toEqual({ action: 'note_out_of_credits' });
+    expect(classifyClaudeRunRefusal('monthly spend limit reached', 1)).toEqual({ action: 'note_out_of_credits' });
+  });
+
+  it('a clean run (exit 0, no refusal) clears any stale marker', () => {
+    expect(classifyClaudeRunRefusal('all good, done', 0)).toEqual({ action: 'clear' });
+  });
+
+  it('a non-zero exit with no recognized refusal leaves the marker untouched', () => {
+    expect(classifyClaudeRunRefusal('some unrelated error', 1)).toEqual({ action: 'none' });
   });
 });

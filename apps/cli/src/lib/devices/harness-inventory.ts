@@ -106,15 +106,33 @@ export function summarizeQuota(
   accountStatus: AccountInfo['usageStatus'] = null,
 ): QuotaSummary {
   if (!snapshot || snapshot.windows.length === 0) {
-    const status = accountStatus;
+    // An active refusal marker (persisted out_of_credits, or an unexpired
+    // session_limit) blocks even when there are no live utilization windows —
+    // which is the normal state hours/days after a run, once cached windows
+    // expire. Check it BEFORE trusting the coarse account status, which is
+    // hardcoded 'available' for a signed-in Claude; otherwise a tokens-exhausted
+    // account reads ready:true here (RUSH-3018 finding, `agents devices harnesses`).
+    const marker = snapshot?.unavailable;
+    let status = accountStatus;
+    let reason = unavailableReason;
+    if (marker?.reason === 'out_of_credits') {
+      status = 'out_of_credits';
+      reason = 'out of credits';
+    } else if (
+      marker?.reason === 'session_limit' &&
+      (!marker.resetsAt || marker.resetsAt.getTime() > Date.now())
+    ) {
+      status = 'rate_limited';
+      reason = 'session-limited';
+    }
     return {
       status,
       verdict: status ?? 'unavailable',
       usedPercent: null,
       stale: false,
       capturedAt: snapshot?.capturedAt?.toISOString() ?? null,
-      resetsAt: null,
-      unavailableReason: status ? null : (unavailableReason ?? 'usage unavailable'),
+      resetsAt: marker?.resetsAt?.toISOString() ?? null,
+      unavailableReason: status ? null : (reason ?? 'usage unavailable'),
     };
   }
   const blocking = snapshot.windows.filter((w) => w.key !== 'sonnet_week');
