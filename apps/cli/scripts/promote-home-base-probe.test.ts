@@ -30,12 +30,18 @@ function stubBin(names: string[], overrides: Record<string, string> = {}): strin
   // dir ONLY — a real /usr/bin on it leaked the host's own jq into the
   // "missing tool" case. bash/env come in as symlinks so the stubs' shebangs
   // and the probe itself still resolve.
-  for (const [name, target] of [
-    ['bash', '/usr/bin/bash'],
-    ['env', '/usr/bin/env'],
-    ['sh', '/bin/sh'],
+  // Interpreter locations differ by OS — bash is /usr/bin/bash on Linux but
+  // /bin/bash on macOS (no /usr/bin/bash there). Resolve each name from its
+  // candidates or runProbe spawns a nonexistent <stub>/bash on darwin and
+  // every test reads status:null (the exact all-Mac failure this fixes).
+  for (const [name, candidates] of [
+    ['bash', ['/usr/bin/bash', '/bin/bash']],
+    ['env', ['/usr/bin/env', '/bin/env']],
+    ['sh', ['/bin/sh', '/usr/bin/sh']],
   ] as const) {
-    if (!names.includes(name) && fs.existsSync(target)) fs.symlinkSync(target, path.join(dir, name));
+    if (names.includes(name)) continue;
+    const target = candidates.find((c) => fs.existsSync(c));
+    if (target) fs.symlinkSync(target, path.join(dir, name));
   }
   return dir;
 }
