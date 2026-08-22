@@ -464,7 +464,8 @@ command — see *Recommendations*.
 The measured numbers — 145 distinct browser visitors in 30 days, of which ~61 are
 confirmed-external humans (search/social referred, 15+ countries), against the
 ~19/fortnight this report estimated — are in the [Addendum](#addendum-the-command-was-run-measured-human-traffic-2026-08-21)
-at the end. Cloudflare stays dark: its token still lacks `zone.analytics.read`.
+at the end. Cloudflare's edge volume is now read too (from the authenticated
+dashboard): ~38,946 requests/month vs ~103 humans — machines ≫ people, ~380:1.
 
 ## Recommendations
 
@@ -715,15 +716,31 @@ saw: **ChatGPT** (people asking an LLM and clicking through) and **LinkedIn**. T
 Autocapture also shows a non-trivial share of clicks in Chinese (`下载 Windows CLI`),
 i.e. real international traffic.
 
-### Still dark: Cloudflare
+### Cloudflare — read from the authenticated dashboard (2026-08-21)
 
-Cloudflare zone analytics remains **403** — the `cloudflare.com` API token
-authenticates but lacks `com.cloudflare.api.account.zone.analytics.read` on zone
-`cb5b568d…`. So total requests (bots + humans + `curl | bash` install fetches) are
-still unmeasured server-side, which means the ratio of **install-script fetches to
-humans-on-the-page (103)** — the last missing number in the funnel — is unknown.
-Closing it is one dashboard action: add **Zone → Analytics → Read** to the token
-(or mint a token with that scope) and re-run the same GraphQL query.
+The `cloudflare.com` API token still 403s on `zone.analytics.read`, but the number
+was reachable another way: the logged-in Cloudflare dashboard for the `agi-cli.sh`
+zone, read directly. It closes the machine-vs-human side of the funnel.
+
+- **~38,946 requests served at the edge in the last ~month** (dashboard "Share
+  Your Stats"), with **4,297 attacks blocked** in the same window.
+- Against PostHog's **~103 human browser visits** to `agi-cli.sh` in 30 days, that
+  is a **~380 : 1 ratio of edge requests to humans-who-ran-JS.** Even after
+  discounting the blocked-attack noise, the overwhelming majority of `agi-cli.sh`
+  traffic is non-browser — bots, CI, and `curl | bash` installer fetches — which is
+  the server-side confirmation of Finding 1: the download volume is machines, not
+  people.
+- Geography of that edge traffic (last 24h) skews the same way the human data does:
+  US 835, Spain 162, Argentina 74, France 54, China 52.
+
+**One number still genuinely unavailable:** the exact split of the installer path
+(`curl | bash`) versus page loads. The free plan's dashboard exposes no per-path
+server breakdown, Cloudflare Web Analytics is a JS beacon (browser-only, so it
+would miss `curl` the same way PostHog does), and the per-path GraphQL query needs
+the `zone.analytics.read` scope the token lacks. Getting that one figure is still
+the "add **Zone → Analytics → Read** to the token" action — but it is now a
+refinement, not the missing headline: the headline (machines ≫ humans, ~380:1) is
+measured.
 
 *Pulled 2026-08-21 via HogQL against PostHog project 299876; every query is
 reproducible with `agents secrets exec posthog.com -- <curl to /api/projects/@current/query/>`.*
