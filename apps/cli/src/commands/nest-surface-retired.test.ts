@@ -60,7 +60,9 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(names).toContain('artifacts');
     expect(names).toContain('events');
     expect(names).toContain('insights');
-    expect(names).toContain('org');
+    // 'auth'/'org' were fully retired with the Prix-coupled account layer (RUSH-2581).
+    expect(names).not.toContain('org');
+    expect(names).not.toContain('auth');
 
     const artifacts = program.commands.find((c) => c.name() === 'artifacts');
     expect(artifacts?.commands.map((c) => c.name())).toContain('unshare');
@@ -68,22 +70,21 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(events?.commands.map((c) => c.name())).toContain('audit');
     const insights = program.commands.find((c) => c.name() === 'insights');
     expect(insights?.commands.map((c) => c.name())).toContain('trends');
-    const auth = program.commands.find((c) => c.name() === 'auth');
-    expect(auth?.commands.map((c) => c.name())).toContain('space');
 
     for (const name of ['unshare', 'audit', 'trends'] as const) {
       expect(isKnownTopLevelCommand(name)).toBe(false);
       expect(RETIRED_TOP_LEVEL_COMMANDS.has(name)).toBe(true);
     }
-    expect(isKnownTopLevelCommand('org')).toBe(true);
-    expect(RETIRED_TOP_LEVEL_COMMANDS.has('org')).toBe(false);
+    for (const name of ['auth', 'org'] as const) {
+      expect(isKnownTopLevelCommand(name)).toBe(false);
+      expect(RETIRED_TOP_LEVEL_COMMANDS.has(name)).toBe(true);
+    }
   });
 
-  it('`agents org list` still runs and prints the auth space deprecation on stderr', () => {
+  it('`agents org list` is an unknown command after the Prix-layer removal (RUSH-2581)', () => {
     const home = guardedHome();
     const r = run(home, 'org', 'list');
-    expect(r.stderr ?? '').toMatch(/agents org is deprecated — use `agents auth space`/);
-    expect(r.stderr ?? '').toMatch(/Not signed in/);
+    expect(r.stderr ?? '').toMatch(/unknown command 'org'/);
     expect(r.status).not.toBe(0);
   });
 
