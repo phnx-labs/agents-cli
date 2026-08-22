@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 557 commands._
+_67 command groups · 535 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -56,24 +56,6 @@ agents artifacts share revisions <target>   Show the retained prior versions of 
 agents artifacts share status               Show the configured share endpoint and namespace.
 agents artifacts share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
 agents artifacts unshare <targets...>       Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
-```
-
-## auth — Sign in to your Prix account (spaces, paid tiers)
-
-```
-agents auth                            Sign in to your Prix account (spaces, paid tiers)
-agents auth login                      Sign in via the device-code flow
-agents auth logout                     Clear the local `agents auth login` session
-agents auth space                      Create and manage a Prix space (invite collaborators)
-agents auth space create <name>        Create a space (free tier: 1 owned space)
-agents auth space invite <email>       Invite (or directly add) a member
-agents auth space leave [space]        Leave a space you do not own
-agents auth space list                 List spaces you own or belong to
-agents auth space members [space]      List a space's members
-agents auth space remove <email>       Remove a member from a space
-agents auth space role <email> <role>  Change a member's role (owner-only for admin)
-agents auth space view [space]         Show one space (defaults to your only space)
-agents auth whoami                     Show the signed-in account
 ```
 
 ## browser — Launch and drive browser profiles via the Chrome DevTools Protocol. Power-tool for the `browser` skill.
@@ -470,20 +452,6 @@ agents open [url]       Resume a session from an agents:// deep link, or registe
 agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents open status      Report whether the agents:// URL scheme handler is registered.
 agents open unregister  Remove the agents:// URL scheme handler.
-```
-
-## org — Deprecated alias of `agents auth space` — create and manage a Prix space
-
-```
-agents org                      Deprecated alias of `agents auth space` — create and manage a Prix space
-agents org create <name>        Create a space (free tier: 1 owned space)
-agents org invite <email>       Invite (or directly add) a member
-agents org leave [space]        Leave a space you do not own
-agents org list                 List spaces you own or belong to
-agents org members [space]      List a space's members
-agents org remove <email>       Remove a member from a space
-agents org role <email> <role>  Change a member's role (owner-only for admin)
-agents org view [space]         Show one space (defaults to your only space)
 ```
 
 ## perf — Latency rollups from the disposable perf warehouse (hooks, commands, runs)

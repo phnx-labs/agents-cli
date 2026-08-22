@@ -293,12 +293,7 @@ Observe (read the fleet — no store merge):
   sync status                     Sync/drift only (not the live fleet snapshot)
   devices snapshot                One-process inventory + active sessions poll
 
-Identity (Prix account — shared with paid tiers):
-  auth login                      Sign in via the device-code flow
-  auth whoami                     Show the signed-in Prix user
-  auth space                      Create and manage a space (invite collaborators)
-
-Credentials (harness keys, not your Prix user):
+Credentials (harness keys):
   harness                         Custom (host CLI + model + auth) harnesses; replaces former profiles command
   secrets                         Keychain-backed env bundles; synced vault: secrets vault unlock|lock
   accounts                        Provider credentials + native OAuth logout

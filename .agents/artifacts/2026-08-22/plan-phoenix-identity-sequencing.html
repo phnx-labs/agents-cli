@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Phoenix login: own backend now, consolidate under Phoenix ID later</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-approved">approved</span></div>
+<h1>Phoenix login: own backend now, consolidate under Phoenix ID later</h1>
+<p class="summary">Decision + implementation plan: detach agents-cli identity from the Rush/Prix backend, stand up its own account backend built for later Phoenix-ID consolidation via Google sub matching.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">prix/api identity audit verdict: deeply Rush-entangled (product columns on users, rush_user_id FK, 15-table GDPR transaction, RLS across ~12 tables, rush:// SSO scheme)<span class="meta-sep" aria-hidden="true">·</span>agents-cli shipped surface = 13 endpoints (3 auth device-code, 9 spaces, 1 billing) — the exact contract an own backend must implement<span class="meta-sep" aria-hidden="true">·</span>client coupling is scattered: the user.yaml token-read implemented 7x, api.prix.dev hardcoded 5x; no identity seam exists<span class="meta-sep" aria-hidden="true">·</span>agents-cli has ~zero users; its only Prix-backend footprint is a conference-signup form</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/RUSH-2581/no-human-identity-substrate-ssosaml-cannot-attach-because-there-is-no" target="_blank" rel="noopener">RUSH-2581</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">phoenix-detach-prix</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-2581</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-22</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#what-changes-for-whom" data-toc-for="what-changes-for-whom"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>What changes for whom</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item toc-sub" href="#phase-a-detach-the-shipped-prix-coupling-this-pr-release-1-22-44" data-toc-for="phase-a-detach-the-shipped-prix-coupling-this-pr-release-1-22-44">Phase A — Detach the shipped Prix coupling (this PR, release 1.22.44)</a><a class="toc-item toc-sub" href="#phase-b-one-identity-seam" data-toc-for="phase-b-one-identity-seam">Phase B — One identity seam</a><a class="toc-item toc-sub" href="#phase-c-the-own-backend-agents-id" data-toc-for="phase-c-the-own-backend-agents-id">Phase C — The own backend (agents-id)</a><a class="toc-item toc-sub" href="#phase-d-re-land-the-cli-surface" data-toc-for="phase-d-re-land-the-cli-surface">Phase D — Re-land the CLI surface</a><a class="toc-item toc-sub" href="#deferred-phoenix-id-consolidation-ticketed-not-built" data-toc-for="deferred-phoenix-id-consolidation-ticketed-not-built">Deferred — Phoenix ID consolidation (ticketed, not built)</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#workload-comparison-stress-tested" data-toc-for="workload-comparison-stress-tested"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Workload comparison (stress-tested)</a><a class="toc-item" href="#checklist" data-toc-for="checklist"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Checklist</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ul>
+<li><strong>The sequencing call</strong>: own agents-cli backend now + Phoenix-ID consolidation later — approved by Muqsit 2026-08-22; this document is the execution shape.</li>
+<li><strong>The seven linkability rules</strong> are the load-bearing bet: they keep "consolidate later" cheap. Veto or add there.</li>
+<li><strong>Phase A soft-vs-hard removal</strong>: <code>agents auth</code>/<code>org</code> are removed as retired names (fail loudly). A "Phoenix sign-in coming" stub was considered and skipped — a stub teaches a surface that doesn't exist yet.</li>
+<li><strong>The new backend's home</strong>: suggested repo <code>agents-id</code> with its own Supabase project — name and hosting are Muqsit's pick before Phase C dispatch.</li>
+</ul>
+<h2 id="purpose">Purpose</h2><p>Muqsit, 2026-08-22: agents-cli must not ride Rush/Prix's login ("that's a separate product") — but the family should eventually share a top-level <strong>Phoenix login</strong>, Apple-ID style: <em>"if users have similar emails we can later also consolidate them, right? Evaluate the workload of doing it now versus after."</em> Answer: consolidation later is cheap <strong>if</strong> matched on the Google <code>sub</code> (not email) and <strong>if</strong> the own backend is built linkable from day one.</p>
+<h2 id="current-architecture">Current architecture</h2><figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+  <svg class="artifact-diagram" viewBox="0 0 980 310" role="img" aria-label="Sequencing: today's Prix coupling, the own-backend phase, and later Phoenix-ID consolidation">
+    <text x="160" y="28" text-anchor="middle" fill="#dc2626" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700">TODAY (shipped 1.22.42+)</text>
+    <rect x="30" y="45" width="260" height="72" rx="8" fill="#1a0e0e" stroke="#dc2626" stroke-width="1.5"></rect>
+    <text x="160" y="72" text-anchor="middle" fill="#f2f2f2" font-family="Inter, system-ui, sans-serif" font-size="12">agents auth / org / entitlement</text>
+    <text x="160" y="90" text-anchor="middle" fill="#9ca3af" font-family="JetBrains Mono, monospace" font-size="10">5x api.prix.dev · 7x user.yaml reads</text>
+    <line x1="160" y1="117" x2="160" y2="157" stroke="#dc2626" stroke-width="2" marker-end="url(#aR)"></line>
+    <rect x="30" y="160" width="260" height="72" rx="8" fill="#1a0e0e" stroke="#dc2626" stroke-width="1.5"></rect>
+    <text x="160" y="187" text-anchor="middle" fill="#f2f2f2" font-family="Inter, system-ui, sans-serif" font-size="12">prix/api — Rush's one DB</text>
+    <text x="160" y="205" text-anchor="middle" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="10">users carries Rush product columns; rush:// SSO</text>
+    <text x="160" y="262" text-anchor="middle" fill="#f87171" font-family="Inter, system-ui, sans-serif" font-size="11">identity entangled with the revenue product</text>
+
+    <text x="490" y="28" text-anchor="middle" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700">NOW (Phases A-D)</text>
+    <rect x="360" y="45" width="260" height="72" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="490" y="72" text-anchor="middle" fill="#f2f2f2" font-family="Inter, system-ui, sans-serif" font-size="12">agents-cli identity seam (one client)</text>
+    <text x="490" y="90" text-anchor="middle" fill="#9ca3af" font-family="JetBrains Mono, monospace" font-size="10">lib/identity: 1 base URL · 1 token read</text>
+    <line x1="490" y1="117" x2="490" y2="157" stroke="#a3e635" stroke-width="2" marker-end="url(#aG)"></line>
+    <rect x="360" y="160" width="260" height="72" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+    <text x="490" y="187" text-anchor="middle" fill="#f2f2f2" font-family="Inter, system-ui, sans-serif" font-size="12">agents-id — own Bun/Hono + Supabase</text>
+    <text x="490" y="205" text-anchor="middle" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="10">13 endpoints · Google OAuth · stores sub</text>
+    <text x="490" y="262" text-anchor="middle" fill="#a3e635" font-family="Inter, system-ui, sans-serif" font-size="11">Phoenix-branded sign-in; zero Rush risk</text>
+
+    <text x="820" y="28" text-anchor="middle" fill="#38bdf8" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700">LATER (when users overlap)</text>
+    <rect x="690" y="45" width="260" height="72" rx="8" fill="#0a1420" stroke="#38bdf8" stroke-width="1.5"></rect>
+    <text x="820" y="72" text-anchor="middle" fill="#f2f2f2" font-family="Inter, system-ui, sans-serif" font-size="12">Phoenix ID service (one login)</text>
+    <text x="820" y="90" text-anchor="middle" fill="#9ca3af" font-family="Inter, system-ui, sans-serif" font-size="10">both products re-auth once via Google</text>
+    <line x1="820" y1="117" x2="820" y2="157" stroke="#38bdf8" stroke-width="2" marker-end="url(#aB)"></line>
+    <rect x="690" y="160" width="260" height="72" rx="8" fill="#0a1420" stroke="#38bdf8" stroke-width="1.5"></rect>
+    <text x="820" y="187" text-anchor="middle" fill="#f2f2f2" font-family="Inter, system-ui, sans-serif" font-size="12">sub-match + scripted re-key</text>
+    <text x="820" y="205" text-anchor="middle" fill="#9ca3af" font-family="JetBrains Mono, monospace" font-size="10">same Google sub → same human</text>
+    <text x="820" y="262" text-anchor="middle" fill="#38bdf8" font-family="Inter, system-ui, sans-serif" font-size="11">cheap only if the seven rules held</text>
+
+    <line x1="300" y1="196" x2="352" y2="196" stroke="#666" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#aN)"></line>
+    <line x1="630" y1="196" x2="682" y2="196" stroke="#666" stroke-width="2" stroke-dasharray="4 4" marker-end="url(#aN)"></line>
+    <defs>
+      <marker id="aR" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#dc2626"></path></marker>
+      <marker id="aG" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#a3e635"></path></marker>
+      <marker id="aB" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#38bdf8"></path></marker>
+      <marker id="aN" markerWidth="9" markerHeight="9" refX="8" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="#666"></path></marker>
+    </defs>
+  </svg>
+  <figcaption><b>Figure 1.</b> Detach from the entangled Rush DB now, build the own backend linkable, and make Phoenix ID a deliberate later consolidation instead of a forced merge.</figcaption>
+</figure><h2 id="what-changes-for-whom">What changes for whom</h2><div class="artifact-behavior">
+  <div class="artifact-behavior-panel" data-state="current" data-evidence="capture">
+    <p><strong>Today (shipped 1.22.42/43):</strong> <code>agents auth login</code> device-codes against <code>api.prix.dev</code> — Rush's backend — and silently falls back to the <code>rush login</code> session. <code>agents org</code> manages <em>Rush's</em> spaces; account caps are gated by <em>Rush's</em> billing tier. The sign-in page says "A Rush CLI is trying to sign in."</p>
+  </div>
+  <div class="artifact-behavior-panel" data-state="proposed" data-evidence="mockup">
+    <p><strong>After Phases A-D:</strong> <code>agents auth login</code> device-codes against agents-cli's <em>own</em> backend; the browser page reads <strong>"Sign in with Phoenix · agents-cli"</strong> with Google as the only provider. No <code>rush</code> fallback, no Prix URLs in the identity path. Teams/spaces live in agents-cli's own database. Later, one click re-links the account under the family-wide Phoenix ID.</p>
+  </div>
+</div><h2 id="proposed-changes">Proposed Changes</h2><h3 id="phase-a-detach-the-shipped-prix-coupling-this-pr-release-1-22-44">Phase A — Detach the shipped Prix coupling (this PR, release 1.22.44)</h3><pre><code>DELETED  src/lib/prix-account.ts (+test)   src/commands/auth.ts   src/commands/org.ts
+DELETED  src/lib/entitlement.ts (+test)
+EDITED   src/commands/accounts.ts   (cap/dormant gates removed; registration uncapped)
+EDITED   src/commands/insights.ts   (paid gate removed; full report always)
+EDITED   src/bootstrap.ts, src/cli/command-registry.ts, src/lib/startup/command-registry.ts
+         ('auth'/'org' retired: fail loudly, no auto-correct)
+</code></pre>
+<p>Untouched (deliberate Rush <em>feature</em> integrations, not identity): <code>lib/cloud/rush.ts</code>, <code>lib/secrets/drivers/rush.ts</code>, <code>lib/session/cloud.ts</code>, <code>commands/factory.ts</code>, <code>lib/channels/owner-sink.ts</code>.</p>
+<h3 id="phase-b-one-identity-seam">Phase B — One identity seam</h3><p>New <code>apps/cli/src/lib/identity/</code> client modeled on the proven seams (<code>SyncBackend</code>, <code>CloudProvider</code>): one base-URL constant, one token reader, one HTTP funnel, own session file, no <code>~/.rush/user.yaml</code> fallback.</p>
+<h3 id="phase-c-the-own-backend-agents-id">Phase C — The own backend (<code>agents-id</code>)</h3><p>Own Bun/Hono service + own Supabase project implementing the audited contract:</p>
+<pre><code>POST /api/v1/auth/device/authorization      # RFC 8628 start
+POST /api/v1/auth/device/token              # poll; errors: authorization_pending | slow_down | expired_token | access_denied
+GET  /api/v1/auth/me                        # {userId, email, valid}
+GET/POST/PATCH/DELETE /api/v1/spaces[...]   # 9 spaces/members/invites routes, audited shapes
+GET  /api/v1/billing/subscription?agent=... # {tierName} — "free" for everyone initially
+</code></pre>
+<p><strong>Seven linkability rules (hard requirements):</strong> Google-only IdP; persist the Google <code>sub</code> on our user row; opaque internal ids; no passwords, ever; verified-email-only writes; product fields in a separate 1:1 profile table; callback scheme as config, not a literal.</p>
+<h3 id="phase-d-re-land-the-cli-surface">Phase D — Re-land the CLI surface</h3><p><code>agents auth login/whoami/logout</code> + <code>agents auth space</code> through the Phase-B seam at the Phase-C service; docs + CHANGELOG; release; fleet verify.</p>
+<h3 id="deferred-phoenix-id-consolidation-ticketed-not-built">Deferred — Phoenix ID consolidation (ticketed, not built)</h3><p>When product-user overlap is real: users re-auth once via Google against the unified project (no cross-project auth-row copying — unsupported in Supabase; the <code>sub</code> match is the join), then a scripted re-key of <code>spaces.owner_user_id</code> / <code>space_members.user_id</code>. Rush migrates on its own schedule.</p>
+<h2 id="public-interface">Public Interface</h2><table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Before (1.22.42/43)</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents auth login/whoami/logout</code></td>
+<td>Device-code against <code>api.prix.dev</code>, <code>rush login</code> fallback</td>
+<td>Removed in 1.22.44; returns in Phase D against <code>agents-id</code></td>
+</tr>
+<tr>
+<td><code>agents org</code> / <code>agents auth space</code></td>
+<td>Rush spaces CRUD</td>
+<td>Removed; returns as own-backend spaces in Phase D</td>
+</tr>
+<tr>
+<td><code>agents accounts add/name/attach</code></td>
+<td>Capped 3-per-harness on free (Rush billing tier)</td>
+<td>Uncapped; no tier reads</td>
+</tr>
+<tr>
+<td><code>agents insights</code></td>
+<td>Friction sections + <code>--by account</code> paid-gated</td>
+<td>Full report, no <code>plan</code>/<code>notice</code> JSON fields</td>
+</tr>
+</tbody></table>
+<h2 id="validation">Validation</h2><pre><code>Phase A: fleet runs 1.22.44; `agents auth` fails loudly as a retired name;
+         grep gate: no api.prix.dev in the identity path; suites green (34/34 affected tests)
+Phase C: live device-code round-trip from a clean box; Phoenix-branded page screenshotted
+Phase D: end-to-end on an installed release, not a dev build
+</code></pre>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Linkability rules skipped in Phase C</td>
+<td>They are hard requirements in the brief; reviewed against the checklist before merge</td>
+</tr>
+<tr>
+<td>Dogfooders lose the rush-session freebie</td>
+<td>Named cost; one extra login, internal users only</td>
+</tr>
+<tr>
+<td>Consolidation grows with real user data</td>
+<td>Consolidate before general-audience launch; re-key is per-user scripted</td>
+</tr>
+<tr>
+<td>Second device-code flow drifts from RFC 8628 semantics</td>
+<td>Fails loudly; contract pinned by the audited client shapes</td>
+</tr>
+</tbody></table>
+<h2 id="workload-comparison-stress-tested">Workload comparison (stress-tested)</h2><table>
+<thead>
+<tr>
+<th></th>
+<th>Phoenix ID now</th>
+<th>Own backend now</th>
+<th>Consolidation later (rules held)</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Effort</td>
+<td>Multi-week; RLS across ~12 tables + 15-table GDPR transaction re-verified</td>
+<td>Single-digit agent sessions; contract already specified</td>
+<td>A few sessions + scripted re-key</td>
+</tr>
+<tr>
+<td>Riskiest step</td>
+<td>Live identity surgery on the revenue product (silent RLS/GDPR failure modes)</td>
+<td>Device-code flow + verification page — fails loudly, self-revealing</td>
+<td>Cutover window: stale tokens/invites, slug uniqueness</td>
+</tr>
+<tr>
+<td>Agent-dispatchable</td>
+<td>No — human sign-off per diff</td>
+<td>Largely yes</td>
+<td>Mostly scripted</td>
+</tr>
+</tbody></table>
+<aside class="artifact-callout"><strong>The real bet is the rules, not the sequencing.</strong> Consolidate-later stays cheap only while both products share one IdP (Google), the <code>sub</code> is persisted, and no passwords exist. Skip those and "later" balloons toward the extraction project's risk profile. Honest cost: dogfooders lose today's shared-session freebie (the <code>rush login</code> fallback) — one extra login, internal users only.</aside><h2 id="checklist">Checklist</h2><div class="checklist"><div class="checklist-head">1 / 5 done</div><ul class="checklist-items"><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">Phase A: detach the Prix surface (this PR) → release 1.22.44 → fleet verify</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase B: <code>lib/identity/</code> seam</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase C: <code>agents-id</code> backend (awaits repo-name/hosting pick)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Phase D: re-land <code>agents auth</code> against it</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Re-scope RUSH-2581; file the Phoenix-ID consolidation successor ticket</span></li></ul></div>
+<h2 id="tracking">Tracking</h2><ul>
+<li><a class="link-pill" href="https://linear.app/getrush/issue/RUSH-2581/no-human-identity-substrate-ssosaml-cannot-attach-because-there-is-no" title="https://linear.app/getrush/issue/RUSH-2581/no-human-identity-substrate-ssosaml-cannot-attach-because-there-is-no" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">RUSH-2581</span></a> — re-scoped: the principal model is the own backend (Phase C)</li>
+<li>Successor ticket (to file): Phoenix ID consolidation — link-by-<code>sub</code>, per-product re-key</li>
+<li>Supersedes: PRs #2821/#2822's Prix coupling</li>
+</ul>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://linear.app/getrush/issue/RUSH-2581/no-human-identity-substrate-ssosaml-cannot-attach-because-there-is-no" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">RUSH-2581</span><span class="reference-host">linear.app</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKdGl0bGU6ICdQaG9lbml4IGxvZ2luOiBvd24gYmFja2VuZCBub3csIGNvbnNvbGlkYXRlIHVuZGVyIFBob2VuaXggSUQgbGF0ZXInCnN1bW1hcnk6ICdEZWNpc2lvbiArIGltcGxlbWVudGF0aW9uIHBsYW46IGRldGFjaCBhZ2VudHMtY2xpIGlkZW50aXR5IGZyb20gdGhlIFJ1c2gvUHJpeCBiYWNrZW5kLCBzdGFuZCB1cCBpdHMgb3duIGFjY291bnQgYmFja2VuZCBidWlsdCBmb3IgbGF0ZXIgUGhvZW5peC1JRCBjb25zb2xpZGF0aW9uIHZpYSBHb29nbGUgc3ViIG1hdGNoaW5nLicKcHJvamVjdDogYWdlbnRzLWNsaQpjb250ZXh0OiAnUlVTSC0yNTgxIHByaW5jaXBhbCBtb2RlbCwgc3VwZXJzZWRpbmcgdGhlIFByaXgtY291cGxlZCBhdXRoIHNoaXBwZWQgaW4gUFJzICMyODIxLyMyODIyJwpyZXBvc2l0b3J5OiBwaG54LWxhYnMvYWdlbnRzLWNsaQpicmFuY2g6IHBob2VuaXgtZGV0YWNoLXByaXgKdHJhY2tpbmc6ICdSVVNILTI1ODEnCnN0YXR1czogYXBwcm92ZWQKc3VyZmFjZTogYXBpCmRhdGU6ICcyMDI2LTA4LTIyJwpmYWN0czoKICAtICdwcml4L2FwaSBpZGVudGl0eSBhdWRpdCB2ZXJkaWN0OiBkZWVwbHkgUnVzaC1lbnRhbmdsZWQgKHByb2R1Y3QgY29sdW1ucyBvbiB1c2VycywgcnVzaF91c2VyX2lkIEZLLCAxNS10YWJsZSBHRFBSIHRyYW5zYWN0aW9uLCBSTFMgYWNyb3NzIH4xMiB0YWJsZXMsIHJ1c2g6Ly8gU1NPIHNjaGVtZSknCiAgLSAnYWdlbnRzLWNsaSBzaGlwcGVkIHN1cmZhY2UgPSAxMyBlbmRwb2ludHMgKDMgYXV0aCBkZXZpY2UtY29kZSwgOSBzcGFjZXMsIDEgYmlsbGluZykg4oCUIHRoZSBleGFjdCBjb250cmFjdCBhbiBvd24gYmFja2VuZCBtdXN0IGltcGxlbWVudCcKICAtICdjbGllbnQgY291cGxpbmcgaXMgc2NhdHRlcmVkOiB0aGUgdXNlci55YW1sIHRva2VuLXJlYWQgaW1wbGVtZW50ZWQgN3gsIGFwaS5wcml4LmRldiBoYXJkY29kZWQgNXg7IG5vIGlkZW50aXR5IHNlYW0gZXhpc3RzJwogIC0gJ2FnZW50cy1jbGkgaGFzIH56ZXJvIHVzZXJzOyBpdHMgb25seSBQcml4LWJhY2tlbmQgZm9vdHByaW50IGlzIGEgY29uZmVyZW5jZS1zaWdudXAgZm9ybScKbGlua3M6CiAgLSAnaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvaXNzdWUvUlVTSC0yNTgxL25vLWh1bWFuLWlkZW50aXR5LXN1YnN0cmF0ZS1zc29zYW1sLWNhbm5vdC1hdHRhY2gtYmVjYXVzZS10aGVyZS1pcy1ubycKYXNzZXRzOiBbXQotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCi0gKipUaGUgc2VxdWVuY2luZyBjYWxsKio6IG93biBhZ2VudHMtY2xpIGJhY2tlbmQgbm93ICsgUGhvZW5peC1JRCBjb25zb2xpZGF0aW9uIGxhdGVyIOKAlCBhcHByb3ZlZCBieSBNdXFzaXQgMjAyNi0wOC0yMjsgdGhpcyBkb2N1bWVudCBpcyB0aGUgZXhlY3V0aW9uIHNoYXBlLgotICoqVGhlIHNldmVuIGxpbmthYmlsaXR5IHJ1bGVzKiogYXJlIHRoZSBsb2FkLWJlYXJpbmcgYmV0OiB0aGV5IGtlZXAgImNvbnNvbGlkYXRlIGxhdGVyIiBjaGVhcC4gVmV0byBvciBhZGQgdGhlcmUuCi0gKipQaGFzZSBBIHNvZnQtdnMtaGFyZCByZW1vdmFsKio6IGBhZ2VudHMgYXV0aGAvYG9yZ2AgYXJlIHJlbW92ZWQgYXMgcmV0aXJlZCBuYW1lcyAoZmFpbCBsb3VkbHkpLiBBICJQaG9lbml4IHNpZ24taW4gY29taW5nIiBzdHViIHdhcyBjb25zaWRlcmVkIGFuZCBza2lwcGVkIOKAlCBhIHN0dWIgdGVhY2hlcyBhIHN1cmZhY2UgdGhhdCBkb2Vzbid0IGV4aXN0IHlldC4KLSAqKlRoZSBuZXcgYmFja2VuZCdzIGhvbWUqKjogc3VnZ2VzdGVkIHJlcG8gYGFnZW50cy1pZGAgd2l0aCBpdHMgb3duIFN1cGFiYXNlIHByb2plY3Qg4oCUIG5hbWUgYW5kIGhvc3RpbmcgYXJlIE11cXNpdCdzIHBpY2sgYmVmb3JlIFBoYXNlIEMgZGlzcGF0Y2guCgojIyBQdXJwb3NlCgpNdXFzaXQsIDIwMjYtMDgtMjI6IGFnZW50cy1jbGkgbXVzdCBub3QgcmlkZSBSdXNoL1ByaXgncyBsb2dpbiAoInRoYXQncyBhIHNlcGFyYXRlIHByb2R1Y3QiKSDigJQgYnV0IHRoZSBmYW1pbHkgc2hvdWxkIGV2ZW50dWFsbHkgc2hhcmUgYSB0b3AtbGV2ZWwgKipQaG9lbml4IGxvZ2luKiosIEFwcGxlLUlEIHN0eWxlOiAqImlmIHVzZXJzIGhhdmUgc2ltaWxhciBlbWFpbHMgd2UgY2FuIGxhdGVyIGFsc28gY29uc29saWRhdGUgdGhlbSwgcmlnaHQ/IEV2YWx1YXRlIHRoZSB3b3JrbG9hZCBvZiBkb2luZyBpdCBub3cgdmVyc3VzIGFmdGVyLiIqIEFuc3dlcjogY29uc29saWRhdGlvbiBsYXRlciBpcyBjaGVhcCAqKmlmKiogbWF0Y2hlZCBvbiB0aGUgR29vZ2xlIGBzdWJgIChub3QgZW1haWwpIGFuZCAqKmlmKiogdGhlIG93biBiYWNrZW5kIGlzIGJ1aWx0IGxpbmthYmxlIGZyb20gZGF5IG9uZS4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgo8ZmlndXJlIGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0gYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgogIDxzdmcgY2xhc3M9ImFydGlmYWN0LWRpYWdyYW0iIHZpZXdCb3g9IjAgMCA5ODAgMzEwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlNlcXVlbmNpbmc6IHRvZGF5J3MgUHJpeCBjb3VwbGluZywgdGhlIG93bi1iYWNrZW5kIHBoYXNlLCBhbmQgbGF0ZXIgUGhvZW5peC1JRCBjb25zb2xpZGF0aW9uIj4KICAgIDx0ZXh0IHg9IjE2MCIgeT0iMjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNkYzI2MjYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIj5UT0RBWSAoc2hpcHBlZCAxLjIyLjQyKyk8L3RleHQ+CiAgICA8cmVjdCB4PSIzMCIgeT0iNDUiIHdpZHRoPSIyNjAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMWEwZTBlIiBzdHJva2U9IiNkYzI2MjYiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iMTYwIiB5PSI3MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YyZjJmMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPmFnZW50cyBhdXRoIC8gb3JnIC8gZW50aXRsZW1lbnQ8L3RleHQ+CiAgICA8dGV4dCB4PSIxNjAiIHk9IjkwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOWNhM2FmIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCI+NXggYXBpLnByaXguZGV2IMK3IDd4IHVzZXIueWFtbCByZWFkczwvdGV4dD4KICAgIDxsaW5lIHgxPSIxNjAiIHkxPSIxMTciIHgyPSIxNjAiIHkyPSIxNTciIHN0cm9rZT0iI2RjMjYyNiIgc3Ryb2tlLXdpZHRoPSIyIiBtYXJrZXItZW5kPSJ1cmwoI2FSKSIgLz4KICAgIDxyZWN0IHg9IjMwIiB5PSIxNjAiIHdpZHRoPSIyNjAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMWEwZTBlIiBzdHJva2U9IiNkYzI2MjYiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iMTYwIiB5PSIxODciIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmMmYyZjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5wcml4L2FwaSDigJQgUnVzaCdzIG9uZSBEQjwvdGV4dD4KICAgIDx0ZXh0IHg9IjE2MCIgeT0iMjA1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOWNhM2FmIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCI+dXNlcnMgY2FycmllcyBSdXNoIHByb2R1Y3QgY29sdW1uczsgcnVzaDovLyBTU088L3RleHQ+CiAgICA8dGV4dCB4PSIxNjAiIHk9IjI2MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPmlkZW50aXR5IGVudGFuZ2xlZCB3aXRoIHRoZSByZXZlbnVlIHByb2R1Y3Q8L3RleHQ+CgogICAgPHRleHQgeD0iNDkwIiB5PSIyOCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTQiIGZvbnQtd2VpZ2h0PSI3MDAiPk5PVyAoUGhhc2VzIEEtRCk8L3RleHQ+CiAgICA8cmVjdCB4PSIzNjAiIHk9IjQ1IiB3aWR0aD0iMjYwIiBoZWlnaHQ9IjcyIiByeD0iOCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgLz4KICAgIDx0ZXh0IHg9IjQ5MCIgeT0iNzIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmMmYyZjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5hZ2VudHMtY2xpIGlkZW50aXR5IHNlYW0gKG9uZSBjbGllbnQpPC90ZXh0PgogICAgPHRleHQgeD0iNDkwIiB5PSI5MCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPmxpYi9pZGVudGl0eTogMSBiYXNlIFVSTCDCtyAxIHRva2VuIHJlYWQ8L3RleHQ+CiAgICA8bGluZSB4MT0iNDkwIiB5MT0iMTE3IiB4Mj0iNDkwIiB5Mj0iMTU3IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIgbWFya2VyLWVuZD0idXJsKCNhRykiIC8+CiAgICA8cmVjdCB4PSIzNjAiIHk9IjE2MCIgd2lkdGg9IjI2MCIgaGVpZ2h0PSI3MiIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIC8+CiAgICA8dGV4dCB4PSI0OTAiIHk9IjE4NyIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YyZjJmMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPmFnZW50cy1pZCDigJQgb3duIEJ1bi9Ib25vICsgU3VwYWJhc2U8L3RleHQ+CiAgICA8dGV4dCB4PSI0OTAiIHk9IjIwNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiPjEzIGVuZHBvaW50cyDCtyBHb29nbGUgT0F1dGggwrcgc3RvcmVzIHN1YjwvdGV4dD4KICAgIDx0ZXh0IHg9IjQ5MCIgeT0iMjYyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+UGhvZW5peC1icmFuZGVkIHNpZ24taW47IHplcm8gUnVzaCByaXNrPC90ZXh0PgoKICAgIDx0ZXh0IHg9IjgyMCIgeT0iMjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMzOGJkZjgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmb250LXdlaWdodD0iNzAwIj5MQVRFUiAod2hlbiB1c2VycyBvdmVybGFwKTwvdGV4dD4KICAgIDxyZWN0IHg9IjY5MCIgeT0iNDUiIHdpZHRoPSIyNjAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMGExNDIwIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iODIwIiB5PSI3MiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YyZjJmMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiPlBob2VuaXggSUQgc2VydmljZSAob25lIGxvZ2luKTwvdGV4dD4KICAgIDx0ZXh0IHg9IjgyMCIgeT0iOTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIj5ib3RoIHByb2R1Y3RzIHJlLWF1dGggb25jZSB2aWEgR29vZ2xlPC90ZXh0PgogICAgPGxpbmUgeDE9IjgyMCIgeTE9IjExNyIgeDI9IjgyMCIgeTI9IjE1NyIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjIiIG1hcmtlci1lbmQ9InVybCgjYUIpIiAvPgogICAgPHJlY3QgeD0iNjkwIiB5PSIxNjAiIHdpZHRoPSIyNjAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMGExNDIwIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiAvPgogICAgPHRleHQgeD0iODIwIiB5PSIxODciIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmMmYyZjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIj5zdWItbWF0Y2ggKyBzY3JpcHRlZCByZS1rZXk8L3RleHQ+CiAgICA8dGV4dCB4PSI4MjAiIHk9IjIwNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzljYTNhZiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiPnNhbWUgR29vZ2xlIHN1YiDihpIgc2FtZSBodW1hbjwvdGV4dD4KICAgIDx0ZXh0IHg9IjgyMCIgeT0iMjYyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMzhiZGY4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSI+Y2hlYXAgb25seSBpZiB0aGUgc2V2ZW4gcnVsZXMgaGVsZDwvdGV4dD4KCiAgICA8bGluZSB4MT0iMzAwIiB5MT0iMTk2IiB4Mj0iMzUyIiB5Mj0iMTk2IiBzdHJva2U9IiM2NjYiIHN0cm9rZS13aWR0aD0iMiIgc3Ryb2tlLWRhc2hhcnJheT0iNCA0IiBtYXJrZXItZW5kPSJ1cmwoI2FOKSIgLz4KICAgIDxsaW5lIHgxPSI2MzAiIHkxPSIxOTYiIHgyPSI2ODIiIHkyPSIxOTYiIHN0cm9rZT0iIzY2NiIgc3Ryb2tlLXdpZHRoPSIyIiBzdHJva2UtZGFzaGFycmF5PSI0IDQiIG1hcmtlci1lbmQ9InVybCgjYU4pIiAvPgogICAgPGRlZnM+CiAgICAgIDxtYXJrZXIgaWQ9ImFSIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDgsNCBMMCw4IFoiIGZpbGw9IiNkYzI2MjYiIC8+PC9tYXJrZXI+CiAgICAgIDxtYXJrZXIgaWQ9ImFHIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDgsNCBMMCw4IFoiIGZpbGw9IiNhM2U2MzUiIC8+PC9tYXJrZXI+CiAgICAgIDxtYXJrZXIgaWQ9ImFCIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDgsNCBMMCw4IFoiIGZpbGw9IiMzOGJkZjgiIC8+PC9tYXJrZXI+CiAgICAgIDxtYXJrZXIgaWQ9ImFOIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDgsNCBMMCw4IFoiIGZpbGw9IiM2NjYiIC8+PC9tYXJrZXI+CiAgICA8L2RlZnM+CiAgPC9zdmc+CiAgPGZpZ2NhcHRpb24+PGI+RmlndXJlIDEuPC9iPiBEZXRhY2ggZnJvbSB0aGUgZW50YW5nbGVkIFJ1c2ggREIgbm93LCBidWlsZCB0aGUgb3duIGJhY2tlbmQgbGlua2FibGUsIGFuZCBtYWtlIFBob2VuaXggSUQgYSBkZWxpYmVyYXRlIGxhdGVyIGNvbnNvbGlkYXRpb24gaW5zdGVhZCBvZiBhIGZvcmNlZCBtZXJnZS48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMgV2hhdCBjaGFuZ2VzIGZvciB3aG9tCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvciI+CiAgPGRpdiBjbGFzcz0iYXJ0aWZhY3QtYmVoYXZpb3ItcGFuZWwiIGRhdGEtc3RhdGU9ImN1cnJlbnQiIGRhdGEtZXZpZGVuY2U9ImNhcHR1cmUiPgogICAgPHA+PHN0cm9uZz5Ub2RheSAoc2hpcHBlZCAxLjIyLjQyLzQzKTo8L3N0cm9uZz4gPGNvZGU+YWdlbnRzIGF1dGggbG9naW48L2NvZGU+IGRldmljZS1jb2RlcyBhZ2FpbnN0IDxjb2RlPmFwaS5wcml4LmRldjwvY29kZT4g4oCUIFJ1c2gncyBiYWNrZW5kIOKAlCBhbmQgc2lsZW50bHkgZmFsbHMgYmFjayB0byB0aGUgPGNvZGU+cnVzaCBsb2dpbjwvY29kZT4gc2Vzc2lvbi4gPGNvZGU+YWdlbnRzIG9yZzwvY29kZT4gbWFuYWdlcyA8ZW0+UnVzaCdzPC9lbT4gc3BhY2VzOyBhY2NvdW50IGNhcHMgYXJlIGdhdGVkIGJ5IDxlbT5SdXNoJ3M8L2VtPiBiaWxsaW5nIHRpZXIuIFRoZSBzaWduLWluIHBhZ2Ugc2F5cyAiQSBSdXNoIENMSSBpcyB0cnlpbmcgdG8gc2lnbiBpbi4iPC9wPgogIDwvZGl2PgogIDxkaXYgY2xhc3M9ImFydGlmYWN0LWJlaGF2aW9yLXBhbmVsIiBkYXRhLXN0YXRlPSJwcm9wb3NlZCIgZGF0YS1ldmlkZW5jZT0ibW9ja3VwIj4KICAgIDxwPjxzdHJvbmc+QWZ0ZXIgUGhhc2VzIEEtRDo8L3N0cm9uZz4gPGNvZGU+YWdlbnRzIGF1dGggbG9naW48L2NvZGU+IGRldmljZS1jb2RlcyBhZ2FpbnN0IGFnZW50cy1jbGkncyA8ZW0+b3duPC9lbT4gYmFja2VuZDsgdGhlIGJyb3dzZXIgcGFnZSByZWFkcyA8c3Ryb25nPiJTaWduIGluIHdpdGggUGhvZW5peCDCtyBhZ2VudHMtY2xpIjwvc3Ryb25nPiB3aXRoIEdvb2dsZSBhcyB0aGUgb25seSBwcm92aWRlci4gTm8gPGNvZGU+cnVzaDwvY29kZT4gZmFsbGJhY2ssIG5vIFByaXggVVJMcyBpbiB0aGUgaWRlbnRpdHkgcGF0aC4gVGVhbXMvc3BhY2VzIGxpdmUgaW4gYWdlbnRzLWNsaSdzIG93biBkYXRhYmFzZS4gTGF0ZXIsIG9uZSBjbGljayByZS1saW5rcyB0aGUgYWNjb3VudCB1bmRlciB0aGUgZmFtaWx5LXdpZGUgUGhvZW5peCBJRC48L3A+CiAgPC9kaXY+CjwvZGl2PgoKIyMgUHJvcG9zZWQgQ2hhbmdlcwoKIyMjIFBoYXNlIEEg4oCUIERldGFjaCB0aGUgc2hpcHBlZCBQcml4IGNvdXBsaW5nICh0aGlzIFBSLCByZWxlYXNlIDEuMjIuNDQpCgpgYGB0ZXh0CkRFTEVURUQgIHNyYy9saWIvcHJpeC1hY2NvdW50LnRzICgrdGVzdCkgICBzcmMvY29tbWFuZHMvYXV0aC50cyAgIHNyYy9jb21tYW5kcy9vcmcudHMKREVMRVRFRCAgc3JjL2xpYi9lbnRpdGxlbWVudC50cyAoK3Rlc3QpCkVESVRFRCAgIHNyYy9jb21tYW5kcy9hY2NvdW50cy50cyAgIChjYXAvZG9ybWFudCBnYXRlcyByZW1vdmVkOyByZWdpc3RyYXRpb24gdW5jYXBwZWQpCkVESVRFRCAgIHNyYy9jb21tYW5kcy9pbnNpZ2h0cy50cyAgIChwYWlkIGdhdGUgcmVtb3ZlZDsgZnVsbCByZXBvcnQgYWx3YXlzKQpFRElURUQgICBzcmMvYm9vdHN0cmFwLnRzLCBzcmMvY2xpL2NvbW1hbmQtcmVnaXN0cnkudHMsIHNyYy9saWIvc3RhcnR1cC9jb21tYW5kLXJlZ2lzdHJ5LnRzCiAgICAgICAgICgnYXV0aCcvJ29yZycgcmV0aXJlZDogZmFpbCBsb3VkbHksIG5vIGF1dG8tY29ycmVjdCkKYGBgCgpVbnRvdWNoZWQgKGRlbGliZXJhdGUgUnVzaCAqZmVhdHVyZSogaW50ZWdyYXRpb25zLCBub3QgaWRlbnRpdHkpOiBgbGliL2Nsb3VkL3J1c2gudHNgLCBgbGliL3NlY3JldHMvZHJpdmVycy9ydXNoLnRzYCwgYGxpYi9zZXNzaW9uL2Nsb3VkLnRzYCwgYGNvbW1hbmRzL2ZhY3RvcnkudHNgLCBgbGliL2NoYW5uZWxzL293bmVyLXNpbmsudHNgLgoKIyMjIFBoYXNlIEIg4oCUIE9uZSBpZGVudGl0eSBzZWFtCgpOZXcgYGFwcHMvY2xpL3NyYy9saWIvaWRlbnRpdHkvYCBjbGllbnQgbW9kZWxlZCBvbiB0aGUgcHJvdmVuIHNlYW1zIChgU3luY0JhY2tlbmRgLCBgQ2xvdWRQcm92aWRlcmApOiBvbmUgYmFzZS1VUkwgY29uc3RhbnQsIG9uZSB0b2tlbiByZWFkZXIsIG9uZSBIVFRQIGZ1bm5lbCwgb3duIHNlc3Npb24gZmlsZSwgbm8gYH4vLnJ1c2gvdXNlci55YW1sYCBmYWxsYmFjay4KCiMjIyBQaGFzZSBDIOKAlCBUaGUgb3duIGJhY2tlbmQgKGBhZ2VudHMtaWRgKQoKT3duIEJ1bi9Ib25vIHNlcnZpY2UgKyBvd24gU3VwYWJhc2UgcHJvamVjdCBpbXBsZW1lbnRpbmcgdGhlIGF1ZGl0ZWQgY29udHJhY3Q6CgpgYGB0ZXh0ClBPU1QgL2FwaS92MS9hdXRoL2RldmljZS9hdXRob3JpemF0aW9uICAgICAgIyBSRkMgODYyOCBzdGFydApQT1NUIC9hcGkvdjEvYXV0aC9kZXZpY2UvdG9rZW4gICAgICAgICAgICAgICMgcG9sbDsgZXJyb3JzOiBhdXRob3JpemF0aW9uX3BlbmRpbmcgfCBzbG93X2Rvd24gfCBleHBpcmVkX3Rva2VuIHwgYWNjZXNzX2RlbmllZApHRVQgIC9hcGkvdjEvYXV0aC9tZSAgICAgICAgICAgICAgICAgICAgICAgICMge3VzZXJJZCwgZW1haWwsIHZhbGlkfQpHRVQvUE9TVC9QQVRDSC9ERUxFVEUgL2FwaS92MS9zcGFjZXNbLi4uXSAgICMgOSBzcGFjZXMvbWVtYmVycy9pbnZpdGVzIHJvdXRlcywgYXVkaXRlZCBzaGFwZXMKR0VUICAvYXBpL3YxL2JpbGxpbmcvc3Vic2NyaXB0aW9uP2FnZW50PS4uLiAjIHt0aWVyTmFtZX0g4oCUICJmcmVlIiBmb3IgZXZlcnlvbmUgaW5pdGlhbGx5CmBgYAoKKipTZXZlbiBsaW5rYWJpbGl0eSBydWxlcyAoaGFyZCByZXF1aXJlbWVudHMpOioqIEdvb2dsZS1vbmx5IElkUDsgcGVyc2lzdCB0aGUgR29vZ2xlIGBzdWJgIG9uIG91ciB1c2VyIHJvdzsgb3BhcXVlIGludGVybmFsIGlkczsgbm8gcGFzc3dvcmRzLCBldmVyOyB2ZXJpZmllZC1lbWFpbC1vbmx5IHdyaXRlczsgcHJvZHVjdCBmaWVsZHMgaW4gYSBzZXBhcmF0ZSAxOjEgcHJvZmlsZSB0YWJsZTsgY2FsbGJhY2sgc2NoZW1lIGFzIGNvbmZpZywgbm90IGEgbGl0ZXJhbC4KCiMjIyBQaGFzZSBEIOKAlCBSZS1sYW5kIHRoZSBDTEkgc3VyZmFjZQoKYGFnZW50cyBhdXRoIGxvZ2luL3dob2FtaS9sb2dvdXRgICsgYGFnZW50cyBhdXRoIHNwYWNlYCB0aHJvdWdoIHRoZSBQaGFzZS1CIHNlYW0gYXQgdGhlIFBoYXNlLUMgc2VydmljZTsgZG9jcyArIENIQU5HRUxPRzsgcmVsZWFzZTsgZmxlZXQgdmVyaWZ5LgoKIyMjIERlZmVycmVkIOKAlCBQaG9lbml4IElEIGNvbnNvbGlkYXRpb24gKHRpY2tldGVkLCBub3QgYnVpbHQpCgpXaGVuIHByb2R1Y3QtdXNlciBvdmVybGFwIGlzIHJlYWw6IHVzZXJzIHJlLWF1dGggb25jZSB2aWEgR29vZ2xlIGFnYWluc3QgdGhlIHVuaWZpZWQgcHJvamVjdCAobm8gY3Jvc3MtcHJvamVjdCBhdXRoLXJvdyBjb3B5aW5nIOKAlCB1bnN1cHBvcnRlZCBpbiBTdXBhYmFzZTsgdGhlIGBzdWJgIG1hdGNoIGlzIHRoZSBqb2luKSwgdGhlbiBhIHNjcmlwdGVkIHJlLWtleSBvZiBgc3BhY2VzLm93bmVyX3VzZXJfaWRgIC8gYHNwYWNlX21lbWJlcnMudXNlcl9pZGAuIFJ1c2ggbWlncmF0ZXMgb24gaXRzIG93biBzY2hlZHVsZS4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCnwgU3VyZmFjZSB8IEJlZm9yZSAoMS4yMi40Mi80MykgfCBBZnRlciB8CnwtLS18LS0tfC0tLXwKfCBgYWdlbnRzIGF1dGggbG9naW4vd2hvYW1pL2xvZ291dGAgfCBEZXZpY2UtY29kZSBhZ2FpbnN0IGBhcGkucHJpeC5kZXZgLCBgcnVzaCBsb2dpbmAgZmFsbGJhY2sgfCBSZW1vdmVkIGluIDEuMjIuNDQ7IHJldHVybnMgaW4gUGhhc2UgRCBhZ2FpbnN0IGBhZ2VudHMtaWRgIHwKfCBgYWdlbnRzIG9yZ2AgLyBgYWdlbnRzIGF1dGggc3BhY2VgIHwgUnVzaCBzcGFjZXMgQ1JVRCB8IFJlbW92ZWQ7IHJldHVybnMgYXMgb3duLWJhY2tlbmQgc3BhY2VzIGluIFBoYXNlIEQgfAp8IGBhZ2VudHMgYWNjb3VudHMgYWRkL25hbWUvYXR0YWNoYCB8IENhcHBlZCAzLXBlci1oYXJuZXNzIG9uIGZyZWUgKFJ1c2ggYmlsbGluZyB0aWVyKSB8IFVuY2FwcGVkOyBubyB0aWVyIHJlYWRzIHwKfCBgYWdlbnRzIGluc2lnaHRzYCB8IEZyaWN0aW9uIHNlY3Rpb25zICsgYC0tYnkgYWNjb3VudGAgcGFpZC1nYXRlZCB8IEZ1bGwgcmVwb3J0LCBubyBgcGxhbmAvYG5vdGljZWAgSlNPTiBmaWVsZHMgfAoKIyMgVmFsaWRhdGlvbgoKYGBgdGV4dApQaGFzZSBBOiBmbGVldCBydW5zIDEuMjIuNDQ7IGBhZ2VudHMgYXV0aGAgZmFpbHMgbG91ZGx5IGFzIGEgcmV0aXJlZCBuYW1lOwogICAgICAgICBncmVwIGdhdGU6IG5vIGFwaS5wcml4LmRldiBpbiB0aGUgaWRlbnRpdHkgcGF0aDsgc3VpdGVzIGdyZWVuICgzNC8zNCBhZmZlY3RlZCB0ZXN0cykKUGhhc2UgQzogbGl2ZSBkZXZpY2UtY29kZSByb3VuZC10cmlwIGZyb20gYSBjbGVhbiBib3g7IFBob2VuaXgtYnJhbmRlZCBwYWdlIHNjcmVlbnNob3R0ZWQKUGhhc2UgRDogZW5kLXRvLWVuZCBvbiBhbiBpbnN0YWxsZWQgcmVsZWFzZSwgbm90IGEgZGV2IGJ1aWxkCmBgYAoKIyMgUmlza3MKCnwgUmlzayB8IE1pdGlnYXRpb24gfAp8IC0tLSB8IC0tLSB8CnwgTGlua2FiaWxpdHkgcnVsZXMgc2tpcHBlZCBpbiBQaGFzZSBDIHwgVGhleSBhcmUgaGFyZCByZXF1aXJlbWVudHMgaW4gdGhlIGJyaWVmOyByZXZpZXdlZCBhZ2FpbnN0IHRoZSBjaGVja2xpc3QgYmVmb3JlIG1lcmdlIHwKfCBEb2dmb29kZXJzIGxvc2UgdGhlIHJ1c2gtc2Vzc2lvbiBmcmVlYmllIHwgTmFtZWQgY29zdDsgb25lIGV4dHJhIGxvZ2luLCBpbnRlcm5hbCB1c2VycyBvbmx5IHwKfCBDb25zb2xpZGF0aW9uIGdyb3dzIHdpdGggcmVhbCB1c2VyIGRhdGEgfCBDb25zb2xpZGF0ZSBiZWZvcmUgZ2VuZXJhbC1hdWRpZW5jZSBsYXVuY2g7IHJlLWtleSBpcyBwZXItdXNlciBzY3JpcHRlZCB8CnwgU2Vjb25kIGRldmljZS1jb2RlIGZsb3cgZHJpZnRzIGZyb20gUkZDIDg2Mjggc2VtYW50aWNzIHwgRmFpbHMgbG91ZGx5OyBjb250cmFjdCBwaW5uZWQgYnkgdGhlIGF1ZGl0ZWQgY2xpZW50IHNoYXBlcyB8CgojIyBXb3JrbG9hZCBjb21wYXJpc29uIChzdHJlc3MtdGVzdGVkKQoKfCB8IFBob2VuaXggSUQgbm93IHwgT3duIGJhY2tlbmQgbm93IHwgQ29uc29saWRhdGlvbiBsYXRlciAocnVsZXMgaGVsZCkgfAp8LS0tfC0tLXwtLS18LS0tfAp8IEVmZm9ydCB8IE11bHRpLXdlZWs7IFJMUyBhY3Jvc3MgfjEyIHRhYmxlcyArIDE1LXRhYmxlIEdEUFIgdHJhbnNhY3Rpb24gcmUtdmVyaWZpZWQgfCBTaW5nbGUtZGlnaXQgYWdlbnQgc2Vzc2lvbnM7IGNvbnRyYWN0IGFscmVhZHkgc3BlY2lmaWVkIHwgQSBmZXcgc2Vzc2lvbnMgKyBzY3JpcHRlZCByZS1rZXkgfAp8IFJpc2tpZXN0IHN0ZXAgfCBMaXZlIGlkZW50aXR5IHN1cmdlcnkgb24gdGhlIHJldmVudWUgcHJvZHVjdCAoc2lsZW50IFJMUy9HRFBSIGZhaWx1cmUgbW9kZXMpIHwgRGV2aWNlLWNvZGUgZmxvdyArIHZlcmlmaWNhdGlvbiBwYWdlIOKAlCBmYWlscyBsb3VkbHksIHNlbGYtcmV2ZWFsaW5nIHwgQ3V0b3ZlciB3aW5kb3c6IHN0YWxlIHRva2Vucy9pbnZpdGVzLCBzbHVnIHVuaXF1ZW5lc3MgfAp8IEFnZW50LWRpc3BhdGNoYWJsZSB8IE5vIOKAlCBodW1hbiBzaWduLW9mZiBwZXIgZGlmZiB8IExhcmdlbHkgeWVzIHwgTW9zdGx5IHNjcmlwdGVkIHwKCjxhc2lkZSBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+PHN0cm9uZz5UaGUgcmVhbCBiZXQgaXMgdGhlIHJ1bGVzLCBub3QgdGhlIHNlcXVlbmNpbmcuPC9zdHJvbmc+IENvbnNvbGlkYXRlLWxhdGVyIHN0YXlzIGNoZWFwIG9ubHkgd2hpbGUgYm90aCBwcm9kdWN0cyBzaGFyZSBvbmUgSWRQIChHb29nbGUpLCB0aGUgPGNvZGU+c3ViPC9jb2RlPiBpcyBwZXJzaXN0ZWQsIGFuZCBubyBwYXNzd29yZHMgZXhpc3QuIFNraXAgdGhvc2UgYW5kICJsYXRlciIgYmFsbG9vbnMgdG93YXJkIHRoZSBleHRyYWN0aW9uIHByb2plY3QncyByaXNrIHByb2ZpbGUuIEhvbmVzdCBjb3N0OiBkb2dmb29kZXJzIGxvc2UgdG9kYXkncyBzaGFyZWQtc2Vzc2lvbiBmcmVlYmllICh0aGUgPGNvZGU+cnVzaCBsb2dpbjwvY29kZT4gZmFsbGJhY2spIOKAlCBvbmUgZXh0cmEgbG9naW4sIGludGVybmFsIHVzZXJzIG9ubHkuPC9hc2lkZT4KCiMjIENoZWNrbGlzdAoKLSBbeF0gUGhhc2UgQTogZGV0YWNoIHRoZSBQcml4IHN1cmZhY2UgKHRoaXMgUFIpIOKGkiByZWxlYXNlIDEuMjIuNDQg4oaSIGZsZWV0IHZlcmlmeQotIFsgXSBQaGFzZSBCOiBgbGliL2lkZW50aXR5L2Agc2VhbQotIFsgXSBQaGFzZSBDOiBgYWdlbnRzLWlkYCBiYWNrZW5kIChhd2FpdHMgcmVwby1uYW1lL2hvc3RpbmcgcGljaykKLSBbIF0gUGhhc2UgRDogcmUtbGFuZCBgYWdlbnRzIGF1dGhgIGFnYWluc3QgaXQKLSBbIF0gUmUtc2NvcGUgUlVTSC0yNTgxOyBmaWxlIHRoZSBQaG9lbml4LUlEIGNvbnNvbGlkYXRpb24gc3VjY2Vzc29yIHRpY2tldAoKIyMgVHJhY2tpbmcKCi0gW1JVU0gtMjU4MV0oaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvaXNzdWUvUlVTSC0yNTgxL25vLWh1bWFuLWlkZW50aXR5LXN1YnN0cmF0ZS1zc29zYW1sLWNhbm5vdC1hdHRhY2gtYmVjYXVzZS10aGVyZS1pcy1ubykg4oCUIHJlLXNjb3BlZDogdGhlIHByaW5jaXBhbCBtb2RlbCBpcyB0aGUgb3duIGJhY2tlbmQgKFBoYXNlIEMpCi0gU3VjY2Vzc29yIHRpY2tldCAodG8gZmlsZSk6IFBob2VuaXggSUQgY29uc29saWRhdGlvbiDigJQgbGluay1ieS1gc3ViYCwgcGVyLXByb2R1Y3QgcmUta2V5Ci0gU3VwZXJzZWRlczogUFJzICMyODIxLyMyODIyJ3MgUHJpeCBjb3VwbGluZwo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
