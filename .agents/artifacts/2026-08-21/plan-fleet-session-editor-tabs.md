@@ -450,7 +450,7 @@ agents sessions focus <session-id>
 | `apps/ext/AGENTS.md`, `apps/ext/README.md`, `apps/ext/CHANGELOG.md` | Document Fleet's editor-tab behavior. |
 | `apps/cli/AGENTS.md`, `apps/cli/docs/sessions.md`, `apps/cli/docs/specifications.md`, `apps/cli/CHANGELOG.md` | Record the hidden in-place lifecycle contract and its no-second-surface invariant. |
 
-PR #2847 merged while this plan was under review (`0250072f7`). It moved session remote fan-out files without changing this Fleet behavior; `focus.ts` still reaches the compatibility export from `sessions-resume.ts`. Implementation must start from post-#2847 `origin/main` and re-run the import/caller audit rather than copying pre-merge paths from this plan.
+PR #2847 merged while this plan was under review (`0250072f7`). It moved session remote fan-out files without changing this Fleet behavior; `focus.ts` now reaches `runOnPeer` through the compatibility export at `apps/cli/src/lib/session/remote-list.ts`. Implementation must start from post-#2847 `origin/main` and re-run the import/caller audit rather than copying pre-merge paths from this plan.
 
 ## Plan
 
