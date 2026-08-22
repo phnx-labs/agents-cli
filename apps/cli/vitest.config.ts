@@ -1,4 +1,5 @@
 import { defineConfig } from 'vitest/config';
+import { shouldEnableCiTestProfile } from './tests/hermetic-guards';
 
 // RUSH-2215: a large vitest forks suite can finish every test green and
 // still exit 1 because idle workers die ("Worker exited unexpectedly").
@@ -6,8 +7,14 @@ import { defineConfig } from 'vitest/config';
 // 12206 tests passed, 0 failed, then exit 1 — three times). Cap fork
 // concurrency on win32; ignore unhandled pool errors on win32 and in CI
 // so the required check tracks test outcomes, not orphan-worker noise.
+//
+// RUSH-3007: this profile is also what release-attestation-produce.sh needs
+// under load (RUSH-2970 trap 5a), which is why it's gated on
+// shouldEnableCiTestProfile() rather than a bare `process.env.CI === 'true'`
+// — see tests/hermetic-guards.ts for why that flag exists and must stay
+// decoupled from tests/setup.ts's real-~/.agents leak tripwires.
 const isWin = process.platform === 'win32';
-const ignoreUnhandledPoolErrors = isWin || process.env.CI === 'true';
+const ignoreUnhandledPoolErrors = isWin || shouldEnableCiTestProfile(process.env);
 
 export default defineConfig({
   test: {

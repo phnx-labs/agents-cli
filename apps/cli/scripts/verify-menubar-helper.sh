@@ -15,9 +15,12 @@
 # corrupt bundle, or an un-notarized cut Gatekeeper rejects as "damaged") without
 # blocking routine rebuilds.
 #
-# prepack only runs at `npm pack` / `npm publish` time, which is macOS-only
-# (releases are cut locally on macOS — see CLAUDE.md), so requiring the bundle
-# here does not affect Linux CI, which never packs.
+# prepack runs at `npm pack` / `npm publish` time. That used to be macOS-only,
+# but RUSH-3026 lets release-attestation-produce.sh pack the pretested tarball
+# on a Linux crabbox too (seeding an already-signed bundle from the caller
+# checkout when it isn't building helpers itself) — so this gate MUST hold on
+# both platforms with no soft-skip, which is exactly what let 1.22.44 ship
+# broken (RUSH-3031, see below).
 
 set -euo pipefail
 
@@ -41,10 +44,50 @@ if command -v codesign >/dev/null 2>&1; then
   fi
 fi
 
+# Require the packed executable to be a universal (fat) Mach-O binary.
+# menubar/scripts/build.sh's `release` mode always lipo's arm64+x86_64
+# together (a THIN single-arch build is a debug/dev artifact — see its
+# comment "so a release cut on a machine without full Xcode still ships a
+# TRUE universal menu-bar helper"). RUSH-3031's shipped 1.22.44 binary was
+# Dev-ID signed but thin (CodeDirectory hashes=47 vs the correct universal
+# build's hashes=390) — a dev slice packed in place of a real release build.
+# The Mach-O fat header's magic bytes (0xCAFEBABE / 0xCAFEBABF, `lipo -create`
+# always writes them big-endian) are plain bytes on disk — checkable with
+# `od` on any OS, so this hard-fails on a Linux packing box too.
+BIN="$APP/Contents/MacOS/MenubarHelper"
+if [ ! -f "$BIN" ]; then
+  echo "menubar helper executable missing inside bundle: $BIN" >&2
+  exit 1
+fi
+if ! command -v od >/dev/null 2>&1; then
+  echo "menubar helper gate cannot verify architecture: 'od' not found on PATH" >&2
+  exit 1
+fi
+MAGIC="$(od -An -tx1 -N4 "$BIN" | tr -d ' \t\n')"
+case "$MAGIC" in
+  cafebabe|cafebabf)
+    ;;
+  *)
+    echo "menubar helper is a THIN (single-arch) binary, not the universal build a release requires: $BIN (magic: 0x$MAGIC)" >&2
+    echo "This is the other half of the RUSH-3031 incident (1.22.44 shipped a thin, dev-signed helper)." >&2
+    echo "Rebuild it: menubar/scripts/build.sh release" >&2
+    exit 1
+    ;;
+esac
+
 # Require a stapled notarization ticket. build.sh notarizes + staples every
 # Developer-ID build; the ticket is a file inside the bundle, so it survives npm.
 # Refuse to pack an un-notarized helper — Gatekeeper rejects it as "damaged" on
 # macOS 26+, and the install path has no re-sign fallback to paper over it.
+#
+# RUSH-3031: 1.22.44 was packed on a Linux attestation-producer box where
+# `command -v xcrun` is false, so this whole check used to silently no-op —
+# the un-stapled dev bundle it let through shipped and Gatekeeper rejected it
+# on every Mac ("AGI Menu is not notarized/valid on this machine; skipping
+# launch"), killing the menu bar fleet-wide until a manual rollback to
+# 1.22.43. `stapler staple` writes the ticket as a plain file
+# (Contents/CodeResources), so its presence is provable on ANY OS with no
+# macOS toolchain — there is no platform this gate may skip on.
 if command -v xcrun >/dev/null 2>&1; then
   if ! xcrun stapler validate "$APP" >/dev/null 2>&1; then
     echo "menubar helper is not notarized/stapled: $APP" >&2
@@ -52,6 +95,19 @@ if command -v xcrun >/dev/null 2>&1; then
     echo "  agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
     exit 1
   fi
+else
+  # No xcrun (a Linux producer, RUSH-3031/RUSH-3026). Presence of the stapled
+  # ticket file is weaker than `stapler validate` (it cannot prove the ticket
+  # matches THIS binary), but it turns the observed failure — a dev bundle
+  # with no ticket at all — into a hard pack error instead of a shipped
+  # regression. This is the exact shape of the 1.22.44 incident.
+  if [ ! -f "$APP/Contents/CodeResources" ]; then
+    echo "menubar helper has NO stapled notarization ticket (Contents/CodeResources missing): $APP" >&2
+    echo "This is what shipped broken in 1.22.44 — Gatekeeper rejects the bundle on every Mac." >&2
+    echo "Seed a notarized bundle (e.g. from the last good published tarball's dist/lib/menubar/)," >&2
+    echo "or rebuild on a Mac: agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
+    exit 1
+  fi
 fi
 
-echo "menubar helper present, signed, and notarized: $APP"
+echo "menubar helper present, signed, notarized, and universal: $APP"

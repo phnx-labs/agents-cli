@@ -16,6 +16,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterAll } from 'vitest';
 import { seedHermeticE2eWinHost } from './seed-e2e-win-host.js';
+import { shouldArmHermeticGuards } from './hermetic-guards.js';
 
 // The REAL developer home, captured before anything below overrides it — the
 // baseline every leak tripwire in this file compares against.
@@ -195,7 +196,16 @@ const claudeSettingsBefore = fs.existsSync(realClaudeSettings)
 
 afterAll(() => {
   try {
-    if (process.env.CI) {
+    // RUSH-3007: these tripwires assume "CI" means a quiet, single-tenant
+    // runner with no concurrent writer to the real ~/.agents. That's false
+    // for release-attestation-produce.sh, which used to need CI=true just to
+    // get vitest.config.ts's extended hookTimeout profile and, as a side
+    // effect, armed these guards on a box with a live daemon + active
+    // sessions — 129/129 test files false-failed on a fully green
+    // 12,559/12,559-test run cutting 1.22.44. shouldArmHermeticGuards() keeps
+    // a genuine CI runner's behavior identical and excludes only the
+    // producer's opt-in flag. See tests/hermetic-guards.ts.
+    if (shouldArmHermeticGuards(process.env)) {
       const sizeAfter = fs.existsSync(realEventsLog) ? fs.statSync(realEventsLog).size : 0;
       if (sizeAfter > sizeBefore) {
         throw new Error(

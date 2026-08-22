@@ -97,6 +97,10 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
       'if [[ "$1" == "--version" ]]; then echo "1.2.3"; exit 0; fi',
       'if [[ "$1" == "install" ]]; then exit 0; fi',
       'if [[ "$1" == "run" && "$2" == "test" ]]; then',
+      // RUSH-3007: the producer must run the suite with AGENTS_ATTEST_PRODUCER=1
+      // and CI unset, never CI=true -- see the "sets AGENTS_ATTEST_PRODUCER..."
+      // test below, which asserts on this exact line.
+      '  echo "RUSH-3007-ENV: producer=${AGENTS_ATTEST_PRODUCER:-<unset>} ci=${CI:-<unset>}"',
       fakeSuiteBody(opts),
       'fi',
       'if [[ "$1" == "run" && "$2" == "build" ]]; then mkdir -p dist; exit 0; fi',
@@ -179,6 +183,32 @@ describe('release-attestation-produce.sh', () => {
     const out = result.stdout + result.stderr;
     expect(result.status, out).toBe(0); // fake npm pack has no prepack gates
     expect(out).not.toContain('seeded bin/');
+  });
+
+  it('runs the suite with AGENTS_ATTEST_PRODUCER=1 and CI unset, even when the caller shell exports CI=true (RUSH-3007)', () => {
+    // Cutting 1.22.44, the operator exported CI=true by hand to get vitest's
+    // extended hookTimeout profile, which also armed tests/setup.ts's
+    // real-~/.agents leak tripwires against a box with a live daemon +
+    // active sessions -- 129/129 test files false-failed on a fully green
+    // suite. The producer must set its own AGENTS_ATTEST_PRODUCER flag and
+    // unset any ambient CI so this exact operator mistake cannot recur.
+    const root = tmp('attest-produce-envflag-');
+    const fx = buildFixture(root);
+    const result = spawnSync(
+      'bash',
+      [
+        path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
+        fx.headCommit,
+        '--repo-root',
+        fx.caller,
+        '--dir',
+        fx.store,
+      ],
+      { encoding: 'utf-8', env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}`, CI: 'true' } },
+    );
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('RUSH-3007-ENV: producer=1 ci=<unset>');
   });
 
   it('runs the suite, packs the tarball, and writes a passing attestation for the exact tree', () => {

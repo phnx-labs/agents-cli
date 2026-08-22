@@ -108,6 +108,19 @@ cd "$WT/apps/cli"
 bun install --frozen-lockfile || die "bun install failed for ${SHA:0:12}"
 
 bold "Running the full suite..."
+# RUSH-3007: cutting 1.22.44, the operator exported CI=true by hand to get
+# vitest.config.ts's extended hookTimeout profile (RUSH-2970 trap 5a), which
+# also armed tests/setup.ts's leak tripwires against this box's REAL
+# ~/.agents — a live daemon + active sessions tripped 129/129 test files on
+# hermeticity-guard writes while every individual test (12,559/12,559)
+# passed, and the producer correctly refused to attest. AGENTS_ATTEST_PRODUCER
+# is this script's own explicit, narrower opt-in: it gets the same vitest
+# profile (tests/hermetic-guards.ts:shouldEnableCiTestProfile) WITHOUT arming
+# those tripwires (shouldArmHermeticGuards). Unset CI defensively so a caller
+# shell that still exports it by habit (the exact operator mistake above)
+# cannot re-arm the guards out from under this flag.
+unset CI
+export AGENTS_ATTEST_PRODUCER=1
 # Mirrors isVitestWorkerCrashWithZeroFailures (scripts/ci-scope.ts): vitest can
 # exit 1 on an unhandled teardown "Worker exited unexpectedly" after every test
 # passed (RUSH-2215; hit by this producer on a fully green tree, RUSH-2758).
