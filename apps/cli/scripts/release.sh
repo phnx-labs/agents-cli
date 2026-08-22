@@ -12,10 +12,10 @@
 #   - Proof: exact-tree attestations (tree + toolchain + lockfile + policy) plus
 #     the pretested npm tarball they name. Ordinary release never re-runs the
 #     full suite and never accepts parent/nearby commit evidence.
-#   - Promote: a Mac home base (mac-mini by default, `--device <name>`) holds
-#     the npm publish identity. It publishes the exact attested .tgz, reuses
-#     immutable helper artifacts, and runs a real install smoke. Sign/notarize
-#     of helpers is outside this ordinary path.
+#   - Promote: the home base (any OS, mac-mini by default, `--device <name>`)
+#     holds the npm publish identity. It publishes the exact attested .tgz,
+#     reuses immutable helper artifacts, and runs a real install smoke.
+#     Sign/notarize of helpers is outside this ordinary path (RUSH-3026).
 #
 # Flow (--apply): require a passing attestation for origin/<default>; open the
 # chore(release) PR; require an attestation + pretested tarball for the release
@@ -56,13 +56,12 @@ bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
 
 die() { red "error: $*"; exit 1; }
 
-# ----- Home base: which machine runs build + sign + notarize + npm publish -----
-# This phase needs macOS (codesign/notarytool) + the Developer ID cert + the npm
-# publish token + the headless signing/secrets context. It defaults to mac-mini,
-# the stable box that holds those, and is overridable with `--device <name>`
-# (parsed below, alias `--host`) so a release can be driven to any capable Mac
-# when mac-mini is down. Not an env var -- the target is a flag with a default,
-# never ambient config. Everything else self-selects (attestations for proof;
+# ----- Home base: which machine runs the promote + npm publish phase -----
+# Promote-only (RUSH-3026): the phase needs the npm publish token + gh auth,
+# nothing macOS-specific. It defaults to mac-mini and is overridable with
+# `--device <name>` (parsed below, alias `--host`) so a release can be driven
+# to any promote-ready box when mac-mini is down. Not an env var -- the target
+# is a flag with a default, never ambient config. Everything else self-selects (attestations for proof;
 # the invoking box for git+gh orchestration).
 readonly RELEASE_HOME_BASE_DEFAULT="mac-mini"
 
@@ -359,7 +358,7 @@ bun install --frozen-lockfile >/dev/null \
 
 # ----- Route the privileged phase to the home base -----
 # After the trigger box has merged + tagged the release (git + gh, which need the
-# invoking box's auth), the build+sign+notarize+publish+computer-helper phase runs
+# invoking box's auth), the promote+publish+computer-helper phase runs
 # on the home base -- always from the TAGGED release.sh, checked out into a
 # throwaway worktree at v$TARGET, so the home base's own on-disk checkout (which,
 # on the first release after this PR merges, predates --home-base-phase) is never
@@ -671,10 +670,10 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
 
   # The catch-up guards above (CI-tested head match + tree match + version match)
   # are preserved intact -- they gate an unverified retry publish. What is NOT
-  # done here anymore: building the signed macOS artifacts on the trigger box.
-  # The whole privileged phase (build + sign + notarize + publish + computer-
-  # helper) now runs on the home base against the tagged tree, so no staged
-  # helper / historical worktree build is needed on the invoking box.
+  # done here anymore: building artifacts on the trigger box. The whole
+  # privileged phase (promote + publish + computer-helper) now runs on the home
+  # base against the tagged tree, so no staged helper / historical worktree
+  # build is needed on the invoking box.
   HISTORICAL_CATCHUP=true
   bold "Catch-up: main already at $TARGET (merged PR #$MERGED_RELEASE_PR at ${MERGED_RELEASE_SHA:0:9}); routing publish to the home base."
 fi

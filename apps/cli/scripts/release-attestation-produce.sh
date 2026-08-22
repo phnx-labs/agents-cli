@@ -19,8 +19,10 @@
 #      steps release.sh's privileged phase ran before RUSH-2666 relocated
 #      build/sign to attestation time). Off that box, this step is skipped and
 #      `npm pack`'s own prepack gates (verify-keychain-helper.sh,
-#      verify-menubar-helper.sh, verify-cli-binary.sh) fail closed instead --
-#      there is no unsigned fallback tarball.
+#      verify-menubar-helper.sh) fail closed instead -- there is no unsigned
+#      fallback tarball. (The CLI binary left the tarball in RUSH-3026, so its
+#      gate left prepack; the sign step below still builds it on a Mac for the
+#      per-release GitHub-asset path.)
 #   3. Packs the tarball (`npm pack`) and binds its sha256 into the record.
 #   4. Writes the attestation via release-attestation.sh write, then copies
 #      the tarball alongside it so release-attestation.sh tarball/promote can
