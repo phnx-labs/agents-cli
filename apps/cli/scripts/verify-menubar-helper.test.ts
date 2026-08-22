@@ -44,14 +44,17 @@ function runGate(bundle: 'ticketed' | 'unticketed' | 'absent'): { status: number
 }
 
 describe('verify-menubar-helper.sh off-Mac (no codesign/xcrun)', () => {
-  it('fails closed on a bundle with NO stapled ticket — the 1.22.44 regression', () => {
+  // runIf: on macOS codesign/xcrun live in /usr/bin, so the minimal PATH cannot
+  // exclude them — the off-Mac branch is only reachable off Mac (same guard as
+  // verify-cli-binary.test.ts).
+  it.runIf(process.platform !== 'darwin')('fails closed on a bundle with NO stapled ticket — the 1.22.44 regression', () => {
     const { status, out } = runGate('unticketed');
     expect(status).not.toBe(0);
     expect(out).toContain('NO stapled notarization ticket');
     expect(out).toContain('1.22.44'); // names the incident so the operator knows the stakes
   });
 
-  it('passes a bundle carrying the stapled ticket file', () => {
+  it.runIf(process.platform !== 'darwin')('passes a bundle carrying the stapled ticket file', () => {
     const { status, out } = runGate('ticketed');
     expect(status).toBe(0);
     expect(out).toContain('present, signed, and notarized');
