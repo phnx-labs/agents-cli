@@ -97,7 +97,6 @@ export function parseRetryAfterMs(header: string | null | undefined, now: number
   return ms > 0 ? Math.min(ms, MAX_BACKOFF_MS) : null;
 }
 
-/** Every recorded deadline for `agent`, newest-first. Never throws. */
 /**
  * File-name scope for a penalty. Provider-wide penalties are `<agent>`;
  * account-scoped ones are `<agent>@<slug>` (RUSH-3036), where the slug is the
