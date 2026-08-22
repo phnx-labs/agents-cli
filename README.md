@@ -1020,7 +1020,7 @@ agents auth space role ada@example.com admin
 agents auth space remove ada@example.com # or remove yourself to leave
 ```
 
-The session lives in this machine's agents state dir, so `logout` here signs out nothing else. `whoami` and every `space` subcommand take `--json`. `PHOENIX_ID_BASE` points the CLI at a different account service (a local one, for instance) and defaults to production.
+The session lives in this machine's agents state dir, so `logout` here signs out nothing else. `whoami` and every `space` subcommand take `--json`. `PHOENIX_ID_BASE` points the CLI at a different account service (a local one, for instance); it defaults to the deployed Phoenix ID service.
 
 Distinct from **Accounts** below: this is *your human identity*; those are the *harness credentials* an agent runs under.
 
