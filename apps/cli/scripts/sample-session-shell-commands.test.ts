@@ -105,7 +105,6 @@ describe('session shell-command sampler', () => {
         reachability: { reachable: true, checkedAt: '2026-08-03T00:00:00Z' },
       }),
       device('offline', { tailscale: { online: false, direct: false } }),
-      device('controller', { role: 'control' }),
       device('phone', { platform: 'unknown' }),
     ])).toEqual(['manual', 'probe-reachable']);
   });

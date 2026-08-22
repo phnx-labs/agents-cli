@@ -2,7 +2,7 @@
 import { createHash } from 'crypto';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
-import { isControlDevice, isDialableDevice, type DeviceProfile } from '../src/lib/devices/registry.js';
+import { isDialableDevice, type DeviceProfile } from '../src/lib/devices/registry.js';
 import type { ToolSearchEnvelope, ToolSessionEvidence } from '../src/lib/session/tool-index.js';
 import { machineId, normalizeHost } from '../src/lib/session/sync/config.js';
 
@@ -123,7 +123,6 @@ export function runAgents(args: string[]): string {
 export function automaticSampleDevices(devices: DeviceProfile[]): string[] {
   return devices
     .filter((device) => isDialableDevice(device)
-      && !isControlDevice(device)
       && ['linux', 'macos', 'windows'].includes(device.platform))
     .map((device) => device.name);
 }
