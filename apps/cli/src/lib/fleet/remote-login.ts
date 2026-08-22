@@ -162,7 +162,7 @@ export interface SelectLoginOptions {
  *
  * A pair is pending when its cached verdict {@link isPendingVerdict} (or
  * `includeLoggedIn` forces it). Agents with no defined login flow are dropped
- * silently (nothing to log into). Control devices are excluded by the caller.
+ * silently (nothing to log into).
  */
 export function selectLoginTargets(
   devices: DeviceProfile[],
