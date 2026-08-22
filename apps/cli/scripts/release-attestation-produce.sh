@@ -247,8 +247,23 @@ if [[ -x scripts/release-manifest.sh ]]; then
   MANIFEST_FILE="$STORE/release-manifest.json"
   CLI_VERSION_MANIFEST="$(jq -r .version package.json)"
   if [[ ! -f "$MANIFEST_FILE" ]]; then
-    scripts/release-manifest.sh new --cli-version "$CLI_VERSION_MANIFEST" --cli-tree "$TREE" \
-      > "$MANIFEST_FILE"
+    # Seed from the last published release before falling back to an empty
+    # manifest. Without this, a fresh store has no recorded computer-mac
+    # inputDigest, the helper loop below reads "input changed", and the
+    # computer-mac arm dies telling the operator to run
+    # publish-computer-helper-mac.sh — which does not write a manifest, so the
+    # instruction loops forever on a byte-identical helper. Every hand-cut
+    # release hit this. RUSH-2970 trap 1.
+    if command -v gh >/dev/null 2>&1 \
+      && PRIOR_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null)" \
+      && [[ -n "${PRIOR_TAG:-}" ]] \
+      && gh release download "$PRIOR_TAG" --pattern release-manifest.json --dir "$STORE" >/dev/null 2>&1 \
+      && [[ -f "$MANIFEST_FILE" ]]; then
+      gray "Seeded the helper manifest from $PRIOR_TAG (unchanged helpers carry forward)."
+    else
+      scripts/release-manifest.sh new --cli-version "$CLI_VERSION_MANIFEST" --cli-tree "$TREE" \
+        > "$MANIFEST_FILE"
+    fi
   fi
 
   manifest_asset_sha256() {

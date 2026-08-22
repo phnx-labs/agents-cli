@@ -34,5 +34,16 @@ if [[ -n "$missing" ]]; then
   exit 1
 fi
 
+# The attestation store lives in the CALLER's checkout (that is where
+# release-attestation-produce.sh writes it), but REPO_ROOT inside this
+# throwaway worktree resolves to the worktree — so `require` looked in an empty
+# directory and reported "missing exact attestation key" with `?` for every key
+# component, which reads like a key mismatch rather than a wrong directory.
+# Operators had to know to export RELEASE_ATTESTATION_DIR; now they do not
+# (an explicit export still wins). RUSH-2970 trap 2.
+if [[ -z "${RELEASE_ATTESTATION_DIR:-}" && -d "$REPO_ROOT/.release-attestations" ]]; then
+  export RELEASE_ATTESTATION_DIR="$REPO_ROOT/.release-attestations"
+fi
+
 cd "$WORKTREE/apps/cli"
 scripts/release.sh "${RELEASE_ARGS[@]}" --orchestration-phase
