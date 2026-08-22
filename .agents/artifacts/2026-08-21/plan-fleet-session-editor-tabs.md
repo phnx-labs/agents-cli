@@ -20,7 +20,7 @@ links:
   - label: "Linear · RUSH-2783"
     url: "https://linear.app/getrush/issue/RUSH-2783/agi-ext-fleet-resume-reopens-remote-sessions-as-panel-terminals-not"
 facts:
-  - "Verified on fresh origin/main at 804d796c6."
+  - "Initial code-path evidence was captured at 804d796c6; session-module paths were rechecked after PR #2847 merged at 0250072f7."
   - "Current Fleet handlers create unregistered bottom-panel terminals and hand-roll SSH/tmux commands."
   - "The registered editor-tab constructor already exists in apps/ext/src/vscode/extension.ts."
   - "Direct sessions resume by id is strict recovery today; Fleet therefore needs the lifecycle-focused sessions focus path, not a blind resume substitution."
@@ -29,7 +29,7 @@ facts:
 ## Focus for review
 
 - **Visible contract:** an existing AGI EXT tab still says **Focus**; every session without a tab says **Open in agent tab**; bulk selection says **Open N in agent tabs**.
-- **One-tab invariant:** one click creates at most one registered editor tab. A repeated click focuses that tab instead of creating a duplicate.
+- **One-tab invariant:** one click creates at most one registered editor tab. Concurrent clicks coalesce behind one in-flight open keyed by session id; later clicks focus the registered tab.
 - **Lifecycle ownership:** AGI EXT chooses the surface; `agents sessions focus <id> --in-place` chooses live attach versus origin-side recovery.
 - **Failure contract:** a row with no canonical session id is disabled inline; an unreachable origin or unsupported harness fails visibly inside the opened tab.
 - **Compatibility:** no new public command or extension setting. `--in-place` is an internal option on the already-hidden `sessions focus` dispatcher.
@@ -340,31 +340,51 @@ Add one renderer-to-host message to `apps/ext/ui/settings/shared/protocol.ts`. R
 
 ### 4. Generalize the registered editor-tab constructor
 
-Refactor `openResumedSessionTerminal` into a small shared constructor, `openAgentSessionTerminal`, that receives the command to run. Command-palette Resume still supplies `buildVersionedResumeCommand`; Fleet supplies `buildFocusInPlaceCommand`. The helper deduplicates by session id before allocating a terminal.
+Refactor `openResumedSessionTerminal` into a small shared constructor, `openAgentSessionTerminal`, that receives the command to run. Command-palette Resume still supplies `buildVersionedResumeCommand`; Fleet supplies `buildFocusInPlaceCommand`.
+
+The dedupe boundary must cover both registered and **currently opening** terminals. `terminal.processId` is asynchronous, so a `getBySessionId` check followed by creation still lets two same-tick clicks allocate two terminals before either is registered. A module-owned `openingSessions` map installs a lazy promise before terminal creation begins; concurrent callers await that same promise, and `finally` releases only that exact reservation.
 
 ```diff
 -async function openResumedSessionTerminal(context, session): Promise<boolean> {
 -  const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version, session.host)
++const openingSessions = new Map<string, Promise<boolean>>()
++
 +async function openAgentSessionTerminal(context, session, command): Promise<boolean> {
-+  const existing = terminals.getBySessionId(session.id)
-+  if (existing) {
-+    existing.terminal.show(false)
++  const registered = terminals.getBySessionId(session.id)
++  if (registered) {
++    registered.terminal.show(false)
 +    return true
 +  }
-   const terminal = vscode.window.createTerminal({
-     iconPath: agentConfig.iconPath,
-     location: { viewColumn: vscode.ViewColumn.Active },
-     name: title,
-     cwd: session.cwd,
-     env: buildAgentTerminalEnv(...),
-     isTransient: true,
-   })
-   terminals.register(...)
-   terminals.setSessionId(terminal, session.id)
-   terminals.setAgentType(terminal, agentKey)
--  terminal.sendText(resumeCmd)
++  const pending = openingSessions.get(session.id)
++  if (pending) return pending
++
++  const opening = Promise.resolve().then(() =>
++    createAndRegisterAgentSessionTerminal(context, session, command),
++  )
++  openingSessions.set(session.id, opening)
++  try {
++    return await opening
++  } finally {
++    if (openingSessions.get(session.id) === opening) openingSessions.delete(session.id)
++  }
++}
++
++async function createAndRegisterAgentSessionTerminal(context, session, command): Promise<boolean> {
++  const terminal = vscode.window.createTerminal({
++    iconPath: agentConfig.iconPath,
++    location: { viewColumn: vscode.ViewColumn.Active },
++    name: title,
++    cwd: session.cwd,
++    env: buildAgentTerminalEnv(...),
++    isTransient: true,
++  })
++  const pid = await terminal.processId
++  terminals.register(terminal, terminalId, agentConfig, pid, context)
++  terminals.setSessionId(terminal, session.id)
++  terminals.setAgentType(terminal, agentKey)
 +  terminal.sendText(command)
- }
++  return true
++}
 +
 +const openResumedSessionTerminal = (context, session) =>
 +  openAgentSessionTerminal(context, session, buildVersionedResumeCommand(...))
@@ -424,20 +444,20 @@ agents sessions focus <session-id>
 | `apps/ext/ui/settings/components/mission-control/floorAdapter.ts` + test | Carry metadata through local and remote adapters. |
 | `apps/ext/ui/settings/shared/protocol.ts` + protocol test | Add `openFleetSession`; remove stale focus messages. |
 | `apps/ext/ui/settings/components/mission-control/UnifiedAgentsPane.tsx` | Route all tabless identified sessions through the typed open intent; update singular/bulk copy and unavailable state. |
-| `apps/ext/src/vscode/extension.ts` | Generalize the registered editor-tab constructor and dedupe by session id. |
+| `apps/ext/src/vscode/extension.ts` | Generalize the registered editor-tab constructor; coalesce in-flight opens by session id before the first await; focus already-registered tabs. |
 | `apps/ext/src/vscode/settings.vscode.ts` | Handle `openFleetSession`; remove both raw panel-terminal handlers. |
 | `apps/ext/src/core/remoteSessions.ts` + test | Delete `buildRemoteFocusCommand` and isolated SSH quoting tests after the last caller moves. |
 | `apps/ext/AGENTS.md`, `apps/ext/README.md`, `apps/ext/CHANGELOG.md` | Document Fleet's editor-tab behavior. |
 | `apps/cli/AGENTS.md`, `apps/cli/docs/sessions.md`, `apps/cli/docs/specifications.md`, `apps/cli/CHANGELOG.md` | Record the hidden in-place lifecycle contract and its no-second-surface invariant. |
 
-The open PR #2847 moves session remote fan-out files. It does not change this behavior, but implementation must re-anchor `focus.ts` imports and session-module paths on fresh `origin/main` before editing.
+PR #2847 merged while this plan was under review (`0250072f7`). It moved session remote fan-out files without changing this Fleet behavior; `focus.ts` still reaches the compatibility export from `sessions-resume.ts`. Implementation must start from post-#2847 `origin/main` and re-run the import/caller audit rather than copying pre-merge paths from this plan.
 
 ## Plan
 
 - [ ] Claim RUSH-2783 and create a feature worktree from freshly fetched `origin/main`.
 - [ ] Add CLI `focus --in-place`, centralize recovery, and land the real lifecycle tests first.
 - [ ] Carry `agentType` / `cwd` through Floor models and replace the transport-shaped protocol.
-- [ ] Generalize the registered editor-tab constructor, add session-id dedupe, and remove raw SSH/tmux handlers.
+- [ ] Generalize the registered editor-tab constructor, add registered + in-flight session-id dedupe, and remove raw SSH/tmux handlers.
 - [ ] Update **Focus** / **Open in agent tab** / **Open N in agent tabs** copy and the missing-id inline state.
 - [ ] Update component docs, specifications and both changelogs; audit the companion `.agents-system` session guidance and record whether any consumer needs a change.
 - [ ] Run CLI remote tests and extension tests/build; inspect the real AGI EXT surface on the interactive macOS host.
@@ -460,6 +480,7 @@ scripts/build.sh <version>
 | Invariant | Test signal |
 | --- | --- |
 | Existing tab focuses | Terminal registry returns the same terminal; terminal count is unchanged. |
+| Two opens in the same event-loop turn | A real extension-host integration sends two `openFleetSession` messages before `processId` resolves; both await one reservation, exactly one terminal is created and registered. |
 | Live local tmux session | New editor tab attaches in place; no recovery command spawns. |
 | Live remote tmux session | New editor tab connects through CLI focus and joins the pane; no raw Fleet SSH builder remains. |
 | Pane dies between render and click | CLI liveness recheck recovers inside the already-created tab; no second tab. |
@@ -483,9 +504,9 @@ scripts/build.sh <version>
 | --- | --- | --- |
 | “Resume” is replaced with a broader open action | A live tabless session is not being resumed; it is being attached or recovered. | Use **Open in agent tab** for tabless rows; reserve **Focus** for an existing tab. |
 | Pane liveness changes after the UI snapshot | A precomputed tmux command can attach a dead pane. | CLI probes immediately before attach; `--in-place` keeps fallback in the same editor tab. |
-| Double-click / repeated bulk action | Duplicate agent copies are costly and confusing. | Host-side `getBySessionId` dedupe is authoritative; renderer state is only an optimization. |
+| Double-click / repeated bulk action | Duplicate agent copies are costly and confusing; registry-only lookup races before `processId` and registration. | Reserve `openingSessions[sessionId]` before the first await, coalesce concurrent callers, then let `getBySessionId` own all later clicks. Renderer state is only an optimization. |
 | Unsupported or missing agent type | The editor tab cannot get a trustworthy icon/config. | Preserve `agentType` from the CLI; fail visibly before creating a false shell tab. |
-| Session module refactor lands first | PR #2847 moves remote fan-out paths. | Re-fetch and re-run the import/file audit before implementation; keep behavior changes in canonical owners. |
+| Post-#2847 paths differ from the initial evidence | The session remote fan-out refactor merged while this plan was reviewed. | Start from post-merge `origin/main`, re-run the import/caller audit, and keep behavior changes in canonical owners rather than reviving compatibility shims. |
 | Hidden CLI surface becomes accidental public API | Internal flags can escape into docs or autocomplete. | Keep `focus` hidden, document only in internal architecture/spec text, and expose no command-palette entry. |
 | Companion guidance still teaches old behavior | Fleet agents may keep invoking a stale command. | Audit the `.agents-system` consumers of `sessions focus/resume`; link a companion PR only if the audit finds a caller. |
 
