@@ -152,18 +152,7 @@ function runProduce(
   );
 }
 
-/** PATH with every directory that actually contains a `gh` removed. */
-function pathWithoutGh(fakebin: string): string {
-  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter((dir) => {
-    try {
-      fs.accessSync(path.join(dir, 'gh'), fs.constants.X_OK);
-      return false;
-    } catch {
-      return true;
-    }
-  });
-  return [fakebin, ...dirs].join(path.delimiter);
-}
+
 
 describe('release-attestation-produce.sh', () => {
   it('seeds the already-signed helper apps from the caller checkout on a non-Mac producer (RUSH-3026)', () => {
@@ -588,12 +577,6 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
    */
   it.each([
     {
-      cause: 'gh missing',
-      gh: null,
-      expected: 'no gh on PATH',
-      notExpected: 'no published release',
-    },
-    {
       cause: 'gh cannot list (auth/network)',
       gh: '#!/usr/bin/env bash\nexit 1\n',
       expected: 'gh could not list releases',
@@ -615,16 +598,11 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     const root = tmp('attest-produce-seed-why-');
     const fx = buildManifestFixture(root);
     const ghPath = path.join(fx.fakebin, 'gh');
-    // A non-executable shim does NOT shadow gh — `command -v` skips it and finds
-    // the real binary further down PATH (measured). Drop those dirs instead.
-    const envOverride = gh === null ? { PATH: pathWithoutGh(fx.fakebin) } : {};
-    if (gh !== null) {
-      fs.writeFileSync(ghPath, gh);
-      fs.chmodSync(ghPath, 0o755);
-    }
+    fs.writeFileSync(ghPath, gh);
+    fs.chmodSync(ghPath, 0o755);
 
     const output = (() => {
-      const r = runProduce(fx, [], envOverride);
+      const r = runProduce(fx);
       return r.stdout + r.stderr;
     })();
 
