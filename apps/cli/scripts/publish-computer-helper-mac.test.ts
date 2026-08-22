@@ -56,10 +56,18 @@ describe('publish-computer-helper-mac.sh', () => {
     // every `security` call. This is what keeps the new source line safe on a Mac
     // that is not the release home base.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'no-signing-home-'));
+
+    // Strip the passphrase the context is supposed to set. Inheriting it from the
+    // developer's own shell would make the assertion below pass on a value this
+    // run never produced -- the same reason tests/secrets-transport-passphrase.test.ts
+    // deletes it before driving the CLI.
+    const env: Record<string, string> = { ...(process.env as Record<string, string>), HOME: home };
+    delete env.AGENTS_SECRETS_PASSPHRASE;
+
     const r = spawnSync(
       'bash',
       ['-c', `set -euo pipefail; . "${CONTEXT}"; echo "rc=$?"; echo "pass=\${AGENTS_SECRETS_PASSPHRASE:-unset}"`],
-      { encoding: 'utf-8', env: { ...process.env, HOME: home } },
+      { encoding: 'utf-8', env },
     );
     const out = `${r.stdout}${r.stderr}`;
 
