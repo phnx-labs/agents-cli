@@ -81,6 +81,7 @@ Also available as `ag` -- all commands work with both `agents` and `ag`.
 - [Plugins](#plugins)
 - [Make it yours](#make-it-yours)
 - [Browser](#browser)
+- [Sign in](#sign-in)
 - [Accounts](#accounts)
 - [Secrets](#secrets)
 - [Routines](#routines)
@@ -1019,7 +1020,7 @@ agents auth space role ada@example.com admin
 agents auth space remove ada@example.com # or remove yourself to leave
 ```
 
-The session lives in this machine's agents state dir, so `logout` here signs out nothing else. Every command takes `--json`. `PHOENIX_ID_BASE` points the CLI at a different account service (a local one, for instance) and defaults to production.
+The session lives in this machine's agents state dir, so `logout` here signs out nothing else. `whoami` and every `space` subcommand take `--json`. `PHOENIX_ID_BASE` points the CLI at a different account service (a local one, for instance) and defaults to production.
 
 Distinct from **Accounts** below: this is *your human identity*; those are the *harness credentials* an agent runs under.
 
