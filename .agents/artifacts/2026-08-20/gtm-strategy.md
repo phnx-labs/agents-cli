@@ -108,7 +108,7 @@ Recommendations that follow are the evidence and the build order.
 | 2 | **Apache-2.0 gave away pricing power** — forks redistributed the work as fast as it shipped. | Roo Code (3M installs, dead; forked into Kilo Code, ZooCode) | CLI stays Apache-2.0 (the distribution asset); the **paid enterprise surface is source-available**, license-key-capped so it can't be re-sold as a competing product. | Roo Code's own successor did exactly this relicensing after the forks bled it — *"you can't offer substantially similar functionality as a competing commercial product."* MongoDB/Elastic/HashiCorp/Redis all made the same move and all judged it commercially necessary. |
 | 3 | **Optimized for stars, not retention** — vanity traction that didn't convert. | All three casualties (27,867 / 24,332 / 256 ★) | Launch **win-condition is retention, not stars**: *20 people outside the fleet who ran agi-cli on two separate days in one week, and whom you can contact.* | Vibe Kanban had 27,867 stars and still died. Stars are the metric that was present at every death; two-day retention is the one that would have predicted a different outcome. |
 | 4 | **Thin slice of the problem** — a single-machine desktop GUI wrapping git worktrees. | Conductor, Sculptor, Crystal, Vibe Kanban | The genuine **positioning whitespace**: across 21 tools nothing else combines CLI-first + real multi-harness + **cross-device SSH fleet** + one surface (sessions/teams/secrets/browser/computer). | The differentiation is measured (Finding 3), and it's the exact axis — many machines, many harnesses, one control plane — that a single-machine GUI structurally cannot reach. |
-| 5 | **(The trap we must not walk into)** the headline pitch — "reuse your Max subscription" via account rotation — has **no monetizable precedent** and sits against provider terms. | Would be *us* if the paid tier were built on subscription-sharing | Paid tier lives in **enterprise API-key / Bedrock / Vertex** territory, where metering and automation are permitted (OpenRouter's 5%-of-routed-value model), **not** on subscription reuse. | Finding 4c: no successful *paid* wrapper of a subscription seat exists; Anthropic's Consumer Terms forbid credential sharing; OpenClaw itself calls subscription-reuse unstable for shared automation. The free tool can reuse subscriptions; the *paid* one cannot be built on it. |
+| 5 | **(The trap we must not walk into)** charging for a *hosted/cloud* service that runs on a reused "Max subscription" — that has **no monetizable precedent** and sits against provider terms. | Would be *us* if the **cloud** tier were built on subscription-sharing | Split by the local/cloud line (see *The pricing model*): **local** multi-account use is a legitimate paid unlock — your own accounts, your own machine, tokens never sent to the cloud (OpenAI/Codex allow multiple accounts). The **cloud** tier runs on **API keys / Bedrock / Vertex**, never a subscription token. | Finding 4c: no successful *paid hosted* wrapper of a subscription seat exists; Anthropic's Consumer Terms forbid credential sharing; OpenClaw calls subscription-reuse unstable for shared automation. So: monetize local account convenience (Local Pro) and hosted execution on API keys (Cloud) — never a hosted product built on someone's personal subscription. |
 
 **The one-line synthesis:** every casualty monetized a thin, forkable, free product
 at a prosumer price and counted stars. The plan is the inverse on all four axes —
@@ -609,6 +609,42 @@ proposition — `README.md:1494` sells "use your existing subscription" precisel
 because subscription pricing beats API pricing for heavy users. Taking a token
 margin means asking users to pay more than they do today. That is a real strategic
 fork, not an obvious win, and it deserves its own decision rather than a default.
+
+### The pricing model — the tier is set by who bears the recurring cost
+
+The governing rule, decided 2026-08-21: **price each feature by who pays the
+recurring cost of running it.** Purely-local convenience that costs us nothing
+recurring is a cheap one-time unlock; anything we host and pay for every month is a
+subscription; the enterprise governance surface is a subscription plus metering.
+One hard architectural line makes the whole model clean and keeps it clear of the
+Finding 4c trap:
+
+> **Local account tokens never leave the machine, and the cloud never runs on your
+> subscription token.** Local use is your own accounts on your own hardware; cloud
+> use is API keys / Bedrock / Vertex (ours or yours). The two never cross.
+
+That line is what turns the "row 5 trap" into a non-issue: we are not reselling
+subscription access. Locally, you use accounts you legitimately bought; in the
+cloud, nobody's Max token is involved at all.
+
+| Tier | For | Included | Price shape | Why this shape |
+| --- | --- | --- | --- | --- |
+| **Free** (Apache-2.0) | solo dev, own machines | full CLI — sessions, teams, worktrees, secrets, browser, computer, SSH fleet — up to **3 local provider accounts** | **$0** | zero recurring cost to us; this is the distribution asset and cannot be recalled |
+| **Local Pro** | power users running many local accounts | **unlimited local accounts** + balanced rotation, local power features | **one-time / low unlock (~$19.99–$99)** | it is *your* accounts on *your* machine — OpenAI/Codex explicitly allow multiple accounts on different emails, and many providers do; tokens never touch the cloud, so no ToS/compliance exposure. We incur no recurring cost, so it is a capability unlock, **not** a recurring seat (this is deliberately not the ~$30 prosumer SaaS seat that killed Vibe Kanban — there is no hosted value being rented) |
+| **Cloud** | anyone wanting hosted execution | run agents in the cloud, hosted session sync + state, cloud dispatch, managed compute | **recurring subscription (+ usage)** | **we** pay infra every month, so it must recur to cover cost + margin; it runs on API keys / Bedrock / Vertex or our own compute — never a personal subscription token — which is what keeps it both permitted and operationally stable (Finding 4c) |
+| **Enterprise** | orgs / budget holders | SSO/SAML, RBAC, audit trail of agent actions, centralized spend attribution + metering, data residency, admin controls | **subscription + metering, sales-led, custom** | the altitude the survivors monetize at (Cursor/Devin/Factory hosted+paid; Cline free→Enterprise); source-available + license-key-capped so it cannot be forked (Roo Code's lesson) |
+
+**The decision rule in one line:** *does running this feature cost us money every
+month?* No, and it is local → **one-time unlock**. Yes → **subscription**. Sold to
+an org that needs governance over committed spend → **subscription + metering**. The
+free CLI stays the top of funnel; Local Pro converts individual power users at near-
+zero marginal cost to us; Cloud and Enterprise are where recurring revenue and the
+enterprise altitude live.
+
+This does not overturn Act 3's core conclusion — the enterprise team tier is still
+the load-bearing revenue bet and still hangs off the identity substrate (RUSH-2581).
+It adds the two tiers beneath it (Free, Local Pro) and the one above the seat
+(Cloud), and gives each a principled price shape instead of a single guess.
 
 ### The fork that is yours, not mine
 
