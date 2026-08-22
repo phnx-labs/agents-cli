@@ -26,10 +26,47 @@ export function isFreshFleetAuthSnapshot(
 }
 
 /**
+ * How stale a cached auth verdict may get before the periodic tick re-probes.
+ *
+ * The auth verdict rides the same rate-limited `/api/oauth/usage` endpoint as
+ * the usage probe. Firing it every 3-minute tick on every fleet device drove one
+ * per-account request quota to a permanent 429, and the shared backoff then
+ * parked usage fleet-wide and froze the usage cache (RUSH-2998). Re-probing at
+ * most every 20 minutes cuts that endpoint traffic ~5x while still catching a
+ * revocation within one window — and every device keeps a REAL verdict (not a
+ * degraded "unverified"), so `agents devices ping --strict` and the run
+ * auth-preflight keep working on every host, unlike a publisher/subscriber split
+ * that would blind every non-primary box to revocation. Fleet status still
+ * publishes every tick — it does not ride that endpoint.
+ */
+export const AUTH_PROBE_MAX_AGE_MS = 20 * 60_000;
+
+/**
+ * True when every cached auth row was probed within {@link AUTH_PROBE_MAX_AGE_MS}
+ * — i.e. reusing them would not let a verdict get staler than one probe window.
+ * Empty cache is never fresh (nothing to reuse). Pure — unit-tested.
+ */
+export function isCachedFleetAuthProbeFresh(
+  authRows: AuthProbeRow[],
+  now: number,
+  maxAgeMs: number = AUTH_PROBE_MAX_AGE_MS,
+): boolean {
+  return authRows.length > 0 && authRows.every((r) => now - r.health.checkedAt < maxAgeMs);
+}
+
+/**
  * Fleet cache warm: publish THIS host's row for the caches `agents fleet
  * status` / `agents devices list` read (PUBLISH-OWN / READ-UNION, RUSH-2061).
+ *
+ * `force` is set by on-demand callers (`agents devices ping`) that must return a
+ * genuinely live verdict; the periodic daemon tick leaves it unset so it reuses a
+ * recent verdict per {@link AUTH_PROBE_MAX_AGE_MS} instead of hammering the
+ * rate-limited endpoint every 3 minutes (RUSH-2998).
  */
-export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRow; authRows: import('./auth-health.js').AuthProbeRow[] }> {
+export async function refreshLocalFleetAuthState(
+  opts?: { force?: boolean },
+): Promise<{ row: FleetStatusRow; authRows: import('./auth-health.js').AuthProbeRow[] }> {
+  const force = opts?.force === true;
   const { machineId } = await import('./machine-id.js');
   const { probeLocalFleetAuth, readFleetAuthRows, writeFleetAuthRows } = await import('./auth-health.js');
   const { getCliVersion } = await import('./version.js');
@@ -38,14 +75,6 @@ export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRo
   const minimumCapturedAt = requestedAt - 2 * 60_000;
   const { withRefreshLease } = await import('./refresh-coordinator.js');
   const { readFleetStatus, publishLocalFleetStatus } = await import('./fleet-status.js');
-  // Only the usage-primary host fires the live provider probe. A subscriber
-  // probing `/oauth/usage` on every 3-minute tick multiplied the fleet's
-  // request rate against one per-account quota until the endpoint 429'd every
-  // account and the shared backoff froze the usage cache (RUSH-2998). Mirror the
-  // usage-refresh publisher/subscriber split so exactly one box hits the endpoint.
-  const { resolveUsagePrimaryHost } = await import('./device-config.js');
-  const { usageRefreshRole } = await import('./usage-fleet.js');
-  const liveProbe = usageRefreshRole(resolveUsagePrimaryHost() ?? undefined, self) === 'publisher';
   return withRefreshLease({
     scope: 'auth',
     key: self,
@@ -55,11 +84,17 @@ export async function refreshLocalFleetAuthState(): Promise<{ row: FleetStatusRo
       return { row, authRows: readFleetAuthRows(self) };
     },
     // A recent daemon publication is the completed result, not a reason to probe
-    // every provider a second time.
-    isCompleted: (value) => isFreshFleetAuthSnapshot(value, minimumCapturedAt),
+    // every provider a second time. An on-demand caller (force) never accepts a
+    // cached snapshot — it must return a genuinely live verdict.
+    isCompleted: (value) => !force && isFreshFleetAuthSnapshot(value, minimumCapturedAt),
     refresh: async () => {
-      const authRows = await probeLocalFleetAuth({ cliVersion: getCliVersion(), liveProbe });
-      writeFleetAuthRows(self, authRows);
+      // Re-probe the rate-limited /oauth/usage endpoint at most every
+      // AUTH_PROBE_MAX_AGE_MS; reuse the last real verdict in between (RUSH-2998).
+      // Fleet status publishes every tick regardless — it does not ride that endpoint.
+      const cached = readFleetAuthRows(self);
+      const reuse = !force && isCachedFleetAuthProbeFresh(cached, requestedAt);
+      const authRows = reuse ? cached : await probeLocalFleetAuth({ cliVersion: getCliVersion() });
+      if (!reuse) writeFleetAuthRows(self, authRows);
       const row = await publishLocalFleetStatus(self);
       return { row, authRows };
     },

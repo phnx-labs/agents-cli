@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isFreshFleetAuthSnapshot, runActiveSessionsWarmTick } from './daemon-ticks.js';
+import { isFreshFleetAuthSnapshot, isCachedFleetAuthProbeFresh, AUTH_PROBE_MAX_AGE_MS, runActiveSessionsWarmTick } from './daemon-ticks.js';
 import {
   readActiveSessionsCache,
   setActiveSessionsSnapshotPathForTest,
@@ -30,6 +30,26 @@ describe('isFreshFleetAuthSnapshot', () => {
     expect(isFreshFleetAuthSnapshot({ row, authRows: [] }, minimum)).toBe(false);
     expect(isFreshFleetAuthSnapshot({ row, authRows: [{ ...authRow, health: { ...authRow.health, checkedAt: minimum - 1 } }] }, minimum)).toBe(false);
     expect(isFreshFleetAuthSnapshot({ row, authRows: [authRow] }, minimum)).toBe(true);
+  });
+});
+
+describe('isCachedFleetAuthProbeFresh — periodic tick reuses a real verdict, does not re-hit /oauth/usage every 3min (RUSH-2998)', () => {
+  const now = 100 * 60_000;
+  const row = (checkedAt: number) => ({ agent: 'claude' as const, version: '1.0.0', health: { verdict: 'live' as const, checkedAt } });
+
+  it('reuses a verdict probed within the 20-minute window', () => {
+    expect(isCachedFleetAuthProbeFresh([row(now - 5 * 60_000)], now)).toBe(true);
+    // Exactly at the boundary is stale (strict <), so the tick re-probes.
+    expect(isCachedFleetAuthProbeFresh([row(now - AUTH_PROBE_MAX_AGE_MS)], now)).toBe(false);
+    expect(isCachedFleetAuthProbeFresh([row(now - (AUTH_PROBE_MAX_AGE_MS + 60_000))], now)).toBe(false);
+  });
+
+  it('never reuses an empty cache (nothing to reuse — must probe)', () => {
+    expect(isCachedFleetAuthProbeFresh([], now)).toBe(false);
+  });
+
+  it('re-probes when ANY row is stale, so one aged account cannot pin the rest to a stale verdict', () => {
+    expect(isCachedFleetAuthProbeFresh([row(now - 60_000), row(now - (AUTH_PROBE_MAX_AGE_MS + 1))], now)).toBe(false);
   });
 });
 

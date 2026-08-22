@@ -812,8 +812,11 @@ async function runFleetPing(opts: { json?: boolean; local?: boolean; verbose?: b
   const { refreshLocalFleetAuthState } = await import('../lib/daemon-ticks.js');
 
   // --local: probe just this host. Used both directly and as the fan-out worker.
+  // force: this command promises "a real request for every account" (--strict
+  // gates on it), so it must never reuse the periodic tick's rate-limit-throttled
+  // cached verdict (RUSH-2998).
   if (opts.local) {
-    const { authRows: rows } = await refreshLocalFleetAuthState();
+    const { authRows: rows } = await refreshLocalFleetAuthState({ force: true });
     if (opts.json) {
       console.log(JSON.stringify({ host: self, rows }));
     } else {

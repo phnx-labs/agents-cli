@@ -8,7 +8,6 @@ import {
   groupFleetAuthInstalls,
   mergeAuthHealthEntries,
   formatCheckedAge,
-  probeAuthHealth,
   probeDetail,
   summarizeHostAuth,
   summarizeVerdicts,
@@ -20,7 +19,6 @@ import {
   type AuthVerdict,
   type FleetAuthInstall,
 } from './auth-health.js';
-import type { AccountInfo } from './agent-spec/agents.js';
 
 describe('classifyHttpStatus', () => {
   it('maps 2xx to live', () => {
@@ -322,27 +320,5 @@ describe('formatCheckedAge', () => {
   });
   it('never goes negative for a future timestamp', () => {
     expect(formatCheckedAge(now + 5_000, now)).toBe('0s ago');
-  });
-});
-
-describe('probeAuthHealth — liveProbe gate (RUSH-2998)', () => {
-  const signedIn = { signedIn: true } as AccountInfo;
-  const signedOut = { signedIn: false } as AccountInfo;
-
-  // The daemon fleet-cache warm on a usage SUBSCRIBER passes liveProbe:false so
-  // only the usage-primary host hits /oauth/usage. Every other device probing it
-  // every 3 minutes multiplied the fleet's request rate against one per-account
-  // quota until the endpoint 429'd every account and the shared backoff froze the
-  // usage cache. A subscriber must therefore take the local-verdict path even for
-  // a network agent — no request, no re-armed throttle.
-  it('claude with liveProbe:false takes the local verdict, never the network probe', async () => {
-    const health = await probeAuthHealth('claude', undefined, { liveProbe: false, info: signedIn });
-    expect(health.verdict).toBe('unverified'); // present but not live-confirmed — never a network 'live'
-    expect(health.detail).toBeUndefined();
-  });
-
-  it('claude with liveProbe:false reports unconfigured when signed out', async () => {
-    const health = await probeAuthHealth('claude', undefined, { liveProbe: false, info: signedOut });
-    expect(health.verdict).toBe('unconfigured');
   });
 });
