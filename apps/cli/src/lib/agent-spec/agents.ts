@@ -22,6 +22,7 @@ import type { AgentConfig, AgentId } from '../types.js';
 import { execFileShellSpec } from '../platform/index.js';
 import { latestFileMtimeMs } from '../fs-walk.js';
 import { damerauLevenshtein } from '../fuzzy.js';
+import { probeCapture } from '../probe.js';
 import { getCacheDir, getVersionsDir, getShimsDir, getHistoryDir, getCliVersionCachePath } from '../state.js';
 import { resolveVersion, getVersionHomePath, getBinaryPath } from '../installations/versions.js';
 import { supports } from '../capabilities.js';
@@ -1286,7 +1287,11 @@ async function getCachedVersionForBinary(agentId: AgentId, binaryPath: string): 
   const agent = AGENTS[agentId];
   let version: string | null = null;
   try {
-    const { stdout } = await execFileAsync(agent.cliCommand, ['--version'], { timeout: 3000 });
+    // probeCapture, not bare execFileAsync: a probed harness can fork its own
+    // children (copilot's platform-binary downloader), and a timeout kill of
+    // the direct child would orphan them mid-write (RUSH-3028). The probe runs
+    // in its own process group and the whole group is reaped on settle.
+    const { stdout } = await probeCapture(agent.cliCommand, ['--version'], 3000);
     const versionRe = agent.versionStdoutMatch === 'openclaw'
       ? /openclaw\/(\d+\.\d+\.\d+)/
       : /(\d+\.\d+\.\d+)/;
