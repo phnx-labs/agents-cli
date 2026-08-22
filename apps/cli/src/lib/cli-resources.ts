@@ -21,6 +21,7 @@ import * as path from 'path';
 import { spawnSync, execFile } from 'child_process';
 import * as yaml from 'yaml';
 import { listResources, resolveResource } from './resources.js';
+import { probeCapture } from './probe.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { localBinDir } from './platform/posixpath.js';
 
@@ -395,22 +396,27 @@ export function isCliInstalledAsync(manifest: CliManifest): Promise<boolean> {
     cmdExistsCache.delete(c.cmd);
     return Promise.resolve(hasCommand(c.cmd));
   }
-  return new Promise<boolean>((resolve) => {
-    execFile(c.cmd, c.args, { timeout: 10_000 }, (err) => {
-      if (!err) return resolve(true);
+  // probeCapture, not bare execFile: a checked CLI can fork children of its
+  // own (copilot's platform-binary downloader), and settling without reaping
+  // the probe's process group would orphan them mid-write (RUSH-3028).
+  return probeCapture(c.cmd, c.args, 10_000).then(
+    () => true,
+    (err) => {
       // A spawn failure (as opposed to a non-zero exit) surfaces as a string
-      // errno code (ENOENT/EINVAL); a non-zero exit surfaces as a numeric code.
-      // On Windows a `.cmd`/`.bat` shim spawn-fails without a shell — retry once
-      // through the shell, exactly as the sync path does.
+      // errno code (ENOENT/EINVAL) on the rejection; a non-zero exit or
+      // timeout carries no errno. On Windows a `.cmd`/`.bat` shim spawn-fails
+      // without a shell — retry once through the shell, exactly as the sync
+      // path does.
       const spawnFailed = typeof (err as NodeJS.ErrnoException).code === 'string';
       if (process.platform === 'win32' && spawnFailed) {
         const line = composeWin32CommandLine(c.cmd, c.args);
-        execFile(line, { timeout: 10_000, shell: true }, (retryErr) => resolve(!retryErr));
-        return;
+        return new Promise<boolean>((resolve) => {
+          execFile(line, { timeout: 10_000, shell: true }, (retryErr) => resolve(!retryErr));
+        });
       }
-      resolve(false);
-    });
-  });
+      return false;
+    },
+  );
 }
 
 // ─── Method selection ────────────────────────────────────────────────────────

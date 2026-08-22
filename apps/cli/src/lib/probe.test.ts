@@ -93,6 +93,37 @@ posixOnly('probeCapture (RUSH-3028: nothing a probe spawns outlives it)', () => 
     }
   });
 
+  it('reaps the probe subtree when the CLI hard-exits mid-probe (Ctrl-C shape, process.exit(130))', async () => {
+    // Reviewer-demonstrated leak (#2896 review): a detached probe leaves the
+    // terminal's foreground group, so index.ts's SIGINT handler
+    // (process.exit(130)) would strand it without the process-exit reap hook.
+    // Drive the REAL module in a real child: a tsx wrapper starts probeCapture
+    // on a hung forker, then hard-exits — everything the probe spawned must die.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-reap-'));
+    try {
+      const script = writeForker(dir, { parentExits: false });
+      const probeModule = path.resolve(__dirname, 'probe.ts');
+      const wrapper = path.join(dir, 'wrapper.ts');
+      fs.writeFileSync(
+        wrapper,
+        [
+          `import { probeCapture } from ${JSON.stringify(probeModule)};`,
+          `void probeCapture(${JSON.stringify(script)}, [], 30_000).catch(() => {});`,
+          `setTimeout(() => process.exit(130), 400);`,
+        ].join('\n'),
+        'utf-8',
+      );
+      const tsx = path.resolve(__dirname, '..', '..', 'node_modules', '.bin', 'tsx');
+      const { spawnSync } = await import('child_process');
+      const run = spawnSync(tsx, [wrapper], { stdio: 'ignore', timeout: 15_000 });
+      expect(run.status).toBe(130);
+      const pid = await readGrandchildPid(dir);
+      await expectDeadSoon(pid);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('reaps the grandchild when the probe times out on a hung parent', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'probe-reap-'));
     try {

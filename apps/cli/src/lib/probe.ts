@@ -12,16 +12,42 @@
  * its OWN process group (`detached`), and the whole group is reaped once the
  * probe settles, so nothing a probe spawned can outlive it.
  *
- * POSIX only: on win32 `detached` means a new console and negative-pid group
- * kills are unsupported, so probes there behave exactly as before (the leak
- * class is a darwin/linux temp-HOME teardown race).
+ * Group semantics are POSIX only: on win32 `detached` means a new console and
+ * negative-pid group kills are unsupported, so there the DIRECT child is
+ * killed on settle instead — the same guarantee `execFileAsync`'s `timeout:`
+ * gave (the grandchild leak class is a darwin/linux temp-HOME teardown race).
+ *
+ * The parent dying mid-probe is covered too: a detached probe leaves the
+ * terminal's foreground group, so a Ctrl-C that hard-exits the CLI
+ * (`process.exit(130)` in index.ts) would strand it. Live probe groups are
+ * tracked in LIVE_GROUPS and a `process.on('exit')` hook — which runs on
+ * every `process.exit` path, including that SIGINT handler — reaps them
+ * synchronously.
  */
 import { spawn } from 'child_process';
 
 const GROUP_REAP = process.platform !== 'win32';
 
+const LIVE_GROUPS = new Set<number>();
+let exitHookInstalled = false;
+
+function ensureExitHook(): void {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  process.on('exit', () => {
+    for (const pid of LIVE_GROUPS) {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        /* group already fully exited */
+      }
+    }
+  });
+}
+
 function reapGroup(pid: number | undefined): void {
   if (!GROUP_REAP || !pid) return;
+  LIVE_GROUPS.delete(pid);
   try {
     process.kill(-pid, 'SIGKILL');
   } catch {
@@ -45,6 +71,10 @@ export function probeCapture(
       stdio: ['ignore', 'pipe', 'ignore'],
       windowsHide: true,
     });
+    if (GROUP_REAP && child.pid) {
+      LIVE_GROUPS.add(child.pid);
+      ensureExitHook();
+    }
     let out = '';
     let settled = false;
     const settle = (err: Error | null): void => {
@@ -52,6 +82,10 @@ export function probeCapture(
       settled = true;
       clearTimeout(timer);
       reapGroup(child.pid);
+      // win32 has no group to reap: kill the direct child so a timed-out
+      // probe still dies, matching execFile's `timeout:` behavior. No-op
+      // after a clean exit.
+      if (!GROUP_REAP) child.kill('SIGKILL');
       if (err) reject(err);
       else resolve({ stdout: out });
     };
