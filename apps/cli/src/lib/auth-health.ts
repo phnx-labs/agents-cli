@@ -28,6 +28,7 @@ import {
   probeKimiStatus,
   USAGE_HEADLESS_SCOPE_MARKER,
   type ProviderProbe,
+  readClaudeUsageCache,
 } from './accounting/usage.js';
 import { getVersionHomePath, listInstalledVersions } from './installations/versions.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from './fs-atomic.js';
@@ -390,10 +391,38 @@ export function writeAuthHealthEntries(entries: Record<string, AuthHealth>): voi
 // ---------------------------------------------------------------------------
 
 /**
+ * A usage snapshot this recent is live proof the account's shared setup-token
+ * works: the snapshot only exists because an authenticated `/oauth/usage`
+ * request succeeded. Matches the periodic tick's own probe window
+ * (AUTH_PROBE_MAX_AGE_MS in daemon-ticks.ts — not imported to avoid a cycle;
+ * a drift here only widens/narrows evidence freshness, never correctness).
+ */
+const FRESH_USAGE_VERDICT_MAX_AGE_MS = 20 * 60_000;
+
+/**
+ * A `live` verdict derived from the account's usage cache instead of a second
+ * network request (RUSH-3036). The auth probe and the usage fetch hit the SAME
+ * rate-limited endpoint with the SAME shared setup-token, so a fresh successful
+ * usage snapshot already proves everything the probe would: paying a second
+ * request per account per box was half the fleet's endpoint load. Returns null
+ * when there is no fresh evidence — the caller then live-probes as before.
+ */
+function verdictFromFreshUsage(usageKey: string | null | undefined, now: number): AuthHealth | null {
+  if (!usageKey) return null;
+  const snapshot = readClaudeUsageCache(usageKey);
+  const capturedAt = snapshot?.capturedAt?.getTime();
+  if (!capturedAt || now - capturedAt >= FRESH_USAGE_VERDICT_MAX_AGE_MS) return null;
+  const ageMin = Math.max(1, Math.round((now - capturedAt) / 60_000));
+  return { verdict: 'live', checkedAt: now, detail: `token proven live by a usage fetch ${ageMin}m ago` };
+}
+
+/**
  * Complete a live auth probe for one (agent, home). For claude/kimi/droid this
- * hits the provider; for everyone else it reports a best-effort local verdict
- * (`unverified` when a credential is present, `unconfigured` otherwise) — never
- * masquerading as `live`.
+ * hits the provider — unless the account's usage cache already holds a fresh
+ * successful fetch, which is the same authenticated request and proves the
+ * token live without spending a second one (RUSH-3036). For everyone else it
+ * reports a best-effort local verdict (`unverified` when a credential is
+ * present, `unconfigured` otherwise) — never masquerading as `live`.
  */
 export async function probeAuthHealth(
   agent: AgentId,
@@ -402,6 +431,8 @@ export async function probeAuthHealth(
 ): Promise<AuthHealth> {
   const checkedAt = Date.now();
   if (LIVE_PROBE_AGENTS.has(agent)) {
+    const derived = verdictFromFreshUsage(opts?.info?.usageKey, checkedAt);
+    if (derived) return derived;
     let probe: ProviderProbe;
     if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion);
     else if (agent === 'kimi') probe = await probeKimiStatus(home);

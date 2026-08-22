@@ -322,3 +322,69 @@ describe('formatCheckedAge', () => {
     expect(formatCheckedAge(now + 5_000, now)).toBe('0s ago');
   });
 });
+
+describe('probeAuthHealth derives live from a fresh usage fetch (RUSH-3036)', () => {
+  // The auth probe and the usage fetch hit the SAME rate-limited endpoint with
+  // the SAME shared setup-token, so a fresh successful usage snapshot already
+  // proves the token live. Exercised against the REAL cache file via the test
+  // seam; in this environment no credentials exist, so a 'live' verdict can
+  // ONLY come from the derivation path — a broken gate falls through to the
+  // live probe and returns a non-live verdict.
+  it('returns live without a network probe when the account has a fresh snapshot', async () => {
+    const os = await import('node:os');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const { setClaudeUsageCachePathForTest, writeClaudeUsageCache, probeAuthHealth: _unused } = await import('./accounting/usage.js').then(async (usage) => {
+      const { probeAuthHealth } = await import('./auth-health.js');
+      return { ...usage, probeAuthHealth };
+    });
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-derive-'));
+    const prev = setClaudeUsageCachePathForTest(path.join(dir, 'usage.json'));
+    try {
+      const usageKey = 'claude:org=derive-test-1234';
+      writeClaudeUsageCache(usageKey, {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(Date.now() - 5 * 60_000), // 5 minutes old — fresh
+        windows: [{ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 42, resetsAt: null, windowMinutes: 10080 }],
+      });
+      const { probeAuthHealth } = await import('./auth-health.js');
+      const health = await probeAuthHealth('claude', undefined, {
+        info: { usageKey, signedIn: true } as never,
+      });
+      expect(health.verdict).toBe('live');
+      expect(health.detail).toContain('usage fetch');
+    } finally {
+      setClaudeUsageCachePathForTest(prev);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('falls through to the real probe path when the snapshot is stale', async () => {
+    const os = await import('node:os');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const usage = await import('./accounting/usage.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-derive-stale-'));
+    const prev = usage.setClaudeUsageCachePathForTest(path.join(dir, 'usage.json'));
+    try {
+      const usageKey = 'claude:org=derive-stale-5678';
+      usage.writeClaudeUsageCache(usageKey, {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(Date.now() - 25 * 60_000), // 25 minutes — beyond the window
+        windows: [{ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 42, resetsAt: null, windowMinutes: 10080 }],
+      });
+      const { probeAuthHealth } = await import('./auth-health.js');
+      const health = await probeAuthHealth('claude', undefined, {
+        info: { usageKey, signedIn: true } as never,
+      });
+      // No credentials in this environment: the live probe path cannot return
+      // 'live', proving the stale snapshot was NOT used as evidence.
+      expect(health.verdict).not.toBe('live');
+    } finally {
+      usage.setClaudeUsageCachePathForTest(prev);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

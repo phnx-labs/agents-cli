@@ -92,7 +92,26 @@ export function parseRetryAfterMs(header: string | null | undefined, now: number
 }
 
 /** Every recorded deadline for `agent`, newest-first. Never throws. */
-function deadlinesFor(agent: AgentId): number[] {
+/**
+ * File-name scope for a penalty. Provider-wide penalties are `<agent>`;
+ * account-scoped ones are `<agent>@<slug>` (RUSH-3036), where the slug is the
+ * account's usage key with path separators neutralized (usage keys carry `:`,
+ * `=`, `.` and `@` freely — all filename-safe on the platforms we run on).
+ * `@` cannot collide with the provider scope because provider files are always
+ * `<agent>.<digits>` and agent ids never contain `@`.
+ */
+function backoffScope(agent: AgentId, account?: string | null): string {
+  if (!account) return agent;
+  return `${agent}@${account.replace(/[/\\]/g, '_')}`;
+}
+
+/**
+ * Every recorded deadline for `scope`. A file belongs to the scope only when
+ * everything after `<scope>.` is pure digits — account slugs contain dots
+ * (emails inside usage keys), so a bare prefix match would let scope
+ * `claude@a` swallow `claude@a.b`'s files.
+ */
+function deadlinesFor(scope: string): number[] {
   let names: string[];
   try {
     names = fs.readdirSync(backoffDir());
@@ -100,11 +119,13 @@ function deadlinesFor(agent: AgentId): number[] {
     // No directory yet: nothing is throttled.
     return [];
   }
-  const prefix = `${agent}.`;
+  const prefix = `${scope}.`;
   const out: number[] = [];
   for (const name of names) {
     if (!name.startsWith(prefix)) continue;
-    const at = Number(name.slice(prefix.length));
+    const rest = name.slice(prefix.length);
+    if (!/^\d+$/.test(rest)) continue;
+    const at = Number(rest);
     if (Number.isFinite(at)) out.push(at);
   }
   return out;
@@ -119,7 +140,7 @@ function deadlinesFor(agent: AgentId): number[] {
 export function noteUsageRateLimited(
   agent: AgentId,
   retryAfter: string | null | undefined,
-  opts?: { now?: number; fallbackMs?: number },
+  opts?: { now?: number; fallbackMs?: number; account?: string | null },
 ): void {
   const now = opts?.now ?? Date.now();
   const fallbackMs = opts?.fallbackMs ?? 15 * 60 * 1000;
@@ -129,7 +150,14 @@ export function noteUsageRateLimited(
     fs.mkdirSync(backoffDir(), { recursive: true });
     // Empty file: the name carries the whole value, so there is no content a
     // concurrent reader could catch half-written, and no document to merge.
-    fs.writeFileSync(path.join(backoffDir(), `${agent}.${deadline}`), '');
+    //
+    // With an account, the penalty is scoped to THAT account (RUSH-3036): the
+    // observed 429s are per-account quotas, and a provider-wide park let the
+    // first throttled account starve every account after it in the refresh
+    // loop's fixed order — the same 4 accounts stayed 'usage unavailable'
+    // across passes while their siblings refreshed. Callers with no account
+    // identity still record provider-wide, which continues to park everything.
+    fs.writeFileSync(path.join(backoffDir(), `${backoffScope(agent, opts?.account)}.${deadline}`), '');
   } catch {
     // Best-effort. An unwritable cache dir costs the cross-process backoff, not
     // the correctness of this read.
@@ -144,16 +172,27 @@ export function noteUsageRateLimited(
  * Sweeps elapsed files while it is here: they can only accumulate at the rate
  * penalties are issued, and this is the one place that already lists them.
  */
-export function usageRateLimitedUntil(agent: AgentId, now: number = Date.now()): number | null {
+export function usageRateLimitedUntil(
+  agent: AgentId,
+  now: number = Date.now(),
+  account?: string | null,
+): number | null {
+  // A provider-wide penalty parks every account; an account-scoped read also
+  // honors that account's own penalties. A bare (no-account) read deliberately
+  // ignores account-scoped penalties — one pinned account must not park its
+  // siblings (RUSH-3036).
+  const scopes = account ? [backoffScope(agent, null), backoffScope(agent, account)] : [backoffScope(agent, null)];
   let latest: number | null = null;
-  for (const at of deadlinesFor(agent)) {
-    if (at > now) {
-      if (latest === null || at > latest) latest = at;
-    } else {
-      try {
-        fs.rmSync(path.join(backoffDir(), `${agent}.${at}`), { force: true });
-      } catch {
-        /* another process may have swept it already */
+  for (const scope of scopes) {
+    for (const at of deadlinesFor(scope)) {
+      if (at > now) {
+        if (latest === null || at > latest) latest = at;
+      } else {
+        try {
+          fs.rmSync(path.join(backoffDir(), `${scope}.${at}`), { force: true });
+        } catch {
+          /* another process may have swept it already */
+        }
       }
     }
   }

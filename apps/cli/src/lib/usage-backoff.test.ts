@@ -176,3 +176,57 @@ describe('a shorter deadline cannot displace a longer one', () => {
     expect(fs.readdirSync(dir).filter((n) => n.startsWith('claude.')).length).toBe(0);
   });
 });
+
+describe('per-account backoff scope (RUSH-3036)', () => {
+  let dir: string;
+  let prevDir: string | null;
+  const A = 'claude:org=aaaa-1111';
+  const B = 'claude:org=bbbb-2222';
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-backoff-acct-'));
+    prevDir = setUsageBackoffDirForTest(dir);
+  });
+  afterEach(() => {
+    setUsageBackoffDirForTest(prevDir);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("one account's 429 parks THAT account, not its siblings or the provider", () => {
+    const now = 1_000_000;
+    noteUsageRateLimited('claude', '3600', { now, account: A });
+    // The pinned account is parked…
+    expect(usageRateLimitedUntil('claude', now + 1, A)).toBe(now + 3600_000);
+    // …its sibling is not — this is the starvation the fix removes: before,
+    // the first 429 in a refresh pass parked the provider and every account
+    // after it in iteration order never got fetched.
+    expect(usageRateLimitedUntil('claude', now + 1, B)).toBeNull();
+    // …and a provider-wide (no-account) read is also free.
+    expect(usageRateLimitedUntil('claude', now + 1)).toBeNull();
+  });
+
+  it('a provider-wide penalty still parks every account', () => {
+    const now = 2_000_000;
+    noteUsageRateLimited('claude', '600', { now });
+    expect(usageRateLimitedUntil('claude', now + 1, A)).toBe(now + 600_000);
+    expect(usageRateLimitedUntil('claude', now + 1, B)).toBe(now + 600_000);
+    expect(usageRateLimitedUntil('claude', now + 1)).toBe(now + 600_000);
+  });
+
+  it('account slugs with dots cannot swallow a longer sibling scope', () => {
+    const now = 3_000_000;
+    // "claude@x" must not read "claude@x.y"'s penalty: the deadline segment is
+    // the digits after the LAST dot, and scope matching requires the remainder
+    // after "<scope>." to be pure digits.
+    noteUsageRateLimited('claude', '600', { now, account: 'x.y' });
+    expect(usageRateLimitedUntil('claude', now + 1, 'x')).toBeNull();
+    expect(usageRateLimitedUntil('claude', now + 1, 'x.y')).toBe(now + 600_000);
+  });
+
+  it('an elapsed account penalty is swept and the account frees up', () => {
+    const now = 4_000_000;
+    noteUsageRateLimited('claude', '60', { now, account: A });
+    expect(usageRateLimitedUntil('claude', now + 61_000, A)).toBeNull();
+    expect(fs.readdirSync(dir)).toHaveLength(0); // swept on read
+  });
+});

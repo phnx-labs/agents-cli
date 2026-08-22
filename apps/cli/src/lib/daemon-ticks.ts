@@ -153,7 +153,7 @@ export async function runUsageRefreshTick(): Promise<void> {
   const r = await runUsageRefresh({
     listAccounts: buildLocalUsageAccounts,
     writeUsageCache: writeClaudeUsageCache,
-    backoffUntil: usageRateLimitedUntil,
+    backoffUntil: (agentId, usageKey) => usageRateLimitedUntil(agentId, Date.now(), usageKey),
   });
   const { listProfiles } = await import('./profiles.js');
   const { refreshDueByokUsage } = await import('./byok-usage.js');

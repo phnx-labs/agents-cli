@@ -288,8 +288,14 @@ export interface UsageRefreshDeps {
   listAccounts: () => Promise<LocalUsageAccount[]>;
   /** Persist a fresh snapshot to the usage cache (writeClaudeUsageCache). */
   writeUsageCache: (usageKey: string, snapshot: UsageSnapshot) => void;
-  /** Epoch ms a provider is backed off until, or null when free (usageRateLimitedUntil). */
-  backoffUntil: (agentId: AgentId) => number | null;
+  /**
+   * Epoch ms this provider — or, when `usageKey` is given, this specific
+   * account — is backed off until; null when free (usageRateLimitedUntil).
+   * Per-account scope (RUSH-3036): one throttled account must not park its
+   * siblings, which previously starved every account after the first 429 in
+   * this loop's fixed iteration order.
+   */
+  backoffUntil: (agentId: AgentId, usageKey?: string) => number | null;
 }
 
 export interface UsageRefreshResult {
@@ -325,7 +331,7 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
 
     // A provider under a 429 penalty is off-limits — poking it re-arms the
     // penalty (the whole reason usage-backoff exists).
-    if ((deps.backoffUntil(account.agentId) ?? 0) > now) {
+    if ((deps.backoffUntil(account.agentId, account.usageKey) ?? 0) > now) {
       result.skippedBackoff += 1;
       continue;
     }

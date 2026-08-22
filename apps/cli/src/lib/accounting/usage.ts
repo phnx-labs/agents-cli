@@ -251,6 +251,13 @@ interface UsageOptions {
   cliVersion?: string | null;
   organizationId?: string | null;
   /**
+   * The account's usage key (`claude:org=…`, `kimi:user=…`, …) when the caller
+   * knows which account this fetch is for. Scopes the 429 backoff to that
+   * account (RUSH-3036) so one throttled account cannot park its siblings;
+   * absent, the backoff stays provider-wide.
+   */
+  usageScope?: string | null;
+  /**
    * When true, never open the ACL-bound OS keychain item (macOS Touch ID).
    * Daemon usage refresh sets this so a background tick cannot pop biometrics.
    * Credentials come from the no-ACL access-token cache, a file-based
@@ -568,6 +575,9 @@ async function fetchLiveUsageDeduped(
         home: input.home,
         cliVersion: input.cliVersion,
         organizationId: input.info.organizationId,
+        // Scope this fetch's 429 backoff to the account being fetched, so one
+        // throttled account cannot park the whole provider (RUSH-3036).
+        usageScope: usageKey,
         fileOnly,
       });
 
@@ -993,7 +1003,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     // Honour a live Retry-After rather than re-arming the penalty (see
     // usage-backoff.ts). No request at all while the window is open.
-    const throttledUntil = usageRateLimitedUntil('claude');
+    const throttledUntil = usageRateLimitedUntil('claude', Date.now(), options?.usageScope);
     if (throttledUntil) {
       return { snapshot: null, error: usageThrottledError('Claude', throttledUntil) };
     }
@@ -1011,7 +1021,7 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     if (!response.ok) {
       if (response.status === 429) {
-        noteUsageRateLimited('claude', response.headers.get('retry-after'));
+        noteUsageRateLimited('claude', response.headers.get('retry-after'), { account: options?.usageScope });
       }
       // Setup-token is user:inference only; usage needs user:profile → 403
       // with a scope-requirement body. Distinct from a real rejection so the
@@ -1118,7 +1128,7 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     // Honour a live Retry-After rather than re-arming the penalty (see
     // usage-backoff.ts). No request at all while the window is open.
-    const throttledUntil = usageRateLimitedUntil('kimi');
+    const throttledUntil = usageRateLimitedUntil('kimi', Date.now(), options?.usageScope);
     if (throttledUntil) {
       return { snapshot: null, error: usageThrottledError('Kimi', throttledUntil) };
     }
@@ -1136,7 +1146,7 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // way there are no bars to draw, and the status is what tells them apart.
     if (!response.ok) {
       if (response.status === 429) {
-        noteUsageRateLimited('kimi', response.headers.get('retry-after'));
+        noteUsageRateLimited('kimi', response.headers.get('retry-after'), { account: options?.usageScope });
       }
       return { snapshot: null, error: usageRejectedError('Kimi', response.status) };
     }
@@ -1292,7 +1302,7 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     // Honour a live Retry-After rather than re-arming the penalty (see
     // usage-backoff.ts). No request at all while the window is open.
-    const throttledUntil = usageRateLimitedUntil('droid');
+    const throttledUntil = usageRateLimitedUntil('droid', Date.now(), options?.usageScope);
     if (throttledUntil) {
       return { snapshot: null, error: usageThrottledError('Droid', throttledUntil) };
     }
@@ -1309,7 +1319,7 @@ async function getDroidUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // 401 => revoked/expired token. No bars to draw, and the status says why.
     if (!response.ok) {
       if (response.status === 429) {
-        noteUsageRateLimited('droid', response.headers.get('retry-after'));
+        noteUsageRateLimited('droid', response.headers.get('retry-after'), { account: options?.usageScope });
       }
       return { snapshot: null, error: usageRejectedError('Droid', response.status) };
     }
