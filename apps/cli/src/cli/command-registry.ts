@@ -101,6 +101,7 @@ export const loadWebhooks: ModuleLoader = async () => (await import('../commands
 export const loadHumans: ModuleLoader = async () => (await import('../commands/humans.js')).registerHumansCommands;
 export const loadAccounts: ModuleLoader = async () => (await import('../commands/accounts.js')).registerAccountsCommand;
 export const loadDaemon: ModuleLoader = async () => (await import('../commands/daemon.js')).registerDaemonCommand;
+export const loadAuth: ModuleLoader = async () => (await import('../commands/auth.js')).registerAuthCommand;
 
 /**
  * Commands whose modules pull in the SQLite-backed session/cloud stack. They are
@@ -217,6 +218,7 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   webhooks: [loadWebhooks],
   humans: [loadHumans],
   daemon: [loadDaemon],
+  auth: [loadAuth],
 };
 
 /**

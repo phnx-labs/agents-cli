@@ -60,9 +60,10 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(names).toContain('artifacts');
     expect(names).toContain('events');
     expect(names).toContain('insights');
-    // 'auth'/'org' were fully retired with the Prix-coupled account layer (RUSH-2581).
+    // 'org' stayed retired with the Prix-coupled account layer; 'auth' returned
+    // against Phoenix ID, with the team surface nested as `auth space` (RUSH-2581).
     expect(names).not.toContain('org');
-    expect(names).not.toContain('auth');
+    expect(names).toContain('auth');
 
     const artifacts = program.commands.find((c) => c.name() === 'artifacts');
     expect(artifacts?.commands.map((c) => c.name())).toContain('unshare');
@@ -75,10 +76,15 @@ describe('RUSH-2989 nested leftover aliases', () => {
       expect(isKnownTopLevelCommand(name)).toBe(false);
       expect(RETIRED_TOP_LEVEL_COMMANDS.has(name)).toBe(true);
     }
-    for (const name of ['auth', 'org'] as const) {
-      expect(isKnownTopLevelCommand(name)).toBe(false);
-      expect(RETIRED_TOP_LEVEL_COMMANDS.has(name)).toBe(true);
-    }
+    expect(isKnownTopLevelCommand('org')).toBe(false);
+    expect(RETIRED_TOP_LEVEL_COMMANDS.has('org')).toBe(true);
+    expect(isKnownTopLevelCommand('auth')).toBe(true);
+    expect(RETIRED_TOP_LEVEL_COMMANDS.has('auth')).toBe(false);
+
+    const authCmd = program.commands.find((c) => c.name() === 'auth');
+    expect(authCmd?.commands.map((c) => c.name())).toEqual(
+      expect.arrayContaining(['login', 'whoami', 'logout', 'space']),
+    );
   });
 
   it('`agents org list` is an unknown command after the Prix-layer removal (RUSH-2581)', () => {

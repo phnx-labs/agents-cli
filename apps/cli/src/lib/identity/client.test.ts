@@ -1,0 +1,142 @@
+import { describe, expect, it, beforeAll, afterAll, beforeEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import * as http from 'http';
+
+/**
+ * The seam's contract, driven against a REAL HTTP server (no mocked fetch):
+ * the poll-state decoding the CLI depends on, the single-token-source rule, and
+ * the fail-loud behavior when nobody is signed in.
+ *
+ * The server here stands in for Phoenix ID and answers with the exact bodies
+ * the real service returns — the shapes were verified live against it.
+ */
+
+const HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-identity-'));
+process.env.AGENTS_STATE_DIR = path.join(HOME, 'state');
+process.env.HOME = HOME;
+
+let server: http.Server;
+let base: string;
+/** Queue of canned responses the next requests will receive, in order. */
+let queue: Array<{ status: number; body: unknown }> = [];
+let received: Array<{ method: string; url: string; auth: string | undefined; body: string }> = [];
+
+beforeAll(async () => {
+  server = http.createServer((req, res) => {
+    let body = '';
+    req.on('data', (chunk) => (body += chunk));
+    req.on('end', () => {
+      received.push({ method: req.method ?? '', url: req.url ?? '', auth: req.headers.authorization, body });
+      const next = queue.shift() ?? { status: 200, body: { ok: true } };
+      res.writeHead(next.status, { 'Content-Type': 'application/json' });
+      res.end(next.body === undefined ? '' : JSON.stringify(next.body));
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  base = `http://127.0.0.1:${typeof addr === 'object' && addr ? addr.port : 0}`;
+  process.env.PHOENIX_ID_BASE = base;
+});
+
+afterAll(async () => {
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  fs.rmSync(HOME, { recursive: true, force: true });
+});
+
+beforeEach(() => {
+  queue = [];
+  received = [];
+});
+
+async function identity() {
+  return import('./index.js');
+}
+
+describe('the identity seam', () => {
+  it('sends the stored session token, and only that token', async () => {
+    const { writeSession, fetchWhoAmI } = await identity();
+    writeSession({ access_token: 'pid_test_token', email: 'a@b.test' });
+    queue.push({ status: 200, body: { userId: 'u1', email: 'a@b.test', valid: true } });
+
+    const me = await fetchWhoAmI();
+
+    expect(me.email).toBe('a@b.test');
+    expect(received[0]?.auth).toBe('Bearer pid_test_token');
+    expect(received[0]?.url).toBe('/api/v1/auth/me');
+  });
+
+  it('refuses to call an authenticated route when signed out, instead of sending nothing', async () => {
+    const { clearSession, listSpaces, PhoenixApiError } = await identity();
+    clearSession();
+
+    await expect(listSpaces()).rejects.toThrowError(PhoenixApiError);
+    await expect(listSpaces()).rejects.toThrow(/Not signed in/);
+    // Fail-loud: nothing was put on the wire.
+    expect(received).toHaveLength(0);
+  });
+
+  it('starts the device flow without a token', async () => {
+    const { clearSession, startDeviceAuthorization } = await identity();
+    clearSession();
+    queue.push({
+      status: 200,
+      body: {
+        device_code: 'dc', user_code: 'ABCD-2345',
+        verification_uri: `${base}/device`, verification_uri_complete: `${base}/device?code=ABCD-2345`,
+        expires_in: 900, interval: 5,
+      },
+    });
+
+    const grant = await startDeviceAuthorization();
+
+    expect(grant.user_code).toBe('ABCD-2345');
+    expect(received[0]?.auth).toBeUndefined();
+  });
+
+  it('decodes every RFC 8628 poll state the server signals through the error body', async () => {
+    const { pollDeviceToken } = await identity();
+    const cases: Array<[number, string, string]> = [
+      [428, 'authorization_pending', 'pending'],
+      [429, 'slow_down', 'slow_down'],
+      [400, 'expired_token', 'expired'],
+      [400, 'access_denied', 'denied'],
+    ];
+    for (const [status, serverError, expected] of cases) {
+      queue.push({ status, body: { error: serverError } });
+      const poll = await pollDeviceToken('dc');
+      expect(poll.status).toBe(expected);
+    }
+    queue.push({ status: 200, body: { status: 'authorized', access_token: 'pid_x', user: { email: 'a@b.test', id: 'u1' } } });
+    const ok = await pollDeviceToken('dc');
+    expect(ok).toEqual({ status: 'authorized', access_token: 'pid_x', user: { email: 'a@b.test', id: 'u1' } });
+  });
+
+  it('surfaces a server error message rather than a bare status', async () => {
+    const { writeSession, createSpace, PhoenixApiError } = await identity();
+    writeSession({ access_token: 'pid_test_token' });
+    queue.push({ status: 403, body: { error: 'free tier allows 1 owned space' } });
+
+    await expect(createSpace({ name: 'Second', slug: 'second' })).rejects.toThrow(/free tier allows 1 owned space/);
+    queue.push({ status: 403, body: { error: 'free tier allows 1 owned space' } });
+    await expect(createSpace({ name: 'Second', slug: 'second' })).rejects.toMatchObject({ status: 403 });
+    expect(PhoenixApiError).toBeDefined();
+  });
+
+  it('writes the session private to the user', async () => {
+    const { writeSession, sessionFilePath } = await identity();
+    writeSession({ access_token: 'pid_secret' });
+    const mode = fs.statSync(sessionFilePath()).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it('never reads another product\'s credential file', async () => {
+    const { clearSession, readSession } = await identity();
+    clearSession();
+    // A Rush session sitting in the home dir must not sign agents-cli in.
+    fs.mkdirSync(path.join(HOME, '.rush'), { recursive: true });
+    fs.writeFileSync(path.join(HOME, '.rush', 'user.yaml'), 'session:\n  access_token: rush-token\n');
+    expect(readSession()).toBeNull();
+  });
+});
