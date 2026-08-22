@@ -218,10 +218,16 @@ export interface UsageSnapshot {
   // otherwise comes from the local auth file via AccountInfo.plan; this field
   // lets a network usage fetch surface a plan the local credential can't.
   plan?: string | null;
-  /** A refusal observed from a real harness run, independent of API windows. */
+  /**
+   * A refusal observed from a real harness run, independent of API windows.
+   * `session_limit` recovers on a clock (`resetsAt`). `out_of_credits` is a
+   * tokens/balance exhaustion that does NOT reset on a clock — it has no
+   * `resetsAt` and is cleared only by a later successful run on the account
+   * (clearClaudeAccountRefusal). Both exclude the account from rotation while set.
+   */
   unavailable?: {
-    reason: 'session_limit';
-    resetsAt: Date;
+    reason: 'session_limit' | 'out_of_credits';
+    resetsAt?: Date;
   };
 }
 
@@ -328,8 +334,8 @@ interface CachedUsageSnapshot {
   windows: CachedUsageWindow[];
   plan?: string | null;
   unavailable?: {
-    reason: 'session_limit';
-    resetsAt: string;
+    reason: 'session_limit' | 'out_of_credits';
+    resetsAt?: string;
   };
 }
 
@@ -659,7 +665,9 @@ export function formatUsageSummary(
   }
 
   if (snapshot) {
-    if (snapshot.unavailable?.reason === 'session_limit') {
+    if (snapshot.unavailable?.reason === 'out_of_credits') {
+      parts.push(chalk.red('out of credits'));
+    } else if (snapshot.unavailable?.reason === 'session_limit' && snapshot.unavailable.resetsAt) {
       parts.push(chalk.yellow(`session-limited (${formatResetHint(snapshot.unavailable.resetsAt)})`));
     }
     // Compact rows show BLOCKING windows — the same set
@@ -736,8 +744,13 @@ export function deriveUsageStatusFromSnapshot(
   snapshot: UsageSnapshot | null | undefined
 ): 'available' | 'rate_limited' | null {
   if (!snapshot) return null;
-  if (snapshot.unavailable && snapshot.unavailable.resetsAt.getTime() > Date.now()) {
-    return 'rate_limited';
+  if (snapshot.unavailable) {
+    // out_of_credits has no clock — it stays blocking until a successful run
+    // clears it. session_limit blocks only until its reset time.
+    if (snapshot.unavailable.reason === 'out_of_credits') return 'rate_limited';
+    if (snapshot.unavailable.resetsAt && snapshot.unavailable.resetsAt.getTime() > Date.now()) {
+      return 'rate_limited';
+    }
   }
   if (snapshot.windows.length === 0) return null;
   const blocking = snapshot.windows.filter((window) => window.key !== 'sonnet_week');
@@ -1931,12 +1944,9 @@ export function writeClaudeUsageCache(
       // refresh cannot drop another account's row (lost update).
       const cache = readClaudeUsageCacheFile(cachePath);
       const prior = cache[usageKey];
-      const priorReset = parseDateValue(prior?.unavailable?.resetsAt);
       cache[usageKey] = serializeClaudeUsageSnapshot({
         ...snapshot,
-        unavailable: priorReset && priorReset.getTime() > Date.now()
-          ? { reason: 'session_limit', resetsAt: priorReset }
-          : snapshot.unavailable,
+        unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
       });
       atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
     });
@@ -1978,7 +1988,10 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
     capturedAt: snapshot.capturedAt?.toISOString() || null,
     plan: snapshot.plan ?? null,
     unavailable: snapshot.unavailable
-      ? { reason: snapshot.unavailable.reason, resetsAt: snapshot.unavailable.resetsAt.toISOString() }
+      ? {
+          reason: snapshot.unavailable.reason,
+          resetsAt: snapshot.unavailable.resetsAt?.toISOString(),
+        }
       : undefined,
     windows: snapshot.windows.map((window) => ({
       key: window.key,
@@ -2018,10 +2031,7 @@ function deserializeClaudeUsageSnapshot(
     }))
     .filter((window) => isCachedUsageWindowFresh(window, capturedAt, now));
 
-  const unavailableReset = parseDateValue(snapshot.unavailable?.resetsAt);
-  const unavailable = unavailableReset && unavailableReset.getTime() > now.getTime()
-    ? { reason: 'session_limit' as const, resetsAt: unavailableReset }
-    : undefined;
+  const unavailable = deserializeUnavailable(snapshot.unavailable, now);
 
   if (windows.length === 0 && !unavailable) {
     return null;
@@ -2035,6 +2045,89 @@ function deserializeClaudeUsageSnapshot(
     plan: snapshot.plan ?? null,
     unavailable,
   };
+}
+
+/**
+ * Carry a prior refusal marker forward across a daemon usage refresh, and drop
+ * an expired one. A live `snapshot.unavailable` (a refusal just observed) wins.
+ * `out_of_credits` survives refreshes with no reset — only a successful run
+ * clears it (clearClaudeAccountRefusal). A `session_limit` survives only while
+ * its reset time is still in the future.
+ */
+function carryForwardUnavailable(
+  prior: CachedUsageSnapshot['unavailable'],
+  live: UsageSnapshot['unavailable'],
+): UsageSnapshot['unavailable'] {
+  if (live) return live;
+  if (!prior) return undefined;
+  if (prior.reason === 'out_of_credits') return { reason: 'out_of_credits' };
+  const reset = parseDateValue(prior.resetsAt);
+  return reset && reset.getTime() > Date.now()
+    ? { reason: 'session_limit', resetsAt: reset }
+    : undefined;
+}
+
+/**
+ * Deserialize a cached `unavailable` marker, dropping an expired session_limit
+ * but keeping a clock-less out_of_credits.
+ */
+function deserializeUnavailable(
+  cached: CachedUsageSnapshot['unavailable'],
+  now: Date,
+): UsageSnapshot['unavailable'] {
+  if (!cached) return undefined;
+  if (cached.reason === 'out_of_credits') return { reason: 'out_of_credits' };
+  const reset = parseDateValue(cached.resetsAt);
+  return reset && reset.getTime() > now.getTime()
+    ? { reason: 'session_limit', resetsAt: reset }
+    : undefined;
+}
+
+/**
+ * Persist a Claude tokens/credits exhaustion (`out of usage credits` / `monthly
+ * spend limit`) from a real run. Unlike a rate/session limit this does NOT reset
+ * on a clock, so no reset time is stored — rotation excludes the account until a
+ * later successful run clears it via {@link clearClaudeAccountRefusal}.
+ */
+export function noteClaudeOutOfCredits(
+  usageKey: string,
+  cachePath = getClaudeUsageCachePath(),
+): void {
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      const existing = cache[usageKey] ?? { capturedAt: null, windows: [] };
+      cache[usageKey] = { ...existing, unavailable: { reason: 'out_of_credits' } };
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
+}
+
+/**
+ * Clear any persisted refusal marker for an account after a run SUCCEEDS on it.
+ * This is the recovery path for `out_of_credits` (which has no clock) and also
+ * proactively clears a stale `session_limit` the moment the account serves again.
+ */
+export function clearClaudeAccountRefusal(
+  usageKey: string,
+  cachePath = getClaudeUsageCachePath(),
+): void {
+  try {
+    if (!fs.existsSync(cachePath)) return;
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      const existing = cache[usageKey];
+      if (!existing?.unavailable) return;
+      const { unavailable: _drop, ...rest } = existing;
+      cache[usageKey] = rest;
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write */
+  }
 }
 
 /**

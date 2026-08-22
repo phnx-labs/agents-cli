@@ -39,7 +39,7 @@ import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
 import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js';
 import { resolveConfigVersion } from './harness/exec-config-version.js';
 import { getAccountInfo } from './agents.js';
-import { getUsageLookupKey, noteClaudeSessionLimit, parseClaudeSessionLimitReset } from './accounting/usage.js';
+import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -2120,6 +2120,20 @@ export function detectRateLimit(text: string): boolean {
 }
 
 /**
+ * Narrow detector for a BILLING exhaustion — tokens/credits run out or the
+ * monthly spend cap is hit — as opposed to a time-window rate limit. This class
+ * does NOT recover on a clock, so rotation must remember it per-account
+ * (noteClaudeOutOfCredits) until a later successful run clears it.
+ */
+const OUT_OF_CREDITS_PATTERNS: RegExp[] = [
+  /out of (?:usage )?credits/i,
+  /spend[\s-]?limit/i,
+];
+export function detectOutOfCredits(text: string): boolean {
+  return OUT_OF_CREDITS_PATTERNS.some(pattern => pattern.test(text));
+}
+
+/**
  * Patterns that indicate an authentication failure — the agent is logged out,
  * its token was revoked, or the session expired. These are the user-visible
  * strings a logged-out agent surfaces (observed across the routine-run corpus).
@@ -2394,10 +2408,18 @@ export async function runWithFallback(options: FallbackOptions): Promise<number>
 
     const output = `${result.stderr}\n${result.stdout}`;
     const sessionLimitReset = agent === 'claude' ? parseClaudeSessionLimitReset(output) : null;
-    if (sessionLimitReset && version) {
+    // A billing exhaustion (tokens/credits out, spend cap) is a distinct,
+    // clock-less refusal — persist it so rotation stops re-picking a dead
+    // account every launch, and clear any prior marker when a run SUCCEEDS.
+    const outOfCredits = agent === 'claude' && !sessionLimitReset && detectOutOfCredits(output);
+    if (agent === 'claude' && version) {
       const account = await getAccountInfo(agent, getVersionHomePath(agent, version));
       const usageKey = getUsageLookupKey(account);
-      if (usageKey) noteClaudeSessionLimit(usageKey, sessionLimitReset);
+      if (usageKey) {
+        if (sessionLimitReset) noteClaudeSessionLimit(usageKey, sessionLimitReset);
+        else if (outOfCredits) noteClaudeOutOfCredits(usageKey);
+        else if (result.exitCode === 0) clearClaudeAccountRefusal(usageKey);
+      }
     }
 
     if (result.exitCode === 0 && !sessionLimitReset) return 0;

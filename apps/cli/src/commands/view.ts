@@ -1503,7 +1503,7 @@ export async function collectAgentsJson(filterAgentId?: AgentId, resourceSection
       unavailable: snapshot?.unavailable
         ? {
             reason: snapshot.unavailable.reason,
-            resetsAt: snapshot.unavailable.resetsAt.toISOString(),
+            resetsAt: snapshot.unavailable.resetsAt?.toISOString(),
           }
         : undefined,
       lastActive: info.lastActive ? info.lastActive.toISOString() : null,

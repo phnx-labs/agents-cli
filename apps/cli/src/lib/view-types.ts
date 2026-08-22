@@ -27,8 +27,8 @@ export interface ViewJsonVersion {
     resetsAt: string | null;
   }>;
   unavailable?: {
-    reason: 'session_limit';
-    resetsAt: string;
+    reason: 'session_limit' | 'out_of_credits';
+    resetsAt?: string;
   };
   lastActive: string | null;
   path: string;

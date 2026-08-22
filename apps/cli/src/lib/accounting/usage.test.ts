@@ -14,6 +14,8 @@ import {
   readClaudeUsageCache,
   pruneExpiredClaudeUsageCacheEntry,
   noteClaudeSessionLimit,
+  noteClaudeOutOfCredits,
+  clearClaudeAccountRefusal,
   parseClaudeSessionLimitReset,
   deriveUsageStatusFromSnapshot,
   setClaudeUsageCachePathForTest,
@@ -1152,4 +1154,37 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(info.snapshot?.windows).toEqual([]);
     expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
   });
+  describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
+    const usageKey = 'claude:org=oocred';
+
+    it('persists a clock-less refusal that excludes the account and survives time', () => {
+      noteClaudeOutOfCredits(usageKey);
+      const snap = readClaudeUsageCache(usageKey, undefined, new Date(Date.now() + 30 * 24 * 3600 * 1000));
+      // A month later it is STILL blocking — unlike a session limit, no clock frees it.
+      expect(snap?.unavailable).toEqual({ reason: 'out_of_credits' });
+      expect(deriveUsageStatusFromSnapshot(snap)).toBe('rate_limited');
+      expect(formatUsageSummary('Max', snap)).toContain('out of credits');
+    });
+
+    it('is cleared by a successful run (clearClaudeAccountRefusal)', () => {
+      noteClaudeOutOfCredits(usageKey);
+      expect(readClaudeUsageCache(usageKey)?.unavailable).toEqual({ reason: 'out_of_credits' });
+      clearClaudeAccountRefusal(usageKey);
+      // Cleared → no longer excluded (no marker, no windows → null snapshot).
+      const snap = readClaudeUsageCache(usageKey);
+      expect(snap?.unavailable).toBeUndefined();
+    });
+
+    it('a session-limit still recovers on its clock, out_of_credits does not', () => {
+      const other = 'claude:org=sess-vs-cred';
+      noteClaudeSessionLimit(other, new Date(Date.now() + 60_000));
+      // past the reset → session limit gone
+      expect(readClaudeUsageCache(other, undefined, new Date(Date.now() + 61_000))).toBeNull();
+      noteClaudeOutOfCredits(other);
+      // out_of_credits ignores the clock entirely
+      expect(readClaudeUsageCache(other, undefined, new Date(Date.now() + 10 * 24 * 3600 * 1000))?.unavailable)
+        .toEqual({ reason: 'out_of_credits' });
+    });
+  });
+
 });
