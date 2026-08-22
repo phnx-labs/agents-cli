@@ -273,6 +273,9 @@ describe('agents inspect', () => {
     expect(r.stdout).toContain('guard_test');
   });
 
+  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
+  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
+  // processes on a 20-core box (RUSH-2839).
   it('renders every item of a long detail row, and survives a malformed manifest', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-rows-' + crypto.randomBytes(4).toString('hex') + '-'));
     const names = ['alpha', 'bravo', 'charlie', 'delta', 'echo', 'foxtrot', 'golf', 'hotel', 'india', 'juliet'];
@@ -317,8 +320,11 @@ describe('agents inspect', () => {
       });
       expect(r2.status, `inspect ${args.join(' ')} exited ${r2.status}: ${r2.stderr}`).toBe(0);
     }
-  });
+  }, 90_000);
 
+  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
+  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
+  // processes on a 20-core box (RUSH-2839).
   it('bare `inspect <repo>` survives an agents.yaml whose hook field types are wrong', () => {
     const proj = fs.mkdtempSync(path.join(os.tmpdir(), 'inspect-hookfx-' + crypto.randomBytes(4).toString('hex') + '-'));
     writeFile(path.join(proj, '.agents', 'hooks', '10-demo.sh'), '#!/usr/bin/env bash\nexit 0\n');
@@ -334,7 +340,7 @@ describe('agents inspect', () => {
       });
       expect(r.status, `inspect ${args.join(' ')} exited ${r.status}: ${r.stderr}`).toBe(0);
     }
-  });
+  }, 90_000);
 
   it('--skills <typo> resolves via fuzzy match; bogus query exits 1 with suggestions', () => {
     // Substring match still wins for "rele" → "release".

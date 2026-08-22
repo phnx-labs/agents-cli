@@ -439,7 +439,7 @@ SSH access (§7); rendering sessions that no harness produced.
   `closed`, `abandoned`, `queued`, and `unknown`. These flags MUST imply the live
   scan, MUST compose as a union, and MUST use the same predicates as the rendered
   status (`requestedLiveStatuses` / `matchesLiveStatus`,
-  `commands/sessions.ts`; test `commands/sessions.test.ts`). `--orphan` is the
+  `commands/sessions.ts`; test `commands/sessions.cli-live.test.ts`). `--orphan` is the
   human-facing spelling and `--orphaned` remains its accepted alias. The live
   scan MUST fan out to registered online devices unless `--local` is present;
   `--all` MUST remain the historical directory/time widening flag, not a device
@@ -616,7 +616,7 @@ SSH access (§7); rendering sessions that no harness produced.
   from the incremental stream, but MUST expose the same picker-facing lifecycle,
   device, viewing, and recovery metadata in each durable row. Consumers MUST NOT
   need a second live-session join (`commands/sessions.ts:847-884,3168-3191`;
-  `commands/sessions.test.ts:61-83`).
+  `commands/sessions.test.ts:45-64`).
 
 #### 3.7 Index / DB
 
@@ -856,7 +856,7 @@ SSH access (§7); rendering sessions that no harness produced.
   (`commands/sessions.ts` `isRunningLiveSession`, `locatorBadge`,
   `renderActiveRowLines`; `commands/sessions-browser.ts` `applyFilters`;
   `commands/focus.ts` `isAttachableLiveSession`; `lib/menubar/snapshot.ts`
-  `computeMenubarSnapshot`; tests `commands/sessions.test.ts`,
+  `computeMenubarSnapshot`; tests `commands/sessions.cli-live.test.ts`,
   `commands/sessions-browser.test.ts`, `commands/focus.test.ts`,
   `commands/sessions.active-row.test.ts`, `lib/menubar/snapshot.test.ts`).
 
@@ -910,7 +910,7 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   (`commands/sessions.ts` `serializeResolvedSessionsJson`, `resolveSessionMetadata`,
   `metadataResolveOutcome`, `fleetCandidatesByQuery`,
   `metadataResolveForwardedArgs`; tests
-  `commands/sessions.test.ts`,
+  `commands/sessions.resolve.test.ts`, `commands/sessions.resolve-errors.test.ts`,
   `lib/session/remote-list.test.ts`).
 
   *Amended 2026-08-10 (RUSH-2492).* This requirement previously mandated exit 2
@@ -927,7 +927,8 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   remain ordinary free text. `--agent <agent> --version <version>` MUST be
   equivalent to `--agent <agent@version>`; `--version` without `--agent` MUST
   fail loudly (`commands/sessions.ts` `parseInstalledAgentVersionQuery`,
-  `applyVersionFilters`; test `commands/sessions.test.ts`).
+  `applyVersionFilters`; tests `commands/sessions.test.ts`,
+  `commands/sessions.cli-list.test.ts`).
 - **SES-IF-3 (MUST).** The export **bundle format** is NDJSON, `kind`
   `agents-session-bundle`, `version` 1; parse MUST reject a wrong kind/version;
   per-record `hash`/`size` are always over **plaintext** for byte-exact dedup;
@@ -1201,7 +1202,7 @@ answers it without opening the source (`lib/session/tool-index.test.ts`).
 Given one Bash call contains `git status; git diff`; When
 `--query program:git --count` runs; Then it reports 2 occurrences, 1 containing
 tool call, and 1 distinct session (`lib/session/tool-index.test.ts`;
-`commands/sessions.test.ts`).
+`commands/sessions.cli-tools.test.ts`).
 
 **GWT-14 — A retained dead pane recovers.**
 Given a session whose tmux pane remains after the harness exited with status 0;

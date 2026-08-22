@@ -102,11 +102,29 @@ groups:
   # (PR #2796, run 32392267349) still touches session/* re-export shims, so
   # the sessions group is selected; impact was 198s of a passing vitest run
   # and failed the 180s ceiling. Same pattern as daemon 240 / hooks 150.
+  # RUSH-2819: sessions.test.ts (2,604 lines, 172s measured — the single
+  # slowest file in CI) is split into sessions.*.test.ts slices so vitest's
+  # per-file fork parallelism spreads them across workers. The when: globs
+  # cover the slices and their shared fixture so a test-only edit inherits
+  # this budget instead of the flat 85s (editing a slow test file always
+  # landed on the default — the asymmetry called out on the ticket). The
+  # tests: list pins the subprocess-only slices that drive the CLI without
+  # statically importing sessions.ts, so a sessions.ts diff still runs its
+  # behavior suite. Lower the budget only against a measured post-split run.
   - id: sessions
     when:
       - apps/cli/src/lib/session/**
       - apps/cli/src/commands/sessions.ts
+      - apps/cli/src/commands/sessions.test.ts
+      - apps/cli/src/commands/sessions.*.test.ts
+      - apps/cli/src/commands/sessions.test-fixture.ts
+      - apps/cli/src/commands/__tests__/sessions-*.test.ts
       - apps/cli/bench/sessions-active-perf.ts
+    tests:
+      - apps/cli/src/commands/sessions.cli-list.test.ts
+      - apps/cli/src/commands/sessions.cli-tools.test.ts
+      - apps/cli/src/commands/sessions.computer.test.ts
+      - apps/cli/src/commands/sessions.render.test.ts
     checks: [typecheck, sessions-bench]
     budget_sec: 240
 

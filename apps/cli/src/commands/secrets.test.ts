@@ -648,6 +648,9 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     }
   });
 
+  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
+  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
+  // processes on a 20-core box (RUSH-2839).
   it.skipIf(!keychainHelperAvailable)('view --json --reveal fails fast outside an interactive terminal — the old --plaintext escape is gone (RUSH-2774)', ({ skip }) => {
     if (!keychainHelperAvailable) {
       skip();
@@ -668,7 +671,7 @@ describe('secrets list/view --json (agent discovery, RUSH-1834)', () => {
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 });
 
 describe('buildSecretsExecEnv', () => {

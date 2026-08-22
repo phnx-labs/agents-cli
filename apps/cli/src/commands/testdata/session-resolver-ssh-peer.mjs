@@ -8,10 +8,14 @@
  * `remoteListCommand`. The command uses a real shell, with
  * PATH arranged so `agents` resolves to whichever CLI this test case needs:
  *
- *   - mode=old-peer:   the actual published @phnx-labs/agents-cli@1.20.88,
- *                       fetched via npx. That build predates `--resolve-safe-v1`
- *                       and rejects it with a real commander exit 1 — no
- *                       fixture-side stubbing of that behavior at all.
+ *   - mode=old-peer:   testdata/old-agents-cli-stub.mjs, a pinned local stand-in
+ *                       for @phnx-labs/agents-cli@1.20.88 that reproduces its
+ *                       commander rejection of `--resolve-safe-v1` (same stderr,
+ *                       same exit 1). The real package used to be npx'd here —
+ *                       a live registry fetch that cost up to 122s in the PR
+ *                       gate, blocked release v1.22.43 (CI run 32439609875),
+ *                       and leaked launchd bootstrap under the real HOME on
+ *                       macOS (RUSH-2963) — see the stub's docblock.
  *   - mode=malformed:  the current repo's CLI (via tsx), run for real. Once it
  *                       has genuinely exited 0, the fixture corrupts only the
  *                       bytes handed back over the ssh channel — simulating a
@@ -25,7 +29,7 @@
  *   SRP_USERNAME    random username accepted through SSH's `none` method
  *   SRP_EXPECTED_COMMAND exact production command accepted by the exec channel
  *   SRP_PROOF_FILE  written only after the old CLI rejects the new protocol
- *   SRP_OLD_VERSION exact npm version to fetch for mode=old-peer
+ *   SRP_OLD_VERSION version the old-peer stub stands in for (proof-file label)
  *   SRP_TSX_LOADER  file:// URL of the tsx ESM loader (mode=malformed)
  *   SRP_CLI_ENTRY   absolute path to src/index.ts (mode=malformed)
  *
@@ -59,9 +63,10 @@ if (!username || !expectedCommand || !proofFile) {
 const shimDir = fs.mkdtempSync(path.join(os.tmpdir(), 'session-resolver-ssh-shim-'));
 const shimBin = path.join(shimDir, 'agents');
 if (mode === 'old-peer') {
+  const oldStub = path.join(path.dirname(new URL(import.meta.url).pathname), 'old-agents-cli-stub.mjs');
   fs.writeFileSync(
     shimBin,
-    `#!/bin/sh\nexec env npm_config_cache='${path.join(peerHome, 'npm-cache')}' npm_config_offline=true npx -y -p @phnx-labs/agents-cli@${process.env.SRP_OLD_VERSION} agents "$@"\n`,
+    `#!/bin/sh\nexec ${process.execPath} '${oldStub}' "$@"\n`,
   );
 } else {
   fs.writeFileSync(

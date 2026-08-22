@@ -252,6 +252,9 @@ describeDaemon('agents daemon', () => {
     expect(res.stdout).toContain('enabled');
   });
 
+  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
+  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
+  // processes on a 20-core box (RUSH-2839).
   it('webhooks add/list/remove drive the real daemon/webhooks.yaml (RUSH-2548)', () => {
     const home = makeHome();
     const configPath = path.join(home, '.agents', 'daemon', 'webhooks.yaml');
@@ -271,7 +274,7 @@ describeDaemon('agents daemon', () => {
     const removed = run(home, ['webhooks', 'remove', '8788']);
     expect(removed.status).toBe(0);
     expect(JSON.parse(run(home, ['webhooks', 'list', '--json']).stdout)).toEqual([]);
-  });
+  }, 90_000);
 
   it('webhooks rejects a funnel port Tailscale cannot serve, and an unknown remove', () => {
     const home = makeHome();
@@ -529,6 +532,9 @@ describeDaemon('agents daemon', () => {
    *
    * Real process launched from a real file that is then unlinked — no mocks.
    */
+  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
+  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
+  // processes on a 20-core box (RUSH-2839).
   it('status flags a daemon whose entry file was deleted from disk', async () => {
     const home = makeHome();
     const scriptDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-stale-entry-'));
@@ -561,7 +567,7 @@ describeDaemon('agents daemon', () => {
       fs.rmSync(scriptDir, { recursive: true, force: true });
       fs.rmSync(home, { recursive: true, force: true });
     }
-  });
+  }, 90_000);
 
   it('does not flag a non-path entry as deleted code', async () => {
     const home = makeHome();

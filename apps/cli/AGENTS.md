@@ -103,8 +103,9 @@ Source of truth: `buildExecEnv` / `emitResolvedSessionId` in
 Enforced by [`src/lib/session/team-filter.test.ts`](src/lib/session/team-filter.test.ts)
 (`--teams includes team sessions with teamOrigin populated`),
 [`src/lib/daemon/runner.test.ts`](src/lib/daemon/runner.test.ts) (routine transcript archival), and
-[`src/commands/sessions.test.ts`](src/commands/sessions.test.ts) (routine run history
-plus linked sessions, with no fake session for command-only runs).
+[`src/commands/sessions.test.ts`](src/commands/sessions.test.ts) +
+[`src/commands/sessions.cli-live.test.ts`](src/commands/sessions.cli-live.test.ts)
+(routine run history plus linked sessions, with no fake session for command-only runs).
 
 Team-origin sessions are durable session rows but are excluded from the ordinary
 historical listing by default to keep an orchestrator's fan-out from flooding it;
