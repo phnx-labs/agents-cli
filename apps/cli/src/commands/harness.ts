@@ -42,8 +42,7 @@ import { listPresets, getPreset } from '../lib/profiles-presets.js';
 import { AGENTS, ALL_AGENT_IDS, resolveAgentName } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
 import { findAccount } from '../lib/account-registry.js';
-import { keychainItemName, setKeychainToken, deleteKeychainToken } from '../lib/secrets/profiles.js';
-import { readStdinSync } from '../lib/format.js';
+
 import {
   runWizardSteps,
   createSteps,
@@ -648,7 +647,7 @@ Examples:
   cmd
     .command('remove <name>')
     .alias('rm')
-    .description('Delete a custom harness (keychain token is kept — use `harness logout <provider>` to remove).')
+    .description('Delete a custom harness (credentials stay on `agents accounts`; this only drops the named pin).')
     .action((name: string) => {
       const existed = deleteProfile(name);
       if (!existed) {
@@ -658,47 +657,4 @@ Examples:
       console.log(chalk.green(`Harness '${name}' removed.`));
     });
 
-  cmd
-    .command('login <provider>')
-    .description('Store or rotate the API key for a provider (e.g., openrouter). Shared across harnesses using that provider.')
-    .option('--key-stdin', 'Read API key from stdin')
-    .action(async (provider: string, opts: { keyStdin?: boolean }) => {
-      try {
-        const item = keychainItemName(provider);
-        let token: string;
-        if (opts.keyStdin) {
-          token = readStdinSync();
-          if (!token) throw new Error('No key received on stdin.');
-        } else {
-          if (!isInteractiveTerminal()) {
-            throw new Error('A secret is required but the shell is not interactive. Pipe the key via stdin (--key-stdin).');
-          }
-          const { password } = await import('@inquirer/prompts');
-          token = await password({ message: `Enter API key for ${provider}`, mask: true });
-        }
-        setKeychainToken(item, token);
-        console.log(chalk.green(`Stored in keychain: ${item}`));
-      } catch (err) {
-        console.error(chalk.red((err as Error).message));
-        process.exit(1);
-      }
-    });
-
-  cmd
-    .command('logout <provider>')
-    .description('Remove a stored provider key from keychain')
-    .action((provider: string) => {
-      try {
-        const item = keychainItemName(provider);
-        const existed = deleteKeychainToken(item);
-        if (!existed) {
-          console.error(chalk.yellow(`No keychain item '${item}' to remove.`));
-          process.exit(1);
-        }
-        console.log(chalk.green(`Removed keychain item: ${item}`));
-      } catch (err) {
-        console.error(chalk.red((err as Error).message));
-        process.exit(1);
-      }
-    });
 }

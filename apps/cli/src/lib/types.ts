@@ -92,7 +92,7 @@ export interface BudgetConfig {
   require_confirm_over?: number;
 }
 
-/** Preview features that users can opt into via `agents beta`. */
+/** Preview features that users can opt into via `agents setup beta`. */
 export type BetaFeatureName = 'factory';
 
 /** Subset of chalk color names used for agent-specific terminal output. */

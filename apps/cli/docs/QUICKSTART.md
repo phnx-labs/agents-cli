@@ -173,11 +173,11 @@ fleet:
 ```
 
 ```bash
-agents apply --plan       # device x dimension matrix; changes nothing
-agents apply               # reconcile the fleet (confirms first; -y to skip)
+agents fleet apply --plan  # device x dimension matrix; changes nothing
+agents fleet apply         # reconcile the fleet (confirms first; -y to skip)
 ```
 
-`agents apply` is the fleet-wide counterpart to config sync: it installs
+`agents fleet apply` is the fleet-wide counterpart to config sync: it installs
 missing agents, syncs the named config scopes, and reports boxes that still need
 an interactive login or provider account. Keep the machine you actually work from lighter than
 your worker boxes: point long-running teams and routines at `--devices
@@ -203,7 +203,7 @@ Two things worth knowing exist, without dumping their full docs here:
 | Concepts — DotAgents repos, resource resolution, devices vs hosts | [`concepts.md`](concepts.md) |
 | Agent cheat sheet — the dozen concepts agents need on one page | [`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md) |
 | Teams — DAG dependencies, worktree isolation, cloud dispatch | [`teams.md`](teams.md) |
-| Fleet profile sync — the `fleet:` manifest and `agents apply` | [`fleet.md`](fleet.md) |
+| Fleet profile sync — the `fleet:` manifest and `agents fleet apply` | [`fleet.md`](fleet.md) |
 | Hosts — dispatching `agents run` over SSH | [`hosts.md`](hosts.md) |
 | Browser — driving Chrome/Brave/Edge via CDP | [`browser.md`](browser.md) |
 | Secrets — Keychain-backed env bundles | [`secrets.md`](secrets.md) |

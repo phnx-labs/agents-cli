@@ -66,12 +66,10 @@ export const loadPrune: ModuleLoader = async () => (await import('../commands/pr
 export const loadTrash: ModuleLoader = async () => (await import('../commands/trash.js')).registerTrashCommands;
 export const loadRestore: ModuleLoader = async () => (await import('../commands/trash.js')).registerRestoreCommand;
 export const loadDoctor: ModuleLoader = async () => (await import('../commands/doctor.js')).registerDoctorCommand;
-export const loadApply: ModuleLoader = async () => (await import('../commands/apply.js')).registerApplyCommand;
 export const loadRoute: ModuleLoader = async () => (await import('../commands/route.js')).registerRouteCommands;
 export const loadHarness: ModuleLoader = async () => (await import('../commands/harness.js')).registerHarnessCommands;
 export const loadSecrets: ModuleLoader = async () => (await import('../commands/secrets.js')).registerSecretsCommands;
 export const loadMenubar: ModuleLoader = async () => (await import('../commands/menubar.js')).registerMenubarCommands;
-export const loadBeta: ModuleLoader = async () => (await import('../commands/beta.js')).registerBetaCommands;
 export const loadSync: ModuleLoader = async () => (await import('../commands/sync.js')).registerSyncCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../commands/refresh-rules.js')).registerRefreshRulesCommand;
 export const loadFactory: ModuleLoader = async () => (await import('../commands/factory.js')).registerFactoryCommands;
@@ -179,13 +177,11 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   trash: [loadTrash],
   restore: [loadRestore],
   doctor: [loadDoctor],
-  apply: [loadApply],
   route: [loadRoute],
   harness: [loadHarness],
   harnesses: [loadHarness],
   secrets: [loadSecrets],
   menubar: [loadMenubar],
-  beta: [loadBeta],
   sync: [loadSync],
   'refresh-rules': [loadRefreshRules],
   factory: [loadFactory],

@@ -456,7 +456,7 @@ A stalled session whose tail shows a hard account limit ("You've hit your weekly
 ## Sync the fleet
 
 <p align="center">
-  <img src="assets/fleet-sync.svg" alt="agents apply: reconcile every device to one profile from agents.yaml — install missing agents and sync config. Native logins stay on the machine that minted them." width="100%" />
+  <img src="assets/fleet-sync.svg" alt="agents fleet apply: reconcile every device to one profile from agents.yaml — install missing agents and sync config. Native logins stay on the machine that minted them." width="100%" />
 </p>
 
 
@@ -473,14 +473,14 @@ fleet:
 ```
 
 ```bash
-agents apply --plan                 # device x dimension matrix; changes nothing
-agents apply                        # reconcile the fleet (confirms first; -y to skip)
-agents apply --device yosemite-s0   # scope to one device
-agents apply --only agents,config   # limit dimensions (agents, config, login)
-agents apply --no-login             # skip login propagation
+agents fleet apply --plan                 # device x dimension matrix; changes nothing
+agents fleet apply                        # reconcile the fleet (confirms first; -y to skip)
+agents fleet apply --device yosemite-s0   # scope to one device
+agents fleet apply --only agents,config   # limit dimensions (agents, config, login)
+agents fleet apply --no-login             # skip login propagation
 ```
 
-`agents apply` (`ag apply`) probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agi-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
+`agents fleet apply` probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agi-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
 
 See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
 
@@ -672,7 +672,7 @@ age (`updated 2m ago — pass --refresh (--live) for a live probe`).
 `agents fleet status` answers "is my fleet OK?" at a glance: a one-line rollup
 (`● N online · ○ M offline`), a short **NEEDS ATTENTION** list where every item names
 the command that fixes it (offline → `check the box`, config drift or a stark CLI gap →
-`agents apply <box>`, version skew → `agents upgrade --fleet`), then quiet per-device
+`agents fleet apply --device <box>`, version skew → `agents upgrade --fleet`), then quiet per-device
 rows grouped by OS (macOS / Linux / Windows) showing just `name · capacity · load/mem ·
 version`, with this machine flagged `▸ … ← this machine`. A healthy fleet reads in a few
 lines; orphaned versions are demoted to a one-line `agents prune` nudge in the footer.

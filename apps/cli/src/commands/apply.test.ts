@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
-import { stripPad, registerApplyCommand, registerFleetApplyAlias } from './apply.js';
+import { stripPad, registerFleetApplyAlias } from './apply.js';
+import { buildFullCommandTree } from '../cli/command-registry.js';
 
 // A real SGR-wrapped cell as chalk emits it: ESC `[32m` ... ESC `[39m`.
 const ESC = '\x1b';
@@ -26,20 +27,26 @@ describe('stripPad', () => {
   });
 });
 
-describe('fleet apply alias', () => {
-  it('registers `apply` under the fleet/devices tree with options identical to top-level `agents apply`', () => {
-    const program = new Command();
-    registerApplyCommand(program);
-    const top = program.commands.find((c) => c.name() === 'apply');
-    expect(top).toBeDefined();
+describe('fleet apply', () => {
+  it('registers apply under devices/fleet, not at the root', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
+    expect(names).not.toContain('apply');
 
+    const devices = program.commands.find((c) => c.name() === 'devices');
+    expect(devices).toBeDefined();
+    expect(devices!.commands.map((c) => c.name())).toContain('apply');
+  });
+
+  it('attaches the reconcile flags on the nested command', () => {
+    const program = new Command();
     const devices = program.command('devices');
     registerFleetApplyAlias(devices);
     const sub = devices.commands.find((c) => c.name() === 'apply');
     expect(sub).toBeDefined();
-
-    // The alias must never drift from the real command — same flags, same engine.
-    const longFlags = (c: Command) => c.options.map((o) => o.long).sort();
-    expect(longFlags(sub!)).toEqual(longFlags(top!));
+    const flags = sub!.options.map((o) => o.long);
+    expect(flags).toContain('--plan');
+    expect(flags).toContain('--device');
+    expect(flags).toContain('--provision-secrets');
   });
 });

@@ -3,8 +3,8 @@ const LOADED_COMMAND_NAMES = [
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use', 'list',
   'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install',
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
-  'models', 'modes', 'trash', 'restore', 'doctor', 'apply',
-  'route', 'harness', 'harnesses', 'secrets', 'menubar', 'beta', 'sync',
+  'models', 'modes', 'trash', 'restore', 'doctor',
+  'route', 'harness', 'harnesses', 'secrets', 'menubar', 'sync',
   'refresh-rules', 'factory', 'usage', 'insights', 'perf',
   'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
@@ -51,7 +51,9 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * `agents artifacts unshare` (RUSH-2989). `audit` nested under `agents events audit`.
  * `trends` nested under `agents insights mix` / `insights trends`. `serve` (the
  * read-only local web companion + `--control` anchor) was removed with the
- * unshipped iOS Fleet Cockpit it existed for (RUSH-3001).
+ * unshipped iOS Fleet Cockpit it existed for (RUSH-3001). `apply` nested under
+ * `agents fleet apply` / `agents devices apply`. `beta` nested under
+ * `agents setup beta` (RUSH-2981).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
@@ -78,6 +80,8 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'unshare',
   'audit',
   'trends',
+  'apply',
+  'beta',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {

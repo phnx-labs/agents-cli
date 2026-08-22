@@ -240,7 +240,7 @@ Install, configure, run, and dispatch AI coding agents from one place.
 Works with Claude, Codex, Antigravity, Cursor, OpenCode, OpenClaw, and Droid.
 
 Quick start:
-  agents setup                    First-time setup (interactive)
+  agents setup                    First-time setup (interactive); setup beta enables preview features
   agents view                     See what's installed
   agents run <agent> ["prompt"]   Run an agent (interactive without prompt, headless with)
   agents sessions                 Browse past sessions across all agents
@@ -314,9 +314,6 @@ Config sync:
   sync [agent]                    Re-materialize installed version homes; --local to skip fetching
   repo init --path <dir>          Scaffold your own editable repo from a template
   repo add <path|gh:user/repo>    Merge an extra repo after the system repo
-
-Beta features:
-  beta                            Enable preview features (factory and more)
 
 Automation tips:
   Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown

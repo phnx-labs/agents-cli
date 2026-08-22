@@ -403,7 +403,7 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
     const seen = row.lastSeen ? ` · last seen ${formatCheckedAge(Date.parse(row.lastSeen), now)}` : '';
     items.push({ glyph: 'offline', subject: row.name, detail: `offline${seen}`, fix: 'check the box' });
   }
-  // 2) Boxes that need `agents apply` — merge config drift and a stark CLI gap
+  // 2) Boxes that need `agents fleet apply` — merge config drift and a stark CLI gap
   // into ONE item per box (both are fixed by the same command, so don't
   // double-list). An offline box's config/CLI is unknowable, so skip it.
   for (const row of report.devices) {
@@ -413,7 +413,7 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
     const stark = starkCliGap(row);
     if (stark) reasons.push(`only ${stark.installed} of ${stark.total} agent CLIs installed`);
     if (reasons.length > 0) {
-      items.push({ glyph: 'warn', subject: row.name, detail: reasons.join(' · '), fix: `agents apply ${row.name}` });
+      items.push({ glyph: 'warn', subject: row.name, detail: reasons.join(' · '), fix: `agents fleet apply --device ${row.name}` });
     }
   }
   // 3) Version skew across the fleet — one line.
@@ -438,7 +438,7 @@ export function buildFleetAttentionItems(report: FleetHealthReport, now: number 
       glyph: 'warn',
       subject: w.devices[0] ?? 'fleet',
       detail: w.message.replace(`${w.devices[0]} `, ''),
-      fix: `agents apply ${w.devices[0] ?? ''}`.trim(),
+      fix: `agents fleet apply --device ${w.devices[0] ?? ''}`.trim(),
     });
   }
   return items;

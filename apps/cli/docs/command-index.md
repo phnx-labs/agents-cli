@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_71 command groups · 559 commands._
+_69 command groups · 556 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -40,12 +40,6 @@ agents accounts view <name>                 Show safe account metadata, custody,
 
 ```
 agents add <specs...>  Download and install agent CLI versions. Enables subsidized API usage through managed binaries.
-```
-
-## apply — Reconcile the fleet to a declared profile: install agents and sync config.
-
-```
-agents apply  Reconcile the fleet to a declared profile: install agents and sync config.
 ```
 
 ## artifacts — Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).
@@ -80,15 +74,6 @@ agents auth space remove <email>       Remove a member from a space
 agents auth space role <email> <role>  Change a member's role (owner-only for admin)
 agents auth space view [space]         Show one space (defaults to your only space)
 agents auth whoami                     Show the signed-in account
-```
-
-## beta — Enable or disable preview features like factory.
-
-```
-agents beta                        Enable or disable preview features like factory.
-agents beta disable <features...>  Disable one or more beta features.
-agents beta enable <features...>   Enable one or more beta features.
-agents beta list                   Show available beta features and whether they are enabled.
 ```
 
 ## browser — Launch and drive browser profiles via the Chrome DevTools Protocol. Power-tool for the `browser` skill.
@@ -314,9 +299,7 @@ agents harness add [name]                    Create a custom harness from a host
 agents harness edit <name>                   Edit an existing custom harness in place — model, endpoint, auth, version, description, fallback. Omit flags in a terminal for the interactive wizard.
 agents harness fork [source] [name]          Fork a native harness (claude, opencode, ...) or an existing custom one into a new named harness. Omit args in a terminal for the interactive wizard.
 agents harness list                          List custom harnesses, addable presets, and native harnesses.
-agents harness login <provider>              Store or rotate the API key for a provider (e.g., openrouter). Shared across harnesses using that provider.
-agents harness logout <provider>             Remove a stored provider key from keychain
-agents harness remove <name>                 Delete a custom harness (keychain token is kept — use `harness logout <provider>` to remove).
+agents harness remove <name>                 Delete a custom harness (credentials stay on `agents accounts`; this only drops the named pin).
 agents harness rename <old-name> <new-name>  Rename a custom harness (updates forkedFrom lineage on any harness forked from it). Errors on a name collision.
 agents harness view <name>                   Show one custom harness (host, model, provider, auth, path).
 ```
@@ -777,6 +760,10 @@ agents setup alias                            Create shorthand binaries that exp
 agents setup alias add <name> [expansion...]  Create an alias shim. If expansion is omitted, defaults to <name>.
 agents setup alias list                       Show installed aliases
 agents setup alias remove <name>              Delete an alias shim
+agents setup beta                             Enable or disable preview features like factory.
+agents setup beta disable <features...>       Disable one or more beta features.
+agents setup beta enable <features...>        Enable one or more beta features.
+agents setup beta list                        Show available beta features and whether they are enabled.
 agents setup browser                          Set up `agents browser` — detect an installed browser and create the default profile.
 agents setup computer                         Set up `agents computer` (macOS) — install the signed helper and grant control permissions.
 agents setup fleet                            Set up `agents fleet` — discover Tailscale devices, choose auth, render SSH config, and test connectivity.

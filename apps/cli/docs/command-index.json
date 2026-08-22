@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 71,
-  "commands": 559,
+  "groups": 69,
+  "commands": 556,
   "root": {
     "name": "agents",
     "path": "",
@@ -647,119 +647,6 @@
       ],
       "examples": "# Install the latest version of an agent\n      agents add claude@latest\n\n      # Install the oldest published version of an agent\n      agents add claude@oldest\n\n      # Install a specific version (reproducibility)\n      agents add claude@2.1.112\n\n      # Install multiple agents at once\n      agents add claude@latest codex@0.116.0\n\n      # Lock a version to this project only (won't affect global default)\n      agents add claude@2.1.100 --project\n\n      # Install a clean, separate copy that leaves your existing setup alone\n      agents add claude@2.1.112 --isolated",
       "notes": "- The first version you install becomes the default automatically.\n      - 'add' does NOT change the default if a default already exists. Use 'agents use' to switch.\n      - Multi-account: each installed version has separate auth, so you can install the same agent twice for two accounts.\n      - --isolated installs a self-contained copy: it never sets the default, never creates the bare '<agent>' shim, and never backs up or symlinks your real ~/.<agent>. Run it with 'agents run <agent>@<version>' and remove it with 'agents remove <agent>@<version> --isolated'. Mutually exclusive with --project.",
-      "subcommands": []
-    },
-    {
-      "name": "apply",
-      "path": "apply",
-      "aliases": [],
-      "description": "Reconcile the fleet to a declared profile: install agents and sync config.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-f, --file <path>",
-          "description": "Manifest file carrying a fleet: block (default: agents.yaml)",
-          "short": "-f",
-          "long": "--file",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--plan",
-          "description": "Show the reconcile plan and exit (no changes)",
-          "long": "--plan",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--dry-run",
-          "description": "Alias for --plan",
-          "long": "--dry-run",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-y, --yes",
-          "description": "Skip the confirmation prompt",
-          "short": "-y",
-          "long": "--yes",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--device <name>",
-          "description": "Scope the apply to a single device",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--agent <specs...>",
-          "description": "Override the roster for targeted device(s): install these specs instead of the manifest's. Use `claude@all` to replicate every version installed on this machine.",
-          "long": "--agent",
-          "required": true,
-          "optional": false,
-          "variadic": true,
-          "negate": false
-        },
-        {
-          "flags": "--only <dims>",
-          "description": "Limit to dimensions: comma list of agents,config,login",
-          "long": "--only",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-login",
-          "description": "Deprecated no-op: native logins are always device-local",
-          "long": "--no-login",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--provision-secrets",
-          "description": "Push the manifest's declared secrets bundles to each device (OFF by default; moves credential values over SSH, and only to a device whose host key is already pinned)",
-          "long": "--provision-secrets",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--force",
-          "description": "With --provision-secrets: re-push a bundle the device already has",
-          "long": "--force",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "examples": "# Preview what would change across the fleet\n      agents apply --plan -f agents.yaml\n\n      # Bring every device to the profile (installs + config sync; native login stays local)\n      ag apply -f agents.yaml\n\n      # One device only\n      agents apply --device yosemite-s1 -y\n\n      # Replicate every claude version on this machine onto a fresh box\n      agents apply --agent claude@all --device yosemite-s0 -y\n\n      # Install a specific pinned version on one device\n      agents apply --agent claude@2.1.207 --device yosemite-s0",
       "subcommands": []
     },
     {
@@ -1867,101 +1754,6 @@
               "variadic": false,
               "negate": false
             },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "beta",
-      "path": "beta",
-      "aliases": [],
-      "description": "Enable or disable preview features like factory.",
-      "args": [],
-      "options": [
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "disable",
-          "path": "beta disable",
-          "aliases": [],
-          "description": "Disable one or more beta features.",
-          "args": [
-            {
-              "name": "features",
-              "required": true,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "enable",
-          "path": "beta enable",
-          "aliases": [],
-          "description": "Enable one or more beta features.",
-          "args": [
-            {
-              "name": "features",
-              "required": true,
-              "variadic": true,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "list",
-          "path": "beta list",
-          "aliases": [],
-          "description": "Show available beta features and whether they are enabled.",
-          "args": [],
-          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -7880,7 +7672,7 @@
               "negate": false
             }
           ],
-          "examples": "# Preview the fleet reconcile\n      agents fleet apply --plan\n\n      # Reconcile every device to the profile\n      agents fleet apply -y",
+          "examples": "# Preview the fleet reconcile\n      agents fleet apply --plan\n\n      # Reconcile every device to the profile\n      agents fleet apply -y\n\n      # One device only\n      agents fleet apply --device yosemite-s1 -y\n\n      # Replicate every claude version on this machine onto a fresh box\n      agents fleet apply --agent claude@all --device yosemite-s0 -y",
           "subcommands": []
         },
         {
@@ -10310,75 +10102,12 @@
           "subcommands": []
         },
         {
-          "name": "login",
-          "path": "harness login",
-          "aliases": [],
-          "description": "Store or rotate the API key for a provider (e.g., openrouter). Shared across harnesses using that provider.",
-          "args": [
-            {
-              "name": "provider",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "--key-stdin",
-              "description": "Read API key from stdin",
-              "long": "--key-stdin",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "logout",
-          "path": "harness logout",
-          "aliases": [],
-          "description": "Remove a stored provider key from keychain",
-          "args": [
-            {
-              "name": "provider",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "remove",
           "path": "harness remove",
           "aliases": [
             "rm"
           ],
-          "description": "Delete a custom harness (keychain token is kept — use `harness logout <provider>` to remove).",
+          "description": "Delete a custom harness (credentials stay on `agents accounts`; this only drops the named pin).",
           "args": [
             {
               "name": "name",
@@ -25109,8 +24838,8 @@
           "negate": false
         }
       ],
-      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog\n      agents setup alias add teams",
-      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n        agents setup alias add teams  # PATH shorthand: teams runs agents teams\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
+      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog\n      agents setup alias add teams\n      agents setup beta enable factory",
+      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n        agents setup alias add teams  # PATH shorthand: teams runs agents teams\n        agents setup beta enable factory  # opt into preview features\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
       "subcommands": [
         {
           "name": "alias",
@@ -25203,6 +24932,103 @@
                   "description": ""
                 }
               ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
+        },
+        {
+          "name": "beta",
+          "path": "setup beta",
+          "aliases": [],
+          "description": "Enable or disable preview features like factory.",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents setup beta list\n      agents setup beta enable factory\n      agents setup beta disable factory",
+          "notes": "Writes the enabled set to ~/.agents/agents.yaml (beta.enabled). Top-level\n      `agents beta` is gone — use this group.",
+          "subcommands": [
+            {
+              "name": "disable",
+              "path": "setup beta disable",
+              "aliases": [],
+              "description": "Disable one or more beta features.",
+              "args": [
+                {
+                  "name": "features",
+                  "required": true,
+                  "variadic": true,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "enable",
+              "path": "setup beta enable",
+              "aliases": [],
+              "description": "Enable one or more beta features.",
+              "args": [
+                {
+                  "name": "features",
+                  "required": true,
+                  "variadic": true,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "list",
+              "path": "setup beta list",
+              "aliases": [],
+              "description": "Show available beta features and whether they are enabled.",
+              "args": [],
               "options": [
                 {
                   "flags": "-h, --help",

@@ -1,3 +1,8 @@
+/**
+ * `agents setup beta` — enable or disable preview features like factory.
+ * Nested under setup because opting into a preview is machine configuration,
+ * not its own noun (RUSH-2981).
+ */
 import type { Command } from 'commander';
 import chalk from 'chalk';
 import {
@@ -7,6 +12,7 @@ import {
   setBetaEnabled,
 } from '../lib/beta.js';
 import type { BetaFeatureName } from '../lib/types.js';
+import { setHelpSections } from '../lib/help.js';
 
 const BETA_DESCRIPTIONS: Record<BetaFeatureName, string> = {
   factory: 'Cloud-based agent dispatch via Rush Factory',
@@ -31,16 +37,23 @@ function parseFeatures(values: string[]): BetaFeatureName[] {
   return values.filter((v) => valid.has(v as BetaFeatureName)) as BetaFeatureName[];
 }
 
-export function registerBetaCommands(program: Command): void {
-  const beta = program
+/** Register `agents setup beta` under the parent `setup` command. */
+export function registerBetaCommands(setupCmd: Command): void {
+  const beta = setupCmd
     .command('beta')
-    .description('Enable or disable preview features like factory.')
-    .addHelpText('after', `
-Examples:
-  agents beta list
-  agents beta enable factory
-  agents beta disable factory
-`);
+    .description('Enable or disable preview features like factory.');
+
+  setHelpSections(beta, {
+    examples: `
+      agents setup beta list
+      agents setup beta enable factory
+      agents setup beta disable factory
+    `,
+    notes: `
+      Writes the enabled set to ~/.agents/agents.yaml (beta.enabled). Top-level
+      \`agents beta\` is gone — use this group.
+    `,
+  });
 
   beta
     .command('list')

@@ -96,6 +96,6 @@ export function setBetaEnabled(features: readonly BetaFeatureName[], enabled: bo
 }
 
 export function betaEnableHint(feature: BetaFeatureName): string {
-  return `Enable it with: agents beta enable ${feature}`;
+  return `Enable it with: agents setup beta enable ${feature}`;
 }
 

@@ -13,7 +13,7 @@ token plus a **single-use refresh token that rotates server-side on every refres
 
 Two failures follow from treating that login as fleet state:
 
-1. **Fleet-wide logout.** `agents apply` copies the login file across machines
+1. **Fleet-wide logout.** `agents fleet apply` copies the login file across machines
    (`FLEET_AUTH_FILES`). When one box refreshes, the server rotates the refresh
    token and invalidates every other copy — the whole fleet drops to "run /login"
    (the codebase already documents this: `fleet/remote-login.ts` — "droid collapsed
@@ -170,7 +170,7 @@ deliberately created with `agents accounts add` and explicitly pushed with
 
 ## How each surface changes
 
-- **`agents apply`** does not copy login files. `FLEET_AUTH_FILES` is inventory
+- **`agents fleet apply`** does not copy login files. `FLEET_AUTH_FILES` is inventory
   metadata only; fleet apply has no native-login materialization path. Per
   agent per box `apply` surfaces: "logged in" / "log in on this box" (interactive or
   `agents fleet login`) / "add or sync a provider account (`agents accounts add` /

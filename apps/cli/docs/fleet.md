@@ -1,10 +1,10 @@
-# Fleet profile sync (`agents apply`)
+# Fleet profile sync (`agents fleet apply`)
 
 Reconcile every machine you own to one declared profile: which agents are
 installed, which config scopes are synced, and which boxes still need local
 authentication. Native logins are never copied.
 
-`agents apply` (alias `ag apply`) is the fleet-wide counterpart to
+`agents fleet apply` (also `agents devices apply`) is the fleet-wide counterpart to
 [resource sync](resource-sync.md): resource sync reconciles resources within
 one machine's version homes; `apply` reconciles *machines* against a profile,
 over the same [SSH transport](ssh-transport.md) every `--device` command uses.
@@ -75,10 +75,10 @@ per-device `agents:` pins, and never writes an IP or username. Source:
 
 **Fresh-machine bootstrap.** The roster (`~/.agents/.history/devices/registry.json`)
 is machine-local and gitignored — so a freshly-cloned `agents.yaml` names devices
-this machine has never registered. `agents apply` handles that: for any device in
+this machine has never registered. `agents fleet apply` handles that: for any device in
 an explicit `devices:` map that isn't in the local registry, it resolves the name
 **live from Tailscale** (`ensureDevicesRegistered`, `src/lib/devices/sync.ts`) and
-registers it before reconciling. So `git clone` + `agents apply` reconstructs the
+registers it before reconciling. So `git clone` + `agents fleet apply` reconstructs the
 fleet with zero committed connection details. Names not on the tailnet are
 reported as unresolved rather than aborting the run.
 
@@ -191,10 +191,10 @@ rate-limit quota), clone that exact set onto another device with `--agent`:
 
 ```
 # Install every claude version on THIS machine onto yosemite-s0
-agents apply --agent claude@all --device yosemite-s0 -y
+agents fleet apply --agent claude@all --device yosemite-s0 -y
 
 # A specific pinned version
-agents apply --agent claude@2.1.207 --device yosemite-s0
+agents fleet apply --agent claude@2.1.207 --device yosemite-s0
 ```
 
 `claude@all` expands **source-side** to one pinned spec per version installed here
