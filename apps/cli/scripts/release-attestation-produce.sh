@@ -254,23 +254,28 @@ if [[ -x scripts/release-manifest.sh ]]; then
     # publish-computer-helper-mac.sh — which does not write a manifest, so the
     # instruction loops forever on a byte-identical helper. Every hand-cut
     # release hit this. RUSH-2970 trap 1.
-    if command -v gh >/dev/null 2>&1 \
-      && PRIOR_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null)" \
-      && [[ -n "${PRIOR_TAG:-}" ]] \
-      && gh release download "$PRIOR_TAG" --pattern release-manifest.json --dir "$STORE" >/dev/null 2>&1 \
-      && [[ -f "$MANIFEST_FILE" ]]; then
+    # Each step is checked on its own rather than chained, so the reason a seed
+    # did not happen is the reason reported. A single `&&` chain collapsed three
+    # distinct outcomes into one branch: a gh that fails on auth read as "no
+    # prior release" — hiding exactly the misconfiguration worth surfacing — and
+    # a repo with zero releases printed the literal string `null`, because
+    # `jq -r '.[0].tagName'` on an empty array emits "null", not "".
+    seed_note=""
+    if ! command -v gh >/dev/null 2>&1; then
+      seed_note="no gh on PATH"
+    elif ! PRIOR_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null)"; then
+      seed_note="gh could not list releases (auth or network)"
+    elif [[ -z "$PRIOR_TAG" || "$PRIOR_TAG" == "null" ]]; then
+      seed_note="no published release to seed from"
+    elif ! gh release download "$PRIOR_TAG" --pattern release-manifest.json --dir "$STORE" >/dev/null 2>&1 \
+      || [[ ! -f "$MANIFEST_FILE" ]]; then
+      seed_note="$PRIOR_TAG carries no release-manifest.json"
+    fi
+
+    if [[ -z "$seed_note" ]]; then
       gray "Seeded the helper manifest from $PRIOR_TAG (unchanged helpers carry forward)."
     else
-      # Say WHY the seed did not happen. Silently falling through means a
-      # misconfigured gh looks identical to "there is no prior release", in a
-      # script whose whole job is operator-facing clarity.
-      if ! command -v gh >/dev/null 2>&1; then
-        gray "No gh on PATH — starting a fresh helper manifest."
-      elif [[ -z "${PRIOR_TAG:-}" ]]; then
-        gray "No prior release to seed from — starting a fresh helper manifest."
-      else
-        gray "$PRIOR_TAG carries no release-manifest.json — starting a fresh helper manifest."
-      fi
+      gray "Starting a fresh helper manifest — $seed_note."
       scripts/release-manifest.sh new --cli-version "$CLI_VERSION_MANIFEST" --cli-tree "$TREE" \
         > "$MANIFEST_FILE"
     fi

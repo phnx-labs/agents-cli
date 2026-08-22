@@ -129,7 +129,11 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   return { caller, fakebin, store: path.join(root, 'store'), headCommit };
 }
 
-function runProduce(fx: ReturnType<typeof buildFixture>, extraArgs: string[] = []) {
+function runProduce(
+  fx: ReturnType<typeof buildFixture>,
+  extraArgs: string[] = [],
+  envOverride: NodeJS.ProcessEnv = {},
+) {
   return spawnSync(
     'bash',
     [
@@ -141,8 +145,24 @@ function runProduce(fx: ReturnType<typeof buildFixture>, extraArgs: string[] = [
       fx.store,
       ...extraArgs,
     ],
-    { encoding: 'utf-8', env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}` } },
+    {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}`, ...envOverride },
+    },
   );
+}
+
+/** PATH with every directory that actually contains a `gh` removed. */
+function pathWithoutGh(fakebin: string): string {
+  const dirs = (process.env.PATH ?? '').split(path.delimiter).filter((dir) => {
+    try {
+      fs.accessSync(path.join(dir, 'gh'), fs.constants.X_OK);
+      return false;
+    } catch {
+      return true;
+    }
+  });
+  return [fakebin, ...dirs].join(path.delimiter);
 }
 
 describe('release-attestation-produce.sh', () => {
@@ -559,6 +579,62 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
    * if the prior release's computer-mac digest does not match this tree, the
    * producer must still fail closed.
    */
+  /**
+   * The seed's diagnostic must name the REAL cause. A single `&&` chain made a
+   * gh that fails on auth read as "no prior release" — hiding the very
+   * misconfiguration worth surfacing — and an empty release list print the
+   * literal string `null`, because `jq -r '.[0].tagName'` emits "null" for an
+   * empty array. Each branch is asserted against the condition that triggers it.
+   */
+  it.each([
+    {
+      cause: 'gh missing',
+      gh: null,
+      expected: 'no gh on PATH',
+      notExpected: 'no published release',
+    },
+    {
+      cause: 'gh cannot list (auth/network)',
+      gh: '#!/usr/bin/env bash\nexit 1\n',
+      expected: 'gh could not list releases',
+      notExpected: 'no published release',
+    },
+    {
+      cause: 'repo has zero releases',
+      gh: '#!/usr/bin/env bash\n[[ "$1" == release && "$2" == list ]] && { echo null; exit 0; }\nexit 1\n',
+      expected: 'no published release to seed from',
+      notExpected: 'null carries no',
+    },
+    {
+      cause: 'release carries no manifest asset',
+      gh: '#!/usr/bin/env bash\n[[ "$1" == release && "$2" == list ]] && { echo v9.9.8; exit 0; }\n[[ "$1" == release && "$2" == download ]] && exit 0\nexit 1\n',
+      expected: 'v9.9.8 carries no release-manifest.json',
+      notExpected: 'no published release',
+    },
+  ])('names the real reason a seed did not happen: $cause', ({ gh, expected, notExpected }) => {
+    const root = tmp('attest-produce-seed-why-');
+    const fx = buildManifestFixture(root);
+    const ghPath = path.join(fx.fakebin, 'gh');
+    // A non-executable shim does NOT shadow gh — `command -v` skips it and finds
+    // the real binary further down PATH (measured). Drop those dirs instead.
+    const envOverride = gh === null ? { PATH: pathWithoutGh(fx.fakebin) } : {};
+    if (gh !== null) {
+      fs.writeFileSync(ghPath, gh);
+      fs.chmodSync(ghPath, 0o755);
+    }
+
+    const output = (() => {
+      const r = runProduce(fx, [], envOverride);
+      return r.stdout + r.stderr;
+    })();
+
+    expect(output).toContain(expected);
+    expect(output).not.toContain(notExpected);
+    // Whatever the cause, it still falls back rather than dying here — the
+    // computer-mac gate below is what fails closed.
+    expect(output).toContain('Starting a fresh helper manifest');
+  });
+
   it('still fails closed when the seeded computer-mac record does not match this tree', () => {
     const root = tmp('attest-produce-manifest-seed-drift-');
     const fx = buildManifestFixture(root);
