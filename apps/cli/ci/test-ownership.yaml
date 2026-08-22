@@ -133,10 +133,17 @@ groups:
   # (78 tests / 174s of vitest) inside a 213s impact run. Under the flat 85s
   # default no runner.ts change that retargets commands/routines.ts can merge.
   # Raise this only against a measured run, and lower it when the suite is split.
+  # RUSH-2819: lib/daemon/daemon.test.ts is split into daemon.*.test.ts slices
+  # (covered by the daemon/** glob) so vitest parallelizes them. The commands/
+  # entries fix the budget asymmetry for the daemon command surface: its test
+  # file self-selects on any edit and carries two tests measured 10-13s each
+  # under load (RUSH-2839), so it inherits this budget instead of the flat 85s.
   - id: daemon
     when:
       - apps/cli/src/lib/daemon/**
       - apps/cli/src/lib/daemon-ticks.ts
+      - apps/cli/src/commands/daemon.ts
+      - apps/cli/src/commands/daemon.test.ts
     checks: [typecheck]
     budget_sec: 240
 
@@ -145,9 +152,22 @@ groups:
   # importers (PR #2837, run 32434389380: 28 files / 715 tests, all passed, inside
   # a 153s impact run). Under the flat 85s default no scheduling change can merge.
   # Raise this only against a measured run, and lower it when the suite is split.
+  # RUSH-2819: commands/routines.test.ts (2,249 lines, 78 tests, 174s in the
+  # macOS release matrix of run 32439609875) is split into routines.*.test.ts
+  # slices sharing routines.test-fixture.ts. The commands/ entries key the
+  # routines command surface and its slices to this budget: pre-split, any
+  # edit to commands/routines.ts selected that one 174s file and could never
+  # pass the flat 85s.
   - id: scheduling
     when:
       - apps/cli/src/lib/scheduling/**
+      - apps/cli/src/commands/routines.ts
+      - apps/cli/src/commands/routines.test.ts
+      - apps/cli/src/commands/routines.*.test.ts
+      - apps/cli/src/commands/routines.test-fixture.ts
+    tests:
+      - apps/cli/src/commands/routines.add.test.ts
+      - apps/cli/src/commands/routines.list.test.ts
     checks: [typecheck]
     budget_sec: 180
 
