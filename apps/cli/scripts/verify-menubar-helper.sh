@@ -52,6 +52,22 @@ if command -v xcrun >/dev/null 2>&1; then
     echo "  agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
     exit 1
   fi
+else
+  # No xcrun (a Linux producer, RUSH-3026). `stapler staple` writes the ticket
+  # as a plain file at Contents/CodeResources, so its ABSENCE is provable
+  # anywhere -- and exactly what let 1.22.44 ship an un-stapled helper that
+  # Gatekeeper rejected on every Mac ("not notarized/valid; skipping launch"),
+  # killing the menu bar. Presence is weaker than `stapler validate` (it cannot
+  # prove the ticket matches this binary), but it turns the observed failure --
+  # a dev bundle with no ticket at all -- into a hard pack error instead of a
+  # shipped regression.
+  if [ ! -f "$APP/Contents/CodeResources" ]; then
+    echo "menubar helper has NO stapled notarization ticket (Contents/CodeResources missing): $APP" >&2
+    echo "This is what shipped broken in 1.22.44 -- Gatekeeper rejects the bundle on every Mac." >&2
+    echo "Seed a notarized bundle (e.g. from the last good published tarball's dist/lib/menubar/)," >&2
+    echo "or rebuild on a Mac: agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
+    exit 1
+  fi
 fi
 
 echo "menubar helper present, signed, and notarized: $APP"
