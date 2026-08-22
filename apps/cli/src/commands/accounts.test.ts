@@ -4,14 +4,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
 import { Command } from 'commander';
-import { classifyAttachTarget, dormantAccountsForHarness, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount } from './accounts.js';
+import { classifyAttachTarget, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount } from './accounts.js';
 import { addAccount, addNativeAccount } from '../lib/account-registry.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
 import { secretsKeychainItem, setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
 import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
 import { keychainRef, writeBundleWithItems } from '../lib/secrets/bundles.js';
-import { entitlementCachePath } from '../lib/entitlement.js';
 
 class MemoryKeychain implements KeychainBackend {
   values = new Map<string, string>();
@@ -156,135 +155,3 @@ describe('accounts switch + native naming honesty-gate', () => {
   });
 });
 
-describe('accounts plan-tier cap (RUSH-2424)', () => {
-  let secretsRoot: string;
-  let previousMetaIndex: string | undefined;
-  let rushUserYaml: string;
-
-  /** Real read path entitlement.ts itself uses — no monkey-patching, just the on-disk fixture. */
-  function writeTierFixture(tierName: string, isPaid: boolean): void {
-    fs.mkdirSync(path.dirname(rushUserYaml), { recursive: true });
-    fs.writeFileSync(rushUserYaml, yaml.stringify({ session: { access_token: 'test-token' } }));
-    const cachePath = entitlementCachePath();
-    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
-    fs.writeFileSync(cachePath, JSON.stringify({ version: 1, tierName, isPaid, fetchedAt: Date.now() }));
-  }
-
-  beforeEach(() => {
-    secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-cap-'));
-    previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
-    _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 'accounts-cap-test' });
-    setKeychainBackendForTest(new MemoryKeychain());
-    rushUserYaml = path.join(os.homedir(), '.rush', 'user.yaml');
-    // Native accounts/defaults live in central agents.yaml (sandbox HOME, shared
-    // across tests in this fork) — start each test from a clean slate.
-    updateMeta(meta => ({ ...meta, accounts: { native: {}, defaults: {}, bindings: {} } }));
-    // `accounts add --from-secrets x:y` needs a real bundle to import from —
-    // a setup-token shaped value so `anthropic`'s validator accepts it.
-    writeBundleWithItems(
-      { name: 'x', policy: 'never', vars: { y: keychainRef('y') } },
-      new Map([[secretsKeychainItem('x', 'y'), 'sk-ant-oat01-test-secret']]),
-    );
-  });
-
-  afterEach(() => {
-    setKeychainBackendForTest(null);
-    _resetFileStoreForTest();
-    if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
-    else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
-    vi.restoreAllMocks();
-    fs.rmSync(secretsRoot, { recursive: true, force: true });
-    fs.rmSync(path.dirname(rushUserYaml), { recursive: true, force: true }); // ~/.rush inside the sandbox HOME
-    fs.rmSync(entitlementCachePath(), { force: true });
-  });
-
-  async function runAccounts(args: string[]): Promise<string> {
-    const program = new Command();
-    program.exitOverride();
-    registerAccountsCommand(program);
-    const chunks: string[] = [];
-    const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
-      chunks.push(a.map(String).join(' '));
-    });
-    try {
-      await program.parseAsync(['node', 'agents', 'accounts', ...args]);
-    } finally {
-      log.mockRestore();
-    }
-    return chunks.join('\n');
-  }
-
-  it('free plan: refuses a 4th claude-capable account with the exact cap message and a non-zero exit', async () => {
-    addNativeAccount('claude1', 'claude', 'id-1', undefined, 'version');
-    addNativeAccount('claude2', 'claude', 'id-2', undefined, 'version');
-    addNativeAccount('claude3', 'claude', 'id-3', undefined, 'version');
-    await expect(runAccounts(['add', 'anthro4', '--provider', 'anthropic', '--auth', 'api-key', '--from-secrets', 'x:y']))
-      .rejects.toThrow('free plan is capped at 3 claude accounts (3/3). agents upgrade — up to 10 per harness.');
-  });
-
-  it('free plan: a successful 3rd add prints a one-line non-blocking notice at exactly 3/3', async () => {
-    addNativeAccount('claude1', 'claude', 'id-1', undefined, 'version');
-    addNativeAccount('claude2', 'claude', 'id-2', undefined, 'version');
-    // The 3rd claude-capable account — the add itself must succeed, only the notice fires.
-    const out = await runAccounts(['add', 'anthro3', '--provider', 'anthropic', '--auth', 'api-key', '--from-secrets', 'x:y']);
-    expect(out).toContain("Added anthropic api-key account 'anthro3'.");
-    expect(out).toContain('3/3 claude accounts on the free plan. agents upgrade — up to 10 per harness.');
-  });
-
-  it('admin tier caps at 10, not 3 — a 4th claude-capable account is accepted with no free-plan notice', async () => {
-    writeTierFixture('admin', true);
-    addNativeAccount('claude1', 'claude', 'id-1', undefined, 'version');
-    addNativeAccount('claude2', 'claude', 'id-2', undefined, 'version');
-    addNativeAccount('claude3', 'claude', 'id-3', undefined, 'version');
-    const out = await runAccounts(['add', 'anthro4', '--provider', 'anthropic', '--auth', 'api-key', '--from-secrets', 'x:y']);
-    expect(out).toContain("Added anthropic api-key account 'anthro4'.");
-    expect(out).not.toContain('free plan');
-  });
-
-  it('downgrade never deletes credentials: over-cap accounts fall out of listSwitchableAccounts and are reported dormant', async () => {
-    // Simulate a downgrade from a paid plan that had 5 registered claude accounts.
-    addNativeAccount('claude-a', 'claude', 'id-a', undefined, 'version');
-    addNativeAccount('claude-b', 'claude', 'id-b', undefined, 'version');
-    addNativeAccount('claude-c', 'claude', 'id-c', undefined, 'version');
-    addNativeAccount('claude-d', 'claude', 'id-d', undefined, 'version');
-    addNativeAccount('claude-e', 'claude', 'id-e', undefined, 'version');
-
-    const active = await listSwitchableAccounts('claude');
-    const dormant = await dormantAccountsForHarness('claude');
-    expect(active).toHaveLength(3);
-    expect(dormant).toHaveLength(2);
-    // Deterministic, name-sorted slice — the first 3 alphabetically stay active.
-    expect(active.map(a => a.name)).toEqual(['claude-a', 'claude-b', 'claude-c']);
-    expect(dormant.map(a => a.name)).toEqual(['claude-d', 'claude-e']);
-
-    // Never deleted: still resolvable via findUnifiedAccount, just excluded from switch.
-    const switchJson = await runAccounts(['switch', 'claude', '--json']);
-    const parsed = JSON.parse(switchJson);
-    expect(parsed.accounts.map((a: { name: string }) => a.name)).not.toContain('claude-d');
-    expect(readMeta().accounts?.native).toBeTruthy();
-    const nativeIds = Object.values(readMeta().accounts?.native ?? {}).map(a => a.name);
-    expect(nativeIds).toContain('claude-d'); // credential metadata never deleted by the cap
-  });
-
-  it('dormant status is surfaced for a downgraded PROVIDER account too, not just native (regression, PR #2822 review round 2)', async () => {
-    addNativeAccount('claude-a', 'claude', 'id-a', undefined, 'version');
-    addNativeAccount('claude-b', 'claude', 'id-b', undefined, 'version');
-    addNativeAccount('claude-c', 'claude', 'id-c', undefined, 'version');
-    addAccount('zzz-provider', 'anthropic', 'api-key', 'sk-test-secret', getUserAgentsDir());
-
-    const dormant = await dormantAccountsForHarness('claude');
-    expect(dormant.map(a => a.name)).toEqual(['zzz-provider']);
-
-    const listedJson = await runAccounts(['--json']);
-    const entry = (JSON.parse(listedJson) as Array<{ name: string; dormant?: boolean }>)
-      .find(a => a.name === 'zzz-provider');
-    expect(entry?.dormant).toBe(true);
-
-    const viewJson = await runAccounts(['view', 'zzz-provider', '--json']);
-    expect(JSON.parse(viewJson).dormant).toBe(true);
-
-    const listedText = await runAccounts([]);
-    expect(listedText).toMatch(/zzz-provider.*dormant \(upgrade to reactivate\)/);
-  });
-});

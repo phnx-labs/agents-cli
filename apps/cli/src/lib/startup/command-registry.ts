@@ -1,5 +1,5 @@
 const LOADED_COMMAND_NAMES = [
-  'accounts', 'auth', 'org', 'view', 'inspect', 'feedback', 'commands', 'hooks', 'skills', 'rules', 'memory',
+  'accounts', 'view', 'inspect', 'feedback', 'commands', 'hooks', 'skills', 'rules', 'memory',
   'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use', 'list',
   'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install',
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
@@ -53,10 +53,13 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * read-only local web companion + `--control` anchor) was removed with the
  * unshipped iOS Fleet Cockpit it existed for (RUSH-3001). `apply` nested under
  * `agents fleet apply` / `agents devices apply`. `beta` nested under
- * `agents setup beta` (RUSH-2981).
+ * `agents setup beta` (RUSH-2981). `auth` and `org` (the Prix-coupled account
+ * layer) were removed pending the Phoenix-backed replacement (RUSH-2581).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
+  'auth',
+  'org',
   'serve',
   'login',
   'logout',

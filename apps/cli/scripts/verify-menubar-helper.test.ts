@@ -14,7 +14,9 @@
  *
  * Runs the REAL script against real fixture bundles; xcrun/codesign absence
  * is the genuine environment on the Linux boxes that produce attestations
- * (no mocking).
+ * (no mocking) — including on a macOS test host, via a constructed PATH that
+ * genuinely excludes codesign/xcrun (see buildLinuxLikePath below), so these
+ * cases are exercised everywhere rather than skipped on macOS.
  */
 import { describe, it, expect } from 'vitest';
 import { spawnSync } from 'node:child_process';

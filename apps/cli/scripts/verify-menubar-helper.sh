@@ -79,15 +79,6 @@ esac
 # Developer-ID build; the ticket is a file inside the bundle, so it survives npm.
 # Refuse to pack an un-notarized helper — Gatekeeper rejects it as "damaged" on
 # macOS 26+, and the install path has no re-sign fallback to paper over it.
-#
-# RUSH-3031: 1.22.44 was packed on a Linux attestation-producer box where
-# `command -v xcrun` is false, so this whole check used to silently no-op —
-# the un-stapled dev bundle it let through shipped and Gatekeeper rejected it
-# on every Mac ("AGI Menu is not notarized/valid on this machine; skipping
-# launch"), killing the menu bar fleet-wide until a manual rollback to
-# 1.22.43. `stapler staple` writes the ticket as a plain file
-# (Contents/CodeResources), so its presence is provable on ANY OS with no
-# macOS toolchain — there is no platform this gate may skip on.
 if command -v xcrun >/dev/null 2>&1; then
   if ! xcrun stapler validate "$APP" >/dev/null 2>&1; then
     echo "menubar helper is not notarized/stapled: $APP" >&2
@@ -96,14 +87,17 @@ if command -v xcrun >/dev/null 2>&1; then
     exit 1
   fi
 else
-  # No xcrun (a Linux producer, RUSH-3031/RUSH-3026). Presence of the stapled
-  # ticket file is weaker than `stapler validate` (it cannot prove the ticket
-  # matches THIS binary), but it turns the observed failure — a dev bundle
-  # with no ticket at all — into a hard pack error instead of a shipped
-  # regression. This is the exact shape of the 1.22.44 incident.
+  # No xcrun (a Linux producer, RUSH-3026). `stapler staple` writes the ticket
+  # as a plain file at Contents/CodeResources, so its ABSENCE is provable
+  # anywhere -- and exactly what let 1.22.44 ship an un-stapled helper that
+  # Gatekeeper rejected on every Mac ("not notarized/valid; skipping launch"),
+  # killing the menu bar. Presence is weaker than `stapler validate` (it cannot
+  # prove the ticket matches this binary), but it turns the observed failure --
+  # a dev bundle with no ticket at all -- into a hard pack error instead of a
+  # shipped regression.
   if [ ! -f "$APP/Contents/CodeResources" ]; then
     echo "menubar helper has NO stapled notarization ticket (Contents/CodeResources missing): $APP" >&2
-    echo "This is what shipped broken in 1.22.44 — Gatekeeper rejects the bundle on every Mac." >&2
+    echo "This is what shipped broken in 1.22.44 -- Gatekeeper rejects the bundle on every Mac." >&2
     echo "Seed a notarized bundle (e.g. from the last good published tarball's dist/lib/menubar/)," >&2
     echo "or rebuild on a Mac: agents secrets exec apple.com -- menubar/scripts/build.sh release" >&2
     exit 1
