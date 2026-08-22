@@ -402,13 +402,25 @@ const FRESH_USAGE_VERDICT_MAX_AGE_MS = 20 * 60_000;
 /**
  * A `live` verdict derived from the account's usage cache instead of a second
  * network request (RUSH-3036). The auth probe and the usage fetch hit the SAME
- * rate-limited endpoint with the SAME shared setup-token, so a fresh successful
- * usage snapshot already proves everything the probe would: paying a second
- * request per account per box was half the fleet's endpoint load. Returns null
- * when there is no fresh evidence — the caller then live-probes as before.
+ * rate-limited endpoint with the SAME fleet-shared setup-token, so a fresh
+ * successful usage snapshot already proves everything the probe would: paying a
+ * second request per account per box was half the fleet's endpoint load.
+ *
+ * Two guards keep the evidence honest (both review findings on the first cut):
+ * the caller must assert this box holds a LOCAL credential for the account
+ * (`signedIn`) — a fleet-imported snapshot proves the shared token works, not
+ * that THIS box can authenticate, so an unsigned home never derives `live`;
+ * and a `forceLive` caller (`agents devices ping --strict`) skips derivation
+ * entirely, because its contract is a real request that can surface `revoked`
+ * within seconds, not minutes. Returns null when there is no admissible fresh
+ * evidence — the caller then live-probes as before.
  */
-function verdictFromFreshUsage(usageKey: string | null | undefined, now: number): AuthHealth | null {
-  if (!usageKey) return null;
+function verdictFromFreshUsage(
+  usageKey: string | null | undefined,
+  signedIn: boolean,
+  now: number,
+): AuthHealth | null {
+  if (!usageKey || !signedIn) return null;
   const snapshot = readClaudeUsageCache(usageKey);
   const capturedAt = snapshot?.capturedAt?.getTime();
   if (!capturedAt || now - capturedAt >= FRESH_USAGE_VERDICT_MAX_AGE_MS) return null;
@@ -427,16 +439,28 @@ function verdictFromFreshUsage(usageKey: string | null | undefined, now: number)
 export async function probeAuthHealth(
   agent: AgentId,
   home: string | undefined,
-  opts?: { cliVersion?: string | null; info?: AccountInfo | null },
+  opts?: {
+    cliVersion?: string | null;
+    info?: AccountInfo | null;
+    /**
+     * Skip the derived-from-usage shortcut and fire a real network probe
+     * (RUSH-3036). Set by `agents devices ping [--strict]`, whose contract is
+     * a genuinely live request that surfaces `revoked` immediately.
+     */
+    forceLive?: boolean;
+  },
 ): Promise<AuthHealth> {
   const checkedAt = Date.now();
   if (LIVE_PROBE_AGENTS.has(agent)) {
-    const derived = verdictFromFreshUsage(opts?.info?.usageKey, checkedAt);
-    if (derived) return derived;
+    const usageScope = opts?.info?.usageKey ?? null;
+    if (opts?.forceLive !== true) {
+      const derived = verdictFromFreshUsage(usageScope, opts?.info?.signedIn === true, checkedAt);
+      if (derived) return derived;
+    }
     let probe: ProviderProbe;
-    if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion);
-    else if (agent === 'kimi') probe = await probeKimiStatus(home);
-    else probe = await probeDroidStatus(home);
+    if (agent === 'claude') probe = await probeClaudeStatus(home, opts?.cliVersion, usageScope);
+    else if (agent === 'kimi') probe = await probeKimiStatus(home, usageScope);
+    else probe = await probeDroidStatus(home, usageScope);
     return { verdict: verdictFromProbe(probe), checkedAt, detail: probeDetail(probe) };
   }
   const info = opts?.info !== undefined ? opts.info : await getAccountInfo(agent, home).catch(() => null);
@@ -522,6 +546,8 @@ export function groupFleetAuthInstalls<T extends FleetAuthInstall>(
 export async function probeLocalFleetAuth(opts?: {
   cliVersion?: string | null;
   agents?: readonly AgentId[];
+  /** Fire real network probes even when fresh usage evidence exists (RUSH-3036) — the `devices ping [--strict]` contract. */
+  forceLive?: boolean;
 }): Promise<AuthProbeRow[]> {
   const agentIds = opts?.agents ?? ALL_AGENT_IDS;
 
@@ -553,7 +579,7 @@ export async function probeLocalFleetAuth(opts?: {
   const perGroup = await Promise.all(
     groupFleetAuthInstalls(installs, (inst) => LIVE_PROBE_AGENTS.has(inst.agent)).map(async (group): Promise<AuthProbeRow[]> => {
       const rep = group.probe;
-      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info });
+      const health = await probeAuthHealth(rep.agent, rep.home, { cliVersion: opts?.cliVersion, info: rep.info, forceLive: opts?.forceLive });
       health.account = authAccountLabel(rep.info);
       if (health.verdict === 'unconfigured') return [];
       return group.members.map((inst) => ({

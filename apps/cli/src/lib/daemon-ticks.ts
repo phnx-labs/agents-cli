@@ -110,7 +110,7 @@ export async function refreshLocalFleetAuthState(
       // Fleet status publishes every tick regardless — it does not ride that endpoint.
       const cached = readFleetAuthRows(self);
       const reuse = shouldReuseCachedAuthProbe(force, cached, requestedAt);
-      const authRows = reuse ? cached : await probeLocalFleetAuth({ cliVersion: getCliVersion() });
+      const authRows = reuse ? cached : await probeLocalFleetAuth({ cliVersion: getCliVersion(), forceLive: force });
       if (!reuse) writeFleetAuthRows(self, authRows);
       const row = await publishLocalFleetStatus(self);
       return { row, authRows };

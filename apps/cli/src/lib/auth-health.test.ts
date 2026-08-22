@@ -388,3 +388,51 @@ describe('probeAuthHealth derives live from a fresh usage fetch (RUSH-3036)', ()
     }
   });
 });
+
+describe('derivation guards (RUSH-3036 review findings)', () => {
+  async function withFreshSnapshot<T>(run: (usageKey: string) => Promise<T>): Promise<T> {
+    const os = await import('node:os');
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const usage = await import('./accounting/usage.js');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-derive-guard-'));
+    const prev = usage.setClaudeUsageCachePathForTest(path.join(dir, 'usage.json'));
+    try {
+      const usageKey = 'claude:org=guard-test-9999';
+      usage.writeClaudeUsageCache(usageKey, {
+        source: 'live',
+        sourceLabel: 'live account data',
+        capturedAt: new Date(Date.now() - 60_000), // 1 minute old — maximally fresh
+        windows: [{ key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 10, resetsAt: null, windowMinutes: 10080 }],
+      });
+      return await run(usageKey);
+    } finally {
+      usage.setClaudeUsageCachePathForTest(prev);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('forceLive skips derivation — devices ping --strict always fires a real probe', async () => {
+    await withFreshSnapshot(async (usageKey) => {
+      const { probeAuthHealth } = await import('./auth-health.js');
+      const health = await probeAuthHealth('claude', undefined, {
+        info: { usageKey, signedIn: true } as never,
+        forceLive: true,
+      });
+      // Fresh evidence exists, but forceLive must ignore it. No credentials in
+      // this environment, so the real probe path cannot return 'live' — a
+      // 'live' here would mean the derivation leaked through the force path.
+      expect(health.verdict).not.toBe('live');
+    });
+  });
+
+  it('a fleet-imported snapshot on an unsigned home is NOT proof this box can authenticate', async () => {
+    await withFreshSnapshot(async (usageKey) => {
+      const { probeAuthHealth } = await import('./auth-health.js');
+      const health = await probeAuthHealth('claude', undefined, {
+        info: { usageKey, signedIn: false } as never, // no local credential
+      });
+      expect(health.verdict).not.toBe('live');
+    });
+  });
+});

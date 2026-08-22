@@ -1372,7 +1372,7 @@ export interface ProviderProbe {
 }
 
 /** Probe Claude's OAuth token against the usage endpoint. Never refreshes — reports `expired` for a near-expiry token; see the comment below (RUSH-1822). */
-export async function probeClaudeStatus(home?: string, cliVersion?: string | null): Promise<ProviderProbe> {
+export async function probeClaudeStatus(home?: string, cliVersion?: string | null, usageScope?: string | null): Promise<ProviderProbe> {
   // accessTokenCache: the daemon warms this probe every ~3 min per account, so it
   // reads ONLY the file-based setup-token and never the interactive login —
   // transmitting that ACL-bound token to the usage API from a background loop is
@@ -1396,7 +1396,7 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
   // window is open, report the throttle from the recorded state instead of
   // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence
   // probe is what created the loop it now respects.
-  if (usageRateLimitedUntil('claude')) return { status: 429, token: 'present' };
+  if (usageRateLimitedUntil('claude', Date.now(), usageScope)) return { status: 429, token: 'present' };
   try {
     const response = await fetch(CLAUDE_USAGE_URL, {
       method: 'GET',
@@ -1409,7 +1409,7 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
       signal: AbortSignal.timeout(8000),
     });
     if (response.status === 429) {
-      noteUsageRateLimited('claude', response.headers.get('retry-after'));
+      noteUsageRateLimited('claude', response.headers.get('retry-after'), { account: usageScope });
     }
     // Setup-token is user:inference only; usage needs user:profile → 403.
     // That is NOT a revocation — the account still runs (RUSH-2392).
@@ -1436,7 +1436,7 @@ export async function probeClaudeStatus(home?: string, cliVersion?: string | nul
 }
 
 /** Probe Kimi's OAuth token against the /usages endpoint. Never refreshes (single-use rotation — see getKimiUsageInfo). */
-export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
+export async function probeKimiStatus(home?: string, usageScope?: string | null): Promise<ProviderProbe> {
   const credPath = resolveKimiCredentialPath(home);
   if (!credPath) return { status: null, token: 'missing' };
   let accessToken: string | undefined;
@@ -1456,7 +1456,7 @@ export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
   // is what created the loop it now respects. It sits AFTER the local
   // missing/expired checks — as in probeClaudeStatus and probeDroidStatus — so
   // a genuinely broken credential is never misreported as merely throttled.
-  if (usageRateLimitedUntil('kimi')) return { status: 429, token: 'present' };
+  if (usageRateLimitedUntil('kimi', Date.now(), usageScope)) return { status: 429, token: 'present' };
   try {
     const response = await fetch(KIMI_USAGES_URL, {
       method: 'GET',
@@ -1464,7 +1464,7 @@ export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
       signal: AbortSignal.timeout(8000),
     });
     if (response.status === 429) {
-      noteUsageRateLimited('kimi', response.headers.get('retry-after'));
+      noteUsageRateLimited('kimi', response.headers.get('retry-after'), { account: usageScope });
     }
     return { status: response.status, token: 'present' };
   } catch (err) {
@@ -1473,7 +1473,7 @@ export async function probeKimiStatus(home?: string): Promise<ProviderProbe> {
 }
 
 /** Probe Droid's WorkOS token against the billing-limits endpoint. Never refreshes (single-use rotation — see getDroidUsageInfo). */
-export async function probeDroidStatus(home?: string): Promise<ProviderProbe> {
+export async function probeDroidStatus(home?: string, usageScope?: string | null): Promise<ProviderProbe> {
   const cred = decryptDroidAuthPayload(home || os.homedir());
   const accessToken = cred?.access_token;
   if (typeof accessToken !== 'string' || !accessToken) return { status: null, token: 'missing' };
@@ -1483,7 +1483,7 @@ export async function probeDroidStatus(home?: string): Promise<ProviderProbe> {
   // window is open, report the throttle from the recorded state instead of
   // firing again and re-arming it (usage-backoff.ts). This 3-min-cadence
   // probe is what created the loop it now respects.
-  if (usageRateLimitedUntil('droid')) return { status: 429, token: 'present' };
+  if (usageRateLimitedUntil('droid', Date.now(), usageScope)) return { status: 429, token: 'present' };
   try {
     const response = await fetch(DROID_USAGE_URL, {
       method: 'GET',
@@ -1491,7 +1491,7 @@ export async function probeDroidStatus(home?: string): Promise<ProviderProbe> {
       signal: AbortSignal.timeout(8000),
     });
     if (response.status === 429) {
-      noteUsageRateLimited('droid', response.headers.get('retry-after'));
+      noteUsageRateLimited('droid', response.headers.get('retry-after'), { account: usageScope });
     }
     return { status: response.status, token: 'present' };
   } catch (err) {
