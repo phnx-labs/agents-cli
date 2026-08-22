@@ -993,17 +993,17 @@ export async function runShareUpdate(opts: {
   if (!cfg) {
     throw new Error("Not configured. Run 'agents artifacts setup' (to provision) or 'agents artifacts share join' first.");
   }
-  if (!cfg.accountId && !opts.account) {
-    throw new Error(
-      "Share endpoint has no Cloudflare account id — `agents artifacts share update` cannot call the API. Pass --account <id>, or re-run 'agents artifacts share join'.",
-    );
-  }
 
   const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle ?? DEFAULT_CF_BUNDLE, {
     apiToken: opts.token,
     accountId: opts.account,
   });
   const accountId = opts.account || acctFromBundle || cfg.accountId;
+  if (!accountId) {
+    throw new Error(
+      "Share endpoint has no Cloudflare account id — `agents artifacts share update` cannot call the API. Pass --account <id>, or re-run 'agents artifacts share join'.",
+    );
+  }
   const writeToken = readWriteToken();
   const script = renderWorkerScript();
   const provisionOpts = { ...(opts.request ? { request: opts.request } : {}), force: opts.force };
@@ -1020,7 +1020,7 @@ export async function runShareUpdate(opts: {
   );
 
   if (!result.skipped) {
-    writeShareConfig({ ...cfg, templateHash: result.templateHash });
+    writeShareConfig({ ...cfg, accountId, templateHash: result.templateHash });
   }
 
   return { updated: !result.skipped, templateHash: result.templateHash, baseUrl: cfg.baseUrl, workerName: cfg.workerName };

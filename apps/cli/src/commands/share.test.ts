@@ -255,6 +255,30 @@ describe('runShareUpdate', () => {
     await expect(share.runShareUpdate({})).rejects.toThrow(/Run 'agents artifacts setup'/);
   });
 
+  it('uses --account when share.accountId is empty rather than treating the endpoint as missing (RUSH-2837)', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: '',
+      workerName: 'worker-existing',
+      bucketName: 'bucket-existing',
+    });
+    config.storeWriteToken('the-original-write-token');
+    const seen: CloudflareRequest[] = [];
+    await share.runShareUpdate({
+      token: 'cf-token',
+      account: 'acct_from_flag',
+      request: async (req) => {
+        seen.push(req);
+        return {};
+      },
+    });
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_from_flag/workers/scripts/worker-existing',
+      '/accounts/acct_from_flag/workers/scripts/worker-existing/secrets',
+    ]);
+  });
+
   it('reuses the existing account/worker/bucket/token from config — never re-provisions', async () => {
     const { share, config } = await freshShareModules();
     config.writeShareConfig({
