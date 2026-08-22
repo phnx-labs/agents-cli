@@ -21,6 +21,14 @@
 #
 #   agents secrets exec apple.com -- apps/cli/scripts/publish-computer-helper-mac.sh [version]
 #
+# That invocation injects the NOTARY creds but does not unlock the Developer ID
+# SIGNING keychain, so on a headless run codesign used to die with
+# errSecInternalComponent (RUSH-2970 trap 3) — the operator had to know to source
+# headless-sign-context.sh first, which nothing said. This script now sources it
+# itself, so the documented invocation above is sufficient. On a Mac that is not
+# the release home base the context is a no-op (it is guarded on its pass files),
+# and an interactive run signs with the usual Touch ID prompt as before.
+#
 # `version` defaults to apps/cli/package.json's version; the asset is uploaded to
 # the matching `v<version>` release (created if it does not exist yet).
 set -euo pipefail
@@ -42,6 +50,11 @@ TAG="v$VERSION"
 command -v gh >/dev/null 2>&1 || die "gh CLI not found"
 [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] \
   || die "notary creds missing. Run under: agents secrets exec apple.com -- $0 $VERSION"
+
+# Unlock the Developer ID signing keychain and authorize codesign to use the key
+# non-interactively. Idempotent, and a no-op on a Mac without the pass files.
+# shellcheck source=scripts/headless-sign-context.sh
+. "$CLI_DIR/scripts/headless-sign-context.sh"
 
 log "Building signed + notarized helper $TAG..."
 ( cd "$HELPER_DIR" && HELPER_VERSION="$VERSION" bash scripts/build.sh release )
