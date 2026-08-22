@@ -36,7 +36,7 @@ import {
 } from './daemon.js';
 import { secretsKeychainItem, setKeychainToken } from '../secrets/index.js';
 import { writeBundle } from '../secrets/bundles.js';
-import { installKeychainHermeticity } from './daemon.test-fixture.js';
+import { DIST_ENTRY, installKeychainHermeticity } from './daemon.test-fixture.js';
 
 const systemdQuote = (value: string): string =>
   `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
