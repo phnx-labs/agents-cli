@@ -294,8 +294,12 @@ describe('selectImpact policy', () => {
   });
 
   test('a group with no budget keeps the default, so the ceiling only rises where declared', () => {
+    // Uses a genuinely unbudgeted group. This previously pointed at
+    // apps/cli/src/commands/** (command-surface), which acquired a budget in
+    // RUSH-3062 — the invariant held, only the example went stale. Pick a group
+    // whose entry in test-ownership.yaml has no budget_sec today.
     const plan = selectImpact({
-      files: ['apps/cli/src/commands/run.ts'],
+      files: ['apps/ext/src/vscode/extension.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -306,7 +310,10 @@ describe('selectImpact policy', () => {
     // A change spanning a budgeted and an unbudgeted group must not be capped by
     // the unbudgeted one — the run still has to execute the union of both.
     const plan = selectImpact({
-      files: ['apps/cli/src/commands/sessions.ts', 'apps/cli/src/commands/run.ts'],
+      // sessions (240) spanning a genuinely unbudgeted group — commands/** is no
+      // longer one, so pairing two command files would compare 240 against 120
+      // rather than against the default, and stop testing the stated case.
+      files: ['apps/cli/src/commands/sessions.ts', 'apps/ext/src/vscode/extension.ts'],
       repoRoot: REPO,
       related: false,
     });

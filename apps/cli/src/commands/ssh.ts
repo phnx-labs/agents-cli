@@ -208,15 +208,34 @@ function pctCell(v: number | undefined, width: number): string {
   return chalk.red(s);
 }
 
-/** Display width of the `spec` column ("32c 128G 1.5T" fits). */
-const SPEC_WIDTH = 12;
+/** Floor for the `spec` column; the real width is measured from the rows.
+ *
+ * A fixed width cannot work here: `fmtBytes` emits an optional decimal, so a
+ * spec string runs from `8c 16G 256G` (11) to `10c 23.5G 460G` (14) depending
+ * purely on the hardware behind it. Anything narrower than the widest row
+ * pushes load/mem/disk/headroom out of alignment row-to-row AND against the
+ * header — which defeats the scannability this column exists for. */
+const SPEC_WIDTH_MIN = 12;
 
 /** The static hardware as one compact cell — `12c 64G 1T`: cores, total RAM,
  * total root disk via fmtBytes. `—` when the probe never saw the box (specs
- * ride the long-TTL static tier, so a warm cache almost always has them). */
-function specCell(stats: DeviceStats | undefined): string {
-  if (!stats?.reachable || !stats.ncpu) return chalk.gray('—'.padEnd(SPEC_WIDTH));
-  return chalk.greenBright(`${stats.ncpu}c ${fmtBytes(stats.memTotalBytes)} ${fmtBytes(stats.diskTotalBytes)}`.padEnd(SPEC_WIDTH));
+ * ride the long-TTL static tier, so a warm cache almost always has them).
+ * Unpadded; {@link renderDeviceTable} pads to the measured column width. */
+function specText(stats: DeviceStats | undefined): string {
+  if (!stats?.reachable || !stats.ncpu) return '—';
+  return `${stats.ncpu}c ${fmtBytes(stats.memTotalBytes)} ${fmtBytes(stats.diskTotalBytes)}`;
+}
+
+/** The widest spec string across the rows actually being rendered, floored at
+ * SPEC_WIDTH_MIN so a short fleet still lines up with the header. */
+function specColumnWidth(names: string[], statsMap: Map<string, DeviceStats>): number {
+  return Math.max(SPEC_WIDTH_MIN, ...names.map((n) => stringWidth(specText(statsMap.get(n)))));
+}
+
+/** Colour + pad one spec cell to the measured column width. */
+function specCell(stats: DeviceStats | undefined, width: number): string {
+  const text = specText(stats);
+  return (text === '—' ? chalk.gray : chalk.greenBright)(text.padEnd(width));
 }
 
 /** The one-line `description` config value per device (absent when unset). */
@@ -275,6 +294,7 @@ export function renderDeviceTable(
   }
 
   const deviceRoles = listConfiguredDeviceRoles(names);
+  const specWidth = specColumnWidth(names, statsMap);
   const descriptions = listDeviceDescriptions(names);
   const width = opts.width ?? terminalWidth();
   const lines: string[] = [];
@@ -283,7 +303,7 @@ export function renderDeviceTable(
     chalk.gray('device'.padEnd(16)) +
     chalk.gray('platform'.padEnd(8)) +
     ' ' +
-    chalk.gray('spec'.padEnd(SPEC_WIDTH)) +
+    chalk.gray('spec'.padEnd(specWidth)) +
     chalk.gray('load'.padStart(5)) +
     chalk.gray('mem'.padStart(6)) +
     chalk.gray('disk'.padStart(5)) +
@@ -330,7 +350,7 @@ export function renderDeviceTable(
     const interactive = name === interactiveHost ? chalk.yellow('  ★ interactive') : '';
     lines.push(
       fitDeviceRow(
-        `${marker}${label}${plat} ${specCell(stats)}${load}${mem}${disk}${freeTotal}  ${badge}${relay}${here}${interactive}`,
+        `${marker}${label}${plat} ${specCell(stats, specWidth)}${load}${mem}${disk}${freeTotal}  ${badge}${relay}${here}${interactive}`,
         role,
         desc,
         width,

@@ -399,6 +399,55 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     return { reg, names: Object.keys(reg).sort(), statsMap };
   }
 
+  /** Column position of the `load` cell — the first column AFTER spec, so any
+   * spec-width error shows up here as drift. Substring assertions cannot see
+   * this: a row can contain "22%" while sitting in the wrong column.
+   *
+   * Measures where the cell ENDS, not where its digits begin. `pctCell`
+   * right-aligns within a fixed width, so "35%" and " 1%" finish in the same
+   * column while starting one apart — keying on the digits would report drift
+   * that is not there. */
+  function loadColumn(line: string): number {
+    return line.indexOf('%');
+  }
+
+  it('every row lines its post-spec columns up with the header, whatever the specs measure', () => {
+    // A FIXED spec width cannot work: fmtBytes emits an optional decimal, so a
+    // real spec string runs from "8c 16G 256G" (11) to "10c 23.5G 460G" (14).
+    // A width narrower than the widest row shifts load/mem/disk/headroom out of
+    // alignment both row-to-row and against the header — the exact scannability
+    // this column exists for. Pin positions, not substrings.
+    // The shared fixture's specs all fit the old fixed width (`12c 64G 1T` is
+    // 10 chars), so it cannot exercise the overflow. Give one device a real
+    // decimal-RAM spec — `10c 23.5G 460G`, 14 chars — which is what an actual
+    // probe of a Mac produces and what the fixed width truncated.
+    const { reg, names, statsMap } = fleet();
+    statsMap.set('mac-mini', stats('mac-mini', {
+      ncpu: 10,
+      memTotalBytes: Math.round(23.5 * 1024 ** 3),
+      diskTotalBytes: 460 * 1024 ** 3,
+    }));
+    const all = renderDeviceTable(reg, names, 'zion', statsMap, false, 'zion', { width: 200, ignoredCount: 0 }).map(stripAnsi);
+    const rows: Record<string, string> = {};
+    for (const line of all) {
+      const m = line.match(/^\s*(?:▸\s+)?([a-z0-9-]+)\s/);
+      if (m && names.includes(m[1])) rows[m[1]] = line;
+    }
+    const header = all.find((l) => /device\s+platform\s+spec\s+load/.test(l))!;
+    // Compare ENDS on both sides: the header label and the right-aligned cell
+    // both finish in the same column when the table is correct.
+    const headerLoadEnd = header.indexOf('load') + 'load'.length - 1;
+
+    const online = Object.entries(rows).filter(([, line]) => !line.includes('offline'));
+    expect(online.length).toBeGreaterThan(1);
+
+    const positions = online.map(([, line]) => loadColumn(line));
+    // Every online row agrees with every other...
+    expect(new Set(positions).size).toBe(1);
+    // ...and lands under the header's own `load` label.
+    expect(positions[0]).toBe(headerLoadEnd);
+  });
+
   /** Render plain-text rows keyed by device name (plus a 'head'/'footer' view). */
   function render(width: number, full = false, ignoredCount = 0): { rows: Record<string, string>; all: string[] } {
     const { reg, names, statsMap } = fleet();
