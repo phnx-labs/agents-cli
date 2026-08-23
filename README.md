@@ -441,6 +441,8 @@ agents feed --flat                  # one row per agent (legacy)
 agents feed --device mac-mini         # scope the view to one or more hosts
 agents feed --local                 # skip the SSH fan-out
 agents feed --json                  # blocks stamped with their outcome key
+agents feed watch --json            # versioned agents + attention + activity NDJSON
+agents feed answer <key> --choice 0 # first answer wins; route over the recorded reply rail
 agents feed post --title "Halfway done" "CI green, watching merge"  # title + body
 ```
 

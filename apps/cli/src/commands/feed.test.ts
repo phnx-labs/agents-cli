@@ -51,6 +51,18 @@ describe('feed post help', () => {
   });
 });
 
+describe('feed watch and answer commands', () => {
+  it('registers the versioned stream and atomic answer surfaces', () => {
+    const program = new Command();
+    registerFeedCommand(program);
+    const feed = program.commands.find((command) => command.name() === 'feed');
+    const watch = feed?.commands.find((command) => command.name() === 'watch');
+    const answer = feed?.commands.find((command) => command.name() === 'answer');
+    expect(watch?.options.map((option) => option.long)).toEqual(['--json', '--local']);
+    expect(answer?.options.map((option) => option.long)).toEqual(expect.arrayContaining(['--choice', '--text', '--as', '--json']));
+  });
+});
+
 const children: ChildProcess[] = [];
 
 afterEach(() => {

@@ -46,6 +46,7 @@ Second names for the product jobs were retired rather than kept as duplicated do
 | Job | Use |
 |---|---|
 | What needs me? | `agents feed` (default filter is needs-you) |
+| Stream the operator projection | `agents feed watch --json` (`--local` for one machine) |
 | What did agents post? | `agents feed --filter updates` |
 | Who is live? | `agents sessions --active` |
 
@@ -892,6 +893,26 @@ agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
 
 ### Attention lifecycle & reconciliation (`lib/feed/attention.ts`)
 
+`agents feed watch --json` is the long-lived thin-client contract. Each NDJSON
+envelope carries `v: 1`, `streamId`, `sequence`, and `scope`. `reset` contains
+`agents` plus reconciled `attention`; incremental types are `agent.upsert`,
+`attention.upsert`, `attention.remove`, `activity.append`, `scope`, and
+`heartbeat`. Fleet coordinators subscribe to `agents feed watch --json --local`
+on peers. A disconnected scope becomes `unavailable` without removing its last
+rows; its next `reset` replaces those rows.
+
+Answer a projected item with exactly one answer source:
+
+```text
+agents feed answer <attention-key> --choice <choice-id> --json
+agents feed answer <attention-key> --text "free-form answer" --json
+```
+
+The CLI atomically records the first answer before using the recorded reply rail.
+Concurrent losers receive `already_answered` and do not inject another reply.
+High-consequence blocks require a verified operator identity via `--as` and the
+operator launch context.
+
 A block file that appears and disappears is not enough to drive a single "Needs
 you" surface: the feed's open-block ledger and the session state engine can each
 be right while the other is stale, and a cleared ask can silently resurrect from a
@@ -1651,4 +1672,3 @@ running process owns this session?" without re-parsing state.
 - [Sessions](./sessions.md) — the `sessions` subsystem in depth
 - Cloud dispatch (`agents cloud --help`)
 - Team DAGs (`agents teams --help`)
-

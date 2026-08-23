@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 68,
-  "commands": 555,
+  "commands": 557,
   "root": {
     "name": "agents",
     "path": "",
@@ -9855,6 +9855,69 @@
       ],
       "subcommands": [
         {
+          "name": "answer",
+          "path": "feed answer",
+          "aliases": [],
+          "description": "Atomically claim and deliver one answer to an open attention item",
+          "args": [
+            {
+              "name": "attention-key",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--choice <choice-id>",
+              "description": "Stable choice id from the attention item",
+              "long": "--choice",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--text <answer>",
+              "description": "Free-text answer",
+              "long": "--text",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--as <operator>",
+              "description": "Verified operator id for high-consequence answers",
+              "long": "--as",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit the delivery result as JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "post",
           "path": "feed post",
           "aliases": [],
@@ -9961,6 +10024,46 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "watch",
+          "path": "feed watch",
+          "aliases": [],
+          "description": "Stream the canonical agent, attention, and activity projection as NDJSON",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "Emit versioned NDJSON envelopes",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--local",
+              "description": "Watch only this machine",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents feed watch --json\nagents feed watch --json --local",
+          "notes": "Order by streamId + sequence. Unavailable scopes retain their last rows until reset on reconnect.",
           "subcommands": []
         }
       ]

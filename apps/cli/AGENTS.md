@@ -22,6 +22,12 @@ core, browser, computer, secrets, fleet, share, watchdog, and preferences, then
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes.
 
+`agents feed watch --json` is the canonical thin-client operator stream: it
+composes the existing session watcher with feed attention and activity, while
+`agents sessions watch --json` remains the compatible session-only stream.
+Answers go through `agents feed answer <attention-key>` so the CLI atomically
+claims the first reply and routes it over the recorded session reply rail.
+
 ## Core design choices (read this first)
 
 Break these and downstream code drifts silently.

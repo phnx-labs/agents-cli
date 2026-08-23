@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 555 commands._
+_68 command groups · 557 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -285,8 +285,10 @@ agents events stats         Show aggregate event statistics
 ## feed — Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
 
 ```
-agents feed                 Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
-agents feed post <text...>  Post a status update to the fleet activity stream (for agents)
+agents feed                         Operator inbox + agent status posts. Default is needs-you; agent progress = --filter updates
+agents feed answer <attention-key>  Atomically claim and deliver one answer to an open attention item
+agents feed post <text...>          Post a status update to the fleet activity stream (for agents)
+agents feed watch                   Stream the canonical agent, attention, and activity projection as NDJSON
 ```
 
 ## feedback — Open a pre-filled feedback Discussion or bug report

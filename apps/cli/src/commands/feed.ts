@@ -72,6 +72,8 @@ import { relTime } from '../lib/format.js';
 import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { loadPolicy, applyPolicyToBlock, isPhoneUrgent } from '../lib/feed-policy.js';
 import { notifyUrgentBlock } from '../lib/notify.js';
+import { registerFeedWatchCommand } from './feed-watch.js';
+import { claimAndRouteAttentionAnswer, forwardFeedAnswer } from '../lib/feed/answer.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { isValidMailboxId } from '../lib/mailbox.js';
 import { getActiveSessions } from '../lib/session/active.js';
@@ -440,6 +442,30 @@ export function registerFeedCommand(program: Command): void {
     .option('--dispatch', 'Run stall suppression + default-on-no-answer policy and urgent notifications')
     .option('--pause <id>', 'Pause a runaway/needy local process (SIGSTOP) or cancel a cloud task')
     .option('--kill <id>', 'Kill a runaway/needy local process (SIGTERM) or cancel a cloud task');
+
+  registerFeedWatchCommand(feed);
+
+  feed.command('answer <attention-key>')
+    .description('Atomically claim and deliver one answer to an open attention item')
+    .option('--choice <choice-id>', 'Stable choice id from the attention item')
+    .option('--text <answer>', 'Free-text answer')
+    .option('--as <operator>', 'Verified operator id for high-consequence answers')
+    .option('--json', 'Emit the delivery result as JSON')
+    .action(async (attentionKey: string, opts: { choice?: string; text?: string; as?: string; json?: boolean }, invoked: Command) => {
+      try {
+        const ownerHost = attentionKey.slice(0, attentionKey.indexOf('/'));
+        const result = ownerHost && ownerHost !== machineId()
+          ? await forwardFeedAnswer({ host: ownerHost, attentionKey, choiceId: opts.choice, text: opts.text, operatorId: opts.as })
+          : await claimAndRouteAttentionAnswer({
+            attentionKey, choiceId: opts.choice, text: opts.text,
+            operator: { id: opts.as, verified: Boolean(opts.as), label: opts.as },
+          });
+        if (opts.json || (invoked.parent?.opts() as { json?: boolean } | undefined)?.json) console.log(JSON.stringify(result));
+        else console.log(result.status === 'delivered' ? `Delivered ${result.receipt.msgId}.` : `Already answered (${result.receipt.at}).`);
+      } catch (error) {
+        invoked.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    });
 
   feed
     .command('post')

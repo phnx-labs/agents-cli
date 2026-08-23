@@ -594,6 +594,24 @@ SSH access (§7); rendering sessions that no harness produced.
 
 #### 3.6 Incremental consumer stream
 
+- **SES-40a (MUST).** `agents feed watch --json` MUST compose the existing
+  session watcher with the feed block/resolution and activity stores. Version 1
+  envelopes carry `v`, `streamId`, strictly increasing `sequence`, and `scope`;
+  the types are `reset`, `agent.upsert`, `attention.upsert`,
+  `attention.remove`, `activity.append`, `scope`, and `heartbeat`. Fleet peers
+  MUST be subscribed through `agents feed watch --json --local`, and an
+  unavailable peer MUST retain its last rows until a reconnecting reset
+  (`lib/feed/watch.ts`; `lib/feed/watch.test.ts`).
+- **SES-40b (MUST).** `agents feed answer <attention-key>` MUST atomically claim
+  the first answer before routing it through the recorded reply rail. A losing
+  caller MUST return `already_answered` and MUST NOT inject or enqueue a second
+  reply. High-consequence blocks MUST pass operator authorization before the
+  claim (`lib/feed/answer.ts`; `lib/feed/answer.test.ts`).
+- **SES-40c (MUST).** Pull-request status used by attention and PR-board
+  projections MUST be sourced by the CLI on a bounded TTL and include
+  `number,title,state,isDraft,reviewDecision,mergeable,statusCheckRollup`
+  (`lib/feed/pr-status.ts`).
+
 - **SES-41 (MUST).** `agents sessions watch --json` MUST emit newline-delimited,
   versioned envelopes carrying `streamId`, a strictly increasing `sequence`, and
   `capturedAt`. Version 1 defines `reset`, `upsert`, `remove`, `scope`, and
