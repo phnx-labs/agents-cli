@@ -977,7 +977,9 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   (`{ schemaVersion, kind: 'sessions-trace', layout: 'single' | 'compare', sessions:
   SessionTrajectory[], diff? }`), never the `SessionMeta[]` list or the `{ session,
   events }` render detail shape. A `SessionTrajectory` MUST carry `spanMs`, `steps[]`,
-  `gaps[]`, `toolTimeShare`, `errorCount`, and `stats`; each `TrajectoryStep` MUST
+  `gaps[]`, `toolTimeShare`, `errorCount`, `stats`, and `redacted` — the last
+  recording whether the model was built with redaction on, so a renderer states
+  the true redaction status instead of asserting one; each `TrajectoryStep` MUST
   carry `startMs`, `durationMs`, and `durationEstimated`, where per-step `durationMs`
   is **derived** by pairing a `tool_use` with its `tool_result`/`error` on `callId`
   (never persisted onto `SessionEvent` or the `tool_calls` index), and
