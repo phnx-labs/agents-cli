@@ -1,6 +1,6 @@
 ---
 kind: visual
-title: Where the Aliens Fight the Hooks
+title: Where the Agents Fight the Hooks
 summary: >
   Across ~7,290 agent transcripts on 7 harnesses, hooks fire at five lifecycle
   moments — but the fighting is concentrated in exactly two: PreToolUse guards and
@@ -18,7 +18,7 @@ facts:
 
 ## Story
 
-You asked where the "aliens" — the agents — fight with the hooks. Here is the map,
+You asked where the agents fight with the hooks. Here is the map,
 mined from **~7,290 real session transcripts** across 7 harnesses (claude, codex,
 grok, kimi, cursor, droid, antigravity).
 
@@ -59,7 +59,7 @@ it — the perfect guard is the one that never has to act.
 | footer-guard | PreToolUse | hard · workflow | 0 | 0 |
 | *auto-mode classifier (not a hook)* | permission | denial | 1,386 | 764 |
 
-**Which alien collides, and how often** (hard hook-blocks vs permission denials)
+**Which agent collides, and how often** (hard hook-blocks vs permission denials)
 
 | Harness | Transcripts | Sessions w/ hard block | Rate | Permission denials |
 |---|---:|---:|---:|---:|
