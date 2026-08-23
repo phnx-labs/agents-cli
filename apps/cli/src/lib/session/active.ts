@@ -38,7 +38,7 @@ import { loadHookSessionIndex, resolveHookSessionRecord, readStateSessionRecord,
 import { buildClaudeLabelMap, getAgentSessionDirs } from './discover.js';
 import { buildRunNameMap } from './run-names.js';
 import { latestSessionFileForCwd, findSessionsByShortIds, findSessionMachinesByIds, getSessionById } from './db.js';
-import { extractSessionTopic } from './prompt.js';
+import { extractSessionTopic, classifyUserPrompt, type UserPromptKind } from './prompt.js';
 import { readSessionTailWithRaw } from './tail.js';
 import { parseSession } from './parse.js';
 import { computeTokPerSec } from './throughput.js';
@@ -286,6 +286,16 @@ export type ActiveStatus =
   | 'crashed'
   | 'unknown';
 
+/**
+ * Which rung of the recap ladder produced a row's shown {@link ActiveSession.title}
+ * (RUSH-3011), best-first:
+ *   - `label`  — a `/rename` or harness-set label; always wins.
+ *   - `agent`  — a cached agent recap/narrative (supplied by the caller).
+ *   - `last`   — the last assistant line from the transcript tail.
+ *   - `prompt` — the first-user-prompt topic; the last-resort fallback.
+ */
+export type RecapSource = 'label' | 'agent' | 'last' | 'prompt';
+
 export interface ActiveSession {
   context: ActiveContext;
   kind: string;
@@ -302,6 +312,30 @@ export interface ActiveSession {
   name?: string;
   /** First meaningful line of the initial prompt (extracted topic). */
   topic?: string;
+  /**
+   * The row's shown title — WHAT the session is, best-source-wins (RUSH-3011).
+   * The ladder ({@link deriveSessionRecap}): a `/rename` or harness `label` →
+   * a cached agent recap → the last agent line (`lastAgentLine`) → the
+   * first-prompt `topic`. A session whose agent did work shows an agent-derived
+   * line, not the stale first prompt. Folded on at the end of
+   * {@link getActiveSessions}; `recapSource` names which rung produced it.
+   */
+  title?: string;
+  /** Which ladder rung produced {@link title}. */
+  recapSource?: RecapSource;
+  /**
+   * The first user turn cleaned for a "You" line — a screenshot path folds to
+   * `[image]`, a pasted `$ cmd` to the command, a `/skill` install path to
+   * `/<name>`, so path noise never shows. See {@link classifyUserPrompt}.
+   */
+  userPromptClean?: string;
+  /** What kind of first turn {@link userPromptClean} was. */
+  userPromptKind?: UserPromptKind;
+  /**
+   * The most recent assistant line (from the transcript tail) — the free,
+   * always-current signal of what the agent last said/did. Ladder rung 3.
+   */
+  lastAgentLine?: string;
   /** Live preview: the latest turn (agent message or tool action), from the state engine. */
   preview?: string;
   /** Inferred activity: working / waiting_input / idle (from the transcript tail). */
@@ -2215,6 +2249,9 @@ export async function getActiveSessions(opts: ActiveQueryOptions = {}): Promise<
   // the EXECUTION host rather than the dispatcher (RUSH-2479).
   foldExecutionMachine(merged, recordedMachineLookup(merged), machineId());
   annotateOrchestratorLabels(merged);
+  // Last: derive the shown title (recap ladder) from label/tail/topic now that
+  // every row's live tail + label are resolved (RUSH-3011).
+  foldRecap(merged);
   return merged;
 }
 
@@ -2463,6 +2500,75 @@ export function foldHostLink(rows: ActiveSession[]): void {
       s.status = 'orphaned';
     }
   }
+}
+
+/** One display line, trimmed and capped, or undefined when empty. */
+function recapLine(s: string | undefined, max = 120): string | undefined {
+  const t = s?.replace(/\s+/g, ' ').trim();
+  if (!t) return undefined;
+  return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
+}
+
+/**
+ * The recap ladder (RUSH-3011): compute a row's shown {@link ActiveSession.title}
+ * + {@link RecapSource} from the best available source, plus the cleaned first
+ * prompt (`userPromptClean`/`userPromptKind`) and the `lastAgentLine`. Pure over
+ * one row; exported for tests and folded in by {@link foldRecap}.
+ *
+ * Ladder, best-first: a `/rename`/harness `label` → a cached agent recap
+ * (`opts.agentRecap`, when a caller has one) → the last assistant line → the
+ * first-prompt topic. Rungs 2–3 are agent-derived, so a session that produced
+ * work stops showing its stale first prompt as the title.
+ */
+export function deriveSessionRecap(
+  row: Pick<ActiveSession, 'label' | 'topic' | 'tail' | 'attachments'>,
+  opts: { agentRecap?: string } = {},
+): { title?: string; recapSource?: RecapSource; userPromptClean?: string; userPromptKind?: UserPromptKind; lastAgentLine?: string } {
+  const lastAgentLine = recapLine(row.tail?.length ? row.tail[row.tail.length - 1] : undefined);
+  const hasImageAttachment = !!row.attachments?.some(a => a.mediaType?.startsWith('image'));
+  const { clean: userPromptClean, kind: userPromptKind } = classifyUserPrompt(row.topic ?? '', { hasImageAttachment });
+
+  const label = recapLine(row.label);
+  const agent = recapLine(opts.agentRecap);
+  const prompt = recapLine(userPromptClean || row.topic);
+
+  let title: string | undefined;
+  let recapSource: RecapSource | undefined;
+  if (label) { title = label; recapSource = 'label'; }
+  else if (agent) { title = agent; recapSource = 'agent'; }
+  else if (lastAgentLine) { title = lastAgentLine; recapSource = 'last'; }
+  else if (prompt) { title = prompt; recapSource = 'prompt'; }
+
+  return { title, recapSource, userPromptClean: userPromptClean || undefined, userPromptKind, lastAgentLine };
+}
+
+/** Fold the recap ladder onto every row (see {@link deriveSessionRecap}). */
+export function foldRecap(rows: ActiveSession[]): void {
+  for (const s of rows) {
+    const recap = deriveSessionRecap(s);
+    s.title = recap.title;
+    s.recapSource = recap.recapSource;
+    s.userPromptClean = recap.userPromptClean;
+    s.userPromptKind = recap.userPromptKind;
+    s.lastAgentLine = recap.lastAgentLine;
+  }
+}
+
+/**
+ * True when a crash-leaked orphan is genuinely DEAD and should be reaped from the
+ * reconnectable set rather than shown as resumable forever (RUSH-3011 / issue #3b).
+ *
+ * The gate is `abandoned` (no transcript write in {@link ABANDONED_STALE_MS}) AND
+ * a dead pid — exactly "past the stale threshold whose pid is gone". A live pid
+ * (an idle-but-unfinished session, the highest-risk state) is NEVER reaped, and
+ * neither is a recently-`closed`/`crashed` session that just exited (still
+ * resumable). `pidAlive` absent (a cloud row or an older peer that can't prove
+ * death) also stays un-reaped — reaping is fail-safe, never a guess.
+ */
+export function isReapableOrphan(
+  row: Pick<ActiveSession, 'status' | 'pidAlive'>,
+): boolean {
+  return row.status === 'abandoned' && row.pidAlive === false;
 }
 
 /**

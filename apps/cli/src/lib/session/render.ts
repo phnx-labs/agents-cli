@@ -11,7 +11,7 @@ import chalk from 'chalk';
 import { truncate } from '../format.js';
 import type { SessionEvent, SessionMeta, TodoItem } from './types.js';
 import { summarizeToolUse } from './parse.js';
-import { cleanSessionPrompt, extractSessionTopic } from './prompt.js';
+import { cleanSessionPrompt, classifyUserPrompt, extractSessionTopic } from './prompt.js';
 import { renderMarkdown } from '../markdown.js';
 import { redactSecrets } from '../redact.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult, type FileChange, type FileOp } from './digest.js';
@@ -716,8 +716,12 @@ export function renderSummary(events: SessionEvent[], cwd?: string): string {
   // 1. Prompt
   if (firstUserMessage) {
     const cleaned = cleanSessionPrompt(firstUserMessage);
-    if (cleaned) {
-      lines.push(chalk.bold('Prompt:') + ' ' + cleaned.split('\n')[0]);
+    // Show the classified prompt (a screenshot path folds to `[image]`, a
+    // pasted `$ cmd` to the command, a skill install path to `/<name>`) so the
+    // recap's first line is intent, never path noise (RUSH-3011).
+    const { clean } = classifyUserPrompt(firstUserMessage, { hasImageAttachment: attachments.length > 0 });
+    if (clean || cleaned) {
+      lines.push(chalk.bold('Prompt:') + ' ' + (clean || cleaned.split('\n')[0]));
       const secondLine = cleaned.split('\n')[1]?.trim();
       if (secondLine) lines.push('  ' + secondLine);
 

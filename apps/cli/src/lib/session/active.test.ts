@@ -4,7 +4,8 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
-import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission } from './active.js';
+import { resolveCwds, enrichProvenance, LSOF_CONCURRENCY, agentKindFromComm, sessionAgentComms, activeStatusFromCloudStatus, resolveFallbackStatus, lifecycleStatus, ABANDONED_STALE_MS, resolvePaneIdentity, matchOriginDevice, annotateOrchestratorLabels, summarizeMission, deriveSessionRecap, foldRecap, isReapableOrphan } from './active.js';
+import type { ActiveSession } from './active.js';
 import { SESSION_AGENTS } from './types.js';
 import type { HookSessionIndex } from './hook-sessions.js';
 import type { DeviceProfile, DeviceRegistry } from '../devices/registry.js';
@@ -351,6 +352,58 @@ describe('annotateOrchestratorLabels (team lineage — which session spun up a t
     const solo = row({ sessionId: 's1', context: 'terminal', label: 'x' });
     annotateOrchestratorLabels([solo]);
     expect(solo.orchestratorLabel).toBeUndefined();
+  });
+});
+
+describe('deriveSessionRecap (recap ladder — show what the agent DID, not the first prompt)', () => {
+  it('prefers a /rename label over everything', () => {
+    const r = deriveSessionRecap({ label: 'ship the auth fix', topic: 'first prompt', tail: ['agent last line'] });
+    expect(r).toMatchObject({ title: 'ship the auth fix', recapSource: 'label' });
+  });
+
+  it('prefers a supplied agent recap over the tail and prompt', () => {
+    const r = deriveSessionRecap({ topic: 'first prompt', tail: ['agent last line'] }, { agentRecap: 'refactored the parser' });
+    expect(r).toMatchObject({ title: 'refactored the parser', recapSource: 'agent' });
+  });
+
+  it('uses the last agent line when there is no label or recap (the always-current fix)', () => {
+    const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
+    expect(r).toMatchObject({ title: 'now fixing CI', recapSource: 'last', lastAgentLine: 'now fixing CI' });
+  });
+
+  it('falls back to the first-prompt topic only as a last resort', () => {
+    const r = deriveSessionRecap({ topic: 'add a widget' });
+    expect(r).toMatchObject({ title: 'add a widget', recapSource: 'prompt' });
+  });
+
+  it('cleans an image-only first prompt into the userPrompt fields', () => {
+    const r = deriveSessionRecap({ topic: '', attachments: [{ mediaType: 'image/png' }] });
+    expect(r).toMatchObject({ userPromptClean: '[image]', userPromptKind: 'image' });
+  });
+
+  it('foldRecap writes the fields onto every row', () => {
+    const rows: ActiveSession[] = [{ context: 'terminal', kind: 'claude', status: 'running', tail: ['did the thing'] }];
+    foldRecap(rows);
+    expect(rows[0]).toMatchObject({ title: 'did the thing', recapSource: 'last' });
+  });
+});
+
+describe('isReapableOrphan (dead + stale crash-orphan folds out of reconnectable)', () => {
+  it('reaps a dead pid that is days-stale (abandoned)', () => {
+    expect(isReapableOrphan({ status: 'abandoned', pidAlive: false })).toBe(true);
+  });
+
+  it('never reaps a live pid, even when stale/stuck (idle-but-unfinished = keep)', () => {
+    expect(isReapableOrphan({ status: 'abandoned', pidAlive: true })).toBe(false);
+  });
+
+  it('never reaps a recently-closed or crashed session (still resumable)', () => {
+    expect(isReapableOrphan({ status: 'closed', pidAlive: false })).toBe(false);
+    expect(isReapableOrphan({ status: 'crashed', pidAlive: false })).toBe(false);
+  });
+
+  it('never reaps a row whose death cannot be proven (no pidAlive)', () => {
+    expect(isReapableOrphan({ status: 'abandoned', pidAlive: undefined })).toBe(false);
   });
 });
 

@@ -1,5 +1,46 @@
 import { describe, expect, it } from 'vitest';
-import { extractSessionTopic, cleanSessionPrompt, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+
+describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
+  it('folds a standalone screenshot path (with spaces) to [image]', () => {
+    const r = classifyUserPrompt('/Users/muqsit/Screenshots/CleanShot 2026-08-20 at 10.11.12.png');
+    expect(r).toEqual({ clean: '[image]', kind: 'image' });
+  });
+
+  it('folds an image-only turn (attachment, no real text) to [image]', () => {
+    const r = classifyUserPrompt('', { hasImageAttachment: true });
+    expect(r).toEqual({ clean: '[image]', kind: 'image' });
+  });
+
+  it('keeps a pasted command, first command only, prefixed with $', () => {
+    const r = classifyUserPrompt('$ crabbox status\n$ crabbox list');
+    expect(r).toEqual({ clean: '$ crabbox status', kind: 'command' });
+  });
+
+  it('collapses a skill install path to /<name>', () => {
+    const r = classifyUserPrompt('Base directory for this skill: /home/u/.claude/skills/blog\n\nWrite a post');
+    expect(r).toEqual({ clean: '/blog', kind: 'skill' });
+  });
+
+  it('strips wrapper tags from plain text', () => {
+    const r = classifyUserPrompt('<ctx>Fix the login bug</ctx>');
+    expect(r.kind).toBe('text');
+    expect(r.clean).toBe('Fix the login bug');
+  });
+
+  it('drops an inline image path from a mixed prompt but keeps it text', () => {
+    const r = classifyUserPrompt('look at this /tmp/shot.png and explain the diff carefully please');
+    expect(r.kind).toBe('text');
+    expect(r.clean).toContain('[image]');
+    expect(r.clean).not.toContain('.png');
+  });
+
+  it('caps a long text prompt', () => {
+    const r = classifyUserPrompt('x'.repeat(500));
+    expect(r.kind).toBe('text');
+    expect(r.clean.length).toBeLessThanOrEqual(100);
+  });
+});
 
 describe('isSyntheticUserMessage', () => {
   it('flags harness-injected user scaffolding', () => {

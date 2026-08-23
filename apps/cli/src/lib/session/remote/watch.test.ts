@@ -3,10 +3,29 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { ActiveSession } from '../active.js';
-import { SessionWatchState, sessionWatchRowKey, watchLocalSessions } from './watch.js';
+import { SessionWatchState, sessionWatchRowKey, watchLocalSessions, toSessionWatchRow } from './watch.js';
 
 const row = (sessionId: string, status: ActiveSession['status'] = 'running'): ActiveSession => ({
   context: 'terminal', kind: 'codex', sessionId, status, cwd: '/repo', lastActivityMs: 10,
+});
+
+describe('toSessionWatchRow resumable gating (reap dead crash-orphans)', () => {
+  it('marks a dead, days-stale orphan non-resumable with no recovery command', () => {
+    const r = toSessionWatchRow('zion', { context: 'terminal', kind: 'codex', sessionId: 'x', status: 'abandoned', pidAlive: false, cwd: '/repo' });
+    expect(r.resumable).toBe(false);
+    expect(r.recovery).toBeNull();
+  });
+
+  it('keeps a live/idle-unfinished session resumable', () => {
+    const r = toSessionWatchRow('zion', { context: 'terminal', kind: 'codex', sessionId: 'x', status: 'idle', pidAlive: true, cwd: '/repo' });
+    expect(r.resumable).toBe(true);
+    expect(r.recovery).toMatchObject({ command: 'agents', args: ['sessions', 'resume', 'x', '--device', 'zion'] });
+  });
+
+  it('keeps a recently-closed session resumable (not yet stale)', () => {
+    const r = toSessionWatchRow('zion', { context: 'terminal', kind: 'codex', sessionId: 'x', status: 'closed', pidAlive: false, cwd: '/repo' });
+    expect(r.resumable).toBe(true);
+  });
 });
 
 describe('session watch protocol', () => {

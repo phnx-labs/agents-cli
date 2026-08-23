@@ -27,6 +27,30 @@ and order events by `(streamId, sequence)`. When a device scope becomes
 unavailable, its last rows remain recovery entries until that scope sends a new
 reset; unavailability is not interpreted as session removal.
 
+#### Row fields a UI consumer reads
+
+Each row (`SessionWatchRow`, extending `ActiveSession`) carries, beyond the base
+session fields, a **recap** the UI shows so a Fleet row reads as *what the agent
+is doing*, not the stale first prompt (`src/lib/session/active.ts`
+`deriveSessionRecap`, folded by `foldRecap`):
+
+| Field | Meaning |
+| --- | --- |
+| `title` | The shown title, best-source-wins. Ladder: `label` → cached agent recap → last agent line → first-prompt topic. |
+| `recapSource` | Which rung produced `title`: `'label'` \| `'agent'` \| `'last'` \| `'prompt'`. A `'last'`/`'agent'` title is agent-derived; `'prompt'` is the last-resort fallback. |
+| `userPromptClean` | The first user turn cleaned for a "You" line: a screenshot path folds to `[image]`, a pasted `$ cmd` to the command, a `/skill` install path to `/<name>`, so path noise never shows. |
+| `userPromptKind` | `'text'` \| `'image'` \| `'command'` \| `'skill'` — what that first turn was (`classifyUserPrompt`). |
+| `lastAgentLine` | The most recent assistant line (transcript tail) — the always-current signal of what the agent last said. |
+
+**Reconnectable vs reaped.** `resumable` (and the `recovery` command) is true for a
+session the UI can get back into. A crash-leaked `--device` tunnel session that is
+genuinely **dead and days-stale** — status `abandoned` with a dead pid
+(`isReapableOrphan`) — is folded OUT: `resumable: false`, `recovery: null`, so the
+"Needs reconnecting" list stops ballooning with orphans that will never come back.
+A **live** pid (an idle-but-unfinished session, the highest-risk state) is never
+reaped, and a **recently-closed/crashed** session stays resumable until it goes
+stale.
+
 These subcommands sit on one axis (get back into a conversation). They are **not**
 interchangeable — pick the verb for the intent:
 
