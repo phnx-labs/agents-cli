@@ -634,6 +634,12 @@ it recovers 72%. Short, and it hands over the fix.
 The hook shims write timings to `~/.agents/.cache/perf/perf.db`. **285,667 recorded
 fires. 284 of them changed the outcome.**
 
+> **Window.** That table covers **2026-08-03 → 08-08 only** — 4.2 days, ~67,700 hook
+> fires a day. Timing collection has not written a row since 2026-08-08, so these are
+> a five-day sample from earlier this month, not an all-time or current total. The
+> per-call latencies and the hit rate are what that window measured; the block counts
+> elsewhere on this page come from the transcript corpus and are current.
+
 <figure>
 <figcaption><strong>Figure 5 — What every Bash call pays.</strong> Nine guards fire on every single <code>Bash</code> tool call, serially, before the command runs. Bar width is measured average latency; the number on the right is how often that guard actually blocked anything.</figcaption>
 
@@ -687,12 +693,22 @@ Combined with merging the four git guards into one script, a planning turn pays
 **~123 ms** instead of 292 — a **2.4x** cut on every command the agent runs while
 thinking.
 
-### One hook is simply broken
+### A hook broke for 18 hours and nothing said so
 
-`activity-log-result` exits **127 — command not found — on 983 of its fires**, while
-still costing 40 ms each (1,114 s total). It is not doing the job it was installed
-for, and nothing surfaced that. A hook that cannot run should fail loudly at install
-time, not burn latency invisibly for a thousand invocations.
+`activity-log-result` exited **127 — command not found — 983 times**, while still
+costing 40 ms per call. Worth stating precisely, because the raw count reads worse
+than the truth: every one of those failures falls inside a single **18-hour window on
+2026-08-03 22:14 → 08-04 16:11**, and there are none after it. Running the hook today
+exits 0. So this was a bounded incident that resolved itself, not a hook that is
+broken now.
+
+The defect it exposes is still real: **for eighteen hours a hook could not run at all,
+and nothing reported it.** The shim bakes an absolute path into one version home
+(`.../versions/claude/2.1.219/home/.claude/hooks/11-activity-log.py`), so any session
+whose version home does not carry that file gets `127` — silently, at full latency
+cost, with the agent none the wiser. A hook that cannot execute should fail loudly at
+install or sync time. The only reason this is visible at all is that the shim happens
+to record exit codes; nothing reads them.
 
 ## Insight
 
