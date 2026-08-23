@@ -36,7 +36,17 @@ export function isDeviceInteractive(value: string | undefined | null): boolean {
  */
 export function resolveInteractiveDevice(): string | null {
   const pinned = getConfigValue('interactive.host').value;
-  return typeof pinned === 'string' && pinned.trim() ? pinned.trim() : null;
+  if (typeof pinned !== 'string' || !pinned.trim()) return null;
+  const host = pinned.trim();
+  // A self-referential pin does NOT recurse — resolution happens once at the
+  // dispatch site — but it does resolve to a literal host named "interactive",
+  // which then fails as an unreachable device and reads as a confusing
+  // `device=interactive → interactive`. Treat it as unset so the caller prints
+  // the actionable "pin a host" message instead. `auto` is rejected for the same
+  // reason: the two sentinels mean opposite things and chaining them is a
+  // mistake, not a request.
+  if (isDeviceInteractive(host) || host.toLowerCase() === 'auto') return null;
+  return host;
 }
 
 /** The actionable error for an unset pin — shared so every call site says the same thing. */

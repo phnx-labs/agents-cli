@@ -71,6 +71,19 @@ describe('resolveInteractiveDevice', () => {
   });
 });
 
+  it('treats a self-referential or `auto` pin as unset, not as a host to dial', async () => {
+    // Verified live before adding this: it does NOT recurse (resolution happens
+    // once at the dispatch site), but it DID resolve to a literal host named
+    // "interactive" and print `device=interactive → interactive` before failing
+    // as unreachable. Refusing with the actionable message is clearer.
+    for (const bad of ['interactive', 'INTERACTIVE', 'auto']) {
+      const { setConfigValue } = await fresh();
+      setConfigValue('interactive.host', bad);
+      const { resolveInteractiveDevice } = await fresh();
+      expect(resolveInteractiveDevice(), bad).toBeNull();
+    }
+  });
+
 describe('interactiveUnsetError', () => {
   it('names the command that fixes it', async () => {
     const { interactiveUnsetError } = await fresh();
