@@ -184,7 +184,13 @@ export function parseProbeOutput(host: string, stdout: string, fetchedAt: number
  * numbers, mirroring how garbage POSIX output degrades. */
 export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: number): DeviceStats {
   const m = stdout.match(/AGWINSTAT load=([0-9.]*) freeKb=([0-9]+) totalKb=([0-9]+) ncpu=([0-9]+)(?: diskFreeKb=([0-9.]+) diskTotalKb=([0-9.]+))?/);
-  if (!m) return { host, reachable: true, fetchedAt };
+  // Unparseable output still means the probe RAN — the box answered, we just
+  // could not read it. Stamp specsFetchedAt anyway: isFreshDeviceSpecs treats a
+  // reachable row without it as written by a pre-disk CLI and therefore stale,
+  // so omitting it here would make such a box re-probe on every devices list,
+  // forever, since the next probe would be just as unreadable. Same reasoning
+  // as the POSIX path, which stamps it even when the df segment yields nothing.
+  if (!m) return { host, reachable: true, fetchedAt, specsFetchedAt: fetchedAt };
   const loadPercent = m[1] === '' ? undefined : parseFloat(m[1]);
   const freeKb = parseInt(m[2], 10);
   const totalKb = parseInt(m[3], 10);

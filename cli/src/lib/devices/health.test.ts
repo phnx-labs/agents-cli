@@ -230,3 +230,24 @@ describe('fleetCapacity', () => {
     expect(cap.memFreeBytes).toBe(140e9);
   });
 });
+
+describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => {
+  // isFreshDeviceSpecs treats a reachable row WITHOUT specsFetchedAt as coming
+  // from a CLI that predates disk collection, and therefore stale. Any success
+  // path that forgets to stamp it makes that box re-probe on every
+  // `agents devices list`, forever — the next probe cannot fix it either.
+  it('windows: unparseable probe output still stamps it', () => {
+    const s = parseWinProbeOutput('winbox', 'garbage that matches nothing', 1000);
+    expect(s.reachable).toBe(true);
+    expect(s.specsFetchedAt).toBe(1000);
+  });
+
+  it('posix: a probe whose df segment yields nothing still stamps it', () => {
+    const SEP = '---AGSTAT---';
+    const out = ['12:00:00 up 1 day, load average: 0.50, 0.4, 0.3', SEP, 'MemTotal: 16000000 kB\nMemAvailable: 8000000 kB', SEP, '8', SEP, ''].join('\n');
+    const s = parseProbeOutput('box', out, 2000);
+    expect(s.reachable).toBe(true);
+    expect(s.diskTotalBytes).toBeUndefined();
+    expect(s.specsFetchedAt).toBe(2000);
+  });
+});
