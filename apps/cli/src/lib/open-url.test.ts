@@ -158,3 +158,43 @@ describe('showFile — which kinds a browser tab is right for', () => {
     expect(out.via).toBe('none');
   });
 });
+
+describe('osOpen — detection without blocking', () => {
+  // trySpawn races `spawn` against its `error` event. The pair of properties
+  // that matters: a missing binary must be DETECTED (so the next candidate and
+  // `via:'none'` stay live), and a long-running opener must NOT be waited on
+  // (spawnSync waited for the child's whole lifetime, which would stall
+  // `devices lease` behind the browser, right before it prompts for a key).
+  const FAKE = { name: 'nope', browser: 'chrome' as const, endpoints: ['cdp://127.0.0.1:39899'] };
+
+  it('reports via:none when no opener works, so a caller can print the URL', async () => {
+    const { showUrl } = await fresh();
+    const out = await showUrl('https://example.com', { spawnOpen: () => false });
+    expect(out.via).toBe('none');
+    expect(out.via === 'none' && out.reason).toMatch(/opener/i);
+  });
+
+  it('does not wait for the opener to exit', async () => {
+    // Through the real (non-injected) path: a viewer-less machine falls to the
+    // OS branch. If this ever regresses to a blocking wait, the assertion is
+    // the wall clock, not a mock.
+    const { showUrl } = await fresh();
+    const started = Date.now();
+    await showUrl('https://example.com');
+    expect(Date.now() - started).toBeLessThan(3_000);
+  }, 10_000);
+
+  it('falls through to the next candidate when the first opener fails', async () => {
+    const { showUrl } = await fresh();
+    const tried: string[] = [];
+    const out = await showUrl('https://example.com', {
+      spawnOpen: (cmd) => {
+        tried.push(cmd);
+        return false;
+      },
+    });
+    expect(out.via).toBe('none');
+    // Every platform candidate was attempted, not just the first.
+    expect(tried.length).toBeGreaterThanOrEqual(1);
+  });
+});

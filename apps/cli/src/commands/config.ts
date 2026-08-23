@@ -317,6 +317,12 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     const key = 'browser.profile';
     yield { key, value: browserProfile, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
+
+  const browserViewer = getConfigValue('browser.viewer').value;
+  if (browserViewer !== undefined) {
+    const key = 'browser.viewer';
+    yield { key, value: browserViewer, hint: configKeyStorageHint(parseConfigKey(key)) };
+  }
 }
 
 /** Collect device-scope config entries. */
@@ -356,7 +362,18 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         if (device === machineId()) continue;
         key = `${prefix}browser.profile`;
         break;
+      case 'browser.viewer':
+        // Same duplication rule as browser.profile above.
+        if (device === machineId()) continue;
+        key = `${prefix}browser.viewer`;
+        break;
       default:
+        // A `default: continue` here silently drops any device property with no
+        // arm — which is how browser.viewer was invisible to `config list` after
+        // being added everywhere else. This is the fourth switch enumerating
+        // DeviceConfigProperty; unlike parseValue's it cannot use a `never`
+        // binding (it must keep skipping properties that are deliberately not
+        // listed), so the completeness test in config.test.ts is the guard.
         continue;
     }
     yield { key, value: entry.value, hint: configKeyStorageHint(parseConfigKey(key)) };

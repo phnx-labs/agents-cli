@@ -1385,7 +1385,10 @@ function registerTaskCommands(browser: Command): void {
       // abandoned-task reaper closes when the calling session ends — wrong for a
       // page a person is reading. This does not.
       const { showUrl, showFile } = await import('../lib/open-url.js');
-      const isLocalFile = !/^[a-z][a-z0-9+.-]*:/i.test(url);
+      // `+` not `*` on the scheme body: `[a-z][a-z0-9+.-]*:` matches a Windows
+      // drive letter (`C:\Users\me\plan.html`), so a real path was treated as a
+      // URL. A scheme is at least two characters.
+      const isLocalFile = !/^[a-z][a-z0-9+.-]+:/i.test(url);
       const outcome = isLocalFile
         ? await showFile(path.resolve(url), { osBrowser: opts.osBrowser })
         : await showUrl(url, { osBrowser: opts.osBrowser });
