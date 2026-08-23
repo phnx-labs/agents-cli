@@ -325,24 +325,7 @@ const BASE_STYLE = `
     color: var(--dim); font-size: 12px;
     font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
   }
-`;
-
-/** Compare-only rules layered on top of {@link BASE_STYLE} — lanes, divergence marker, summary table. */
-const COMPARE_STYLE = `
-  svg .diverge { stroke: #e0b341; stroke-width: 1.4; stroke-dasharray: 4 3; }
-  .diverge-note { color: #e0b341; font-size: 12.5px; margin: 6px 0; }
-  table.cmp-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12.5px; }
-  table.cmp-table th, table.cmp-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
-  table.cmp-table th { color: var(--dim); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .5px; }
-  .diff-cols { display: flex; gap: 24px; flex-wrap: wrap; }
-  .diff-col { flex: 1; min-width: 260px; }
-  .diff-col h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; margin: 0 0 8px; }
-  .diff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-  .diff-list li {
-    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px;
-    border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; background: var(--panel);
-  }
-  /* trace v2 — analysis hero + program-aware step list */
+  /* trace v2 — analysis hero + program-aware step list (single-session view; compare/lineage layer on top of BASE_STYLE, so this must live here) */
   main { padding: 20px; }
   .analysis { display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; margin-bottom: 26px; }
   @media (max-width: 720px) { .analysis { grid-template-columns: 1fr; } }
@@ -381,6 +364,23 @@ const COMPARE_STYLE = `
   .tok { color: var(--dim); font-size: 10px; }
   .gap-divider { text-align: center; color: #7a5c3a; font-size: 11px; margin: 8px 0; letter-spacing: .06em; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
   details.step .detail { white-space: pre-wrap; color: var(--dim); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 2px 0 8px 54px; max-height: 220px; overflow: auto; }
+`;
+
+/** Compare-only rules layered on top of {@link BASE_STYLE} — lanes, divergence marker, summary table. */
+const COMPARE_STYLE = `
+  svg .diverge { stroke: #e0b341; stroke-width: 1.4; stroke-dasharray: 4 3; }
+  .diverge-note { color: #e0b341; font-size: 12.5px; margin: 6px 0; }
+  table.cmp-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12.5px; }
+  table.cmp-table th, table.cmp-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  table.cmp-table th { color: var(--dim); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .5px; }
+  .diff-cols { display: flex; gap: 24px; flex-wrap: wrap; }
+  .diff-col { flex: 1; min-width: 260px; }
+  .diff-col h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; margin: 0 0 8px; }
+  .diff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .diff-list li {
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; background: var(--panel);
+  }
 `;
 
 const THEME_SCRIPT = `
