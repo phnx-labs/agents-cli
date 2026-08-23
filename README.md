@@ -607,7 +607,7 @@ agents hosts check gpu-box              # reachable? which agi-cli version?
 
 # Run there instead of locally
 agents run claude --device gpu-box "profile this build"   # headless: follows live by default
-agents run claude --device gpu-box                         # no prompt → interactive TTY over SSH (tmux-backed)
+agents run claude --device gpu-box                         # no prompt → direct interactive TTY over SSH
 agents accounts sync work --device gpu-box               # portable provider account only; native OAuth stays local
 agents run claude --device auto "…"                      # affinity-pick host from 14d usage (harness stays claude)
 agents run claude --device auto "…"                        # same — auto is a host value, not a harness name
@@ -1540,7 +1540,10 @@ macOS and Linux. Windows via WSL works but isn't first-class yet.
 
 **macOS-only features:** Keychain-based secrets (`agents secrets`, `agents accounts add`) require macOS. Default iCloud sync for bundles requires macOS + iCloud Keychain enabled; use `--no-icloud-sync` for device-local bundles. On Linux, use environment variables or `.env` files for API keys. Native Linux credential store support is planned.
 
-Interactive tmux-backed runs require tmux 3.2 or newer.
+Interactive runs spawn directly by default. Enable `tmux.enabled` on a device to
+give each run an addressable pane for `agents message`, injection, and `agents
+focus`; tmux-backed runs require tmux 3.2 or newer. A direct run with no precise
+terminal rail names the unavailable controls once at launch.
 
 ### Do I need Node.js?
 

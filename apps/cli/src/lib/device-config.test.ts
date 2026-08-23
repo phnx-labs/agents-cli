@@ -356,10 +356,19 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
   });
 });
 
-describe('tmux gate (tmux.enabled=false on this device)', () => {
-  it('defaults to enabled when unset (unset = today’s behavior: wrap)', async () => {
+describe('tmux gate (tmux.enabled on this device)', () => {
+  it('defaults to disabled when unset', async () => {
     const { isTmuxEnabled } = await freshModules();
-    expect(isTmuxEnabled()).toBe(true);
+    const { shouldWrapInTmux } = await import('./exec.js');
+    expect(shouldWrapInTmux({
+      interactive: true,
+      platform: 'linux',
+      inTmux: false,
+      raw: false,
+      noTmuxEnv: false,
+      configEnabled: isTmuxEnabled(),
+      tmuxAvailable: true,
+    })).toBe(false);
   });
 
   it('isTmuxEnabled reflects the stored value', async () => {
@@ -380,7 +389,7 @@ describe('tmux gate (tmux.enabled=false on this device)', () => {
     const { isTmuxEnabled, setConfigValue } = await freshModules();
     expect(() => setConfigValue('tmux.enabled', false, { device: 'mac-mini' }))
       .toThrow(/machine-local/);
-    expect(isTmuxEnabled()).toBe(true);
+    expect(isTmuxEnabled()).toBe(false);
   });
 });
 

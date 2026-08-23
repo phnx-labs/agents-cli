@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, ReplyRail, MuxLocation } from '../session/provenance.js';
-import { resolveInjectTargetForSession } from './resolve.js';
+import { bareLaunchAddressabilityNotice, resolveInjectTargetForSession } from './resolve.js';
 
 /** Minimal ActiveSession with the fields the resolver reads. */
 function session(over: {
@@ -125,5 +125,20 @@ describe('resolveInjectTargetForSession — pty + refusals', () => {
     const r = resolveInjectTargetForSession(session({ host: 'warp' }));
     expect(r.addressable).toBe(false);
     if (!r.addressable) expect(r.reason).toContain('warp');
+  });
+});
+
+describe('bare interactive launch degradation', () => {
+  it('prints one recovery line when no precise rail exists', () => {
+    expect(bareLaunchAddressabilityNotice(session({ host: 'ghostty', sessionId: 's' }), 'zion')).toBe(
+      'agents: this direct session is not addressable; agents message, injection, and agents focus will not work. Restore them with: agents config set devices.zion.tmux on',
+    );
+  });
+
+  it('stays quiet when the canonical resolver finds an addressable rail', () => {
+    expect(bareLaunchAddressabilityNotice(
+      session({ host: 'iterm', reply: { rail: 'iterm', session: 'UUID-1' } }),
+      'zion',
+    )).toBeUndefined();
   });
 });

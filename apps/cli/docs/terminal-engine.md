@@ -143,9 +143,10 @@ Resolution order, each step skipped when it names nothing drivable here:
 | 2 | the host app of the most recent live session | `active-session` |
 | 3 | the first available backend (Terminal.app is the every-Mac floor) | `available` |
 
-**A tmux-hosted session names its viewer, not the multiplexer.** `agents run`
-wraps interactive runs in tmux, so a session the user started in Ghostty is
-attributed `host: 'tmux'` on the discovery path — which names no terminal at all.
+**A tmux-hosted session names its viewer, not the multiplexer.** When a device
+opts into `tmux.enabled`, `agents run` wraps eligible interactive runs, so a
+session the user started in Ghostty is attributed `host: 'tmux'` on the discovery
+path — which names no terminal at all. Direct runs are the default.
 `toHostSamples` ([`run-surface.ts`](../src/lib/terminal/run-surface.ts)) fills in
 `viewingApp` for those from `resolveViewingIn`
 ([`session/viewing-in.ts`](../src/lib/session/viewing-in.ts)) — the same resolver
