@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 555,
+  "commands": 556,
   "root": {
     "name": "agents",
     "path": "",
@@ -2902,6 +2902,48 @@
                   "variadic": false,
                   "negate": false
                 },
+                {
+                  "flags": "--json",
+                  "description": "Output machine-readable JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "rename",
+              "path": "browser profiles rename",
+              "aliases": [],
+              "description": "Rename a profile, moving its browser data with it (logins survive)",
+              "args": [
+                {
+                  "name": "from",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "to",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
                 {
                   "flags": "--json",
                   "description": "Output machine-readable JSON",

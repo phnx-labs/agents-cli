@@ -207,6 +207,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can `browser use` one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
 | `agents browser profiles prune` | Remove dead machine-local profiles — browser not installed here, or never started (see below) |
 | `agents browser profiles edit <name>` | Edit an existing profile in place — description, endpoints, secrets, viewport, binary. Stays in the store it already lives in. The browser type and the name are NOT editable: both key the on-disk profile cache (and its logins), so changing either orphans it — delete and recreate instead |
+| `agents browser profiles rename <from> <to>` | Rename a profile and move its browser data with it, so logins survive. Refuses while the profile is in use. The one safe way to change a name: `edit` refuses it, and delete-and-recreate abandons the `--user-data-dir` |
 | `agents browser profiles scope <name> <local\|fleet>` | Move a profile between the fleet-synced store and this machine. `fleet -> local` is the repair for a profile whose endpoint is machine-bound — run it ON the machine that owns the browser |
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
