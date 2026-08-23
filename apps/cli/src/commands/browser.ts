@@ -786,7 +786,7 @@ function registerProfilesCommands(browser: Command): void {
       // A misfiled fleet profile is never a prune candidate (deleting a fleet
       // entry deletes it everywhere), so without this it would only ever surface
       // in --json. It is the one kept-reason a user has to act on.
-      const misfiled = plan.kept.filter((k) => k.why.includes('MISFILED'));
+      const misfiled = plan.kept.filter((k) => k.misfiled);
       const reportMisfiled = (): void => {
         if (misfiled.length === 0) return;
         console.log('');
@@ -798,6 +798,7 @@ function registerProfilesCommands(browser: Command): void {
           console.log(`  ${k.name} — agents browser profiles scope ${k.name} local`);
         }
         console.log('Run that on the machine that owns each browser. Nothing was moved for you.');
+        console.log('(Prune never deletes these — removing a fleet entry removes it everywhere.)');
       };
 
       if (plan.candidates.length === 0) {

@@ -137,7 +137,7 @@ describe('agents browser profiles edit', () => {
     expect(error).toHaveBeenCalledWith(expect.stringContaining('Nothing to edit'));
   });
 
-  it("edit's surface is create's minus --browser and --fleet", async () => {
+  it("edit's surface is create's minus --fleet, and adds no flag create lacks", async () => {
     const { registerBrowserCommand } = await freshBrowserModules();
     const program = new Command();
     program.exitOverride();
@@ -162,6 +162,12 @@ describe('agents browser profiles edit', () => {
       expect(edit.has(flag), `edit is missing ${flag}`).toBe(true);
     }
     expect(edit.has('--fleet')).toBe(false);
+    // And nothing NEW: a flag on edit that create never taught is drift in the
+    // other direction, which the one-directional check above cannot see.
+    const editOnly = [...edit].filter(
+      (f) => !create.has(f) && !['--json', '--no-headless', '--no-electron', '--help'].includes(f)
+    );
+    expect(editOnly, `edit has flags create lacks: ${editOnly.join(', ')}`).toEqual([]);
   });
 });
 
@@ -176,7 +182,14 @@ describe('agents browser profiles scope', () => {
     await run(['profiles', 'scope', 'work', 'local']);
 
     const { listProfilesWithScope: read } = await freshBrowserModules();
+    const { readMeta } = await import('../lib/state.js');
     expect((await read()).find((p) => p.profile.name === 'work')?.scope).toBe('local');
+    // listProfilesWithScope reports `local` whenever a local entry exists, because
+    // local wins the collision — so it passes even if the fleet copy was never
+    // dropped. Assert the source store directly, which is the actual contract.
+    const meta = readMeta();
+    expect(meta.deviceBrowser?.work).toBeDefined();
+    expect(meta.browser?.work).toBeUndefined();
   });
 
   it('rejects a scope that is neither local nor fleet', async () => {

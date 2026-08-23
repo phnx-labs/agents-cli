@@ -343,7 +343,18 @@ export interface PrunePlan {
   /** Profiles that would be (or were) removed. */
   candidates: PruneCandidate[];
   /** Profiles deliberately left alone, with the guard that kept them. */
-  kept: Array<{ name: string; scope: ProfileScope; why: string }>;
+  kept: Array<{
+    name: string;
+    scope: ProfileScope;
+    why: string;
+    /**
+     * True for a fleet profile whose endpoint only makes sense on one machine.
+     * A structured flag, not a substring of `why`: both the CLI's human output
+     * and `--json` consumers branch on it, and sniffing the reason text would
+     * couple them to wording.
+     */
+    misfiled?: boolean;
+  }>;
 }
 
 export const PRUNE_REASON_TEXT: Record<PruneReason, string> = {
@@ -391,17 +402,23 @@ export function planProfilePrune(
   const plan: PrunePlan = { candidates: [], kept: [] };
 
   for (const { name, scope, launchableHere, misfiledWhy } of profiles) {
-    const keep = (why: string): void => { plan.kept.push({ name, scope, why }); };
+    const keep = (why: string, misfiled = false): void => {
+      plan.kept.push(misfiled ? { name, scope, why, misfiled } : { name, scope, why });
+    };
+
+    // Checked FIRST, ahead of every other rule including --fleet. Deleting a
+    // fleet entry deletes it on EVERY machine, and a misfiled profile's defining
+    // symptom is that the browser is absent on whatever box you are standing on
+    // — so `prune --fleet` would otherwise read `binary-missing` and destroy it
+    // fleet-wide, which is the opposite of the repair. The repair is a scope
+    // move; an intentional delete is still available as `profiles delete`.
+    if (misfiledWhy) {
+      keep(`MISFILED — ${misfiledWhy}`, true);
+      continue;
+    }
 
     if (scope === 'fleet' && !opts.includeFleet) {
-      // A misfiled fleet profile is NOT a prune candidate — deleting a fleet
-      // entry deletes it on every machine, and the repair is to move its scope,
-      // not to remove it. Report it in the kept reason so a dry run surfaces it.
-      keep(
-        misfiledWhy
-          ? `fleet-synced, and MISFILED — ${misfiledWhy}`
-          : 'fleet-synced (pass --fleet to include it)'
-      );
+      keep('fleet-synced (pass --fleet to include it)');
       continue;
     }
     if (name === DEFAULT_BROWSER_PROFILE_NAME || name === LEGACY_DEFAULT_BROWSER_PROFILE_NAME) {

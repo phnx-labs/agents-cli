@@ -348,7 +348,32 @@ describe('planProfilePrune', () => {
   const local = (name: string, launchableHere: boolean) =>
     ({ name, scope: 'local' as const, launchableHere });
 
-  it('never prunes a misfiled fleet profile — it reports it in the kept reason', () => {
+  it('never prunes a misfiled fleet profile even with --fleet and the binary missing', () => {
+    // The regression: `misfiledWhy` used to be read only inside the
+    // `scope === 'fleet' && !includeFleet` branch, so `prune --fleet` on a box
+    // where the browser is absent — a misfiled profile's DEFINING symptom —
+    // read `binary-missing` and deleted it fleet-wide, the opposite of the fix.
+    const name = uniq('misfiled-fleetflag');
+    const plan = planProfilePrune(
+      [{ name, scope: 'fleet' as const, launchableHere: false, misfiledWhy: 'loopback endpoint' }],
+      { includeFleet: true }
+    );
+    expect(plan.candidates).toEqual([]);
+    expect(plan.kept[0].misfiled).toBe(true);
+  });
+
+  it('marks a misfiled profile with a structured flag, not a substring of the reason', () => {
+    const name = uniq('misfiled-structured');
+    const plan = planProfilePrune([
+      { name, scope: 'fleet' as const, launchableHere: true, misfiledWhy: 'loopback endpoint' },
+    ]);
+    expect(plan.kept[0].misfiled).toBe(true);
+    // A clean fleet profile must NOT carry the flag at all.
+    const clean = planProfilePrune([{ name: uniq('clean'), scope: 'fleet' as const, launchableHere: true }]);
+    expect(clean.kept[0].misfiled).toBeUndefined();
+  });
+
+  it('reports a misfiled fleet profile in the kept reason', () => {
     // Deleting a fleet entry deletes it on EVERY machine, so a misfiled profile
     // is a scope-move, not a prune. A dry run still has to surface it.
     const name = uniq('misfiled');
