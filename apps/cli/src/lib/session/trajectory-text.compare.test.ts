@@ -58,10 +58,28 @@ describe('renderTrajectoryCompareText', () => {
       { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'c1', command: `deploy --token ${secret}` },
       { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Bash', callId: 'c1', outcome: 'ok' },
     ];
+    // `b` deliberately shares NO tool with `a`. A step matched in both sessions
+    // is classified `same`, and the renderer prints no label for those — so
+    // comparing against a fixture that also runs Bash made the secret-bearing
+    // step invisible, and any assertion about it vacuous.
+    const noBash: SessionEvent[] = [
+      { type: 'tool_use', agent: 'codex', timestamp: '2026-08-01T00:00:00Z', tool: 'Grep', callId: 'd1', pattern: 'foo' },
+      { type: 'tool_result', agent: 'codex', timestamp: '2026-08-01T00:00:02Z', tool: 'Grep', callId: 'd1', outcome: 'ok' },
+    ];
     const a = buildTrajectory(withSecret, meta({ id: 'a' }), { redact: true, knownSecrets: [secret] });
-    const b = buildTrajectory(eventsB, meta({ id: 'b', agent: 'codex' }), { redact: true, knownSecrets: [secret] });
+    const b = buildTrajectory(noBash, meta({ id: 'b', agent: 'codex' }), { redact: true, knownSecrets: [secret] });
     const text = renderTrajectoryCompareText(diffTrajectories(a, b));
+
+    // Assert the redaction MARKER, not merely the absence of the secret.
+    // `not.toContain(secret)` alone passes with redaction fully disabled,
+    // because clipLabel truncates the label mid-token — the unredacted output is
+    // `deploy --token sk-supersecrettoken12345…`, which does not contain the
+    // whole secret string. The marker is present only when redaction actually
+    // ran, so this fails if it is bypassed.
+    expect(text).toContain('deploy --token [REDACTED]');
     expect(text).not.toContain(secret);
+    // And a prefix short enough to survive clipping, so a partial leak is caught too.
+    expect(text).not.toContain(secret.slice(0, 12));
   });
 
   it('caps the diff lines with maxDiffLines and counts the rest', () => {
