@@ -1,4 +1,4 @@
-- **Security: the remote browser-control consent gate no longer has a hole.**
+- **Security: the remote browser-control consent gate now covers the whole launch path.**
   `agents browser remote-control off` (the default) was only enforced on the
   `browser start` command, but `navigate`, `click`, `screenshot`, `evaluate` and
   the other page verbs open a browser implicitly when the caller has no live

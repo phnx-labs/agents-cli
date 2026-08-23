@@ -381,7 +381,12 @@ describe('remote-control consent gate over IPC', () => {
       expect(response.ok).toBe(false);
       // Consent is refused BEFORE the unknown-profile error, so the message is the
       // consent one — proving the gate ran first, as the first statement of start().
+      // This positive match is what carries the test: mutate the start gate and it
+      // reports the profile-not-found error instead.
       expect(response.error).toMatch(/remote-control on/);
+      // Intent, not coverage: vitest stops at the first failed expect, so the
+      // positive above always fails first in a mutant and this never discriminates.
+      // Do not count it when reasoning about what is covered.
       expect(response.error).not.toMatch(/not found/);
     } finally {
       await server.stop();
