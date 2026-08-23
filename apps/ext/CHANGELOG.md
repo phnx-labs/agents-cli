@@ -30,7 +30,9 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   Fleet Focus, background Attach, remote tmux focus, command-palette Resume,
   and unclean-shutdown recovery now share one registered editor-terminal path.
   Restored tabs keep `AGENT_TERMINAL_ID` and session identity, while mappings
-  absent from the CLI's reaped session list are folded away. Source:
+  absent from the CLI's reaped session list are folded away. Crash restore
+  dedupes the eager prewarm mappings against the tabs the persisted-terminals
+  pass already reopened, so no session is opened or resumed twice. Source:
   `src/vscode/{extension,settings,prewarm}.vscode.ts`.
 
 - **`Agents: New <Harness>` opens an agent again instead of asking which account

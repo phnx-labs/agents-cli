@@ -302,8 +302,8 @@ async function detachAgentToBackground(): Promise<void> {
 }
 
 // Bring a backgrounded/parked agent to the foreground: pick from the CLI's
-// active-session list (presence background/parked) and open a terminal running
-// `agents sessions attach <id>`, which resumes the session interactively in that tab.
+// active-session list (presence background/parked) and reopen it as a registered
+// editor tab via the shared resume helper, so it resumes its real session there.
 async function attachAgentFromBackground(): Promise<void> {
   const sessions = sessionPresentationStore.presentedSessions(LOCAL_MACHINE_ID, LOCAL_LABEL)
     .filter((session) => session.host === LOCAL_LABEL);
@@ -976,7 +976,20 @@ export async function activate(context: vscode.ExtensionContext) {
     .then(() => restoreAgentTerminals(context))
     .then(async () => {
       const { restoreTerminals } = await import('./prewarm.vscode');
-      await restoreTerminals(context, { listRestorableSessionIds, openAgentSessionTerminal });
+      await restoreTerminals(context, {
+        listRestorableSessionIds,
+        // restoreAgentTerminals ran first in this chain and registered every tab
+        // it reopened; hand restoreTerminals those keys so it skips them and only
+        // reopens the eager-prewarm residual the debounced store missed.
+        trackedKeys: () => {
+          const all = terminals.getAllTerminals();
+          return {
+            terminalIds: new Set(all.map((entry) => entry.id)),
+            sessionIds: new Set(all.map((entry) => entry.sessionId).filter((id): id is string => Boolean(id))),
+          };
+        },
+        openAgentSessionTerminal,
+      });
     })
     .then(() => {
       // Adopt any SH terminals that are already running an agent CLI

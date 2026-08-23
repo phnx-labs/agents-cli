@@ -39,8 +39,11 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   re-keys it to the harness the CLI picked — the `sh` prefix is load-bearing,
   since `armShellAdoptionForTerminal` only arms for it. An unregistered tab is
   invisible to Copy Session ID / Resume / Fork and is not restored after a
-  window reload. Crash restore reopens only mappings still returned by the CLI's
-  canonical session list, so reaped stale transcripts are not resurrected.
+  window reload. Crash restore runs `restoreAgentTerminals` (the debounced
+  persisted-terminals store) first, then the eager prewarm mappings via
+  `restoreTerminals`, which reopens only mappings the CLI's canonical session
+  list still returns AND that the first pass did not already reopen — so reaped
+  transcripts are not resurrected and no session is opened or resumed twice.
 - Other reads use their CLI noun: `devices list/status/accounts`, `teams ...
   --json`, `watchdog status/history`, and `routines ... --json`. Ticket reads
   use `linear tasks --json` and `gh issue list` (the former `agents tickets`

@@ -320,6 +320,16 @@ export function wasCleanShutdown(context: vscode.ExtensionContext): boolean {
  */
 export interface TerminalRestoreActions {
   listRestorableSessionIds(): Promise<Set<string>>;
+  /**
+   * The terminal ids and session ids that already have a live/tracked tab —
+   * i.e. everything `restoreAgentTerminals` (the debounced persisted-terminals
+   * path) already reopened on this same crash. Prewarm mappings are written
+   * eagerly per `registerAgentTerminal`, while that store is a 500ms debounce
+   * (`schedulePersist`), so the two overlap: without this guard both paths
+   * reopen and re-resume the same session, racing two `agents sessions resume`
+   * processes onto one transcript (the RUSH-2477 thundering-herd class).
+   */
+  trackedKeys(): { terminalIds: Set<string>; sessionIds: Set<string> };
   openAgentSessionTerminal(
     context: vscode.ExtensionContext,
     session: { id: string; shortId: string; agent: string; cwd?: string; terminalId?: string },
@@ -343,9 +353,14 @@ export async function restoreTerminals(
 
   console.log(`[PREWARM] Detected crash - ${mappings.length} terminals to restore`);
   const restorableIds = await actions.listRestorableSessionIds();
+  // Only reopen mappings `restoreAgentTerminals` did NOT already restore on this
+  // crash. Its debounced store lags the eager prewarm mappings by up to 500ms, so
+  // this path exists to catch that residual window — not to double every tab.
+  const tracked = actions.trackedKeys();
   let restored = 0;
   for (const mapping of mappings) {
     if (!restorableIds.has(mapping.sessionId)) continue;
+    if (tracked.terminalIds.has(mapping.terminalId) || tracked.sessionIds.has(mapping.sessionId)) continue;
     const opened = await actions.openAgentSessionTerminal(context, {
       id: mapping.sessionId,
       shortId: mapping.sessionId.slice(0, 8),
