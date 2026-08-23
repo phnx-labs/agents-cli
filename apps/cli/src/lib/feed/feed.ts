@@ -471,7 +471,9 @@ export function rollbackAnswerClaim(
   const marker = path.join(answeredDir(dir), `${blockId}.json`);
   const current = safeReadJson<AnswerRecord>(marker);
   if (!current || current.answeredAt !== answeredAt) return false;
-  fs.unlinkSync(marker);
+  // Restore while the O_EXCL marker still excludes every other claimant. The
+  // marker is removed LAST; once another writer can win recordAnswer, this
+  // rollback has no state left to overwrite.
   publishBlock(previousBlock, dir);
   const resolutionFile = path.join(resolutionDir(dir), `${blockId}.json`);
   if (previousResolution) recordResolution(previousResolution, dir);
@@ -480,6 +482,7 @@ export function rollbackAnswerClaim(
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     }
   }
+  fs.unlinkSync(marker);
   return true;
 }
 
