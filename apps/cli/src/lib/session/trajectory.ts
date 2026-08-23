@@ -133,7 +133,7 @@ const INLINE_TASK_TOOLS = new Set(['Task', 'Agent']);
  * `state.ts` (`['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']`)
  * so Codex's `exec_command` and the rest are covered, not just Claude's `Bash`.
  */
-const SHELL_TOOLS = new Set(['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']);
+const SHELL_TOOLS = new Set(['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute']);
 
 /**
  * Shell builtins/assignments that are rarely the POINT of a command — the action

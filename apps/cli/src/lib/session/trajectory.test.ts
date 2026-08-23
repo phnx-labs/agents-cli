@@ -53,7 +53,8 @@ describe('buildTrajectory — durations by callId pairing', () => {
       { type: 'tool_use', agent: 'codex', timestamp: '2026-08-01T00:00:00Z', tool, callId: 'c', command: 'npm test' },
       { type: 'tool_result', agent: 'codex', timestamp: '2026-08-01T00:00:01Z', tool, callId: 'c', outcome: 'ok' },
     ];
-    for (const tool of ['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']) {
+    // 'exec' is newer Codex (gpt-5.6-sol) whose command the parser unwraps from a JS cell.
+    for (const tool of ['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute']) {
       expect(buildTrajectory(shellStep(tool), meta()).steps[0].program).toBe('npm');
     }
   });

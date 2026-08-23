@@ -320,6 +320,14 @@ export function summarizeToolUse(tool: string, args?: Record<string, any>): stri
     // Codex tools
     case 'exec_command':
       return `Bash: ${truncate(String(args.command || args.cmd || '').replace(/\n/g, ' ').trim(), 120)}`;
+    // Newer Codex JS-cell shell wrapper: prefer the unwrapped command (set at parse
+    // time), else the extracted command, else the raw cell code.
+    case 'exec': {
+      const cmd = args.command || extractCodexExecCommand(String(args.input || ''));
+      if (cmd) return `Bash: ${truncate(String(cmd).replace(/\n/g, ' ').trim(), 120)}`;
+      const code = String(args.input || '').replace(/\n/g, ' ').trim();
+      return code ? `exec: ${truncate(code, 100)}` : 'exec';
+    }
     case 'read_file':
       return `Read ${shortenPath(args.file_path || args.path || '')}`;
     case 'write_file':
@@ -627,6 +635,41 @@ function applyPatchTargetPath(input: string): string | undefined {
 }
 
 /**
+ * Newer Codex (gpt-5.6-sol / codex >=~0.145) runs every shell command inside a JS
+ * cell: a `custom_tool_call` named `exec` whose `input` is code like
+ * `const r = await tools.exec_command({cmd:"git status", "workdir":"…"});`. The real
+ * shell command is buried in that `cmd:"…"` string, so without unwrapping it the
+ * whole trajectory reads as an opaque wall of "exec". This pulls the shell command
+ * back out so the step reads by its actual program (`git`, `agents`, `scp`, …),
+ * exactly like Claude's `Bash` and Droid's `Execute`. Returns undefined for a
+ * non-shell cell (`tools.view_image(...)`, a raw JS computation) — those genuinely
+ * aren't shell and stay labeled by their code.
+ */
+export function extractCodexExecCommand(input: string | undefined): string | undefined {
+  if (!input || !input.includes('tools.exec_command')) return undefined;
+  const seg = input.slice(input.indexOf('tools.exec_command'));
+  // Locate the `cmd:` key and parse the JS string literal that follows, honoring
+  // \" \\ \n escapes (codex nests quoted args like `agents ssh zion \"…\"`).
+  const open = /\bcmd\s*:\s*(["'])/.exec(seg);
+  if (!open) return undefined;
+  const quote = open[1];
+  let out = '';
+  for (let i = open.index + open[0].length; i < seg.length; i++) {
+    const ch = seg[i];
+    if (ch === '\\') {
+      const next = seg[i + 1];
+      out += next === 'n' ? '\n' : next === 't' ? '\t' : next ?? '';
+      i++;
+      continue;
+    }
+    if (ch === quote) break;
+    out += ch;
+  }
+  const trimmed = out.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+/**
  * Parse Codex JSONL *content* (already read into a string) into normalized
  * events. Split from `parseCodex` so the tail reader can parse just the last
  * chunk without re-reading the whole file.
@@ -764,6 +807,9 @@ export function parseCodexContent(content: string): SessionEvent[] {
         const rawName = payload.name || 'unknown';
         const input = typeof payload.input === 'string' ? payload.input : '';
         const isApplyPatch = rawName === 'apply_patch';
+        // Newer Codex wraps shell in a JS `exec` cell — unwrap the real command so
+        // the step reads by its program instead of a bare "exec" (see extractor).
+        const execCommand = rawName === 'exec' ? extractCodexExecCommand(input) : undefined;
         // Multi-file patches: one tool_use per file so artifact discovery sees
         // every path (RUSH-1410). Single-file / non-patch keep one event.
         const patchPaths = isApplyPatch ? applyPatchTargetPaths(input) : [];
@@ -773,6 +819,7 @@ export function parseCodexContent(content: string): SessionEvent[] {
         const emitOne = (patchPath: string | undefined) => {
           const args: any = { input: truncatedInput };
           if (patchPath) args.file_path = patchPath;
+          if (execCommand) args.command = execCommand;
           const callId = payload.call_id || payload.id;
           if (callId) callMap.set(callId, { name: tool, args });
           events.push({
@@ -782,6 +829,7 @@ export function parseCodexContent(content: string): SessionEvent[] {
             tool,
             callId,
             args,
+            command: execCommand,
             path: patchPath,
           });
         };
