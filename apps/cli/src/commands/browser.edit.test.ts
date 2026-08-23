@@ -206,26 +206,50 @@ describe('agents browser profiles scope', () => {
 });
 
 describe('agents browser profiles prune — misfiled reporting', () => {
-  it('names each misfiled fleet profile and the repair, and offers none for deletion', async () => {
-    // reportMisfiled() is the PRIMARY surface for this finding: a misfiled
-    // profile is never a prune candidate, and the `kept` loop only runs when
-    // there is nothing to prune. Without this test, deleting the whole filter
-    // leaves the suite green.
+  // reportMisfiled() is the PRIMARY surface for this finding: a misfiled profile
+  // is never a prune candidate, and the `kept` loop only prints when there is
+  // nothing to prune at all.
+  //
+  // The subtlety these assertions are built around: misfiledFleetProfile's `why`
+  // ALREADY ends with "…agents browser profiles scope <name> local", and that
+  // `why` is echoed by the kept loop. So a bare `toContain(<repair command>)`
+  // passes off the kept reason even when reportMisfiled is gutted, and a
+  // `/misfiled/i` match passes off the fixture's own name. Hence: a fixture name
+  // with no "misfiled" in it, and a line-anchored match on reportMisfiled's own
+  // two-space-indented format, which the kept line ("  kept <name> …") cannot
+  // satisfy.
+  const FLEET_MISFILED = {
+    name: 'work-fleet',
+    browser: 'custom' as const,
+    binary: process.execPath,
+    endpoints: ['cdp://localhost:9401'],
+  };
+
+  it('names each misfiled profile with its repair, in reportMisfiled own format', async () => {
     const { createProfile } = await freshBrowserModules();
-    await createProfile(
-      { name: 'misfiled-one', browser: 'custom', binary: process.execPath, endpoints: ['cdp://localhost:9401'] },
-      { fleet: true },
-    );
+    await createProfile(FLEET_MISFILED, { fleet: true });
     const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
     await run(['profiles', 'prune', '--dry-run']);
 
     const out = log.mock.calls.map((c) => String(c[0])).join('\n');
-    expect(out).toMatch(/misfiled/i);
-    expect(out).toContain('agents browser profiles scope misfiled-one local');
+    expect(out).toMatch(/^1 fleet profile is misfiled —/m);
+    expect(out).toMatch(/^ {2}work-fleet — agents browser profiles scope work-fleet local$/m);
     expect(out).toMatch(/never deletes these/i);
-    // And it is not offered for removal.
-    expect(out).not.toMatch(/Would remove[\s\S]*misfiled-one/);
+  });
+
+  it('offers no misfiled profile for deletion, even with --fleet', async () => {
+    // --fleet is the path that used to reach `binary-missing` and delete it
+    // fleet-wide. Asserting it without --fleet would be trivially true.
+    const { createProfile } = await freshBrowserModules();
+    await createProfile(FLEET_MISFILED, { fleet: true });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await run(['profiles', 'prune', '--dry-run', '--fleet']);
+
+    const out = log.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(out).not.toMatch(/Would remove[\s\S]*work-fleet/);
+    expect(out).toMatch(/^ {2}work-fleet — agents browser profiles scope work-fleet local$/m);
   });
 
   it('says nothing about misfiling when every fleet profile is correctly scoped', async () => {
