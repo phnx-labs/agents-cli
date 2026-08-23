@@ -35,7 +35,7 @@ import { planFleetTargets } from '../devices/fleet.js';
 import { assertValidSshTarget, shellQuote, sshExecAsync } from '../ssh-exec.js';
 import { machineId } from '../session/sync/config.js';
 import { ptyRequest } from '../pty-client.js';
-import { openUrl } from '../open-url.js';
+import { showUrl } from '../open-url.js';
 import {
   readAuthHealthCache,
   type AuthVerdict,
@@ -647,7 +647,13 @@ export async function runFleetLogin(opts: RunFleetLoginOptions = {}): Promise<Lo
   if (!opts.json) {
     console.log(`Dashboard: ${dashUrl}`);
   }
-  if (opts.open !== false) openUrl(dashUrl);
+  if (opts.open !== false) {
+    const shown = await showUrl(dashUrl);
+    if (shown.via === 'none') {
+      console.error('Could not open a browser — open this yourself:');
+      console.error(`  ${dashUrl}`);
+    }
+  }
 
   const driver = opts.driver ?? defaultPtyDriver();
   const remotable = pending.filter((p) => p.remotable);

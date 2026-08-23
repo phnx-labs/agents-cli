@@ -23,7 +23,8 @@ export interface SessionsPickerCommandSpec<TRow, TOpts extends SessionsPickerGat
    * selector) falls through to the flat printer. Computer has no `--open`.
    */
   requireOpenUndefined?: boolean;
-  runFlat: (opts: TOpts) => void;
+  /** May be async — the browser spec's flat path awaits an artifact open. */
+  runFlat: (opts: TOpts) => void | Promise<void>;
   buildRows: (opts: TOpts) => TRow[];
   emptyMessage: (opts: TOpts) => string;
   message: string;
@@ -94,7 +95,7 @@ export function createSessionsPickerCommand<TRow, TOpts extends SessionsPickerGa
     shouldOpen,
     run: async (opts) => {
       if (!shouldOpen(opts, isInteractiveTerminal())) {
-        spec.runFlat(opts);
+        await spec.runFlat(opts);
         return;
       }
       const rows = spec.buildRows(opts);

@@ -504,20 +504,8 @@ export class BrowserService {
     }
     const taskLabel = deriveTaskLabel({ title: opts.title, url: opts.url });
 
-    let conn = this.connections.get(composite);
+    let conn = await this.reuseHealthyConnection(composite);
     let effectiveKey: ConnectionKey = composite;
-
-    // If we have a cached connection, confirm it's still usable before any
-    // caller relies on it. A browser killed externally (Cmd-Q, crash, or a
-    // user clearing the profile by hand) leaves a closed WebSocket here.
-    // Without this check the next `cdp.send` throws "CDP connection not
-    // open" and the user has no way to recover short of killing the daemon.
-    if (conn && !(await isConnHealthy(conn))) {
-      try { conn.cdp.close(); } catch { /* already closed */ }
-      conn.cleanup?.();
-      this.connections.delete(composite);
-      conn = undefined;
-    }
 
     if (conn && conn.electron && conn.tasks.size > 0) {
       if (this.forkingProfiles.has(composite)) {
@@ -542,11 +530,7 @@ export class BrowserService {
         }
       }
     } else if (!conn) {
-      conn = await this.connectProfile(effectiveProfile, resolved.target, composite);
-      conn.key = composite;
-      conn.profile = profileName;
-      this.connections.set(composite, conn);
-      await this.applyDefaultDownloadBehavior(conn, composite);
+      conn = await this.openConnection(effectiveProfile, resolved.target, composite, profileName);
     }
     if (conn && !conn.profile) conn.profile = profileName;
 
@@ -3465,6 +3449,82 @@ export class BrowserService {
     // Keep only last 50 entries
     history = history.slice(0, 50);
     await fs.promises.writeFile(historyFile, JSON.stringify(history, null, 2));
+  }
+
+  /**
+   * The cached connection for `key`, or undefined — evicting it first if the
+   * browser died underneath us.
+   *
+   * A browser killed externally (Cmd-Q, crash, a user clearing the profile by
+   * hand) leaves a closed WebSocket in the map. Without this the next
+   * `cdp.send` throws "CDP connection not open" and there is no recovery short
+   * of killing the daemon.
+   */
+  private async reuseHealthyConnection(key: ConnectionKey): Promise<ProfileConnection | undefined> {
+    const conn = this.connections.get(key);
+    if (!conn) return undefined;
+    if (await isConnHealthy(conn)) return conn;
+    try { conn.cdp.close(); } catch { /* already closed */ }
+    conn.cleanup?.();
+    this.connections.delete(key);
+    return undefined;
+  }
+
+  /** Connect a profile at `target`, register it under `key`, and arm downloads. */
+  private async openConnection(
+    profile: BrowserProfile,
+    target: string,
+    key: ConnectionKey,
+    profileName: ProfileName,
+  ): Promise<ProfileConnection> {
+    const conn = await this.connectProfile(profile, target, key);
+    conn.key = key;
+    conn.profile = profileName;
+    this.connections.set(key, conn);
+    await this.applyDefaultDownloadBehavior(conn, key);
+    return conn;
+  }
+
+  /**
+   * Open a tab for a HUMAN to read, bound to no task.
+   *
+   * That is the entire difference from {@link start}, and it is the point. The
+   * abandoned-task reaper closes a task's tabs when the calling session dies or
+   * after the idle window, but it "deliberately never touches a tab that is not
+   * in `task.tabs`" (hygiene.ts) — so a viewer tab must not be in one, or the
+   * artifact the user is reading vanishes when the agent that rendered it exits.
+   *
+   * Consequently `stop`/`done` do not close it either, which is correct: it is
+   * the user's tab now.
+   */
+  async showUrl(
+    profileName: ProfileName,
+    url: string,
+    opts: { endpointName?: string; fleetRemote?: boolean; actor?: string } = {},
+  ): Promise<{ profile: ProfileName; key: ConnectionKey; tabId: string }> {
+    // Same consent gate as start(): this opens a browser, so a fleet-remote
+    // caller needs the target machine's opt-in.
+    assertRemoteControlAllowedForRequest(opts.fleetRemote, { actor: opts.actor });
+
+    const profile = await getProfile(profileName);
+    if (!profile) throw new Error(`Profile "${profileName}" not found`);
+
+    const resolved = resolveEndpoint(profile, opts.endpointName);
+    const key = connectionKey(profileName, resolved.name);
+    const effectiveProfile: BrowserProfile = {
+      ...profile,
+      binary: resolved.binary,
+      targetFilter: resolved.targetFilter,
+    };
+
+    const conn =
+      (await this.reuseHealthyConnection(key)) ??
+      (await this.openConnection(effectiveProfile, resolved.target, key, profileName));
+
+    // createPageTarget refuses Arc with an actionable error rather than crashing it.
+    const created = await this.createPageTarget(conn, { url });
+    this.invalidateTargetCache(conn);
+    return { profile: profileName, key, tabId: created.targetId };
   }
 
   async getHistory(limit = 10): Promise<HistoricalTask[]> {

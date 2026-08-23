@@ -1388,7 +1388,7 @@ export interface TmuxWrapContext {
   raw: boolean;
   /** The AGENTS_NO_TMUX=1 escape hatch. */
   noTmuxEnv: boolean;
-  /** This device's `tmux.enabled` config — false turns the wrap off for every launch on this box. */
+  /** This device's `tmux.enabled` config — true opts every eligible launch on this box into the wrap. */
   configEnabled: boolean;
   /** Whether a tmux binary is on PATH. */
   tmuxAvailable: boolean;
@@ -1398,7 +1398,7 @@ export interface TmuxWrapContext {
  * Decide whether to run an interactive agent INSIDE a detached tmux session on
  * the shared socket (then attach the current TTY) instead of a bare spawn.
  *
- * tmux-wrapping gives every interactive agent an exact, unique `%pane` handle so
+ * Opting into tmux wrapping gives every interactive agent an exact, unique `%pane` handle so
  * `agents sessions --active` can tell co-located agents apart, and lets `agents
  * focus` re-attach a live session without forking it. Pure so the gate is unit-
  * tested independently of the (side-effecting) spawn.
@@ -1409,7 +1409,7 @@ export interface TmuxWrapContext {
  *   - not already in tmux — nesting tmux-in-tmux is pointless and confusing.
  *   - not --raw       — explicit opt-out.
  *   - not AGENTS_NO_TMUX=1 — env opt-out (CI, scripts, the shim passthrough path).
- *   - tmux.enabled    — this device's durable opt-out, for a box whose tmux is broken.
+ *   - tmux.enabled    — this device explicitly opted into addressable tmux panes.
  *   - tmux installed  — otherwise there is nothing to wrap with.
  */
 export function shouldWrapInTmux(ctx: TmuxWrapContext): boolean {
@@ -1544,7 +1544,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const name = slugifyName(`ag-${options.agent}-${idSeed}`);
 
   const RED = '\x1b[31m', GRAY = '\x1b[90m', OFF = '\x1b[0m';
-  const NO_TMUX_TIP = `${GRAY}  Tip: re-run with --no-tmux to launch the agent directly and see its full output.\n  If tmux is broken on this machine, turn the wrap off for good: agents config set devices.${machineId()}.tmux off${OFF}\n\n`;
+  const NO_TMUX_TIP = `${GRAY}  This run used the opt-in tmux wrap. Re-run with --no-tmux for a direct launch, or turn the wrap off: agents config set devices.${machineId()}.tmux off${OFF}\n\n`;
 
   // Recap a dead pane's tail into THIS shell's stderr. The pane-died hook
   // detaches the client the instant the agent exits, so a fast failure (a
@@ -1846,11 +1846,10 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     args: redactArgs(args.slice(0, 10)),
   });
 
-  // Interactive spawn-wrap: on macOS/Linux, run the agent INSIDE a shared-socket
-  // tmux session (then attach this TTY) so it gets a unique, addressable %pane.
-  // Headless runs, Windows, already-in-tmux, --raw, and AGENTS_NO_TMUX=1 keep the
-  // bare spawn below. See shouldWrapInTmux / runInTmux.
-  if (shouldWrapInTmux({
+  // Interactive spawn-wrap: when this device opts in on macOS/Linux, run the
+  // agent INSIDE a shared-socket tmux session (then attach this TTY) so it gets
+  // a unique, addressable %pane. Every failed guard keeps the bare spawn below.
+  const wrapInTmux = shouldWrapInTmux({
     interactive,
     platform: process.platform,
     inTmux: !!process.env.TMUX,
@@ -1858,7 +1857,8 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     noTmuxEnv: process.env.AGENTS_NO_TMUX === '1',
     configEnabled: isTmuxEnabled(),
     tmuxAvailable: isTmuxInstalled(),
-  })) {
+  });
+  if (wrapInTmux) {
     timer.mark('startup');
     try {
       const result = await runInTmux(options, executable, args);

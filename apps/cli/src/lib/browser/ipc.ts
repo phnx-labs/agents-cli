@@ -465,6 +465,23 @@ export class BrowserIPCServer {
         return { ok: true, version: getCliVersion() };
       }
 
+      case 'show': {
+        // Task-less by design — see BrowserService.showUrl. Absent from both
+        // PAGE_CREATE_VERBS and PAGE_RESOLVE_VERBS, so bindTask never ran above
+        // and this request carries no task.
+        if (!request.url) {
+          return { ok: false, error: actionable('URL required.', 'Next: agents browser navigate <url>') };
+        }
+        if (!request.profile) {
+          return { ok: false, error: actionable('Profile required.', 'Next: agents browser profiles list') };
+        }
+        const shown = await this.service.showUrl(request.profile, request.url, {
+          fleetRemote: request.fleetRemote,
+          actor: request.actor,
+        });
+        return { ok: true, tabId: shown.tabId };
+      }
+
       case 'start': {
         if (!request.profile) {
           return { ok: false, error: actionable('Profile required.', 'Next: agents browser profiles list') };

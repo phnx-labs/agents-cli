@@ -7,6 +7,7 @@
  * the whole suite is skipped at module load.
  */
 
+import { spawnSync } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -32,6 +33,9 @@ import {
   splitPane,
   AGENT_HOOK_SCHEMA,
   agentPaneDiedHook,
+  AGENTS_TMUX_HISTORY_LIMIT,
+  AGENTS_TMUX_CONFIG_SCHEMA,
+  buildCreateSessionArgs,
   TmuxSessionError,
 } from './session.js';
 
@@ -66,6 +70,69 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(slugifyName('hello world')).toBe('hello-world');
     expect(slugifyName('agent:claude.task')).toBe('agent-claude-task');
     expect(slugifyName('---trim---')).toBe('trim');
+  });
+
+  it('builds session creation with agents-cli server ergonomics before new-session', () => {
+    const args = buildCreateSessionArgs({ name: 'ergonomic', cmd: 'sleep 30' }, '/agents/tmux-defaults.conf');
+    expect(args).toEqual([
+      '-f', '/agents/tmux-defaults.conf',
+      'set-option', '-g', 'remain-on-exit', 'on', ';',
+      'new-session', '-d', '-s', 'ergonomic', '-P', '-F', '#{pane_id}',
+      '--', 'sh', '-c', 'sleep 30',
+    ]);
+  });
+
+  it('keeps explicit user tmux options and mouse-copy bindings', async () => {
+    const userHome = path.join(tempDir, 'home');
+    fs.mkdirSync(userHome);
+    fs.writeFileSync(path.join(userHome, '.tmux.conf'), [
+      'set-option -g mouse off',
+      'set-option -s set-clipboard external',
+      'set-option -g history-limit 50000',
+      'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X cancel',
+      'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X cancel',
+    ].join('\n'));
+
+    await createSession({
+      name: 'user-config',
+      cmd: 'sleep 30',
+      socket,
+      env: { ...process.env, HOME: userHome, XDG_CONFIG_HOME: path.join(userHome, '.config') },
+    });
+
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'mouse'] })).stdout.trim()).toBe('off');
+    expect((await runTmux({ socket, args: ['show-options', '-sv', 'set-clipboard'] })).stdout.trim()).toBe('external');
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'history-limit'] })).stdout.trim()).toBe('50000');
+    for (const table of ['copy-mode', 'copy-mode-vi']) {
+      const binding = (await runTmux({ socket, args: ['list-keys', '-T', table, 'MouseDragEnd1Pane'] })).stdout;
+      expect(binding).toContain('cancel');
+      expect(binding).not.toContain('copy-selection-no-clear');
+    }
+  });
+
+  it('configures mouse, OSC 52 clipboard, scrollback, and non-clearing mouse copy on its socket', async () => {
+    const unconfiguredHome = path.join(tempDir, 'unconfigured-home');
+    fs.mkdirSync(unconfiguredHome);
+    await createSession({
+      name: 'ergonomic',
+      cmd: 'sleep 30',
+      socket,
+      env: {
+        ...process.env,
+        HOME: unconfiguredHome,
+        XDG_CONFIG_HOME: path.join(unconfiguredHome, '.config'),
+      },
+    });
+
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'mouse'] })).stdout.trim()).toBe('on');
+    expect((await runTmux({ socket, args: ['show-options', '-sv', 'set-clipboard'] })).stdout.trim()).toBe('on');
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'history-limit'] })).stdout.trim())
+      .toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+
+    for (const table of ['copy-mode', 'copy-mode-vi']) {
+      const binding = (await runTmux({ socket, args: ['list-keys', '-T', table, 'MouseDragEnd1Pane'] })).stdout;
+      expect(binding).toContain('copy-selection-no-clear');
+    }
   });
 
   it('creates a detached session and reports it via hasSession + listSessions', async () => {
@@ -657,3 +724,76 @@ async function waitForCapture(
     await wait(50);
   }
 }
+
+describe('already-running server reconcile (RUSH-3066)', () => {
+  // These drive the REAL createSession() against a REAL tmux server, because the
+  // bug being fixed lives in createSession's control flow, not in tmux. A test
+  // that only shells out to `tmux` directly would still pass with the fix
+  // deleted, which is exactly the ceremony apps/cli/AGENTS.md forbids.
+  const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ag-reconcile-'));
+
+  it('configures a server that was ALREADY running before agents-cli touched it', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const socket = path.join(dir, 's.sock');
+    try {
+      // A pre-existing server started WITHOUT our config — the state every
+      // machine is in at upgrade.
+      spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'preexisting'], { encoding: 'utf-8' });
+      const before = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      expect(before.stdout.trim()).toBe('off');
+
+      await createSession({ name: 'agent-1', socket, cmd: 'sleep 30' });
+
+      const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      const hist = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'history-limit'], { encoding: 'utf-8' });
+      const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
+      // Without the reconcile branch these are 'off' / '2000' / '' — tmux
+      // ignores -f on a server that is already up.
+      expect(mouse.stdout.trim()).toBe('on');
+      expect(hist.stdout.trim()).toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+      expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles on the attachExisting path too', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const socket = path.join(dir, 's.sock');
+    try {
+      spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'legacy'], { encoding: 'utf-8' });
+      await createSession({ name: 'legacy', socket, attachExisting: true });
+      const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
+      expect(mouse.stdout.trim()).toBe('on');
+      expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not source the user config twice on a cold start', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const home = path.join(dir, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    const marker = path.join(dir, 'sourced.log');
+    // A side-effectful user config, the way TPM's run-shell behaves.
+    fs.writeFileSync(path.join(home, '.tmux.conf'), `run-shell "echo x >> ${marker}"\n`);
+    const socket = path.join(dir, 's.sock');
+    try {
+      await createSession({ name: 'cold', socket, cmd: 'sleep 30', env: { ...process.env, HOME: home } });
+      // Give run-shell a moment to land.
+      await new Promise((r) => setTimeout(r, 400));
+      const fired = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf-8').trim().split('\n').length : 0;
+      expect(fired).toBeLessThanOrEqual(1);
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

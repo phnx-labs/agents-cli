@@ -127,3 +127,4 @@ describe('resolveInjectTargetForSession — pty + refusals', () => {
     if (!r.addressable) expect(r.reason).toContain('warp');
   });
 });
+

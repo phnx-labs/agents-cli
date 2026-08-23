@@ -156,6 +156,20 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
         : `auto.pool must be one of ${AUTO_POOL_MODES.join(' | ')}.`,
   },
   {
+    name: 'browser.viewer',
+    yamlKey: 'browserViewer',
+    scope: 'device',
+    visibility: 'machine',
+    type: 'string',
+    description:
+      "Which browser THIS machine shows YOU a page in (an .html artifact, `agents feedback`, a login " +
+      "dashboard): a profile name, or `os` for the OS default handler. Unset follows browser.profile. " +
+      "Distinct from browser.profile, which is the profile agents DRIVE — see RUSH-2709 for why " +
+      "collapsing the two was a mistake. Set it to `os` to keep the OS default handler.",
+    validate: (v: unknown) =>
+      typeof v === 'string' && v.length > 0 ? null : 'browser.viewer must be `os` or a profile name.',
+  },
+  {
     name: 'browser.profile',
     yamlKey: 'defaultBrowserProfile',
     scope: 'device',
@@ -212,12 +226,11 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     scope: 'device',
     visibility: 'machine',
     type: 'bool',
-    defaultValue: true,
+    defaultValue: false,
     description:
       'Whether an interactive `agents run` on this device is wrapped in the shared-socket tmux session. ' +
-      'On gives every agent an addressable pane (`agents sessions --active` tells co-located agents apart, ' +
-      '`agents focus` re-attaches without forking). Off spawns the agent directly on this box — the durable ' +
-      'form of `--no-tmux`, for a machine whose tmux is broken or unwanted.',
+      'Off, the default, spawns the agent directly. Turn it on to give every agent an addressable pane for ' +
+      '`agents message`, injection, and `agents focus` once the tmux mouse, clipboard, and scrollback behavior suits this device.',
   },
   {
     name: 'browser.remote-control',
@@ -856,16 +869,9 @@ export function assertSchedulerEnabled(): void {
   );
 }
 
-/**
- * True unless this machine's config turns off the managed tmux wrap for
- * interactive `agents run` launches (`tmux.enabled=false`).
- *
- * Read as one of the guards in `shouldWrapInTmux` (lib/exec.ts) — the durable,
- * per-machine form of `--no-tmux` / `AGENTS_NO_TMUX=1`, for a box whose tmux is
- * broken or unwanted. Unset means today's behavior: wrap.
- */
+/** True only when this machine explicitly enables the managed tmux wrap. */
 export function isTmuxEnabled(): boolean {
-  return getConfigValue('tmux.enabled').value !== false;
+  return getConfigValue('tmux.enabled').value === true;
 }
 
 /** True unless this machine's config disables the daemon outright (top-level kill switch). */
