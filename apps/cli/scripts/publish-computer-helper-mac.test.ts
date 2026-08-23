@@ -39,16 +39,27 @@ describe('publish-computer-helper-mac.sh', () => {
   });
 
   it('refuses a non-macOS host loudly rather than half-running', () => {
-    const r = spawnSync('bash', [PUBLISH], { encoding: 'utf-8' });
+    // Force the platform gate to see a NON-macOS host by shadowing `uname` on
+    // PATH, so this exercises the refusal path deterministically on ANY host.
+    // Running the real script unshadowed on a Mac would get PAST the gate and
+    // start the actual build+sign+notarize -- a 60s+ side-effecting operation
+    // that timed the test out on the one machine that signs releases (the
+    // attestation producer runs the full suite there), which is exactly the
+    // half-run this guard exists to prevent, now reproduced by the test itself.
+    const stub = fs.mkdtempSync(path.join(os.tmpdir(), 'uname-stub-'));
+    fs.writeFileSync(path.join(stub, 'uname'), '#!/bin/sh\necho Linux\n');
+    fs.chmodSync(path.join(stub, 'uname'), 0o755);
+
+    const r = spawnSync('bash', [PUBLISH], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${stub}:${process.env.PATH ?? ''}` },
+    });
     const out = `${r.stdout}${r.stderr}`;
 
-    if (process.platform === 'darwin') {
-      // On a Mac it gets past the platform gate; it must not die claiming otherwise.
-      expect(out).not.toContain('macOS only');
-    } else {
-      expect(r.status).not.toBe(0);
-      expect(out).toContain('macOS only');
-    }
+    // The gate must fire first and loud, before any real work: non-zero exit and
+    // the "macOS only" refusal, never a half-run.
+    expect(r.status, `expected a loud refusal, got: ${out}`).not.toBe(0);
+    expect(out).toContain('macOS only');
   });
 
   it('sourcing the signing context is a no-op without the release-box pass files', () => {
