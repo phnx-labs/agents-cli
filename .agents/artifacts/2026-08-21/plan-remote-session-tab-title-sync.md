@@ -214,6 +214,18 @@ only the editor-tab presentation derived from an accepted stream event.
 - Explicit remote launch, resume/fork, and host inventory must use `--device`
   and must not emit the retired `--host` flag.
 
+Pre-ship end-to-end verification used the exact branch build on zion with a
+Claude session executing on yosemite-s1. The indexed-and-published canonical
+row was:
+
+```json
+{"sessionId":"67098680-0741-4734-becf-7d5e9f32c97e","topic":"Reply with exactly READY","label":"Remote tab title synced live"}
+```
+
+The selected editor tab then rendered `Claude 67098680 - Remote tab title
+synced live`; the inspected screenshot is stored outside git at
+`.agents/scratch/rush3011-remote-tab-title-synced.jpg`.
+
 ## Risks
 
 - **Manual-label overwrite:** bounded by refusing updates when a genuine manual
@@ -234,7 +246,7 @@ only the editor-tab presentation derived from an accepted stream event.
 - [x] Reconcile canonical labels into tabs without a second scheduler.
 - [x] Add parser, database, and presentation regression tests.
 - [x] Run full CLI and extension verification plus packaged build.
-- [ ] Install on the interactive editor and visually verify the real tab.
+- [x] Install on the interactive editor and visually verify the real tab.
 - [ ] Land reviewed PR, release both surfaces, and verify installed versions.
 
 ## Tracking
