@@ -9,8 +9,15 @@
  * `browser.remote-control` config key, never synced).
  *
  * Local invocations (no marker) are never gated — this only governs cross-machine
- * drives. Read-only queries are not gated here; the gate sits at the drive entry
- * point (`browser start`), the one command that opens/attaches a browser.
+ * drives. Read-only queries are not gated.
+ *
+ * The authoritative gate is {@link assertRemoteControlAllowedForRequest}, called
+ * inside the browser daemon at the two points that can OPEN a browser
+ * (`BrowserService.start` and the create branch of `resolveOrCreateTask`). It has
+ * to live there because ~18 page verbs (`navigate`, `click`, `screenshot`, …)
+ * create a browser implicitly, and gating only the `browser start` command left
+ * every one of them ungated. {@link assertRemoteControlAllowed} remains as a
+ * fast-fail CLI-side check so a refused `start` never auto-creates a profile.
  */
 
 import { getConfigValue } from '../device-config.js';
@@ -53,5 +60,35 @@ export function assertRemoteControlAllowed(opts?: {
     `${who} tried to drive this machine's browser over \`browser --device\`, but remote ` +
       `browser control is off here. To allow it, run on THIS machine:\n` +
       `  agents browser remote-control on`,
+  );
+}
+
+/**
+ * The daemon-side consent gate.
+ *
+ * Reads ONLY the per-request marker, never `process.env`: the browser daemon is
+ * shared and long-lived, and it may have been auto-started by a fleet-remote CLI
+ * that leaked `AGENTS_FLEET_REMOTE=1` into its environment permanently. Reading
+ * the daemon's env would then refuse every subsequent LOCAL drive on this
+ * machine until the daemon restarted.
+ *
+ * `actor` is likewise the caller's forwarded identity, not the daemon's.
+ */
+export function assertRemoteControlAllowedForRequest(
+  fleetRemote: boolean | undefined,
+  opts: { actor?: string; enabled?: boolean } = {},
+): void {
+  if (!fleetRemote) return;
+  const enabled = opts.enabled ?? remoteControlEnabled();
+  if (enabled) return;
+  throw new Error(remoteControlRefusal(opts.actor || 'A fleet machine'));
+}
+
+/** The refusal text, shared by the CLI-side and daemon-side gates. */
+export function remoteControlRefusal(who: string): string {
+  return (
+    `${who} tried to drive this machine's browser over \`browser --device\`, but remote ` +
+    `browser control is off here. To allow it, run on THIS machine:\n` +
+    `  agents browser remote-control on`
   );
 }

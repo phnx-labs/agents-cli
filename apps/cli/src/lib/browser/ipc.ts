@@ -9,6 +9,7 @@ import { startDaemon, stopDaemon } from '../daemon/daemon.js';
 import { getCliVersion } from '../version.js';
 import { compareVersions } from '../agent-spec/primitives.js';
 import { getDaemonLogPath } from '../daemon/daemon.js';
+import { isFleetRemoteInvocation } from './remote-control.js';
 import { resolveCallerIdentity } from './caller-identity.js';
 import { actionable } from './service.js';
 import type { IPCRequest, IPCResponse, RefNodeJson } from './types.js';
@@ -419,6 +420,7 @@ export class BrowserIPCServer {
         actor: request.actor,
         launchId: request.launchId,
         sessionId: request.sessionId,
+        fleetRemote: request.fleetRemote,
         createIfMissing,
         title: request.title,
         url: request.url,
@@ -476,6 +478,7 @@ export class BrowserIPCServer {
           actor: request.actor,
           launchId: request.launchId,
           sessionId: request.sessionId,
+          fleetRemote: request.fleetRemote,
           title: request.title,
         });
         return {
@@ -977,14 +980,26 @@ export async function sendIPCRequest(
  * Fill actor / launchId / sessionId from the calling process when the request
  * left them blank. Explicit values on the request always win.
  */
-export function stampCallerIdentity(request: IPCRequest): IPCRequest {
-  if (request.actor && request.launchId && request.sessionId) return request;
+export function stampCallerIdentity(
+  request: IPCRequest,
+  env: NodeJS.ProcessEnv = process.env,
+): IPCRequest {
+  // The consent marker is stamped FIRST, above the identity early-return: a
+  // request that already carries a full identity (every streamed request does)
+  // would otherwise skip stamping entirely and reach the daemon unmarked.
+  // OR-ed, never overwritten — a client may assert the marker but must not be
+  // able to clear one this environment sets.
+  const fleetRemote = isFleetRemoteInvocation(env) || request.fleetRemote === true;
+  const marked: IPCRequest =
+    request.fleetRemote === fleetRemote ? request : { ...request, fleetRemote };
+
+  if (marked.actor && marked.launchId && marked.sessionId) return marked;
   const id = resolveCallerIdentity();
   return {
-    ...request,
-    actor: request.actor ?? id.actor,
-    launchId: request.launchId ?? id.launchId,
-    sessionId: request.sessionId ?? id.sessionId,
+    ...marked,
+    actor: marked.actor ?? id.actor,
+    launchId: marked.launchId ?? id.launchId,
+    sessionId: marked.sessionId ?? id.sessionId,
   };
 }
 

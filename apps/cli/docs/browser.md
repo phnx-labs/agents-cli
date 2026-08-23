@@ -346,10 +346,22 @@ whether it allows it:
 
 Consent is a **per-device setting** (the `browser.remote-control` config key,
 in this machine's `devices/<machine>/agents.yaml` `config:`) and **off by
-default**: a `browser --device <this-machine> start` from elsewhere is refused
+default**: a `browser --device <this-machine>` drive from elsewhere is refused
 with a message naming how to enable it, until the owner runs
 `agents browser remote-control on` here. The key is machine-local — only this
-box can set it. Local starts (no `--device`) are never gated.
+box can set it. Local drives (no `--device`) are never gated.
+
+The gate lives in the browser daemon, at the two points that can actually open a
+browser (`BrowserService.start` and the create branch of `resolveOrCreateTask`),
+not on the `browser start` command. It has to: `navigate`, `click`, `screenshot`
+and the other page verbs create a browser implicitly when the caller has no live
+task, so gating the one command left every one of them ungated. Read-only queries
+(`status`, `tabs`, `profiles list`) are not gated.
+
+The marker travels **on the request**, not in the daemon's environment. The
+daemon is shared and long-lived, and one auto-started by a fleet-remote CLI
+inherits `AGENTS_FLEET_REMOTE=1` for its whole life — a daemon that read its own
+environment would refuse every later *local* drive on the machine.
 
 ### Navigation
 

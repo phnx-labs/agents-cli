@@ -936,9 +936,11 @@ function registerTaskCommands(browser: Command): void {
     .option('--duration <sec>', 'Recording duration cap in seconds (with --record; default 60)', (v) => parseInt(v, 10))
     .option('--max-mb <mb>', 'Recording size cap in MB (with --record; default 25)', (v) => parseInt(v, 10))
     .action(async (opts) => {
-      // Consent gate: a fleet-remote `browser --device <this-machine> start` may
-      // only open a browser here if the owner opted in. Refuse before we resolve
-      // or auto-create any profile. Local starts are never gated.
+      // Fast-fail copy of the consent gate, so a refused start never resolves or
+      // auto-creates a profile. The AUTHORITATIVE gate is in the daemon
+      // (BrowserService.start / resolveOrCreateTask, via
+      // assertRemoteControlAllowedForRequest) — it has to be, because the page
+      // verbs create a browser implicitly and never reach this command.
       try {
         assertRemoteControlAllowed();
       } catch (err) {

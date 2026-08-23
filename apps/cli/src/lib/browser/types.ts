@@ -444,6 +444,18 @@ export interface IPCRequest {
    * for `computer.action` events, so both tool surfaces key on one signal.
    */
   sessionId?: string;
+
+  /**
+   * True when the CLI process that issued this request was itself dispatched to
+   * this machine by a fleet `--device` hop.
+   *
+   * Stamped client-side for the same reason actor/launchId are — and
+   * additionally because the daemon may have been auto-started BY a fleet-remote
+   * CLI and inherited AGENTS_FLEET_REMOTE for its whole life (startDetached
+   * passes `env: opts.env ?? process.env`). The daemon's own env is therefore
+   * not a truthful signal about the CURRENT caller; only the request is.
+   */
+  fleetRemote?: boolean;
 }
 
 /** Subset of IPCResponse describing a recording start result. */

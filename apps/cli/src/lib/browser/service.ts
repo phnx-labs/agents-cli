@@ -19,6 +19,7 @@ import {
   parseEndpointUrl,
 } from './profiles.js';
 import { killChrome, getRunningChromeInfo, launchBrowser, allocatePort } from './chrome.js';
+import { assertRemoteControlAllowedForRequest } from './remote-control.js';
 import { connectLocal } from './drivers/local.js';
 import { connectSSH, shellQuote } from './drivers/ssh.js';
 import { clearProfileRuntime, listProfileCacheDirs, readProfileRuntimeMeta, isProcessAlive } from './runtime-state.js';
@@ -444,6 +445,8 @@ export class BrowserService {
       launchId?: string;
       /** Calling agent session, forwarded from the CLI (see IPCRequest.sessionId). */
       sessionId?: string;
+      /** Whether the CALLER was dispatched here by a fleet `--device` hop. */
+      fleetRemote?: boolean;
       /** Explicit human label (`--title`). */
       title?: string;
     } = {}
@@ -458,6 +461,12 @@ export class BrowserService {
     key: ConnectionKey;
     skill?: ResolvedDomainSkill;
   }> {
+    // Consent gate, before anything is resolved or launched. This is the
+    // authoritative one: gating only the `browser start` COMMAND left the ~18
+    // page verbs that create a browser implicitly (navigate, click, screenshot,
+    // …) able to open a browser on a machine whose owner never opted in.
+    assertRemoteControlAllowedForRequest(opts.fleetRemote, { actor: opts.actor });
+
     const profile = await getProfile(profileName);
     if (!profile) {
       throw new Error(`Profile "${profileName}" not found`);
@@ -2806,6 +2815,8 @@ export class BrowserService {
    *   - no handle, zero, !createIfMissing → return null (caller reports "nothing to close")
    */
   async resolveOrCreateTask(opts: {
+    /** Whether the CALLER was dispatched here by a fleet `--device` hop. */
+    fleetRemote?: boolean;
     task?: string;
     profile?: string;
     actor?: string;
@@ -2860,6 +2871,11 @@ export class BrowserService {
     // Zero matches for this caller.
     if (!opts.createIfMissing) return null;
 
+    // Refuse BEFORE ensureDefaultBrowserProfile() below, which probes local
+    // browser installs and may CREATE and persist an `auto-chrome` profile — a
+    // refused request must not leave state behind on the target machine.
+    assertRemoteControlAllowedForRequest(opts.fleetRemote, { actor: opts.actor });
+
     // Implicit start on the default / named profile.
     let profileName = opts.profile;
     if (!profileName) {
@@ -2868,6 +2884,7 @@ export class BrowserService {
       profileName = detected.name;
     }
     const started = await this.start(profileName, {
+      fleetRemote: opts.fleetRemote,
       url: opts.url,
       actor: opts.actor,
       launchId: opts.launchId,

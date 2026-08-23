@@ -302,3 +302,176 @@ describe('gc action — reaper over IPC', () => {
     }
   }, 20_000);
 });
+
+// The bypass this closes: `assertRemoteControlAllowed` was called only from the
+// `browser start` COMMAND, but 18 page verbs create a browser implicitly through
+// resolveOrCreateTask -> start(). A fleet-remote `navigate` therefore opened a
+// browser on a machine whose owner never ran `browser remote-control on`.
+describe('remote-control consent gate over IPC', () => {
+  it('refuses a fleet-remote navigate when consent is off, and creates nothing', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      const response = await sendIPCRequest({
+        action: 'navigate',
+        url: 'https://example.com',
+        fleetRemote: true,
+        // A complete identity, so stampCallerIdentity takes its early return —
+        // the marker still has to survive, which is why it is stamped above it.
+        actor: 'yosemite-s0',
+        launchId: 'l1',
+        sessionId: 's1',
+      });
+      expect(response.ok).toBe(false);
+      expect(response.error).toMatch(/remote-control on/);
+      // Refused before anything was opened.
+      const connections = (service as unknown as { connections: Map<string, unknown> }).connections;
+      expect(connections.size).toBe(0);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+
+  it('does not gate a local navigate — no marker, no refusal', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      const response = await sendIPCRequest({
+        action: 'navigate',
+        url: 'https://example.com',
+        profile: 'definitely-not-a-real-profile',
+        actor: 'zion',
+        launchId: 'l1',
+        sessionId: 's1',
+      });
+      // It fails for its own reason (no such profile), NEVER the consent refusal.
+      expect(response.ok).toBe(false);
+      expect(response.error).not.toMatch(/remote-control on/);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+});
+
+describe('stampCallerIdentity — consent marker', () => {
+  it('marks a request dispatched here by a fleet hop', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    const out = stampCallerIdentity({ action: 'navigate' } as never, { AGENTS_FLEET_REMOTE: '1' });
+    expect(out.fleetRemote).toBe(true);
+  });
+
+  it('marks it even when the identity is already complete (the early-return trap)', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    const out = stampCallerIdentity(
+      { action: 'navigate', actor: 'a', launchId: 'l', sessionId: 's' } as never,
+      { AGENTS_FLEET_REMOTE: '1' },
+    );
+    expect(out.fleetRemote).toBe(true);
+  });
+
+  it('a client cannot clear a marker the environment sets', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    const out = stampCallerIdentity(
+      { action: 'navigate', fleetRemote: false } as never,
+      { AGENTS_FLEET_REMOTE: '1' },
+    );
+    expect(out.fleetRemote).toBe(true);
+  });
+
+  it('leaves a local request unmarked', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    expect(stampCallerIdentity({ action: 'navigate' } as never, {}).fleetRemote).toBeFalsy();
+  });
+});
+
+// The bypass this closes: `assertRemoteControlAllowed` was called only from the
+// `browser start` COMMAND, but 18 page verbs create a browser implicitly through
+// resolveOrCreateTask -> start(). A fleet-remote `navigate` therefore opened a
+// browser on a machine whose owner never ran `browser remote-control on`.
+describe('remote-control consent gate over IPC', () => {
+  it('refuses a fleet-remote navigate when consent is off, and creates nothing', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      const response = await sendIPCRequest({
+        action: 'navigate',
+        url: 'https://example.com',
+        fleetRemote: true,
+        // A complete identity, so stampCallerIdentity takes its early return —
+        // the marker still has to survive, which is why it is stamped above it.
+        actor: 'yosemite-s0',
+        launchId: 'l1',
+        sessionId: 's1',
+      } as never);
+      expect(response.ok).toBe(false);
+      expect(response.error).toMatch(/remote-control on/);
+      const connections = (service as unknown as { connections: Map<string, unknown> }).connections;
+      expect(connections.size).toBe(0);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+
+  it('does not gate a local navigate — no marker, no refusal', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const service = new BrowserService();
+    const server = new BrowserIPCServer(service);
+    await server.start();
+    try {
+      const response = await sendIPCRequest({
+        action: 'navigate',
+        url: 'https://example.com',
+        profile: 'definitely-not-a-real-profile',
+        actor: 'zion',
+        launchId: 'l1',
+        sessionId: 's1',
+      } as never);
+      // It fails for its own reason (no such profile), NEVER the consent refusal.
+      expect(response.ok).toBe(false);
+      expect(response.error).not.toMatch(/remote-control on/);
+    } finally {
+      await server.stop();
+    }
+  }, 20_000);
+});
+
+describe('stampCallerIdentity — consent marker', () => {
+  it('marks a request dispatched here by a fleet hop', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    const out = stampCallerIdentity({ action: 'navigate' } as never, { AGENTS_FLEET_REMOTE: '1' });
+    expect(out.fleetRemote).toBe(true);
+  });
+
+  it('marks it even when the identity is already complete (the early-return trap)', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    const out = stampCallerIdentity(
+      { action: 'navigate', actor: 'a', launchId: 'l', sessionId: 's' } as never,
+      { AGENTS_FLEET_REMOTE: '1' },
+    );
+    expect(out.fleetRemote).toBe(true);
+  });
+
+  it('a client cannot clear a marker the environment sets', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    const out = stampCallerIdentity(
+      { action: 'navigate', fleetRemote: false } as never,
+      { AGENTS_FLEET_REMOTE: '1' },
+    );
+    expect(out.fleetRemote).toBe(true);
+  });
+
+  it('leaves a local request unmarked', async () => {
+    const { stampCallerIdentity } = await import('./ipc.js');
+    expect(stampCallerIdentity({ action: 'navigate' } as never, {}).fleetRemote).toBeFalsy();
+  });
+});
