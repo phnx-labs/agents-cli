@@ -231,7 +231,11 @@ function pctCell(v: number | undefined, width: number): string {
 const SPEC_WIDTH_MIN = 12;
 
 /** The static hardware as one compact cell — `12c 64G 1T`: cores, total RAM,
- * total root disk via fmtBytes. `—` only when no probe has ever seen the box.
+ * total root disk via fmtBytes. `—` covers two cases: no probe has ever seen
+ * the box, or the probe answered but yielded no usable core count (`parseNcpu`
+ * finding none, or the Windows `ncpu` group failing the finite-and-positive
+ * check) — the cell is keyed on `ncpu` because a spec string without it would
+ * read as a machine with zero cores.
  *
  * Deliberately NOT gated on `reachable`: hardware does not change while a
  * machine is down, so an offline device keeps rendering the spec from its last

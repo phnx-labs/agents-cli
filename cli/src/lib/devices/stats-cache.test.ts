@@ -25,7 +25,7 @@ function unreachableDev(name: string): DeviceProfile {
 }
 
 function stat(host: string, fetchedAt: number, loadPercent = 10): DeviceStats {
-  return { host, reachable: true, loadPercent, memPercent: 20, ncpu: 4, memTotalBytes: 16 * 1024 ** 3, diskTotalBytes: 256 * 1024 ** 3, fetchedAt };
+  return { host, reachable: true, loadPercent, memPercent: 20, ncpu: 4, memTotalBytes: 16 * 1024 ** 3, diskTotalBytes: 256 * 1024 ** 3, fetchedAt, specsFetchedAt: fetchedAt };
 }
 
 /** A probe stub that records which devices it was asked to probe. */
