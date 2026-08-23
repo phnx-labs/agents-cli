@@ -96,7 +96,11 @@ export interface SessionLineage {
 }
 
 export interface BuildLineageOptions {
-  /** Root the graph here. Defaults to the topmost ancestor of the first session. */
+  /**
+   * Which session the graph is about. The graph is always rooted at that
+   * session's TOPMOST ancestor in the pool, so passing a child still renders its
+   * whole team. Defaults to the first session in `sessions`.
+   */
   rootId?: string;
   /** Epoch ms used to classify {@link LineageActivity}. Defaults to `Date.now()`. */
   now?: number;
@@ -129,12 +133,31 @@ function classifyActivity(session: SessionMeta, now: number, activeWithin: numbe
 }
 
 /**
+ * How far outside a run's own spawn window a parentless teammate may still be
+ * adopted by that run's spawner.
+ *
+ * `groupSessionsByTeam` buckets by team NAME alone (`team-filter.ts:292`), and
+ * `--tree` scans the pool all-time, so two separate runs of a team called
+ * `fleet-resume` land in one group — without a window, the older run's
+ * parentless teammates get adopted by the newer run's orchestrator and render as
+ * its children. A teams run spawns its teammates within minutes of each other,
+ * so an hour is generous for the first or last of them and still far tighter
+ * than the all-time scan that caused the misattribution.
+ */
+const SPAWNER_ADOPTION_SLACK_MS = 60 * 60_000;
+
+function spawnMs(session: SessionMeta): number {
+  return new Date(spawnTs(session)).getTime();
+}
+
+/**
  * Resolve every parent → child edge the session index knows about.
  *
  * Two passes, in priority order: a teammate's own `parentSessionId` wins, and
- * only a teammate that carries none inherits its team's agreed-on spawner. A
- * self-edge (a record naming its own session) is dropped — it would make the
- * root its own child and hang the walk.
+ * only a teammate that carries none inherits its team's agreed-on spawner —
+ * and then only if it was spawned inside that run's own window (see
+ * {@link SPAWNER_ADOPTION_SLACK_MS}). A self-edge (a record naming its own
+ * session) is dropped: it would make the root its own child and hang the walk.
  */
 function resolveParents(sessions: SessionMeta[]): Map<string, LineageEdge> {
   const parentOf = new Map<string, LineageEdge>();
@@ -147,8 +170,15 @@ function resolveParents(sessions: SessionMeta[]): Map<string, LineageEdge> {
   for (const group of groupSessionsByTeam(sessions)) {
     const spawner = group.spawnerSessionId;
     if (!spawner) continue;
+    // The window of the teammates that actually named this spawner — the run.
+    const named = group.sessions.filter((r) => r.teamOrigin.parentSessionId === spawner).map(spawnMs).filter((t) => !Number.isNaN(t));
+    if (named.length === 0) continue;
+    const from = Math.min(...named) - SPAWNER_ADOPTION_SLACK_MS;
+    const to = Math.max(...named) + SPAWNER_ADOPTION_SLACK_MS;
     for (const row of group.sessions) {
       if (parentOf.has(row.id) || row.id === spawner) continue;
+      const ts = spawnMs(row);
+      if (Number.isNaN(ts) || ts < from || ts > to) continue;
       parentOf.set(row.id, { parent: spawner, child: row.id, source: 'teamSpawner' });
     }
   }

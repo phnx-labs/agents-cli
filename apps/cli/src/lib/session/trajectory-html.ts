@@ -671,7 +671,7 @@ export function renderLineageHtml(lineage: SessionLineage): string {
       ? '<p class="muted">This session spawned no indexed teammate. Only the orchestrator is drawn.</p>'
       : '';
   const unresolved = lineage.unresolvedParentIds.length > 0
-    ? `<p class="stall">${lineage.unresolvedParentIds.length} parent session${lineage.unresolvedParentIds.length === 1 ? '' : 's'} referenced but not in the scanned pool — widen with --all or --since.</p>`
+    ? `<p class="stall">${lineage.unresolvedParentIds.length} parent session${lineage.unresolvedParentIds.length === 1 ? '' : 's'} referenced but not in the scanned pool — widen with --limit or --since.</p>`
     : '';
 
   return `<!DOCTYPE html>

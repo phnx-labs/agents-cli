@@ -209,9 +209,14 @@ export function renderTrajectoryCompareText(
 }
 
 /**
- * Render a {@link SessionLineage} as an indented, ANSI-free tree — the `--tree`
- * text rendering an agent reads when it asks "what did this orchestrator spawn,
- * and where did the fan-out go?".
+ * Render a {@link SessionLineage} as a tree — the `--tree` text rendering an
+ * agent reads when it asks "what did this orchestrator spawn, and where did the
+ * fan-out go?".
+ *
+ * Drawn from the EDGES, not from each node's depth. Indenting by depth alone
+ * puts every depth-2 node under whichever depth-1 node happened to print last,
+ * so a nested teammate reads as a child of its aunt and its real parent is
+ * unrecoverable from the output — a lie an agent has no way to detect.
  *
  * One line per session: its handle/short id, harness, role, indexed tool count,
  * span, recency and PR when it opened one. No per-step detail — lineage answers
@@ -229,16 +234,37 @@ export function renderLineageText(lineage: SessionLineage): string {
   const spawned = lineage.nodes.length - 1;
   lines.push(`lineage: ${root.agent} ${root.shortId}${teamPart} · ${spawned} spawned session${spawned === 1 ? '' : 's'}`);
 
-  for (const node of lineage.nodes) {
-    const indent = node.depth === 0 ? '' : '  '.repeat(node.depth - 1) + '└─ ';
+  const byId = new Map(lineage.nodes.map((n) => [n.id, n]));
+  const childrenOf = new Map<string, string[]>();
+  for (const edge of lineage.edges) {
+    (childrenOf.get(edge.parent) ?? childrenOf.set(edge.parent, []).get(edge.parent)!).push(edge.child);
+  }
+
+  const describe = (node: SessionLineage['nodes'][number]): string => {
     const name = node.handle && node.handle !== node.shortId ? `${node.handle} · ${node.shortId}` : node.shortId;
     const bits = [node.agent, node.role, `${node.toolCount} tools`];
     if (node.durationMs > 0) bits.push(dur(node.durationMs, false));
     bits.push(node.activity);
     if (node.mode) bits.push(node.mode);
     if (node.prNumber) bits.push(`PR #${node.prNumber}`);
-    lines.push(`${indent}${name} · ${bits.join(' · ')}`);
-  }
+    return `${name} · ${bits.join(' · ')}`;
+  };
+
+  // Depth-first from the root so a child always prints directly under its own
+  // parent; `prefix` carries the ancestors' continuation bars.
+  const walk = (id: string, prefix: string): void => {
+    const kids = childrenOf.get(id) ?? [];
+    kids.forEach((childId, i) => {
+      const node = byId.get(childId);
+      if (!node) return;
+      const last = i === kids.length - 1;
+      lines.push(`${prefix}${last ? '└─ ' : '├─ '}${describe(node)}`);
+      walk(childId, `${prefix}${last ? '   ' : '│  '}`);
+    });
+  };
+
+  lines.push(describe(root));
+  walk(root.id, '');
 
   if (lineage.unresolvedParentIds.length > 0) {
     lines.push(

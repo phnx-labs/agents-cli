@@ -126,6 +126,34 @@ describe('buildLineage — the delegation graph from the session index', () => {
     expect(inherited).toEqual({ parent: root.id, child: parentless.id, source: 'teamSpawner' });
   });
 
+  it('does NOT adopt a parentless teammate from a different run that shares the team name', () => {
+    // groupSessionsByTeam buckets by team NAME alone and --tree scans all-time,
+    // so without a spawn window the older run's teammates became this run's kids.
+    const root = meta('now00000-0000-0000-0000-000000000000');
+    const sameRun = teammate('same0000-0000-0000-0000-000000000000', 'auth', root.id);
+    const otherRun = meta('old00000-0000-0000-0000-000000000000', {
+      isTeamOrigin: true,
+      // Same team name, spawned three days earlier, no parent of its own.
+      teamOrigin: { handle: 'stale-auth', team: 'fleet-resume', startedAt: T(60 * 72), source: 'meta' },
+    });
+
+    const lineage = buildLineage([root, sameRun, otherRun], { rootId: root.id, now: NOW });
+    expect(lineage.nodes.map((n) => n.id)).toEqual([root.id, sameRun.id]);
+    expect(lineage.edges.some((e) => e.child === otherRun.id)).toBe(false);
+  });
+
+  it('still adopts a parentless teammate spawned inside its own run window', () => {
+    const root = meta('win00000-0000-0000-0000-000000000000');
+    const named = teammate('namd0000-0000-0000-0000-000000000000', 'auth', root.id); // startedAt T(50)
+    const parentless = meta('pless000-0000-0000-0000-000000000000', {
+      isTeamOrigin: true,
+      teamOrigin: { handle: 'ui', team: 'fleet-resume', startedAt: T(48), source: 'meta' },
+    });
+
+    const lineage = buildLineage([root, named, parentless], { rootId: root.id, now: NOW });
+    expect(lineage.edges.find((e) => e.child === parentless.id)?.source).toBe('teamSpawner');
+  });
+
   it('roots at the topmost ancestor when a CHILD is selected, so --tree always shows the whole team', () => {
     const root = meta('top00000-0000-0000-0000-000000000000');
     const kid = teammate('kid00003-0000-0000-0000-000000000000', 'auth', root.id);
@@ -256,10 +284,38 @@ describe('renderLineageText — the indented tree an agent reads', () => {
     expect(out).toContain('e0ffab12 · claude · orchestrator · 22 tools');
     expect(out).toContain('└─ auth · 4f21aaaa · codex · orchestrator · 31 tools');
     expect(out).toContain('PR #2931');
-    expect(out).toMatch(/\n {2}└─ probe · deadbeef/); // depth 2 is indented under depth 1
+    expect(out).toMatch(/\n {3}└─ probe · deadbeef/); // nested under its own parent
     // eslint-disable-next-line no-control-regex
     expect(out).not.toMatch(/\[/);
     expect(out.endsWith('\n')).toBe(true);
+  });
+
+  it('nests each child under ITS OWN parent, never under whichever sibling printed last', () => {
+    // The regression: indenting by depth alone put B1 under A, so a nested
+    // teammate read as a child of its aunt and its real parent was unrecoverable.
+    const root = meta('root2222-0000-0000-0000-000000000000');
+    const a = teammate('aaaa0000-0000-0000-0000-000000000000', 'A', root.id);
+    const b = teammate('bbbb0000-0000-0000-0000-000000000000', 'B', root.id);
+    const a1 = teammate('a1110000-0000-0000-0000-000000000000', 'A1', a.id, {
+      teamOrigin: { handle: 'A1', team: 'fleet-resume', parentSessionId: a.id, startedAt: T(40), source: 'meta' },
+    });
+    const b1 = teammate('b1110000-0000-0000-0000-000000000000', 'B1', b.id, {
+      teamOrigin: { handle: 'B1', team: 'fleet-resume', parentSessionId: b.id, startedAt: T(40), source: 'meta' },
+    });
+
+    const out = renderLineageText(buildLineage([root, a, b, a1, b1], { rootId: root.id, now: NOW }));
+    const lines = out.split('\n');
+    const at = (needle: string) => lines.findIndex((l) => l.includes(needle));
+
+    // A1 prints directly after A (and before B), under A's branch.
+    expect(at('A1 · a1110000')).toBe(at('A · aaaa0000') + 1);
+    expect(at('B · bbbb0000')).toBe(at('A1 · a1110000') + 1);
+    expect(at('B1 · b1110000')).toBe(at('B · bbbb0000') + 1);
+    // A is not the last child, so its branch carries a continuation bar.
+    expect(lines[at('A · aaaa0000')].startsWith('├─ ')).toBe(true);
+    expect(lines[at('A1 · a1110000')].startsWith('│  └─ ')).toBe(true);
+    expect(lines[at('B · bbbb0000')].startsWith('└─ ')).toBe(true);
+    expect(lines[at('B1 · b1110000')].startsWith('   └─ ')).toBe(true);
   });
 
   it('says so plainly when the session spawned nothing', () => {
