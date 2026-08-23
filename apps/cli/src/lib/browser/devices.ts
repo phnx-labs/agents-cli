@@ -43,3 +43,26 @@ export function getDevice(name: string): DeviceDescriptor | undefined {
 export function listDevices(): string[] {
   return Object.keys(DEVICES);
 }
+
+/**
+ * Parse a `--window WxH` value. Returns null when the value is malformed, so
+ * callers emit their own actionable error.
+ *
+ * Shared by `profiles create` and `profiles edit` — one regex, one test, no
+ * drift between the two surfaces.
+ */
+export function parseWindowSize(raw: string): { width: number; height: number } | null {
+  const m = String(raw).match(/^(\d+)x(\d+)$/);
+  if (!m) return null;
+  return { width: parseInt(m[1], 10), height: parseInt(m[2], 10) };
+}
+
+/**
+ * Parse a `--position X,Y` value. Negative coordinates are valid — a window may
+ * sit on a display left of or above the primary one.
+ */
+export function parseWindowPosition(raw: string): { x: number; y: number } | null {
+  const m = String(raw).match(/^(-?\d+),(-?\d+)$/);
+  if (!m) return null;
+  return { x: parseInt(m[1], 10), y: parseInt(m[2], 10) };
+}

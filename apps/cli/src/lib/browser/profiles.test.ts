@@ -42,6 +42,10 @@ import {
   DEFAULT_PROFILE_ALIAS,
   formatProfilesTable,
   padColumn,
+  editProfile,
+  moveProfileScope,
+  assertLocalPortFree,
+  misfiledFleetProfile,
 } from './profiles.js';
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
@@ -1085,3 +1089,282 @@ describe('resolveProfileRefForStart — keeps the launchable repair (RUSH-2709)'
 function chromeCfg(): BrowserProfileConfig {
   return { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] };
 }
+
+// editProfile / moveProfileScope — the store-scope rules are the whole risk here.
+// A profile edited into the wrong store either vanishes from the machine that
+// owns the browser, or gets fleet-synced with a machine-specific port.
+describe('editProfile', () => {
+  beforeEach(() => {
+    vi.mocked(updateMeta).mockImplementation((updates: any) => {
+      const meta = vi.mocked(readMeta)() as any;
+      const next = typeof updates === 'function' ? updates(meta) : { ...meta, ...updates };
+      vi.mocked(writeMeta)(next);
+      return next;
+    });
+    vi.clearAllMocks();
+  });
+
+  function wire(store: ProfileStore) {
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+  }
+
+  it('keeps a fleet-scoped profile in the fleet store', async () => {
+    const store: ProfileStore = {
+      browser: { shared: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9401'] } },
+    };
+    wire(store);
+
+    const res = await editProfile('shared', { description: 'the shared one' });
+
+    expect(res.scope).toBe('fleet');
+    expect(res.changed).toEqual(['description']);
+    expect(store.browser!.shared.description).toBe('the shared one');
+    expect(store.deviceBrowser?.shared).toBeUndefined();
+  });
+
+  it('keeps a machine-local profile in the device store', async () => {
+    const store: ProfileStore = {
+      browser: {},
+      deviceBrowser: { mine: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9402'] } },
+    };
+    wire(store);
+
+    const res = await editProfile('mine', { description: 'local only' });
+
+    expect(res.scope).toBe('local');
+    expect(store.deviceBrowser!.mine.description).toBe('local only');
+    expect(store.browser?.mine).toBeUndefined();
+  });
+
+  it('reports a stale fleet copy when a machine-local name lived in the fleet store', async () => {
+    // `auto-chrome` is always machine-local by rule, so updateProfile pins the
+    // write local — leaving an older version's fleet copy behind. Reporting a
+    // clean success there would hide that every other box keeps the old value.
+    const store: ProfileStore = {
+      browser: {
+        [DEFAULT_BROWSER_PROFILE_NAME]: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9403'] },
+      },
+    };
+    wire(store);
+
+    const res = await editProfile(DEFAULT_BROWSER_PROFILE_NAME, { description: 'repaired' });
+
+    expect(res.scope).toBe('local');
+    expect(res.fleetCopyLeftStale).toBe(true);
+    expect(store.deviceBrowser![DEFAULT_BROWSER_PROFILE_NAME].description).toBe('repaired');
+    expect(store.browser![DEFAULT_BROWSER_PROFILE_NAME].description).toBeUndefined();
+  });
+
+  it('keeps every untouched field through a description-only edit', async () => {
+    const store: ProfileStore = { browser: {} };
+    wire(store);
+    await createProfile({
+      name: 'rich',
+      browser: 'custom',
+      binary: '/Applications/Canva.app/Contents/MacOS/Canva',
+      electron: true,
+      targetFilter: 'url:https://www.canva.com/',
+      endpoints: ['cdp://127.0.0.1:9404'],
+      secrets: 'canva-creds',
+      viewport: { width: 1512, height: 982, x: 80, y: 80 },
+    }, { fleet: true });
+
+    const before = storedProfile(store, 'rich');
+    await editProfile('rich', { description: 'now described' });
+    const after = storedProfile(store, 'rich');
+
+    expect(after.description).toBe('now described');
+    expect(after.binary).toBe(before.binary);
+    expect(after.electron).toBe(before.electron);
+    expect(after.targetFilter).toBe(before.targetFilter);
+    expect(after.secrets).toBe(before.secrets);
+    expect(after.endpoints).toEqual(before.endpoints);
+    expect(after.viewport).toEqual({ width: 1512, height: 982, x: 80, y: 80 });
+  });
+
+  it('does not treat the profile own port as a collision', async () => {
+    // Without the `ignore` argument every edit collides with itself, because the
+    // stored copy still owns the port being kept.
+    const store: ProfileStore = {
+      browser: { solo: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9405'] } },
+    };
+    wire(store);
+
+    await expect(
+      editProfile('solo', { endpoints: ['cdp://127.0.0.1:9405'], description: 'same port' })
+    ).resolves.toMatchObject({ scope: 'fleet' });
+  });
+
+  it('refuses an endpoint whose local port another profile owns', async () => {
+    const store: ProfileStore = {
+      browser: {
+        a: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9406'] },
+        b: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9407'] },
+      },
+    };
+    wire(store);
+
+    await expect(editProfile('a', { endpoints: ['cdp://127.0.0.1:9407'] })).rejects.toThrow(/"b"/);
+  });
+
+  it('refuses a target filter once electron is turned off in the same edit', async () => {
+    const store: ProfileStore = {
+      browser: {
+        app: {
+          browser: 'custom',
+          binary: '/Applications/Canva.app/Contents/MacOS/Canva',
+          electron: true,
+          targetFilter: 'url:https://www.canva.com/',
+          endpoints: ['cdp://127.0.0.1:9408'],
+        },
+      },
+    };
+    wire(store);
+
+    await expect(editProfile('app', { electron: undefined })).rejects.toThrow(/--target-filter/);
+  });
+
+  it('clears the description when passed undefined', async () => {
+    const store: ProfileStore = {
+      browser: { desc: { browser: 'chrome', description: 'old', endpoints: ['cdp://127.0.0.1:9409'] } },
+    };
+    wire(store);
+
+    await editProfile('desc', { description: undefined });
+
+    expect(store.browser!.desc.description).toBeUndefined();
+  });
+
+  it('rejects an unknown profile', async () => {
+    const store: ProfileStore = { browser: {} };
+    wire(store);
+    await expect(editProfile('ghost', { description: 'x' })).rejects.toThrow(/does not exist/);
+  });
+});
+
+describe('moveProfileScope', () => {
+  beforeEach(() => {
+    vi.mocked(updateMeta).mockImplementation((updates: any) => {
+      const meta = vi.mocked(readMeta)() as any;
+      const next = typeof updates === 'function' ? updates(meta) : { ...meta, ...updates };
+      vi.mocked(writeMeta)(next);
+      return next;
+    });
+    vi.clearAllMocks();
+  });
+
+  function wire(store: ProfileStore) {
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+  }
+
+  it('moves a fleet profile into the device store and drops the fleet copy', async () => {
+    // The repair for a machine-bound profile created with --fleet: a loopback
+    // cdp:// endpoint means a DIFFERENT browser on every box.
+    const store: ProfileStore = {
+      browser: { 'comet-local': { browser: 'comet', endpoints: ['cdp://localhost:9333'] } },
+    };
+    wire(store);
+
+    const moved = await moveProfileScope('comet-local', 'local');
+
+    expect(moved).toEqual({ from: 'fleet', to: 'local' });
+    expect(store.deviceBrowser!['comet-local'].endpoints).toEqual(['cdp://localhost:9333']);
+    expect(store.browser?.['comet-local']).toBeUndefined();
+  });
+
+  it('is a no-op when the profile already has that scope', async () => {
+    const store: ProfileStore = {
+      browser: {},
+      deviceBrowser: { mine: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9410'] } },
+    };
+    wire(store);
+
+    expect(await moveProfileScope('mine', 'local')).toEqual({ from: 'local', to: 'local' });
+    expect(store.deviceBrowser!.mine).toBeDefined();
+  });
+
+  it('refuses to fleet-sync the auto-detected profile', async () => {
+    const store: ProfileStore = {
+      browser: {},
+      deviceBrowser: {
+        [DEFAULT_BROWSER_PROFILE_NAME]: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9411'] },
+      },
+    };
+    wire(store);
+
+    await expect(moveProfileScope(DEFAULT_BROWSER_PROFILE_NAME, 'fleet')).rejects.toThrow(/machine-local/);
+  });
+});
+
+describe('assertLocalPortFree', () => {
+  beforeEach(() => {
+    vi.mocked(updateMeta).mockImplementation((updates: any) => {
+      const meta = vi.mocked(readMeta)() as any;
+      const next = typeof updates === 'function' ? updates(meta) : { ...meta, ...updates };
+      vi.mocked(writeMeta)(next);
+      return next;
+    });
+    vi.clearAllMocks();
+  });
+
+  it('names the profile already holding the port', () => {
+    const store: ProfileStore = {
+      browser: { holder: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9412'] } },
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    expect(() =>
+      assertLocalPortFree({ name: 'newcomer', browser: 'chrome', endpoints: ['cdp://127.0.0.1:9412'] })
+    ).toThrow(/"holder"/);
+  });
+
+  it('an SSH endpoint binds its configured port locally too, so it still collides', () => {
+    const store: ProfileStore = {
+      browser: { local: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9300'] } },
+    };
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+
+    expect(() =>
+      assertLocalPortFree({ name: 'remote', browser: 'custom', endpoints: ['ssh://muqsit@mac-mini?port=9300'] })
+    ).toThrow(/9300/);
+  });
+});
+
+describe('misfiledFleetProfile', () => {
+  const loopback = { name: 'comet-local', browser: 'comet' as const, endpoints: ['cdp://localhost:9333'] };
+
+  it('flags a fleet profile bound to a loopback cdp:// endpoint', () => {
+    const r = misfiledFleetProfile(loopback, 'fleet');
+    expect(r.misfiled).toBe(true);
+    // The message must name the repair, not just the symptom.
+    expect(r.misfiled && r.why).toMatch(/profiles scope comet-local local/);
+  });
+
+  it('leaves the same profile alone once it is stored local', () => {
+    expect(misfiledFleetProfile(loopback, 'local').misfiled).toBe(false);
+  });
+
+  it('does not flag a fleet ssh:// profile — it genuinely addresses one machine', () => {
+    // `ssh://user@host?port=N` names its host, so it means the same browser on
+    // every box. That is exactly what fleet scope is for.
+    const remote = {
+      name: 'rush-mac-mini',
+      browser: 'custom' as const,
+      endpoints: ['ssh://muqsit@mac-mini?port=9300'],
+    };
+    expect(misfiledFleetProfile(remote, 'fleet').misfiled).toBe(false);
+  });
+
+  it('does not flag a fleet profile pointed at a real remote host over http', () => {
+    const remote = { name: 'grid', browser: 'chrome' as const, endpoints: ['http://10.0.0.5:9222'] };
+    expect(misfiledFleetProfile(remote, 'fleet').misfiled).toBe(false);
+  });
+});

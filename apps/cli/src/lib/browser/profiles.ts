@@ -455,6 +455,33 @@ function hasSshEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
 }
 
 /**
+ * Refuse a profile whose LOCAL port another profile already owns.
+ *
+ * Every CDP/SSH profile ends up listening on (or tunneling to) the same LOCAL
+ * port number as the one configured in the endpoint URL — SSH profiles reuse
+ * `?port=N` locally, so we no longer scope by host. Two profiles that would
+ * need the same local port can't both run at the same time.
+ *
+ * `opts.ignore` is the profile's own name on an edit. Without it every edit
+ * collides with itself, since the stored copy still owns the port being kept.
+ */
+export function assertLocalPortFree(profile: BrowserProfile, opts: { ignore?: string } = {}): void {
+  const wanted = effectiveLocalPort(profile);
+  if (wanted === undefined) return;
+  for (const [existingName, existingConfig] of Object.entries(allProfileConfigs())) {
+    if (existingName === opts.ignore) continue;
+    const existingProfile = configToProfile(existingName, existingConfig);
+    if (effectiveLocalPort(existingProfile) === wanted) {
+      throw new Error(
+        `Local port ${wanted} is already used by profile "${existingName}". ` +
+          `Each profile must own a unique local port (SSH tunnels now bind ` +
+          `to their configured port locally too). Pick a different port.`
+      );
+    }
+  }
+}
+
+/**
  * Create a profile. **It lands in this machine's own store by default** — pass
  * `{ fleet: true }` (the CLI's `--fleet`) to put it in the synced `agents.yaml`
  * where every box will see it.
@@ -481,25 +508,7 @@ export async function createProfile(
     throw new Error(`Profile "${profile.name}" already exists`);
   }
 
-  // Collision check. Every CDP/SSH profile ends up listening on (or
-  // tunneling to) the same LOCAL port number as the one configured in the
-  // endpoint URL — SSH profiles now reuse `?port=N` locally so we no
-  // longer need to scope by host. Two profiles that would need the same
-  // local port can't both run at the same time.
-  const newLocal = effectiveLocalPort(profile);
-  if (newLocal !== undefined) {
-    for (const [existingName, existingConfig] of Object.entries(existingConfigs)) {
-      const existingProfile = configToProfile(existingName, existingConfig);
-      const existingLocal = effectiveLocalPort(existingProfile);
-      if (existingLocal === newLocal) {
-        throw new Error(
-          `Local port ${newLocal} is already used by profile "${existingName}". ` +
-            `Each profile must own a unique local port (SSH tunnels now bind ` +
-            `to their configured port locally too). Pick a different port.`
-        );
-      }
-    }
-  }
+  assertLocalPortFree(profile);
 
   // Resolve the browser binary at create time. Fails fast with an actionable
   // error ("Comet not installed at /Applications/Comet.app") rather than
@@ -540,6 +549,181 @@ export async function updateProfile(profile: BrowserProfile): Promise<void> {
     return;
   }
   updateMeta((m) => ({ ...m, browser: { ...m.browser, [profile.name]: config } }));
+}
+
+/**
+ * Flag a fleet-synced profile whose contents only make sense on ONE machine.
+ *
+ * A `cdp://` endpoint on loopback always connects on the machine EVALUATING the
+ * profile, so a fleet-scope copy does not mean "that browser" — it means "port N
+ * on whichever box ran the command". The name then silently resolves to a
+ * different, usually logged-out browser on every other machine, which is the
+ * worst possible failure for a profile that carries live logins.
+ *
+ * Reported by `profiles doctor` and `profiles prune --dry-run`; the repair is
+ * {@link moveProfileScope}, never an automatic rewrite of the synced doc.
+ */
+export function misfiledFleetProfile(
+  profile: BrowserProfile,
+  scope: ProfileScope
+): { misfiled: false } | { misfiled: true; why: string } {
+  if (scope !== 'fleet') return { misfiled: false };
+  const presets = getEndpointPresets(profile);
+  const targets = Object.values(presets).map((p) => p.target);
+  const loopback = targets.find((t) => {
+    if (!t.startsWith('cdp://')) return false;
+    const parsed = parseEndpointUrl(t);
+    return parsed ? isLocalHost(parsed.host) : false;
+  });
+  if (!loopback) return { misfiled: false };
+  return {
+    misfiled: true,
+    why:
+      `fleet-synced but "${loopback}" is a loopback endpoint — on every other machine ` +
+      `this name resolves to that box's own port, not this browser. ` +
+      `Repair on the machine that owns it: agents browser profiles scope ${profile.name} local`,
+  };
+}
+
+/** Fields an existing profile may be edited in place.
+ *
+ * Deliberately a SUBSET of {@link BrowserProfile}. `name` and `browser` are
+ * identity, not settings: both key the on-disk runtime dir
+ * ({@link getProfileRuntimeDir}) and any live `<name>@<endpoint>` connection, so
+ * changing either orphans the cached browser data. Delete and recreate instead.
+ */
+export type EditableProfileFields = Partial<
+  Pick<
+    BrowserProfile,
+    'description' | 'binary' | 'electron' | 'targetFilter' | 'endpoints' | 'chrome' | 'secrets' | 'viewport'
+  >
+>;
+
+export interface EditProfileResult {
+  profile: BrowserProfile;
+  scope: ProfileScope;
+  /** Field names that actually changed. Empty means the edit was a no-op. */
+  changed: string[];
+  /**
+   * Set when the write landed machine-locally while a stale fleet copy remains.
+   * Only reachable for {@link isMachineLocalProfile} names that an older version
+   * wrote into the fleet store: {@link updateProfile} pins those local, so this
+   * box sees the edit and every other box keeps the old value. Callers must say
+   * so rather than reporting a clean success.
+   */
+  fleetCopyLeftStale?: boolean;
+}
+
+/**
+ * Merge `patch` onto the stored profile and persist it in the store it already
+ * lives in (see {@link updateProfile} for the scope rules).
+ *
+ * Runs {@link createProfile}'s validations against the MERGED record, not just
+ * the patched fields — a binary edit re-resolves the browser path, a
+ * targetFilter edit re-checks the electron gate, and the local-port scan runs
+ * with this profile excluded so an unchanged port is not a self-collision.
+ */
+export async function editProfile(
+  name: string,
+  patch: EditableProfileFields
+): Promise<EditProfileResult> {
+  const meta = readMeta();
+  const local = meta.deviceBrowser?.[name];
+  const fleet = meta.browser?.[name];
+  if (!local && !fleet) {
+    throw new Error(`Profile "${name}" does not exist`);
+  }
+
+  const current = configToProfile(name, (local ?? fleet)!);
+  const merged: BrowserProfile = { ...current, ...patch, name };
+
+  const changed = (Object.keys(patch) as Array<keyof EditableProfileFields>).filter(
+    (k) => JSON.stringify(current[k]) !== JSON.stringify(merged[k])
+  );
+
+  // A target filter only means anything for an Electron app, and the gate must
+  // read the MERGED record: `--target-filter x` on a profile that is already
+  // electron is valid, and `--no-electron` on one that still carries a filter is
+  // not. Checking the patch alone would accept both.
+  if (merged.targetFilter && !merged.electron) {
+    throw new Error(
+      `--target-filter only applies to an Electron profile. ` +
+        `Pass --electron, or clear the filter with --target-filter ''.`
+    );
+  }
+
+  assertLocalPortFree(merged, { ignore: name });
+
+  // Same rule as create: the binary lives on the remote for an SSH profile, so a
+  // local lookup would validate the wrong machine.
+  if (!hasSshEndpoint(merged.endpoints)) {
+    findBrowserPath(merged.browser, merged.binary);
+  }
+
+  await updateProfile(merged);
+
+  const landedLocal = !!local || isMachineLocalProfile(name);
+  return {
+    profile: merged,
+    scope: landedLocal ? 'local' : 'fleet',
+    changed,
+    fleetCopyLeftStale: landedLocal && !local && !!fleet ? true : undefined,
+  };
+}
+
+/**
+ * Move an existing profile between the fleet-synced store and this machine's
+ * device store.
+ *
+ * `fleet -> local` is the repair for a profile whose endpoint is machine-bound
+ * (a loopback `cdp://`) but which was created with `--fleet`: the name resolves
+ * to a DIFFERENT browser on every box, because `cdp:` always connects on the
+ * machine evaluating it. Run it ON the machine that owns the browser — the copy
+ * that survives is the one that works.
+ *
+ * Deliberately not automatic. Rewriting the user's synced `agents.yaml` from a
+ * heuristic is the rewrite loop RUSH-2161 fixed; this is an explicit verb.
+ */
+export async function moveProfileScope(
+  name: string,
+  to: ProfileScope
+): Promise<{ from: ProfileScope; to: ProfileScope }> {
+  const meta = readMeta();
+  const local = meta.deviceBrowser?.[name];
+  const fleet = meta.browser?.[name];
+  if (!local && !fleet) {
+    throw new Error(`Profile "${name}" does not exist`);
+  }
+  const from: ProfileScope = local ? 'local' : 'fleet';
+  if (from === to) return { from, to };
+
+  if (to === 'fleet' && isMachineLocalProfile(name)) {
+    throw new Error(
+      `"${name}" is always machine-local — its binary path and port are this box's. ` +
+        `Fleet-syncing it is the rewrite loop RUSH-2161 fixed.`
+    );
+  }
+
+  const config = (local ?? fleet)!;
+  // Write the destination BEFORE dropping the source, so a crash between the two
+  // leaves a duplicate (harmless — local wins in allProfileConfigs) rather than
+  // no profile at all.
+  if (to === 'local') {
+    updateMeta((m) => ({ ...m, deviceBrowser: { ...m.deviceBrowser, [name]: config } }));
+    updateMeta((m) => {
+      const next = { ...m.browser };
+      delete next[name];
+      return { ...m, browser: Object.keys(next).length > 0 ? next : undefined };
+    });
+  } else {
+    updateMeta((m) => ({ ...m, browser: { ...m.browser, [name]: config } }));
+    updateMeta((m) => {
+      const next = { ...m.deviceBrowser };
+      delete next[name];
+      return { ...m, deviceBrowser: Object.keys(next).length > 0 ? next : undefined };
+    });
+  }
+  return { from, to };
 }
 
 export async function deleteProfile(name: string): Promise<void> {

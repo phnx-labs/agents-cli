@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 548 commands._
+_69 command groups · 550 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -96,9 +96,11 @@ agents browser profiles                       Manage browser profiles
 agents browser profiles create <name>         Create a new browser profile (machine-local unless --fleet)
 agents browser profiles delete <name>         Delete a browser profile (drops YAML config + all cached runtime dirs)
 agents browser profiles doctor <name>         Diagnose a browser profile: binary, port, user-data-dir, onboarding state
+agents browser profiles edit <name>           Edit an existing profile in place (stays in the store it already lives in)
 agents browser profiles list                  List all browser profiles, with the store each lives in (local / fleet)
 agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
 agents browser profiles prune                 Remove dead machine-local profiles: browser not installed here, or never started
+agents browser profiles scope <name> <scope>  Move a profile between the fleet-synced store and this machine (local|fleet)
 agents browser profiles seed                  Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or use one instead of hand-crafting each. Idempotent — existing profiles are left untouched.
 agents browser profiles show <name>           Show profile details
 agents browser profiles use [name]            Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.

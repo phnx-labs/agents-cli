@@ -206,11 +206,13 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser profiles create <name>` | Create a new profile, machine-local unless `--fleet` (see flags below) |
 | `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can `browser use` one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
 | `agents browser profiles prune` | Remove dead machine-local profiles — browser not installed here, or never started (see below) |
+| `agents browser profiles edit <name>` | Edit an existing profile in place — description, endpoints, secrets, viewport, binary. Stays in the store it already lives in. The browser type and the name are NOT editable: both key the on-disk profile cache (and its logins), so changing either orphans it — delete and recreate instead |
+| `agents browser profiles scope <name> <local\|fleet>` | Move a profile between the fleet-synced store and this machine. `fleet -> local` is the repair for a profile whose endpoint is machine-bound — run it ON the machine that owns the browser |
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
 | `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
-| `agents browser profiles doctor <name>` | Diagnose binary, port, user-data-dir, onboarding state |
+| `agents browser profiles doctor <name>` | Diagnose scope, binary, port, user-data-dir, onboarding state |
 
 `profiles create` flags:
 
@@ -227,6 +229,38 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `--binary <path>` | Absolute path to browser binary (required for `--browser custom`) |
 | `--electron` | Treat as an Electron desktop app; never creates new targets |
 | `--target-filter <expr>` | Pick the visible CDP page target. Format: `url:<substring>` or `title:<substring>`. Requires `--electron` |
+
+### Fleet scope is for a profile that means the same thing everywhere
+
+`--fleet` stores a profile in the synced `agents.yaml`, so every machine sees the
+name. That is only correct when the endpoint addresses **one specific machine**:
+
+- `ssh://muqsit@mac-mini?port=9300` names its host, so it resolves to the same
+  browser from anywhere. Fleet scope is right.
+- `cdp://localhost:9333` is evaluated **on the machine running the command** —
+  `cdp:` always connects locally. Fleet-synced, that name means "port 9333 on
+  whichever box you happen to be on", so it silently resolves to a different,
+  usually logged-out browser on every other machine.
+
+The second case is the dangerous one for a profile that carries live logins: an
+agent asks for the credentialed browser by name and gets a stranger. `profiles
+doctor` flags it as a failing `scope` check, `profiles prune --dry-run` notes it
+in the `kept` reason, and the repair is one command on the owning machine:
+
+```bash
+agents browser profiles scope comet-local local
+```
+
+Neither surface repairs it for you. Rewriting the synced `agents.yaml` from a
+heuristic is the cross-machine rewrite loop RUSH-2161 fixed.
+
+To reach another machine's browser, use `--device` (which runs the CLI over
+there, so the target machine picks its own profile) rather than trying to make
+one profile name span machines:
+
+```bash
+agents browser navigate --device zion --url https://example.com
+```
 
 ### Cleaning up dead profiles (`prune`)
 

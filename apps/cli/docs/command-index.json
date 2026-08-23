@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 548,
+  "commands": 550,
   "root": {
     "name": "agents",
     "path": "",
@@ -2635,6 +2635,145 @@
               "subcommands": []
             },
             {
+              "name": "edit",
+              "path": "browser profiles edit",
+              "aliases": [],
+              "description": "Edit an existing profile in place (stays in the store it already lives in)",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "-d, --description <text>",
+                  "description": "Profile description (pass '' to clear)",
+                  "short": "-d",
+                  "long": "--description",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-e, --endpoint <url>",
+                  "description": "Replace the endpoint list (repeatable)",
+                  "short": "-e",
+                  "long": "--endpoint",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": []
+                },
+                {
+                  "flags": "-s, --secrets <bundle>",
+                  "description": "Secrets bundle to inject",
+                  "short": "-s",
+                  "long": "--secrets",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--headless",
+                  "description": "Run in headless mode",
+                  "long": "--headless",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--no-headless",
+                  "description": "Run headed",
+                  "long": "--no-headless",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": true
+                },
+                {
+                  "flags": "--window <WxH>",
+                  "description": "Window size in CSS pixels",
+                  "long": "--window",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--position <X,Y>",
+                  "description": "Window position on screen, e.g. 80,80",
+                  "long": "--position",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--binary <path>",
+                  "description": "Absolute path to the browser/app binary",
+                  "long": "--binary",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--electron",
+                  "description": "Treat this profile as an Electron desktop app",
+                  "long": "--electron",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--no-electron",
+                  "description": "Stop treating it as an Electron app",
+                  "long": "--no-electron",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": true
+                },
+                {
+                  "flags": "--target-filter <expr>",
+                  "description": "url:<substring> or title:<substring>; requires --electron (pass '' to clear)",
+                  "long": "--target-filter",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--json",
+                  "description": "Output machine-readable JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
               "name": "list",
               "path": "browser profiles list",
               "aliases": [
@@ -2711,6 +2850,48 @@
                   "variadic": false,
                   "negate": false
                 },
+                {
+                  "flags": "--json",
+                  "description": "Output machine-readable JSON",
+                  "long": "--json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "scope",
+              "path": "browser profiles scope",
+              "aliases": [],
+              "description": "Move a profile between the fleet-synced store and this machine (local|fleet)",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                },
+                {
+                  "name": "scope",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
                 {
                   "flags": "--json",
                   "description": "Output machine-readable JSON",

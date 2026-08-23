@@ -17,6 +17,10 @@ import {
   listProfilesWithScope,
   formatProfilesTable,
   type BrowserProfile,
+  editProfile,
+  moveProfileScope,
+  misfiledFleetProfile,
+  type EditableProfileFields,
 } from '../lib/browser/profiles.js';
 import { resolveActor } from '../lib/actor.js';
 import {
@@ -39,7 +43,7 @@ import {
   pruneProfiles,
   PRUNE_REASON_TEXT,
 } from '../lib/browser/runtime-state.js';
-import { DEFAULT_VIEWPORT } from '../lib/browser/devices.js';
+import { DEFAULT_VIEWPORT, parseWindowSize, parseWindowPosition } from '../lib/browser/devices.js';
 import { runBrowserSessionsCommand } from './browser-sessions-picker.js';
 import { discoverBrowserWsUrl, verifyBrowserIdentity } from '../lib/browser/cdp.js';
 import { parseTargetFilter } from '../lib/browser/service.js';
@@ -459,22 +463,22 @@ function registerProfilesCommands(browser: Command): void {
         height: DEFAULT_VIEWPORT.height,
       };
       if (opts.window) {
-        const m = String(opts.window).match(/^(\d+)x(\d+)$/);
-        if (!m) {
+        const size = parseWindowSize(String(opts.window));
+        if (!size) {
           console.error(`--window must be WxH, e.g. ${DEFAULT_VIEWPORT.width}x${DEFAULT_VIEWPORT.height}`);
           process.exit(1);
         }
-        viewport.width = parseInt(m[1], 10);
-        viewport.height = parseInt(m[2], 10);
+        viewport.width = size.width;
+        viewport.height = size.height;
       }
       if (opts.position) {
-        const m = String(opts.position).match(/^(-?\d+),(-?\d+)$/);
-        if (!m) {
+        const pos = parseWindowPosition(String(opts.position));
+        if (!pos) {
           console.error('--position must be X,Y, e.g. 80,80');
           process.exit(1);
         }
-        viewport.x = parseInt(m[1], 10);
-        viewport.y = parseInt(m[2], 10);
+        viewport.x = pos.x;
+        viewport.y = pos.y;
       }
 
       const profile: BrowserProfile = {
@@ -499,6 +503,151 @@ function registerProfilesCommands(browser: Command): void {
       if (opts.secrets && !bundleExists(opts.secrets)) {
         console.error(
           `warning: secrets bundle "${opts.secrets}" does not exist yet. Create it with: agents secrets create ${opts.secrets}`,
+        );
+      }
+    });
+
+  profiles
+    .command('edit <name>')
+    .description('Edit an existing profile in place (stays in the store it already lives in)')
+    .option('-d, --description <text>', "Profile description (pass '' to clear)")
+    .option('-e, --endpoint <url>', 'Replace the endpoint list (repeatable)', collect, [])
+    .option('-s, --secrets <bundle>', 'Secrets bundle to inject')
+    .option('--headless', 'Run in headless mode')
+    .option('--no-headless', 'Run headed')
+    .option('--window <WxH>', 'Window size in CSS pixels')
+    .option('--position <X,Y>', 'Window position on screen, e.g. 80,80')
+    .option('--binary <path>', 'Absolute path to the browser/app binary')
+    .option('--electron', 'Treat this profile as an Electron desktop app')
+    .option('--no-electron', 'Stop treating it as an Electron app')
+    .option('--target-filter <expr>', "url:<substring> or title:<substring>; requires --electron (pass '' to clear)")
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (name: string, opts) => {
+      // The browser type and the name are identity, not settings: both key the
+      // on-disk runtime dir and any live `<name>@<endpoint>` connection, so
+      // changing either orphans the cached browser data (and its logins).
+      if (opts.browser) {
+        console.error(
+          'browser type is not editable — it keys the on-disk profile cache. ' +
+            `Delete and recreate instead: agents browser profiles delete ${name} && agents browser profiles create ${name} -b <type>`
+        );
+        process.exit(1);
+      }
+
+      if (opts.targetFilter) {
+        const parsed = parseTargetFilter(String(opts.targetFilter));
+        if (!parsed) {
+          console.error('--target-filter must be url:<substring> or title:<substring> (non-empty value, no leading whitespace)');
+          process.exit(1);
+        }
+      }
+
+      const patch: EditableProfileFields = {};
+      if (opts.description !== undefined) patch.description = opts.description || undefined;
+      if (opts.endpoint && opts.endpoint.length > 0) patch.endpoints = opts.endpoint;
+      if (opts.secrets !== undefined) patch.secrets = opts.secrets;
+      if (opts.binary !== undefined) patch.binary = opts.binary;
+      if (opts.targetFilter !== undefined) patch.targetFilter = opts.targetFilter || undefined;
+      // commander maps --electron/--no-electron and --headless/--no-headless onto
+      // one boolean each, and leaves it undefined when neither was passed.
+      if (opts.electron !== undefined) patch.electron = opts.electron || undefined;
+
+      if (opts.headless !== undefined || opts.window || opts.position) {
+        const current = await getProfile(name);
+        if (!current) {
+          console.error(`Profile "${name}" does not exist`);
+          process.exit(1);
+        }
+        if (opts.headless !== undefined) {
+          patch.chrome = opts.headless ? { ...current.chrome, headless: true } : { ...current.chrome, headless: undefined };
+        }
+        if (opts.window || opts.position) {
+          const viewport = { ...(current.viewport ?? { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height }) };
+          if (opts.window) {
+            const size = parseWindowSize(String(opts.window));
+            if (!size) {
+              console.error('--window must be WxH, e.g. 1512x982');
+              process.exit(1);
+            }
+            viewport.width = size.width;
+            viewport.height = size.height;
+          }
+          if (opts.position) {
+            const pos = parseWindowPosition(String(opts.position));
+            if (!pos) {
+              console.error('--position must be X,Y, e.g. 80,80');
+              process.exit(1);
+            }
+            viewport.x = pos.x;
+            viewport.y = pos.y;
+          }
+          patch.viewport = viewport;
+        }
+      }
+
+      if (Object.keys(patch).length === 0) {
+        console.error('Nothing to edit. Pass at least one field, e.g. -d "<description>".');
+        process.exit(1);
+      }
+
+      let result;
+      try {
+        result = await editProfile(name, patch);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+
+      if (opts.json) {
+        console.log(JSON.stringify({ ...result.profile, scope: result.scope, changed: result.changed }, null, 2));
+      } else if (result.changed.length === 0) {
+        console.log(`No change: ${name} already had those values.`);
+      } else {
+        console.log(`Updated ${name} (${result.scope}): ${result.changed.join(', ')}`);
+      }
+
+      if (result.fleetCopyLeftStale) {
+        console.error(
+          `warning: "${name}" is machine-local by rule, so the edit was written to this machine only. ` +
+            `The fleet-synced copy still holds the old values on every other box.`
+        );
+      }
+      if (patch.secrets && !bundleExists(patch.secrets)) {
+        console.error(
+          `warning: secrets bundle "${patch.secrets}" does not exist yet. Create it with: agents secrets create ${patch.secrets}`,
+        );
+      }
+    });
+
+  profiles
+    .command('scope <name> <scope>')
+    .description('Move a profile between the fleet-synced store and this machine (local|fleet)')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (name: string, scope: string, opts: { json?: boolean }) => {
+      if (scope !== 'local' && scope !== 'fleet') {
+        console.error('scope must be `local` or `fleet`');
+        process.exit(1);
+      }
+      let moved;
+      try {
+        moved = await moveProfileScope(name, scope);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+      if (opts.json) {
+        console.log(JSON.stringify({ profile: name, ...moved }, null, 2));
+        return;
+      }
+      if (moved.from === moved.to) {
+        console.log(`${name} is already ${scope}.`);
+        return;
+      }
+      console.log(`Moved ${name}: ${moved.from} -> ${moved.to}`);
+      if (scope === 'local') {
+        console.error(
+          `note: ${name} is no longer visible on any other machine. ` +
+            `Run this ON the machine that owns the browser — the surviving copy is this one.`
         );
       }
     });
@@ -690,6 +839,18 @@ function registerProfilesCommands(browser: Command): void {
       }
 
       const checks: Array<{ label: string; ok: boolean; detail: string }> = [];
+
+      // 0. Store scope. A fleet-synced profile whose endpoint is loopback cdp://
+      //    means a DIFFERENT browser on every machine — the name lies everywhere
+      //    but here. Checked first because it invalidates the reading of every
+      //    check below on any other box.
+      const scoped = (await listProfilesWithScope()).find((p) => p.profile.name === name);
+      const misfiled = scoped ? misfiledFleetProfile(profile, scoped.scope) : { misfiled: false as const };
+      checks.push(
+        misfiled.misfiled
+          ? { label: 'scope', ok: false, detail: misfiled.why }
+          : { label: 'scope', ok: true, detail: scoped ? `stored ${scoped.scope}` : 'stored local' }
+      );
 
       // 1. Binary exists for declared browser type, and is a real executable we
       //    can drive — not a distro launcher script. findBrowserPath already
