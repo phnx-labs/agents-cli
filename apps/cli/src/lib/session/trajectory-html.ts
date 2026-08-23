@@ -41,122 +41,121 @@ function formatStepDuration(ms: number): string {
   return `${m}m${String(s).padStart(2, '0')}s`;
 }
 
-/** Axis tick labels in minutes across the span. */
+/** Axis tick labels in minutes across the span (used by the compare lanes). */
 function axisTicks(spanMs: number, count = 4): Array<{ frac: number; label: string }> {
   if (spanMs <= 0) return [{ frac: 0, label: '0m' }];
   const ticks: Array<{ frac: number; label: string }> = [];
   for (let i = 0; i <= count; i++) {
     const frac = i / count;
     const min = (spanMs * frac) / 60_000;
-    ticks.push({ frac, label: min >= 1 ? `${Math.round(min)}m` : `${Math.round(spanMs * frac / 1000)}s` });
+    ticks.push({ frac, label: min >= 1 ? `${Math.round(min)}m` : `${Math.round((spanMs * frac) / 1000)}s` });
   }
   return ticks;
 }
 
-interface WaterfallGeometry {
-  labelW: number;
-  chartW: number;
-  rowH: number;
-  top: number;
-}
-
-const GEO: WaterfallGeometry = { labelW: 84, chartW: 620, rowH: 20, top: 34 };
-
-function xForMs(startMs: number, spanMs: number): number {
-  const frac = spanMs > 0 ? Math.min(1, Math.max(0, startMs / spanMs)) : 0;
-  return GEO.labelW + frac * GEO.chartW;
-}
-
-function widthForMs(durationMs: number, spanMs: number): number {
-  if (spanMs <= 0) return 3;
-  return Math.max(3, (durationMs / spanMs) * GEO.chartW);
-}
-
-function renderWaterfallSvg(model: SessionTrajectory): string {
-  const { steps, gaps, spanMs } = model;
-  const height = GEO.top + steps.length * GEO.rowH + 16;
-  const width = GEO.labelW + GEO.chartW + 40;
-  const parts: string[] = [];
-  parts.push(`<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Session tool-call waterfall over time" xmlns="http://www.w3.org/2000/svg">`);
-
-  // Axis line + minute ticks.
-  const axisY = GEO.top - 10;
-  parts.push(`<line x1="${GEO.labelW}" y1="${axisY}" x2="${GEO.labelW + GEO.chartW}" y2="${axisY}" class="axis" />`);
-  for (const tick of axisTicks(spanMs)) {
-    const x = GEO.labelW + tick.frac * GEO.chartW;
-    parts.push(`<text x="${x.toFixed(1)}" y="${axisY - 3}" class="tick">${escapeHtml(tick.label)}</text>`);
-  }
-
-  // Idle-gap bands behind the rows.
-  for (const gap of gaps) {
-    const gx = xForMs(gap.startMs, spanMs);
-    const gw = widthForMs(gap.durationMs, spanMs);
-    parts.push(`<rect x="${gx.toFixed(1)}" y="${GEO.top}" width="${gw.toFixed(1)}" height="${steps.length * GEO.rowH}" class="gap" />`);
-    parts.push(`<text x="${(gx + 3).toFixed(1)}" y="${GEO.top + 11}" class="gap-label">idle ${escapeHtml(formatStepDuration(gap.durationMs))}</text>`);
-  }
-
-  // One row per step.
-  steps.forEach((step, i) => {
-    const y = GEO.top + i * GEO.rowH;
-    const barY = y + 3;
-    const barH = GEO.rowH - 8;
-    const x = xForMs(step.startMs, spanMs);
-    const w = widthForMs(step.durationMs, spanMs);
-    const color = toolColor(step);
-    const laneLabel = escapeHtml(step.lane);
-    const dur = formatStepDuration(step.durationMs);
-    const estimatedAttrs = step.durationEstimated ? ' stroke-dasharray="3 2" stroke="' + color + '" fill-opacity="0.35"' : '';
-    parts.push(`<a href="#step-${step.ordinal}">`);
-    parts.push(`<text x="${GEO.labelW - 6}" y="${y + 13}" class="lane" text-anchor="end">${laneLabel}</text>`);
-    parts.push(`<rect x="${x.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="${color}"${estimatedAttrs}><title>step ${step.ordinal} · ${escapeHtml(step.tool ?? step.kind)} · ${escapeHtml(dur)}${step.durationEstimated ? ' (est)' : ''}</title></rect>`);
-    const textX = x + w + 4;
-    if (textX < width - 30) {
-      parts.push(`<text x="${textX.toFixed(1)}" y="${y + 13}" class="bar-label">${escapeHtml(clipLabel(step.label))} <tspan class="bar-dur">${escapeHtml(dur)}${step.outcome === 'error' ? ' ✗' : ''}</tspan></text>`);
-    }
-    parts.push(`</a>`);
-  });
-
-  parts.push('</svg>');
-  return parts.join('\n');
-}
+/** Lane geometry for the compare waterfall (px). */
+const GEO = { labelW: 84, chartW: 620 };
 
 function clipLabel(label: string): string {
   return label.length <= 46 ? label : `${label.slice(0, 45)}…`;
 }
 
 function renderTimeShare(model: SessionTrajectory): string {
-  const entries = Object.entries(model.toolTimeShare).sort((a, b) => b[1] - a[1]);
-  if (entries.length === 0) return '<p class="muted">No measured tool time.</p>';
-  const rows = entries.map(([tool, share]) => {
-    const pct = Math.round(share * 100);
-    const color = toolColor({ ordinal: 0, kind: 'tool', tool, lane: tool, startMs: 0, durationMs: 0, durationEstimated: false, label: tool });
-    return `<div class="share-row"><span class="share-name">${escapeHtml(tool)}</span>` +
+  // Time summed BY PROGRAM (a Bash-heavy session reads as git/agents/gh, not "Bash").
+  const byProgram = new Map<string, number>();
+  let total = 0;
+  for (const step of model.steps) {
+    if (step.kind !== 'tool' || step.durationMs <= 0) continue;
+    const tag = stepBadge(step);
+    byProgram.set(tag, (byProgram.get(tag) ?? 0) + step.durationMs);
+    total += step.durationMs;
+  }
+  const entries = [...byProgram.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (entries.length === 0 || total === 0) return '<p class="muted">No measured tool time.</p>';
+  return entries.map(([tag, ms]) => {
+    const pct = Math.round((ms / total) * 100);
+    const color = toolColor({ ordinal: 0, kind: 'tool', tool: tag, program: tag, lane: tag, startMs: 0, durationMs: 0, durationEstimated: false, label: tag });
+    return `<div class="share-row"><span class="share-name">${escapeHtml(tag)}</span>` +
       `<span class="share-bar"><span class="share-fill" style="width:${pct}%;background:${color}"></span></span>` +
       `<span class="share-pct">${pct}%</span></div>`;
   }).join('\n');
-  return rows;
+}
+
+/** The badge label for a step — the effective program for a shell call, else the tool. */
+function stepBadge(step: TrajectoryStep): string {
+  return step.program ?? step.tool ?? step.kind;
+}
+
+/** A duration heat class: fast (<1s), mid (<15s), slow, or error. */
+function durClass(step: TrajectoryStep): string {
+  if (step.outcome === 'error') return 'err';
+  if (step.durationMs < 1_000) return 'fast';
+  if (step.durationMs < 15_000) return 'mid';
+  return 'slow';
 }
 
 function renderStepDetail(model: SessionTrajectory): string {
-  return model.steps.map((step) => {
+  // Gaps are interleaved between steps as dividers, keyed by the step they follow.
+  const gapsAfter = new Map<number, number>();
+  for (const g of model.gaps) gapsAfter.set(g.afterOrdinal, g.durationMs);
+  const parts: string[] = [];
+  const leading = gapsAfter.get(0);
+  if (leading) parts.push(`<div class="gap-divider">··· idle ${escapeHtml(formatStepDuration(leading))} ···</div>`);
+  for (const step of model.steps) {
     const color = toolColor(step);
-    const outcome = step.outcome && step.outcome !== 'unknown'
-      ? `<span class="outcome ${step.outcome}">${step.outcome}</span>` : '';
-    const est = step.durationEstimated ? '<span class="est">estimated</span>' : '';
+    const badge = escapeHtml(stepBadge(step));
+    const exit = step.exitCode !== undefined && step.exitCode !== 0
+      ? `<span class="exit">exit ${step.exitCode}</span>` : '';
+    const mark = step.outcome === 'error' ? '<span class="x">✗</span>' : '';
+    const est = step.durationEstimated ? '<span class="est">~</span>' : '';
     const delegation = step.delegation ? `<span class="tag">${escapeHtml(step.delegation)}</span>` : '';
-    const tokens = step.outputTokens ? `<span class="muted">${formatTokenCount(step.outputTokens)} out</span>` : '';
-    const detail = step.detail ? `<pre class="detail">${escapeHtml(step.detail)}</pre>` : '';
-    return `<div class="step" id="step-${step.ordinal}">
-  <div class="step-head">
-    <span class="dot" style="background:${color}"></span>
-    <span class="step-ord">${step.ordinal}</span>
-    <span class="step-tool">${escapeHtml(step.tool ?? step.kind)}</span>
-    <span class="step-dur">${escapeHtml(formatStepDuration(step.durationMs))}</span>
-    ${outcome} ${est} ${delegation} ${tokens}
-  </div>
-  <div class="step-label">${escapeHtml(step.label)}</div>
-  ${detail}
-</div>`;
+    const tokens = step.outputTokens && step.outputTokens > 1000 ? `<span class="tok">${formatTokenCount(step.outputTokens)}</span>` : '';
+    const hasDetail = Boolean(step.detail);
+    const head = `<span class="step-ord">${step.ordinal}</span>` +
+      `<span class="badge" style="background:${color}">${badge}</span>` +
+      `<span class="step-label">${escapeHtml(step.label)}</span>` +
+      `${tokens}${delegation}` +
+      `<span class="step-dur ${durClass(step)}">${escapeHtml(formatStepDuration(step.durationMs))}${est}${exit}${mark}</span>`;
+    if (hasDetail) {
+      parts.push(`<details class="step ${step.outcome === 'error' ? 'error' : ''}" id="step-${step.ordinal}"><summary>${head}</summary><pre class="detail">${escapeHtml(step.detail!)}</pre></details>`);
+    } else {
+      parts.push(`<div class="step ${step.outcome === 'error' ? 'error' : ''}" id="step-${step.ordinal}"><div class="row">${head}</div></div>`);
+    }
+    const gap = gapsAfter.get(step.ordinal);
+    if (gap) parts.push(`<div class="gap-divider">··· idle ${escapeHtml(formatStepDuration(gap))} ···</div>`);
+  }
+  return parts.join('\n');
+}
+
+/** The command/program mix — Bash broken down by program. Count-based histogram. */
+function renderProgramMix(model: SessionTrajectory): string {
+  const counts = new Map<string, number>();
+  for (const step of model.steps) {
+    if (step.kind !== 'tool') continue;
+    const tag = stepBadge(step);
+    counts.set(tag, (counts.get(tag) ?? 0) + 1);
+  }
+  const entries = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (entries.length === 0) return '';
+  const max = entries[0][1];
+  return entries.map(([tag, n]) => {
+    const color = toolColor({ ordinal: 0, kind: 'tool', tool: tag, program: tag, lane: tag, startMs: 0, durationMs: 0, durationEstimated: false, label: tag });
+    return `<div class="mix-row"><span class="mix-name">${escapeHtml(tag)}</span>` +
+      `<span class="mix-bar"><span class="mix-fill" style="width:${Math.round(n / max * 100)}%;background:${color}"></span></span>` +
+      `<span class="mix-n">${n}</span></div>`;
+  }).join('\n');
+}
+
+/** The slowest steps — the debugging signal for "where did the time go". */
+function renderSlowest(model: SessionTrajectory): string {
+  const slowest = [...model.steps].filter((s) => s.durationMs > 0).sort((a, b) => b.durationMs - a.durationMs).slice(0, 6);
+  if (slowest.length === 0) return '';
+  return slowest.map((s) => {
+    const color = toolColor(s);
+    return `<div class="slow-row"><span class="slow-ord">${s.ordinal}</span>` +
+      `<span class="badge sm" style="background:${color}">${escapeHtml(stepBadge(s))}</span>` +
+      `<span class="slow-label">${escapeHtml(clipLabel(s.label))}</span>` +
+      `<span class="slow-dur ${durClass(s)}">${escapeHtml(formatStepDuration(s.durationMs))}</span></div>`;
   }).join('\n');
 }
 
@@ -183,8 +182,10 @@ export function renderTrajectoryHtml(model: SessionTrajectory): string {
   const date = (session.timestamp || '').slice(0, 10);
   if (date) chips.push(`<span class="chip"><span class="k">date</span>${escapeHtml(date)}</span>`);
 
+  const idleTotal = model.gaps.reduce((sum, g) => sum + g.durationMs, 0);
+  const longestGap = model.gaps.length > 0 ? Math.max(...model.gaps.map((g) => g.durationMs)) : 0;
   const gapNote = model.gaps.length > 0
-    ? `<p class="stall">${model.gaps.length} idle gap${model.gaps.length === 1 ? '' : 's'} — longest ${escapeHtml(formatStepDuration(Math.max(...model.gaps.map((g) => g.durationMs))))}.</p>`
+    ? `<p class="stall">${model.gaps.length} idle gap${model.gaps.length === 1 ? '' : 's'} — longest ${escapeHtml(formatStepDuration(longestGap))}.</p>`
     : '';
   const truncNote = model.truncatedSteps > 0
     ? `<p class="stall">Showing the first ${model.steps.length} steps; ${model.truncatedSteps} later step${model.truncatedSteps === 1 ? '' : 's'} collapsed.</p>`
@@ -212,13 +213,26 @@ export function renderTrajectoryHtml(model: SessionTrajectory): string {
   </div>
 </header>
 <main>
-  <h2>Trajectory</h2>
+  <section class="analysis">
+    <div class="card">
+      <h3>Where the time went</h3>
+      ${renderTimeShare(model)}
+      <h3 class="mt">Slowest steps</h3>
+      ${renderSlowest(model) || '<p class="muted">No measured steps.</p>'}
+    </div>
+    <div class="card">
+      <h3>Command mix</h3>
+      ${renderProgramMix(model) || '<p class="muted">No tool calls.</p>'}
+      <div class="kpis">
+        <div class="kpi"><div class="v ${model.errorCount ? 'bad' : ''}">${model.errorCount}</div><div class="l">errors</div></div>
+        <div class="kpi"><div class="v warn">${escapeHtml(idleTotal > 0 ? formatStepDuration(idleTotal) : '0')}</div><div class="l">idle total</div></div>
+        <div class="kpi"><div class="v">${escapeHtml(longestGap > 0 ? formatStepDuration(longestGap) : '0')}</div><div class="l">longest gap</div></div>
+      </div>
+    </div>
+  </section>
+  <h2>Trajectory · ${model.steps.length} step${model.steps.length === 1 ? '' : 's'}, execution order</h2>
   ${gapNote}
   ${truncNote}
-  ${renderWaterfallSvg(model)}
-  <h2>Where the time went</h2>
-  ${renderTimeShare(model)}
-  <h2>Steps</h2>
   <div class="steps">
     ${renderStepDetail(model)}
   </div>
@@ -335,6 +349,45 @@ const COMPARE_STYLE = `
     font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px;
     border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; background: var(--panel);
   }
+  /* trace v2 — analysis hero + program-aware step list */
+  main { padding: 20px; }
+  .analysis { display: grid; grid-template-columns: 1.25fr 1fr; gap: 20px; margin-bottom: 26px; }
+  @media (max-width: 720px) { .analysis { grid-template-columns: 1fr; } }
+  .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; }
+  .card h3 { margin: 0 0 10px; font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .1em; font-weight: 600; }
+  .card h3.mt { margin-top: 16px; }
+  .mono, .badge, .step-dur, .mix-row, .slow-row { font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .mix-row { display: grid; grid-template-columns: 84px 1fr 34px; align-items: center; gap: 8px; margin: 4px 0; font-size: 12px; }
+  .mix-name { color: var(--dim); overflow: hidden; text-overflow: ellipsis; }
+  .mix-bar { height: 8px; background: var(--bg); border-radius: 4px; overflow: hidden; }
+  .mix-fill { display: block; height: 100%; min-width: 2px; }
+  .mix-n { text-align: right; color: var(--fg); font-size: 11px; }
+  .slow-row { display: grid; grid-template-columns: 30px 64px 1fr auto; align-items: center; gap: 8px; margin: 5px 0; font-size: 12px; }
+  .slow-ord { color: var(--dim); } .slow-label { color: var(--dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .kpis { display: flex; gap: 20px; margin-top: 14px; }
+  .kpi .v { font-size: 20px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .kpi .v.bad { color: #f87171; } .kpi .v.warn { color: #e0b341; }
+  .kpi .l { font-size: 9.5px; color: var(--dim); text-transform: uppercase; letter-spacing: .06em; }
+  .badge { color: #0a0a0a; font-weight: 600; font-size: 10px; text-align: center; padding: 2px 7px; border-radius: 4px; white-space: nowrap; display: inline-block; }
+  .badge.sm { font-size: 9.5px; padding: 1px 5px; }
+  .steps { display: flex; flex-direction: column; gap: 2px; }
+  details.step, .step { border: 0; border-radius: 7px; padding: 0; background: transparent; scroll-margin-top: 16px; }
+  .step .row, details.step > summary {
+    display: grid; grid-template-columns: 36px 78px minmax(0,1fr) auto 64px; gap: 10px; align-items: center;
+    padding: 6px 10px; border-radius: 7px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px;
+  }
+  details.step > summary { cursor: pointer; list-style: none; }
+  details.step > summary::-webkit-details-marker { display: none; }
+  .step .row:hover, details.step > summary:hover { background: var(--panel); }
+  .step.error > summary, .step.error .row { background: rgba(179,64,63,.14); border-left: 2px solid #b3403f; }
+  .step-ord { color: var(--dim); }
+  .step-label { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .step-dur { text-align: right; font-size: 12px; }
+  .step-dur.fast { color: var(--dim); } .step-dur.mid { color: #e0b341; } .step-dur.slow, .step-dur.err { color: #f87171; }
+  .exit { color: #f87171; margin-left: 6px; } .x { color: #f87171; margin-left: 6px; } .est { color: var(--dim); margin-left: 3px; }
+  .tok { color: var(--dim); font-size: 10px; }
+  .gap-divider { text-align: center; color: #7a5c3a; font-size: 11px; margin: 8px 0; letter-spacing: .06em; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  details.step .detail { white-space: pre-wrap; color: var(--dim); font-size: 11px; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin: 2px 0 8px 54px; max-height: 220px; overflow: auto; }
 `;
 
 const THEME_SCRIPT = `

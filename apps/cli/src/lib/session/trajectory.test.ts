@@ -45,6 +45,17 @@ describe('buildTrajectory — durations by callId pairing', () => {
     expect(prog('export FOO=bar; gh pr create --base main')).toBe('gh'); // export skipped
     expect(prog('cd apps/cli && bun test')).toBe('bun'); // cd skipped
     expect(prog('cat file.txt')).toBe('cat');
+    expect(prog('cat f | grep x')).toBe('cat'); // pipeline: leftmost effective program
+  });
+
+  it('resolves program for every harness shell tool, not just Bash (Codex exec_command)', () => {
+    const shellStep = (tool: string): SessionEvent[] => [
+      { type: 'tool_use', agent: 'codex', timestamp: '2026-08-01T00:00:00Z', tool, callId: 'c', command: 'npm test' },
+      { type: 'tool_result', agent: 'codex', timestamp: '2026-08-01T00:00:01Z', tool, callId: 'c', outcome: 'ok' },
+    ];
+    for (const tool of ['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']) {
+      expect(buildTrajectory(shellStep(tool), meta()).steps[0].program).toBe('npm');
+    }
   });
 
   it('leaves non-shell tools without a program', () => {

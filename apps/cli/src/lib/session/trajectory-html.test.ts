@@ -56,15 +56,18 @@ describe('renderTrajectoryHtml — self-contained and safe', () => {
     expect(html).not.toContain('Secret-redacted trajectory');
   });
 
-  it('renders the waterfall, time-share, and per-step detail sections', () => {
+  it('renders the analysis hero + program-aware step list', () => {
     const html = renderTrajectoryHtml(buildTrajectory(events, meta()));
-    expect(html).toContain('<svg');
     expect(html).toContain('Where the time went');
+    expect(html).toContain('Command mix'); // program mix panel
     expect(html).toContain('id="step-1"');
     expect(html).toContain('exec.ts');
-    // An error outcome shows as a red-classed outcome badge.
-    expect(html).toContain('outcome error');
-    // The Bash step dominates the time share.
+    // Steps are labeled by program via a colored badge (a Bash `bun test` → "bun").
+    expect(html).toMatch(/class="badge"[^>]*>bun</);
+    // An error step is red-classed and shows its exit code.
+    expect(html).toMatch(/class="step error"/);
+    expect(html).toContain('exit 1');
+    // Time share still renders its bars, now keyed by program.
     expect(html).toMatch(/share-fill/);
   });
 

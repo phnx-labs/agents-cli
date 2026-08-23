@@ -121,8 +121,13 @@ const DETAIL_MAX = 400;
 /** Tools that spawn an inline sub-agent inside THIS transcript (a `tool_use` row). */
 const INLINE_TASK_TOOLS = new Set(['Task', 'Agent']);
 
-/** Shell tools whose command is worth resolving to an effective program. */
-const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'Shell', 'run_terminal_cmd']);
+/**
+ * Shell tools whose command is worth resolving to an effective program — every
+ * harness's shell-exec tool, kept in lockstep with the canonical set in
+ * `state.ts` (`['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']`)
+ * so Codex's `exec_command` and the rest are covered, not just Claude's `Bash`.
+ */
+const SHELL_TOOLS = new Set(['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']);
 
 /**
  * Shell builtins/assignments that are rarely the POINT of a command — the action
@@ -132,10 +137,14 @@ const SHELL_TOOLS = new Set(['Bash', 'BashOutput', 'Shell', 'run_terminal_cmd'])
 const SHELL_NOISE_PROGRAMS = new Set(['export', 'cd', 'set', 'source', '.', 'unset', 'local', 'eval']);
 
 /**
- * The effective program a shell command ran, via the shared shell parser — the
- * primary `effective`-role program (wrappers unwrapped), skipping bare shell
- * builtins/assignments when a real program follows. Undefined when nothing static
- * is identifiable. Never executes anything.
+ * The effective program a shell command ran, via the shared shell parser
+ * (`extractShellPrograms` — which unwraps the wrappers it knows: `env`, `sudo`,
+ * `agents ssh`; note `timeout` is deliberately NOT a wrapper there, per SES-37,
+ * so `timeout 30 npm test` resolves to `timeout`). On top of that this skips
+ * bare builtins/assignments (`cd`, `export`, …) when a real program follows. For
+ * a pipeline it takes the LEFTMOST effective program (`cat f | grep x` → `cat`),
+ * matching how the parser orders occurrences. Undefined when nothing static is
+ * identifiable. Never executes anything.
  */
 function effectiveProgram(command: string | undefined): string | undefined {
   if (!command) return undefined;
