@@ -97,6 +97,20 @@ describe('buildTrajectory — gaps, tokens, delegation, shares', () => {
     expect(buildTrajectory(events, meta(), { idleThresholdMs: 120_000 }).gaps).toHaveLength(0);
   });
 
+  it('a long tool execution (tool_use→its own result) is NOT an idle gap', () => {
+    // A single 8m04s `bun test`: the span between the tool_use and its result is
+    // the tool running, not the agent stalling — it must not be a gap.
+    const events: SessionEvent[] = [
+      { type: 'message', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', role: 'user', content: 'go' },
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:02Z', tool: 'Bash', callId: 'c1', command: 'bun test' },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:08:06Z', tool: 'Bash', callId: 'c1', outcome: 'ok' },
+    ];
+    const traj = buildTrajectory(events, meta(), { idleThresholdMs: 120_000 });
+    expect(traj.gaps).toHaveLength(0);
+    // The duration still lands on the step itself.
+    expect(traj.steps.find((s) => s.tool === 'Bash')!.durationMs).toBe(8 * 60_000 + 4_000);
+  });
+
   it('attributes output tokens from the nearest following usage event', () => {
     const events: SessionEvent[] = [
       { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'c1', command: 'ls' },
@@ -131,10 +145,12 @@ describe('buildTrajectory — redaction and safety', () => {
       { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'c1', command: `curl -H "authorization: Bearer ${secret}" https://x` },
       { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Bash', callId: 'c1', outcome: 'ok' },
     ];
-    const redacted = buildTrajectory(events, meta(), { redact: true, knownSecrets: [secret] }).steps[0];
-    expect(redacted.label).not.toContain(secret);
-    const raw = buildTrajectory(events, meta(), { redact: false, knownSecrets: [secret] }).steps[0];
-    expect(raw.label).toContain(secret);
+    const redacted = buildTrajectory(events, meta(), { redact: true, knownSecrets: [secret] });
+    expect(redacted.steps[0].label).not.toContain(secret);
+    expect(redacted.redacted).toBe(true);
+    const raw = buildTrajectory(events, meta(), { redact: false, knownSecrets: [secret] });
+    expect(raw.steps[0].label).toContain(secret);
+    expect(raw.redacted).toBe(false);
   });
 
   it('empty events (unparseable harness like OpenClaw) yields an empty trajectory, not a crash', () => {

@@ -83,6 +83,8 @@ export interface SessionTrajectory {
    * here, so this is the truthful "how many calls failed" for the trajectory view.
    */
   errorCount: number;
+  /** True when derived labels/details were secret-redacted (false under `--no-redact`). */
+  redacted: boolean;
   /** Reused wholesale from `computeSummaryStats` — turns, tools, tokens, span. */
   stats: SessionStats;
   /** Steps dropped by the `maxSteps` cap, surfaced so truncation is never silent. */
@@ -344,6 +346,11 @@ export function buildTrajectory(
     return ordinal;
   };
   for (let k = 1; k < orderedTs.length; k++) {
+    // A span that OPENS on a `tool_use` is that tool executing (waiting on its
+    // own result), not the agent sitting idle — so it is not a stall. Counting
+    // it double-reports a long `bun test` as both its step duration and a fake
+    // "idle" gap. Only spans that open after a completed boundary are idle.
+    if (events[orderedTs[k - 1].index].type === 'tool_use') continue;
     const delta = orderedTs[k].ms - orderedTs[k - 1].ms;
     if (delta > idleThreshold) {
       gaps.push({
@@ -371,5 +378,5 @@ export function buildTrajectory(
 
   const errorCount = steps.reduce((n, s) => (s.outcome === 'error' ? n + 1 : n), 0);
 
-  return { session: meta, spanMs, steps, gaps, toolTimeShare, errorCount, stats, truncatedSteps };
+  return { session: meta, spanMs, steps, gaps, toolTimeShare, errorCount, redacted: redact, stats, truncatedSteps };
 }

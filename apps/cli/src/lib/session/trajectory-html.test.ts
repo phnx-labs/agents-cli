@@ -47,6 +47,13 @@ describe('renderTrajectoryHtml — self-contained and safe', () => {
     ];
     const html = renderTrajectoryHtml(buildTrajectory(withSecret, meta(), { redact: true, knownSecrets: [secret] }));
     expect(html).not.toContain(secret);
+    expect(html).toContain('Secret-redacted trajectory');
+  });
+
+  it('footer tells the truth under --no-redact (not a false "Secret-redacted" claim)', () => {
+    const html = renderTrajectoryHtml(buildTrajectory(events, meta(), { redact: false }));
+    expect(html).toContain('Unredacted (local only) trajectory');
+    expect(html).not.toContain('Secret-redacted trajectory');
   });
 
   it('renders the waterfall, time-share, and per-step detail sections', () => {
