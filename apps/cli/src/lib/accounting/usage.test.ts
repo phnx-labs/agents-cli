@@ -23,7 +23,7 @@ import {
   formatUsageSummary,
   classifyUsageErrorKind,
   classifyUsageFetchFailure,
-  isUsageNoRecentUsageError,
+  getUsageBenignState,
   usageNoCredentialError,
   usageExpiredCredentialError,
   usageRejectedError,
@@ -670,7 +670,6 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
   it.each([
     [usageExpiredCredentialError('Kimi'), 're-auth for usage'],
     [usageNoCredentialError('Cursor'), 'sign in / provision token'],
-    ['Codex: no usage recorded yet on this machine.', 'no usage recorded yet'],
   ])('renders the specific unavailable state from %s', (error, expected) => {
     const out = formatUsageSummary(null, null, 3, {
       unavailable: true,
@@ -679,6 +678,13 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
     });
 
     expect(out).toContain(expected);
+    expect(out).not.toContain('usage unavailable');
+  });
+
+  it('renders no recent usage as a benign state without an unavailable flag', () => {
+    const out = formatUsageSummary(null, null, 3, { benignState: 'no-recent-usage' });
+
+    expect(out).toContain('no usage recorded yet');
     expect(out).not.toContain('usage unavailable');
   });
 
@@ -1049,7 +1055,8 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
     const info = await getUsageInfo('codex', { home });
     expect(info.snapshot).toBeNull();
-    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+    expect(info.error).toBeNull();
+    expect(getUsageBenignState(info)).toBe('no-recent-usage');
   });
 
   it('reports a benign no-usage marker when no local session exists yet', async () => {
@@ -1058,7 +1065,9 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     const info = await getUsageInfo('codex', { home });
 
     expect(info.snapshot).toBeNull();
-    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+    expect(info.error).toBeNull();
+    expect(getUsageBenignState(info)).toBe('no-recent-usage');
+    expect(JSON.stringify(info)).toBe('{"snapshot":null,"error":null}');
   });
 
   it('drops a Codex window after its derived expiry', async () => {
@@ -1069,7 +1078,8 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     const info = await getUsageInfo('codex', { home });
 
     expect(info.snapshot).toBeNull();
-    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+    expect(info.error).toBeNull();
+    expect(getUsageBenignState(info)).toBe('no-recent-usage');
   });
 
   it('reports a session written after the current login', async () => {
@@ -1179,7 +1189,8 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     const info = await getUsageInfo('grok', { home });
 
     expect(info.snapshot).toBeNull();
-    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+    expect(info.error).toBeNull();
+    expect(getUsageBenignState(info)).toBe('no-recent-usage');
   });
 
   it('renders the latest in-period creditUsagePercent as the week bar', async () => {

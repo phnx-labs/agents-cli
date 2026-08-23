@@ -149,13 +149,8 @@ export function usageUnreachableError(agent: string, cause?: unknown): string {
  * install and should render as a benign state, not an error (RUSH-3040).
  */
 export const USAGE_NO_RECENT_USAGE_MARKER = 'no usage recorded yet';
-export function usageNoRecentUsageError(agent: string): string {
-  return `${agent}: ${USAGE_NO_RECENT_USAGE_MARKER} on this machine.`;
-}
-/** True when an error string is the benign "no local log yet" marker above. */
-export function isUsageNoRecentUsageError(error: string | null | undefined): boolean {
-  return typeof error === 'string' && error.includes(USAGE_NO_RECENT_USAGE_MARKER);
-}
+export const USAGE_BENIGN_STATE: unique symbol = Symbol('usageBenignState');
+export type UsageBenignState = 'no-recent-usage';
 
 /**
  * Shared error-classification + 429 backoff for a networked usage fetch whose
@@ -196,14 +191,12 @@ export type UsageErrorKind =
   | 'rate-limited'
   | 'rejected'
   | 'headless-scope'
-  | 'no-usage-yet'
   | 'unreachable';
 
 /** Classify a `UsageInfo.error` string into its {@link UsageErrorKind}, or null when there is no error. */
 export function classifyUsageErrorKind(error: string | null | undefined): UsageErrorKind | null {
   if (!error) return null;
   if (isUsageHeadlessScopeError(error)) return 'headless-scope';
-  if (isUsageNoRecentUsageError(error)) return 'no-usage-yet';
   if (error.startsWith('No readable ')) return 'no-credential';
   if (error.includes('credential expired')) return 'expired-credential';
   if (error.includes('rate-limited this machine') || error.includes('is rate-limiting the usage endpoint')) {
@@ -310,6 +303,18 @@ export interface UsageSnapshot {
 export interface UsageInfo {
   snapshot: UsageSnapshot | null;
   error: string | null;
+  /** Benign local state, symbol-backed so `--json` keeps its existing shape. */
+  [USAGE_BENIGN_STATE]?: UsageBenignState;
+}
+
+/** Construct the benign no-local-log result without overloading `error`. */
+export function usageNoRecentUsageInfo(): UsageInfo {
+  return { snapshot: null, error: null, [USAGE_BENIGN_STATE]: 'no-recent-usage' };
+}
+
+/** Read a benign state for the human renderer; symbols are omitted by JSON serialization. */
+export function getUsageBenignState(info: UsageInfo): UsageBenignState | null {
+  return info[USAGE_BENIGN_STATE] ?? null;
 }
 
 /** Input needed to identify an account for usage lookup. */
@@ -738,7 +743,7 @@ export interface FormatUsageSummaryOpts {
    * The classified cause of `usageInfo.error` (RUSH-3040), from
    * {@link classifyUsageErrorKind}. Lets the no-bars branch below name the
    * SPECIFIC reason ('re-auth for usage', 'sign in / provision a long-lived
-   * token', 'rate-limited (retry ~12m)', 'no usage recorded yet') instead of
+   * token', 'rate-limited (retry ~12m)') instead of
    * the generic 'usage unavailable' that used to cover ~6 distinct causes.
    * Only consulted when `unavailable` is set — a snapshot WITH bars still
    * renders 'unverified'/`headless` as before. `--json` output is unaffected:
@@ -752,6 +757,8 @@ export interface FormatUsageSummaryOpts {
    * message text, not the kind).
    */
   errorDetail?: string | null;
+  /** Benign state from {@link getUsageBenignState}; never sourced from `UsageInfo.error`. */
+  benignState?: UsageBenignState | null;
 }
 
 /** Human label for a classified usage error, for the no-bars branch of {@link formatUsageSummary}. */
@@ -768,8 +775,6 @@ function formatUsageErrorKindLabel(
       const retryHint = detail?.match(/not retrying for (.+)\.$/)?.[1] ?? null;
       return retryHint ? `rate-limited (retry ~${retryHint})` : 'rate-limited';
     }
-    case 'no-usage-yet':
-      return 'no usage recorded yet';
     case 'rejected':
     case 'unreachable':
     case 'headless-scope':
@@ -840,6 +845,8 @@ export function formatUsageSummary(
     // No bars at all: still name the scope gap so "usage pending" is not
     // mistaken for a missing setup-token or seeding failure (RUSH-2392).
     parts.push(chalk.dim(USAGE_HEADLESS_SCOPE_MARKER));
+  } else if (opts?.benignState === 'no-recent-usage') {
+    parts.push(chalk.dim(USAGE_NO_RECENT_USAGE_MARKER));
   } else if (opts?.unavailable) {
     // Signed-in account we could NOT fetch usage for (no live token in a reachable
     // home / org mismatch / fetch error). Say so explicitly instead of drawing a
@@ -1075,7 +1082,7 @@ async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // the ones found were still fresh) — a benign "nothing to show yet", not a
     // failure (RUSH-3040). Distinct from the outer catch below, which is a
     // genuine read/parse failure.
-    return { snapshot: null, error: usageNoRecentUsageError('Codex') };
+    return usageNoRecentUsageInfo();
   } catch (err) {
     return { snapshot: null, error: usageUnreachableError('Codex', err) };
   }
@@ -2593,10 +2600,10 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const base = options?.home || os.homedir();
     const logPath = path.join(base, '.grok', 'logs', 'unified.jsonl');
     // No log yet: a benign "nothing recorded here", not a failure (RUSH-3040).
-    if (!fs.existsSync(logPath)) return { snapshot: null, error: usageNoRecentUsageError('Grok') };
+    if (!fs.existsSync(logPath)) return usageNoRecentUsageInfo();
 
     const match = await readLatestGrokBilling(logPath);
-    if (!match) return { snapshot: null, error: usageNoRecentUsageError('Grok') };
+    if (!match) return usageNoRecentUsageInfo();
 
     // Grok has no live usage API (`network: false`) — bars are last-seen from
     // this machine's unified.jsonl only. Drop windows whose billing period has
@@ -2661,7 +2668,7 @@ async function getMuseUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // now does the probe's own outcome become the reported error, mirroring
     // Cursor's "surface the last resort's failure" pattern above.
     if (!probe.hasKey) return { snapshot: null, error: null };
-    if (probe.noHeaders) return { snapshot: null, error: usageNoRecentUsageError('Muse') };
+    if (probe.noHeaders) return usageNoRecentUsageInfo();
     return {
       snapshot: null,
       error: classifyUsageFetchFailure('Muse', 'muse', probe.status, probe.retryAfter, options?.usageScope),
