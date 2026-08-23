@@ -413,7 +413,13 @@ describe('devices role', () => {
 describe('devices describe (RUSH-3062 surface)', () => {
   // `describe` is thin sugar over the 'description' config key — these tests
   // pin that BOTH names drive the same store, not two parallel code paths.
-  it('sets, reads back, and unsets the same key `devices config <name> description` drives', () => {
+  // Every `run()` is a full process spawn (~2s) and apps/cli/AGENTS.md treats the
+  // required check's latency as a correctness requirement, so this asserts through
+  // the device doc — a file read — wherever a second CLI round-trip would only
+  // re-read what was just written. The CLI reads that remain are the ones whose
+  // POINT is the CLI surface: that `describe --json` and `config --json` return
+  // the identical object, i.e. one store behind two names.
+  it('describe: sets, reads back, unsets — and shares one store with `devices config`', () => {
     guardedHome();
     addDevice('mac-mini', 'muqsit@192.0.2.2');
 
@@ -422,26 +428,20 @@ describe('devices describe (RUSH-3062 surface)', () => {
     expect(set.stdout).toContain('description');
     expect(deviceDoc('mac-mini')).toContain('description: signing + notarize box');
 
-    // Same store: the config surface reads back exactly what describe wrote.
+    // The one assertion that genuinely needs both surfaces: same store, two names.
     const viaConfig = JSON.parse(run(['devices', 'config', 'mac-mini', 'description', '--json']).stdout);
     expect(viaConfig).toEqual({ device: 'mac-mini', key: 'description', value: 'signing + notarize box', source: 'device' });
-    const viaDescribe = JSON.parse(run(['devices', 'describe', 'mac-mini', '--json']).stdout);
-    expect(viaDescribe).toEqual(viaConfig);
+    expect(JSON.parse(run(['devices', 'describe', 'mac-mini', '--json']).stdout)).toEqual(viaConfig);
 
     // Unquoted multi-word text joins the argv parts, same as config.
     expect(run(['devices', 'describe', 'mac-mini', 'gpu', 'box', '-', 'cuda', '12.4']).status).toBe(0);
-    expect(JSON.parse(run(['devices', 'describe', 'mac-mini', '--json']).stdout).value).toBe('gpu box - cuda 12.4');
+    expect(deviceDoc('mac-mini')).toContain('description: gpu box - cuda 12.4');
 
     const unset = run(['devices', 'describe', 'mac-mini', '--unset']);
     expect(unset.status, unset.stderr).toBe(0);
-    expect(JSON.parse(run(['devices', 'config', 'mac-mini', 'description', '--json']).stdout).value).toBeNull();
     expect(deviceDoc('mac-mini')).not.toContain('description:');
-  });
 
-  it('fails loud on an unknown device and enforces the one-line / 80-char cap', () => {
-    guardedHome();
-    addDevice('mac-mini', 'muqsit@192.0.2.2');
-
+    // Failure modes share this setup rather than paying for their own.
     const unknown = run(['devices', 'describe', 'zoin', 'nope']);
     expect(unknown.status).toBe(1);
     expect(unknown.stderr).toMatch(/Unknown device 'zoin'/);
@@ -451,35 +451,24 @@ describe('devices describe (RUSH-3062 surface)', () => {
     expect(tooLong.stderr).toContain('at most 80 characters');
   });
 
-  it('surfaces description and disk capacity in `devices list --json` (additive)', () => {
+  it('end-to-end: describe + ignore reach both the human table and --json', () => {
     guardedHome();
-    // The device named after the pinned machine id (AGENTS_SYNC_MACHINE_ID =
-    // mac-mini) is probed LOCALLY by the list command — a real probe of the
-    // test box, so the health row carries real disk totals.
     addDevice('mac-mini', 'muqsit@192.0.2.2');
     expect(run(['devices', 'describe', 'mac-mini', 'signing box']).status).toBe(0);
+    expect(run(['devices', 'ignore', 'old-laptop']).status).toBe(0);
 
-    const list = run(['devices', 'list', '--json']);
-    expect(list.status, list.stderr).toBe(0);
-    const rows = JSON.parse(list.stdout) as Array<Record<string, any>>;
-    const row = rows.find((r) => r.name === 'mac-mini');
+    const json = run(['devices', 'list', '--json']);
+    expect(json.status, json.stderr).toBe(0);
+    const row = (JSON.parse(json.stdout) as Array<Record<string, any>>).find((r) => r.name === 'mac-mini');
     expect(row).toBeDefined();
     expect(row!.description).toBe('signing box');
-    // New disk fields ride the existing `health` object (additive — no renames).
-    expect(row!.health).toBeDefined();
+    // New disk fields ride the existing `health` object — additive, no renames.
     expect(row!.health.diskTotalBytes).toBeGreaterThan(0);
     expect(row!.health.diskFreeBytes).toBeGreaterThan(0);
     expect(row!.health.diskUsedPercent).toBeGreaterThanOrEqual(0);
-    // Existing fields untouched.
     expect(row!.health.memTotalBytes).toBeGreaterThan(0);
     expect(row!.interactive).toBe(false);
     expect(row!.autoPool).toBeDefined();
-  });
-
-  it('renders spec/disk/description in the human `devices list` table', () => {
-    guardedHome();
-    addDevice('mac-mini', 'muqsit@192.0.2.2');
-    expect(run(['devices', 'describe', 'mac-mini', 'signing box']).status).toBe(0);
 
     const list = run(['devices', 'list'], { COLUMNS: '200' });
     expect(list.status, list.stderr).toBe(0);
@@ -487,25 +476,12 @@ describe('devices describe (RUSH-3062 surface)', () => {
     expect(plain).toMatch(/device\s+platform\s+spec\s+load\s+mem\s+disk\s+headroom/);
     expect(plain).toContain('signing box');
     expect(plain).toContain('disk free'); // Fleet capacity footer
-    // The local probe of the test box yields a real spec cell: "<n>c <RAM> <disk>",
-    // e.g. "4c 15.6G 144G" or "20c 122G 3.7T". fmtBytes emits one optional
-    // decimal and any of K/M/G/T/P, and which of those a runner produces depends
-    // on its actual hardware — so match the SHAPE, not one machine's formatting.
-    // (The original /\d+c \d+G? \d/ passed on a box whose RAM rendered as "122G"
-    // and failed on a CI runner rendering "15.6G".)
+    expect(plain).toContain("1 ignored node not listed — 'agents devices ignored'");
+    // The local probe yields a real spec cell: "<n>c <RAM> <disk>", e.g.
+    // "4c 15.6G 144G" or "20c 122G 3.7T". fmtBytes emits one optional decimal and
+    // any of K/M/G/T/P, and which a runner produces depends on its hardware — so
+    // match the SHAPE, not one machine's formatting. (/\d+c \d+G? \d/ passed on a
+    // box rendering "122G" and failed on a runner rendering "15.6G".)
     expect(plain).toMatch(/\d+c \d+(\.\d+)?[KMGTP] \d+(\.\d+)?[KMGTP]/);
-  });
-});
-
-describe('devices list footer — ignored count (RUSH-3062 surface)', () => {
-  it('names ignored nodes under the Fleet capacity line', () => {
-    guardedHome();
-    addDevice('mac-mini', 'muqsit@192.0.2.2');
-    expect(run(['devices', 'ignore', 'old-laptop']).status).toBe(0);
-
-    const list = run(['devices', 'list'], { COLUMNS: '200' });
-    expect(list.status, list.stderr).toBe(0);
-    expect(list.stdout).toContain('Fleet capacity:');
-    expect(list.stdout).toContain("1 ignored node not listed — 'agents devices ignored'");
   });
 });

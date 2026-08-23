@@ -68,6 +68,15 @@ groups:
       - apps/cli/docs/command-index.md
       - apps/cli/docs/command-index.json
     checks: [command-index, docs, typecheck]
+    # The devices/config command tests drive the REAL CLI as a subprocess (repo
+    # convention forbids mocking), so each case costs a process spawn — the group
+    # already sat near the 85s default before RUSH-3062 added the devices-list
+    # surface, and run 32643687531 measured 102s. Same failure mode and same
+    # remedy as cli-bootstrap above. Measured, not guessed: this branch runs the
+    # selected suite in 37s locally against 31s on main, and the CI multiplier
+    # puts it just over the default. Lower this when the devices command tests
+    # are split out of the required lane.
+    budget_sec: 120
 
   - id: cli-docs
     when:
