@@ -276,12 +276,24 @@ describe('isFreshDeviceSpecs — cache written before disk collection', () => {
     fetchedAt: Date.now(), specsFetchedAt: Date.now(), ...over,
   });
 
-  it('treats a reachable row with no disk total as stale, however recent', () => {
-    // The 7-day TTL would call this fresh for a week after upgrading, so the
-    // disk column would render `—` on every cached run — the feature looking
-    // broken rather than being broken. Verified live on this fleet before the
+  it('treats a row from a pre-disk CLI as stale, however recent', () => {
+    // No specsFetchedAt means the row predates RUSH-3062, so it has no disk and
+    // the 7-day TTL would serve it for a week after upgrading — the disk column
+    // rendering `—` on every cached run. Verified live on this fleet before the
     // fix: cached rows showed `10c 23.5G —` where --refresh gave `10c 23.5G 460G`.
-    expect(isFreshDeviceSpecs(base(), Date.now())).toBe(false);
+    const preDisk = base();
+    delete (preDisk as { specsFetchedAt?: number }).specsFetchedAt;
+    expect(isFreshDeviceSpecs(preDisk, Date.now())).toBe(false);
+  });
+
+  it('does NOT re-probe forever a box whose probe cannot measure disk', () => {
+    // `df -Pk /` can fail on an odd mount and Win32_LogicalDisk can return null
+    // for C:, so a probe legitimately succeeds with no disk. Both parsers still
+    // set specsFetchedAt, so such a row stays fresh — keying staleness off the
+    // missing disk field instead would re-probe that box on every devices list,
+    // forever, because the next probe cannot produce the field either.
+    const probedNoDisk = base({ specsFetchedAt: Date.now() });
+    expect(isFreshDeviceSpecs(probedNoDisk, Date.now())).toBe(true);
   });
 
   it('keeps a row that HAS disk fresh inside the TTL', () => {
