@@ -5,7 +5,7 @@ shared libraries and native helpers. Install, configure, run, and dispatch AI
 coding agents (Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok, Droid, …)
 from one place.
 
-> Phoenix Labs OSS · Apache-2.0.
+> Phoenix Labs · FSL-1.1-Apache-2.0.
 
 **Two main projects live here:** (a) the **agents CLI** — [`apps/cli`](apps/cli),
 the published `@phnx-labs/agents-cli` — and (b) the **CLI's VS Code extension,
