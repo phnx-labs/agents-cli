@@ -2649,6 +2649,16 @@
               ],
               "options": [
                 {
+                  "flags": "-b, --browser <type>",
+                  "description": "Not editable — see the error for the delete-and-recreate path",
+                  "short": "-b",
+                  "long": "--browser",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-d, --description <text>",
                   "description": "Profile description (pass '' to clear)",
                   "short": "-d",

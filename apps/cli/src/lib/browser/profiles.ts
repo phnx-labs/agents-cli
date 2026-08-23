@@ -560,7 +560,8 @@ export async function updateProfile(profile: BrowserProfile): Promise<void> {
  * different, usually logged-out browser on every other machine, which is the
  * worst possible failure for a profile that carries live logins.
  *
- * Reported by `profiles doctor` and `profiles prune --dry-run`; the repair is
+ * Reported by `profiles doctor` (a failing `scope` check) and noted in the
+ * `kept` reason `profiles prune` prints for a fleet profile. The repair is
  * {@link moveProfileScope}, never an automatic rewrite of the synced doc.
  */
 export function misfiledFleetProfile(
@@ -568,14 +569,20 @@ export function misfiledFleetProfile(
   scope: ProfileScope
 ): { misfiled: false } | { misfiled: true; why: string } {
   if (scope !== 'fleet') return { misfiled: false };
+  // Judge the endpoint the profile would actually CONNECT on, resolving
+  // `defaultEndpoint` exactly as effectiveLocalPort does. Scanning every preset
+  // instead would fail a legitimate fleet profile that defaults to `ssh://` and
+  // merely carries a loopback alternate for local debugging.
   const presets = getEndpointPresets(profile);
-  const targets = Object.values(presets).map((p) => p.target);
-  const loopback = targets.find((t) => {
-    if (!t.startsWith('cdp://')) return false;
-    const parsed = parseEndpointUrl(t);
-    return parsed ? isLocalHost(parsed.host) : false;
-  });
-  if (!loopback) return { misfiled: false };
+  const chosen =
+    profile.defaultEndpoint && presets[profile.defaultEndpoint]
+      ? profile.defaultEndpoint
+      : Object.keys(presets)[0];
+  if (!chosen) return { misfiled: false };
+  const loopback = presets[chosen].target;
+  if (!loopback.startsWith('cdp://')) return { misfiled: false };
+  const parsed = parseEndpointUrl(loopback);
+  if (!parsed || !isLocalHost(parsed.host)) return { misfiled: false };
   return {
     misfiled: true,
     why:

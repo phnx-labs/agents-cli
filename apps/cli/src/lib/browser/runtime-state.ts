@@ -11,6 +11,7 @@ import {
   DEFAULT_BROWSER_PROFILE_NAME,
   LEGACY_DEFAULT_BROWSER_PROFILE_NAME,
   type ProfileScope,
+  misfiledFleetProfile,
 } from './profiles.js';
 import { keyBelongsToProfile, type ProfileName } from './types.js';
 
@@ -378,16 +379,29 @@ export const PRUNE_REASON_TEXT: Record<PruneReason, string> = {
  * and `--dry-run` exists.
  */
 export function planProfilePrune(
-  profiles: Array<{ name: string; scope: ProfileScope; launchableHere: boolean }>,
+  profiles: Array<{
+    name: string;
+    scope: ProfileScope;
+    launchableHere: boolean;
+    /** Set when this fleet profile's endpoint only makes sense on one machine. */
+    misfiledWhy?: string;
+  }>,
   opts: { includeFleet?: boolean; configuredDefault?: string } = {}
 ): PrunePlan {
   const plan: PrunePlan = { candidates: [], kept: [] };
 
-  for (const { name, scope, launchableHere } of profiles) {
+  for (const { name, scope, launchableHere, misfiledWhy } of profiles) {
     const keep = (why: string): void => { plan.kept.push({ name, scope, why }); };
 
     if (scope === 'fleet' && !opts.includeFleet) {
-      keep('fleet-synced (pass --fleet to include it)');
+      // A misfiled fleet profile is NOT a prune candidate — deleting a fleet
+      // entry deletes it on every machine, and the repair is to move its scope,
+      // not to remove it. Report it in the kept reason so a dry run surfaces it.
+      keep(
+        misfiledWhy
+          ? `fleet-synced, and MISFILED — ${misfiledWhy}`
+          : 'fleet-synced (pass --fleet to include it)'
+      );
       continue;
     }
     if (name === DEFAULT_BROWSER_PROFILE_NAME || name === LEGACY_DEFAULT_BROWSER_PROFILE_NAME) {
@@ -427,11 +441,15 @@ export async function buildProfilePrunePlan(
 ): Promise<PrunePlan> {
   const scoped = await listProfilesWithScope();
   return planProfilePrune(
-    scoped.map(({ profile, scope }) => ({
-      name: profile.name,
-      scope,
-      launchableHere: isProfileLaunchableHere(profile),
-    })),
+    scoped.map(({ profile, scope }) => {
+      const misfiled = misfiledFleetProfile(profile, scope);
+      return {
+        name: profile.name,
+        scope,
+        launchableHere: isProfileLaunchableHere(profile),
+        misfiledWhy: misfiled.misfiled ? misfiled.why : undefined,
+      };
+    }),
     { includeFleet: opts.includeFleet, configuredDefault: getConfiguredDefaultProfileName() }
   );
 }

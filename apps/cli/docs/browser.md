@@ -244,7 +244,7 @@ name. That is only correct when the endpoint addresses **one specific machine**:
 
 The second case is the dangerous one for a profile that carries live logins: an
 agent asks for the credentialed browser by name and gets a stranger. `profiles
-doctor` flags it as a failing `scope` check, `profiles prune --dry-run` notes it
+doctor` flags it as a failing `scope` check, `profiles prune` notes it
 in the `kept` reason, and the repair is one command on the owning machine:
 
 ```bash

@@ -348,6 +348,24 @@ describe('planProfilePrune', () => {
   const local = (name: string, launchableHere: boolean) =>
     ({ name, scope: 'local' as const, launchableHere });
 
+  it('never prunes a misfiled fleet profile — it reports it in the kept reason', () => {
+    // Deleting a fleet entry deletes it on EVERY machine, so a misfiled profile
+    // is a scope-move, not a prune. A dry run still has to surface it.
+    const name = uniq('misfiled');
+    const plan = planProfilePrune([
+      { name, scope: 'fleet' as const, launchableHere: true, misfiledWhy: 'loopback endpoint' },
+    ]);
+    expect(plan.candidates).toEqual([]);
+    expect(plan.kept[0].why).toContain('MISFILED');
+    expect(plan.kept[0].why).toContain('loopback endpoint');
+  });
+
+  it('keeps the plain fleet reason when the profile is not misfiled', () => {
+    const name = uniq('cleanfleet');
+    const plan = planProfilePrune([{ name, scope: 'fleet' as const, launchableHere: true }]);
+    expect(plan.kept[0].why).toBe('fleet-synced (pass --fleet to include it)');
+  });
+
   it('removes a local profile whose browser is not installed here', () => {
     const name = uniq('nobinary');
     // Give it a runtime dir so the verdict is binary-missing, not never-used.

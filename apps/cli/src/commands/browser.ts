@@ -510,6 +510,10 @@ function registerProfilesCommands(browser: Command): void {
   profiles
     .command('edit <name>')
     .description('Edit an existing profile in place (stays in the store it already lives in)')
+    // Declared only so the action can explain WHY the browser type is not
+    // editable. Without it commander rejects `-b` as an unknown option before
+    // the action runs, and the delete-and-recreate guidance never reaches anyone.
+    .option('-b, --browser <type>', 'Not editable — see the error for the delete-and-recreate path')
     .option('-d, --description <text>', "Profile description (pass '' to clear)")
     .option('-e, --endpoint <url>', 'Replace the endpoint list (repeatable)', collect, [])
     .option('-s, --secrets <bundle>', 'Secrets bundle to inject')
@@ -559,7 +563,13 @@ function registerProfilesCommands(browser: Command): void {
           process.exit(1);
         }
         if (opts.headless !== undefined) {
-          patch.chrome = opts.headless ? { ...current.chrome, headless: true } : { ...current.chrome, headless: undefined };
+          const chrome = { ...current.chrome };
+          if (opts.headless) chrome.headless = true;
+          else delete chrome.headless;
+          // `{ headless: undefined }` is truthy, so profileToConfig would persist
+          // a bare `chrome: {}` into the YAML and the change-detector would report
+          // a phantom edit on an already-headed profile. Drop the key entirely.
+          patch.chrome = Object.keys(chrome).length > 0 ? chrome : undefined;
         }
         if (opts.window || opts.position) {
           const viewport = { ...(current.viewport ?? { width: DEFAULT_VIEWPORT.width, height: DEFAULT_VIEWPORT.height }) };
@@ -773,11 +783,29 @@ function registerProfilesCommands(browser: Command): void {
         return;
       }
 
+      // A misfiled fleet profile is never a prune candidate (deleting a fleet
+      // entry deletes it everywhere), so without this it would only ever surface
+      // in --json. It is the one kept-reason a user has to act on.
+      const misfiled = plan.kept.filter((k) => k.why.includes('MISFILED'));
+      const reportMisfiled = (): void => {
+        if (misfiled.length === 0) return;
+        console.log('');
+        console.log(
+          `${misfiled.length} fleet profile${misfiled.length === 1 ? '' : 's'} ${misfiled.length === 1 ? 'is' : 'are'} misfiled — ` +
+            `fleet-synced but bound to a local port, so the name means a different browser on every machine:`
+        );
+        for (const k of misfiled) {
+          console.log(`  ${k.name} — agents browser profiles scope ${k.name} local`);
+        }
+        console.log('Run that on the machine that owns each browser. Nothing was moved for you.');
+      };
+
       if (plan.candidates.length === 0) {
         console.log('Nothing to prune — every profile is in use, healthy, or protected.');
         if (plan.kept.length > 0) {
           for (const k of plan.kept) console.log(`  kept ${k.name} (${k.scope}) — ${k.why}`);
         }
+        reportMisfiled();
         return;
       }
 
@@ -789,6 +817,7 @@ function registerProfilesCommands(browser: Command): void {
           : '';
         console.log(`  ${c.name} (${c.scope}) — ${PRUNE_REASON_TEXT[c.reason]}${cache}`);
       }
+      reportMisfiled();
       if (opts.dryRun) {
         console.log('');
         console.log('Nothing was changed. Re-run without --dry-run to apply.');

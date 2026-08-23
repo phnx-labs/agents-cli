@@ -1363,6 +1363,35 @@ describe('misfiledFleetProfile', () => {
     expect(misfiledFleetProfile(remote, 'fleet').misfiled).toBe(false);
   });
 
+  it('respects defaultEndpoint — an ssh-default profile with a loopback alternate is fine', () => {
+    // effectiveLocalPort resolves defaultEndpoint first, and this must agree:
+    // scanning every preset would fail a legitimate fleet profile that merely
+    // carries a loopback alternate for local debugging.
+    const mixed = {
+      name: 'rush-mac-mini',
+      browser: 'custom' as const,
+      endpoints: {
+        remote: { target: 'ssh://muqsit@mac-mini?port=9300' },
+        local: { target: 'cdp://localhost:9300' },
+      },
+      defaultEndpoint: 'remote',
+    };
+    expect(misfiledFleetProfile(mixed as any, 'fleet').misfiled).toBe(false);
+  });
+
+  it('flags it when the loopback alternate IS the default', () => {
+    const mixed = {
+      name: 'rush-mac-mini',
+      browser: 'custom' as const,
+      endpoints: {
+        remote: { target: 'ssh://muqsit@mac-mini?port=9300' },
+        local: { target: 'cdp://localhost:9300' },
+      },
+      defaultEndpoint: 'local',
+    };
+    expect(misfiledFleetProfile(mixed as any, 'fleet').misfiled).toBe(true);
+  });
+
   it('does not flag a fleet profile pointed at a real remote host over http', () => {
     const remote = { name: 'grid', browser: 'chrome' as const, endpoints: ['http://10.0.0.5:9222'] };
     expect(misfiledFleetProfile(remote, 'fleet').misfiled).toBe(false);
