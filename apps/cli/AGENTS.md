@@ -391,8 +391,7 @@ The new command is a **facade over the existing YAML storage**
 `devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so interactive
 `agents run` launches spawn the agent directly. Turn it on for a device to wrap
 eligible launches in the shared-socket tmux session and give each agent an exact
-`%pane` address for `agents message`, injection, and `agents focus`. A direct
-launch with no other precise rail prints that degradation once at launch. The
+`%pane` address for `agents message`, injection, and `agents focus`. The
 setting is machine-local and cannot be set for a peer; `--no-tmux`, `--raw`, and
 `AGENTS_NO_TMUX=1` remain per-run opt-outs when wrapping is enabled. The gate is `shouldWrapInTmux`
 ([`src/lib/exec.ts`](src/lib/exec.ts)), reading `isTmuxEnabled()`.

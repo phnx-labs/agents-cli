@@ -1542,8 +1542,7 @@ macOS and Linux. Windows via WSL works but isn't first-class yet.
 
 Interactive runs spawn directly by default. Enable `tmux.enabled` on a device to
 give each run an addressable pane for `agents message`, injection, and `agents
-focus`; tmux-backed runs require tmux 3.2 or newer. A direct run with no precise
-terminal rail names the unavailable controls once at launch.
+focus`; tmux-backed runs require tmux 3.2 or newer.
 
 ### Do I need Node.js?
 

@@ -40,8 +40,6 @@ import { resolveHarnessAdapter, stripForeignConfigDir } from './harness/index.js
 import { resolveConfigVersion } from './harness/exec-config-version.js';
 import { getAccountInfo } from './agents.js';
 import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
-import { deriveProvenance } from './session/provenance.js';
-import { hostFromPid } from './session/active.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -1867,7 +1865,6 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
       throw err;
     }
   }
-
 
   return new Promise((resolve, reject) => {
     // Interactive mode inherits all stdio so the CLI owns the TTY (TUI
