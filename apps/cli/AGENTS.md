@@ -890,7 +890,15 @@ the helper only when `src/lib/secrets/keychain-helper.swift` changes.
 **Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) ships the same
 way — built into `bin/`, copied to `dist/lib/menubar/` by `build`, gated in `prepack`
 by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (presence +
-`codesign --verify` + a **stapled notarization ticket**). It is Developer-ID signed
+`codesign --verify` + a **stapled notarization ticket** + a **designated-requirement
+pin**). The DR pin is what keeps the Accessibility grant alive across upgrades:
+macOS re-validates each new version against the requirement stored with the grant
+(`identifier "com.phnx-labs.agents-menubar" … certificate leaf[subject.OU] =
+"2HTP252L87"`), not the CDHash — so every re-signed release still satisfies it and
+the grant persists. The gate hard-fails a release whose DR drops the pinned bundle
+id or Team ID (a wrong/absent team, an ad-hoc signature, a CDHash-pinned DR), because
+that would silently revoke every user's grant and re-prompt them on the next paste.
+It is Developer-ID signed
 **and notarized + stapled** ([`menubar/scripts/build.sh`](menubar/scripts/build.sh),
 run inside the release's `agents secrets exec apple.com` context): Gatekeeper on
 macOS 26+ rejects an un-notarized `.app` as "damaged" (crashing AppKit at launch),
@@ -936,8 +944,10 @@ Three escapes keep the gate from becoming a **stuck state**, which is how the fi
 version of it regressed: (1) **repairs are never gated** — a missing helper
 executable or a Developer-ID heal proceeds from any install, since a bundle that
 isn't there cannot be contested and blocking it leaves the menu bar dead with no
-automatic recovery; (2) a non-owner takes over immediately once the recorded owner
-is **gone from disk**; (3) otherwise a non-owner may still take over **once per
+automatic recovery; (2) a non-owner takes over once the recorded owner is **gone
+from disk** — but, like escape (3), only a **Developer-ID** source may seize a
+*healthy* helper this way (an ad-hoc/dev build is refused, see caveat (a)); (3)
+otherwise a non-owner may still take over **once per
 `MENUBAR_TAKEOVER_COOLDOWN_MS`** (1h, stamped in `.menubar-last-heal`). Without (3)
 a stale-but-present copy — an old nvm node dir nobody runs — owns the plist forever
 while the user's actual daily driver upgrades and never heals again. The cooldown
@@ -945,13 +955,19 @@ turns an every-invocation storm into at most one restart per hour while leaving
 every install able to make progress. `agents menubar setup` bypasses the gate
 entirely and stays the immediate manual fix.
 
-Two caveats worth knowing before you tune any of this. **(a)** Escape (3) is
-refused to a source bundle that is not Developer-ID signed: `scripts/install.sh`
-puts an ad-hoc dev build beside the npm global, and letting it win a *timed*
-takeover would recopy an un-notarized bundle over a good one, which Gatekeeper
-rejects as "damaged" and AppKit crashes on (RUSH-2134) — a broken menu bar rather
-than a cosmetic restart. It can still adopt via (2), the case that must never
-deadlock. **(b)** The cooldown bounds the loop but does not converge it: two
+Two caveats worth knowing before you tune any of this. **(a)** Escapes (2) AND (3)
+are both refused to a source bundle that is not Developer-ID signed:
+`scripts/install.sh` puts an ad-hoc dev build beside the npm global, and letting it
+recopy an un-notarized bundle over a good one both makes Gatekeeper reject the
+result as "damaged" (RUSH-2134) AND poisons the shipped helper's Accessibility
+grant — an ad-hoc signature carrying the production bundle id fails the code
+requirement macOS stored with the grant, so it revokes the grant and re-prompts on
+the next paste. This is why a dev build ALSO signs under a distinct
+`com.phnx-labs.agents-menubar.dev` id (`menubar/scripts/build.sh`), so even a
+running dev helper registers its own TCC entry rather than the production one.
+Refusing an ad-hoc healthy-helper takeover strands nothing: escape (1) still heals
+a genuinely broken (missing / ad-hoc-installed) helper from any source, which is
+the only real deadlock. **(b)** The cooldown bounds the loop but does not converge it: two
 installs that are *both* invoked regularly trade ownership every cooldown, so the
 helper restarts roughly hourly until one is removed. That is deliberate — the
 alternative is stranding one of them — and the real fix is a single install

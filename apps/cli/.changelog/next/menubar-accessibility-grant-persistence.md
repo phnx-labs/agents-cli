@@ -1,0 +1,5 @@
+---
+type: fix
+---
+
+AGI Menu no longer re-prompts for Accessibility on dev machines, and the clip-paste hotkey (Cmd-Shift-V) no longer depends on the grant at all. A locally-built (ad-hoc) menu-bar helper now signs under a distinct `com.phnx-labs.agents-menubar.dev` bundle id, so it can never poison the shipped app's Accessibility grant (macOS keys the grant to the bundle id and revokes it when a same-id binary fails the stored Developer-ID code requirement). An ad-hoc build also can no longer overwrite a healthy Developer-ID install when the recorded owner path vanishes. A release now hard-fails if the shipped helper's designated requirement ever drops the pinned bundle id or Developer ID team, since that would silently revoke every user's grant on upgrade. And when the grant is missing, Cmd-Shift-V now silently copies the `host:path` reference to the clipboard (press Cmd-V) instead of re-showing the system permission modal on every paste — auto-type stays on only where Accessibility is already granted.

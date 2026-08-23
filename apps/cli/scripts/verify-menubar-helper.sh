@@ -42,6 +42,35 @@ if command -v codesign >/dev/null 2>&1; then
     echo "Rebuild it: menubar/scripts/build.sh release" >&2
     exit 1
   fi
+
+  # The Accessibility (TCC) grant survives upgrades ONLY because macOS re-validates
+  # each new version against the DESIGNATED REQUIREMENT stored with the grant, not
+  # the exact CDHash — and this helper's requirement is identity+team based
+  # (`identifier "com.phnx-labs.agents-menubar" … certificate leaf[subject.OU] =
+  # "2HTP252L87"`), which every re-signed, re-notarized release still satisfies. If
+  # a signing change ever produced a requirement that DIDN'T (a wrong/absent Team
+  # ID, an ad-hoc signature, a CDHash-pinned DR), macOS would revoke every user's
+  # grant and re-prompt them for Accessibility on the next paste. That is a
+  # fleet-wide, silent, per-user regression — so pin it here and fail the release
+  # rather than ship it. (macOS-only: reading the requirement needs codesign; the
+  # helper is always Developer-ID signed on a Mac, which is where this must hold.)
+  REQ="$(codesign -d --requirements - "$APP" 2>/dev/null || true)"
+  MENUBAR_BUNDLE_ID="com.phnx-labs.agents-menubar"
+  MENUBAR_TEAM_ID="2HTP252L87"
+  if ! printf '%s' "$REQ" | grep -qF "identifier \"$MENUBAR_BUNDLE_ID\""; then
+    echo "menubar helper designated requirement is missing the pinned bundle identifier ($MENUBAR_BUNDLE_ID): $APP" >&2
+    echo "TCC keys the Accessibility grant to this requirement — a change re-prompts every user on the next paste." >&2
+    echo "Requirement read: ${REQ:-<none>}" >&2
+    exit 1
+  fi
+  if ! printf '%s' "$REQ" | grep -qF "$MENUBAR_TEAM_ID"; then
+    echo "menubar helper designated requirement is missing the Developer ID team ($MENUBAR_TEAM_ID): $APP" >&2
+    echo "That team is what makes the requirement stable across re-signed releases; without it every" >&2
+    echo "existing Accessibility grant is invalidated and users are re-prompted. Sign with the real" >&2
+    echo "Developer ID Application: … ($MENUBAR_TEAM_ID) identity: menubar/scripts/build.sh release" >&2
+    echo "Requirement read: ${REQ:-<none>}" >&2
+    exit 1
+  fi
 fi
 
 # Require the packed executable to be a universal (fat) Mach-O binary.
