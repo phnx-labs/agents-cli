@@ -27,7 +27,7 @@ export const WIN_PROBE_TIMEOUT_MS = 6_000;
 
 const SEP = '---AGSTAT---';
 /** One-shot remote snapshot: load, memory, core count, then root filesystem. */
-export const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null); echo ${SEP}; df -k / 2>/dev/null | tail -1`;
+export const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null); echo ${SEP}; df -Pk / 2>/dev/null | tail -1`;
 
 /** Windows equivalent, one labeled line via CIM. PowerShell 5.1-safe: no `||`
  * chaining, plain string concatenation. `LoadPercentage` is $null on some
