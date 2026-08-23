@@ -204,9 +204,9 @@ workspace, `~/.agents`, the regenerable toolchain cache roots, network on. Only
 the approval axis changes.
 
 <div class="artifact-callout">
-<strong>Autonomy is the approval axis only.</strong> `auto` does not widen the
-sandbox by a single path, and <code>--mode skip</code> remains the one mode that
-removes it. A sandbox-denied command under `auto` surfaces to the model as an
+<strong>Autonomy is the approval axis only.</strong> <code>auto</code> does not
+widen the sandbox by a single path, and <code>--mode skip</code> remains the one
+mode that removes it. A sandbox-denied command under <code>auto</code> surfaces to the model as an
 ordinary command failure it can work around — instead of a dialog that stops an
 agent nobody is watching.
 </div>
@@ -214,9 +214,25 @@ agent nobody is watching.
 Interactive shim launches — a bare `codex` typed at your own terminal — still
 pin `edit`, because there a prompt is the useful outcome.
 
-Nine files: the policy builder, the adapter, the capability table, the command
-template, four test files, plus the spec (`EXEC-22a`), `resource-sync.md`, and a
-`.changelog/next/` fragment.
+The mechanism is small — the policy builder, the adapter, the capability table,
+and the command template. The rest of the change is telling the truth about it.
+
+A non-author review blocked the first version for exactly that: the code was
+right, but adding `auto` to Codex made five user-visible descriptions false, and
+the diff had touched none of them. `README.md` still said Codex had no native
+`auto`. `agents modes codex` rendered a row promising a "smart classifier
+auto-approves safe ops, prompts for risky" — a row that did not exist for Codex
+before this change, so the change is what created the lie. The fleet's own
+`run` skill taught the old behavior to every agent that reads it. And the
+extension's panel contract was *inverted*: it promised "Auto (the safe
+default — asks before anything risky), Edit (accepts edits without asking)",
+when on Codex it is `edit` that prompts and `auto` that does not.
+
+The review also caught that the new test could not fail. It asserted `auto`'s
+contents in isolation, so a later change adding a root or a network key to
+`auto` alone — the exact regression the spec forbids — would have passed every
+assertion. It is now pinned against `edit` directly, so the sandbox can only
+ever move for both at once.
 
 ### What to do for fleet work
 
