@@ -59,7 +59,7 @@ import {
   type StallStatus,
   type WatchdogCandidate,
 } from './watchdog.js';
-import { makeWatchdogAgentDecider } from './watchdog-agent.js';
+import { makeWatchdogAgentDecider, type WatchdogAgentDecider } from './watchdog-agent.js';
 import {
   readWatchdogTail,
   WATCHDOG_STALL_MS,
@@ -151,6 +151,13 @@ export interface WatchdogTickOptions {
    * shelling out.
    */
   smartDecider?: SmartDecider;
+  /**
+   * The batched agent decider used in production (all idle candidates → one call).
+   * Default `makeWatchdogAgentDecider`. Tests inject one (e.g. returning an empty
+   * map) to exercise the batched path and the no-verdict fallback without shelling
+   * out. Ignored when `smartDecider` (the per-candidate test seam) is set.
+   */
+  agentDecider?: WatchdogAgentDecider;
   /** Open feed block for a session (parked-on-question detection). Default reads the feed. */
   openBlockFor?: (s: ActiveSession) => OpenBlock | null;
   /** Inject primitive. Default injectIntoTerminal — tests capture the resolved target. */
@@ -659,8 +666,18 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       }
     } else {
       // Production: ONE batched agent call for every idle session this tick.
-      const decide = makeWatchdogAgentDecider(opts.smartAgent ?? 'claude');
+      const decide = opts.agentDecider ?? makeWatchdogAgentDecider(opts.smartAgent ?? 'claude');
       const verdicts = await decide(idleCandidates.map((e) => e.candidate));
+      // A decider outage (agent unavailable / timeout) returns no verdicts while
+      // idle sessions exist — surface it as an error so it is not an invisible
+      // no-op tick (the watchdog silently steering nothing is the failure mode
+      // this whole subsystem exists to prevent).
+      if (verdicts.size === 0) {
+        logEvents.push({
+          ts: nowMs, kind: 'error',
+          message: `watchdog agent returned no verdicts for ${idleCandidates.length} idle session(s) — decider unavailable this tick`,
+        });
+      }
       for (const { candidate } of idleCandidates) {
         const d = verdicts.get(candidate.terminalId);
         decisionByTerminal.set(
@@ -674,7 +691,14 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
                 // never silently abandon an unfinished session (the highest-risk state).
                 needsHuman: d.action === 'skip' ? d.needsHuman ?? true : undefined,
               }
-            : { nudge: false, reason: 'watchdog agent returned no verdict for this session', needsHuman: false },
+            // No verdict for this session — the agent couldn't decide (partial or a
+            // decider outage). A NEUTRAL safe-skip: NOT "done" (needsHuman stays
+            // undefined, so it is never logged as finished and the reminder never
+            // fires), nothing booked, so the next tick re-evaluates it once the
+            // decider is back. Marking it done (needsHuman:false) would let an
+            // outage abandon every idle session; marking it needsHuman would spam a
+            // "you're stuck" reminder into every idle terminal on any outage.
+            : { nudge: false, reason: 'watchdog agent returned no verdict — retry next tick' },
         );
       }
     }

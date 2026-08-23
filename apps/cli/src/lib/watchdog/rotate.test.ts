@@ -102,7 +102,7 @@ function rig(over: Partial<WatchdogTickOptions> = {}) {
   let deciderCalled = false;
   const injectFn = async (target: InjectTarget, text: string, opts: { dryRun?: boolean; enter?: boolean }) => {
     calls.push({ target, text, opts });
-    return { ok: true as const, backend: target.backend, writes: 1 };
+    return { ok: true as const, confirmed: true as const, backend: target.backend, writes: 1 };
   };
   const smartDecider: SmartDecider = async () => {
     deciderCalled = true;

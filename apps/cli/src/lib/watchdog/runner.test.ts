@@ -18,6 +18,7 @@ import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, MuxLocation } from '../session/provenance.js';
 import type { InjectTarget } from '../terminal/index.js';
 import type { WatchdogCandidate } from './watchdog.js';
+import type { WatchdogAgentDecider } from './watchdog-agent.js';
 import type { OpenBlock } from '../feed/feed.js';
 import {
   runWatchdogTick,
@@ -458,6 +459,51 @@ describe('runWatchdogTick — the agent decides only when something is idle', ()
   });
 });
 
+describe('runWatchdogTick — the batched agent decider (production path)', () => {
+  function readLog(): Array<{ kind: string; message: string; terminalId?: string }> {
+    try {
+      return fs.readFileSync(path.join(stateDir, 'watchdog.log'), 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+    } catch { return []; }
+  }
+
+  it('applies a batched verdict keyed by terminalId (one decider call for all idle sessions)', async () => {
+    let calls = 0;
+    let sawCount = 0;
+    const agentDecider: WatchdogAgentDecider = async (cands) => {
+      calls++; sawCount = cands.length;
+      return new Map(cands.map((c) => [c.terminalId, { terminalId: c.terminalId, action: 'nudge' as const, text: '', reason: 'unfinished' }]));
+    };
+    const a = tmuxSession({ sessionId: 'sess-a' });
+    const b = tmuxSession({ sessionId: 'sess-b' });
+    const result = await run({
+      sessions: [a, b], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
+      tailFor: () => PROMISE_TAIL, agentDecider,
+    });
+    expect(calls).toBe(1);          // ONE call for both idle sessions
+    expect(sawCount).toBe(2);
+    expect(result.outcomes.every((o) => o.decision === 'nudge')).toBe(true);
+    expect(result.counts.nudged).toBe(2);
+  });
+
+  it('a session with NO verdict is a neutral safe-skip — not marked done, not booked, retried next tick', async () => {
+    // A decider outage (empty map while idle sessions exist) must NOT abandon the
+    // session as "done" (the bug: needsHuman:false). It skips, books nothing (so the
+    // next tick re-evaluates), and logs an outage error so the no-op is visible.
+    const emptyDecider: WatchdogAgentDecider = async () => new Map();
+    const result = await run({
+      sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
+      tailFor: () => PROMISE_TAIL, agentDecider: emptyDecider,
+    });
+    const o = result.outcomes[0];
+    expect(o.decision).toBe('skip');
+    expect(o.reason).toMatch(/no verdict/i);
+    // Nothing booked → retried next tick (not silently abandoned as done).
+    expect(readLedger()['sess-tmux']).toBeUndefined();
+    // The outage is surfaced, not an invisible no-op tick.
+    expect(readLog().some((e) => e.kind === 'error' && /no verdicts/i.test(e.message))).toBe(true);
+  });
+});
+
 describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost updates)', () => {
   it('two concurrent ticks nudging different sessions both persist their timestamps', async () => {
     // Reproduces the lost-update race: the OLD unlocked read-at-start/write-at-end
@@ -502,7 +548,7 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       let capturedText: string | null = null;
       const injectFn = async (_target: InjectTarget, text: string, _o: { dryRun?: boolean }) => {
         capturedText = text;
-        return { ok: true as const, backend: 'tmux' as const, writes: 2 };
+        return { ok: true as const, confirmed: true as const, backend: 'tmux' as const, writes: 2 };
       };
       const result = await run({
         sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
@@ -522,7 +568,7 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
 
     it('does NOT inject when a block already exists for the session', async () => {
       let injected = false;
-      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const injectFn = async () => { injected = true; return { ok: true as const, confirmed: true as const, backend: 'tmux' as const, writes: 2 }; };
       const existingBlock = { blockId: 'block-sess-tmux', sessionId: 'sess-tmux', mailboxId: 'sess-tmux' } as OpenBlock;
       await run({
         sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
@@ -537,7 +583,7 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
       // Seed a ledger entry 1 minute ago — inside the default 20m cooldown.
       fs.writeFileSync(path.join(stateDir, 'nudges.json'), JSON.stringify({ 'sess-tmux': NOW - 60_000 }));
       let injected = false;
-      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const injectFn = async () => { injected = true; return { ok: true as const, confirmed: true as const, backend: 'tmux' as const, writes: 2 }; };
       await run({
         sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
         tailFor: () => ASK_TAIL, smartDecider: needsHumanDecider, injectFn,

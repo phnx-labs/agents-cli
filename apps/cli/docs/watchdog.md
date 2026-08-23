@@ -65,7 +65,10 @@ playbook at `~/.agents/playbooks/watchdog.md` is appended as **House Rules**
 already-published version to my own fleet is authorized — proceed") tune the NUDGE/SKIP line
 without editing the built-in prompt. If a `watchdog` workflow resolves (repo > user >
 system), it runs by name so its WORKFLOW.md body + `model:` frontmatter apply; absent one,
-the built-in prompt runs.
+the built-in prompt runs. Because the decision is one batched call spanning every idle
+session (which may live in different projects), the workflow is resolved from the daemon's
+own cwd — so the user/system-layer `watchdog` workflow applies fleet-wide, while a
+project-layer override only takes effect when the daemon runs from that project.
 
 Four rules govern a good nudge:
 
