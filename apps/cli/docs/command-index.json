@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 554,
+  "commands": 555,
   "root": {
     "name": "agents",
     "path": "",
@@ -225,6 +225,48 @@
             }
           ],
           "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "label",
+          "path": "accounts label",
+          "aliases": [],
+          "description": "Label a native login independently of its installed harness version",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            },
+            {
+              "name": "label",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--account <email-or-id>",
+              "description": "Native identity to label when the harness has multiple logins",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -19823,8 +19865,8 @@
           "negate": false
         },
         {
-          "flags": "--account <name>",
-          "description": "Use this durable provider credential for the run",
+          "flags": "--account <label>",
+          "description": "Use this labeled native login or durable provider credential for the run",
           "long": "--account",
           "required": true,
           "optional": false,
