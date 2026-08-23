@@ -37,7 +37,7 @@ import * as yaml from 'yaml';
 import { META_HEADER, getUserAgentsDir, readMeta, updateMeta, withMetaLock } from './state.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { machineId } from './machine-id.js';
-import { assertValidDeviceName } from './devices/registry.js';
+import { assertValidDeviceName, assertRegistrableDeviceName } from './devices/registry.js';
 import { migrateDeviceConfigStores } from './devices/config-migration.js';
 import type { FleetManifest } from './fleet/types.js';
 
@@ -118,7 +118,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Device that shows the user artifacts (browser opens, dashboards) — the "online macOS box" skills should use instead of guessing.',
     validate: (v) => {
       try {
-        assertValidDeviceName(v as string);
+        assertRegistrableDeviceName(v as string);
         return null;
       } catch (err: any) {
         return err?.message ?? String(err);
@@ -133,7 +133,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description: 'Device whose usage snapshots are authoritative for fleet-wide usage reporting.',
     validate: (v) => {
       try {
-        assertValidDeviceName(v as string);
+        assertRegistrableDeviceName(v as string);
         return null;
       } catch (err: any) {
         return err?.message ?? String(err);

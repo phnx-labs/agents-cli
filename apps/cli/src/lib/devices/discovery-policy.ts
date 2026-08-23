@@ -3,6 +3,7 @@ import { readMeta, updateMeta } from '../state.js';
 import {
   addIgnored,
   assertValidDeviceName,
+  assertRegistrableDeviceName,
   loadDevices,
   removeDevice,
   removeIgnored,
@@ -22,13 +23,13 @@ export interface DeviceDiscoveryReconcileResult {
 
 /** Read one portable decision. Absence means pending. */
 export function getDeviceDiscoveryStatus(name: string): DeviceDiscoveryStatus | undefined {
-  assertValidDeviceName(name);
+  assertRegistrableDeviceName(name);
   return loadDeviceDiscoveryPolicies().get(name);
 }
 
 /** Persist one portable decision in the central fleet manifest. */
 export function setDeviceDiscoveryStatus(name: string, status: DeviceDiscoveryStatus | undefined): void {
-  assertValidDeviceName(name);
+  assertRegistrableDeviceName(name);
   updateMeta((meta) => {
     const discovery = { ...meta.fleet?.discovery };
     if (status) discovery[name] = status;

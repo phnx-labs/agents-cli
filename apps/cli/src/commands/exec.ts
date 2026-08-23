@@ -778,7 +778,7 @@ export function registerRunCommand(program: Command): void {
     )
     .option(
       '-D, --device <name>',
-      'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better. Same as --where device:<name>. See `agents devices`.',
+      'Offload this run onto another machine over SSH — a registered device, or user@host. Pass "auto" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better, or "interactive" for the machine pinned as interactive.host (the box a human is sitting at). Same as --where device:<name>. See `agents devices`.',
     )
     .option('--remote-cwd <dir>', "Explicit device working directory for --device runs, used VERBATIM (overrides --cwd; usually --cwd suffices — it re-roots a local-home path onto the remote home). Pass a single-quoted '$HOME/…' or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you).")
     .option('--no-follow', 'With --device, dispatch detached and return immediately (track via `agents hosts ps/logs`).')

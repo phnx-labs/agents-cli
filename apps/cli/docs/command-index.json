@@ -19787,7 +19787,7 @@
         },
         {
           "flags": "-D, --device <name>",
-          "description": "Offload this run onto another machine over SSH — a registered device, or user@host. Pass \"auto\" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better. Same as --where device:<name>. See `agents devices`.",
+          "description": "Offload this run onto another machine over SSH — a registered device, or user@host. Pass \"auto\" to pick the least-loaded reachable device where the requested agent is installed and signed in, keeping the run local when no remote is better, or \"interactive\" for the machine pinned as interactive.host (the box a human is sitting at). Same as --where device:<name>. See `agents devices`.",
           "short": "-D",
           "long": "--device",
           "required": true,

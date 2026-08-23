@@ -163,13 +163,33 @@ const DEVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
  */
 export const RESERVED_DEVICE_NAMES = new Set(['auto', 'interactive', 'all']);
 
-/** Throw if `name` is not usable as an ssh alias (no spaces, quotes, etc.). */
+/**
+ * Throw if `name` is not usable as an ssh alias (no spaces, quotes, etc.).
+ *
+ * SHAPE ONLY. Safe on read paths, which must keep working for a name that is
+ * already registered — including one this version would refuse to create.
+ */
 export function assertValidDeviceName(name: string): void {
   if (!DEVICE_NAME_RE.test(name)) {
     throw new Error(
       `Invalid device name ${JSON.stringify(name)}. Use letters, digits, '.', '_', '-' (no spaces) — e.g. 'win-mini'.`,
     );
   }
+}
+
+/**
+ * Throw if `name` cannot be used for a NEW device: bad shape, or a reserved
+ * routing sentinel.
+ *
+ * Deliberately separate from {@link assertValidDeviceName}. Folding the reserved
+ * check into the shape check put policy on every read path, so one pre-existing
+ * node named `auto` would abort the whole `agents devices sync` (the upsert loop
+ * has no per-node catch) and break pure reads like `configuredDeviceRole` — a
+ * machine whose own hostname collided would fail its auth gate. Policy belongs
+ * only where a name is being CHOSEN.
+ */
+export function assertRegistrableDeviceName(name: string): void {
+  assertValidDeviceName(name);
   if (RESERVED_DEVICE_NAMES.has(name.trim().toLowerCase())) {
     throw new Error(
       `${JSON.stringify(name)} is a reserved --device value, not a device name. ` +
@@ -296,7 +316,7 @@ export interface DeviceInput {
  * platform so the two can never drift. Returns the resulting profile.
  */
 export async function upsertDevice(name: string, input: DeviceInput): Promise<DeviceProfile> {
-  assertValidDeviceName(name);
+  assertRegistrableDeviceName(name);
   const p = registryPath();
   return withRegistryLock(p, async () => {
     const reg = await loadDevices();
@@ -417,7 +437,7 @@ export async function isIgnored(name: string): Promise<boolean> {
 
 /** Add a node name to the ignore-list. Idempotent. Returns the resulting set. */
 export async function addIgnored(name: string): Promise<Set<string>> {
-  assertValidDeviceName(name);
+  assertRegistrableDeviceName(name);
   const p = ignoredPath();
   return withRegistryLock(p, async () => {
     const set = await loadIgnored();

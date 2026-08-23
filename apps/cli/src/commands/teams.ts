@@ -1641,10 +1641,10 @@ export function registerTeamsCommands(program: Command): void {
           if (isDeviceInteractive(d)) {
             const pinned = resolveInteractiveDevice();
             if (!pinned) {
-              dieFriction('teams', 'device-interactive-unset', interactiveUnsetError());
+              dieFriction('teams', 'pool-device-interactive-unset', interactiveUnsetError());
             }
             process.stderr.write(chalk.gray(`[teams] pool device=interactive → ${pinned}\n`));
-            d = pinned!;
+            d = pinned;
           }
           if (!devices.includes(d)) devices.push(d);
         }
