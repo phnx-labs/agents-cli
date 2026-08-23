@@ -4,6 +4,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.332] - 2026-08-23
+
+- **`scripts/release.sh` no longer loses the version when it re-enters under
+  `agents secrets exec` (RUSH-2987).** The argument parser shifts every argument
+  away, so the re-exec that picks up the marketplace PATs replayed an empty
+  `"$@"`: the re-entered script found no version, fell through to `usage 1`, and
+  every extension release died at the token step with a usage dump. The original
+  argv is captured before parsing and replayed verbatim. Source:
+  `scripts/release.sh`, covered by `scripts/release.test.sh`.
+
 ## [0.9.331] - 2026-08-23
 
 - **`Agents: New <Harness>` opens an agent again instead of asking which account

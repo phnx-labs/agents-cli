@@ -45,6 +45,13 @@ STAY_HERE=0
 # the work instead of routing again.
 PUBLISH_PHASE=0
 
+# The parse loop below shifts every argument away, so `$@` is empty by the time
+# the secrets re-entry re-execs this script (RUSH-2987: the re-exec replayed an
+# empty argv, the re-entered script fell through to `usage 1`, and every release
+# died at the token step). Keep the original argv so the re-exec can replay it
+# verbatim.
+ORIGINAL_ARGV=("$@")
+
 usage() {
     sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'
     exit "${1:-0}"
@@ -354,7 +361,8 @@ if { [ $PUBLISH_VSCE -eq 1 ] && [ -z "${VSCE_PAT:-}" ]; } || { [ $PUBLISH_OVSX -
             echo "       Then add VSCE_PAT and OVSX_PAT keys." >&2
             exit 1
         fi
-        EXT_RELEASE_SECRETS_EXEC=1 exec agents secrets exec vs-marketplace -- "$0" "$@"
+        # Replay ORIGINAL_ARGV, not "$@" — see the note at its definition.
+        EXT_RELEASE_SECRETS_EXEC=1 exec agents secrets exec vs-marketplace -- "$0" "${ORIGINAL_ARGV[@]}"
     fi
 fi
 
