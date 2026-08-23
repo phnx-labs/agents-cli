@@ -2164,6 +2164,10 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
  * candidate (RUSH-2858). Dropping mirrors the Grok collector, and an all-expired
  * snapshot deserializes to null so `readClaudeUsageCache` deletes the entry and
  * callers surface "usage unavailable" plus the recorded throttle reason.
+ *
+ * A row that carries a plan survives even with no fresh windows: the plan is a
+ * truthful reading in its own right, and losing it is what made the cached view
+ * contradict the refreshed one for meterless harnesses. See the guard below.
  */
 function deserializeClaudeUsageSnapshot(
   snapshot: CachedUsageSnapshot,
@@ -2183,7 +2187,17 @@ function deserializeClaudeUsageSnapshot(
 
   const unavailable = deserializeUnavailable(snapshot.unavailable, now);
 
-  if (windows.length === 0 && !unavailable) {
+  // A windowless row is not automatically worthless. Grok's collector reports
+  // the subscription tier and no meters at all, so treating "no fresh windows"
+  // as "nothing cached" deleted the only truthful thing we knew about the
+  // account: `--refresh` wrote {plan: 'SuperGrok Heavy', windows: []}, the very
+  // next plain `agents view` deserialized it to null, `readClaudeUsageCache`
+  // pruned the row, and the row rendered "usage unavailable" one read after a
+  // successful refresh. Keep a plan-bearing row — it renders as the plan alone,
+  // and `deriveUsageStatusFromSnapshot` still returns null for zero windows, so
+  // it can never read as a 0% bar or an "available" badge (the RUSH-2858
+  // property that made expired windows drop in the first place).
+  if (windows.length === 0 && !unavailable && !snapshot.plan) {
     return null;
   }
 

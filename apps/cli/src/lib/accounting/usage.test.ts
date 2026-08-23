@@ -453,6 +453,44 @@ describe('expired cached windows are unknown, not 0%', () => {
     const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
     expect(raw[usageKey]).toBeUndefined();
   });
+
+  it('keeps a meterless plan-only row so the cached read matches the refreshed one', () => {
+    // The exact row Grok's collector writes: a subscription tier and no meters.
+    // Dropping it made `agents view grok` print "usage unavailable" on the read
+    // immediately after a successful `--refresh`, and pruned the row as a bonus.
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(Date.now() - 60 * 60 * 1000),
+      plan: 'SuperGrok Heavy',
+      windows: [],
+    });
+
+    const snapshot = readClaudeUsageCache(usageKey);
+
+    expect(snapshot?.plan).toBe('SuperGrok Heavy');
+    expect(snapshot?.windows).toEqual([]);
+    // No windows means no throttle claim either way — never a fake 0% bar.
+    expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
+    expect(formatUsageSummary(snapshot?.plan ?? null, snapshot)).toBe('SuperGrok Heavy');
+
+    // The row survives the read that used to delete it.
+    const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
+    expect(raw[usageKey]?.plan).toBe('SuperGrok Heavy');
+  });
+
+  it('still drops a row with neither windows, a refusal, nor a plan', () => {
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(Date.now() - 60 * 60 * 1000),
+      windows: [],
+    });
+
+    expect(readClaudeUsageCache(usageKey)).toBeNull();
+    const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
+    expect(raw[usageKey]).toBeUndefined();
+  });
 });
 
 describe('observed Claude session limits', () => {

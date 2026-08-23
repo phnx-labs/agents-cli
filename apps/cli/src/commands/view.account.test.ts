@@ -114,6 +114,27 @@ describe('viewUsageSummaryOptions — truthful unavailable states', () => {
     expect(opts.unavailable).toBe(false);
     expect(formatUsageSummary(null, null, 3, opts)).toBe('');
   });
+
+  it('renders the cached plan for a meterless harness instead of "usage unavailable"', () => {
+    // A plan-only cache row (Grok reports a tier and no meters) is what the
+    // plain, non-refreshing `agents view` reads. It must render the same thing
+    // `--refresh` just showed, not the generic unavailable bucket.
+    const usageInfo: UsageInfo = {
+      snapshot: {
+        source: 'last_seen',
+        sourceLabel: 'last seen live account data',
+        capturedAt: new Date(),
+        plan: 'SuperGrok Heavy',
+        windows: [],
+      },
+      error: null,
+    };
+    const opts = viewUsageSummaryOptions('grok', true, usageInfo, 2);
+
+    expect(opts.unavailable).toBe(false);
+    expect(formatUsageSummary(usageInfo.snapshot?.plan ?? null, usageInfo.snapshot, 3, opts))
+      .toBe('SuperGrok Heavy');
+  });
 });
 
 describe('accountColumnLabel — organization suffix', () => {
