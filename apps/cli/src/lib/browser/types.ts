@@ -314,6 +314,10 @@ export interface ReapResult {
 
 export type IPCAction =
   | 'start'
+  // Open a tab for a HUMAN to read. Deliberately absent from PAGE_CREATE_VERBS
+  // and PAGE_RESOLVE_VERBS: it must NOT bind a task, or the abandoned-task
+  // reaper would close the user's tab when the calling session ends.
+  | 'show'
   | 'gc'
   | 'record-start'
   | 'record-stop'

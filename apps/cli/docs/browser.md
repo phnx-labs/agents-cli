@@ -230,6 +230,37 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `--electron` | Treat as an Electron desktop app; never creates new targets |
 | `--target-filter <expr>` | Pick the visible CDP page target. Format: `url:<substring>` or `title:<substring>`. Requires `--electron` |
 
+### Which browser shows YOU a page (`browser.viewer`)
+
+Two browsers exist on a machine like this, and they are not interchangeable:
+
+- the **OS default handler** — whatever `open`/`xdg-open` resolves to
+- the **configured profile** — what `agents browser` drives, and where the
+  fleet's logins accumulate (`agents browser profiles logins` lists them)
+
+Anything the CLI shows you — a rendered artifact, `agents feedback`, a login
+dashboard, `agents sessions trace --open` — goes through one seam that resolves
+the viewer once:
+
+| `browser.viewer` | Result |
+|---|---|
+| unset | follows `browser.profile`, i.e. the profile agents drive |
+| a profile name | that profile |
+| `os` | the OS default handler |
+
+Set it with `agents config set browser.viewer <name>`. Per command, `--os-browser`
+forces the OS handler for that one call.
+
+Two deliberate carve-outs. Screenshots, PDFs and recordings go to the OS default
+**app** regardless — Preview and QuickTime are the better viewer and a CDP tab is
+a downgrade. And the viewer tab is bound to **no task**, so the abandoned-task
+reaper never closes a page you are reading; `stop`/`done` leave it alone too,
+because it is your tab now.
+
+If the viewer cannot be reached — profile missing, Arc (which exposes no CDP page
+targets), not launchable here — the call falls back to the OS handler and prints
+one line saying why. It never silently ignores your configuration.
+
 ### Fleet scope is for a profile that means the same thing everywhere
 
 `--fleet` stores a profile in the synced `agents.yaml`, so every machine sees the

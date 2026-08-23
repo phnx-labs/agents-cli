@@ -19,7 +19,7 @@ import * as path from 'path';
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
-import { openUrl } from '../lib/open-url.js';
+import { showFile } from '../lib/open-url.js';
 import { knownSecretValuesFromEnv } from '../lib/redact.js';
 import { getCacheDir } from '../lib/state.js';
 import { discoverSessions } from '../lib/session/discover.js';
@@ -366,7 +366,7 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
       if (options.open === false) {
         process.stdout.write(`${file}\n`);
       } else {
-        openUrl(file);
+        await showFile(file);
         process.stderr.write(chalk.green(`Opened lineage for ${idPart}: ${file}\n`));
       }
       return;
@@ -412,7 +412,7 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
       if (options.open === false) {
         process.stdout.write(`${file}\n`);
       } else {
-        openUrl(file);
+        await showFile(file);
         process.stderr.write(chalk.green(`Opened compare for ${idPart}: ${file}\n`));
       }
       return;
@@ -458,7 +458,7 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
     if (options.open === false) {
       process.stdout.write(`${file}\n`);
     } else {
-      openUrl(file);
+      await showFile(file);
       process.stderr.write(chalk.green(`Opened trajectory for ${session.shortId || session.id}: ${file}\n`));
     }
   });

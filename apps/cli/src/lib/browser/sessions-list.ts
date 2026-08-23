@@ -14,12 +14,13 @@
  * problem (pid registry, the SessionStart hook index, the activity log; see
  * `feed-post.ts` `resolvePostIdentity`), never a second parser.
  */
+import { showFile, openArtifactSync } from '../open-url.js';
 import * as fs from 'fs';
 import { formatBytes } from '../format.js';
 // Re-exported for the picker, which lists artifacts from this module's rows.
 export { formatBytes };
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
@@ -165,19 +166,14 @@ export function resolveArtifact(groups: ProfileArtifacts[], selector: string): s
   return hit ? hit.path : null;
 }
 
-/** Open a file in the OS default app. Returns true on success. */
-export function openArtifact(filePath: string): boolean {
-  const openers: Array<[string, string[]]> =
-    process.platform === 'darwin'
-      ? [['open', [filePath]]]
-      : process.platform === 'win32'
-        ? [['cmd', ['/c', 'start', '""', filePath]]]
-        : [['xdg-open', [filePath]], ['gnome-open', [filePath]]];
-  for (const [cmd, args] of openers) {
-    if (spawnSync(cmd, args, { stdio: 'ignore' }).status === 0) return true;
-  }
-  return false;
-}
+/**
+ * Open a file in the OS default app. Returns true on success.
+ *
+ * Kept for the interactive picker, which cannot await. Everything else should
+ * use `showFile`, which routes browser-renderable kinds to the configured
+ * viewer profile instead of the OS handler.
+ */
+export const openArtifact = openArtifactSync;
 
 // ─── Task-first grouping (RUSH-2407) ───────────────────────────────────────
 
@@ -437,7 +433,7 @@ export function matchesBrowserSessionRow(row: BrowserSessionRow, query: string):
  * `open` is the Commander value for `--open [selector]`: undefined when the flag
  * is absent, `true` when passed bare (defaults to 'latest'), or the selector string.
  */
-export function runBrowserSessions(opts: { profile?: string; open?: string | boolean; json?: boolean }): void {
+export async function runBrowserSessions(opts: { profile?: string; open?: string | boolean; json?: boolean }): Promise<void> {
   const groups = listBrowserSessions(opts.profile);
 
   if (opts.open !== undefined && opts.open !== false) {
@@ -448,7 +444,7 @@ export function runBrowserSessions(opts: { profile?: string; open?: string | boo
       process.exit(1);
     }
     console.log(target);
-    if (!openArtifact(target)) {
+    if ((await showFile(target)).via === 'none') {
       console.error(`Could not open ${target}`);
       process.exit(1);
     }

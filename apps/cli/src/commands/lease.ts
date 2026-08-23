@@ -10,7 +10,7 @@
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { openUrl } from '../lib/open-url.js';
+import { showUrl } from '../lib/open-url.js';
 import { crabboxList, crabboxStop, reapSafeOrphans, reapOrphans, setLeaseSecretsBundle, type CrabboxBox } from '../lib/crabbox/cli.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { bundleExists, readBundle, writeBundle, keychainRef, bundleItemStore } from '../lib/secrets/bundles.js';
@@ -105,7 +105,7 @@ async function captureTailscaleAuthKey(): Promise<void> {
   const { password } = await import('@inquirer/prompts');
   let key: string;
   try {
-    openUrl(TAILSCALE_KEYS_URL);
+    await showUrl(TAILSCALE_KEYS_URL);
     key = (await password({ message: 'Paste a Tailscale auth key (blank to skip):', mask: true })).trim();
   } catch (e) {
     if (isPromptCancelled(e)) {
@@ -173,7 +173,7 @@ export async function runLeaseSetup(opts: { provider?: string } = {}): Promise<b
   console.error(chalk.bold('\nSet up leasing (Hetzner) — one time (~30s):'));
   console.error(chalk.dim('Opening the Hetzner console. Create/select a project, then Security → API Tokens →'));
   console.error(chalk.dim('Generate a token with Read & Write permission, and copy it.\n'));
-  openUrl(HETZNER_CONSOLE_URL);
+  await showUrl(HETZNER_CONSOLE_URL);
 
   const { password } = await import('@inquirer/prompts');
   const ora = (await import('ora')).default;
