@@ -22,6 +22,20 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   argv is captured before parsing and replayed verbatim. Source:
   `scripts/release.sh`, covered by `scripts/release.test.sh`.
 
+- **Closing an agent tab (Cmd+W) now shuts the agent down instead of orphaning
+  an idle session (#5b).** `onDidCloseTerminal` fired for a real user close AND a
+  window reload, and the handler only unregistered internal state — it never
+  killed the underlying agent (which survives in a detached tmux/mux session), so
+  Cmd+W left a still-running idle session behind. On a genuine user close the
+  extension now runs `agents sessions stop <id>`, which tears down the agent and
+  its mux. A window **reload/restore** does not — the two are distinguished by
+  `terminal.exitStatus.reason` (`TerminalExitReason.User` tears down; `Shutdown`,
+  `Extension`, `Process`, and the ambiguous `Unknown` do not), so crash-restore,
+  which re-registers the closed session, is never killed. The CLI owns the
+  teardown; the extension only wires the user-close event to it. Source:
+  `src/vscode/terminalReadiness.ts` (`shouldTearDownAgentOnClose`,
+  `maybeTearDownAgentOnClose`), `src/vscode/extension.ts`.
+
 ## [0.9.331] - 2026-08-23
 
 - **Fleet session rows are a consistent 3-line recap.** Every Sessions-surface

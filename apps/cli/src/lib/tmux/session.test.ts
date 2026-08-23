@@ -376,23 +376,29 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(panes[0]).toBe(`${agentPane}:0`);
   });
 
-  it('pane-guarded pane-died hook: exiting the agent pane fires the guard (dead husk kept for status read)', async () => {
-    // The true-branch: when the AGENT pane exits, the hook fires. remain-on-exit
-    // on the agent pane keeps it as a dead husk so runInTmux can read the exit status before teardown.
-    const meta = await createSession({ name: 'guardagent', cmd: 'sh -c "exit 7"', socket });
+  it('#5a: agent pane dies with NO client attached → the whole session is torn down (no lingering husk)', async () => {
+    // The core graceful-shutdown fix (AGENT_HOOK_SCHEMA v6): a wrapped agent that
+    // exits with nobody attached must NOT leave a dead `remain-on-exit` husk on the
+    // socket until the daemon's periodic reap — the "second exit" / orphaned-idle
+    // session bug. The session_attached-aware hook kill-sessions it the instant the
+    // agent pane dies. This is the exact scenario a closed terminal / a `/exit`
+    // after detaching produces: no attach client, agent exits, session must be GONE.
+    const meta = await createSession({ name: 'ag-shutdown', cmd: 'sh -c "sleep 0.3; exit 0"', socket });
     const agentPane = meta.pane!;
+    expect(agentPane).toMatch(/^%\d+$/);
+    // Install the hook while the agent is still alive (the 0.3s sleep window), so it
+    // is armed before the pane dies — mirrors runInTmux installing it post-create.
     await setSessionHook(
-      'guardagent',
+      'ag-shutdown',
       'pane-died',
-      agentPaneDiedHook('guardagent', agentPane),
+      agentPaneDiedHook('ag-shutdown', agentPane),
       socket,
     );
-    await wait(400);
-    // Guard matched the agent pane → the else-branch kill-pane did NOT run, so the
-    // dead husk survives and its exit status is still readable.
-    const exit = await paneExitStatus(agentPane, socket);
-    expect(exit.dead).toBe(true);
-    expect(exit.status).toBe(7);
+    // No client is attached (headless), so session_attached=0 → the hook's
+    // agent-pane branch kill-sessions on pane death.
+    const gone = await waitForSessionGone('ag-shutdown', socket);
+    expect(gone).toBe(true);
+    expect(await hasSession('ag-shutdown', socket)).toBe(false);
   });
 
   it('reconcileSessionHooks retrofits the guarded hook onto a session left with the OLD unconditional one', async () => {
@@ -522,6 +528,27 @@ describe.skipIf(skipReason)('reapDeadTmuxPanes', () => {
 
 function wait(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Poll `hasSession` until the named session is GONE, or the timeout elapses.
+ * Used by the #5a graceful-shutdown test: the session_attached-aware pane-died
+ * hook kill-sessions on agent-pane death when no client is attached, and that
+ * teardown is an async tmux operation whose latency varies under CI load — so
+ * poll for it rather than racing a fixed sleep. Returns true once it's gone,
+ * false if it never converged (so a genuine failure still fails the assertion).
+ */
+async function waitForSessionGone(
+  name: string,
+  socket: string,
+  timeoutMs = 20000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!(await hasSession(name, socket))) return true;
+    if (Date.now() >= deadline) return false;
+    await wait(50);
+  }
 }
 
 /**

@@ -38,17 +38,20 @@ export function registerDetachCommand(program: Command): void {
 }
 
 /**
- * Stop the interactive process so it can't fight the headless resume over the
- * same transcript. tmux-hosted sessions are killed by session (closes the pane
- * and ends the agent); a plain process is SIGTERM'd by pid. Either way we then
- * wait for the process to actually exit before returning, so the headless
- * continuation never starts writing the transcript while the old process is
- * still flushing it.
+ * Stop a live agent's interactive process and tear down its mux. tmux-hosted
+ * sessions are killed by session (closes the pane, ends the agent, reaps its
+ * helper processes); a plain process is SIGTERM'd (then SIGKILLed) by pid. Either
+ * way we wait for the process to actually exit before returning.
+ *
+ * Shared by two callers: `detach` (stop the terminal so the headless resume it
+ * spawns next doesn't fight the old process over the same transcript) and `stop`
+ * (end the session outright — no resume). `socket` defaults to the shared agents
+ * socket; it is a parameter only so a test can drive an isolated tmux server.
  */
-async function stopInteractive(s: ActiveSession): Promise<void> {
+export async function stopInteractive(s: ActiveSession, socket: string = getDefaultSocketPath()): Promise<void> {
   if (s.tmuxTarget) {
     const name = s.tmuxTarget.split(':')[0];
-    await killSession(name, getDefaultSocketPath());
+    await killSession(name, socket);
   } else if (s.pid && s.pid > 0) {
     try {
       process.kill(s.pid, 'SIGTERM');

@@ -87,6 +87,7 @@ import { registerGoCommand } from './go.js';
 import { registerFocusCommand } from './focus.js';
 import { registerReconnectCommand } from './reconnect.js';
 import { registerDetachCommand } from './detach.js';
+import { registerSessionsStopCommand } from './sessions-stop.js';
 import { registerAttachCommand } from './attach.js';
 import { registerSessionsInjectCommand } from './sessions-inject.js';
 import { registerSessionsExportCommand } from './sessions-export.js';
@@ -5911,6 +5912,7 @@ export function registerSessionsCommands(program: Command): void {
   registerFocusCommand(sessionsCmd);
   registerReconnectCommand(sessionsCmd);
   registerDetachCommand(sessionsCmd);
+  registerSessionsStopCommand(sessionsCmd);
   registerAttachCommand(sessionsCmd);
   registerSessionsInjectCommand(sessionsCmd);
   registerSessionsExportCommand(sessionsCmd);

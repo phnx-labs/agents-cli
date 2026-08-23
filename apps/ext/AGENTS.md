@@ -48,6 +48,17 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   filesystem/polling fallbacks.
 - The extension must not add an action scheduler, transcript parser/watcher,
   lifecycle classifier, candidate cache, or raw agents config reader.
+- **Closing an agent tab tears the agent down via the CLI, not in the UI.** On a
+  genuine user close (Cmd+W) the close handler runs `agents sessions stop <id>`
+  so the underlying agent + its tmux/mux session shut down instead of lingering
+  idle. It fires ONLY for a real user close — a window reload/restore fires the
+  same `onDidCloseTerminal`, and killing there would break crash-restore (which
+  re-registers the closed session) — so the two are split by
+  `terminal.exitStatus.reason` (`TerminalExitReason.User` tears down; `Shutdown`,
+  `Extension`, `Process`, `Unknown` do not). The decision + injected-stop wiring
+  live in `src/vscode/terminalReadiness.ts` (`shouldTearDownAgentOnClose`,
+  `maybeTearDownAgentOnClose`); the CLI owns the teardown (`agents sessions
+  stop`), the extension only maps the event to it.
 
 ## Layout
 

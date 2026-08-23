@@ -1518,11 +1518,14 @@ export function formatPaneTail(raw: string, maxLines = 30): string {
  * Lifecycle:
  *   1. createSession() launches `sh -c 'exec env … agent'` detached, remain-on-exit
  *      on (global), and returns the pane id.
- *   2. A per-session `pane-died` hook detaches the attach client the instant the
- *      AGENT pane exits, so attach returns instead of parking on a dead pane. The
- *      hook is guarded on `#{hook_pane}` so it fires ONLY for the agent pane —
- *      user-created splits (Ctrl-b " / %) that the user exits are closed in place
- *      (`kill-pane`) instead of tearing down the whole client, so exiting one
+ *   2. A per-session `pane-died` hook tears the session down the instant the AGENT
+ *      pane exits: with a client attached it `detach-client`s so attach returns
+ *      instead of parking on a dead pane (then resolveAfterAttach reads the status
+ *      and kills); with no client attached it `kill-session`s outright, so a
+ *      wrapped agent that exits unattended can't leave a dead husk lingering on the
+ *      socket. The hook is guarded on `#{hook_pane}` so it fires ONLY for the agent
+ *      pane — user-created splits (Ctrl-b " / %) that the user exits are closed in
+ *      place (`kill-pane`) instead of tearing down the whole client, so exiting one
  *      split leaves the agent running full-window rather than kicking you out.
  *   3. We record the agent pane's pid → session mapping (WITH the tmux pane) so the
  *      headless active-scan attributes it, then attach the TTY (blocking).

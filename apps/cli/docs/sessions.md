@@ -1411,6 +1411,20 @@ not a per-agent special case. (In AGI EXT: **Agents: Detach**
   detach-record lookup and PID stop happen after routing so a cross-device attach
   cannot leave the real background process running beside a second recovery.
 
+`agents sessions stop <id>` is the third verb on this axis: it **ends** a live
+session outright — stops the interactive process and tears down its tmux/mux
+session — but does **not** resume it headless the way `detach` does. It reuses
+`detach`'s exact teardown (`stopInteractive`: kill the tmux session when
+tmux-hosted, else SIGTERM→SIGKILL the pid, reaping the session's helper
+processes) and the same resolution rules — a session on another host is stopped
+**there over SSH** (`--local` skips the fleet sweep), and cloud/team sessions are
+refused. Use `detach` to keep an agent working unattended; use `stop` when the
+work is over. Its primary caller is AGI EXT: when a user genuinely closes an
+agent tab (Cmd+W), the extension runs `sessions stop` so the underlying agent and
+its mux shut down instead of lingering as an orphaned idle session — a window
+*reload* does not, because the extension only stops on a real user close (see
+apps/ext).
+
 Host-dispatched session rows persist the dispatch host as `machine`. Their empty
 remote `filePath` therefore cannot make the SQLite index infer the dispatching box
 as the origin or send recovery into the wrong device's isolated version home.

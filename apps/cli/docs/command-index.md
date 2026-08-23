@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 550 commands._
+_69 command groups · 551 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -735,6 +735,7 @@ agents sessions render <selectors...>       Render one or more sessions as reada
 agents sessions resume [query] [prompt]     Resume a session by id (strict), or multi-select history into terminal tabs/splits.
 agents sessions share <session>             Publish one session as a redacted, self-contained web page and print the link.
 agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.
+agents sessions stop <id>                   Stop a live agent outright — end its process and tear down its tmux/mux session
 agents sessions tail [sessionId]            Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
 agents sessions trace <selectors...>        Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
 agents sessions watch                       Stream canonical live and recoverable session row changes as NDJSON

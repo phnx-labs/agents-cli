@@ -499,8 +499,17 @@ export async function setSessionHook(name: string, hook: string, command: string
  *        variant could stall the hook on a loaded CI runner, letting the dead
  *        split survive until the test's wait timeout expired (flake in CI shard
  *        3: pane-guarded pane-died hook / user split exit).
+ *   v6 — the agent-pane branch is now `session_attached`-aware: with a client
+ *        attached it `detach-client`s (the interactive path, so runInTmux's
+ *        attach returns and reads the exit status, EXEC-23b unchanged); with NO
+ *        client it `kill-session`s outright. A `remain-on-exit` pane with no
+ *        attach client to reap it otherwise lingers as a dead husk until the
+ *        daemon's periodic `reapDeadTmuxPanes` sweep — so a run whose terminal
+ *        was closed, or a `/exit` after the user detached, left an idle-looking
+ *        dead session on the socket. Killing it the instant the agent exits is
+ *        the "one close tears down every layer" contract (#5a).
  */
-export const AGENT_HOOK_SCHEMA = 5;
+export const AGENT_HOOK_SCHEMA = 6;
 /** Per-session tmux user-option that records which AGENT_HOOK_SCHEMA a session's hook is at. */
 const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 
@@ -515,21 +524,28 @@ const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 const TMUX_HOOK_REPAIR_TIMEOUT_MS = 5_000;
 
 /**
- * The guarded `pane-died` hook. Detach the client ONLY when the agent pane dies
- * (so the blocking attach in runInTmux returns and the exit status can be read);
- * a user split's death runs the else-branch, closing just that split. The
- * else-branch goes through `run-shell -b -C` with an explicit `-t #{hook_pane}`
- * target: tmux format-expands the command at fire time and executes it inside
- * the server command queue in the background, so the event pane is always the
- * one killed without launching a second tmux client against the same socket and
- * without stalling the hook on a loaded runner. A bare `kill-pane` relied on
- * the hook context supplying a "current pane", while an external self-client
- * could race the server under load. Single source of truth: both the
- * spawn-wrap (exec.ts) and the daemon reconcile build the hook here, so the
- * two can never drift.
+ * The guarded `pane-died` hook. When the AGENT pane dies, tear the whole session
+ * down — but HOW depends on whether a client is attached:
+ *   - attached (`#{session_attached}`): `detach-client` so the blocking attach in
+ *     runInTmux returns and `resolveAfterAttach` reads the exit status off the
+ *     still-`remain-on-exit` dead pane, then kills the session (EXEC-23b, unchanged);
+ *   - no client: `kill-session` outright. Without this the dead pane sits under
+ *     `remain-on-exit` as an idle-looking husk until the daemon's periodic
+ *     `reapDeadTmuxPanes` sweep — the "second exit" / orphaned-idle session bug
+ *     when a wrapped agent exits with nobody attached (a closed terminal, or a
+ *     `/exit` after the user detached). `detach-client` on an unattached session
+ *     is a no-op, so the old hook left the husk; `kill-session` ends it at once.
+ * A user split's death still runs the else-branch, closing just that split via
+ * `run-shell -b -C` with an explicit `-t #{hook_pane}` target: tmux format-expands
+ * the command at fire time and executes it inside the server command queue in the
+ * background, so the event pane is always the one killed without launching a second
+ * tmux client against the same socket and without stalling the hook on a loaded
+ * runner. Single source of truth: both the spawn-wrap (exec.ts) and the daemon
+ * reconcile build the hook here, so the two can never drift.
  */
 export function agentPaneDiedHook(sessionName: string, agentPane: string): string {
-  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell -b -C "kill-pane -t #{hook_pane}"'`;
+  const agentPaneAction = `if -F '#{session_attached}' 'detach-client -s =${sessionName}' 'kill-session -t =${sessionName}'`;
+  return `if -F '#{==:#{hook_pane},${agentPane}}' "${agentPaneAction}" 'run-shell -b -C "kill-pane -t #{hook_pane}"'`;
 }
 
 /** Stamp a session's hook-schema marker to the current version. */

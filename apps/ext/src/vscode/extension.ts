@@ -1710,6 +1710,27 @@ export async function activate(context: vscode.ExtensionContext) {
           const { removeTerminalSession } = await import('./prewarm.vscode');
           await removeTerminalSession(context, entry.id);
         }
+
+        // #5b: a genuine user close (Cmd+W) tears the agent + its mux down so a
+        // still-running (idle) session isn't orphaned. A window RELOAD or a
+        // programmatic close is NOT a user close — restore re-registers the
+        // session, and killing it would break crash-restore — so the CLI stop
+        // fires only for `terminal.exitStatus.reason === User` (see
+        // maybeTearDownAgentOnClose). The CLI owns the teardown; the extension
+        // just wires the user-close event to `agents sessions stop`.
+        if (entry?.agentConfig) {
+          await readiness.maybeTearDownAgentOnClose({
+            reason: terminal.exitStatus?.reason,
+            sessionId: entry.sessionId,
+            host: entry.host,
+            stop: async (id, o) => {
+              const { runAgents } = await import('../core/agentsBin');
+              await runAgents(`sessions stop ${id}${o.local ? ' --local' : ''}`, { timeout: 20_000 })
+                .catch((err) => console.error('[TERMINALS] sessions stop on close failed', err));
+            },
+          });
+        }
+
         terminals.unregister(terminal);
         updateActiveAgentContextKey(vscode.window.activeTerminal, context.extensionPath);
       })();
