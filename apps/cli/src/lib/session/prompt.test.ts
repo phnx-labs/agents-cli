@@ -35,10 +35,11 @@ describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
     expect(r.clean).not.toContain('.png');
   });
 
-  it('caps a long text prompt', () => {
-    const r = classifyUserPrompt('x'.repeat(500));
+  it('does not length-cap the clean text (the recap card shows it in full)', () => {
+    const long = 'Implement a feature '.repeat(30);
+    const r = classifyUserPrompt(long);
     expect(r.kind).toBe('text');
-    expect(r.clean.length).toBeLessThanOrEqual(100);
+    expect(r.clean.length).toBeGreaterThan(300);
   });
 });
 

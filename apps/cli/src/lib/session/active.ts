@@ -2539,7 +2539,7 @@ export function deriveSessionRecap(
   else if (lastAgentLine) { title = lastAgentLine; recapSource = 'last'; }
   else if (prompt) { title = prompt; recapSource = 'prompt'; }
 
-  return { title, recapSource, userPromptClean: userPromptClean || undefined, userPromptKind, lastAgentLine };
+  return { title, recapSource, userPromptClean: recapLine(userPromptClean), userPromptKind, lastAgentLine };
 }
 
 /** Fold the recap ladder onto every row (see {@link deriveSessionRecap}). */

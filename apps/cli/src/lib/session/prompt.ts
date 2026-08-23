@@ -162,13 +162,14 @@ export function cleanSessionPrompt(raw: string): string {
 export type UserPromptKind = 'text' | 'image' | 'command' | 'skill';
 
 export interface ClassifiedPrompt {
-  /** The one-line, display-ready form of the prompt. Never a bare path. */
+  /**
+   * The one-line, display-ready form of the prompt — never a bare path. NOT
+   * length-capped: the recap card shows it in full; row consumers cap it
+   * themselves (`deriveSessionRecap`).
+   */
   clean: string;
   kind: UserPromptKind;
 }
-
-/** Display cap for a cleaned one-line prompt. */
-const PROMPT_DISPLAY_MAX = 100;
 
 /**
  * A skill invocation injects a system line naming the skill's install directory:
@@ -187,11 +188,6 @@ const COMMAND_PREFIX_RE = /^[$>»]\s+(\S.*)$/;
  * detect an image-only prompt and to drop the path from a mixed one.
  */
 const IMAGE_PATH_RE = /[\/~][^\n]*?\.(?:png|jpe?g|gif|webp|heic|bmp|svg)\b/i;
-
-function truncatePrompt(s: string, max = PROMPT_DISPLAY_MAX): string {
-  const t = s.trim();
-  return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
-}
 
 /**
  * Classify a raw first user turn into a display-ready `{ clean, kind }`, so a
@@ -222,7 +218,7 @@ export function classifyUserPrompt(
   const firstLine = text.split('\n').map(line => line.trim()).find(Boolean) ?? '';
 
   const cmd = firstLine.match(COMMAND_PREFIX_RE);
-  if (cmd) return { clean: truncatePrompt(`$ ${cmd[1]}`), kind: 'command' };
+  if (cmd) return { clean: `$ ${cmd[1]}`.trim(), kind: 'command' };
 
   const cleaned = cleanSessionPrompt(text);
   const cleanedFirst = cleaned.split('\n').map(line => line.trim()).find(Boolean) ?? '';
@@ -234,7 +230,7 @@ export function classifyUserPrompt(
   }
 
   const display = (cleanedFirst || firstLine).replace(IMAGE_PATH_RE, '[image]').trim();
-  return { clean: truncatePrompt(display), kind: 'text' };
+  return { clean: display, kind: 'text' };
 }
 
 /** Extract a one-line topic from a raw user message, or undefined if the message is pure noise. */
