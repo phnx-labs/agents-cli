@@ -1020,8 +1020,9 @@ feed:
       minLevel: important
 ```
 
-Sinks are **argv templates**, not built-in integrations — this CLI ships
-Apache-2.0 and must not depend on one person's tracker or messaging stack. The
+Sinks are **argv templates**, not built-in integrations — this CLI ships under
+the free FSL-1.1-Apache-2.0 license and must not depend on one person's tracker
+or messaging stack. The
 first element is spawned directly (no shell), so post text can never become shell
 syntax. Point the same mechanism at `jira`, `gh issue comment`, or a webhook
 script.

@@ -2,6 +2,7 @@
   "name": "@agents/session-tracker",
   "version": "0.0.1",
   "description": "Per-agent SessionStart hook + descendant-pid lookup. One state-file format for every coding-agent CLI.",
+  "license": "FSL-1.1-Apache-2.0",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

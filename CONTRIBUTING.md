@@ -69,6 +69,11 @@ Cloud providers implement the `CloudProvider` interface in `apps/cli/src/lib/clo
 
 Use [conventional commits](https://www.conventionalcommits.org/): `feat:`, `fix:`, `docs:`, `refactor:`, `test:`, `chore:`.
 
+Every commit must carry a Developer Certificate of Origin sign-off. Use
+`git commit -s` so the commit includes a `Signed-off-by:` line.
+
 ## License
 
-By contributing, you agree that your contributions will be licensed under the Apache License 2.0.
+By contributing, you license your work under this project's license
+(FSL-1.1-Apache-2.0), including its conversion to Apache-2.0 two years after
+the version is made available.
