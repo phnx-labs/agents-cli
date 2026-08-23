@@ -487,8 +487,13 @@ describe('devices describe (RUSH-3062 surface)', () => {
     expect(plain).toMatch(/device\s+platform\s+spec\s+load\s+mem\s+disk\s+headroom/);
     expect(plain).toContain('signing box');
     expect(plain).toContain('disk free'); // Fleet capacity footer
-    // The local probe of the test box yields a real spec cell: "<n>c <RAM> <disk>".
-    expect(plain).toMatch(/\d+c \d+G? \d/);
+    // The local probe of the test box yields a real spec cell: "<n>c <RAM> <disk>",
+    // e.g. "4c 15.6G 144G" or "20c 122G 3.7T". fmtBytes emits one optional
+    // decimal and any of K/M/G/T/P, and which of those a runner produces depends
+    // on its actual hardware — so match the SHAPE, not one machine's formatting.
+    // (The original /\d+c \d+G? \d/ passed on a box whose RAM rendered as "122G"
+    // and failed on a CI runner rendering "15.6G".)
+    expect(plain).toMatch(/\d+c \d+(\.\d+)?[KMGTP] \d+(\.\d+)?[KMGTP]/);
   });
 });
 
