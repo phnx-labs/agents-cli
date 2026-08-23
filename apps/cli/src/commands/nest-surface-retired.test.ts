@@ -104,3 +104,21 @@ describe('RUSH-2989 nested leftover aliases', () => {
     },
   );
 });
+
+describe('RUSH-3079 removed `usage` command (duplicate of `agents view`)', () => {
+  it('usage is gone from the root tree and marked retired', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
+    expect(names).not.toContain('usage');
+    expect(names).toContain('view');
+    expect(isKnownTopLevelCommand('usage')).toBe(false);
+    expect(RETIRED_TOP_LEVEL_COMMANDS.has('usage')).toBe(true);
+  });
+
+  it('a bare `agents usage` is an unknown command, not an auto-correct', () => {
+    const home = guardedHome();
+    const r = run(home, 'usage');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr ?? '').toMatch(/unknown command/i);
+  });
+});

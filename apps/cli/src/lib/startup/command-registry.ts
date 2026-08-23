@@ -5,7 +5,7 @@ const LOADED_COMMAND_NAMES = [
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
   'models', 'modes', 'trash', 'restore', 'doctor',
   'route', 'harness', 'harnesses', 'secrets', 'menubar', 'sync',
-  'refresh-rules', 'factory', 'usage', 'insights', 'trace', 'perf',
+  'refresh-rules', 'factory', 'insights', 'trace', 'perf',
   'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
   'teams', 'cloud', 'message', 'send', 'notify', 'feed',
@@ -55,12 +55,15 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * `agents fleet apply` / `agents devices apply`. `beta` nested under
  * `agents setup beta` (RUSH-2981). `org` (the Prix-coupled account layer) was
  * removed; `agents auth` returned against Phoenix ID with `auth space` as the
- * team surface (RUSH-2581).
+ * team surface (RUSH-2581). `usage` was removed as a duplicate surface of
+ * `agents view`, which renders per-account usage with account, version, and
+ * auth state beside it (RUSH-3079).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
   'org',
   'serve',
+  'usage',
   'login',
   'logout',
   'budget',

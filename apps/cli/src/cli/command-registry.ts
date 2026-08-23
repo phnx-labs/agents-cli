@@ -73,7 +73,6 @@ export const loadMenubar: ModuleLoader = async () => (await import('../commands/
 export const loadSync: ModuleLoader = async () => (await import('../commands/sync.js')).registerSyncCommand;
 export const loadRefreshRules: ModuleLoader = async () => (await import('../commands/refresh-rules.js')).registerRefreshRulesCommand;
 export const loadFactory: ModuleLoader = async () => (await import('../commands/factory.js')).registerFactoryCommands;
-export const loadUsage: ModuleLoader = async () => (await import('../commands/usage.js')).registerUsageCommand;
 export const loadInsights: ModuleLoader = async () => (await import('../commands/insights.js')).registerInsightsCommand;
 export const loadTrace: ModuleLoader = async () => (await import('../commands/sessions-trace.js')).registerTraceCommand;
 export const loadPerf: ModuleLoader = async () => (await import('../commands/perf.js')).registerPerfCommand;
@@ -183,7 +182,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   sync: [loadSync],
   'refresh-rules': [loadRefreshRules],
   factory: [loadFactory],
-  usage: [loadUsage],
   insights: [loadInsights],
   // `agents trace` is a top-level alias of `agents sessions trace` (precedent:
   // `agents insights` aliases `agents sessions insights`). One implementation.

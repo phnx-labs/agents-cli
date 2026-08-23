@@ -5,7 +5,7 @@
  * This is the read side of issue #323. Cost and duration are computed and
  * persisted at scan time (see src/lib/session/discover.ts + db.ts); this
  * command only queries and renders them — a pure SQLite/CLI win, no server,
- * no telemetry. Distinct from `agents usage`, which reports live rate-limit /
+ * no telemetry. Distinct from `agents view`, which reports live rate-limit /
  * quota status per agent and is left untouched.
  */
 import type { Command } from 'commander';

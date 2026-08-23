@@ -107,7 +107,7 @@ agents cost --by project      # group by project instead of agent
 agents cost --by day --json   # machine-readable daily rollup
 ```
 
-`agents cost` answers "how much did this cost?"; `agents usage` answers "how
+`agents cost` answers "how much did this cost?"; `agents view` answers "how
 much quota / rate limit is left?" — different commands.
 
 ## Tips
@@ -116,5 +116,5 @@ much quota / rate limit is left?" — different commands.
 - Use `--teams` to see what team-spawned agents are doing
 - Use `--since 1h` for recent activity
 - Use `--sort cost` / `--sort duration` to find your priciest or longest sessions
-- `agents cost` for spend rollups; `agents usage` for rate-limit status
+- `agents cost` for spend rollups; `agents view` for rate-limit status
 - Combine filters: `agents sessions --project myapp --since 1d --agent claude`
