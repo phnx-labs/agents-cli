@@ -91,6 +91,30 @@ function backendArgs(backend: SetupSecretsBackend): string[] {
   return backend === 'vault' ? ['--synced'] : ['--backend', backend];
 }
 
+/**
+ * Provision the signed macOS keychain broker on the explicit onboarding path.
+ * This is the async, download-capable trigger the hot sync `getKeychainHelperPath()`
+ * fails loud toward: with a bundled `.app` it is a local copy (no network); on a
+ * tarball that lacks the bundle it fetches the verified release asset. Best-effort
+ * — the wizard's saved prefs must survive an offline provision failure; the next
+ * secret op re-points here.
+ */
+async function maybeProvisionKeychainHelper(backend: SetupSecretsBackend): Promise<void> {
+  if (backend !== 'keychain' || process.platform !== 'darwin') return;
+  const { ensureKeychainHelperInstalledAsync } = await import('../lib/secrets/install-helper.js');
+  try {
+    await ensureKeychainHelperInstalledAsync();
+    console.log(chalk.gray('keychain helper: installed the signed broker for this version.'));
+  } catch (err) {
+    console.error(
+      chalk.yellow(
+        `keychain helper not installed: ${(err as Error).message}\n` +
+        'Re-run `agents setup secrets` once online, or reinstall agents-cli.',
+      ),
+    );
+  }
+}
+
 function printBackendNotes(backend: SetupSecretsBackend): void {
   if (backend === 'keychain') {
     console.log(chalk.gray('backend: keychain — macOS reads may ask for Touch ID or the device password.'));
@@ -227,6 +251,9 @@ export async function runSecretsSetupWizard(opts: SetupSecretsOptions = {}): Pro
     defaultPolicy: policy,
     updatedAt: new Date().toISOString(),
   });
+
+  // Provision the signed keychain broker before any import subprocess reads it.
+  await maybeProvisionKeychainHelper(backend);
 
   await maybeImportSecrets(importSource, {
     bundle: opts.bundle,

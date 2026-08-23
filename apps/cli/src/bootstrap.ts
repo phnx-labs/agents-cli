@@ -527,8 +527,10 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   // getKeychainHelperPath() still repairs it on the next secret operation).
   if (process.platform === 'darwin') {
     try {
-      const { ensureKeychainHelperInstalled } = await import('./lib/secrets/install-helper.js');
-      ensureKeychainHelperInstalled({ forceReinstall: true });
+      const { ensureKeychainHelperInstalledAsync } = await import('./lib/secrets/install-helper.js');
+      // Async + download-capable: an upgrade to a tarball that dropped the
+      // bundle fetches the verified release asset instead of no-op'ing.
+      await ensureKeychainHelperInstalledAsync({ forceReinstall: true });
     } catch {
       // Non-fatal.
     }

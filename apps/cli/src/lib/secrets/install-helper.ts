@@ -21,6 +21,8 @@ import * as os from 'os';
 import * as path from 'path';
 
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
+import { downloadKeychainHelperApp } from './download-keychain.js';
+import { getCliVersion } from '../version.js';
 
 const APP_BUNDLE_NAME = 'Agents CLI.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -67,8 +69,19 @@ function sourceAppPath(): string {
   }
   throw new Error(
     `Source ${APP_BUNDLE_NAME} not found. Looked in:\n  ${candidates.join('\n  ')}\n` +
-    'The npm package may have been built without the signed helper bundle. Reinstall agents-cli.'
+    'The npm package shipped without the bundled keychain helper. Run `agents setup secrets` to ' +
+    'download the signed helper for this version, or reinstall agents-cli.'
   );
+}
+
+/** The bundled/local source `.app`, or null when absent (no throw) — the async
+ *  download path resolves the missing bundle instead of failing. */
+function bundledSourceAppPathOrNull(): string | null {
+  try {
+    return sourceAppPath();
+  } catch {
+    return null;
+  }
 }
 
 function assertDarwin(): void {
@@ -134,6 +147,32 @@ function spctlAssess(appPath: string): { ok: boolean; output: string } {
  */
 export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean } = {}): void {
   assertDarwin();
+  installKeychainHelperFromSource(sourceAppPath(), opts);
+}
+
+/**
+ * ASYNC, download-capable install — the EXPLICIT onboarding/upgrade path
+ * (`agents setup secrets`, the bootstrap upgrade self-heal). When a bundled or
+ * locally-built `.app` ships (the common case, and always true this release
+ * stage), it installs that copy with NO network. When the tarball lacks the
+ * bundle (a fresh `npm i -g` whose tarball dropped it), it fetches the signed +
+ * notarized release asset for the running CLI version — sha256 + codesign +
+ * Team + notarization verified before install — and installs from the cached
+ * copy. The sync `getKeychainHelperPath()` never routes here: it stays sync +
+ * network-free and fails loud toward this command when no source exists.
+ */
+export async function ensureKeychainHelperInstalledAsync(opts: { forceReinstall?: boolean } = {}): Promise<void> {
+  assertDarwin();
+  const bundled = bundledSourceAppPathOrNull();
+  const src = bundled ?? (await downloadKeychainHelperApp(getCliVersion()));
+  installKeychainHelperFromSource(src, opts);
+}
+
+/**
+ * Copy `src` (a verified `.app` bundle) to the stable user path, then verify.
+ * Shared by the sync (bundled-source) and async (download-capable) installers.
+ */
+function installKeychainHelperFromSource(src: string, opts: { forceReinstall?: boolean } = {}): void {
   const dest = installedAppPath();
   const upToDate = (): boolean =>
     fs.existsSync(dest) && codesignVerify(dest).ok && !installedHelperIsStale();
@@ -147,7 +186,6 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
   // transiently corrupted the bundle and tripped the "damaged" dialog.
   withInstallLock(dest, (heartbeat) => {
     if (!opts.forceReinstall && upToDate()) return;
-    const src = sourceAppPath();
     copyAppBundle(src, dest);
     heartbeat(); // cp -R done; keep the lock fresh across the codesign/spctl spawns
     const verify = codesignVerify(dest);
@@ -178,7 +216,12 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
  * `npm i -g`, so this call site is the only one every machine is guaranteed to
  * pass through.
  *
- * Throws on non-darwin.
+ * SYNC and network-free by design: this is the secrets hot path, called by
+ * every keychain op. It never downloads. When no bundled/local source exists
+ * (a tarball that dropped the bundle), the reinstall's `sourceAppPath()` throws
+ * loud, directing the user to `agents setup secrets` — the explicit, async,
+ * download-capable path (`ensureKeychainHelperInstalledAsync`). Throws on
+ * non-darwin.
  */
 export function getKeychainHelperPath(): string {
   assertDarwin();
