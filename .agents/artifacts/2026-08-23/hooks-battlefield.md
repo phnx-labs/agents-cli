@@ -15,7 +15,7 @@ facts:
   - "The auto-mode permission classifier — not a hook — is the single biggest force at 1,401 denials"
   - "footer-guard: 0 blocks — the no-footer rule is fully internalized, the guard never has to fire"
   - "The owner-update reminder fires 811 times and is ignored 58% of the time — the loudest, least obeyed hook"
-  - "main-branch-guard blocks the write every time, but only 29% of blocked agents then open a worktree"
+  - "main-branch-guard recovers 72% — its refusal pastes the worktree recipe instead of only stating the rule"
 ---
 
 ## Story
@@ -366,7 +366,7 @@ one matters more.
 | git-guard | 164 | 110 | 61% | 54 | working |
 | verify-work-complete | 148 | 35 | *97%* | 113 | unmeasured |
 | pr-description-reminder | 136 | 87 | 65% | 49 | working |
-| main-branch-guard | 80 | 51 | **29%** | 29 | **TEACH THE FIX** |
+| main-branch-guard | 80 | 51 | 72% | 29 | working |
 | plan-html-reminder | 57 | 32 | 53% | 25 | TUNE (see below) |
 | teams-roster-guard | 17 | 4 | 71% | 13 | working |
 | user-message-guard | 10 | 7 | 60% | 3 | working |
@@ -375,8 +375,17 @@ one matters more.
 session did not teach the first time. Compliance can be faked by an agent that
 happens to do the right thing anyway; a re-fire cannot.
 
+**Every compliance number here is a lower bound.** It is only as good as the
+pattern used to recognise the demanded action, and a too-narrow pattern
+manufactures a false defect. main-branch-guard is the worked example: scored
+against `worktree add` alone it reads **29%** and looks broken. But an agent
+that already *has* a worktree and merely aimed a write at the wrong path does
+not need a new one — it needs to re-aim, and 36 of its 61 recoveries did exactly
+that. Scored against both recoveries it is **72%**, and the guard is fine.
+Treat a low number as a question, not a verdict.
+
 <figure>
-<figcaption><strong>Figure 4 — Obeyed vs ignored.</strong> Each hook's fires split by whether the demanded action appeared in the following 40 messages. The two red flags are the widest ignored bars: the owner-update reminder and main-branch-guard.</figcaption>
+<figcaption><strong>Figure 4 — Obeyed vs ignored.</strong> Each hook's fires split by whether the demanded action appeared in the following 40 messages. One bar is the outlier that matters: the owner-update reminder, ignored more often than obeyed and wider than every guard combined.</figcaption>
 
 <svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hook compliance" width="100%" font-family="JetBrains Mono, ui-monospace, monospace">
   <g font-size="13">
@@ -387,7 +396,7 @@ happens to do the right thing anyway; a re-fire cannot.
     <g transform="translate(0,70)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">feed-owner-update</text><rect x="250" y="-11" width="277" height="22" fill="#7fae5f"/><rect x="527" y="-11" width="385" height="22" fill="#ff5470"/><text x="920" y="4" fill="#ffb3bd" font-size="12">42%</text></g>
     <g transform="translate(0,104)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">git-guard</text><rect x="250" y="-11" width="82" height="22" fill="#7fae5f"/><rect x="332" y="-11" width="52" height="22" fill="#ff5470"/><text x="392" y="4" fill="#8a8a8a" font-size="12">61%</text></g>
     <g transform="translate(0,138)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">pr-desc-reminder</text><rect x="250" y="-11" width="73" height="22" fill="#7fae5f"/><rect x="323" y="-11" width="39" height="22" fill="#ff5470"/><text x="370" y="4" fill="#8a8a8a" font-size="12">65%</text></g>
-    <g transform="translate(0,172)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">main-branch-guard</text><rect x="250" y="-11" width="19" height="22" fill="#7fae5f"/><rect x="269" y="-11" width="47" height="22" fill="#ff5470"/><text x="324" y="4" fill="#ffb3bd" font-size="12">29%</text></g>
+    <g transform="translate(0,172)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">main-branch-guard</text><rect x="250" y="-11" width="48" height="22" fill="#7fae5f"/><rect x="298" y="-11" width="18" height="22" fill="#ff5470"/><text x="324" y="4" fill="#8a8a8a" font-size="12">72%</text></g>
     <g transform="translate(0,206)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">plan-html-reminder</text><rect x="250" y="-11" width="25" height="22" fill="#7fae5f"/><rect x="275" y="-11" width="22" height="22" fill="#ff5470"/><text x="305" y="4" fill="#8a8a8a" font-size="12">53%</text></g>
     <g transform="translate(0,240)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">teams-roster-guard</text><rect x="250" y="-11" width="10" height="22" fill="#7fae5f"/><rect x="260" y="-11" width="4" height="22" fill="#ff5470"/><text x="272" y="4" fill="#8a8a8a" font-size="12">71%</text></g>
     <g transform="translate(0,274)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">user-message-guard</text><rect x="250" y="-11" width="5" height="22" fill="#7fae5f"/><rect x="255" y="-11" width="3" height="22" fill="#ff5470"/><text x="266" y="4" fill="#8a8a8a" font-size="12">60%</text></g>
@@ -404,12 +413,13 @@ important post to iMessage. So the reminder's only successful outcome is a phone
 buzz, fired without regard to whether the session shipped anything worth one. It
 hardcodes the escalation level instead of letting the outcome pick it.
 
-**main-branch-guard has the lowest compliance of any hook: 29%.** The block itself
-is airtight — the write never lands, which is the guarantee it exists to give. But
-only 29% of blocked agents then open a worktree within 40 messages. The message
-says *no* without handing over the four-line worktree recipe, so the agent flails
-or wanders off. This is a message defect, not a policy defect: keep the block,
-paste the recipe into the refusal.
+**main-branch-guard is healthy, and its refusal is the model to copy.** 72% of
+blocked agents recover within 40 messages — 25 open a fresh worktree, 36 re-aim
+into one they already had. The reason is visible in the refusal text itself
+(`main-branch-guard.sh:198-203`): it does not just say *no*, it pastes the
+four-line worktree recipe with `$REPO` already filled in. A guard that hands over
+the fix outperforms one that only states the rule. The 24 non-recoveries are
+mostly sessions that changed direction entirely, not agents left stuck.
 
 **The Stop gate's 97% is not a real number.** For a gate whose demand is "keep
 working," the only measurable compliance is "did any tool call follow," which is
