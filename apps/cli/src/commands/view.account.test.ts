@@ -7,7 +7,7 @@ import {
   viewUsageSummaryOptions,
   type AccountOrderedVersion,
 } from './view.js';
-import { formatUsageSummary } from '../lib/accounting/usage.js';
+import { formatUsageSummary, USAGE_BENIGN_STATE, type UsageInfo } from '../lib/accounting/usage.js';
 import { padToWidth, stringWidth } from '../lib/session/width.js';
 
 describe('joinViewColumns — fixed multi-agent layout', () => {
@@ -77,6 +77,21 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
 });
 
 describe('viewUsageSummaryOptions — truthful unavailable states', () => {
+  it.each(['codex', 'grok', 'muse'] as const)(
+    'renders no recent usage truthfully for a signed-in %s account',
+    (agentId) => {
+      const usageInfo: UsageInfo = {
+        snapshot: null,
+        error: null,
+        [USAGE_BENIGN_STATE]: 'no-recent-usage',
+      };
+      const opts = viewUsageSummaryOptions(agentId, true, usageInfo, 2);
+
+      expect(opts.unavailable).toBe(false);
+      expect(formatUsageSummary(null, usageInfo.snapshot, 3, opts)).toBe('no usage recorded yet');
+    },
+  );
+
   it('renders the specific usage error for a signed-in usage-capable harness', () => {
     const error = 'Claude credential expired; re-authentication required for usage.';
     const opts = viewUsageSummaryOptions('claude', true, { snapshot: null, error }, 2);

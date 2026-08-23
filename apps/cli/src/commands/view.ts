@@ -39,6 +39,7 @@ import {
   formatUsageSection,
   formatUsageSummary,
   formatUsageStatusBadge,
+  getUsageBenignState,
   getUsageInfoForIdentity,
   getUsageInfoByIdentity,
   getUsageLookupKey,
@@ -97,13 +98,15 @@ export function viewUsageSummaryOptions(
   maxWindows: number | undefined,
 ): FormatUsageSummaryOpts {
   const headless = isUsageHeadlessScopeError(usageInfo?.error);
+  const benignState = usageInfo ? getUsageBenignState(usageInfo) : null;
   return {
-    unavailable: agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless,
+    unavailable: agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless && !benignState,
     unverified: !headless && !!usageInfo?.snapshot && !!usageInfo.error,
     headless,
     maxWindows,
     errorKind: classifyUsageErrorKind(usageInfo?.error),
     errorDetail: usageInfo?.error ?? null,
+    benignState,
   };
 }
 
