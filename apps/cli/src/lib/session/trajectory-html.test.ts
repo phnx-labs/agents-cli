@@ -71,6 +71,20 @@ describe('renderTrajectoryHtml — self-contained and safe', () => {
     expect(html).toMatch(/share-fill/);
   });
 
+  it('ships the analysis-hero CSS in the single-session view (not only in COMPARE_STYLE)', () => {
+    // Regression: the .analysis/.card/.mix-*/.slow-* rules once lived in COMPARE_STYLE,
+    // so the single-session page (which injects only BASE_STYLE) rendered the hero
+    // unstyled — cards had no panels and mix/slow rows jammed ("git105"). The markup
+    // being present is not enough; the CSS that lays it out must ship in THIS view.
+    const html = renderTrajectoryHtml(buildTrajectory(events, meta()));
+    const style = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+    for (const rule of ['.analysis', '.card', '.mix-row', '.mix-name', '.mix-n', '.slow-row', '.slow-label', '.steps', '.gap-divider']) {
+      expect(style, `single-session <style> is missing ${rule}`).toContain(rule);
+    }
+    // And the grid that actually spaces the command-mix rows must be there.
+    expect(style).toMatch(/\.mix-row\s*\{[^}]*display:\s*grid/);
+  });
+
   it('an empty trajectory still renders a valid page (no crash)', () => {
     const html = renderTrajectoryHtml(buildTrajectory([], meta({ agent: 'openclaw' })));
     expect(html).toContain('<!DOCTYPE html>');
