@@ -201,3 +201,52 @@ describe('isDialableDevice', () => {
     } as any)).toBe(true);
   });
 });
+
+describe('device-name validation — shape vs policy', () => {
+  // The split is load-bearing and its failure mode is invisible to CI: it only
+  // bites a fleet that already owns a node named `auto`, so nothing here would
+  // fail if the two validators were re-merged. These tests are the only thing
+  // standing between that and a fleet-wide `agents devices sync` abort.
+
+  it('assertValidDeviceName is SHAPE-ONLY, so observed names keep working', async () => {
+    const { assertValidDeviceName } = await import('./registry.js');
+    // A tailnet node really can be called this. Sync must not care.
+    for (const observed of ['auto', 'interactive', 'all', 'AUTO']) {
+      expect(() => assertValidDeviceName(observed), observed).not.toThrow();
+    }
+    expect(() => assertValidDeviceName('bad name')).toThrow(/Invalid device name/);
+  });
+
+  it('assertRegistrableDeviceName rejects the routing sentinels', async () => {
+    const { assertRegistrableDeviceName } = await import('./registry.js');
+    for (const reserved of ['auto', 'interactive', 'all', 'AUTO', 'Interactive']) {
+      expect(() => assertRegistrableDeviceName(reserved), reserved).toThrow(/reserved/i);
+    }
+    expect(() => assertRegistrableDeviceName('mac-mini')).not.toThrow();
+    // A padded name fails the SHAPE check first, which is right — spaces are
+    // invalid in an ssh alias whether or not the word is reserved. Asserting
+    // /reserved/ there would have been asserting the wrong guard.
+    expect(() => assertRegistrableDeviceName('  Interactive  ')).toThrow(/Invalid device name/);
+  });
+
+  it('upsertDevice accepts an observed reserved name — devices sync must not abort', async () => {
+    // The regression this exists for: `devices sync` upserts every observed node
+    // in a loop with no per-node catch, so one node named `auto` would abort the
+    // whole sync and register nothing after it.
+    const { upsertDevice } = await import('./registry.js');
+    await expect(
+      upsertDevice('auto', {
+        platform: 'linux',
+        user: 'x',
+        address: { via: 'manual', dnsName: 'auto.example' },
+      } as never),
+    ).resolves.toBeTruthy();
+  });
+
+  it('addIgnored accepts one too — otherwise the node can be neither registered nor dismissed', async () => {
+    // With both strict, `agents devices ignore auto` threw and the node stayed
+    // pending, re-prompting on every sync with no way out.
+    const { addIgnored } = await import('./registry.js');
+    await expect(addIgnored('auto')).resolves.toBeTruthy();
+  });
+});
