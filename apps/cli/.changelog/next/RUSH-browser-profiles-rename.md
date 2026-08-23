@@ -6,7 +6,7 @@
   live. On a real agent browser that is gigabytes of session state and every
   account it has ever signed into. `rename` moves the config (staying in whichever
   store it already lives in), moves every cache dir belonging to the old name, and
-  repoints `browser.profile` when it pointed there. Refuses while the profile is in
+  repoints both `browser.profile` and `browser.viewer` when either pointed there — a dangling `browser.viewer` sends every artifact back to the OS default handler, which is the exact bug the viewer seam was built to fix. Refuses while the profile is in
   use, because moving a `--user-data-dir` out from under a running browser
   corrupts it. Source: `src/lib/browser/profiles.ts`, `src/commands/browser.ts`.
 - **Profile-name validation is shared between `create` and `rename`.** The shape

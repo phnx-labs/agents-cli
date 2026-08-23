@@ -656,6 +656,9 @@ function registerProfilesCommands(browser: Command): void {
       if (res.repointedDefault) {
         console.log(`  browser.profile now points at ${to}`);
       }
+      if (res.repointedViewer) {
+        console.log(`  browser.viewer now points at ${to}`);
+      }
     });
 
   profiles

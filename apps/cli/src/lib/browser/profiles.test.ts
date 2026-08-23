@@ -14,6 +14,9 @@ vi.mock('../state.js', () => ({
   writeMeta: vi.fn(),
   // device-config.js (the browser.profile store) reads/writes through these.
   updateMeta: vi.fn(),
+  // setConfigValue writes under this lock; the real one just runs fn() when
+  // uncontended, which is always true in a single-process test.
+  withMetaLock: vi.fn((fn: () => unknown) => fn()),
   META_HEADER: '',
   getUserAgentsDir: vi.fn(() => path.join(TEST_ROOT, '.agents')),
   getDevicesAutoLaunchPath: vi.fn(() => path.join(TEST_ROOT, 'auto-launch.json')),
@@ -1443,6 +1446,41 @@ describe('renameProfile', () => {
     expect(fs.readFileSync(path.join(newDir, 'Cookies'), 'utf8')).toBe('pretend-session');
     expect(store.browser!.agents).toBeDefined();
     expect(store.browser!['comet-local']).toBeUndefined();
+  });
+
+  it('repoints browser.viewer too, or artifacts silently go back to the OS browser', async () => {
+    // The gap this closes: `browser.viewer` is a separate key from
+    // `browser.profile`. Left dangling, resolveViewer falls back to the OS
+    // default handler — the exact bug the viewer seam was built to fix,
+    // reintroduced by a rename.
+    const store: ProfileStore = {
+      browser: { old: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9520'] } },
+    };
+    wire(store);
+    const { setConfigValue, getConfigValue } = await import('../device-config.js');
+    setConfigValue('browser.viewer', 'old');
+
+    const res = await renameProfile('old', 'fresh');
+
+    expect(res.repointedViewer).toBe(true);
+    expect(getConfigValue('browser.viewer').value).toBe('fresh');
+  });
+
+  it('leaves browser.viewer alone when it points somewhere else', async () => {
+    const store: ProfileStore = {
+      browser: {
+        old: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9521'] },
+        other: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9522'] },
+      },
+    };
+    wire(store);
+    const { setConfigValue, getConfigValue } = await import('../device-config.js');
+    setConfigValue('browser.viewer', 'other');
+
+    const res = await renameProfile('old', 'fresh');
+
+    expect(res.repointedViewer).toBe(false);
+    expect(getConfigValue('browser.viewer').value).toBe('other');
   });
 
   it('keeps a local profile local', async () => {

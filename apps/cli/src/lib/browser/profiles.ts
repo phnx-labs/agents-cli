@@ -737,7 +737,12 @@ export function assertRegistrableProfileName(name: string): void {
 export async function renameProfile(
   from: ProfileName,
   to: ProfileName,
-): Promise<{ scope: ProfileScope; movedDirs: string[]; repointedDefault: boolean }> {
+): Promise<{
+  scope: ProfileScope;
+  movedDirs: string[];
+  repointedDefault: boolean;
+  repointedViewer: boolean;
+}> {
   if (from === to) throw new Error(`"${from}" is already its own name.`);
 
   const meta = readMeta();
@@ -788,16 +793,25 @@ export async function renameProfile(
     });
   }
 
-  // The pointer is a separate key; leaving it behind would silently fall back to
-  // auto-detect on the next `browser start`.
+  // Both pointers are separate keys. Leaving `browser.profile` behind falls back
+  // to auto-detect on the next `browser start`; leaving `browser.viewer` behind
+  // sends every artifact back to the OS default handler — which is the exact bug
+  // the viewer seam was built to fix, reintroduced by a rename.
+  const { setConfigValue, getConfigValue } = await import('../device-config.js');
+
   let repointedDefault = false;
   if (getConfiguredDefaultProfileName() === from) {
-    const { setConfigValue } = await import('../device-config.js');
     setConfigValue('browser.profile', to);
     repointedDefault = true;
   }
 
-  return { scope, movedDirs, repointedDefault };
+  let repointedViewer = false;
+  if (getConfigValue('browser.viewer').value === from) {
+    setConfigValue('browser.viewer', to);
+    repointedViewer = true;
+  }
+
+  return { scope, movedDirs, repointedDefault, repointedViewer };
 }
 
 export async function moveProfileScope(
