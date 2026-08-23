@@ -18,6 +18,7 @@ const {
   getTaskBinding,
   listTaskBindings,
   unbindTask,
+  unbindTasksForProfile,
   updateTaskBinding,
   tasksForCaller,
   formatOpenTaskList,
@@ -62,6 +63,15 @@ describe('task index store', () => {
     unbindTask('post');
     expect(getTaskBinding('post')).toBeUndefined();
     expect(listTaskBindings()).toEqual([]);
+  });
+
+  it('unbinds every task recorded under a profile so a later --task cannot recreate', () => {
+    bindTask('post', { device: 'zion', profile: 'work', createdAt: 1 });
+    bindTask('other', { device: 'zion', profile: 'mail', createdAt: 2 });
+    unbindTasksForProfile('work');
+    expect(getTaskBinding('post')).toBeUndefined();
+    expect(getTaskBinding('other')?.profile).toBe('mail');
+    expect(resolveTaskRoute({ task: 'post', self: 'testbox' }).kind).toBe('unknown');
   });
 
   it('fails loud on an empty task name or missing device', () => {

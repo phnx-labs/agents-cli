@@ -105,6 +105,19 @@ export function unbindTask(name: string): void {
   writeTaskIndex(index);
 }
 
+/** Drop every binding recorded under this profile (after `stop --profile` / gc). */
+export function unbindTasksForProfile(profile: string): void {
+  const index = readTaskIndex();
+  let changed = false;
+  for (const [name, binding] of Object.entries(index)) {
+    if (binding.profile === profile) {
+      delete index[name];
+      changed = true;
+    }
+  }
+  if (changed) writeTaskIndex(index);
+}
+
 export function tasksForCaller(sessionId?: string, launchId?: string): Array<{ name: string } & TaskBinding> {
   return listTaskBindings().filter((entry) => {
     if (sessionId && entry.sessionId === sessionId) return true;

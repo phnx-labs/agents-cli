@@ -69,6 +69,17 @@ describe('page verbs reject --device (T3)', () => {
       /agents browser start/,
     );
   });
+
+  it('rejects --device on stop --profile instead of stopping the local profile', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockExit();
+    await expect(run(['stop', '--profile', 'work', '--device', 'zion'])).rejects.toThrow(
+      /process.exit 1/,
+    );
+    expect(error.mock.calls.map((c) => String(c[0])).join('\n')).toMatch(
+      /agents browser start/,
+    );
+  });
 });
 
 describe('unknown and killed tasks fail loud (T3)', () => {

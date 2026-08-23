@@ -64,6 +64,7 @@ import {
   REJECT_DEVICE_MESSAGE,
   resolveTaskRoute,
   unbindTask,
+  unbindTasksForProfile,
   updateTaskBinding,
 } from '../lib/browser/task-index.js';
 import { isSelfHost } from '../lib/devices/self-host.js';
@@ -80,7 +81,7 @@ import {
   stripRoutingFlags,
 } from '../lib/hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
-import { sshExec } from '../lib/ssh-exec.js';
+import { sshExec, SSH_OPTS } from '../lib/ssh-exec.js';
 import { flagValue } from '../lib/hosts/routing-flag.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
 import { assertRemoteControlAllowed, isFleetRemoteInvocation } from '../lib/browser/remote-control.js';
@@ -236,7 +237,7 @@ async function pullRemoteFile(device: string, remotePath: string, localPath: str
   const sshOpts = passthroughSshOptions(host, false);
   const copied = spawnSync(
     'scp',
-    [...sshOpts.extraSshArgs, '--', `${target}:${remotePath}`, path.resolve(localPath)],
+    [...sshOpts.extraSshArgs, ...SSH_OPTS, `${target}:${remotePath}`, path.resolve(localPath)],
     { encoding: 'utf8' },
   );
   if (copied.status !== 0) {
@@ -247,8 +248,19 @@ async function pullRemoteFile(device: string, remotePath: string, localPath: str
 }
 
 function syncTaskIndex(request: IPCRequest, response: IPCResponse): void {
+  if (!response.ok) return;
+  if (request.action === 'stop' && request.profile && !request.task) {
+    unbindTasksForProfile(request.profile);
+    return;
+  }
+  if (request.action === 'gc') {
+    for (const closed of response.reaped?.closed ?? []) {
+      unbindTask(closed.task);
+    }
+    return;
+  }
   const name = response.task ?? request.task ?? request.taskName;
-  if (!response.ok || !name) return;
+  if (!name) return;
   if (request.action === 'done' || (request.action === 'stop' && request.task)) {
     unbindTask(name);
     return;
@@ -1325,23 +1337,25 @@ function registerTaskCommands(browser: Command): void {
     const top = pathNames[0];
     if (!top || !TASK_ROUTED_COMMANDS.has(top)) return;
     if (pathNames.length === 1 && top === 'start') return;
-    if (top === 'stop' && actionCommand.opts().profile && !actionCommand.opts().task) return;
 
-    const opts = actionCommand.opts() as { task?: string; device?: string };
+    const opts = actionCommand.opts() as { task?: string; device?: string; profile?: string };
     const deviceFlag = opts.device ?? flagValue(process.argv.slice(2), 'device', 'D');
     const taskFlag = opts.task ?? flagValue(process.argv.slice(2), 'task');
+
+    // Reject --device on every later verb, including `stop --profile`.
+    if (deviceFlag) {
+      console.error(REJECT_DEVICE_MESSAGE);
+      process.exit(1);
+    }
+
+    if (top === 'stop' && opts.profile && !taskFlag) return;
+
     const route = resolveTaskRoute({
       task: taskFlag ?? process.env.AGENTS_BROWSER_TASK,
-      device: deviceFlag,
       sessionId: callerSessionId(),
       launchId: callerLaunchId(),
     });
-
-    if (route.kind === 'reject-device') {
-      console.error(route.message);
-      process.exit(1);
-    }
-    if (route.kind === 'unknown' || route.kind === 'ambiguous') {
+    if (route.kind !== 'proceed') {
       console.error(route.message);
       process.exit(1);
     }
