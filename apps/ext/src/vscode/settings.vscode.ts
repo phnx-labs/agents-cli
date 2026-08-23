@@ -1136,6 +1136,7 @@ async function pushFloorUpdate(workspacePath?: string): Promise<void> {
     // approval-waiting state. Edge-triggered so it fires once per wait.
     notifyNewlyWaiting(floorTerminals);
     settingsPanel.webview.postMessage({ type: 'allTerminalsData', terminals: floorTerminals });
+    settingsPanel.webview.postMessage({ type: 'feedActivity', activity: sessionPresentationStore.activityEvents() });
 
     // Tasks arrive in their own message whenever they are ready. fetchTasks
     // already absorbs a cloud outage internally and resolves with local data,

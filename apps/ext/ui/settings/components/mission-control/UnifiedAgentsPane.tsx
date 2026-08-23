@@ -815,6 +815,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         })
         return
       }
+      if (msg?.type === 'feedActivity') {
+        if (Array.isArray(msg.activity)) setFeedActivity(msg.activity)
+        return
+      }
       if (msg?.type === 'hostSessions') {
         const failed = msg.ok === false || typeof msg.error === 'string'
         if (failed) {

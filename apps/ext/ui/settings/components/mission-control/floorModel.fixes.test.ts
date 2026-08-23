@@ -85,6 +85,7 @@ describe('wiring guard — infra must stay wired (issue 5 was dead code)', () =>
   // groupAgents + sessionTaskLine both existed unused once; assert their production
   // consumer still imports them so they can't silently become dead again.
   const pane = fs.readFileSync(path.join(__dirname, 'UnifiedAgentsPane.tsx'), 'utf8')
+  const settingsHost = fs.readFileSync(path.join(__dirname, '../../../../src/vscode/settings.vscode.ts'), 'utf8')
   test('UnifiedAgentsPane wires groupAgents (the Group-by control)', () => {
     expect(pane).toContain('groupAgents(')
   })
@@ -101,5 +102,10 @@ describe('wiring guard — infra must stay wired (issue 5 was dead code)', () =>
     expect(idleAt).toBeGreaterThan(-1)
     expect(runningAt).toBeGreaterThan(-1)
     expect(idleAt).toBeLessThan(runningAt)
+  })
+  test('live feed refresh projects resolution receipts into the chronological activity lane', () => {
+    expect(settingsHost).toContain("type: 'feedActivity', activity: sessionPresentationStore.activityEvents()")
+    expect(pane).toContain("msg?.type === 'feedActivity'")
+    expect(pane).toContain("event.type === 'attention.receipt'")
   })
 })
