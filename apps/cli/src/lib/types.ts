@@ -241,7 +241,9 @@ export type CapabilityName = 'hooks' | 'mcp' | 'mcpHttp' | 'mcpHeaders' | 'allow
  * Permission modes controlling agent autonomy.
  *   plan  read-only investigation; no writes, no shell side-effects
  *   edit  may edit files; prompts for shell/risky operations
- *   auto  smart classifier auto-approves safe operations, prompts for risky ones
+ *   auto  never stops to ask; the mechanism is per-harness -- a smart classifier
+ *         that auto-approves safe operations (claude, copilot), or
+ *         approval_policy=never over edit's sandbox (codex)
  *   skip  bypasses every permission prompt (dangerously-skip-permissions)
  *
  * `full` is accepted as a permanent silent alias for `skip` via normalizeMode().

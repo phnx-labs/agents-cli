@@ -2246,9 +2246,11 @@ schema (`--json` passes through each agent's native stream format).
   beyond `edit`, and only explicit `skip` may emit
   `--dangerously-bypass-approvals-and-sandbox`. Fresh runs, native resumes,
   routines, POSIX shims, versioned aliases, and the Windows shim delegate MUST
-  consume the same policy builder. The shims and the direct-binary launch
-  (`lib/exec.ts` `runShimmedBinary`) deliberately pin `edit`: a human is at that
-  terminal, so an approval prompt is the useful outcome there.
+  consume the same policy builder. Two paths deliberately pin `edit` -- the
+  direct-binary launch (`lib/exec.ts` `execShimPassthrough`) and the shim launch
+  args (`harness/adapters/codex.ts` `shimLaunchArgs`, consumed by the POSIX shim
+  and the versioned alias). A bare `codex` invocation carries no mode at all and
+  a human is at that terminal, so an approval prompt is the useful outcome there.
 - **EXEC-22b (MUST).** When `--mode` is omitted and the selected or fallback
   harness is Codex, the mode MUST resolve to `edit`. Explicit `plan` MUST remain
   filesystem-read-only with network enabled; explicit/configured modes MUST not

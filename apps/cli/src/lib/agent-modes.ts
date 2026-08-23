@@ -86,6 +86,15 @@ export function getAgentModesCatalog(
   if (unsupported.includes('auto')) {
     notes.push(`--mode auto degrades to edit on ${agent} (no native auto classifier).`);
   }
+  // MODE_DESCRIPTIONS is one flat Record<Mode, string>, so `auto` renders the
+  // smart-classifier wording for every agent. Codex's auto has no classifier and
+  // never prompts -- without this note the catalog an orchestrating agent reads
+  // before `agents run codex --mode auto` asserts a gate that does not exist.
+  if (agent === 'codex' && supported.includes('auto')) {
+    notes.push(
+      `codex --mode auto is approval_policy=never over the same sandbox as edit: it never prompts, and a sandbox-denied command fails instead of raising an approval request.`,
+    );
+  }
   if (unsupported.includes('plan')) {
     notes.push(`--mode plan degrades to ${defaultMode} on ${agent} (no native read-only mode).`);
   }

@@ -79,8 +79,12 @@ export function getBuiltInDefByTitle(title: string): BuiltInAgentDef | undefined
   return BUILT_IN_AGENTS.find(a => a.title === title);
 }
 
-// Dispatch "mode" the panel offers: Plan (read-only), Auto (the safe default —
-// asks before anything risky), Edit (accepts edits without asking). We launch
+// Dispatch "mode" the panel offers: Plan (read-only), Auto (the unattended
+// default — never stops to ask), Edit (accepts edits, still asks about risky
+// shell operations). What Auto means is per-harness: a smart classifier that
+// auto-approves safe operations on Claude/Copilot, and approval_policy=never
+// over edit's sandbox on Codex. Note the ordering is NOT "auto is stricter than
+// edit" — on Codex it is edit that prompts and auto that does not. We launch
 // every agent through `agents run <agent>`, which has its OWN `--mode plan|auto|
 // edit` flag and translates it to each CLI's native permission posture. So the
 // flag is agent-AGNOSTIC — emitting the underlying `--permission-mode` directly

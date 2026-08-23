@@ -668,7 +668,7 @@ export function registerRunCommand(program: Command): void {
   const runCmd = program
     .command('run [agent] [prompt]')
     .description('Execute an agent. Pass a prompt for headless runs; omit it to launch the agent interactively. With --broadcast, run the same prompt/task across an agent × model matrix.')
-    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (smart classifier auto-approves safe ops, prompts for risky), skip (bypass all permission prompts). Omitted Codex mode defaults to safe writable edit; other harnesses default to plan. \'full\' accepted as alias for skip.', 'plan')
+    .option('-m, --mode <mode>', 'How much the agent can do: plan (read-only), edit (can write files), auto (never stops to ask: smart classifier on Claude/Copilot, approval_policy=never over the edit sandbox on Codex), skip (bypass all permission prompts). Omitted Codex mode defaults to safe writable edit; other harnesses default to plan. \'full\' accepted as alias for skip.', 'plan')
     .option('-e, --effort <effort>', 'Reasoning effort: low | medium | high | xhigh | max | auto (claude and codex only)', 'auto')
     .option('--model <model>', 'Cost tier (cheap|default|best|ultra) or a concrete model id; tiers resolve per harness+version to a supported model')
     .option(
@@ -910,7 +910,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       Modes (not every agent supports every mode — run \`agents modes <agent>\`):
         plan  read-only investigation; no writes, no shell side-effects
         edit  may edit files; prompts for shell / risky operations
-        auto  smart classifier auto-approves safe ops, prompts for risky (claude, copilot)
+        auto  never stops to ask; what that means is per-harness --
+              claude, copilot: smart classifier auto-approves safe ops
+              codex: approval_policy=never over the edit sandbox; a denied
+                     command fails rather than raising a prompt
         skip  bypass every permission prompt (dangerously-skip-permissions)
         Legacy 'full' is silently rewritten to 'skip'.
         List per-harness support + native flags: agents modes · agents modes claude

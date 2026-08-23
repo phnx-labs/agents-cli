@@ -224,8 +224,8 @@ Supports plan (read-only), edit, auto, and skip modes, effort levels, JSON outpu
 Treat `skip` as a last-resort escape hatch. In direct-exec runs (without `--acp`),
 agi-cli forwards the harness's native no-prompt flag; it does not add another
 safety layer. Prefer `auto` where it adds a safer automatic policy (smart classifier
-on Claude/Copilot, native high-auto mode on Droid, or interactive Kimi), or `edit`
-everywhere else. For headless Kimi, `edit`, `auto`, and `skip` all use the same
+on Claude/Copilot, never-prompt over a sandbox on Codex, native high-auto mode on
+Droid, or interactive Kimi), or `edit` everywhere else. For headless Kimi, `edit`, `auto`, and `skip` all use the same
 already-auto-approved `-p` behavior, so prefer `edit` rather than signaling a blanket
 bypass. Harnesses without a native bypass flag reject direct-exec `skip`.
 
@@ -247,11 +247,13 @@ permission requests at the ACP protocol layer: it selects `allow_always` when of
 otherwise the first permission option offered by the server. The same last-resort
 warning applies.
 
-Codex has no native smart-classifier mode, so `agents run codex --mode auto` resolves
-to sandboxed `edit` and can still prompt. When `--mode` is omitted for Codex, the same
-safe writable mode is used: the workspace, `~/.agents`, and regenerable toolchain caches
-are writable; network access is enabled; and approvals are requested on demand. An
-explicit `--mode plan` keeps the filesystem read-only while leaving network access on.
+Codex has three managed permission profiles rather than a smart classifier. `edit`
+and `auto` share one sandbox — the workspace, `~/.agents`, and regenerable toolchain
+caches are writable, and network access is enabled — and differ only in approvals:
+`edit` requests them on demand, while `auto` never prompts, so a sandbox-denied
+command fails and the agent works around it instead of stopping on a dialog nobody
+is watching. When `--mode` is omitted for Codex, `edit` is used. An explicit
+`--mode plan` keeps the filesystem read-only while leaving network access on.
 `agents run codex --mode skip` is different:
 it bypasses approvals **and** removes the sandbox. `full` remains an alias for `skip`,
 but new scripts should use the explicit `skip` name.
@@ -814,7 +816,7 @@ tools:
 ---
 ```
 
-Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit`, or `--mode auto` on Claude Code and GitHub Copilot. Reserve `--mode skip` (legacy alias: `full`) for last-resort bypasses. `agents run` defaults to `--mode plan` for other harnesses; Codex defaults to its safe writable profile. An explicit Codex `--mode plan` is read-only with network access.
+Workflows that need to write — post PR comments, edit files, send Slack — should run with `--mode edit`, or `--mode auto` on Claude Code, GitHub Copilot, and Codex. Reserve `--mode skip` (legacy alias: `full`) for last-resort bypasses. `agents run` defaults to `--mode plan` for other harnesses; Codex defaults to its safe writable profile. An explicit Codex `--mode plan` is read-only with network access.
 
 Resolution is project > user > system: a `<repo>/.agents/workflows/<name>/` overrides a same-named workflow in `~/.agents/workflows/`. Commit project workflows with your repo so teammates get the same pipeline.
 
