@@ -268,3 +268,29 @@ describe('loadFleetStats', () => {
     expect(isFreshDeviceSpecs(stat('a', now - SPECS_STALE_MS - 1), now)).toBe(false);
   });
 });
+
+describe('isFreshDeviceSpecs — cache written before disk collection', () => {
+  const base = (over: Partial<DeviceStats> = {}): DeviceStats => ({
+    host: 'box', reachable: true, ncpu: 8,
+    memTotalBytes: 16 * 1024 ** 3, memFreeBytes: 8 * 1024 ** 3,
+    fetchedAt: Date.now(), specsFetchedAt: Date.now(), ...over,
+  });
+
+  it('treats a reachable row with no disk total as stale, however recent', () => {
+    // The 7-day TTL would call this fresh for a week after upgrading, so the
+    // disk column would render `—` on every cached run — the feature looking
+    // broken rather than being broken. Verified live on this fleet before the
+    // fix: cached rows showed `10c 23.5G —` where --refresh gave `10c 23.5G 460G`.
+    expect(isFreshDeviceSpecs(base(), Date.now())).toBe(false);
+  });
+
+  it('keeps a row that HAS disk fresh inside the TTL', () => {
+    const withDisk = base({ diskTotalBytes: 460 * 1024 ** 3, diskFreeBytes: 100 * 1024 ** 3, diskUsedPercent: 78 });
+    expect(isFreshDeviceSpecs(withDisk, Date.now())).toBe(true);
+  });
+
+  it('does not force a probe for an unreachable box, which never has disk', () => {
+    // An offline row legitimately carries no disk and re-probing cannot help.
+    expect(isFreshDeviceSpecs(base({ reachable: false }), Date.now())).toBe(true);
+  });
+});

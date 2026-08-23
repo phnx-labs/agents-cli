@@ -52,6 +52,13 @@ export function isFreshDeviceStats(stats: DeviceStats, now: number = Date.now())
 
 /** True when cached core, RAM-total, and disk-total facts remain current. */
 export function isFreshDeviceSpecs(stats: DeviceStats, now: number = Date.now()): boolean {
+  // A row written by a CLI that predates disk collection carries no
+  // diskTotalBytes, and the 7-day TTL would call it fresh for a week after the
+  // upgrade — so `agents devices list` renders the new disk column as `—` on
+  // every cached run and the feature looks broken until something forces a
+  // live probe. A reachable row missing the field is stale by definition: the
+  // probe it came from could not have produced it.
+  if (stats.reachable && stats.diskTotalBytes === undefined) return false;
   const fetchedAt = stats.specsFetchedAt ?? stats.fetchedAt;
   return now - fetchedAt <= SPECS_STALE_MS;
 }
