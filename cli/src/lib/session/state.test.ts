@@ -426,6 +426,19 @@ describe('extractTodoProgress (RUSH-1380)', () => {
       tool('Write', { file_path: path.join(src, 'b.ts') }),   // absolute → same dir as the Edit, so it dedups
     ], root)).toEqual([tests, src]);
   });
+  it('registers cwd for every harness shell tool via the shared predicate, not just Bash/exec_command', () => {
+    const root = path.resolve('/repo');
+    const a = path.join(root, 'a');
+    const b = path.join(root, 'b');
+    const c = path.join(root, 'c');
+    // 'run_command' (Grok) and case-variant 'EXEC' were NOT in the old hardcoded array —
+    // isShellExecTool now recognizes them, so their working dir is a touched directory.
+    expect(extractRecentDirectoriesTouched([
+      tool('run_command', { workdir: a }),
+      tool('EXEC', { cwd: b }),
+      tool('Execute', { working_directory: c }),
+    ], root)).toEqual([a, b, c]);
+  });
   it('tallies done/total and surfaces the in-progress activeForm', () => {
     const p = extractTodoProgress({
       todos: [

@@ -98,6 +98,29 @@ describe('renderTrajectoryHtml — self-contained and safe', () => {
     expect(html).not.toMatch(/idle 125m/); // never runaway minutes
   });
 
+  it('colors every harness shell tool with the shell hue, not just Bash', () => {
+    // toolColor now routes through isShellExecTool, so Codex `exec` and Droid `Execute`
+    // get the shell bar color (#e0b341) the old `.includes('exec')`/2-name checks split on.
+    const shellStep = (tool: string): SessionEvent[] => [
+      { type: 'tool_use', agent: 'codex', timestamp: '2026-08-01T00:00:00Z', tool, callId: 's', command: 'git status' },
+      { type: 'tool_result', agent: 'codex', timestamp: '2026-08-01T00:00:02Z', tool, callId: 's', outcome: 'ok' },
+    ];
+    // The per-step badge carries the color as `style="background:#e0b341"` — distinct
+    // from the static CSS that also mentions `color: #e0b341`, so this is a real marker.
+    for (const tool of ['exec', 'Execute', 'run_command']) {
+      expect(renderTrajectoryHtml(buildTrajectory(shellStep(tool), meta({ agent: 'codex' }))))
+        .toContain('style="background:#e0b341"');
+    }
+    // A non-shell tool gets the read hue instead, never the shell hue on its badge.
+    const readOnly: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Read', callId: 'r', args: { file_path: 'a.ts' } },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Read', callId: 'r', outcome: 'ok' },
+    ];
+    const readHtml = renderTrajectoryHtml(buildTrajectory(readOnly, meta()));
+    expect(readHtml).toContain('style="background:#4a9eff"');
+    expect(readHtml).not.toContain('style="background:#e0b341"');
+  });
+
   it('an empty trajectory still renders a valid page (no crash)', () => {
     const html = renderTrajectoryHtml(buildTrajectory([], meta({ agent: 'openclaw' })));
     expect(html).toContain('<!DOCTYPE html>');

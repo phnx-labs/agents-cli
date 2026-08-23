@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import chalk from 'chalk';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { makeStreamRenderer } from './stream-render.js';
 
 describe('makeStreamRenderer', () => {
@@ -77,6 +78,39 @@ describe('makeStreamRenderer', () => {
     expect(result).toContain('Edit');
     expect(result).toContain('(result elided — 2 lines)');
     expect(result).not.toContain('patched');
+  });
+
+  describe('paintTool colors every harness shell tool with the shell hue', () => {
+    // paintTool routes through isShellExecTool now (was `Bash || exec_command`), so a
+    // Codex `exec` step gets the same yellow as Claude's Bash. Force color so the ANSI
+    // codes are deterministic in the non-TTY test env, then restore.
+    let prev: number;
+    beforeAll(() => { prev = chalk.level; chalk.level = 1; });
+    afterAll(() => { chalk.level = prev; });
+
+    const YELLOW = '[33m'; // chalk.yellow open code — the shell-tool hue
+    const CYAN = '[36m';   // the non-shell (Read/Edit/…) hue
+
+    it('paints a Codex exec tool call yellow, like Bash, not cyan', () => {
+      const render = makeStreamRenderer('codex', '/repo');
+      const use = render(JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-22T14:40:00.000',
+        payload: {
+          type: 'custom_tool_call', name: 'exec', call_id: 'c1',
+          input: 'await tools.exec_command({cmd:"git status", workdir:"/repo"})',
+        },
+      }));
+      expect(use).toContain(YELLOW + 'exec'); // the exec LABEL is yellow (not just the arrow)
+      // The Codex apply_patch → Edit path stays cyan, proving the hue is tool-specific.
+      const edit = render(JSON.stringify({
+        type: 'response_item',
+        timestamp: '2026-07-22T14:40:02.000',
+        payload: { type: 'custom_tool_call', name: 'apply_patch', call_id: 'c2', input: '*** Begin Patch\n*** Update File: a.ts\n*** End Patch' },
+      }));
+      expect(edit).toContain(CYAN + 'Edit');       // Edit label is cyan
+      expect(edit).not.toContain(YELLOW + 'Edit');  // …never the shell yellow
+    });
   });
 
   it('renders user messages distinctly and hides usage/result events', () => {
