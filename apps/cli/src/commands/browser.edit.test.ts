@@ -204,3 +204,40 @@ describe('agents browser profiles scope', () => {
     expect(error).toHaveBeenCalledWith('scope must be `local` or `fleet`');
   });
 });
+
+describe('agents browser profiles prune — misfiled reporting', () => {
+  it('names each misfiled fleet profile and the repair, and offers none for deletion', async () => {
+    // reportMisfiled() is the PRIMARY surface for this finding: a misfiled
+    // profile is never a prune candidate, and the `kept` loop only runs when
+    // there is nothing to prune. Without this test, deleting the whole filter
+    // leaves the suite green.
+    const { createProfile } = await freshBrowserModules();
+    await createProfile(
+      { name: 'misfiled-one', browser: 'custom', binary: process.execPath, endpoints: ['cdp://localhost:9401'] },
+      { fleet: true },
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await run(['profiles', 'prune', '--dry-run']);
+
+    const out = log.mock.calls.map((c) => String(c[0])).join('\n');
+    expect(out).toMatch(/misfiled/i);
+    expect(out).toContain('agents browser profiles scope misfiled-one local');
+    expect(out).toMatch(/never deletes these/i);
+    // And it is not offered for removal.
+    expect(out).not.toMatch(/Would remove[\s\S]*misfiled-one/);
+  });
+
+  it('says nothing about misfiling when every fleet profile is correctly scoped', async () => {
+    const { createProfile } = await freshBrowserModules();
+    await createProfile(
+      { name: 'remote-ok', browser: 'custom', binary: process.execPath, endpoints: ['ssh://muqsit@mac-mini?port=9300'] },
+      { fleet: true },
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+
+    await run(['profiles', 'prune', '--dry-run']);
+
+    expect(log.mock.calls.map((c) => String(c[0])).join('\n')).not.toMatch(/misfiled/i);
+  });
+});
