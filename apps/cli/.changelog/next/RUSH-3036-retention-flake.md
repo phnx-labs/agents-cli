@@ -1,1 +1,0 @@
-- fix(teams): observe AgentManager's fire-and-forget init rejection so a lost init race (dir removed mid-mkdir) fails the awaiting caller instead of crashing the process as an unhandled rejection — the flake that failed two fully-green release attestation runs

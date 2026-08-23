@@ -1,1 +1,0 @@
-- **New versions are licensed FSL-1.1-Apache-2.0.** Use, modification, and redistribution remain free for every user. Offering agents-cli as a competing commercial product or service is barred. Each version converts to Apache-2.0 two years after it is made available. Already-shipped Apache-2.0 versions are unchanged. Source: `LICENSE`, `apps/cli/LICENSE`.
