@@ -27,7 +27,7 @@ grok, kimi, cursor, droid, antigravity). Every number on this page comes from on
 snapshot of that corpus — it is live and still growing, so a re-run moves the
 counts by a few.
 
-A hook can fire at **five lifecycle moments**. Four of them are peaceful: SessionStart
+A hook can fire at **five lifecycle moments**. Three of them are peaceful: SessionStart
 and UserPromptSubmit hooks only *inject* context or *remind* — they never stop an
 agent. The battlefield is **PreToolUse** (guards that veto a tool call before it runs)
 and **Stop** (the gate that refuses a premature "I'm done"). That is where every real
@@ -490,7 +490,7 @@ Treat a low number as a question, not a verdict.
 </figure>
 
 **The owner-update reminder is the worst hook in the system.** 811 fires across 272
-sessions — three per session, more than every PreToolUse guard combined — and 58%
+sessions — three per session, and more than any single guard fires — and 58%
 of them are ignored. Worse, the 42% that *are* obeyed are obeyed by running
 `agents feed post … --level important`, and `feed.broadcast.owner` forwards an
 important post to iMessage. So the reminder's only successful outcome is a phone
@@ -667,15 +667,16 @@ fires. 284 of them changed the outcome.**
     <g transform="translate(0,296)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">footer-guard</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#6a6a6a"/><text x="399" y="4" fill="#8a8a8a">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.00%</text></g>
   </g>
   <line x1="240" y1="318" x2="760" y2="318" stroke="#3a3a3a"/>
-  <text x="240" y="340" fill="#ff8a9c" font-size="14" font-weight="700">292 ms added to every Bash call</text>
+  <text x="240" y="340" fill="#ff8a9c" font-size="14" font-weight="700">293 ms added to every Bash call</text>
   <text x="850" y="340" fill="#8a8a8a" font-size="12">hit rate</text>
 </svg>
 </figure>
 
-**Every `Bash` tool call pays 292 ms** before the command starts, across nine guards.
+**Every `Bash` tool call pays 293 ms** before the command starts, across nine guards
+(the nine bars above, summed).
 Total recorded hook wall-clock: **2.66 hours**. The hit rate that buys is **0.099%**.
 
-That is not an argument for deleting the guards — `git-guard`'s 131 blocks are 131
+That is not an argument for deleting the guards — `git-guard`'s 245 fires include 53
 prevented `reset --hard`es, and its cost is worth paying. It *is* an argument for not
 running a guard in a mode where it cannot possibly fire.
 
@@ -699,10 +700,19 @@ not new code**.
 | user-message-guard | **off** | **off** | cut entirely — 0.08% |
 | verify-work-complete | **plan-aware** | **on** | "done" in plan mode means *the plan is delivered*, not *the PR is merged* — it should audit against the plan, not the delivery chain |
 
-Gating those five off in plan mode drops the per-Bash tax from **292 ms → 176 ms**.
-Combined with merging the four git guards into one script, a planning turn pays
-**~123 ms** instead of 292 — a **2.4x** cut on every command the agent runs while
-thinking.
+Two different savings sit in that table, and they should not be added together
+carelessly — an earlier revision of this page did exactly that:
+
+| step | guards | saved | per-`Bash` cost |
+|---|---|---:|---:|
+| today | — | — | **293 ms** |
+| gate the four delivery-phase guards off in plan mode | `merge-guard` 19 · `pr-description-reminder` 18 · `large-file-add-guard` 25 · `git-require-clean-tree` 18 | **80 ms** | **213 ms** |
+| plus cut `footer-guard` and `user-message-guard` outright | 18 · 18 | **36 ms** | **177 ms** |
+
+Only the first row is a mode gate; the second is deletion, and it applies in *every*
+mode rather than just plan. Merging the four git guards into one script would cut
+further still — three fewer process spawns per call — but that number is not measured
+yet and is deliberately not claimed here.
 
 ### A hook broke for 18 hours and nothing said so
 
@@ -814,6 +824,6 @@ to enforce. Its test suite is the check.
 
 - **The map has two hot lanes, not five.** SessionStart (6 hooks) and UserPromptSubmit (5 hooks) never block — they inject Linear/topology/inflight context and expand promptcuts/bangcuts. All the friction is PreToolUse + Stop. If you are auditing "where agents fight hooks," you can ignore 60% of the hook surface.
 - **The Stop gate is the heaviest hook in the system** — 561 fires, 11 per session it touches, more than git-guard and merge-guard put together. Among PreToolUse guards those two lead (245 and 240): git-guard's top vetoes are `reset --hard`, `checkout`, `branch-delete`, `stash` — exactly the history-destroying moves the agentic-git workflow forbids; merge-guard's are admin-bypass and merging with no non-author verdict.
-- **The loudest antagonist is not a hook.** The auto-mode permission classifier denied 1,450 tool calls — nearly as many as all 13 guards combined (1,696). For grok it is almost the *entire* experience of "being stopped".
+- **The loudest antagonist is not a hook.** The auto-mode permission classifier denied 1,450 tool calls — **more than all 13 PreToolUse guards combined (1,135)**. For grok it is almost the *entire* experience of "being stopped".
 - **codex fights hardest per session (12.4%), grok softest (1.2%).** claude sits at 6.9% but spreads across all 13 guards; grok concentrates on the classifier + merge-guard.
 - **A guard firing zero times is a rule that won.** footer-guard: 0 fires. Nobody tries the banned footer anymore — the guard is pure standing deterrent. The inverse also holds: a hook that fires three times a session and is ignored 58% of the time is a rule nobody internalized, and the fix is the message, not more volume.
