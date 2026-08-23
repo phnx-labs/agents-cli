@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 552 commands._
+_69 command groups · 554 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -235,14 +235,16 @@ agents devices add <name> <target>             Add a device manually (target is 
 agents devices apply                           Reconcile the fleet to a declared profile: install agents and sync config.
 agents devices capture                         Snapshot the live environment (roster names, agents, browser, secret-bundle names, routines) into agents.yaml fleet:.
 agents devices config [name] [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.
+agents devices describe <name> [text...]       Show or set the one-line description of what a device is FOR ("gpu box — cuda 12.4"). Rendered as the tail column of `agents devices list` and synced fleet-wide. Same key as `agents devices config <name> description` — one store, two names.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
 agents devices ignore <name>                   Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).
+agents devices ignored                         List dismissed tailscale nodes — what was dismissed, when, and on which machine.
 agents devices lease                           Manage the disposable cloud boxes used by `agents run --lease`.
 agents devices lease gc                        Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.
 agents devices lease list                      List warm crabbox boxes you can reuse with `agents run --box <slug>`.
 agents devices lease setup                     One-time credential setup so `agents run --lease` works with no env var or flag.
 agents devices lease stop <slug>               Stop (release) a leased crabbox box now.
-agents devices list                            List registered devices with platform, address, reachability, and live resource headroom.
+agents devices list                            List registered devices with platform, spec (cores/RAM/disk), live load/mem/disk headroom, role, and description.
 agents devices login                           Log agent CLIs into fleet boxes over SSH: drive each box's device-code OAuth, scrape the URL + code, and surface every pending login in one local browser page. Default drives all codes at once; --interactive walks one box at a time (codes requested just-in-time so they don't expire).
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
 agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
