@@ -3447,10 +3447,9 @@ not the watchdog's.
 - **WD-1 (MUST).** The agents daemon MUST be the sole automatic watchdog scheduler and
   executor. When device-local `watchdog.enabled` is true it MUST run one bounded,
   non-overlapping pass every three minutes. UI surfaces MUST only render persisted state.
-  As of RUSH-2353 the daemon fires this pass through the routine scheduler (the shipped
-  `watchdog` system routine, `command: agents __daemon-tick watchdog` ->
-  `runWatchdogTick` in `lib/daemon-ticks.ts`, still gated on `watchdog.enabled`) rather
-  than a bare `setInterval` — the daemon remains the sole scheduler/executor either way.
+  The daemon fires this pass from a `setInterval(WATCHDOG_TICK_MS)` with an in-flight
+  guard (`daemon.ts`), re-checking `watchdog.enabled` inside each tick — the daemon
+  remains the sole scheduler/executor.
 - **WD-2 (MUST).** Delivery MUST occur only when `--nudge` is set; without it a tick is a
   dry run that reports "would nudge" and delivers nothing (`lib/watchdog/runner.ts`).
 - **WD-3 (MUST).** `on`/`off` MUST write the typed device-local `watchdog.enabled`
@@ -3465,9 +3464,9 @@ not the watchdog's.
 - **WD-5 (MUST).** A session whose inferred activity is `working` MUST NOT be nudged
   (`lib/session/state.ts`).
 - **WD-6 (MUST NOT).** The watchdog MUST NOT fight the feed: a session in `waiting_input`
-  (asked a question / permission prompt) is the feed's to surface; the watchdog MUST either
-  leave it for the human or escalate to the brain — never blind-nudge it as if idle
-  (`deterministicDecision`, `lib/watchdog/runner.ts`).
+  (asked a question / permission prompt) is the feed's to surface; the agent decider MUST
+  judge it (drive-forward vs leave-for-human) from its task + tail — never blind-nudge it
+  as if idle.
 - **WD-7 (SHOULD).** When several candidates exist, the watchdog SHOULD prioritize the ones
   active most recently (a warm session is likeliest to be steerable).
 - **WD-8 (MUST).** A session whose transcript cannot be located (no timestamp) MUST be
@@ -3479,14 +3478,19 @@ not the watchdog's.
 
 #### 2.3 Decision — nudge vs skip
 
-- **WD-9 (MUST).** The default per-tick decision MUST be a cheap deterministic pre-filter;
-  judgment-heavy cases (parked-on-question, ambiguous stall) MUST escalate to an LLM brain
-  via `agents run … --mode plan` (`makeDefaultSmartDecider`, `lib/watchdog/runner.ts`). A
-  decider failure MUST resolve to a safe skip, never a blind nudge.
-- **WD-10 (MUST).** The brain MUST skip (leave for the human) on: credentials/auth, an
-  irreversible or outward-facing action needing sign-off (publish/release, delete prod,
-  spend, external message), a genuine product/intent decision, a completed task, or an
-  unreadable state (`WATCHDOG_SYSTEM_PROMPT`, `lib/watchdog/watchdog.ts`).
+- **WD-9 (MUST).** The per-tick decision MUST be made by an agent, not a heuristic script.
+  Every idle candidate (its originating task + transcript tail) MUST be judged in a SINGLE
+  `agents run … --mode plan` invocation per tick (`makeWatchdogAgentDecider`,
+  `lib/watchdog/watchdog-agent.ts`) — never one subprocess per candidate. The agent decides
+  idle-but-unfinished → nudge vs idle-and-done / needs-human → skip. A decider failure or a
+  candidate with no returned verdict MUST resolve to a safe skip, never a blind nudge. The
+  agent MUST NOT be invoked when nothing is idle.
+- **WD-10 (MUST).** The agent MUST skip (leave for the human, `needsHuman: true`) on:
+  credentials/auth, an irreversible or outward-facing action needing sign-off
+  (publish/release, delete prod, spend, external message), a genuine product/intent
+  decision, or an unreadable state; and MUST skip with `needsHuman: false` on a completed
+  task, so a finished session is never poked (`WATCHDOG_SYSTEM_PROMPT`,
+  `lib/watchdog/watchdog.ts`).
 - **WD-11 (MUST).** A nudge message MUST carry context — restate the goal and name ONE
   concrete next step (the specific action, a forgotten tool, or the sensible default). A
   generic "use your judgment and finish" with no concrete step MUST NOT be emitted.
@@ -3510,6 +3514,13 @@ not the watchdog's.
 - **WD-17 (MUST).** Every decision MUST be appended to `watchdog.log` in the ext event
   shape, with persisted transcript context bounded so it cannot consume the audit window
   (`lib/watchdog/log.ts`).
+- **WD-21 (MUST).** A nudge MUST be booked in the cooldown ledger (`nudges.json`) and
+  logged as a `nudge` event ONLY when delivery is CONFIRMED. tmux / iterm / pty self-confirm
+  (a successful transport IS delivery); vscodium's `--open-url` is fire-and-forget, so it is
+  `confirmed: false` until the swarm-ext extension acks the verb (`backendConfirmsDelivery`,
+  `lib/terminal/inject.ts`). An unconfirmed-but-dispatched delivery MUST be logged as an
+  `undelivered` event and MUST NOT be reported as a landed nudge; it MAY still start the
+  cooldown so a possibly-working session is not re-hit every tick.
 
 #### 2.5 Per-session policy
 
@@ -3570,11 +3581,14 @@ location/activity context, while healthy rows are summarized until `--verbose` i
 
 ### 4. Known gaps
 
-- **WD-GAP-1.** The brain is not yet seeded with the full fleet-wide
-  `agents sessions --active --json` snapshot as its starting context; it reads
-  per-candidate tails. Planned (see [watchdog.md](watchdog.md) roadmap).
+- **WD-GAP-1 (resolved).** The decider now sees every idle session at once: the tick
+  batches all idle candidates (each with its originating task + tail) into one
+  `agents run --mode plan` call, rather than judging a lone per-candidate tail
+  (`makeWatchdogAgentDecider`, `lib/watchdog/watchdog-agent.ts`). It is scoped to the
+  machine's idle set, not the entire fleet snapshot.
 - **WD-GAP-2.** There is no distinct `done` state — a completed session is inferred as
-  `idle` and skipped via completion hints rather than a first-class status. Planned.
+  `idle` and the agent skips it with `needsHuman: false` rather than a first-class status.
+  Planned.
 - **WD-GAP-3.** Live status inference covers Claude/Codex; other harnesses fall to
   `unknown` and are not yet steered (`findSessionFileForKind`,
   `lib/session/active.ts`). Planned.

@@ -39,30 +39,33 @@ summarized; pass `--verbose` to render every row or `--json` for the complete ti
    past its cooldown) — not `working`, not freshly `waiting` for the feed. Prioritize the
    ones active most recently: a warm session (last activity ~minutes ago) is the one worth
    steering.
-2. **Analyze.** For a candidate, read its transcript tail to recover the goal and the
-   reason it stopped (`lib/watchdog/watchdogTail.ts`). The deterministic pre-filter
-   (`deterministicDecision`, `lib/watchdog/runner.ts`) resolves the two cheap cases —
-   a clearly-complete session (skip) and a promise-without-toolcall stall — and escalates
-   the judgment-heavy cases to the brain.
-3. **Drive it.** The brain decides NUDGE vs SKIP and crafts the message
-   (`WATCHDOG_SYSTEM_PROMPT`, `lib/watchdog/watchdog.ts`). A nudge is **help, not a
-   shove**: it restates the goal, references the conclusion the agent already reached, and
-   names the concrete next step — the exact action, a tool it forgot, or the sensible
-   default. Never a generic "keep going."
+2. **Analyze.** Collect every idle candidate with its originating task and transcript tail
+   (`lib/watchdog/watchdogTail.ts`). There is no heuristic pre-filter guessing done-vs-stuck
+   — the whole idle set goes to the agent.
+3. **Drive it.** The agent judges each candidate in ONE `agents run --mode plan` call per
+   tick (`makeWatchdogAgentDecider`, `lib/watchdog/watchdog-agent.ts`): idle-but-unfinished
+   → NUDGE; idle-and-done or genuinely-needs-human → SKIP. It crafts the message
+   (`WATCHDOG_SYSTEM_PROMPT`, `lib/watchdog/watchdog.ts`). A nudge is **help, not a shove**:
+   it restates the goal, references the conclusion the agent already reached, and names the
+   concrete next step — the exact action, a tool it forgot, or the sensible default. Never a
+   generic "keep going."
 4. **Escalate only genuine sign-off.** Credentials, a release/publish, an
    irreversible/outward-facing action, or a real product decision → left for the human
    (surfaced in the feed), never nudged.
 
 ## The brain
 
-The decider is a real agent, not a template. The default per-tick decision is a cheap
-deterministic pre-filter; the judgment-heavy cases escalate to an LLM brain via
-`agents run <watchdog-workflow> --mode plan` (`makeDefaultSmartDecider`,
-`lib/watchdog/runner.ts`). The prompt is `WATCHDOG_SYSTEM_PROMPT`
-(`lib/watchdog/watchdog.ts`); a user playbook at `~/.agents/playbooks/watchdog.md` is
-appended as **House Rules** (`composePromptWithPlaybook`) so per-fleet authorization norms
-("rolling an already-published version to my own fleet is authorized — proceed") tune the
-NUDGE/SKIP line without editing the built-in prompt.
+The decider is a real agent, not a heuristic script. Every idle session on the machine (its
+task + tail) is judged in ONE `agents run <watchdog-workflow-or-agent> --mode plan` call per
+tick (`makeWatchdogAgentDecider`, `lib/watchdog/watchdog-agent.ts`) — one bounded call for
+the whole idle set, spawned only when something is actually idle, never one agent per
+session. The prompt is `WATCHDOG_SYSTEM_PROMPT` (`lib/watchdog/watchdog.ts`); a user
+playbook at `~/.agents/playbooks/watchdog.md` is appended as **House Rules**
+(`composePromptWithPlaybook`) so per-fleet authorization norms ("rolling an
+already-published version to my own fleet is authorized — proceed") tune the NUDGE/SKIP line
+without editing the built-in prompt. If a `watchdog` workflow resolves (repo > user >
+system), it runs by name so its WORKFLOW.md body + `model:` frontmatter apply; absent one,
+the built-in prompt runs.
 
 Four rules govern a good nudge:
 
@@ -89,6 +92,14 @@ the extension's `/inject` URI handler. When no addressable split exists the tick
 to a mailbox enqueue or a headless `--resume`, and refuses (flags for the menu-bar) only
 when nothing can reach the session. `agents sessions inject` shares this same resolver, so
 the manual unblock path and the watchdog agree.
+
+**Confirmed delivery.** A nudge counts as landed — booked in the cooldown ledger and logged
+`nudge` — only when delivery is confirmed. tmux / iterm / pty self-confirm: a successful
+`send-keys` / `write text` / pty write IS delivery (a bad pane or session id errors).
+vscodium's `codium --open-url` is fire-and-forget — exiting 0 only means the editor accepted
+the URL, not that the extension typed anything — so it is recorded `undelivered` (visible in
+`agents watchdog history`) until the swarm-ext extension acks the verb. This ends the
+phantom-nudge ledger, where a nudge the extension silently dropped was booked as delivered.
 
 ## Rotate (in-place, same tab)
 
@@ -165,7 +176,8 @@ persisted result and never executes a pass.
 | File | Role |
 |---|---|
 | `lib/daemon/daemon.ts` | Sole automatic scheduler: one non-overlapping pass every three minutes. |
-| `lib/watchdog/runner.ts` | One tick: enumerate → classify → decide (deterministic + smart) → deliver → log. |
+| `lib/watchdog/runner.ts` | One tick: enumerate → classify → decide (batched agent) → deliver (confirmed) → log. |
+| `lib/watchdog/watchdog-agent.ts` | The agent decider: batches every idle candidate into ONE `agents run --mode plan` call, maps verdicts by terminalId. |
 | `lib/watchdog/watchdog.ts` | `WATCHDOG_SYSTEM_PROMPT`, playbook composition, prompt render, response parse. |
 | `lib/watchdog/read.ts` | Locate a transcript and read its tail; stall thresholds. |
 | `lib/watchdog/watchdogTail.ts` | Summarize a tail into last-user / last-assistant for the brain + log. |
