@@ -9,19 +9,42 @@ import { findGitRepos, collectCommits, toSearchDate } from '../git-output.js';
 let root: string;
 let repo: string;
 
-/** Run a git command in `repo`, optionally stamping author+committer dates. */
-function git(args: string[], dateIso?: string): void {
+/**
+ * Run a git command in `repo`, optionally stamping author+committer identity
+ * and dates.
+ *
+ * Identity is passed as ENV, not `-c user.email=…`, because git's
+ * `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_EMAIL` environment variables OUTRANK
+ * `-c` config. A developer box that exports those (many do, and the agent
+ * fleet does) silently re-authored every fixture commit to the ambient
+ * identity, so `collectCommits(['alice@example.com', …])` matched nothing and
+ * four tests failed with a bare `expected +0 to be 2`. CI never saw it — its
+ * runners export no such vars — so this only ever broke locally and, worse,
+ * inside the fail-closed release-attestation producer, where it blocked
+ * releases from any box with a git identity in the environment.
+ *
+ * The env we hand git is therefore built explicitly rather than inherited
+ * wholesale: the four identity vars are always set (never left to leak in),
+ * which makes the fixture's authorship independent of the host.
+ */
+function git(args: string[], dateIso?: string, identity?: { email: string; name: string }): void {
   const env = { ...process.env } as Record<string, string>;
   if (dateIso) {
     env.GIT_AUTHOR_DATE = dateIso;
     env.GIT_COMMITTER_DATE = dateIso;
   }
+  // Always assign, even with no identity passed, so an ambient GIT_AUTHOR_EMAIL
+  // can never decide who authored a fixture commit.
+  env.GIT_AUTHOR_EMAIL = identity?.email ?? 'fixture@example.com';
+  env.GIT_COMMITTER_EMAIL = identity?.email ?? 'fixture@example.com';
+  env.GIT_AUTHOR_NAME = identity?.name ?? 'Fixture';
+  env.GIT_COMMITTER_NAME = identity?.name ?? 'Fixture';
   execFileSync('git', ['-C', repo, ...args], { env, stdio: 'pipe' });
 }
 
 /** Commit an empty change authored by `email` at `dateIso`. */
 function commitAs(email: string, name: string, message: string, dateIso: string): void {
-  git(['-c', `user.email=${email}`, '-c', `user.name=${name}`, 'commit', '--allow-empty', '-m', message], dateIso);
+  git(['commit', '--allow-empty', '-m', message], dateIso, { email, name });
 }
 
 function daysAgoIso(days: number): string {
