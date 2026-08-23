@@ -244,4 +244,7 @@ printf '{"hook_event_name":"Stop","permission_mode":"plan","transcript_path":"..
 
 ## Tracking
 
-Ticket to be filed on approval (one per landed unit: the `.agents-system` gate PR, the agents-cli `modes:` PR); ids will be recorded here.
+- **RUSH-3050** — Mode-gated hooks: fire planning hooks only in plan mode (this delivery's ticket)
+- Stage 1 PR: [phnx-labs/.agents-system#362](https://github.com/phnx-labs/.agents-system/pull/362) — inline `permission_mode` gate; merge gated on the RUSH-3044 ruleset fix (needs an APPROVED review from a distinct identity)
+- Stage 2 PR: [phnx-labs/agi-cli#2915](https://github.com/phnx-labs/agi-cli/pull/2915) — `matches.permission_mode` predicate (implemented via the existing `matches:` machinery rather than a parallel `modes:` field)
+- Stage 3 (after #2915 ships fleet-wide): flip `plan-presentation/hooks.yaml` to `matches: { permission_mode: plan }` and drop the inline gate
