@@ -5,7 +5,7 @@
  * peer of `agents insights` with overlapping "analytics" meaning, so agents and
  * humans kept picking the wrong verb. The cheap counter path (sessions index +
  * usage.db) still exists — it is now `agents insights mix` and the recipe
- * subcommands below. Latency stays on `agents perf`; quota on `agents usage`.
+ * subcommands below. Latency stays on `agents perf`; quota on `agents view`.
  *
  * Former top-level `agents trends` is gone. The nested spelling
  * `agents insights trends` is an alias of `agents insights mix`.
@@ -121,7 +121,7 @@ export function registerMixCommands(parent: Command): void {
       Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.
       Empty recipes are skipped on the default mix board.
       This is the cheap counter path. Behavioural report (transcript content, account split)
-      is bare \`agents insights\`. Latency is \`agents perf\`; quota is \`agents usage\`.
+      is bare \`agents insights\`. Latency is \`agents perf\`; quota is \`agents view\`.
       Skill/slash-command popularity is \`agents sessions stats\`.
     `,
   });

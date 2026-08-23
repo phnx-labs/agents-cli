@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 69,
-  "commands": 556,
+  "groups": 68,
+  "commands": 555,
   "root": {
     "name": "agents",
     "path": "",
@@ -11056,7 +11056,7 @@
         }
       ],
       "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents view`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
       "subcommands": [
         {
           "name": "browser-activity",
@@ -11258,7 +11258,7 @@
             }
           ],
           "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights harness-mix --json\n\n      # Raw usage events\n      agents insights query --kind secret --days 7\n\n      # List baked recipe ids\n      agents insights recipes",
-          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents usage`.\n      Skill/slash-command popularity is `agents sessions stats`.",
+          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
           "subcommands": []
         },
         {
@@ -23468,7 +23468,7 @@
             }
           ],
           "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents usage`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents view`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
           "subcommands": [
             {
               "name": "browser-activity",
@@ -23586,7 +23586,7 @@
                 }
               ],
               "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights harness-mix --json\n\n      # Raw usage events\n      agents insights query --kind secret --days 7\n\n      # List baked recipe ids\n      agents insights recipes",
-              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents usage`.\n      Skill/slash-command popularity is `agents sessions stats`.",
+              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
               "subcommands": []
             },
             {
@@ -28776,89 +28776,6 @@
           "description": "Install without an interactive confirmation prompt",
           "short": "-y",
           "long": "--yes",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "usage",
-      "path": "usage",
-      "aliases": [],
-      "description": "Show rate-limit / quota usage per agent",
-      "args": [
-        {
-          "name": "agent",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-          "short": "-D",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--remote-cwd <dir>",
-          "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-          "long": "--remote-cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-tty",
-          "description": "Force non-interactive output for --device runs even from a terminal.",
-          "long": "--no-tty",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--any",
-          "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
-          "long": "--any",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Emit machine-readable JSON (per-agent usage snapshot) instead of the table",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-r, --refresh",
-          "description": "Collect fresh usage through the shared device coordinator before rendering",
-          "short": "-r",
-          "long": "--refresh",
           "required": false,
           "optional": false,
           "variadic": false,

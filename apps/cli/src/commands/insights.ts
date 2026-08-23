@@ -14,7 +14,7 @@
  *
  *   agents insights cost    what you spent ($ and duration)
  *   agents insights output  what shipped (burn vs PRs and commits)
- *   agents usage            live quota headroom
+ *   agents view             live quota headroom (per account, with auth state)
  *   agents perf             latency (hooks, CLI commands, agent.run) — not popularity
  *   agents sessions stats   which skills/slash-commands were explicitly invoked
  *
@@ -671,7 +671,7 @@ function configureInsightsCommand(cmd: Command): void {
       Two paths under one verb:
         bare \`agents insights\`     — transcript behaviour (tools, friction, rhythm, by account)
         \`agents insights mix\`      — cheap counters from sessions.db + usage.db
-      Latency is \`agents perf\` (not mix). Quota is \`agents usage\`. Spend is
+      Latency is \`agents perf\` (not mix). Quota is \`agents view\`. Spend is
       \`agents insights cost\`; shipped output is \`agents insights output\`. Skill/slash popularity
       is \`agents sessions stats\`. Former top-level \`agents trends\` is \`agents insights mix\`
       (also \`agents insights trends\`).

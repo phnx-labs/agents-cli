@@ -36,7 +36,7 @@ export interface RefreshLeaseOptions<T> {
  * Serialize refresh work across every agents-cli process on this device.
  *
  * In-process promise maps only protect one Node process. Factory, the daemon,
- * `agents view`, and `agents usage` are separate processes, so they need an
+ * and `agents view` are separate processes, so they need an
  * OS-visible lease. The result is re-read after lock acquisition: a waiter
  * consumes the winner's publication and never calls the provider a second
  * time. `proper-lockfile` supplies heartbeat + stale-owner recovery while an

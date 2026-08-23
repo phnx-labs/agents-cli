@@ -2809,7 +2809,7 @@ nothing but its own view cache.
   (`lib/installations/migrate.ts`) repairs the fleet again at upgrade time as the
   version-skew one-shot.
 - **SING-1a (MUST).** Ordinary usage/auth consumers MUST be cache-only. This
-  includes routing (`agents run` and teams), `view`, `versions`, `usage`, device
+  includes routing (`agents run` and teams), `view`, `versions`, device
   inventory, and UI consumers. A missing snapshot MUST render as stale or
   unavailable and MUST NOT trigger provider HTTP, credential refresh, or a local
   transcript scan. The daemon and an explicit user refresh are the only

@@ -32,7 +32,7 @@ with different stores, but the surface taught the wrong model.
 | **`agents insights`** (bare) | How did work *look*? tools, friction, rhythm, edits — by account | Transcript content via `parseSession`, cached in `session_insights` |
 | **`agents insights mix`** | What are the *counts*? harness/model mix, tools/session, secrets, browser | Cheap SQL on `sessions.db` + `usage.db` recipes |
 | **`agents perf`** | How *slow* / sticky is the machinery? | Disposable `perf.db` samples from command.end / hooks / runs |
-| **`agents usage`** | Live *quota* headroom right now | Provider rate-limit APIs |
+| **`agents view`** | Live *quota* headroom right now | Provider rate-limit APIs |
 | **`agents sessions stats`** | Which *skills/slash-commands* were explicitly invoked? | `session_resource_usage` index |
 
 **Do not re-split mix into a peer top-level command.** Latency stays on `perf` so
@@ -158,7 +158,7 @@ timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
 ## Counter mix (`agents insights mix`)
 
 Resource and session **frequency** under the `insights` verb — **not** model quota
-(`agents usage`) and **not** latency (`agents perf`). Implementation:
+(`agents view`) and **not** latency (`agents perf`). Implementation:
 `apps/cli/src/lib/analytics/` (recipes + `mix-commands.ts`); CLI entry is
 `apps/cli/src/commands/insights.ts` (registers the mix tree). Former top-level
 `agents trends` is `agents insights mix` (also `agents insights trends`).
@@ -1363,7 +1363,7 @@ Output sections:
 - **By agent / project / day** — grouped totals (`--by`), summed cost,
   session count, and total duration.
 
-`agents cost` is distinct from [`agents usage`](#), which reports live
+`agents cost` is distinct from `agents view`, which reports live
 rate-limit / quota status per agent — different question, different command.
 
 For per-session figures, `agents sessions --json` now carries `costUsd` and

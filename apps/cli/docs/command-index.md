@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 556 commands._
+_68 command groups · 555 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -872,12 +872,6 @@ agents update list <agent>  Show every frozen installation of an agent and the r
 
 ```
 agents upgrade [version]  Upgrade agents-cli to the latest version (or a specific [version])
-```
-
-## usage — Show rate-limit / quota usage per agent
-
-```
-agents usage [agent]  Show rate-limit / quota usage per agent
 ```
 
 ## use — Switch the active version for an agent. This is the only command that sets the default.
