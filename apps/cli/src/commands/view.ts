@@ -34,6 +34,7 @@ import { machineId } from '../lib/machine-id.js';
 import { authCacheKey, formatCheckedAge, readAuthHealthCache, type AuthHealth } from '../lib/auth-health.js';
 import {
   agentReportsUsage,
+  classifyUsageErrorKind,
   deriveUsageStatusFromSnapshot,
   formatUsageSection,
   formatUsageSummary,
@@ -43,6 +44,7 @@ import {
   getUsageLookupKey,
   isUsageHeadlessScopeError,
 } from '../lib/accounting/usage.js';
+import type { FormatUsageSummaryOpts, UsageInfo } from '../lib/accounting/usage.js';
 import { readManifest } from '../lib/manifest.js';
 import {
   listInstalledVersions,
@@ -87,6 +89,23 @@ import { renderHarnessDetail } from './harness.js';
 import { confirm } from '@inquirer/prompts';
 import { formatPath, isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
+
+export function viewUsageSummaryOptions(
+  agentId: AgentId,
+  signedIn: boolean,
+  usageInfo: UsageInfo | undefined,
+  maxWindows: number | undefined,
+): FormatUsageSummaryOpts {
+  const headless = isUsageHeadlessScopeError(usageInfo?.error);
+  return {
+    unavailable: agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless,
+    unverified: !headless && !!usageInfo?.snapshot && !!usageInfo.error,
+    headless,
+    maxWindows,
+    errorKind: classifyUsageErrorKind(usageInfo?.error),
+    errorDetail: usageInfo?.error ?? null,
+  };
+}
 
 /** Shared account identity formatter, re-exported for the view-specific tests. */
 export const accountColumnLabel = accountDisplayLabel;
@@ -651,15 +670,12 @@ async function showInstalledVersions(
         const info = rawInfo ? mergeCanonical(rawInfo) : undefined;
         const usageKey = getUsageLookupKey(info);
         const usageInfo = usageKey ? usageByKey.get(usageKey) : undefined;
-        const headless = isUsageHeadlessScopeError(usageInfo?.error);
-        const usageUnavailable = agentReportsUsage(agentId) && !!info?.signedIn && !usageInfo?.snapshot && !headless;
-        const usageUnverified = !headless && !!usageInfo?.snapshot && !!usageInfo.error;
-        const usageStr = formatUsageSummary(info?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, {
-          unavailable: usageUnavailable,
-          unverified: usageUnverified,
-          headless,
-          maxWindows: usageWindowCap,
-        });
+        const usageStr = formatUsageSummary(
+          info?.plan || null,
+          usageInfo?.snapshot || null,
+          maxPlanWidth,
+          viewUsageSummaryOptions(agentId, !!info?.signedIn, usageInfo, usageWindowCap),
+        );
         maxUsageWidth = Math.max(maxUsageWidth, stringWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
         maxStatusWidth = Math.max(maxStatusWidth, stringWidth(statusStr));
@@ -724,15 +740,12 @@ async function showInstalledVersions(
         }
         const hasEmail = !!vInfo?.email;
         const signedIn = !!vInfo?.signedIn;
-        const headless = isUsageHeadlessScopeError(usageInfo?.error);
-        const usageUnavailable = agentReportsUsage(agentId) && signedIn && !usageInfo?.snapshot && !headless;
-        const usageUnverified = !headless && !!usageInfo?.snapshot && !!usageInfo.error;
-        const usageStr = formatUsageSummary(vInfo?.plan || null, usageInfo?.snapshot || null, maxPlanWidth, {
-          unavailable: usageUnavailable,
-          unverified: usageUnverified,
-          headless,
-          maxWindows: usageWindowCap,
-        });
+        const usageStr = formatUsageSummary(
+          vInfo?.plan || null,
+          usageInfo?.snapshot || null,
+          maxPlanWidth,
+          viewUsageSummaryOptions(agentId, signedIn, usageInfo, usageWindowCap),
+        );
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
@@ -850,12 +863,12 @@ async function showInstalledVersions(
       gMaxStatusWidth = Math.max(gMaxStatusWidth, stringWidth(formatUsageStatusBadge(gInfo?.usageStatus)));
       const gUsageKey = getUsageLookupKey(gInfo);
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
-      const gHeadless = isUsageHeadlessScopeError(gUsage?.error);
-      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
-        unverified: !gHeadless && !!gUsage?.snapshot && !!gUsage.error,
-        headless: gHeadless,
-        maxWindows: usageWindowCap,
-      });
+      const gUsageStr = formatUsageSummary(
+        gInfo?.plan || null,
+        gUsage?.snapshot || null,
+        3,
+        viewUsageSummaryOptions(agentId, !!gInfo?.signedIn, gUsage, usageWindowCap),
+      );
       gMaxUsageWidth = Math.max(gMaxUsageWidth, stringWidth(gUsageStr));
       const gDisplay = accountColumnLabel(gInfo);
       if (gDisplay) gMaxEmail = Math.max(gMaxEmail, gDisplay.length);
@@ -874,12 +887,12 @@ async function showInstalledVersions(
       const parts = [`    ${verLabel}${padding}`];
       const gUsageKey = getUsageLookupKey(gInfo);
       const gUsage = gUsageKey ? usageByKey.get(gUsageKey) : undefined;
-      const gHeadless = isUsageHeadlessScopeError(gUsage?.error);
-      const gUsageStr = formatUsageSummary(gInfo?.plan || null, gUsage?.snapshot || null, 3, {
-        unverified: !gHeadless && !!gUsage?.snapshot && !!gUsage.error,
-        headless: gHeadless,
-        maxWindows: usageWindowCap,
-      });
+      const gUsageStr = formatUsageSummary(
+        gInfo?.plan || null,
+        gUsage?.snapshot || null,
+        3,
+        viewUsageSummaryOptions(agentId, !!gInfo?.signedIn, gUsage, usageWindowCap),
+      );
       const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
         const gDisplay = accountColumnLabel(gInfo);

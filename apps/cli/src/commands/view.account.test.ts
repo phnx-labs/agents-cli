@@ -4,8 +4,10 @@ import {
   compareAccountOrderedVersions,
   joinViewColumns,
   pruneGroupKey,
+  viewUsageSummaryOptions,
   type AccountOrderedVersion,
 } from './view.js';
+import { formatUsageSummary } from '../lib/accounting/usage.js';
 import { padToWidth, stringWidth } from '../lib/session/width.js';
 
 describe('joinViewColumns — fixed multi-agent layout', () => {
@@ -71,6 +73,31 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
   it('drops only trailing empty columns', () => {
     expect(joinViewColumns(['ver', 'model', '', ''])).toBe('ver  model');
     expect(joinViewColumns(['ver', '', 'acct'])).toBe('ver    acct');
+  });
+});
+
+describe('viewUsageSummaryOptions — truthful unavailable states', () => {
+  it('renders the specific usage error for a signed-in usage-capable harness', () => {
+    const error = 'Claude credential expired; re-authentication required for usage.';
+    const opts = viewUsageSummaryOptions('claude', true, { snapshot: null, error }, 2);
+
+    expect(formatUsageSummary(null, null, 3, opts)).toBe('re-auth for usage');
+  });
+
+  it('renders an unavailable state for a globally installed signed-in harness', () => {
+    const error = 'Codex usage is rate-limiting the usage endpoint; not retrying for 13 minutes.';
+    const opts = viewUsageSummaryOptions('codex', true, { snapshot: null, error }, 2);
+
+    expect(opts.unavailable).toBe(true);
+    expect(formatUsageSummary(null, null, 3, opts)).toBe('rate-limited (retry ~13 minutes)');
+  });
+
+  it('keeps the usage column blank for a harness with no usage concept', () => {
+    const error = 'usage read failed: unavailable';
+    const opts = viewUsageSummaryOptions('opencode', true, { snapshot: null, error }, 2);
+
+    expect(opts.unavailable).toBe(false);
+    expect(formatUsageSummary(null, null, 3, opts)).toBe('');
   });
 });
 
