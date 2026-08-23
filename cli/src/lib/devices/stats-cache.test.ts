@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 
-import { SPECS_STALE_MS, STATS_STALE_MS, isFreshDeviceSpecs, isFreshDeviceStats, loadFleetStats, retainHardwareFacts } from './stats-cache.js';
+import { STATS_STALE_MS, isFreshDeviceStats, loadFleetStats, retainHardwareFacts } from './stats-cache.js';
 import type { DeviceStats } from './health.js';
 import type { DeviceProfile } from './registry.js';
 
@@ -25,7 +25,7 @@ function unreachableDev(name: string): DeviceProfile {
 }
 
 function stat(host: string, fetchedAt: number, loadPercent = 10): DeviceStats {
-  return { host, reachable: true, loadPercent, memPercent: 20, ncpu: 4, memTotalBytes: 16 * 1024 ** 3, diskTotalBytes: 256 * 1024 ** 3, fetchedAt, specsFetchedAt: fetchedAt };
+  return { host, reachable: true, loadPercent, memPercent: 20, ncpu: 4, memTotalBytes: 16 * 1024 ** 3, diskTotalBytes: 256 * 1024 ** 3, fetchedAt };
 }
 
 /** A probe stub that records which devices it was asked to probe. */
@@ -108,30 +108,6 @@ describe('loadFleetStats', () => {
     expect(probed.sort()).toEqual(['a', 'b']);
     expect(res.servedFromCache).toBe(false);
     expect(res.oldestFetchedAt).toBe(2000);
-  });
-
-  it('serves a specs-only second read inside the static TTL with zero probes', async () => {
-    const now = 10_000_000;
-    const probed: string[] = [];
-    let cache: Record<string, DeviceStats> = {};
-    const options = {
-      selfName: 'z',
-      probeFleet: fakeProbe(now, probed),
-      probeLocal: (async (h: string) => stat(h, now)) as never,
-      readCache: () => ({ ...cache }),
-      writeCache: (entries: Record<string, DeviceStats>) => { cache = { ...cache, ...entries }; },
-    };
-    await loadFleetStats([dev('a')], { ...options, now });
-    expect(probed).toEqual(['a']);
-    probed.length = 0;
-    const second = await loadFleetStats([dev('a')], {
-      ...options,
-      specsOnly: true,
-      now: now + STATS_STALE_MS + 1,
-    });
-    expect(probed).toEqual([]);
-    expect(second.stats.get('a')?.ncpu).toBe(4);
-    expect(second.stats.get('a')?.diskTotalBytes).toBe(256 * 1024 ** 3);
   });
 
   it('falls back to a local probe for a self not present in the device list', async () => {
@@ -260,49 +236,5 @@ describe('loadFleetStats', () => {
     expect(isFreshDeviceStats(stat('a', now - STATS_STALE_MS), now)).toBe(true);
     expect(isFreshDeviceStats(stat('a', now - STATS_STALE_MS - 1), now)).toBe(false);
     expect(isFreshDeviceStats(stat('a', now - 9 * 24 * 3600_000), now)).toBe(false); // the observed 9d row
-  });
-
-  it('isFreshDeviceSpecs bounds static facts at seven days independently', () => {
-    const now = 1_000_000_000;
-    expect(isFreshDeviceSpecs(stat('a', now - SPECS_STALE_MS), now)).toBe(true);
-    expect(isFreshDeviceSpecs(stat('a', now - SPECS_STALE_MS - 1), now)).toBe(false);
-  });
-});
-
-describe('isFreshDeviceSpecs — cache written before disk collection', () => {
-  const base = (over: Partial<DeviceStats> = {}): DeviceStats => ({
-    host: 'box', reachable: true, ncpu: 8,
-    memTotalBytes: 16 * 1024 ** 3, memFreeBytes: 8 * 1024 ** 3,
-    fetchedAt: Date.now(), specsFetchedAt: Date.now(), ...over,
-  });
-
-  it('treats a row from a pre-disk CLI as stale, however recent', () => {
-    // No specsFetchedAt means the row predates RUSH-3062, so it has no disk and
-    // the 7-day TTL would serve it for a week after upgrading — the disk column
-    // rendering `—` on every cached run. Verified live on this fleet before the
-    // fix: cached rows showed `10c 23.5G —` where --refresh gave `10c 23.5G 460G`.
-    const preDisk = base();
-    delete (preDisk as { specsFetchedAt?: number }).specsFetchedAt;
-    expect(isFreshDeviceSpecs(preDisk, Date.now())).toBe(false);
-  });
-
-  it('does NOT re-probe forever a box whose probe cannot measure disk', () => {
-    // `df -Pk /` can fail on an odd mount and Win32_LogicalDisk can return null
-    // for C:, so a probe legitimately succeeds with no disk. Both parsers still
-    // set specsFetchedAt, so such a row stays fresh — keying staleness off the
-    // missing disk field instead would re-probe that box on every devices list,
-    // forever, because the next probe cannot produce the field either.
-    const probedNoDisk = base({ specsFetchedAt: Date.now() });
-    expect(isFreshDeviceSpecs(probedNoDisk, Date.now())).toBe(true);
-  });
-
-  it('keeps a row that HAS disk fresh inside the TTL', () => {
-    const withDisk = base({ diskTotalBytes: 460 * 1024 ** 3, diskFreeBytes: 100 * 1024 ** 3, diskUsedPercent: 78 });
-    expect(isFreshDeviceSpecs(withDisk, Date.now())).toBe(true);
-  });
-
-  it('does not force a probe for an unreachable box, which never has disk', () => {
-    // An offline row legitimately carries no disk and re-probing cannot help.
-    expect(isFreshDeviceSpecs(base({ reachable: false }), Date.now())).toBe(true);
   });
 });

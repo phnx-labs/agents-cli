@@ -185,11 +185,9 @@ export function parseProbeOutput(host: string, stdout: string, fetchedAt: number
 export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: number): DeviceStats {
   const m = stdout.match(/AGWINSTAT load=([0-9.]*) freeKb=([0-9]+) totalKb=([0-9]+) ncpu=([0-9]+)(?: diskFreeKb=([0-9.]+) diskTotalKb=([0-9.]+))?/);
   // Unparseable output still means the probe RAN — the box answered, we just
-  // could not read it. Stamp specsFetchedAt anyway: isFreshDeviceSpecs treats a
-  // reachable row without it as written by a pre-disk CLI and therefore stale,
-  // so omitting it here would make such a box re-probe on every devices list,
-  // forever, since the next probe would be just as unreadable. Same reasoning
-  // as the POSIX path, which stamps it even when the df segment yields nothing.
+  // could not read it. Stamp specsFetchedAt anyway so a hardware-fact carry
+  // forward (retainHardwareFacts, RUSH-3096) has a real observation moment
+  // instead of undefined.
   if (!m) return { host, reachable: true, fetchedAt, specsFetchedAt: fetchedAt };
   const loadPercent = m[1] === '' ? undefined : parseFloat(m[1]);
   const freeKb = parseInt(m[2], 10);

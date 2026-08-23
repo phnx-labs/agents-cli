@@ -232,10 +232,10 @@ describe('fleetCapacity', () => {
 });
 
 describe('specsFetchedAt is stamped on every reachable path (RUSH-3062)', () => {
-  // isFreshDeviceSpecs treats a reachable row WITHOUT specsFetchedAt as coming
-  // from a CLI that predates disk collection, and therefore stale. Any success
-  // path that forgets to stamp it makes that box re-probe on every
-  // `agents devices list`, forever — the next probe cannot fix it either.
+  // retainHardwareFacts (RUSH-3096) carries specsFetchedAt forward across an
+  // unreachable probe to say when the retained hardware facts were actually
+  // observed. Any success path that forgets to stamp it degrades that
+  // provenance to the coarser fetchedAt.
   it('windows: unparseable probe output still stamps it', () => {
     const s = parseWinProbeOutput('winbox', 'garbage that matches nothing', 1000);
     expect(s.reachable).toBe(true);
