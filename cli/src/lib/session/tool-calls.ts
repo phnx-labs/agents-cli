@@ -2,7 +2,7 @@ import { createHash } from 'crypto';
 import { parse, type Node as JavaScriptNode } from 'acorn';
 import { knownSecretValuesFromEnv, redactSecrets, sanitizeForTerminal } from '../redact.js';
 import type { SessionEvent } from './types.js';
-import { extractShellPrograms, type ShellProgramOccurrence } from './shell-programs.js';
+import { extractShellPrograms, isShellExecTool, type ShellProgramOccurrence } from './shell-programs.js';
 
 export const TOOL_INPUT_MAX_BYTES = 16 * 1024;
 export const TOOL_SUCCESS_OUTPUT_MAX_BYTES = 1024;
@@ -16,9 +16,6 @@ export const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
 export const TOOL_SHELL_PARSE_MAX_BYTES = 64 * 1024;
 export const TOOL_INDEX_VERSION = 7;
 
-const SHELL_TOOLS = new Set([
-  'bash', 'exec', 'execute', 'exec_command', 'run_command', 'run_shell_command', 'shell',
-]);
 const BASE64_BLOCK = /(?:[A-Za-z0-9+/]{256,}={0,2})/g;
 const SECRET_FIELD = /(?:token|secret|password|authorization|cookie|api[_-]?key|private[_-]?key)$/i;
 const KNOWN_SECRET_VALUES = knownSecretValuesFromEnv();
@@ -251,7 +248,7 @@ export function commandsFromCodexExec(source: string): string[] {
 }
 
 function commandFor(tool: string, args?: Record<string, unknown>, command?: string): string | undefined {
-  if (!SHELL_TOOLS.has(tool.toLowerCase())) return undefined;
+  if (!isShellExecTool(tool)) return undefined;
   const direct = command
     ?? (typeof args?.command === 'string' ? args.command : undefined)
     ?? (typeof args?.cmd === 'string' ? args.cmd : undefined);

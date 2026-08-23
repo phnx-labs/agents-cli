@@ -14,6 +14,7 @@
  */
 import { formatDuration, formatTokenCount } from './render.js';
 import { escapeHtml } from './share-html.js';
+import { isShellExecTool } from './shell-programs.js';
 import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
 import type { TrajectoryComparison } from './trajectory-compare.js';
 import type { LineageNode, SessionLineage } from './trajectory-lineage.js';
@@ -33,7 +34,7 @@ function toolColor(step: TrajectoryStep): string {
   if (step.outcome === 'error') return '#f87171';
   if (step.kind === 'thinking') return '#3a3a55';
   const tool = (step.tool ?? '').toLowerCase();
-  if (tool === 'bash' || tool === 'shell' || tool.includes('exec') || tool === 'run_command') return '#e0b341';
+  if (isShellExecTool(tool)) return '#e0b341';
   if (tool === 'read' || tool === 'grep' || tool === 'glob' || tool === 'search' || tool === 'codebase_search') return '#4a9eff';
   if (tool === 'edit' || tool === 'write' || tool === 'notebookedit' || tool === 'multiedit') return '#7ee787';
   if (tool === 'task' || tool === 'agent') return '#b98cff';

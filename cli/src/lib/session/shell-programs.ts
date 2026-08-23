@@ -22,6 +22,29 @@ export interface ShellProgramOccurrence {
   role: ShellProgramRole;
 }
 
+/**
+ * Harness tool NAMES that run a shell command — Claude's `Bash`, Codex's
+ * `exec_command`/`exec` (`exec` is newer gpt-5.6-sol), Droid's `Execute`, plus the
+ * generic `shell`/`run_shell_command`/`run_command`/`execute`. This is the single
+ * source of truth for "does this tool row carry a shell command?", consumed by the
+ * trajectory model (program resolution + command-arg extraction), the directory-touched
+ * scan in `state.ts`, the tool-call indexer, and stream rendering — replacing five
+ * hand-synced copies that had already drifted apart.
+ *
+ * Distinct from {@link SHELL_WRAPPERS}, which is interpreter binaries (`bash`, `sh`…)
+ * found INSIDE a command string, not the harness's tool name. Match through
+ * {@link isShellExecTool} so casing is normalized in one place — harnesses disagree on
+ * case (`Bash` vs `bash`, `Execute` vs `exec_command`).
+ */
+export const SHELL_EXEC_TOOLS = new Set([
+  'bash', 'exec', 'execute', 'exec_command', 'run_command', 'run_shell_command', 'shell',
+]);
+
+/** Case-insensitive membership test for {@link SHELL_EXEC_TOOLS}. */
+export function isShellExecTool(tool: string | undefined): boolean {
+  return tool !== undefined && SHELL_EXEC_TOOLS.has(tool.toLowerCase());
+}
+
 const SHELL_WRAPPERS = new Set(['bash', 'sh', 'zsh', 'dash', 'ksh']);
 const PROGRAM_WRAPPERS = new Set(['command', 'builtin', 'env', 'nohup', 'sudo']);
 const MAX_NESTED_DEPTH = 3;

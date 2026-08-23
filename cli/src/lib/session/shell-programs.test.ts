@@ -1,6 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { extractShellPrograms, staticShellWord } from './shell-programs.js';
+import { extractShellPrograms, isShellExecTool, SHELL_EXEC_TOOLS, staticShellWord } from './shell-programs.js';
 import { parse } from 'unbash';
+
+describe('isShellExecTool', () => {
+  it('recognizes every harness shell-exec tool name, case-insensitively', () => {
+    // The names each harness actually emits as its shell tool, in their native casing.
+    for (const tool of ['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute', 'run_command', 'execute']) {
+      expect(isShellExecTool(tool)).toBe(true);
+      expect(isShellExecTool(tool.toUpperCase())).toBe(true);
+    }
+  });
+
+  it('rejects non-shell tools and empty input', () => {
+    for (const tool of ['Read', 'Edit', 'Write', 'Grep', 'Task', 'WebFetch', 'apply_patch', '', undefined]) {
+      expect(isShellExecTool(tool as string | undefined)).toBe(false);
+    }
+  });
+
+  it('is the single source of truth — SHELL_EXEC_TOOLS is stored lowercased', () => {
+    for (const name of SHELL_EXEC_TOOLS) expect(name).toBe(name.toLowerCase());
+  });
+});
 
 describe('extractShellPrograms', () => {
   it('walks pipelines, control flow, substitutions, and process substitutions', () => {

@@ -2,6 +2,7 @@ import chalk from 'chalk';
 import { truncate } from '../format.js';
 import { parseClaudeContent, parseCodexContent, sanitizeEvents, summarizeToolUse } from './parse.js';
 import { linkPath, relativeToCwd } from './render.js';
+import { isShellExecTool } from './shell-programs.js';
 import type { SessionAgentId, SessionEvent } from './types.js';
 
 const LINE_MAX = 120;
@@ -16,7 +17,7 @@ function timeOf(event: SessionEvent): string {
 
 function paintTool(tool: string): string {
   const label = tool.padEnd(10);
-  if (tool === 'Bash' || tool === 'exec_command') return chalk.yellow(label);
+  if (isShellExecTool(tool)) return chalk.yellow(label);
   if (tool === 'Edit' || tool === 'Write' || tool === 'Read') return chalk.cyan(label);
   if (tool === 'Agent') return chalk.magenta(label);
   return chalk.cyan(label);

@@ -18,6 +18,7 @@
 import * as path from 'path';
 import type { SessionAttachment, SessionEvent, TodoItem, TodoProgress } from './types.js';
 import { isCompletedTodoStatus, SNAPSHOT_TODO_TOOLS, summarizeToolUse } from './parse.js';
+import { isShellExecTool } from './shell-programs.js';
 
 // TodoItem / TodoProgress moved to ./types.ts so SessionMeta can carry `todos`
 // without a state↔types import cycle; re-exported here for existing importers.
@@ -282,7 +283,7 @@ export function extractRecentDirectoriesTouched(events: SessionEvent[], cwd?: st
     const args = event.args ?? {};
     if (['Edit', 'Write', 'edit_file', 'write_file', 'create_file', 'edit', 'write'].includes(tool)) {
       add(args.file_path ?? args.filePath ?? args.path ?? event.path, true);
-    } else if (['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute'].includes(tool)) {
+    } else if (isShellExecTool(tool)) {
       add(args.cwd ?? args.Cwd ?? args.workdir ?? args.working_directory ?? cwd);
     }
   }

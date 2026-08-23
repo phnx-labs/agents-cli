@@ -22,7 +22,7 @@
  */
 import { redactSecrets } from '../redact.js';
 import { computeSummaryStats, type SessionStats } from './render.js';
-import { extractShellPrograms } from './shell-programs.js';
+import { extractShellPrograms, isShellExecTool } from './shell-programs.js';
 import type { SessionEvent, SessionMeta } from './types.js';
 
 /** One drawable step on a session's trajectory — a tool call or a thinking block. */
@@ -126,16 +126,6 @@ const DETAIL_MAX = 400;
 
 /** Tools that spawn an inline sub-agent inside THIS transcript (a `tool_use` row). */
 const INLINE_TASK_TOOLS = new Set(['Task', 'Agent']);
-
-/**
- * Shell tools whose command is worth resolving to an effective program — every
- * harness's shell-exec tool, kept in lockstep with the canonical set in
- * `state.ts` (`['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute']`)
- * so Codex's `exec_command`/`exec` and the rest are covered, not just Claude's `Bash`.
- * `exec` is newer Codex (gpt-5.6-sol) whose real command the parser unwraps from a
- * JS cell into the event's `command` before this runs.
- */
-const SHELL_TOOLS = new Set(['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute']);
 
 /**
  * Shell builtins/assignments that are rarely the POINT of a command — the action
@@ -249,7 +239,7 @@ function toolLabel(
 ): string {
   let raw: string | undefined;
   const lower = tool.toLowerCase();
-  if (lower === 'bash' || lower === 'shell' || lower === 'run_command' || lower.includes('exec')) {
+  if (isShellExecTool(tool)) {
     const cmd = command ?? stringArg(args, 'command', 'cmd', 'script');
     raw = cmd ? stripLeadingShellNoise(cmd) : cmd;
   } else if (lower === 'read' || lower === 'edit' || lower === 'write' || lower === 'notebookedit' || lower === 'multiedit') {
@@ -364,7 +354,7 @@ export function buildTrajectory(
           label: toolLabel(tool, e.args, e.command, redact, knownSecrets),
           delegation: INLINE_TASK_TOOLS.has(tool) ? 'inline-task' : undefined,
           callId: e.callId,
-          program: SHELL_TOOLS.has(tool) ? effectiveProgram(e.command ?? (typeof e.args?.command === 'string' ? e.args.command : undefined)) : undefined,
+          program: isShellExecTool(tool) ? effectiveProgram(e.command ?? (typeof e.args?.command === 'string' ? e.args.command : undefined)) : undefined,
           exitCode: typeof e.exitCode === 'number' ? e.exitCode : undefined,
         },
         eventIndex: i,
