@@ -249,7 +249,7 @@ Hermes (Nous Research, ≥ 0.11.0) declares hooks under a `hooks:` block in `~/.
 
 ## Predicate Matchers
 
-All predicates live in `matches:`. They AND together — every declared predicate must pass. Evaluated by `shouldFire()` in `src/lib/hooks/match.ts:117`. The hook input context (`HookInput`) is passed by the agent CLI as JSON to each registered script.
+All predicates live in `matches:`. They AND together — every declared predicate must pass. Evaluated by `shouldFire()` in `src/lib/hooks/match.ts:120`. The hook input context (`HookInput`) is passed by the agent CLI as JSON to each registered script.
 
 | Matcher | Tests | Example |
 |---------|-------|---------|
@@ -264,14 +264,14 @@ All predicates live in `matches:`. They AND together — every declared predicat
 
 ### Matcher Implementation Notes
 
-- `prompt_contains`: `src/lib/hooks/match.ts:123` — `prompt.includes(matches.prompt_contains)`
-- `prompt_matches`: `src/lib/hooks/match.ts:128` — compiled via `compileHookRegex()`; capped at 200 chars and max group depth 3 to prevent ReDoS
-- `tool_name`: `src/lib/hooks/match.ts:134` — accepts a string or array; `arrayOf()` normalizes both
-- `tool_args_match`: `src/lib/hooks/match.ts:142` — serializes `tool_args` to JSON if not already a string, then applies regex
-- `cwd_includes`: `src/lib/hooks/match.ts:152` — `cwd.includes(n)` for each needle; passes if any matches
-- `project_has`: `src/lib/hooks/match.ts:160` — walks up to the nearest `.git` directory via `findProjectRoot()`, then checks `fs.existsSync(path.join(root, matches.project_has))`
-- `git_dirty`: `src/lib/hooks/match.ts:166` — runs `git status --porcelain` in `cwd`; returns true if output is non-empty
-- `permission_mode`: `src/lib/hooks/match.ts` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
+- `prompt_contains`: `src/lib/hooks/match.ts:125` — `prompt.includes(matches.prompt_contains)`
+- `prompt_matches`: `src/lib/hooks/match.ts:130` — compiled via `compileHookRegex()`; capped at 200 chars and max group depth 3 to prevent ReDoS
+- `tool_name`: `src/lib/hooks/match.ts:137` — accepts a string or array; `arrayOf()` normalizes both
+- `tool_args_match`: `src/lib/hooks/match.ts:156` — serializes `tool_args` to JSON if not already a string, then applies regex
+- `cwd_includes`: `src/lib/hooks/match.ts:166` — `cwd.includes(n)` for each needle; passes if any matches
+- `project_has`: `src/lib/hooks/match.ts:174` — walks up to the nearest `.git` directory via `findProjectRoot()`, then checks `fs.existsSync(path.join(root, matches.project_has))`
+- `git_dirty`: `src/lib/hooks/match.ts:180` — runs `git status --porcelain` in `cwd`; returns true if output is non-empty
+- `permission_mode`: `src/lib/hooks/match.ts:145` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
 
 ## Script Resolution
 
