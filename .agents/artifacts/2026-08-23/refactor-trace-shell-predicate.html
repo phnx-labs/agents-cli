@@ -1,0 +1,325 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Trace debugger — one shell-exec-tool predicate</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>Trace debugger — one shell-exec-tool predicate</h1>
+<p class="summary">The "is this tool a shell command?" decision lived as six hand-synced copies across the trace cluster and had drifted apart. They collapse to one case-insensitive isShellExecTool in shell-programs.ts. Behavior-preserving plus the drift fix; 518 session tests green.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">6 call sites -&gt; 1 predicate; net -24 lines of source<span class="meta-sep" aria-hidden="true">·</span>Drift: the indexer treated Codex exec/execute + run_command as shell; the model, state scan, and both renderers did not<span class="meta-sep" aria-hidden="true">·</span>After: buildTrajectory over exec/Execute/Bash/run_command resolves git/npm/git/rg — npm 84% · git 13% · rg 2%</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">debugger-shell-tools</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/356d398d-18cd-48ef-b0d1-9a0bd5eaf4ea">356d398d</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-23</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#story" data-toc-for="story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a class="toc-item" href="#figure" data-toc-for="figure"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Figure</a><a class="toc-item" href="#data" data-toc-for="data"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Data</a></nav><article class="artifact-body"><h2 id="story">Story</h2><p>The trace debugger answers one question in six places: <strong>is this harness tool a shell command?</strong> Each place spelled it differently — the tool-call indexer used a lowercase 7-name set, the trajectory model and the directory-touched scan used a case-sensitive 6-name array, the stream renderer checked two names, the HTML renderer used a <code>.includes('exec')</code> substring, and <code>trajectory.ts</code> alone carried <strong>two</strong> different forms. A hand-written <em>"kept in lockstep"</em> docblock was doing the job a shared function should — and the copies had already drifted: the indexer recognized Codex's <code>exec</code>/<code>execute</code> and Grok's <code>run_command</code>, but the model, the state scan, and both renderers didn't, so the same session's shell steps were <strong>indexed one way and rendered another</strong>.</p>
+<p>The fix is the smallest one on the deletion ladder that works: one case-insensitive <code>isShellExecTool</code> in the leaf module <code>shell-programs.ts</code> (already imported by both <code>trajectory.ts</code> and <code>tool-calls.ts</code>, and sitting beside the distinct <code>SHELL_WRAPPERS</code>), consumed by all six sites.</p>
+<h2 id="figure">Figure</h2><div class="artifact-behavior">
+<div class="artifact-behavior-panel" data-state="current" data-evidence="grep: SHELL_TOOLS / shell-tool idioms on origin/main">
+<svg viewBox="0 0 440 320" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Six drifting copies of the shell-tool decision">
+<text x="220" y="20" font-size="13" font-weight="800" text-anchor="middle" fill="currentColor">BEFORE — 6 copies, drifted</text>
+<rect x="16" y="40" width="192" height="40" rx="5" stroke="currentColor" fill="none"></rect><text x="24" y="58" font-size="10.5" fill="currentColor">tool-calls.ts:19  · indexer</text><text x="24" y="72" font-size="9" fill="#16a34a">lowercase · 7: +exec +execute +run_command</text>
+<rect x="232" y="40" width="192" height="40" rx="5" stroke="currentColor" fill="none"></rect><text x="240" y="58" font-size="10.5" fill="currentColor">trajectory.ts:138 · program</text><text x="240" y="72" font-size="9" fill="#dc2626">exact-case · 6 · no run_command</text>
+<rect x="16" y="92" width="192" height="40" rx="5" stroke="currentColor" fill="none"></rect><text x="24" y="110" font-size="10.5" fill="currentColor">trajectory.ts:206 · arg extract</text><text x="24" y="124" font-size="9" fill="#dc2626">lower + .includes('exec') · 3rd form</text>
+<rect x="232" y="92" width="192" height="40" rx="5" stroke="currentColor" fill="none"></rect><text x="240" y="110" font-size="10.5" fill="currentColor">state.ts:285 · dir-touched</text><text x="240" y="124" font-size="9" fill="#dc2626">exact-case · 6 · no run_command</text>
+<rect x="16" y="144" width="192" height="40" rx="5" stroke="currentColor" fill="none"></rect><text x="24" y="162" font-size="10.5" fill="currentColor">stream-render.ts · color</text><text x="24" y="176" font-size="9" fill="#dc2626">only Bash + exec_command (2)</text>
+<rect x="232" y="144" width="192" height="40" rx="5" stroke="currentColor" fill="none"></rect><text x="240" y="162" font-size="10.5" fill="currentColor">trajectory-html.ts · color</text><text x="240" y="176" font-size="9" fill="#dc2626">.includes('exec') substring</text>
+<text x="220" y="214" font-size="10.5" text-anchor="middle" fill="#8a8a8a">…kept aligned by a "// in lockstep with state.ts" docblock</text>
+<rect x="60" y="236" width="320" height="64" rx="6" stroke="#dc2626" fill="none" stroke-dasharray="4 3"></rect>
+<text x="220" y="260" font-size="11" text-anchor="middle" fill="#dc2626" font-weight="700">Same Codex `exec` step</text>
+<text x="220" y="278" font-size="10" text-anchor="middle" fill="currentColor">indexed as shell ✓  ·  program-resolved ✗  ·  colored ✗</text>
+<text x="220" y="292" font-size="10" text-anchor="middle" fill="currentColor">Grok `run_command`: known to indexer only</text>
+</svg>
+</div>
+<div class="artifact-behavior-panel" data-state="proposed" data-evidence="derived: all 6 sites call isShellExecTool()">
+<svg viewBox="0 0 440 320" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="One shared predicate">
+<text x="220" y="20" font-size="13" font-weight="800" text-anchor="middle" fill="currentColor">AFTER — 1 source of truth</text>
+<rect x="120" y="40" width="200" height="48" rx="6" stroke="#16a34a" fill="none" stroke-width="2"></rect><text x="220" y="60" font-size="11" text-anchor="middle" fill="#16a34a" font-weight="800">shell-programs.ts</text><text x="220" y="76" font-size="10" text-anchor="middle" fill="currentColor">isShellExecTool() · case-insensitive · 7 names</text>
+<rect x="16" y="140" width="120" height="34" rx="5" stroke="currentColor" fill="none"></rect><text x="76" y="161" font-size="9.5" text-anchor="middle" fill="currentColor">tool-calls</text>
+<rect x="146" y="140" width="120" height="34" rx="5" stroke="currentColor" fill="none"></rect><text x="206" y="161" font-size="9.5" text-anchor="middle" fill="currentColor">trajectory ×2</text>
+<rect x="276" y="140" width="148" height="34" rx="5" stroke="currentColor" fill="none"></rect><text x="350" y="161" font-size="9.5" text-anchor="middle" fill="currentColor">state.ts</text>
+<rect x="60" y="196" width="150" height="34" rx="5" stroke="currentColor" fill="none"></rect><text x="135" y="217" font-size="9.5" text-anchor="middle" fill="currentColor">stream-render</text>
+<rect x="230" y="196" width="150" height="34" rx="5" stroke="currentColor" fill="none"></rect><text x="305" y="217" font-size="9.5" text-anchor="middle" fill="currentColor">trajectory-html</text>
+<path d="M180 88 L76 140" stroke="#16a34a" fill="none"></path><path d="M210 88 L206 140" stroke="#16a34a" fill="none"></path><path d="M250 88 L350 140" stroke="#16a34a" fill="none"></path><path d="M170 88 L135 196" stroke="#16a34a" fill="none" opacity="0.7"></path><path d="M270 88 L305 196" stroke="#16a34a" fill="none" opacity="0.7"></path>
+<rect x="60" y="256" width="320" height="46" rx="6" stroke="#16a34a" fill="none"></rect>
+<text x="220" y="276" font-size="10.5" text-anchor="middle" fill="#16a34a" font-weight="700">exec→git · Execute→npm · Bash→git · run_command→rg</text>
+<text x="220" y="292" font-size="10" text-anchor="middle" fill="currentColor">indexed = resolved = colored, every harness</text>
+</svg>
+</div>
+</div><h2 id="data">Data</h2><table>
+<thead>
+<tr>
+<th>Site</th>
+<th><code>file:line</code></th>
+<th>Role</th>
+<th>Was</th>
+<th>Now</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>indexer</td>
+<td><code>tool-calls.ts:19,254</code></td>
+<td>command indexing</td>
+<td>lowercase Set (7)</td>
+<td><code>isShellExecTool</code></td>
+</tr>
+<tr>
+<td>model</td>
+<td><code>trajectory.ts:138,320</code></td>
+<td>program resolution</td>
+<td>exact-case Set (6)</td>
+<td><code>isShellExecTool</code></td>
+</tr>
+<tr>
+<td>model</td>
+<td><code>trajectory.ts:206</code></td>
+<td>command-arg extraction</td>
+<td><code>.includes('exec')</code> chain</td>
+<td><code>isShellExecTool</code></td>
+</tr>
+<tr>
+<td>state</td>
+<td><code>state.ts:285</code></td>
+<td>directory-touched scan</td>
+<td>exact-case array (6)</td>
+<td><code>isShellExecTool</code></td>
+</tr>
+<tr>
+<td>stream</td>
+<td><code>stream-render.ts:19</code></td>
+<td>tool color</td>
+<td><code>Bash || exec_command</code></td>
+<td><code>isShellExecTool</code></td>
+</tr>
+<tr>
+<td>html</td>
+<td><code>trajectory-html.ts:26</code></td>
+<td>bar color</td>
+<td><code>.includes('exec')</code> chain</td>
+<td><code>isShellExecTool</code></td>
+</tr>
+</tbody></table>
+<p>Net <strong>-24 source lines</strong>. Out of scope by design: the per-harness parser blocks in <code>parse.ts</code> (each knows its own tool's arg field) and the Bash-syntax bucketer in <code>digest.ts</code> — different concepts, not the shell-tool set.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0aXRsZTogVHJhY2UgZGVidWdnZXIg4oCUIG9uZSBzaGVsbC1leGVjLXRvb2wgcHJlZGljYXRlCnN1bW1hcnk6IFRoZSAiaXMgdGhpcyB0b29sIGEgc2hlbGwgY29tbWFuZD8iIGRlY2lzaW9uIGxpdmVkIGFzIHNpeCBoYW5kLXN5bmNlZCBjb3BpZXMgYWNyb3NzIHRoZSB0cmFjZSBjbHVzdGVyIGFuZCBoYWQgZHJpZnRlZCBhcGFydC4gVGhleSBjb2xsYXBzZSB0byBvbmUgY2FzZS1pbnNlbnNpdGl2ZSBpc1NoZWxsRXhlY1Rvb2wgaW4gc2hlbGwtcHJvZ3JhbXMudHMuIEJlaGF2aW9yLXByZXNlcnZpbmcgcGx1cyB0aGUgZHJpZnQgZml4OyA1MTggc2Vzc2lvbiB0ZXN0cyBncmVlbi4Kc3RhdHVzOiBkcmFmdApjb250ZXh0OiBhZ2VudHMtY2xpIGFwcHMvY2xpL3NyYy9saWIvc2Vzc2lvbiByZWZhY3RvcgpmYWN0czoKICAtICI2IGNhbGwgc2l0ZXMgLT4gMSBwcmVkaWNhdGU7IG5ldCAtMjQgbGluZXMgb2Ygc291cmNlIgogIC0gIkRyaWZ0OiB0aGUgaW5kZXhlciB0cmVhdGVkIENvZGV4IGV4ZWMvZXhlY3V0ZSArIHJ1bl9jb21tYW5kIGFzIHNoZWxsOyB0aGUgbW9kZWwsIHN0YXRlIHNjYW4sIGFuZCBib3RoIHJlbmRlcmVycyBkaWQgbm90IgogIC0gIkFmdGVyOiBidWlsZFRyYWplY3Rvcnkgb3ZlciBleGVjL0V4ZWN1dGUvQmFzaC9ydW5fY29tbWFuZCByZXNvbHZlcyBnaXQvbnBtL2dpdC9yZyDigJQgbnBtIDg0JSDCtyBnaXQgMTMlIMK3IHJnIDIlIgotLS0KCiMjIFN0b3J5CgpUaGUgdHJhY2UgZGVidWdnZXIgYW5zd2VycyBvbmUgcXVlc3Rpb24gaW4gc2l4IHBsYWNlczogKippcyB0aGlzIGhhcm5lc3MgdG9vbCBhIHNoZWxsIGNvbW1hbmQ/KiogRWFjaCBwbGFjZSBzcGVsbGVkIGl0IGRpZmZlcmVudGx5IOKAlCB0aGUgdG9vbC1jYWxsIGluZGV4ZXIgdXNlZCBhIGxvd2VyY2FzZSA3LW5hbWUgc2V0LCB0aGUgdHJhamVjdG9yeSBtb2RlbCBhbmQgdGhlIGRpcmVjdG9yeS10b3VjaGVkIHNjYW4gdXNlZCBhIGNhc2Utc2Vuc2l0aXZlIDYtbmFtZSBhcnJheSwgdGhlIHN0cmVhbSByZW5kZXJlciBjaGVja2VkIHR3byBuYW1lcywgdGhlIEhUTUwgcmVuZGVyZXIgdXNlZCBhIGAuaW5jbHVkZXMoJ2V4ZWMnKWAgc3Vic3RyaW5nLCBhbmQgYHRyYWplY3RvcnkudHNgIGFsb25lIGNhcnJpZWQgKip0d28qKiBkaWZmZXJlbnQgZm9ybXMuIEEgaGFuZC13cml0dGVuICoia2VwdCBpbiBsb2Nrc3RlcCIqIGRvY2Jsb2NrIHdhcyBkb2luZyB0aGUgam9iIGEgc2hhcmVkIGZ1bmN0aW9uIHNob3VsZCDigJQgYW5kIHRoZSBjb3BpZXMgaGFkIGFscmVhZHkgZHJpZnRlZDogdGhlIGluZGV4ZXIgcmVjb2duaXplZCBDb2RleCdzIGBleGVjYC9gZXhlY3V0ZWAgYW5kIEdyb2sncyBgcnVuX2NvbW1hbmRgLCBidXQgdGhlIG1vZGVsLCB0aGUgc3RhdGUgc2NhbiwgYW5kIGJvdGggcmVuZGVyZXJzIGRpZG4ndCwgc28gdGhlIHNhbWUgc2Vzc2lvbidzIHNoZWxsIHN0ZXBzIHdlcmUgKippbmRleGVkIG9uZSB3YXkgYW5kIHJlbmRlcmVkIGFub3RoZXIqKi4KClRoZSBmaXggaXMgdGhlIHNtYWxsZXN0IG9uZSBvbiB0aGUgZGVsZXRpb24gbGFkZGVyIHRoYXQgd29ya3M6IG9uZSBjYXNlLWluc2Vuc2l0aXZlIGBpc1NoZWxsRXhlY1Rvb2xgIGluIHRoZSBsZWFmIG1vZHVsZSBgc2hlbGwtcHJvZ3JhbXMudHNgIChhbHJlYWR5IGltcG9ydGVkIGJ5IGJvdGggYHRyYWplY3RvcnkudHNgIGFuZCBgdG9vbC1jYWxscy50c2AsIGFuZCBzaXR0aW5nIGJlc2lkZSB0aGUgZGlzdGluY3QgYFNIRUxMX1dSQVBQRVJTYCksIGNvbnN1bWVkIGJ5IGFsbCBzaXggc2l0ZXMuCgojIyBGaWd1cmUKCjxkaXYgY2xhc3M9ImFydGlmYWN0LWJlaGF2aW9yIj4KPGRpdiBjbGFzcz0iYXJ0aWZhY3QtYmVoYXZpb3ItcGFuZWwiIGRhdGEtc3RhdGU9ImN1cnJlbnQiIGRhdGEtZXZpZGVuY2U9ImdyZXA6IFNIRUxMX1RPT0xTIC8gc2hlbGwtdG9vbCBpZGlvbXMgb24gb3JpZ2luL21haW4iPgo8c3ZnIHZpZXdCb3g9IjAgMCA0NDAgMzIwIiB3aWR0aD0iMTAwJSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJTaXggZHJpZnRpbmcgY29waWVzIG9mIHRoZSBzaGVsbC10b29sIGRlY2lzaW9uIj4KPHRleHQgeD0iMjIwIiB5PSIyMCIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjgwMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iY3VycmVudENvbG9yIj5CRUZPUkUg4oCUIDYgY29waWVzLCBkcmlmdGVkPC90ZXh0Pgo8cmVjdCB4PSIxNiIgeT0iNDAiIHdpZHRoPSIxOTIiIGhlaWdodD0iNDAiIHJ4PSI1IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPjx0ZXh0IHg9IjI0IiB5PSI1OCIgZm9udC1zaXplPSIxMC41IiBmaWxsPSJjdXJyZW50Q29sb3IiPnRvb2wtY2FsbHMudHM6MTkgIMK3IGluZGV4ZXI8L3RleHQ+PHRleHQgeD0iMjQiIHk9IjcyIiBmb250LXNpemU9IjkiIGZpbGw9IiMxNmEzNGEiPmxvd2VyY2FzZSDCtyA3OiArZXhlYyArZXhlY3V0ZSArcnVuX2NvbW1hbmQ8L3RleHQ+CjxyZWN0IHg9IjIzMiIgeT0iNDAiIHdpZHRoPSIxOTIiIGhlaWdodD0iNDAiIHJ4PSI1IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPjx0ZXh0IHg9IjI0MCIgeT0iNTgiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIj50cmFqZWN0b3J5LnRzOjEzOCDCtyBwcm9ncmFtPC90ZXh0Pjx0ZXh0IHg9IjI0MCIgeT0iNzIiIGZvbnQtc2l6ZT0iOSIgZmlsbD0iI2RjMjYyNiI+ZXhhY3QtY2FzZSDCtyA2IMK3IG5vIHJ1bl9jb21tYW5kPC90ZXh0Pgo8cmVjdCB4PSIxNiIgeT0iOTIiIHdpZHRoPSIxOTIiIGhlaWdodD0iNDAiIHJ4PSI1IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPjx0ZXh0IHg9IjI0IiB5PSIxMTAiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIj50cmFqZWN0b3J5LnRzOjIwNiDCtyBhcmcgZXh0cmFjdDwvdGV4dD48dGV4dCB4PSIyNCIgeT0iMTI0IiBmb250LXNpemU9IjkiIGZpbGw9IiNkYzI2MjYiPmxvd2VyICsgLmluY2x1ZGVzKCdleGVjJykgwrcgM3JkIGZvcm08L3RleHQ+CjxyZWN0IHg9IjIzMiIgeT0iOTIiIHdpZHRoPSIxOTIiIGhlaWdodD0iNDAiIHJ4PSI1IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPjx0ZXh0IHg9IjI0MCIgeT0iMTEwIiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciI+c3RhdGUudHM6Mjg1IMK3IGRpci10b3VjaGVkPC90ZXh0Pjx0ZXh0IHg9IjI0MCIgeT0iMTI0IiBmb250LXNpemU9IjkiIGZpbGw9IiNkYzI2MjYiPmV4YWN0LWNhc2UgwrcgNiDCtyBubyBydW5fY29tbWFuZDwvdGV4dD4KPHJlY3QgeD0iMTYiIHk9IjE0NCIgd2lkdGg9IjE5MiIgaGVpZ2h0PSI0MCIgcng9IjUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIi8+PHRleHQgeD0iMjQiIHk9IjE2MiIgZm9udC1zaXplPSIxMC41IiBmaWxsPSJjdXJyZW50Q29sb3IiPnN0cmVhbS1yZW5kZXIudHMgwrcgY29sb3I8L3RleHQ+PHRleHQgeD0iMjQiIHk9IjE3NiIgZm9udC1zaXplPSI5IiBmaWxsPSIjZGMyNjI2Ij5vbmx5IEJhc2ggKyBleGVjX2NvbW1hbmQgKDIpPC90ZXh0Pgo8cmVjdCB4PSIyMzIiIHk9IjE0NCIgd2lkdGg9IjE5MiIgaGVpZ2h0PSI0MCIgcng9IjUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIi8+PHRleHQgeD0iMjQwIiB5PSIxNjIiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIj50cmFqZWN0b3J5LWh0bWwudHMgwrcgY29sb3I8L3RleHQ+PHRleHQgeD0iMjQwIiB5PSIxNzYiIGZvbnQtc2l6ZT0iOSIgZmlsbD0iI2RjMjYyNiI+LmluY2x1ZGVzKCdleGVjJykgc3Vic3RyaW5nPC90ZXh0Pgo8dGV4dCB4PSIyMjAiIHk9IjIxNCIgZm9udC1zaXplPSIxMC41IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOGE4YThhIj7igKZrZXB0IGFsaWduZWQgYnkgYSAiLy8gaW4gbG9ja3N0ZXAgd2l0aCBzdGF0ZS50cyIgZG9jYmxvY2s8L3RleHQ+CjxyZWN0IHg9IjYwIiB5PSIyMzYiIHdpZHRoPSIzMjAiIGhlaWdodD0iNjQiIHJ4PSI2IiBzdHJva2U9IiNkYzI2MjYiIGZpbGw9Im5vbmUiIHN0cm9rZS1kYXNoYXJyYXk9IjQgMyIvPgo8dGV4dCB4PSIyMjAiIHk9IjI2MCIgZm9udC1zaXplPSIxMSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2RjMjYyNiIgZm9udC13ZWlnaHQ9IjcwMCI+U2FtZSBDb2RleCBgZXhlY2Agc3RlcDwvdGV4dD4KPHRleHQgeD0iMjIwIiB5PSIyNzgiIGZvbnQtc2l6ZT0iMTAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9ImN1cnJlbnRDb2xvciI+aW5kZXhlZCBhcyBzaGVsbCDinJMgIMK3ICBwcm9ncmFtLXJlc29sdmVkIOKclyAgwrcgIGNvbG9yZWQg4pyXPC90ZXh0Pgo8dGV4dCB4PSIyMjAiIHk9IjI5MiIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iY3VycmVudENvbG9yIj5Hcm9rIGBydW5fY29tbWFuZGA6IGtub3duIHRvIGluZGV4ZXIgb25seTwvdGV4dD4KPC9zdmc+CjwvZGl2Pgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvci1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9ImRlcml2ZWQ6IGFsbCA2IHNpdGVzIGNhbGwgaXNTaGVsbEV4ZWNUb29sKCkiPgo8c3ZnIHZpZXdCb3g9IjAgMCA0NDAgMzIwIiB3aWR0aD0iMTAwJSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJPbmUgc2hhcmVkIHByZWRpY2F0ZSI+Cjx0ZXh0IHg9IjIyMCIgeT0iMjAiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI4MDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9ImN1cnJlbnRDb2xvciI+QUZURVIg4oCUIDEgc291cmNlIG9mIHRydXRoPC90ZXh0Pgo8cmVjdCB4PSIxMjAiIHk9IjQwIiB3aWR0aD0iMjAwIiBoZWlnaHQ9IjQ4IiByeD0iNiIgc3Ryb2tlPSIjMTZhMzRhIiBmaWxsPSJub25lIiBzdHJva2Utd2lkdGg9IjIiLz48dGV4dCB4PSIyMjAiIHk9IjYwIiBmb250LXNpemU9IjExIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMTZhMzRhIiBmb250LXdlaWdodD0iODAwIj5zaGVsbC1wcm9ncmFtcy50czwvdGV4dD48dGV4dCB4PSIyMjAiIHk9Ijc2IiBmb250LXNpemU9IjEwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJjdXJyZW50Q29sb3IiPmlzU2hlbGxFeGVjVG9vbCgpIMK3IGNhc2UtaW5zZW5zaXRpdmUgwrcgNyBuYW1lczwvdGV4dD4KPHJlY3QgeD0iMTYiIHk9IjE0MCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIzNCIgcng9IjUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIi8+PHRleHQgeD0iNzYiIHk9IjE2MSIgZm9udC1zaXplPSI5LjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9ImN1cnJlbnRDb2xvciI+dG9vbC1jYWxsczwvdGV4dD4KPHJlY3QgeD0iMTQ2IiB5PSIxNDAiIHdpZHRoPSIxMjAiIGhlaWdodD0iMzQiIHJ4PSI1IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPjx0ZXh0IHg9IjIwNiIgeT0iMTYxIiBmb250LXNpemU9IjkuNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iY3VycmVudENvbG9yIj50cmFqZWN0b3J5IMOXMjwvdGV4dD4KPHJlY3QgeD0iMjc2IiB5PSIxNDAiIHdpZHRoPSIxNDgiIGhlaWdodD0iMzQiIHJ4PSI1IiBzdHJva2U9ImN1cnJlbnRDb2xvciIgZmlsbD0ibm9uZSIvPjx0ZXh0IHg9IjM1MCIgeT0iMTYxIiBmb250LXNpemU9IjkuNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iY3VycmVudENvbG9yIj5zdGF0ZS50czwvdGV4dD4KPHJlY3QgeD0iNjAiIHk9IjE5NiIgd2lkdGg9IjE1MCIgaGVpZ2h0PSIzNCIgcng9IjUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBmaWxsPSJub25lIi8+PHRleHQgeD0iMTM1IiB5PSIyMTciIGZvbnQtc2l6ZT0iOS41IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSJjdXJyZW50Q29sb3IiPnN0cmVhbS1yZW5kZXI8L3RleHQ+CjxyZWN0IHg9IjIzMCIgeT0iMTk2IiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjM0IiByeD0iNSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIGZpbGw9Im5vbmUiLz48dGV4dCB4PSIzMDUiIHk9IjIxNyIgZm9udC1zaXplPSI5LjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9ImN1cnJlbnRDb2xvciI+dHJhamVjdG9yeS1odG1sPC90ZXh0Pgo8cGF0aCBkPSJNMTgwIDg4IEw3NiAxNDAiIHN0cm9rZT0iIzE2YTM0YSIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0yMTAgODggTDIwNiAxNDAiIHN0cm9rZT0iIzE2YTM0YSIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0yNTAgODggTDM1MCAxNDAiIHN0cm9rZT0iIzE2YTM0YSIgZmlsbD0ibm9uZSIvPjxwYXRoIGQ9Ik0xNzAgODggTDEzNSAxOTYiIHN0cm9rZT0iIzE2YTM0YSIgZmlsbD0ibm9uZSIgb3BhY2l0eT0iMC43Ii8+PHBhdGggZD0iTTI3MCA4OCBMMzA1IDE5NiIgc3Ryb2tlPSIjMTZhMzRhIiBmaWxsPSJub25lIiBvcGFjaXR5PSIwLjciLz4KPHJlY3QgeD0iNjAiIHk9IjI1NiIgd2lkdGg9IjMyMCIgaGVpZ2h0PSI0NiIgcng9IjYiIHN0cm9rZT0iIzE2YTM0YSIgZmlsbD0ibm9uZSIvPgo8dGV4dCB4PSIyMjAiIHk9IjI3NiIgZm9udC1zaXplPSIxMC41IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMTZhMzRhIiBmb250LXdlaWdodD0iNzAwIj5leGVj4oaSZ2l0IMK3IEV4ZWN1dGXihpJucG0gwrcgQmFzaOKGkmdpdCDCtyBydW5fY29tbWFuZOKGknJnPC90ZXh0Pgo8dGV4dCB4PSIyMjAiIHk9IjI5MiIgZm9udC1zaXplPSIxMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iY3VycmVudENvbG9yIj5pbmRleGVkID0gcmVzb2x2ZWQgPSBjb2xvcmVkLCBldmVyeSBoYXJuZXNzPC90ZXh0Pgo8L3N2Zz4KPC9kaXY+CjwvZGl2PgoKIyMgRGF0YQoKfCBTaXRlIHwgYGZpbGU6bGluZWAgfCBSb2xlIHwgV2FzIHwgTm93IHwKfC0tLXwtLS18LS0tfC0tLXwtLS18CnwgaW5kZXhlciB8IGB0b29sLWNhbGxzLnRzOjE5LDI1NGAgfCBjb21tYW5kIGluZGV4aW5nIHwgbG93ZXJjYXNlIFNldCAoNykgfCBgaXNTaGVsbEV4ZWNUb29sYCB8CnwgbW9kZWwgfCBgdHJhamVjdG9yeS50czoxMzgsMzIwYCB8IHByb2dyYW0gcmVzb2x1dGlvbiB8IGV4YWN0LWNhc2UgU2V0ICg2KSB8IGBpc1NoZWxsRXhlY1Rvb2xgIHwKfCBtb2RlbCB8IGB0cmFqZWN0b3J5LnRzOjIwNmAgfCBjb21tYW5kLWFyZyBleHRyYWN0aW9uIHwgYC5pbmNsdWRlcygnZXhlYycpYCBjaGFpbiB8IGBpc1NoZWxsRXhlY1Rvb2xgIHwKfCBzdGF0ZSB8IGBzdGF0ZS50czoyODVgIHwgZGlyZWN0b3J5LXRvdWNoZWQgc2NhbiB8IGV4YWN0LWNhc2UgYXJyYXkgKDYpIHwgYGlzU2hlbGxFeGVjVG9vbGAgfAp8IHN0cmVhbSB8IGBzdHJlYW0tcmVuZGVyLnRzOjE5YCB8IHRvb2wgY29sb3IgfCBgQmFzaCBcfFx8IGV4ZWNfY29tbWFuZGAgfCBgaXNTaGVsbEV4ZWNUb29sYCB8CnwgaHRtbCB8IGB0cmFqZWN0b3J5LWh0bWwudHM6MjZgIHwgYmFyIGNvbG9yIHwgYC5pbmNsdWRlcygnZXhlYycpYCBjaGFpbiB8IGBpc1NoZWxsRXhlY1Rvb2xgIHwKCk5ldCAqKi0yNCBzb3VyY2UgbGluZXMqKi4gT3V0IG9mIHNjb3BlIGJ5IGRlc2lnbjogdGhlIHBlci1oYXJuZXNzIHBhcnNlciBibG9ja3MgaW4gYHBhcnNlLnRzYCAoZWFjaCBrbm93cyBpdHMgb3duIHRvb2wncyBhcmcgZmllbGQpIGFuZCB0aGUgQmFzaC1zeW50YXggYnVja2V0ZXIgaW4gYGRpZ2VzdC50c2Ag4oCUIGRpZmZlcmVudCBjb25jZXB0cywgbm90IHRoZSBzaGVsbC10b29sIHNldC4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
