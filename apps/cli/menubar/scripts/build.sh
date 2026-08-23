@@ -82,7 +82,35 @@ cp "$SRC" "$APP/Contents/MacOS/MenubarHelper"
 # notification's app icon — both the left-hand bundle icon (CFBundleIconFile) and
 # the right-hand contentImage (appIconImage in PromptPanel.swift loads AppIcon.icns).
 generate_app_icon "$REPO_ROOT/assets/app-icon.png" "$APP/Contents/Resources/AppIcon.icns"
-cat > "$APP/Contents/Info.plist" <<'PLIST'
+# Resolve the signing identity FIRST — it decides the bundle IDENTITY. A real
+# Developer ID build carries the production id `com.phnx-labs.agents-menubar`; an
+# ad-hoc dev build (no Developer ID cert) MUST NOT, because the Accessibility
+# (TCC) grant is keyed to the bundle id AND validated against the Developer-ID
+# code requirement stored with it. A dev build sharing the production id runs
+# under that same grant with an ad-hoc signature that FAILS the stored
+# requirement, so macOS revokes the shipped app's grant and re-prompts on the
+# next paste — the "re-approve Accessibility on every dev build" bug. A distinct
+# `.dev` id gives the dev build its own TCC entry it can never poison the real
+# one from. (The production id is also the designated-requirement identity the
+# release gate pins — scripts/verify-menubar-helper.sh.)
+SIGN_ID="${MENUBAR_HELPER_SIGN_ID:-}"
+if [ -z "$SIGN_ID" ]; then
+    SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -oE '"Developer ID Application: [^"]+"' | head -1 | tr -d '"')
+fi
+BUNDLE_ID="com.phnx-labs.agents-menubar"
+APP_DISPLAY_NAME="AGI Menu"
+if [ -z "$SIGN_ID" ] || [ "$SIGN_ID" = "-" ]; then
+    SIGN_ID="-"
+    BUNDLE_ID="com.phnx-labs.agents-menubar.dev"
+    APP_DISPLAY_NAME="AGI Menu (Dev)"
+    echo "  WARNING: no Developer ID identity found — signing ad-hoc (DEV ONLY)." >&2
+    echo "  Using the dev bundle id ${BUNDLE_ID} so this build can never touch the" >&2
+    echo "  shipped helper's Accessibility grant. An ad-hoc build cannot be notarized," >&2
+    echo "  so prepack (verify-menubar-helper.sh) refuses to pack it. Sign on a host" >&2
+    echo "  with the Developer ID cert + the apple.com secrets bundle to ship." >&2
+fi
+
+cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -90,11 +118,11 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
     <key>CFBundleExecutable</key>
     <string>MenubarHelper</string>
     <key>CFBundleIdentifier</key>
-    <string>com.phnx-labs.agents-menubar</string>
+    <string>${BUNDLE_ID}</string>
     <key>CFBundleName</key>
-    <string>AGI Menu</string>
+    <string>${APP_DISPLAY_NAME}</string>
     <key>CFBundleDisplayName</key>
-    <string>AGI Menu</string>
+    <string>${APP_DISPLAY_NAME}</string>
     <key>CFBundleIconFile</key>
     <string>AppIcon</string>
     <key>CFBundlePackageType</key>
@@ -109,20 +137,9 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-SIGN_ID="${MENUBAR_HELPER_SIGN_ID:-}"
-if [ -z "$SIGN_ID" ]; then
-    SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -oE '"Developer ID Application: [^"]+"' | head -1 | tr -d '"')
-fi
-if [ -z "$SIGN_ID" ]; then
-    SIGN_ID="-"
-    echo "  WARNING: no Developer ID identity found — signing ad-hoc (DEV ONLY)." >&2
-    echo "  An ad-hoc build cannot be notarized, so prepack (verify-menubar-helper.sh)" >&2
-    echo "  refuses to pack it. Sign on a host with the Developer ID cert + the" >&2
-    echo "  apple.com secrets bundle to produce a shippable, notarized helper." >&2
-fi
-echo "  signing with: $SIGN_ID"
-codesign --force --options runtime --sign "$SIGN_ID" --identifier com.phnx-labs.agents-menubar "$APP" 2>&1 | sed 's/^/  /'
-codesign --force --options runtime --sign "$SIGN_ID" --identifier com.phnx-labs.agents-menubar "$DEST" 2>&1 | sed 's/^/  /'
+echo "  signing with: $SIGN_ID  (bundle id: $BUNDLE_ID)"
+codesign --force --options runtime --sign "$SIGN_ID" --identifier "$BUNDLE_ID" "$APP" 2>&1 | sed 's/^/  /'
+codesign --force --options runtime --sign "$SIGN_ID" --identifier "$BUNDLE_ID" "$DEST" 2>&1 | sed 's/^/  /'
 
 # Notarize + staple — MANDATORY for a RELEASE build. Gatekeeper on macOS 26+
 # rejects an un-notarized app as "damaged", so a signed-but-not-notarized helper

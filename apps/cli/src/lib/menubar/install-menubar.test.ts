@@ -332,12 +332,35 @@ describe('mayInstallMenubarHelper', () => {
     })).toBe(false);
   });
 
-  it('still lets an ad-hoc build adopt a helper whose owner is gone', () => {
-    // The deadlock case must not be reintroduced: if nothing else can install it,
-    // an ad-hoc build is better than no menu bar.
+  it('refuses an ad-hoc build seizing a HEALTHY helper whose owner-entry is gone', () => {
+    // The owner-gone branch is deadlock avoidance, but recopying an ad-hoc bundle
+    // over a healthy Developer-ID install poisons its Accessibility grant — the
+    // ad-hoc signature fails the grant's stored code requirement, so macOS revokes
+    // it and re-prompts on the next paste — and Gatekeeper rejects the result as
+    // "damaged" (RUSH-2134). This does NOT deadlock: a genuinely broken helper
+    // still heals from any source via escape (1), asserted next.
     expect(mayInstallMenubarHelper({
       ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
       sourceIsDeveloperId: false,
+    })).toBe(false);
+  });
+
+  it('still lets an ad-hoc build repair a BROKEN helper whose owner is gone (no deadlock)', () => {
+    // The real "nothing else can install it" case is a MISSING/ad-hoc-installed
+    // helper — escape (1) (helperExecMissing / needsDevIdHeal) heals it from ANY
+    // source, so refusing the healthy-helper takeover above strands nothing.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+      sourceIsDeveloperId: false, helperExecMissing: true,
+    })).toBe(true);
+  });
+
+  it('still lets a Developer-ID build adopt a healthy helper whose owner-entry is gone', () => {
+    // A relocated npm dir (owner AGENTS_ENTRY path vanished) must still self-heal
+    // for a legitimately signed install — only ad-hoc sources are refused above.
+    expect(mayInstallMenubarHelper({
+      ...base, plistEntry: brew, activeEntry: nvm, ownerEntryExists: false,
+      sourceIsDeveloperId: true,
     })).toBe(true);
   });
 

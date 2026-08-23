@@ -637,7 +637,18 @@ export function mayInstallMenubarHelper(opts: {
   if (!opts.activeEntry) return false;
   // No owner recorded yet (fresh or pre-`AGENTS_ENTRY` plist) — adopt it.
   if (!opts.plistEntry) return true;
-  if (!opts.ownerEntryExists) return true; // the recorded owner is gone
+  // The recorded owner's entry path is gone from disk, so this install may adopt
+  // the helper — but a non-Developer-ID (ad-hoc/dev) source may NOT seize a
+  // healthy install this way. Recopying an ad-hoc bundle over the Developer-ID
+  // one poisons the shared Accessibility grant (an ad-hoc signature fails the
+  // grant's stored code requirement, so macOS revokes it and re-prompts on the
+  // next paste) and Gatekeeper then rejects the result as "damaged" (RUSH-2134).
+  // This does not strand a genuinely broken helper: escape (1) above
+  // (helperExecMissing / needsDevIdHeal) already lets ANY source repair a
+  // missing-or-ad-hoc install, so refusing here only declines to re-point the
+  // plist of a helper that is already present and working — the menu bar keeps
+  // running, nothing deadlocks.
+  if (!opts.ownerEntryExists) return opts.sourceIsDeveloperId;
   if (opts.installedVersion && opts.currentVersion) {
     const versionOrder = compareVersions(opts.currentVersion, opts.installedVersion);
     if (versionOrder > 0) return opts.sourceIsDeveloperId;
