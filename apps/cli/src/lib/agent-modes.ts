@@ -30,9 +30,15 @@ export const MODE_DESCRIPTIONS: Record<Mode, string> = {
  * Absent entry = no extra note; the row's own text suffices.
  */
 const AUTO_SEMANTICS: Partial<Record<AgentId, string>> = {
+  // Classifier-style: still escalates. --permission-mode auto / --autopilot.
   claude: 'a smart classifier auto-approves safe operations and still prompts for risky ones.',
   copilot: 'a smart classifier auto-approves safe operations and still prompts for risky ones.',
+  // Approvals off, sandbox kept: never escalates. A denied command just fails.
   codex: 'approval_policy=never over the same sandbox as edit — it never prompts, and a sandbox-denied command fails instead of raising an approval request.',
+  muse: 'runs --disable-approval, which turns approvals off while keeping the sandbox — like codex, it never prompts and a denied command fails.',
+  // Native autonomy dial at its top setting.
+  droid: 'runs --auto high, droid\'s full-autonomy setting.',
+  kimi: "runs kimi's native --auto.",
 };
 
 export interface AgentModeEntry {

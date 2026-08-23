@@ -389,7 +389,7 @@ export function resolveMode(
   if (requestedMode !== null && requestedMode !== undefined) {
     const normalizedMode = normalizeModeValue(requestedMode);
     if (!normalizedMode) {
-      throw new Error(`Invalid mode '${requestedMode}'. Valid modes: plan (read-only), edit (can write), auto (smart classifier), skip (bypass all permissions). 'full' is accepted as alias for skip.`);
+      throw new Error(`Invalid mode '${requestedMode}'. Valid modes: plan (read-only), edit (can write), auto (more autonomous than edit; per-harness), skip (bypass all permissions). 'full' is accepted as alias for skip.`);
     }
     return normalizedMode;
   }

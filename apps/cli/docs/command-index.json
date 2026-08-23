@@ -17086,7 +17086,7 @@
             },
             {
               "flags": "-m, --mode <mode>",
-              "description": "Execution mode: plan (read-only), edit (can write files), auto (smart classifier, the default), or skip (bypass all permission prompts). 'full' accepted as alias for skip.",
+              "description": "Execution mode: plan (read-only), edit (can write files), auto (the default; more autonomous than edit, mechanism per-harness — see `agents modes <agent>`), or skip (bypass all permission prompts). 'full' accepted as alias for skip.",
               "short": "-m",
               "long": "--mode",
               "required": true,
@@ -26011,7 +26011,7 @@
             },
             {
               "flags": "-m, --mode <mode>",
-              "description": "Permissions: plan (read-only) | edit (can write files) | auto (smart classifier auto-approves safe ops) | skip (bypass all permission prompts). 'full' accepted as alias for skip. Teammates run headless: plan works headless on claude/codex/cursor/droid/opencode; kimi/grok/antigravity have no headless plan mode and auto-downgrade a plan request to auto.",
+              "description": "Permissions: plan (read-only) | edit (can write files) | auto (more autonomous than edit, mechanism per-harness — see 'agents modes <agent>') | skip (bypass all permission prompts). 'full' accepted as alias for skip. Teammates run headless: plan works headless on claude/codex/cursor/droid/opencode; kimi/grok/antigravity have no headless plan mode and auto-downgrade a plan request to auto.",
               "short": "-m",
               "long": "--mode",
               "required": true,
