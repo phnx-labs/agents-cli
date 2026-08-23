@@ -751,6 +751,42 @@ export function setConfiguredDeviceRole(name: string, role: ConfiguredDeviceRole
  * fleet-wide `role` default would silently miss a doc-less device and drop it
  * from the worker allowlist. Mirrors {@link loadAutoLaunchPreferences}.
  */
+/**
+ * Devices whose OWN config pins one of the browser profile keys to `profile`.
+ *
+ * Used by `profiles rename` to warn rather than silently leave a peer pointing at
+ * a name that no longer exists. Deliberately read-only: rewriting another
+ * machine's device doc from here would be a cross-machine mutation nobody asked
+ * for, and the pin may well be correct there (a local profile of the same name).
+ */
+export function devicesPinningBrowserProfile(
+  profile: string,
+): Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }> {
+  ensureDeviceConfigMigrated();
+  // Reports WHICH key each device used, not just that it matched. A caller
+  // telling the user to fix `browser.profile` on a device that actually pinned
+  // `browser.viewer` leaves the real pin broken and sets a second key nobody
+  // asked for.
+  const hits: Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }> = [];
+  const devicesRoot = path.join(getUserAgentsDir(), 'devices');
+  let names: string[] = [];
+  try {
+    names = fs
+      .readdirSync(devicesRoot, { withFileTypes: true })
+      .filter((e) => e.isDirectory())
+      .map((e) => e.name);
+  } catch {
+    return hits;
+  }
+  for (const name of names.sort()) {
+    const cfg = readDeviceDocConfig(name);
+    // A device can pin BOTH; each needs its own fix line.
+    if (cfg.defaultBrowserProfile === profile) hits.push({ device: name, key: 'browser.profile' });
+    if (cfg.browserViewer === profile) hits.push({ device: name, key: 'browser.viewer' });
+  }
+  return hits;
+}
+
 export function listConfiguredDeviceRoles(roster?: string[]): Record<string, ConfiguredDeviceRole> {
   ensureDeviceConfigMigrated();
   const out: Record<string, ConfiguredDeviceRole> = {};

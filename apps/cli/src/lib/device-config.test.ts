@@ -594,3 +594,41 @@ describe('listConfiguredDeviceRoles (roster reaches doc-less devices)', () => {
     });
   });
 });
+
+describe('devicesPinningBrowserProfile', () => {
+  // These pins cannot be written through setConfigValue from here — the browser
+  // keys are machine-local, so only the owning device can set them (it errors
+  // with "can only be read or set on the device itself"). They reach this
+  // machine by SYNC, as a device doc. So the fixture writes the doc, which is
+  // the real-world shape.
+  function writeDeviceDoc(device: string, body: string): void {
+    const dir = path.join(TMP, '.agents', 'devices', device);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'agents.yaml'), body);
+  }
+
+  it('reports WHICH key each device pinned, not just that it matched', async () => {
+    // A caller telling the user to fix `browser.profile` on a device that
+    // actually pinned `browser.viewer` leaves the real pin broken AND sets a
+    // second key nobody asked for. `profiles rename` prints these verbatim.
+    writeDeviceDoc('peerbox', 'config:\n  defaultBrowserProfile: demo\n');
+    writeDeviceDoc('otherbox', 'config:\n  browserViewer: demo\n');
+    writeDeviceDoc('bothbox', 'config:\n  defaultBrowserProfile: demo\n  browserViewer: demo\n');
+
+    const { devicesPinningBrowserProfile } = await freshModules();
+    const hits = devicesPinningBrowserProfile('demo');
+
+    expect(hits).toEqual([
+      { device: 'bothbox', key: 'browser.profile' },
+      { device: 'bothbox', key: 'browser.viewer' },
+      { device: 'otherbox', key: 'browser.viewer' },
+      { device: 'peerbox', key: 'browser.profile' },
+    ]);
+  });
+
+  it('ignores devices pinning a different profile', async () => {
+    writeDeviceDoc('peerbox', 'config:\n  defaultBrowserProfile: something-else\n');
+    const { devicesPinningBrowserProfile } = await freshModules();
+    expect(devicesPinningBrowserProfile('demo')).toEqual([]);
+  });
+});

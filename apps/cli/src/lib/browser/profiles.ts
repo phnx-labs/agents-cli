@@ -719,6 +719,15 @@ export function assertRegistrableProfileName(name: string): void {
         `not a profile name. Pick another name.`,
     );
   }
+  // `browser.viewer: os` means "use the OS default handler". A profile by that
+  // name turns the opt-out into a pointer at a profile — silently, since both
+  // are just strings in the same key.
+  if (name === 'os') {
+    throw new Error(
+      `"os" is the reserved browser.viewer value meaning the OS default handler, ` +
+        `not a profile name. Pick another name.`,
+    );
+  }
 }
 
 /**
@@ -742,6 +751,8 @@ export async function renameProfile(
   movedDirs: string[];
   repointedDefault: boolean;
   repointedViewer: boolean;
+  /** Peers still pinning the OLD name, and which key each used. */
+  stalePins: Array<{ device: string; key: 'browser.profile' | 'browser.viewer' }>;
 }> {
   if (from === to) throw new Error(`"${from}" is already its own name.`);
 
@@ -761,20 +772,47 @@ export async function renameProfile(
     );
   }
 
+  // A name can exist in BOTH stores (local wins in allProfileConfigs). Rewriting
+  // only one leaves the other listed under the OLD name with its data dir already
+  // moved away — the abandoned-`--user-data-dir` state this command exists to
+  // prevent, produced by this command, and previously reported as a clean
+  // success. Refuse instead: which copy the user means is genuinely ambiguous,
+  // and `profiles scope` is the tool for collapsing the duplicate first.
+  if (local && fleet) {
+    throw new Error(
+      `"${from}" exists in BOTH this machine's store and the fleet-synced one. ` +
+        `Renaming would move its browser data while leaving one copy behind under the old name. ` +
+        `Collapse the duplicate first: agents browser profiles scope ${from} local  ` +
+        `(or delete the copy you do not want).`,
+    );
+  }
+
   const config = (local ?? fleet)!;
   const scope: ProfileScope = local ? 'local' : 'fleet';
 
   // Move the on-disk state BEFORE the config, so a crash between the two leaves
   // a profile whose dirs are already where the new name expects them rather than
   // a config pointing at dirs that no longer exist.
-  const movedDirs: string[] = [];
+  // PRE-FLIGHT every destination before moving ANY of them. With the check
+  // inside the loop, dir N was validated only after dirs 0..N-1 had already
+  // moved: a collision on the second endpoint left the first one's logins
+  // stranded under a name with no config entry, and the error named only the
+  // squatter. Nothing repaired that, and the user was never told.
+  const plan: Array<{ dir: string; dest: string }> = [];
   for (const dir of listProfileCacheDirs(from)) {
     const base = path.basename(dir);
     const suffix = base.slice(from.length);
     const dest = path.join(path.dirname(dir), `${to}${suffix}`);
     if (fs.existsSync(dest)) {
-      throw new Error(`Cannot rename: ${dest} already exists. Move or remove it first.`);
+      throw new Error(
+        `Cannot rename: ${dest} already exists. Nothing was moved. Remove or rename it first.`,
+      );
     }
+    plan.push({ dir, dest });
+  }
+
+  const movedDirs: string[] = [];
+  for (const { dir, dest } of plan) {
     fs.renameSync(dir, dest);
     movedDirs.push(dest);
   }
@@ -811,7 +849,18 @@ export async function renameProfile(
     repointedViewer = true;
   }
 
-  return { scope, movedDirs, repointedDefault, repointedViewer };
+  // A fleet rename changes the name on every machine, but each machine's own
+  // config doc is separate — a peer pinning the old name is left dangling. Not
+  // rewritten from here: that would be a cross-machine mutation, and on a peer
+  // the pin may be correct (a LOCAL profile of the same name). Reported instead.
+  const { devicesPinningBrowserProfile } = await import('../device-config.js');
+  const { machineId } = await import('../machine-id.js');
+  const stalePins =
+    scope === 'fleet'
+      ? devicesPinningBrowserProfile(from).filter((p) => p.device !== machineId())
+      : [];
+
+  return { scope, movedDirs, repointedDefault, repointedViewer, stalePins };
 }
 
 export async function moveProfileScope(

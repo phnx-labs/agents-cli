@@ -1448,6 +1448,22 @@ describe('renameProfile', () => {
     expect(store.browser!['comet-local']).toBeUndefined();
   });
 
+  it('repoints browser.profile, or the next browser start falls back to auto-detect', async () => {
+    // #2962 added two tests for browser.viewer while the sibling repoint three
+    // lines up had none — deleting it broke nothing.
+    const store: ProfileStore = {
+      browser: { old: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9540'] } },
+    };
+    wire(store);
+    const { setConfigValue, getConfigValue } = await import('../device-config.js');
+    setConfigValue('browser.profile', 'old');
+
+    const res = await renameProfile('old', 'fresh');
+
+    expect(res.repointedDefault).toBe(true);
+    expect(getConfigValue('browser.profile').value).toBe('fresh');
+  });
+
   it('repoints browser.viewer too, or artifacts silently go back to the OS browser', async () => {
     // The gap this closes: `browser.viewer` is a separate key from
     // `browser.profile`. Left dangling, resolveViewer falls back to the OS
@@ -1481,6 +1497,74 @@ describe('renameProfile', () => {
 
     expect(res.repointedViewer).toBe(false);
     expect(getConfigValue('browser.viewer').value).toBe('other');
+  });
+
+  it('refuses while the profile is in use, so a live browser keeps its data dir', async () => {
+    // The guard that prevents actual corruption, and it had no test: moving a
+    // --user-data-dir out from under a running browser corrupts it. Driven
+    // through the real isProfileInUse, which counts a profile in use when its
+    // tasks.json is non-empty.
+    const store: ProfileStore = {
+      browser: { live: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9534'] } },
+    };
+    wire(store);
+    const { getBrowserRuntimeDir } = await import('./profiles.js');
+    const dir = path.join(getBrowserRuntimeDir(), 'live@endpoint-0');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'Cookies'), 'live-session');
+    fs.writeFileSync(path.join(dir, 'tasks.json'), JSON.stringify(['a-running-task']));
+
+    await expect(renameProfile('live', 'renamed')).rejects.toThrow(/in use/);
+
+    // Nothing moved, config untouched.
+    expect(fs.readFileSync(path.join(dir, 'Cookies'), 'utf8')).toBe('live-session');
+    expect(store.browser!.live).toBeDefined();
+  });
+
+  it('moves NOTHING when any destination dir is taken', async () => {
+    // The stranding bug: the dest check used to sit inside the move loop, so
+    // dir N was validated only after dirs 0..N-1 had moved. A collision on the
+    // second endpoint left the first one's logins under a name with no config
+    // entry, and the error named only the squatter.
+    const store: ProfileStore = {
+      browser: { multi: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9530'] } },
+    };
+    wire(store);
+    const { getBrowserRuntimeDir } = await import('./profiles.js');
+    const root = getBrowserRuntimeDir();
+    for (const d of ['multi@endpoint-0', 'multi@endpoint-1', 'target@endpoint-1']) {
+      fs.mkdirSync(path.join(root, d), { recursive: true });
+    }
+    fs.writeFileSync(path.join(root, 'multi@endpoint-0', 'Cookies'), 'keep-me');
+
+    await expect(renameProfile('multi', 'target')).rejects.toThrow(/Nothing was moved/);
+
+    // The first dir must still be where it started, with its data.
+    expect(fs.readFileSync(path.join(root, 'multi@endpoint-0', 'Cookies'), 'utf8')).toBe('keep-me');
+    expect(fs.existsSync(path.join(root, 'target@endpoint-0'))).toBe(false);
+    expect(store.browser!.multi).toBeDefined();
+  });
+
+  it('refuses a name that exists in BOTH stores rather than orphaning one', async () => {
+    // Rewriting one store while moving the data leaves the other listed under
+    // the old name with its dir gone — the exact state this command prevents,
+    // produced by this command.
+    const store: ProfileStore = {
+      browser: { dup: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9531'] } },
+      deviceBrowser: { dup: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9532'] } },
+    };
+    wire(store);
+    await expect(renameProfile('dup', 'fresh')).rejects.toThrow(/BOTH/);
+    expect(store.browser!.dup).toBeDefined();
+    expect(store.deviceBrowser!.dup).toBeDefined();
+  });
+
+  it('refuses `os`, the reserved browser.viewer value', async () => {
+    const store: ProfileStore = {
+      browser: { a: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9533'] } },
+    };
+    wire(store);
+    await expect(renameProfile('a', 'os')).rejects.toThrow(/reserved browser\.viewer value/);
   });
 
   it('keeps a local profile local', async () => {

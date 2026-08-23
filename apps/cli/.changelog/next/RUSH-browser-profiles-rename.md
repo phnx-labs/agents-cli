@@ -8,7 +8,12 @@
   store it already lives in), moves every cache dir belonging to the old name, and
   repoints both `browser.profile` and `browser.viewer` when either pointed there — a dangling `browser.viewer` sends every artifact back to the OS default handler, which is the exact bug the viewer seam was built to fix. Refuses while the profile is in
   use, because moving a `--user-data-dir` out from under a running browser
-  corrupts it. Source: `src/lib/browser/profiles.ts`, `src/commands/browser.ts`.
+  corrupts it; refuses when the name exists in BOTH stores, since rewriting one
+  would leave the other listed under the old name with its data already moved
+  away; and validates every destination BEFORE moving any of them, so a
+  collision on the second endpoint cannot strand the first one's logins under a
+  name with no config entry. `os` joins `default` as a name a profile may not
+  take — it is the reserved `browser.viewer` value meaning the OS handler. Source: `src/lib/browser/profiles.ts`, `src/commands/browser.ts`.
 - **Profile-name validation is shared between `create` and `rename`.** The shape
   rule lived inline in `profiles create`, so a second caller would have accepted
   names `create` rejects. Now `assertRegistrableProfileName`, which also refuses

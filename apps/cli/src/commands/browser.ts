@@ -659,6 +659,17 @@ function registerProfilesCommands(browser: Command): void {
       if (res.repointedViewer) {
         console.log(`  browser.viewer now points at ${to}`);
       }
+      if (res.stalePins.length > 0) {
+        const devices = [...new Set(res.stalePins.map((p) => p.device))];
+        const one = devices.length === 1;
+        console.error(
+          `warning: ${devices.join(', ')} still ${one ? 'pins' : 'pin'} "${from}" in ` +
+            `${one ? 'its' : 'their'} own device config. Fix with:`,
+        );
+        for (const pin of res.stalePins) {
+          console.error(`  agents config set ${pin.key} ${to} --device ${pin.device}`);
+        }
+      }
     });
 
   profiles
