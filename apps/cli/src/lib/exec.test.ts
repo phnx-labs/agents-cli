@@ -282,6 +282,12 @@ describe('buildExecEnv — Cursor per-account login isolation (XDG_CONFIG_HOME)'
     expect(b.XDG_CONFIG_HOME).toContain(path.join('cursor', '2026.07.23'));
   });
 
+  it('overlays a labeled account config home without changing the binary version', () => {
+    const env = buildExecEnv({ agent: 'cursor', version: '2026.8.1', configVersion: '2026.7.23', mode: 'edit', effort: 'auto' });
+    expect(env.XDG_CONFIG_HOME).toContain('/cursor/2026.7.23/home/.config');
+    expect(env.XDG_CONFIG_HOME).not.toContain('/cursor/2026.8.1/');
+  });
+
   it('a caller-provided XDG_CONFIG_HOME override still wins', () => {
     const env = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04', env: { XDG_CONFIG_HOME: '/custom/xdg' } }));
     expect(env.XDG_CONFIG_HOME).toBe('/custom/xdg');

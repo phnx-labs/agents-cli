@@ -20,6 +20,7 @@ import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import { parseLoopInterval } from '../lib/loop.js';
 import type { RotateResult } from '../lib/accounting/rotate.js';
 import { AGENTS, resolveAgentName, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
+import { parseAgentVersionSpec } from '../lib/agent-spec/agents.js';
 import { recordDispatchedRun } from '../lib/audit/log.js';
 import { maybeShowStarNudge } from '../lib/star-nudge.js';
 import { warnUnpushedWork, shouldWarnUnpushed } from '../lib/warn-unpushed.js';
@@ -586,7 +587,7 @@ async function handleTerminalHandoff(
   // isValidAgent / profileExists / resolveWorkflowRef chain below), so this must
   // accept all three. Gating on the agent table alone rejected every profile —
   // the whole Kimi/DeepSeek/Qwen/GLM path — for `--terminal` runs only.
-  const rawTarget = parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('@')[0];
+  const rawTarget = parseRunAccountPickerRequest(agentSpec).normalizedAgentSpec.split('#')[0].split('@')[0];
   const knownAgent = resolveAgentName(rawTarget);
   const [{ profileExists }, { resolveWorkflowRef }] = await Promise.all([
     import('../lib/profiles.js'),
@@ -738,7 +739,7 @@ export function registerRunCommand(program: Command): void {
       '--strategy <strategy>',
       'Version/account selection strategy: pinned | available | balanced. Defaults to run.<agent>.strategy, then balanced (spreads load across healthy accounts and skips any that are rate-limited). (Legacy `rotate` accepted as alias for `balanced`.)',
     )
-    .option('--account <name>', 'Use this durable provider credential for the run')
+    .option('--account <label>', 'Use this labeled native login or durable provider credential for the run')
     .option(
       '--acp',
       'Route through the Agent Client Protocol instead of direct exec. Supported for claude via @zed-industries/claude-code-acp adapter. Unified event stream; emits ndjson when --json.',
@@ -1116,7 +1117,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
 
       // Hard-deprecated harnesses cannot be run — point the user at the successor.
-      const runBaseAgentName = normalizedAgentSpec.split('@')[0];
+      const runBaseAgentName = normalizedAgentSpec.split('#')[0].split('@')[0];
       const runBaseAgentId = resolveAgentName(runBaseAgentName);
       const { profileExists: runProfileExists } = await import('../lib/profiles.js');
       if (runBaseAgentId && !runProfileExists(runBaseAgentName) && isAgentHardDeprecated(runBaseAgentId)) {
@@ -1140,7 +1141,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       // `agents run auto`: the reserved harness keyword — full-auto dispatch
       // (host affinity → cross-harness balance → account balance, RUSH-2132).
-      if (normalizedAgentSpec.split('@')[0] === RUN_AUTO_KEYWORD && normalizedAgentSpec !== RUN_AUTO_KEYWORD) {
+      if (normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD && normalizedAgentSpec !== RUN_AUTO_KEYWORD) {
         console.error(chalk.red(
           `agents run auto picks the harness itself — a @version pin does not apply. ` +
           `Pin a concrete harness instead: agents run <harness>@<version>.`,
@@ -1190,7 +1191,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         }
         resolvedResumeSource = outcome.session;
 
-        const [requestedAgent, requestedVersion] = normalizedAgentSpec.split('@');
+        const [requestedAgent, requestedVersion] = normalizedAgentSpec.split('#')[0].split('@');
         if (!autoHarnessRequested && requestedAgent !== resolvedResumeSource.agent) {
           console.error(chalk.red(
             `Session ${resolvedResumeSource.shortId} belongs to ${resolvedResumeSource.agent}, not ${requestedAgent}. ` +
@@ -1292,9 +1293,9 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           accountPickerRequested,
           // `run auto` selects its harness after placement, so do not filter
           // candidates against an arbitrary proxy harness at this stage.
-          agent: normalizedAgentSpec.split('@')[0] === RUN_AUTO_KEYWORD
+          agent: normalizedAgentSpec.split('#')[0].split('@')[0] === RUN_AUTO_KEYWORD
             ? undefined
-            : (resolveAgentName(normalizedAgentSpec.split('@')[0]) ?? undefined),
+            : (resolveAgentName(normalizedAgentSpec.split('#')[0].split('@')[0]) ?? undefined),
         });
         if (!options.quiet && result.deprecationSmart) {
           process.stderr.write(
@@ -1462,7 +1463,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         const { profileExists, readProfile, resolveProfileEnv } = await import('../lib/profiles.js');
 
         const detected = await detectSignedInRuntimes();
-        const [agentName, rawLeaseVersion] = normalizedAgentSpec.split('@');
+        const [agentName, rawLeaseVersion] = normalizedAgentSpec.split('#')[0].split('@');
         let runtime: AgentId | null = null;
         let credentialRuntimes: AgentId[] = [];
         let dispatchProfile: import('../lib/crabbox/lease.js').LeaseDispatchProfile | undefined;
@@ -1713,7 +1714,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           throw e;
         }
         try {
-          const [runAgent, rawRunVersion] = normalizedAgentSpec.split('@');
+          const [runAgent, rawRunVersion] = normalizedAgentSpec.split('#')[0].split('@');
           // Forward the explicit @version pin verbatim. Resolving aliases like
           // @latest locally would check local installs, but the remote host may
           // have versions the laptop does not. The remote agents CLI resolves
@@ -2100,12 +2101,32 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       ]);
       const isValidAgent = (agent: string): agent is AgentId => ALL_AGENT_IDS.includes(agent as AgentId);
 
-      // Parse agent@version
-      const [rawAgent, rawVersion] = normalizedAgentSpec.split('@');
+      // Parse agent@version#label. The label selects native auth without pinning
+      // the binary version; --account remains the equivalent flag form.
+      const labelParts = normalizedAgentSpec.split('#');
+      if (labelParts.length > 2 || labelParts[1] === '') {
+        console.error(chalk.red(`Invalid account label in '${normalizedAgentSpec}'.`));
+        process.exit(1);
+      }
+      const [rawAgent, rawVersion] = labelParts[0].split('@');
+      const specAccountLabel = labelParts[1];
+      if (resolveAgentName(rawAgent)) {
+        const parsed = parseAgentVersionSpec(normalizedAgentSpec);
+        if ('error' in parsed) {
+          console.error(chalk.red(parsed.error));
+          process.exit(1);
+        }
+      }
+      if (specAccountLabel && options.account && specAccountLabel !== options.account) {
+        console.error(chalk.red(`Account '${specAccountLabel}' from the agent spec conflicts with --account '${options.account}'.`));
+        process.exit(1);
+      }
+      if (specAccountLabel) options.account = specAccountLabel;
       let agent: AgentId;
       let version: string | undefined = rawVersion || undefined;
       let profileEnv: Record<string, string> | undefined;
       let accountEnv: Record<string, string> | undefined;
+      let accountConfigVersion: string | undefined;
       let profileProvider: string | undefined;
       let fromProfile = false;
       let profileFallbackModel: { envKey: string; model: string } | undefined;
@@ -2487,28 +2508,18 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             console.error(chalk.red(`Account '${spawnAccount.name}' is a device-local ${spawnAccount.agent} login and cannot be forwarded to '${remoteTarget}'. Sign in on that device and name the login there.`));
             process.exit(1);
           }
-          if (version) {
-            // A pinned version must actually be signed in as the named identity.
-            const { getAccountInfo } = await import('../lib/agents.js');
-            const info = await getAccountInfo(agent, getVersionHomePath(agent, version));
-            const liveKey = info.accountKey ?? info.email?.toLowerCase() ?? null;
-            if (!info.signedIn || liveKey !== spawnAccount.identityKey) {
-              console.error(chalk.red(`Account '${spawnAccount.name}' names a specific ${spawnAccount.agent} identity, but ${agent}@${version} ${info.signedIn ? 'is signed in as a different identity' : 'is not signed in'}. Sign in as that identity, or re-name the account.`));
-              process.exit(1);
-            }
-          } else {
-            // No version pinned: locate the installed version currently signed in
-            // as this identity and pin the run to it — do NOT assume the global
-            // default holds it (the account may live on another installed copy).
-            const { resolveAccountVersion } = await import('../lib/accounting/rotate.js');
-            const matched = await resolveAccountVersion(agent, spawnAccount.identityKey);
-            if (!matched) {
-              console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity named by account '${spawnAccount.name}'. Sign in as that identity, or attach a different account.`));
-              process.exit(1);
-            }
-            version = matched;
+          const { CONFIG_ENV_ISOLATED_AGENTS } = await import('../lib/installations/shims.js');
+          if (!CONFIG_ENV_ISOLATED_AGENTS.includes(agent)) {
+            console.error(chalk.red(`${agent} cannot select native accounts independently of its installed version.`));
+            process.exit(1);
           }
-          // Native identity confirmed live; the harness reads it from its home.
+          const { resolveAccountVersion } = await import('../lib/accounting/rotate.js');
+          accountConfigVersion = await resolveAccountVersion(agent, spawnAccount.identityKey) ?? undefined;
+          if (!accountConfigVersion) {
+            console.error(chalk.red(`No installed ${spawnAccount.agent} version is signed in as the identity labeled '${spawnAccount.name}'. Sign in as that identity, or label a different account.`));
+            process.exit(1);
+          }
+          if (!options.quiet) process.stderr.write(chalk.gray(`[agents] account '${spawnAccount.name}' · ${agent} auth from ${accountConfigVersion}\n`));
         } else {
           accountEnv = spawnAccount.env;
         }
@@ -3055,6 +3066,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       const execOptions: ExecOptions = {
         agent,
         version,
+        configVersion: accountConfigVersion,
         prompt,
         interactive: options.interactive || forceInteractive,
         mode: requestedMode,

@@ -49,12 +49,17 @@ export interface NativeAccount {
 export type UnifiedAccount = (CredentialAccount & { kind: 'provider' }) | NativeAccount;
 
 const NAME = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
+const NATIVE_LABEL = /^[a-zA-Z0-9][a-zA-Z0-9@._+-]*$/;
 const AUTH_KINDS: readonly AccountAuthKind[] = ['api-key', 'setup-token', 'bearer-token'];
 
 export function accountRegistryPath(base = getUserAgentsDir()): string { return path.join(base, 'accounts.yaml'); }
 
 function assertName(name: string): void {
   if (!NAME.test(name)) throw new Error('Account name must start with a letter or number and contain only letters, numbers, dot, underscore, or dash.');
+}
+
+function assertNativeLabel(label: string): void {
+  if (!NATIVE_LABEL.test(label)) throw new Error('Account label must start with a letter or number and contain only letters, numbers, @, dot, underscore, plus, or dash.');
 }
 
 function isAccountAuthKind(value: unknown): value is AccountAuthKind {
@@ -171,7 +176,10 @@ export function listNativeAccounts(meta: Pick<Meta, 'accounts'>): NativeAccount[
  * able to omit it.
  */
 export function findUnifiedAccount(nameOrId: string, meta: Pick<Meta, 'accounts'>, doc?: AccountRegistryDocument): UnifiedAccount | null {
-  const native = listNativeAccounts(meta).find(account => account.id === nameOrId || account.name === nameOrId);
+  const needle = nameOrId.toLowerCase();
+  const native = listNativeAccounts(meta).find(account =>
+    account.id === nameOrId || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle,
+  );
   if (native) return native;
   const provider = findAccount(nameOrId, doc ?? readAccountRegistry());
   return provider ? { ...provider, kind: 'provider' } : null;
@@ -188,7 +196,7 @@ export function addNativeAccount(
   identityLabel: string | undefined,
   scope: 'version' | 'device',
 ): NativeAccount {
-  assertName(name);
+  assertNativeLabel(name);
   const meta = readMeta();
   assertUniqueUnifiedName(name, meta);
   const duplicate = listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey);
@@ -202,6 +210,32 @@ export function addNativeAccount(
     },
   }));
   return account;
+}
+
+/** Create or replace the version-independent label for one native identity. */
+export function labelNativeAccount(
+  agent: AgentId,
+  identityKey: string,
+  identityLabel: string | undefined,
+  label: string | undefined,
+  scope: 'version' | 'device',
+): NativeAccount {
+  const resolvedLabel = label ?? identityLabel;
+  if (!resolvedLabel) throw new Error(`${agent} does not expose an email; pass a manual label.`);
+  assertNativeLabel(resolvedLabel);
+  const meta = readMeta();
+  const existing = listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey);
+  const collision = findUnifiedAccount(resolvedLabel, meta);
+  if (collision && collision.id !== existing?.id) throw new Error(`Account '${resolvedLabel}' already exists.`);
+  if (!existing) return addNativeAccount(resolvedLabel, agent, identityKey, identityLabel, scope);
+  updateMeta(current => ({
+    ...current,
+    accounts: {
+      ...current.accounts,
+      native: { ...current.accounts?.native, [existing.id]: { ...current.accounts?.native?.[existing.id]!, name: resolvedLabel, identityLabel } },
+    },
+  }));
+  return { ...existing, name: resolvedLabel, identityLabel };
 }
 
 export function bindAccount(nameOrId: string, target: string): UnifiedAccount {

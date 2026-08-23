@@ -5,7 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type KeychainBackend } from './secrets/index.js';
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { addAccount, findUnifiedAccount, inspectAccount, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+import { readMeta, updateMeta } from './state.js';
+import { addAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -24,6 +25,23 @@ describe('findUnifiedAccount does not touch the provider store for a native look
 
   it('reaches the provider registry only when the name is not a native account', () => {
     expect(() => findUnifiedAccount('not-native', meta, poisoned)).toThrow('provider registry accessed');
+  });
+});
+
+describe('native account labels', () => {
+  beforeEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+  afterEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+
+  it('writes and resolves a manual label and the implicit email label', () => {
+    const original = labelNativeAccount('codex', 'codex:user=1', 'user@example.com', 'work', 'version');
+    expect(findUnifiedAccount('work', readMeta())).toMatchObject({ id: original.id, identityKey: 'codex:user=1' });
+    const relabeled = labelNativeAccount('codex', 'codex:user=1', 'user@example.com', undefined, 'version');
+    expect(relabeled.id).toBe(original.id);
+    expect(findUnifiedAccount('user@example.com', readMeta())).toMatchObject({ id: original.id, name: 'user@example.com' });
+  });
+
+  it('requires a manual label when the harness exposes no email', () => {
+    expect(() => labelNativeAccount('kimi', 'kimi:opaque=1', undefined, undefined, 'version')).toThrow('pass a manual label');
   });
 });
 

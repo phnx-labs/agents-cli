@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_AGENT_IDS } from './agents.js';
 import { NATIVE_ACCOUNT_CAPABILITIES, nativeAccountNameable, nativeAccountNamingRefusal, nativeIdentityKey, supportedNativeHarnesses } from './account-capabilities.js';
+import { CONFIG_ENV_ISOLATED_AGENTS } from './installations/shims.js';
 
 describe('native account capability registry', () => {
   it('classifies every harness exactly once', () => {
@@ -16,35 +17,38 @@ describe('native account capability registry', () => {
     }
   });
 
-  it('pins the version-scoped strong set to exactly Claude / Codex / Grok', () => {
+  it('pins the selector-capable set to the config-isolated native harnesses', () => {
     const versionStrong = ALL_AGENT_IDS.filter((id) => {
       const cap = NATIVE_ACCOUNT_CAPABILITIES[id];
-      return cap.scope === 'version' && cap.inspection === 'strong';
+      return cap.scope === 'version' && cap.status === 'supported';
     });
-    expect(versionStrong.sort()).toEqual(['claude', 'codex', 'grok']);
+    expect(versionStrong.sort()).toEqual(['claude', 'codex', 'cursor', 'grok', 'kimi']);
+    for (const id of versionStrong) expect(CONFIG_ENV_ISOLATED_AGENTS).toContain(id);
   });
 
   it('treats Muse as a conditional, email-only version harness', () => {
     expect(NATIVE_ACCOUNT_CAPABILITIES.muse).toEqual({ inspection: 'email', scope: 'version', status: 'conditional' });
   });
 
-  it('blocks Cursor from native naming/attachment', () => {
-    expect(NATIVE_ACCOUNT_CAPABILITIES.cursor.status).toBe('unsupported');
-    expect(nativeAccountNameable('cursor')).toBe(false);
+  it('records Cursor isolation and Kimi manual-label-only truthfully', () => {
+    expect(NATIVE_ACCOUNT_CAPABILITIES.cursor).toEqual({ inspection: 'strong', scope: 'version', status: 'supported' });
+    expect(NATIVE_ACCOUNT_CAPABILITIES.kimi).toEqual({ inspection: 'opaque', scope: 'version', status: 'supported' });
+    expect(nativeAccountNameable('cursor')).toBe(true);
+    expect(nativeAccountNameable('kimi')).toBe(true);
   });
 
-  it('records Antigravity / Kimi / Droid / OpenCode as device-scoped opaque but UNSUPPORTED', () => {
+  it('records Antigravity / Droid / OpenCode as device-scoped opaque but UNSUPPORTED', () => {
     // No device-id discriminator in NativeAccount → an opaque/singleton identity
     // cannot be proven unique across synced metadata, so naming is refused.
-    for (const id of ['antigravity', 'kimi', 'droid', 'opencode'] as const) {
+    for (const id of ['antigravity', 'droid', 'opencode'] as const) {
       expect(NATIVE_ACCOUNT_CAPABILITIES[id]).toEqual({ inspection: 'opaque', scope: 'device', status: 'unsupported' });
       expect(nativeAccountNameable(id)).toBe(false);
     }
   });
 
-  it('never marks an opaque harness supported/conditional (no safe device identity yet)', () => {
+  it('only permits opaque naming when the harness has version-isolated config', () => {
     for (const [, cap] of Object.entries(NATIVE_ACCOUNT_CAPABILITIES)) {
-      if (cap.inspection === 'opaque') expect(['unsupported', 'discovery-only']).toContain(cap.status);
+      if (cap.inspection === 'opaque' && cap.status === 'supported') expect(cap.scope).toBe('version');
     }
   });
 
@@ -55,14 +59,14 @@ describe('native account capability registry', () => {
     expect(nativeAccountNameable('copilot')).toBe(false); // unsupported
   });
 
-  it('names the supported native set as claude, codex, grok', () => {
-    expect(supportedNativeHarnesses()).toEqual(['claude', 'codex', 'grok']);
+  it('names the supported native set', () => {
+    expect(supportedNativeHarnesses()).toEqual(['claude', 'codex', 'cursor', 'grok', 'kimi']);
   });
 
   it('refuses native naming with a named reason for device-scoped logins', () => {
-    const reason = nativeAccountNamingRefusal('kimi');
-    expect(reason).toContain("kimi accounts can't be isolated by agents-cli yet (device-scoped login)");
-    expect(reason).toContain('Supported today: claude, codex, grok');
+    const reason = nativeAccountNamingRefusal('antigravity');
+    expect(reason).toContain("antigravity accounts can't be isolated by agents-cli yet (device-scoped login)");
+    expect(reason).toContain('Supported today: claude, codex, cursor, grok, kimi');
     expect(nativeAccountNamingRefusal('claude')).toBeNull();
     expect(nativeAccountNamingRefusal('muse')).toBeNull();
   });

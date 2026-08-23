@@ -1330,6 +1330,17 @@ describe('parseAgentVersionSpec — the agents run launch-target split at the ro
     expect(parseAgentVersionSpec('claude@2.1.207')).toEqual({ agent: 'claude', version: '2.1.207' });
   });
 
+  it('splits account labels without pinning a version', () => {
+    expect(parseAgentVersionSpec('codex#work')).toEqual({ agent: 'codex', label: 'work' });
+    expect(parseAgentVersionSpec('codex@1.2.3#work')).toEqual({ agent: 'codex', version: '1.2.3', label: 'work' });
+    expect(parseAgentVersionSpec('codex#user@example.com')).toEqual({ agent: 'codex', label: 'user@example.com' });
+  });
+
+  it('rejects an empty or malformed account label cleanly', () => {
+    expect(parseAgentVersionSpec('codex#')).toMatchObject({ error: expect.stringContaining('Invalid account label') });
+    expect(parseAgentVersionSpec('codex#bad label')).toMatchObject({ error: expect.stringContaining('Invalid account label') });
+  });
+
   it('a bare agent id yields no version field', () => {
     expect(parseAgentVersionSpec('claude')).toEqual({ agent: 'claude' });
   });

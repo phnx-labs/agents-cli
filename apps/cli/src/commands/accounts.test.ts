@@ -61,7 +61,15 @@ describe('accounts switch + native naming honesty-gate', () => {
   let previousMetaIndex: string | undefined;
   let secretsRoot: string;
 
+  const clearTestNativeAccounts = (): void => updateMeta(meta => {
+    const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
+      !['claude-native-default', 'antigravity-home'].includes(account.name),
+    ));
+    return { ...meta, accounts: { ...meta.accounts, native } };
+  });
+
   beforeEach(() => {
+    clearTestNativeAccounts();
     secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-cmd-'));
     previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
     process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
@@ -70,6 +78,7 @@ describe('accounts switch + native naming honesty-gate', () => {
   });
 
   afterEach(() => {
+    clearTestNativeAccounts();
     setKeychainBackendForTest(null);
     _resetFileStoreForTest();
     if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
@@ -115,18 +124,18 @@ describe('accounts switch + native naming honesty-gate', () => {
   });
 
   it('refuses native name for an unsupported harness with a named reason', async () => {
-    await expect(nativeIdentityFromSource('kimi@1.0.0')).rejects.toThrow(
-      /kimi accounts can't be isolated by agents-cli yet \(device-scoped login\).*Supported today: claude, codex, grok/,
+    await expect(nativeIdentityFromSource('antigravity@1.0.0')).rejects.toThrow(
+      /antigravity accounts can't be isolated by agents-cli yet \(device-scoped login\).*Supported today: claude, codex, cursor, grok, kimi/,
     );
-    await expect(runAccounts(['name', 'kimi@1.0.0', 'work'])).rejects.toThrow(
-      "kimi accounts can't be isolated by agents-cli yet (device-scoped login)",
+    await expect(runAccounts(['name', 'antigravity@1.0.0', 'work'])).rejects.toThrow(
+      "antigravity accounts can't be isolated by agents-cli yet (device-scoped login)",
     );
   });
 
   it('refuses native attach for an unsupported harness and still allows provider add', async () => {
-    addNativeAccount('kimi-home', 'kimi', 'kimi:opaque=1', undefined, 'device');
-    await expect(runAccounts(['attach', 'kimi-home', 'kimi'])).rejects.toThrow(
-      "kimi accounts can't be isolated by agents-cli yet (device-scoped login)",
+    addNativeAccount('antigravity-home', 'antigravity', 'antigravity:opaque=1', undefined, 'device');
+    await expect(runAccounts(['attach', 'antigravity-home', 'antigravity'])).rejects.toThrow(
+      "antigravity accounts can't be isolated by agents-cli yet (device-scoped login)",
     );
     const provider = addAccount('cursor-work', 'cursor', 'api-key', 'cursor-secret', getUserAgentsDir());
     expect(provider.name).toBe('cursor-work');
@@ -154,4 +163,3 @@ describe('accounts switch + native naming honesty-gate', () => {
     expect(readMeta().accounts?.defaults?.claude).toBe(native.id);
   });
 });
-

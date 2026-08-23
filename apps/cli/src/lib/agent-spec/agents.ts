@@ -3383,17 +3383,25 @@ export function isAgentName(input: string): boolean {
 }
 
 /**
- * Split a CLI-provided `<agent>[@<version>]` spec into its bare agent id and
- * optional exact version token, the same way `agents run` does
- * (commands/exec.ts parses its positional with a plain `split('@')`) — NOT the
+ * Split a CLI-provided `<agent>[@<version>][#<label>]` spec into its bare agent
+ * id, optional exact version token, and optional account label, the same way
+ * `agents run` does — NOT the
  * agent-spec qualifier engine (`@latest`/`@all`), which enumerates installed
  * versions for read/diagnostic commands, not a single launch target. Returns an
  * error message rather than throwing so callers decide exit-vs-continue.
  */
 export function parseAgentVersionSpec(
   raw: string,
-): { agent: AgentId; version?: string } | { error: string } {
-  const parts = raw.split('@');
+): { agent: AgentId; version?: string; label?: string } | { error: string } {
+  const labelParts = raw.split('#');
+  if (labelParts.length > 2) {
+    return { error: `Invalid agent spec '${raw}': at most one '#label' is allowed` };
+  }
+  const [versionSpec, rawLabel] = labelParts;
+  if (rawLabel !== undefined && (rawLabel === '' || !/^[a-zA-Z0-9][a-zA-Z0-9@._+-]*$/.test(rawLabel))) {
+    return { error: `Invalid account label '${rawLabel}' in '${raw}'` };
+  }
+  const parts = versionSpec.split('@');
   if (parts.length > 2) {
     return { error: `Invalid agent spec '${raw}': at most one '@version' is allowed` };
   }
@@ -3405,7 +3413,7 @@ export function parseAgentVersionSpec(
   if (rawVersion !== undefined && (rawVersion === '' || !VERSION_RE.test(rawVersion))) {
     return { error: `Invalid version '${rawVersion}' in '${raw}'` };
   }
-  return { agent, ...(rawVersion ? { version: rawVersion } : {}) };
+  return { agent, ...(rawVersion ? { version: rawVersion } : {}), ...(rawLabel ? { label: rawLabel } : {}) };
 }
 
 /**

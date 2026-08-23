@@ -23,11 +23,14 @@ export interface NativeAccountCapability {
 
 /** Canonical truth for native-account naming and attachment semantics. */
 export const NATIVE_ACCOUNT_CAPABILITIES: Record<AgentId, NativeAccountCapability> = {
-  // Version-scoped with a strong account key — the only harnesses whose native
-  // identity is safe to pin per installed version.
+  // Config-isolated harnesses with a stable native identity. A labeled launch
+  // may use the auth/config home from one installed version with another binary.
   claude: { inspection: 'strong', scope: 'version', status: 'supported' },
   codex: { inspection: 'strong', scope: 'version', status: 'supported' },
   grok: { inspection: 'strong', scope: 'version', status: 'supported' },
+  cursor: { inspection: 'strong', scope: 'version', status: 'supported' },
+  // Kimi exposes a stable opaque id but no email, so it requires a manual label.
+  kimi: { inspection: 'opaque', scope: 'version', status: 'supported' },
   // Version-scoped but only an email identity — nameable only when that email is
   // present (the resolver rejects an emailless Muse login).
   muse: { inspection: 'email', scope: 'version', status: 'conditional' },
@@ -40,12 +43,8 @@ export const NATIVE_ACCOUNT_CAPABILITIES: Record<AgentId, NativeAccountCapabilit
   // "unsupported" is correct until a device-scoped identity key (with a stable
   // device id) exists to validate against.
   antigravity: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
-  kimi: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
   droid: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
   opencode: { inspection: 'opaque', scope: 'device', status: 'unsupported' },
-  // Cursor multi-account isolation is unresolved (RUSH-2400) — blocked from
-  // native naming/attachment; its API-key path is a provider account instead.
-  cursor: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
   // Discoverable in the list, but not nameable.
   gemini: { inspection: 'email', scope: 'unsupported', status: 'discovery-only' },
   copilot: { inspection: 'none', scope: 'unsupported', status: 'unsupported' },
@@ -87,9 +86,6 @@ export function nativeAccountNamingRefusal(agent: AgentId): string | null {
   const suffix = `Supported today: ${supportedNativeHarnesses().join(', ')}.`;
   if (cap.scope === 'device') {
     return `${agent} accounts can't be isolated by agents-cli yet (device-scoped login). ${suffix}`;
-  }
-  if (agent === 'cursor') {
-    return `${agent} accounts can't be isolated by agents-cli yet (multi-account isolation unresolved). ${suffix}`;
   }
   if (cap.status === 'discovery-only') {
     return `${agent} native accounts are discovery-only; agents-cli cannot name or attach this login. ${suffix}`;

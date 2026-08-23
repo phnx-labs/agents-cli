@@ -218,6 +218,8 @@ export type ExecEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 export interface ExecOptions {
   agent: AgentId;
   version?: string;
+  /** Version home whose native auth/config is overlaid onto this run's binary. */
+  configVersion?: string;
   /** Omit to launch the CLI interactively -- no prompt, no --print, stdio fully inherited. */
   prompt?: string;
   /** Force interactive mode even when a prompt is provided. Wins over `headless`. */
@@ -428,7 +430,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     const { version, versionHome } = resolveConfigVersion(
       options.agent,
       options.cwd || process.cwd(),
-      options.version,
+      options.configVersion ?? options.version,
     );
     configAdapter.applyExecConfigEnv(result, {
       agent: options.agent,

@@ -5,7 +5,7 @@ import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
-import { getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
+import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
 import { assertNativeAccountNameable, nativeAccountCapability, nativeIdentityKey } from '../lib/account-capabilities.js';
 import { collectRunCandidates } from '../lib/accounting/rotate.js';
 import { isInteractiveTerminal } from './utils.js';
@@ -18,7 +18,11 @@ import { runDevicesAccounts } from './ssh.js';
 import { discoverNativeAccounts } from '../lib/account-catalog.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, type AccountAuthKind } from '../lib/account-provider-registry.js';
-import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
+import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
+
+function cleanCommandError(command: Command, err: unknown): never {
+  command.error(err instanceof Error ? err.message : String(err), { exitCode: 1, code: 'accounts.error' });
+}
 
 function parseInstallation(raw: string): { agent: AgentId; version: string } {
   const at = raw.lastIndexOf('@');
@@ -280,11 +284,35 @@ export function registerAccountsCommand(program: Command): void {
 
   accounts.command('name <source> <name>')
     .description('Name a signed-in native installation without copying its OAuth credentials')
-    .action(async (source: string, name: string) => {
-      const identity = await nativeIdentityFromSource(source);
-      const account = addNativeAccount(name, identity.agent, identity.identityKey, identity.identityLabel, identity.scope);
-      console.log(chalk.green(`Named ${source} as ${account.name}.`));
-      if (account.scope === 'device') console.log(chalk.gray(`${identity.agent} authentication is device-scoped; attach '${account.name}' to '${identity.agent}', not an individual version.`));
+    .action(async (source: string, name: string, _o: unknown, command: Command) => {
+      try {
+        const identity = await nativeIdentityFromSource(source);
+        const account = addNativeAccount(name, identity.agent, identity.identityKey, identity.identityLabel, identity.scope);
+        console.log(chalk.green(`Named ${source} as ${account.name}.`));
+        if (account.scope === 'device') console.log(chalk.gray(`${identity.agent} authentication is device-scoped; attach '${account.name}' to '${identity.agent}', not an individual version.`));
+      } catch (err) { cleanCommandError(command, err); }
+    });
+
+  accounts.command('label <harness> [label]')
+    .description('Label a native login independently of its installed harness version')
+    .option('--account <email-or-id>', 'Native identity to label when the harness has multiple logins')
+    .action(async (harness: string, label: string | undefined, o: { account?: string }, command: Command) => {
+      try {
+        const agent = parseHarness(harness);
+        assertNativeAccountNameable(agent);
+        const candidates = (await collectRunCandidates(agent)).filter(candidate => candidate.signedIn);
+        const needle = o.account?.toLowerCase();
+        const selected = needle
+          ? candidates.find(candidate => candidate.email?.toLowerCase() === needle || candidate.accountKey?.toLowerCase() === needle)
+          : candidates.find(candidate => candidate.version === getGlobalDefault(agent)) ?? (candidates.length === 1 ? candidates[0] : undefined);
+        if (!selected) throw new Error(needle
+          ? `Unknown ${agent} account '${o.account}'.`
+          : `Multiple ${agent} accounts are connected; pass --account <email|id>.`);
+        const identityKey = selected.accountKey ?? selected.email?.toLowerCase();
+        if (!identityKey) throw new Error(`${agent} account '${selected.version}' has no stable identity.`);
+        const account = labelNativeAccount(agent, identityKey, selected.email ?? undefined, label, nativeAccountCapability(agent).scope as 'version' | 'device');
+        console.log(chalk.green(`Labeled ${agent} account ${selected.email ?? identityKey} as '${account.name}'.`));
+      } catch (err) { cleanCommandError(command, err); }
     });
 
   accounts.command('attach <account> <target>')
@@ -331,16 +359,19 @@ export function registerAccountsCommand(program: Command): void {
 
   accounts.command('set-default <agent> <name>')
     .description('Use this account for a harness when --account is omitted')
-    .action((agentRaw: string, name: string) => {
-      const { agent, account } = setDefaultAccount(agentRaw, name);
-      console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
+    .action((agentRaw: string, name: string, _o: unknown, command: Command) => {
+      try {
+        const { agent, account } = setDefaultAccount(agentRaw, name);
+        console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
+      } catch (err) { cleanCommandError(command, err); }
     });
 
   const switchCmd = accounts.command('switch <harness> [account]')
     .description('Pick the default account for a harness')
     .option('--json', 'Machine-readable account list or the resulting default')
     .action(async (harness: string, account: string | undefined, o: { json?: boolean }, command: Command) => {
-      await runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) });
+      try { await runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) }); }
+      catch (err) { cleanCommandError(command, err); }
     });
 
   accounts.command('clear-default <agent>')
