@@ -11,6 +11,8 @@
  */
 import { formatTokenCount } from './render.js';
 import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
+import type { TrajectoryComparison, TrajectorySummary } from './trajectory-compare.js';
+import type { SessionMeta } from './types.js';
 
 export interface RenderTrajectoryTextOptions {
   /** Collapse to error steps and their immediate neighbours. */
@@ -135,6 +137,72 @@ export function renderTrajectoryText(
   // Where the time went.
   const share = shareLine(model);
   if (share) lines.push(share);
+
+  return lines.join('\n') + '\n';
+}
+
+export interface RenderTrajectoryCompareTextOptions {
+  /** Cap on step lines listed per diff column; the remainder is collapsed with a count. Default 15. */
+  maxDiffLines?: number;
+}
+
+const DEFAULT_MAX_DIFF_LINES = 15;
+
+function sessionLabel(session: SessionMeta): string {
+  return `${session.agent} ${session.shortId || session.id}`;
+}
+
+function summaryLine(summary: TrajectorySummary): string {
+  const spanMin = summary.spanMs > 0 ? `${Math.max(1, Math.round(summary.spanMs / 60_000))}m` : '0m';
+  const errPart = summary.errorCount > 0 ? ` · ${summary.errorCount}✗` : '';
+  const tokPart = summary.outputTokens > 0 ? ` · ${formatTokenCount(summary.outputTokens)} out` : '';
+  return `  ${sessionLabel(summary.session)} · ${spanMin} · ${summary.toolCount} tools${errPart}${tokPart}`;
+}
+
+function diffColumn(heading: string, steps: TrajectoryStep[], maxLines: number): string[] {
+  if (steps.length === 0) return [`${heading} (0): none`];
+  const lines = [`${heading} (${steps.length}):`];
+  const shown = steps.slice(0, maxLines);
+  for (const step of shown) {
+    const mark = outcomeMark(step);
+    lines.push(`  ${pad(step.tool ?? step.kind, 6)} ${pad(clipLabel(step.label), LABEL_COL)} ${dur(step.durationMs, step.durationEstimated)}${mark ? ' ' + mark : ''}`.trimEnd());
+  }
+  const omitted = steps.length - shown.length;
+  if (omitted > 0) lines.push(`  … ${omitted} more`);
+  return lines;
+}
+
+/**
+ * Render a two-session {@link TrajectoryComparison} as compact, ANSI-free text —
+ * both sessions' headline stats, the first divergence point, and the step-level
+ * diff (only-in-first / only-in-second), each capped so a triaging agent pays a
+ * bounded token cost regardless of how far the two runs diverge.
+ */
+export function renderTrajectoryCompareText(
+  cmp: TrajectoryComparison,
+  options: RenderTrajectoryCompareTextOptions = {},
+): string {
+  const maxDiffLines = options.maxDiffLines ?? DEFAULT_MAX_DIFF_LINES;
+  const labelA = sessionLabel(cmp.a.session);
+  const labelB = sessionLabel(cmp.b.session);
+  const lines: string[] = [];
+
+  lines.push(`compare: ${labelA} vs ${labelB}`);
+  lines.push(summaryLine(cmp.summaryA));
+  lines.push(summaryLine(cmp.summaryB));
+
+  if (cmp.divergence) {
+    lines.push(`diverge after step ${cmp.divergence.afterOrdinalA}/${cmp.divergence.afterOrdinalB}: ${cmp.divergence.detail}`);
+  } else {
+    lines.push('no divergence — tool sequences match');
+  }
+
+  if (cmp.truncatedA > 0 || cmp.truncatedB > 0) {
+    lines.push(`diff capped — ${cmp.truncatedA} step(s) from the first and ${cmp.truncatedB} from the second were not compared`);
+  }
+
+  lines.push(...diffColumn(`only in ${labelA}`, cmp.removed, maxDiffLines));
+  lines.push(...diffColumn(`only in ${labelB}`, cmp.added, maxDiffLines));
 
   return lines.join('\n') + '\n';
 }

@@ -15,6 +15,7 @@
 import { formatDuration, formatTokenCount } from './render.js';
 import { escapeHtml } from './share-html.js';
 import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
+import type { TrajectoryComparison } from './trajectory-compare.js';
 
 /** Color a tool bar by family; an error outcome overrides to red. */
 function toolColor(step: TrajectoryStep): string {
@@ -195,7 +196,42 @@ export function renderTrajectoryHtml(model: SessionTrajectory): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="robots" content="noindex" />
 <title>${escapeHtml(title)} — trajectory</title>
-<style>
+<style>${BASE_STYLE}</style>
+</head>
+<body>
+<header>
+  <div class="inner">
+    <button class="toggle" id="theme" title="Toggle light and dark">&#9689;</button>
+    <div class="mark">agents session trace</div>
+    <h1>${escapeHtml(title)}${model2 ? ` <span class="muted">${model2}</span>` : ''}</h1>
+    <div class="metrics">${metricLine}</div>
+    <div class="chips">
+      ${chips.join('\n      ')}
+    </div>
+  </div>
+</header>
+<main>
+  <h2>Trajectory</h2>
+  ${gapNote}
+  ${truncNote}
+  ${renderWaterfallSvg(model)}
+  <h2>Where the time went</h2>
+  ${renderTimeShare(model)}
+  <h2>Steps</h2>
+  <div class="steps">
+    ${renderStepDetail(model)}
+  </div>
+</main>
+<footer>
+  ${model.truncatedSteps > 0 ? 'Truncated · ' : ''}Secret-redacted trajectory rendered by agents-cli &middot; <code>agents sessions trace</code>
+</footer>
+<script>${THEME_SCRIPT}</script>
+</body>
+</html>
+`;
+}
+
+const BASE_STYLE = `
   :root {
     --bg: #0a0a0a; --panel: #121212; --border: #262626; --fg: #e5e5e5;
     --dim: #737373; --accent: #a3e635; --quote: #1a1a1a;
@@ -281,36 +317,26 @@ export function renderTrajectoryHtml(model: SessionTrajectory): string {
     color: var(--dim); font-size: 12px;
     font-family: ui-monospace, "JetBrains Mono", Menlo, monospace;
   }
-</style>
-</head>
-<body>
-<header>
-  <div class="inner">
-    <button class="toggle" id="theme" title="Toggle light and dark">&#9689;</button>
-    <div class="mark">agents session trace</div>
-    <h1>${escapeHtml(title)}${model2 ? ` <span class="muted">${model2}</span>` : ''}</h1>
-    <div class="metrics">${metricLine}</div>
-    <div class="chips">
-      ${chips.join('\n      ')}
-    </div>
-  </div>
-</header>
-<main>
-  <h2>Trajectory</h2>
-  ${gapNote}
-  ${truncNote}
-  ${renderWaterfallSvg(model)}
-  <h2>Where the time went</h2>
-  ${renderTimeShare(model)}
-  <h2>Steps</h2>
-  <div class="steps">
-    ${renderStepDetail(model)}
-  </div>
-</main>
-<footer>
-  ${model.truncatedSteps > 0 ? 'Truncated · ' : ''}Secret-redacted trajectory rendered by agents-cli &middot; <code>agents sessions trace</code>
-</footer>
-<script>
+`;
+
+/** Compare-only rules layered on top of {@link BASE_STYLE} — lanes, divergence marker, summary table. */
+const COMPARE_STYLE = `
+  svg .diverge { stroke: #e0b341; stroke-width: 1.4; stroke-dasharray: 4 3; }
+  .diverge-note { color: #e0b341; font-size: 12.5px; margin: 6px 0; }
+  table.cmp-table { border-collapse: collapse; width: 100%; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12.5px; }
+  table.cmp-table th, table.cmp-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+  table.cmp-table th { color: var(--dim); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: .5px; }
+  .diff-cols { display: flex; gap: 24px; flex-wrap: wrap; }
+  .diff-col { flex: 1; min-width: 260px; }
+  .diff-col h3 { font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: .5px; margin: 0 0 8px; }
+  .diff-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+  .diff-list li {
+    font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px;
+    border: 1px solid var(--border); border-radius: 5px; padding: 5px 8px; background: var(--panel);
+  }
+`;
+
+const THEME_SCRIPT = `
   (function () {
     var root = document.documentElement;
     var saved = null;
@@ -324,7 +350,136 @@ export function renderTrajectoryHtml(model: SessionTrajectory): string {
       try { localStorage.setItem('agents-share-theme', next); } catch (e) {}
     });
   })();
-</script>
+`;
+
+function compareTitle(cmp: TrajectoryComparison): string {
+  const a = cmp.a.session;
+  const b = cmp.b.session;
+  return `${a.agent} ${a.shortId || a.id} vs ${b.agent} ${b.shortId || b.id}`;
+}
+
+function renderCompareWaterfallSvg(cmp: TrajectoryComparison): string {
+  const { a, b, divergence } = cmp;
+  const sharedSpan = Math.max(a.spanMs, b.spanMs, 1);
+  const rowH = 26;
+  const top = 34;
+  const width = GEO.labelW + GEO.chartW + 40;
+  const height = top + 2 * rowH + 16;
+  const parts: string[] = [];
+  parts.push(`<svg viewBox="0 0 ${width} ${height}" width="100%" role="img" aria-label="Compare waterfall: two sessions' tool calls on a shared time axis with a divergence marker" xmlns="http://www.w3.org/2000/svg">`);
+
+  const axisY = top - 10;
+  parts.push(`<line x1="${GEO.labelW}" y1="${axisY}" x2="${GEO.labelW + GEO.chartW}" y2="${axisY}" class="axis" />`);
+  for (const tick of axisTicks(sharedSpan)) {
+    const x = GEO.labelW + tick.frac * GEO.chartW;
+    parts.push(`<text x="${x.toFixed(1)}" y="${axisY - 3}" class="tick">${escapeHtml(tick.label)}</text>`);
+  }
+
+  const lanes = [
+    { session: a.session, steps: a.steps.filter((s) => s.kind === 'tool') },
+    { session: b.session, steps: b.steps.filter((s) => s.kind === 'tool') },
+  ];
+  lanes.forEach((lane, li) => {
+    const y = top + li * rowH;
+    const barY = y + 5;
+    const barH = rowH - 12;
+    const label = `${lane.session.agent} ${lane.session.shortId || lane.session.id}`;
+    parts.push(`<text x="${GEO.labelW - 6}" y="${y + rowH / 2 + 3}" class="lane" text-anchor="end">${escapeHtml(label)}</text>`);
+    for (const step of lane.steps) {
+      const x = GEO.labelW + Math.min(1, Math.max(0, step.startMs / sharedSpan)) * GEO.chartW;
+      const w = Math.max(3, (step.durationMs / sharedSpan) * GEO.chartW);
+      const color = toolColor(step);
+      const dur = formatStepDuration(step.durationMs);
+      parts.push(`<rect x="${x.toFixed(1)}" y="${barY}" width="${w.toFixed(1)}" height="${barH}" rx="2" fill="${color}"><title>${escapeHtml(label)} · step ${step.ordinal} · ${escapeHtml(step.tool ?? step.kind)} · ${escapeHtml(dur)}${step.outcome === 'error' ? ' ✗' : ''}</title></rect>`);
+    }
+  });
+
+  if (divergence) {
+    const dxA = GEO.labelW + Math.min(1, Math.max(0, divergence.startMsA / sharedSpan)) * GEO.chartW;
+    const dxB = GEO.labelW + Math.min(1, Math.max(0, divergence.startMsB / sharedSpan)) * GEO.chartW;
+    const dx = Math.min(dxA, dxB);
+    parts.push(`<line x1="${dx.toFixed(1)}" y1="${top - 6}" x2="${dx.toFixed(1)}" y2="${top + 2 * rowH}" class="diverge"><title>diverge: ${escapeHtml(divergence.detail)}</title></line>`);
+  }
+
+  parts.push('</svg>');
+  return parts.join('\n');
+}
+
+function renderCompareSummaryTable(cmp: TrajectoryComparison): string {
+  const rows = [cmp.summaryA, cmp.summaryB].map((s) => {
+    const label = `${s.session.agent} ${s.session.shortId || s.session.id}`;
+    return `<tr><td>${escapeHtml(label)}</td><td>${s.toolCount}</td><td>${s.errorCount}</td><td>${escapeHtml(formatDuration(s.spanMs))}</td><td>${escapeHtml(formatTokenCount(s.outputTokens))}</td></tr>`;
+  }).join('\n');
+  return `<table class="cmp-table"><thead><tr><th>session</th><th>tools</th><th>errors</th><th>duration</th><th>tokens</th></tr></thead><tbody>${rows}</tbody></table>`;
+}
+
+function renderStepListItem(step: TrajectoryStep): string {
+  const dur = formatStepDuration(step.durationMs);
+  return `<li>${escapeHtml(step.tool ?? step.kind)} · ${escapeHtml(clipLabel(step.label))} <span class="muted">${escapeHtml(dur)}</span></li>`;
+}
+
+function renderCompareDiffLists(cmp: TrajectoryComparison): string {
+  const aLabel = `${cmp.a.session.agent} ${cmp.a.session.shortId || cmp.a.session.id}`;
+  const bLabel = `${cmp.b.session.agent} ${cmp.b.session.shortId || cmp.b.session.id}`;
+  const removedItems = cmp.removed.length > 0
+    ? cmp.removed.map(renderStepListItem).join('\n')
+    : '<li class="muted">none</li>';
+  const addedItems = cmp.added.length > 0
+    ? cmp.added.map(renderStepListItem).join('\n')
+    : '<li class="muted">none</li>';
+  return `<div class="diff-cols">
+    <div class="diff-col">
+      <h3>Only in ${escapeHtml(aLabel)} (${cmp.removed.length})</h3>
+      <ul class="diff-list">${removedItems}</ul>
+    </div>
+    <div class="diff-col">
+      <h3>Only in ${escapeHtml(bLabel)} (${cmp.added.length})</h3>
+      <ul class="diff-list">${addedItems}</ul>
+    </div>
+  </div>`;
+}
+
+/** Render a two-session {@link TrajectoryComparison} as a self-contained HTML page. */
+export function renderTrajectoryCompareHtml(cmp: TrajectoryComparison): string {
+  const title = compareTitle(cmp);
+  const divergenceNote = cmp.divergence
+    ? `<p class="diverge-note">◆ diverge after step ${cmp.divergence.afterOrdinalA}/${cmp.divergence.afterOrdinalB} — ${escapeHtml(cmp.divergence.detail)}</p>`
+    : '<p class="muted">No divergence — the two tool sequences match.</p>';
+  const truncNote = (cmp.truncatedA > 0 || cmp.truncatedB > 0)
+    ? `<p class="stall">Diff capped — ${cmp.truncatedA} step${cmp.truncatedA === 1 ? '' : 's'} from the first and ${cmp.truncatedB} from the second were not compared.</p>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>${escapeHtml(title)} — compare</title>
+<style>${BASE_STYLE}${COMPARE_STYLE}</style>
+</head>
+<body>
+<header>
+  <div class="inner">
+    <button class="toggle" id="theme" title="Toggle light and dark">&#9689;</button>
+    <div class="mark">agents session trace · compare</div>
+    <h1>${escapeHtml(title)}</h1>
+  </div>
+</header>
+<main>
+  <h2>Trajectory</h2>
+  ${truncNote}
+  ${renderCompareWaterfallSvg(cmp)}
+  ${divergenceNote}
+  <h2>Summary</h2>
+  ${renderCompareSummaryTable(cmp)}
+  <h2>Step diff</h2>
+  ${renderCompareDiffLists(cmp)}
+</main>
+<footer>
+  Secret-redacted compare rendered by agents-cli &middot; <code>agents sessions trace</code>
+</footer>
+<script>${THEME_SCRIPT}</script>
 </body>
 </html>
 `;

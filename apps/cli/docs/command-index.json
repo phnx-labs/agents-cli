@@ -24412,6 +24412,24 @@
               "negate": false
             },
             {
+              "flags": "--compare",
+              "description": "Force the compare layout for exactly two selectors (this is also the default for two)",
+              "long": "--compare",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--tree",
+              "description": "Force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up PR",
+              "long": "--tree",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--no-redact",
               "description": "Local-only: skip secret redaction of derived labels (never for a shared file)",
               "long": "--no-redact",
@@ -24468,8 +24486,8 @@
               "negate": false
             }
           ],
-          "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open",
-          "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\n--json emits { schemaVersion, kind: 'sessions-trace', layout: 'single', sessions: [SessionTrajectory] } —\nthe contract consumers read so nothing re-parses a transcript.\n\nThis release renders ONE session. Passing several selectors is an error: compare (several sessions)\nand lineage (a parent + its team) land in a follow-up PR.",
+          "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents sessions trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents sessions trace a1b2c3d4 e5f6a7b8 --text",
+          "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff). --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare', sessions: [SessionTrajectory], diff? } — the contract consumers read so\nnothing re-parses a transcript.\n\nThree or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that\nlayout lands in a follow-up PR.",
           "subcommands": []
         },
         {
@@ -28010,6 +28028,24 @@
           "negate": false
         },
         {
+          "flags": "--compare",
+          "description": "Force the compare layout for exactly two selectors (this is also the default for two)",
+          "long": "--compare",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
+          "flags": "--tree",
+          "description": "Force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up PR",
+          "long": "--tree",
+          "required": false,
+          "optional": false,
+          "variadic": false,
+          "negate": false
+        },
+        {
           "flags": "--no-redact",
           "description": "Local-only: skip secret redaction of derived labels (never for a shared file)",
           "long": "--no-redact",
@@ -28066,8 +28102,8 @@
           "negate": false
         }
       ],
-      "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open",
-      "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\n--json emits { schemaVersion, kind: 'sessions-trace', layout: 'single', sessions: [SessionTrajectory] } —\nthe contract consumers read so nothing re-parses a transcript.\n\nThis release renders ONE session. Passing several selectors is an error: compare (several sessions)\nand lineage (a parent + its team) land in a follow-up PR.",
+      "examples": "# Open one session's trajectory in a browser (a person at a terminal)\nagents sessions trace a1b2c3d4\n\n# The compact text trajectory an agent reads in-context\nagents sessions trace a1b2c3d4 --text\n\n# Just the failures and their neighbours — for a triaging agent\nagents sessions trace a1b2c3d4 --text --errors-only\n\n# The stable JSON envelope for the AGI EXT Fleet panel or a tool\nagents sessions trace a1b2c3d4 --json\n\n# Write the self-contained HTML to a file without opening it\nagents sessions trace a1b2c3d4 --html -o trace.html --no-open\n\n# Two selectors — compare where a passing run and a failing one diverge\nagents sessions trace a1b2c3d4 e5f6a7b8\n\n# The compare, as text — for a triaging agent comparing harnesses\nagents sessions trace a1b2c3d4 e5f6a7b8 --text",
+      "notes": "Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and\nthe compact text trajectory prints when piped or headless (an agent). The HTML is self-contained\n(no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.\n\nOne selector renders the single trajectory; exactly two selectors compare them (a shared time axis,\nthe first divergence point, and the step-level diff). --json emits { schemaVersion, kind: 'sessions-trace',\nlayout: 'single' | 'compare', sessions: [SessionTrajectory], diff? } — the contract consumers read so\nnothing re-parses a transcript.\n\nThree or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that\nlayout lands in a follow-up PR.",
       "subcommands": []
     },
     {

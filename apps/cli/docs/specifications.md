@@ -974,20 +974,28 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
 - **SES-IF-4d (MUST).** `sessions trace` and its top-level alias `trace` MUST invoke
   the same implementation (`commands/sessions-trace.ts` `configureTraceCommand`), and
   `--json` MUST emit its own versioned envelope
-  (`{ schemaVersion, kind: 'sessions-trace', layout: 'single', sessions: SessionTrajectory[] }`),
-  never the `SessionMeta[]` list or the `{ session, events }` render detail shape. A
-  `SessionTrajectory` MUST carry `spanMs`, `steps[]`, `gaps[]`, `toolTimeShare`,
-  `errorCount`, and `stats`; each `TrajectoryStep` MUST carry `startMs`, `durationMs`,
-  and `durationEstimated`, where per-step `durationMs` is **derived** by pairing a
-  `tool_use` with its `tool_result`/`error` on `callId` (never persisted onto
-  `SessionEvent` or the `tool_calls` index), and `durationEstimated` MUST be `true`
-  whenever the value is the next-event fallback rather than a measured pairing.
-  Concurrent same-tool calls MUST correlate strictly by `callId`, never by arrival
-  order (matching `ToolCallCollector.takePending`). With no `--html/--text/--json`,
-  the rendering MUST be audience-selected: HTML on a TTY, compact text otherwise; the
-  HTML MUST be self-contained (no external asset) and redacted by default. This
-  release renders exactly one session; >1 resolved selector MUST fail loud, never
-  silently trace the first (`commands/sessions-trace.ts`; `lib/session/trajectory.ts`).
+  (`{ schemaVersion, kind: 'sessions-trace', layout: 'single' | 'compare', sessions:
+  SessionTrajectory[], diff? }`), never the `SessionMeta[]` list or the `{ session,
+  events }` render detail shape. A `SessionTrajectory` MUST carry `spanMs`, `steps[]`,
+  `gaps[]`, `toolTimeShare`, `errorCount`, and `stats`; each `TrajectoryStep` MUST
+  carry `startMs`, `durationMs`, and `durationEstimated`, where per-step `durationMs`
+  is **derived** by pairing a `tool_use` with its `tool_result`/`error` on `callId`
+  (never persisted onto `SessionEvent` or the `tool_calls` index), and
+  `durationEstimated` MUST be `true` whenever the value is the next-event fallback
+  rather than a measured pairing. Concurrent same-tool calls MUST correlate strictly
+  by `callId`, never by arrival order (matching `ToolCallCollector.takePending`). With
+  no `--html/--text/--json`, the rendering MUST be audience-selected: HTML on a TTY,
+  compact text otherwise; the HTML MUST be self-contained (no external asset) and
+  redacted by default. One resolved selector renders the single-session trajectory;
+  exactly two render a **compare** (`diffTrajectories()`,
+  `lib/session/trajectory-compare.ts`) — the two sessions' tool-step sequences
+  aligned by tool name, the first divergence point, the steps each session ran with
+  no counterpart in the other, and a per-session summary, in all three renderings.
+  Three or more resolved selectors, or `--tree`, MUST fail loud, never silently trace
+  or compare a subset (`commands/sessions-trace.ts`; `lib/session/trajectory.ts`;
+  `lib/session/trajectory-compare.ts`). Lineage (a parent + its team, `--tree`) is not
+  yet implemented.
+  Status: `[Intended]` for lineage — see SES-GAP-11.
 
 #### 4.3 stdout / stderr / exit discipline
 
@@ -1137,6 +1145,11 @@ normative — a change that widens/narrows a cell is a spec change.
   false-ambiguous resume (the empty-file index row's recorded machine being
   clobbered by the path derivation in `queryIndexedSessions`) is fixed in the
   same change; see the SES-23a "pool listing agrees with the live view" bullet.
+- **SES-GAP-11.** `sessions trace --tree` (lineage: a parent + its team, drawn as a
+  node graph over `enrichTeamOrigins`/`groupSessionsByTeam`) is not implemented —
+  passing `--tree`, or three or more resolved selectors, fails loud rather than
+  rendering anything (SES-IF-4d). The single-session trajectory and the two-session
+  compare are both implemented.
 ---
 
 ### 8. Given/When/Then scenarios

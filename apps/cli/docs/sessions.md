@@ -924,16 +924,17 @@ escaped** so a session that printed a `<script>` tag does not ship an executable
 
 ### Trajectory (`sessions trace`)
 
-`agents sessions trace <selector>` (top-level alias: `agents trace <selector>`) turns
-one session into a derived **trajectory** — a tool-call timeline you read at a glance
-instead of scrolling the Markdown wall. Where `render` is a linear transcript, `trace`
-answers "what ran, in what order, how long each step took, where it errored, and where
-it stalled." It consumes the same normalized `SessionEvent[]` model and computes one
-thing nothing else does: a **per-step duration**, by pairing each `tool_use` with its
-`tool_result` on `callId` (a step falls back to the next-event delta and is marked
-`durationEstimated` when a harness omits the result, so measured and inferred are never
-conflated). It also flags idle gaps (stalls), a per-tool "where the time went" share,
-and tags inline `Task`/`Agent` sub-agents.
+`agents sessions trace <selectors...>` (top-level alias: `agents trace <selectors...>`)
+turns one session into a derived **trajectory** — a tool-call timeline you read at a
+glance instead of scrolling the Markdown wall — or two sessions into a **compare**.
+Where `render` is a linear transcript, `trace` answers "what ran, in what order, how
+long each step took, where it errored, and where it stalled." It consumes the same
+normalized `SessionEvent[]` model and computes one thing nothing else does: a
+**per-step duration**, by pairing each `tool_use` with its `tool_result` on `callId` (a
+step falls back to the next-event delta and is marked `durationEstimated` when a
+harness omits the result, so measured and inferred are never conflated). It also flags
+idle gaps (stalls), a per-tool "where the time went" share, and tags inline
+`Task`/`Agent` sub-agents.
 
 One model renders three ways, **auto-selected by audience**:
 
@@ -945,8 +946,8 @@ One model renders three ways, **auto-selected by audience**:
   token-bounded trajectory an agent reads in-context. `--errors-only` collapses it to
   the failures and their neighbours.
 - **`--json`**: the versioned envelope `{ schemaVersion, kind: 'sessions-trace',
-  layout: 'single', sessions: [SessionTrajectory] }` — the stable contract consumers
-  read so nothing re-parses a transcript.
+  layout: 'single' | 'compare', sessions: [SessionTrajectory], diff? }` — the stable
+  contract consumers read so nothing re-parses a transcript.
 
 ```bash
 agents sessions trace a1b2c3d4                       # open the HTML (a person at a terminal)
@@ -954,12 +955,36 @@ agents sessions trace a1b2c3d4 --text                # compact trajectory (an ag
 agents sessions trace a1b2c3d4 --text --errors-only  # just the failures + neighbours
 agents sessions trace a1b2c3d4 --json                # the versioned envelope
 agents sessions trace a1b2c3d4 --html -o trace.html --no-open
+
+agents sessions trace a1b2c3d4 e5f6a7b8               # two selectors -> compare
+agents sessions trace a1b2c3d4 e5f6a7b8 --text        # the compare, as compact text
 ```
 
-This release renders **one** session. Passing several selectors fails loud: compare
-(several sessions on a shared axis) and lineage (a parent + its team) land in a
-follow-up PR — never a silent single-session fallback. Everything is derived from the
-event stream; nothing is persisted onto `SessionEvent` or the `tool_calls` index.
+#### Compare (two selectors)
+
+Pass **exactly two** selectors and the same command renders a **compare**: the two
+sessions' tool sequences aligned by tool name (`diffTrajectories()` in
+`apps/cli/src/lib/session/trajectory-compare.ts`), laid on a shared relative-time
+axis, with the **first divergence point** — where the two runs' tool order stops
+lining up — called out, plus the steps each session ran that the other never did
+(the step-level diff) and a per-session summary (tools, errors, duration, tokens).
+Useful for "the same ticket run by Claude and Codex — where did they diverge?" or "a
+passing run vs. a failing retry — what did the failing one do extra?"
+
+- **HTML**: two stacked lanes on one time axis, a dashed divergence marker, a summary
+  table, and the "only in the first" / "only in the second" step lists.
+- **Text**: both sessions' headline stats, the divergence line, and the capped diff
+  lists — token-bounded the same way the single-session text trajectory is.
+- **`--json`**: `layout: 'compare'`, `sessions: [a, b]` (the two full
+  `SessionTrajectory` models — nothing re-parses either transcript), and `diff:
+  { divergence?, added, removed, summaryA, summaryB, truncatedA, truncatedB }`.
+
+`--compare` forces the compare layout (and fails loud if fewer than two selectors
+resolved); it is otherwise implicit for exactly two. **Three or more selectors, or
+`--tree`, fail loud** in this release: lineage (a parent + its team) lands in a
+follow-up PR — never a silent single-session or first-two-of-N fallback. Everything is
+derived from the event stream; nothing is persisted onto `SessionEvent` or the
+`tool_calls` index.
 
 ## Live sessions (`--active`) and the interactive browser
 
