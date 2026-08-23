@@ -16,12 +16,25 @@ import { shouldEnableCiTestProfile } from './tests/hermetic-guards';
 const isWin = process.platform === 'win32';
 const ignoreUnhandledPoolErrors = isWin || shouldEnableCiTestProfile(process.env);
 
+// RUSH-3081/RUSH-3015: the attestation producer (release-attestation-produce.sh,
+// AGENTS_ATTEST_PRODUCER=1) runs the FULL suite on the signing Mac (mac-mini),
+// which is a shared box usually under concurrent load. With the default forks
+// pool spawning a worker per core, these real-CLI / real-service integration
+// tests contend on shared state and flake (1-2 different tests per run out of
+// ~13k) and workers OOM/crash — observed failing ~every producer run across ~10
+// attempts, blocking releases. Cap producer concurrency so the suite runs stably
+// enough to attest. Only the producer is affected (a signing-Mac full-suite run);
+// normal CI on dedicated crabboxes (CI=true, not AGENTS_ATTEST_PRODUCER) keeps
+// full parallelism and its 90s budget.
+const isAttestProducer = process.env.AGENTS_ATTEST_PRODUCER === '1';
+
 export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
     pool: 'forks',
     ...(isWin ? { maxWorkers: 2, minWorkers: 1 } : {}),
+    ...(isAttestProducer && !isWin ? { maxWorkers: 4, minWorkers: 1 } : {}),
     // Hermeticity (#910): every fork gets a temp-pinned broker socket, events
     // sink, and broker-off defaults BEFORE the test file's imports run.
     setupFiles: ['./tests/setup.ts'],
