@@ -645,10 +645,12 @@ agents devices sync                     # ingest `tailscale status`
 agents devices ignore ipad              # sync the dismissal via agents.yaml fleet.discovery
 agents repo push user                    # carry device decisions to the other machines
 agents repo pull user                    # pull and reconcile them into this machine's registry
-agents devices list                     # fleet + headroom: load, mem, idle/busy — which box has room (cache-first)
+agents devices list                     # spec (cores/RAM/disk) + load/mem/disk + headroom + role + description
 agents devices list --live              # force a live probe of every device (alias of --refresh)
-agents devices list --full              # add per-device cores and free/total RAM
+agents devices list --full              # add per-device free/total RAM detail
 agents devices list --no-stats          # instant: names/addresses only, skip the probe
+agents devices describe mac-mini "signing + notarize box"   # one-line purpose, synced + shown in the list
+agents devices ignored                  # dismissed nodes — when, and which machine dismissed them
 agents devices config zion interactive.host zion   # the device agents show YOU artifacts on (★ in the list)
 agents devices config mac-mini agents.max-concurrent 4   # per-device settings (tracked devices/<name>/agents.yaml)
 agents devices config mac-mini scheduler.enabled off     # bare `devices config <name>` opens a settings menu (TTY)

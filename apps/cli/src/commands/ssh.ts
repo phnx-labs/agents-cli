@@ -28,6 +28,7 @@ import {
   getDevice,
   loadDevices,
   loadIgnored,
+  loadIgnoredEntries,
   removeDevice,
   removeIgnored,
   upsertDevice,
@@ -36,6 +37,7 @@ import {
   type DevicePlatform,
   type DeviceProfile,
   type DeviceRegistry,
+  type IgnoredDeviceEntry,
 } from '../lib/devices/registry.js';
 import { resolveDeviceProfile } from '../lib/devices/resolve-profile.js';
 import { collectReachabilityWriteBacks, deviceOnlineState } from '../lib/devices/reachability.js';
@@ -100,7 +102,7 @@ import { buildRemoteAgentsInvocation } from '../lib/hosts/remote-cmd.js';
 import { listTasks, resolveTaskRef } from '../lib/hosts/tasks.js';
 import { reconcileRunningTasks } from '../lib/hosts/reconcile.js';
 import { stopDispatchedTask } from '../lib/hosts/dispatch.js';
-import { terminalWidth, truncateToWidth } from '../lib/session/width.js';
+import { stringWidth, stripAnsi, terminalWidth, truncateToWidth } from '../lib/session/width.js';
 import { sshExec, sshExecAsync, SSH_OPTS } from '../lib/ssh-exec.js';
 import { ALL_AGENT_IDS } from '../lib/agents.js';
 import type { AgentId } from '../lib/types.js';
@@ -206,20 +208,66 @@ function pctCell(v: number | undefined, width: number): string {
   return chalk.red(s);
 }
 
+/** Display width of the `spec` column ("32c 128G 1.5T" fits). */
+const SPEC_WIDTH = 12;
+
+/** The static hardware as one compact cell — `12c 64G 1T`: cores, total RAM,
+ * total root disk via fmtBytes. `—` when the probe never saw the box (specs
+ * ride the long-TTL static tier, so a warm cache almost always has them). */
+function specCell(stats: DeviceStats | undefined): string {
+  if (!stats?.reachable || !stats.ncpu) return chalk.gray('—'.padEnd(SPEC_WIDTH));
+  return chalk.greenBright(`${stats.ncpu}c ${fmtBytes(stats.memTotalBytes)} ${fmtBytes(stats.diskTotalBytes)}`.padEnd(SPEC_WIDTH));
+}
+
+/** The one-line `description` config value per device (absent when unset). */
+function listDeviceDescriptions(names: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const n of names) {
+    const v = getConfigValue('description', { device: n }).value;
+    if (typeof v === 'string' && v.length > 0) out[n] = v;
+  }
+  return out;
+}
+
+/**
+ * Fit a device row to the terminal width. The description is the FIRST thing
+ * to truncate, then the role tag; the fixed columns (device, platform, spec,
+ * load/mem/disk numbers, headroom, and the ▸/★/←/relay markers) never
+ * truncate. `role` and `desc` arrive fully rendered (ansi + leading gap).
+ */
+function fitDeviceRow(fixed: string, role: string, desc: string, width: number): string {
+  const w = (s: string) => stringWidth(stripAnsi(s));
+  let over = w(fixed) + w(role) + w(desc) - width;
+  if (over > 0 && desc) {
+    // `desc` is '  ' + gray(text) — truncate the text, keep the gap.
+    const text = stripAnsi(desc).slice(2);
+    const budget = w(text) - over;
+    desc = budget > 0 ? '  ' + chalk.gray(truncateToWidth(text, budget)) : '';
+    over = w(fixed) + w(role) + w(desc) - width;
+  }
+  // A partial role word ("work…") reads as a bug — when it can't fit whole,
+  // it drops entirely. The numbers are never touched.
+  if (over > 0 && role) role = '';
+  return fixed + role + desc;
+}
+
 /**
  * Render the device list. When `statsMap` is provided, resource columns are
- * appended — normalized load, memory, a headroom badge, and (in `full` mode)
- * core count and free/total memory — so it's obvious which boxes have room.
+ * appended — a `spec` cell (cores / total RAM / total disk), normalized load,
+ * memory and disk-used percentages, a headroom badge, and (in `full` mode)
+ * free/total memory — with the per-device role and `description` riding the
+ * tail, so it's obvious which boxes have room and what each box is for.
  * Without it (probe skipped) the classic reachability line is used. A fleet
  * capacity summary is appended whenever stats were gathered.
  */
-function renderDeviceTable(
+export function renderDeviceTable(
   reg: DeviceRegistry,
   names: string[],
   self: string | undefined,
   statsMap?: Map<string, DeviceStats>,
   full = false,
   interactiveHost?: string,
+  opts: { width?: number; ignoredCount?: number } = {},
 ): string[] {
   if (!statsMap) {
     const roles = listConfiguredDeviceRoles(names);
@@ -227,18 +275,25 @@ function renderDeviceTable(
   }
 
   const deviceRoles = listConfiguredDeviceRoles(names);
+  const descriptions = listDeviceDescriptions(names);
+  const width = opts.width ?? terminalWidth();
   const lines: string[] = [];
   const head =
     '  ' +
     chalk.gray('device'.padEnd(16)) +
     chalk.gray('platform'.padEnd(8)) +
     ' ' +
-    (full ? chalk.gray('cores'.padStart(6)) : '') +
+    chalk.gray('spec'.padEnd(SPEC_WIDTH)) +
     chalk.gray('load'.padStart(5)) +
     chalk.gray('mem'.padStart(6)) +
+    chalk.gray('disk'.padStart(5)) +
     (full ? '  ' + chalk.gray('free/total'.padEnd(12)) : '') +
     '  ' +
-    chalk.gray('headroom');
+    chalk.gray('headroom') +
+    '  ' +
+    chalk.gray('role') +
+    '  ' +
+    chalk.gray('description');
   lines.push(head);
 
   for (const name of names) {
@@ -250,18 +305,20 @@ function renderDeviceTable(
     const label = isSelf ? chalk.bold.cyan(name.padEnd(16)) : chalk.bold(name.padEnd(16));
     const plat = String(d.platform).padEnd(8);
     const stats = statsMap.get(name);
+    const role = roleTag(name, deviceRoles);
+    const desc = descriptions[name] ? '  ' + chalk.gray(descriptions[name]) : '';
     // Prefer this run's live probe, then the written-back verdict, over the
     // stale tailscale.online snapshot — so a reachable box never renders
     // "offline" while its live load/mem sit one column over (RUSH-1965).
     const offline = deviceOnlineState(d, stats) === 'offline';
     if (offline) {
-      lines.push(`${marker}${label}${plat} ${chalk.gray('offline')}`);
+      lines.push(fitDeviceRow(`${marker}${label}${plat} ${chalk.gray('offline')}`, role, desc, width));
       continue;
     }
     const relay = !isSelf && d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' relay') : '';
-    const cores = full ? chalk.gray(String(stats?.ncpu ?? '—').padStart(6)) : '';
     const load = pctCell(stats?.loadPercent, 5);
     const mem = pctCell(stats?.memPercent, 6);
+    const disk = pctCell(stats?.diskUsedPercent, 5);
     const freeTotal = full
       ? '  ' +
         (stats?.reachable && stats.memTotalBytes
@@ -271,16 +328,33 @@ function renderDeviceTable(
     const badge = HEADROOM_BADGE[headroom(stats)];
     const here = isSelf ? chalk.cyan('  ← this machine') : '';
     const interactive = name === interactiveHost ? chalk.yellow('  ★ interactive') : '';
-    lines.push(`${marker}${label}${plat} ${cores}${load}${mem}${freeTotal}  ${badge}${relay}${here}${interactive}${roleTag(name, deviceRoles)}`);
+    lines.push(
+      fitDeviceRow(
+        `${marker}${label}${plat} ${specCell(stats)}${load}${mem}${disk}${freeTotal}  ${badge}${relay}${here}${interactive}`,
+        role,
+        desc,
+        width,
+      ),
+    );
   }
 
-  // Fleet capacity summary — total cores + how much RAM is free right now.
+  // Fleet capacity summary — total cores, how much RAM is free right now, and
+  // total free root disk across the reachable fleet.
   const cap = fleetCapacity(statsMap.values());
   if (cap.reachable > 0) {
     const freePct = cap.memTotalBytes > 0 ? Math.round((cap.memFreeBytes / cap.memTotalBytes) * 100) : 0;
+    let diskFreeBytes = 0;
+    for (const s of statsMap.values()) if (s.reachable) diskFreeBytes += s.diskFreeBytes ?? 0;
     lines.push(
       chalk.gray(
-        `  Fleet capacity: ${cap.cores} cores · ${fmtBytes(cap.memFreeBytes)} free / ${fmtBytes(cap.memTotalBytes)} RAM (${freePct}% free) across ${cap.reachable} reachable device${cap.reachable === 1 ? '' : 's'}`,
+        `  Fleet capacity: ${cap.cores} cores · ${fmtBytes(cap.memFreeBytes)} free / ${fmtBytes(cap.memTotalBytes)} RAM (${freePct}% free) · ${fmtBytes(diskFreeBytes)} disk free across ${cap.reachable} reachable device${cap.reachable === 1 ? '' : 's'}`,
+      ),
+    );
+  }
+  if (opts.ignoredCount) {
+    lines.push(
+      chalk.gray(
+        `  ${opts.ignoredCount} ignored node${opts.ignoredCount === 1 ? '' : 's'} not listed — 'agents devices ignored'`,
       ),
     );
   }
@@ -1134,6 +1208,7 @@ function registerDevicesCommands(program: Command): void {
         agents devices sync            # pick which tailscale nodes to keep (TTY)
         agents devices sync --yes      # register all non-ignored nodes
         agents devices ignore ipad165  # dismiss a node so it's never re-suggested
+        agents devices ignored         # list dismissed nodes (when / which machine)
 
       Inspect:
         agents devices list            # what's registered (★ = interactive host)
@@ -1149,6 +1224,7 @@ function registerDevicesCommands(program: Command): void {
         agents devices config win-mini ssh.auth password
         agents devices config worker ssh.identity-file ~/.ssh/worker_ed25519
         agents devices config mac-mini auto-launch.enabled off
+        agents devices describe mark-1 "gpu box — cuda 12.4"  # one-line purpose, shown in the list
         agents devices config mac-mini interactive.host zion # where agents show YOU artifacts
         agents devices render --write  # write ~/.ssh/config.d/agents include
 
@@ -1163,10 +1239,10 @@ function registerDevicesCommands(program: Command): void {
   registerSnapshotCommand(devicesCmd);
 
   registerCommandGroups(devicesCmd, [
-    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'rm'] },
+    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'ignored', 'rm'] },
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
-    { title: 'Configure a device', names: ['config', 'render'] },
+    { title: 'Configure a device', names: ['config', 'describe', 'render'] },
     { title: 'Fleet operations', names: ['update', 'run', 'login', 'capture', 'apply'] },
   ]);
 
@@ -1248,6 +1324,47 @@ function registerDevicesCommands(program: Command): void {
       setDeviceDiscoveryStatus(name, undefined);
       console.log(chalk.green(`No longer ignoring '${name}'`) + chalk.gray(' — run `agents devices sync` to register it.'));
     });
+
+  const ignoredCmd = devicesCmd
+    .command('ignored')
+    .description('List dismissed tailscale nodes — what was dismissed, when, and on which machine.')
+    .option('--json', 'output machine-readable JSON')
+    .action((opts: { json?: boolean }) => {
+      try {
+        const entries: IgnoredDeviceEntry[] = loadIgnoredEntries();
+        if (opts.json) {
+          process.stdout.write(JSON.stringify(entries, null, 2) + '\n');
+          return;
+        }
+        if (entries.length === 0) {
+          console.log(chalk.gray("No ignored nodes. 'agents devices ignore <name>' dismisses one — it won't be re-suggested."));
+          return;
+        }
+        console.log(chalk.bold(`Ignored nodes (${entries.length})`));
+        for (const e of entries) {
+          const age = formatCheckedAge(Date.parse(e.ignoredAt));
+          console.log(`  ${chalk.bold(e.name.padEnd(24))} ${chalk.gray(`${age} · dismissed on ${e.ignoredOn}`)}`);
+        }
+        console.log(chalk.gray("Undo one with 'agents devices unignore <name>'."));
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(ignoredCmd, {
+    examples: `
+      agents devices ignored          # what was dismissed, when, and on which machine
+      agents devices ignored --json   # machine-readable [{ name, ignoredAt, ignoredOn }]
+      agents devices unignore old-laptop   # undo a dismissal
+    `,
+    notes: `
+      Dismissals live in the tracked central agents.yaml (fleet.ignored) and
+      sync with 'agents repo push/pull', so a node dismissed on one box stays
+      dismissed everywhere. An ignored node is not a device — it never enters
+      the registry, so 'agents devices list' never shows it; this command is
+      where dismissals are visible.
+    `,
+  });
 
   // ─── devices config (unified settings surface) ────────────────────────────
   //
@@ -1617,6 +1734,8 @@ function registerDevicesCommands(program: Command): void {
     `,
     notes: `
       Keys: role (worker|personal), see 'agents devices role',
+      description (one line saying what the box is for — see
+      'agents devices describe'; renders in the devices list tail),
       agents.max-concurrent, scheduler.enabled, daemon.enabled,
       watchdog.enabled, tmux.enabled, browser.remote-control,
       browser.task-idle-minutes, browser.profile,
@@ -1685,6 +1804,42 @@ function registerDevicesCommands(program: Command): void {
 
       Turn the allowlist off with 'agents config set auto.pool all'; a personal
       box stays excluded, since that is what the mark is for.
+    `,
+  });
+
+  const describeCmd = devicesCmd
+    .command('describe <name> [text...]')
+    .description(
+      'Show or set the one-line description of what a device is FOR ("gpu box — cuda 12.4"). ' +
+        'Rendered as the tail column of `agents devices list` and synced fleet-wide. ' +
+        'Same key as `agents devices config <name> description` — one store, two names.',
+    )
+    .option('--unset', 'remove the description (the device falls back to the fleet default / unset)')
+    .option('--json', 'output machine-readable JSON')
+    .action(async (name: string, textParts: string[] | undefined, opts: { unset?: boolean; json?: boolean }) => {
+      try {
+        // Thin sugar over the 'description' config key — the same engine that
+        // backs `agents devices config <name> description`, not a second path.
+        await runDevicesConfig(name, 'description', textParts ?? [], opts);
+      } catch (err: any) {
+        console.error(chalk.red(err.message));
+        process.exit(1);
+      }
+    });
+  setHelpSections(describeCmd, {
+    examples: `
+      agents devices describe mark-1 "gpu box — cuda 12.4"  # set it (80 chars, one line)
+      agents devices describe mark-1                        # read it back
+      agents devices describe mark-1 --unset                # remove it
+      agents devices describe mark-1 --json                 # machine-readable
+      agents devices config mark-1 description "gpu box"    # equivalent — same store
+    `,
+    notes: `
+      The description is the device-scope 'description' config key: stored in
+      the tracked per-device doc (devices/<name>/agents.yaml config: block),
+      synced fleet-wide with 'agents repo push/pull', and rendered as the tail
+      column of 'agents devices list'. It replaces on each set — for appended
+      long-form scratch use 'agents devices config <name> notes "…"'.
     `,
   });
 
@@ -1897,6 +2052,7 @@ function registerDevicesCommands(program: Command): void {
       process.stdout.write(JSON.stringify(names.map((name) => {
         const config = deviceConfigJson(name);
         const health = statsMap?.get(name);
+        const description = getConfigValue('description', { device: name }).value;
         return {
           ...resolveDeviceProfile(reg[name]),
           interactive: name === interactiveHost,
@@ -1904,6 +2060,7 @@ function registerDevicesCommands(program: Command): void {
           // marked (absent when unmarked), `autoPool` is the answer that
           // matters to a caller — may `--device auto` pick this box.
           ...(jsonRoles[name] ? { role: jsonRoles[name] } : {}),
+          ...(typeof description === 'string' && description ? { description } : {}),
           autoPool: autoPool.has(name),
           ...(config ? { config } : {}),
           ...(health ? { health: { ...health, headroom: headroom(health) } } : {}),
@@ -1913,7 +2070,10 @@ function registerDevicesCommands(program: Command): void {
     }
 
     console.log(chalk.bold(`Devices (${names.length})`));
-    for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full, interactiveHost)) console.log(line);
+    // Dismissed nodes are not devices (never in the registry) — surface their
+    // count under the table so a "missing" node is explainable from the list.
+    const ignoredCount = loadIgnoredEntries().length;
+    for (const line of renderDeviceTable(reg, names, self, statsMap, opts.full, interactiveHost, { ignoredCount })) console.log(line);
     if (freshness?.servedFromCache && freshness.oldestFetchedAt != null) {
       console.log(chalk.gray(`  updated ${formatCheckedAge(freshness.oldestFetchedAt)} — pass --refresh (--live) for a live probe`));
     }
@@ -1934,7 +2094,7 @@ function registerDevicesCommands(program: Command): void {
   devicesCmd
     .command('list')
     .alias('ls')
-    .description('List registered devices with platform, address, reachability, and live resource headroom.')
+    .description('List registered devices with platform, spec (cores/RAM/disk), live load/mem/disk headroom, role, and description.')
     .option('--json', 'output effective device profiles, config, and health as a JSON array')
     .option('--no-stats', 'skip the live resource probe (instant; names/addresses only)')
     .option('--refresh', 'force a live probe of every device, bypassing the cache')

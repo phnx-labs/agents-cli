@@ -205,6 +205,17 @@ password from a Keychain bundle via an askpass shim. `agents devices render --wr
 emits a `~/.ssh/config.d/agents` include so plain `ssh`/`scp`/`rsync` resolve the
 same logical names.
 
+`agents devices list` is the fleet inventory: a `spec` cell per device
+(`12c 64G 1T` — cores, total RAM, total root disk from the long-TTL static
+probe tier), live `load` / `mem` / `disk` used percentages on one severity
+scale, a headroom badge, the `role` mark, and the one-line `description` as the
+tail column (the first thing a narrow terminal truncates, then role — the
+numbers never truncate). The "Fleet capacity" footer sums cores, free RAM, and
+free disk across the reachable fleet. `--json` is additive over the same rows:
+effective profile, `role` / `description` / `autoPool`, the device-layer
+`config` block, and `health` (which carries `diskTotalBytes`, `diskFreeBytes`,
+`diskUsedPercent` alongside the memory and load fields).
+
 Approval is portable even though connection metadata is not. Registering or
 ignoring a device records `approved` or `ignored` under `fleet.discovery` in
 the central `~/.agents/agents.yaml`; no entry means the device is still pending.
@@ -261,11 +272,18 @@ pin first, then falls back to `interactive.host`, then to no primary host. The
 interactive host answers where the user sees artifacts; it does not by itself
 declare that device authoritative for usage. The interactive host is marked
 `★ interactive` in `agents devices list`; `list --json` carries each row's
-effective profile plus its device-layer `config` block and an `interactive`
-flag. The retired subcommands (`configure`, `note`, `set`, `set-interactive`,
+effective profile plus its device-layer `config` block, an `interactive`
+flag, and a top-level `description` when one is set. The retired subcommands
+(`configure`, `note`, `set`, `set-interactive`,
 `enable`/`disable`/`prefer`/`unprefer`) still work as hidden tombstones that
 forward into `devices config` with a stderr notice. Unset keys always mean
 today's behavior. The key registry is `src/lib/device-config.ts`.
+
+`agents devices describe <name> <text>` is the task-shaped spelling for the
+`description` key — one store, two names (`devices config <name> description`
+does the identical write). `agents devices ignored` lists dismissed tailscale
+nodes (when, and on which machine); `agents devices unignore <name>` reverses a
+dismissal.
 
 The keys are consumed, not just stored. `scheduler.enabled=false` keeps the
 routines scheduler from starting on that device — `routines add` skips the

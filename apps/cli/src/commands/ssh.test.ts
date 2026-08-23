@@ -4,8 +4,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { renderLeasedBoxesSection, showLeasedBoxesSection, raceFleetPingDeadline } from './ssh.js';
+import { renderDeviceTable, renderLeasedBoxesSection, showLeasedBoxesSection, raceFleetPingDeadline } from './ssh.js';
+import { stripAnsi } from '../lib/text/width.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
+import type { DeviceProfile, DeviceRegistry } from '../lib/devices/registry.js';
+import type { DeviceStats } from '../lib/devices/health.js';
 import { fanOutDevices, type FanOutDeviceTarget } from '../lib/devices/fleet.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -221,6 +224,33 @@ describe('showLeasedBoxesSection — devices list leased-boxes gate (RUSH-2190)'
   });
 });
 
+describe('devices ignored (RUSH-3062 surface)', () => {
+  it('lists dismissed nodes with when and which machine, and emits --json entries', () => {
+    guardedHome();
+    run(['devices', 'add', 'old-laptop', 'operator@old-laptop.internal', '--platform', 'linux']);
+    expect(run(['devices', 'ignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'zion' }).status).toBe(0);
+
+    const list = run(['devices', 'ignored']);
+    expect(list.status, list.stderr).toBe(0);
+    expect(list.stdout).toContain('Ignored nodes (1)');
+    expect(list.stdout).toContain('old-laptop');
+    expect(list.stdout).toContain('dismissed on zion');
+    expect(list.stdout).toContain('ago');
+    expect(list.stdout).toContain('agents devices unignore');
+
+    const json = run(['devices', 'ignored', '--json']);
+    expect(json.status, json.stderr).toBe(0);
+    const entries = JSON.parse(json.stdout) as Array<{ name: string; ignoredAt: string; ignoredOn: string }>;
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe('old-laptop');
+    expect(entries[0].ignoredOn).toBe('zion');
+    expect(Number.isFinite(Date.parse(entries[0].ignoredAt))).toBe(true);
+
+    expect(run(['devices', 'unignore', 'old-laptop']).status).toBe(0);
+    expect(run(['devices', 'ignored']).stdout).toContain('No ignored nodes');
+  });
+});
+
 describe('devices auto-launch preferences (per-device doc store)', () => {
   // tests/setup.ts pins AGENTS_DEVICES_DIR for hermeticity, and run() forwards
   // the whole env — so the spawned CLI reads its registry from there, NOT from
@@ -293,5 +323,170 @@ describe('devices auto-launch preferences (per-device doc store)', () => {
     expect(r.status).toBe(1);
     expect(r.stderr).toMatch(/Unknown device 'zoin'/);
     expect(fs.existsSync(path.join(testHome, '.agents', 'devices', 'zoin'))).toBe(false);
+  });
+});
+
+// ─── renderDeviceTable — Option B capacity columns (RUSH-3062) ──────────────
+//
+// Unit-level rendering tests over the REAL renderer: a fake registry plus real
+// DeviceStats rows. Role and description ride the tracked per-device doc, so
+// those are seeded into the fork-sandboxed HOME the config store already reads
+// (tests/setup.ts) — nothing is mocked.
+
+describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () => {
+  const NOW = 1_700_000_000_000;
+
+  function device(name: string, over: Partial<DeviceProfile> = {}): DeviceProfile {
+    return {
+      name,
+      platform: 'linux',
+      shell: 'posix',
+      user: 'someone',
+      address: { via: 'tailscale', dnsName: `${name}.example.ts.net` },
+      auth: { method: 'key' },
+      tailscale: { online: true, direct: true },
+      createdAt: new Date(NOW).toISOString(),
+      updatedAt: new Date(NOW).toISOString(),
+      ...over,
+    };
+  }
+
+  function stats(host: string, over: Partial<DeviceStats> = {}): DeviceStats {
+    return {
+      host,
+      reachable: true,
+      ncpu: 12,
+      loadPercent: 35,
+      memPercent: 55,
+      memTotalBytes: 64 * 1024 ** 3, // 64G
+      memFreeBytes: 28 * 1024 ** 3,
+      diskTotalBytes: 1024 ** 4, // 1T
+      diskFreeBytes: 300 * 1024 ** 3,
+      diskUsedPercent: 71,
+      fetchedAt: NOW,
+      ...over,
+    };
+  }
+
+  /** Seed the tracked per-device doc the config store reads (role/description). */
+  function seedDeviceDoc(name: string, config: Record<string, string>): void {
+    const dir = path.join(process.env.HOME!, '.agents', 'devices', name);
+    fs.mkdirSync(dir, { recursive: true });
+    const body = Object.entries(config)
+      .map(([k, v]) => `  ${k}: ${JSON.stringify(v)}`)
+      .join('\n');
+    fs.writeFileSync(path.join(dir, 'agents.yaml'), `config:\n${body}\n`);
+  }
+
+  /** The four-device fleet the width matrix below reasons about. */
+  function fleet(): { reg: DeviceRegistry; names: string[]; statsMap: Map<string, DeviceStats> } {
+    const reg: DeviceRegistry = {
+      'ci-runner': device('ci-runner', { platform: 'linux' }),
+      'mac-mini': device('mac-mini', { platform: 'macos' }),
+      'mark-1': device('mark-1', { tailscale: { online: true, direct: false } }), // relayed
+      zion: device('zion', { platform: 'macos' }),
+    };
+    const statsMap = new Map<string, DeviceStats>([
+      ['ci-runner', stats('ci-runner', { reachable: false })], // offline
+      ['mac-mini', stats('mac-mini')],
+      ['mark-1', stats('mark-1', { ncpu: 36, loadPercent: 1, memPercent: 6, diskUsedPercent: 8 })],
+      ['zion', stats('zion', { ncpu: 16, loadPercent: 24, memPercent: 32, diskUsedPercent: 63 })],
+    ]);
+    seedDeviceDoc('ci-runner', { role: 'worker', description: 'hetzner CI runner' });
+    seedDeviceDoc('mac-mini', { role: 'worker', description: 'signing + notarize box' });
+    seedDeviceDoc('mark-1', { role: 'worker', description: 'gpu box - cuda 12.4' });
+    seedDeviceDoc('zion', { role: 'personal', description: 'my laptop - never auto-place' });
+    return { reg, names: Object.keys(reg).sort(), statsMap };
+  }
+
+  /** Render plain-text rows keyed by device name (plus a 'head'/'footer' view). */
+  function render(width: number, full = false, ignoredCount = 0): { rows: Record<string, string>; all: string[] } {
+    const { reg, names, statsMap } = fleet();
+    const lines = renderDeviceTable(reg, names, 'zion', statsMap, full, 'zion', { width, ignoredCount }).map(stripAnsi);
+    const rows: Record<string, string> = {};
+    for (const line of lines) {
+      const m = line.match(/^\s*(?:▸\s+)?([a-z0-9-]+)\s/);
+      if (m && names.includes(m[1])) rows[m[1]] = line;
+    }
+    return { rows, all: lines };
+  }
+
+  it('renders spec, disk, role, and description columns at a wide (200) terminal', () => {
+    const { rows, all } = render(200);
+    expect(all[0]).toMatch(/device\s+platform\s+spec\s+load\s+mem\s+disk\s+headroom/);
+
+    expect(rows['mac-mini']).toContain('12c 64G 1T'); // spec cell: cores, RAM, disk
+    expect(rows['mac-mini']).toContain('35%'); // load
+    expect(rows['mac-mini']).toContain('55%'); // mem
+    expect(rows['mac-mini']).toContain('71%'); // disk — same severity scale as load/mem
+    expect(rows['mac-mini']).toContain('worker');
+    expect(rows['mac-mini']).toContain('signing + notarize box');
+
+    // The markers survive: this-machine caret + arrow, interactive star, relay.
+    expect(rows['zion']).toContain('▸');
+    expect(rows['zion']).toContain('← this machine');
+    expect(rows['zion']).toContain('★ interactive');
+    expect(rows['zion']).toContain('personal');
+    expect(rows['mark-1']).toContain('relay');
+  });
+
+  it('keeps the offline row behavior, now carrying role and description', () => {
+    const { rows } = render(200);
+    expect(rows['ci-runner']).toContain('offline');
+    expect(rows['ci-runner']).not.toContain('%'); // no phantom numbers for a dead box
+    expect(rows['ci-runner']).toContain('worker');
+    expect(rows['ci-runner']).toContain('hetzner CI runner');
+  });
+
+  it('truncates the description first at 120 columns; role and numerics intact', () => {
+    const { rows } = render(120);
+    // zion's row is the longest (self + interactive markers): its description
+    // is the first thing to give.
+    expect(rows['zion']).not.toContain('my laptop - never auto-place');
+    expect(rows['zion']).toContain('…');
+    expect(rows['zion']).toContain('personal'); // role survives
+    expect(rows['zion']).toContain('24%');
+    expect(rows['zion']).toContain('63%');
+    // Shorter rows still fit their full description.
+    expect(rows['mac-mini']).toContain('signing + notarize box');
+  });
+
+  it('drops the description then the role at 80 columns — numerics never truncate', () => {
+    const { rows } = render(80);
+    // mac-mini: description shrinks to an ellipsis stub, role survives.
+    expect(rows['mac-mini']).not.toContain('signing + notarize box');
+    expect(rows['mac-mini']).toContain('worker');
+    expect(rows['mac-mini']).toContain('35%');
+    expect(rows['mac-mini']).toContain('71%');
+    expect(rows['mac-mini']).toContain('12c 64G 1T');
+    // zion: fixed columns + markers alone exceed 80, so description is gone AND
+    // the role has dropped — but every number and marker is still there.
+    expect(rows['zion']).not.toContain('my laptop');
+    expect(rows['zion']).not.toContain('personal');
+    expect(rows['zion']).toContain('24%');
+    expect(rows['zion']).toContain('32%');
+    expect(rows['zion']).toContain('63%');
+    expect(rows['zion']).toContain('16c 64G 1T');
+    expect(rows['zion']).toContain('← this machine');
+  });
+
+  it('full mode keeps the free/total memory detail alongside the spec cell', () => {
+    const { rows, all } = render(200, true);
+    expect(all[0]).toContain('free/total');
+    expect(rows['mac-mini']).toContain('12c 64G 1T'); // spec still carries cores
+    expect(rows['mac-mini']).toContain('28G/64G');
+  });
+
+  it('extends the Fleet capacity footer with free disk, and names ignored nodes', () => {
+    const { all } = render(200, false, 2);
+    const footer = all.find((l) => l.includes('Fleet capacity'));
+    expect(footer).toContain('64 cores'); // 12+36+16 — the offline box counts nothing
+    expect(footer).toContain('disk free');
+    expect(all.some((l) => l.includes("2 ignored nodes not listed — 'agents devices ignored'"))).toBe(true);
+  });
+
+  it('omits the ignored-nodes line when nothing is ignored', () => {
+    const { all } = render(200);
+    expect(all.some((l) => l.includes('ignored'))).toBe(false);
   });
 });

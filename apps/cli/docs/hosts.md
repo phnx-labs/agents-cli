@@ -74,7 +74,9 @@ Roles live in that device's tracked `devices/<name>/agents.yaml` `config.role`
 and travel with `agents repo push` / `pull`. Per-device files are
 conflict-free because each machine writes only its own folder; a role set
 from any box writes that device's folder, not a shared central map.
-`agents devices list` tags marked rows, and `agents devices list --json`
+`agents devices list` tags marked rows (and shows each box's `spec` —
+cores/RAM/disk — plus live load/mem/disk and the one-line `description`), and
+`agents devices list --json`
 carries `role` plus an `autoPool` boolean per device.
 
 ### `agents run auto` — all three routing layers

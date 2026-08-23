@@ -424,8 +424,11 @@ of `role`: one line saying what the box is FOR — "gpu box — cuda 12.4", "rel
 runner" — where `role` is the two-value placement switch. Like `role` it is
 **shared**: it lives in the device's tracked `devices/<name>/agents.yaml`
 `config.description` and syncs with `agents repo push/pull`, and any box may set
-it for any device. The device-list renderer will show it (RUSH-3062, `surface`
-track), so it is validated as a single
+it for any device. `agents devices describe <name> <text>` is the task-shaped
+spelling (thin sugar over `agents devices config <name> description` — one
+store, two names), and the default `agents devices list` renders it as the tail
+column next to a `spec` cell (cores / total RAM / total disk) and `load`, `mem`,
+`disk` used columns (RUSH-3062). It is validated as a single
 line capped at 80 characters — a newline or an over-long value is rejected
 loudly, never truncated. It is NOT `notes`: `notes` stays an appended list of
 long-form operator scratch that is never shown in device listings.
