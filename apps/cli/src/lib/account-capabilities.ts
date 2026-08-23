@@ -21,6 +21,16 @@ export interface NativeAccountCapability {
   status: 'supported' | 'conditional' | 'discovery-only' | 'unsupported';
 }
 
+/** Native-login selector coverage required by RUSH-3053. */
+export const NATIVE_ACCOUNT_SELECTOR_AGENTS = ['claude', 'codex', 'cursor', 'grok', 'kimi'] as const satisfies readonly AgentId[];
+
+/** Explicit dispositions for config-isolated harnesses outside that selector. */
+export const NATIVE_ACCOUNT_SELECTOR_EXCLUSIONS: Partial<Record<AgentId, string>> = {
+  copilot: 'no inspectable native identity',
+  opencode: 'provider-set identity is not safely attributable to one native login',
+  muse: 'email-only conditional identity is outside the RUSH-3053 harness contract',
+};
+
 /** Canonical truth for native-account naming and attachment semantics. */
 export const NATIVE_ACCOUNT_CAPABILITIES: Record<AgentId, NativeAccountCapability> = {
   // Config-isolated harnesses with a stable native identity. A labeled launch

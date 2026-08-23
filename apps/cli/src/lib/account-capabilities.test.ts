@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_AGENT_IDS } from './agents.js';
-import { NATIVE_ACCOUNT_CAPABILITIES, nativeAccountNameable, nativeAccountNamingRefusal, nativeIdentityKey, supportedNativeHarnesses } from './account-capabilities.js';
+import { NATIVE_ACCOUNT_CAPABILITIES, NATIVE_ACCOUNT_SELECTOR_AGENTS, NATIVE_ACCOUNT_SELECTOR_EXCLUSIONS, nativeAccountNameable, nativeAccountNamingRefusal, nativeIdentityKey, supportedNativeHarnesses } from './account-capabilities.js';
 import { CONFIG_ENV_ISOLATED_AGENTS } from './installations/shims.js';
 
 describe('native account capability registry', () => {
@@ -24,6 +24,10 @@ describe('native account capability registry', () => {
     });
     expect(versionStrong.sort()).toEqual(['claude', 'codex', 'cursor', 'grok', 'kimi']);
     for (const id of versionStrong) expect(CONFIG_ENV_ISOLATED_AGENTS).toContain(id);
+    expect([...NATIVE_ACCOUNT_SELECTOR_AGENTS].sort()).toEqual(versionStrong.sort());
+    for (const id of CONFIG_ENV_ISOLATED_AGENTS) {
+      expect(NATIVE_ACCOUNT_SELECTOR_AGENTS.includes(id as typeof NATIVE_ACCOUNT_SELECTOR_AGENTS[number]) || !!NATIVE_ACCOUNT_SELECTOR_EXCLUSIONS[id]).toBe(true);
+    }
   });
 
   it('treats Muse as a conditional, email-only version harness', () => {

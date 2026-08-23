@@ -442,6 +442,15 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
     });
   } else {
     stripForeignConfigDir(result);
+    // Grok's adapter owns the same GROK_HOME export in generated shims, but a
+    // labeled account deliberately runs one version's binary with another
+    // version's config. Apply that overlay here because the shim's binary-slot
+    // export cannot express a distinct account slot.
+    if (options.agent === 'grok' && options.configVersion) {
+      const { versionHome } = resolveConfigVersion(options.agent, options.cwd || process.cwd(), options.configVersion);
+      if (!versionHome) throw new Error(`Cannot resolve Grok account config home for ${options.configVersion}.`);
+      result.GROK_HOME = path.join(versionHome, '.grok');
+    }
   }
 
   // Point the agent at its own mailbox so the PreToolUse `mailbox-inject` hook

@@ -294,6 +294,14 @@ describe('buildExecEnv — Cursor per-account login isolation (XDG_CONFIG_HOME)'
   });
 });
 
+describe('buildExecEnv — Grok labeled-account overlay', () => {
+  it('points GROK_HOME at the account slot while retaining the requested binary version', () => {
+    const env = buildExecEnv(execOpts({ agent: 'grok', version: '0.3.0', configVersion: '0.2.9' }));
+    expect(env.GROK_HOME).toBe(path.join(getVersionHomePath('grok', '0.2.9'), '.grok'));
+    expect(env.GROK_HOME).not.toContain(path.join('grok', '0.3.0'));
+  });
+});
+
 describe('nativeResume (Tier-1 capability derives from the command template)', () => {
   it('claude and codex resume natively', () => {
     expect(nativeResume('claude')).toBe(true);
