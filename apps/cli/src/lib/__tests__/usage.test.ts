@@ -370,8 +370,11 @@ describe('usage formatting', () => {
     expect(windows[0]?.usedPercent).toBe(100);
   });
 
-  it('getUsageInfo(antigravity) renders nothing when no credential exists', async () => {
-    // No credential file in the temp home, keyring probe disabled -> null, no throw.
+  it('getUsageInfo(antigravity) reports a specific no-credential error, not silent null (RUSH-3040)', async () => {
+    // No credential file in the temp home, keyring probe disabled -> a named
+    // no-credential error, no throw. Antigravity used to swallow every
+    // failure into `error: null`, indistinguishable from a healthy account
+    // with nothing to show.
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-agy-usage-'));
     const prev = process.env.AGENTS_NO_KEYCHAIN_PROBE;
     const prevRealHome = process.env.AGENTS_REAL_HOME;
@@ -379,7 +382,8 @@ describe('usage formatting', () => {
     process.env.AGENTS_REAL_HOME = home;
     try {
       const info = await getUsageInfo('antigravity', { home });
-      expect(info).toEqual({ snapshot: null, error: null });
+      expect(info.snapshot).toBeNull();
+      expect(info.error).toContain('No readable Antigravity credential');
     } finally {
       if (prev === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
       else process.env.AGENTS_NO_KEYCHAIN_PROBE = prev;
@@ -476,12 +480,12 @@ describe('usage formatting', () => {
     }
   });
 
-  it('returns an empty Grok snapshot when the log is absent', async () => {
+  it('returns a benign no-recent-usage marker (not null) when the log is absent (RUSH-3040)', async () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-grok-nolog-'));
     try {
       const { snapshot, error } = await getUsageInfo('grok', { home });
-      expect(error).toBeNull();
       expect(snapshot).toBeNull();
+      expect(error).toContain('no usage recorded yet');
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }

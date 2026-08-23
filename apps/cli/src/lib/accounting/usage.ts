@@ -140,6 +140,81 @@ export function usageUnreachableError(agent: string, cause?: unknown): string {
 }
 
 /**
+ * Marker for a log-based (`network: false`) provider — Codex, Grok — that has
+ * simply never recorded a rate-limit event on this machine yet: no session
+ * log exists, or no session in it carries usage data. Distinct on purpose from
+ * `usageUnreachableError`: that one means the local log COULDN'T be read (a
+ * real failure worth surfacing distinctly); this one means there is nothing to
+ * read because the account has not run here, which is expected for a fresh
+ * install and should render as a benign state, not an error (RUSH-3040).
+ */
+export const USAGE_NO_RECENT_USAGE_MARKER = 'no usage recorded yet';
+export function usageNoRecentUsageError(agent: string): string {
+  return `${agent}: ${USAGE_NO_RECENT_USAGE_MARKER} on this machine.`;
+}
+/** True when an error string is the benign "no local log yet" marker above. */
+export function isUsageNoRecentUsageError(error: string | null | undefined): boolean {
+  return typeof error === 'string' && error.includes(USAGE_NO_RECENT_USAGE_MARKER);
+}
+
+/**
+ * Shared error-classification + 429 backoff for a networked usage fetch whose
+ * only signal is an HTTP status (or none at all, on a network failure) —
+ * Antigravity's :retrieveUserQuota and Muse's Meta Model API probe are both
+ * this shape. They were added to `USAGE_SOURCES` after the four original
+ * `usageXError` constructors and did not get their own scheme (usage.ts's
+ * error handling was written for "four networked providers"; RUSH-3040).
+ * Route every no-snapshot outcome for either through this one function so a
+ * future entry cannot be added second-class again — it owns noting the 429
+ * backoff, so callers must NOT also call {@link noteUsageRateLimited} for the
+ * same response.
+ */
+export function classifyUsageFetchFailure(
+  agent: string,
+  agentId: 'antigravity' | 'muse',
+  status: number | null,
+  retryAfterHeader: string | null | undefined,
+  usageScope?: string | null,
+): string {
+  if (status === 429) {
+    noteUsageRateLimited(agentId, retryAfterHeader ?? null, { account: usageScope });
+    return usageRejectedError(agent, 429);
+  }
+  if (status !== null) return usageRejectedError(agent, status);
+  return usageUnreachableError(agent);
+}
+
+/**
+ * The specific cause behind a `UsageInfo.error`, so a renderer can name the
+ * exact state instead of a generic "usage unavailable" for one of several
+ * distinct causes (RUSH-3040). Matched against the canonical strings this file
+ * constructs — never re-derive these prefixes at a call site.
+ */
+export type UsageErrorKind =
+  | 'no-credential'
+  | 'expired-credential'
+  | 'rate-limited'
+  | 'rejected'
+  | 'headless-scope'
+  | 'no-usage-yet'
+  | 'unreachable';
+
+/** Classify a `UsageInfo.error` string into its {@link UsageErrorKind}, or null when there is no error. */
+export function classifyUsageErrorKind(error: string | null | undefined): UsageErrorKind | null {
+  if (!error) return null;
+  if (isUsageHeadlessScopeError(error)) return 'headless-scope';
+  if (isUsageNoRecentUsageError(error)) return 'no-usage-yet';
+  if (error.startsWith('No readable ')) return 'no-credential';
+  if (error.includes('credential expired')) return 'expired-credential';
+  if (error.includes('rate-limited this machine') || error.includes('is rate-limiting the usage endpoint')) {
+    return 'rate-limited';
+  }
+  if (error.includes('rejected the usage read')) return 'rejected';
+  if (error.includes('usage read failed')) return 'unreachable';
+  return 'rejected';
+}
+
+/**
  * True when a Claude OAuth access token is within the refresh leeway of expiry
  * (or already expired) — i.e. it "would need a refresh" before the next use.
  *
@@ -659,6 +734,50 @@ export interface FormatUsageSummaryOpts {
    * column width; single-agent and detail views leave this unset.
    */
   maxWindows?: number;
+  /**
+   * The classified cause of `usageInfo.error` (RUSH-3040), from
+   * {@link classifyUsageErrorKind}. Lets the no-bars branch below name the
+   * SPECIFIC reason ('re-auth for usage', 'sign in / provision a long-lived
+   * token', 'rate-limited (retry ~12m)', 'no usage recorded yet') instead of
+   * the generic 'usage unavailable' that used to cover ~6 distinct causes.
+   * Only consulted when `unavailable` is set — a snapshot WITH bars still
+   * renders 'unverified'/`headless` as before. `--json` output is unaffected:
+   * `UsageInfo.error` keeps carrying the full message; this only changes the
+   * short human string rendered here.
+   */
+  errorKind?: UsageErrorKind | null;
+  /**
+   * The raw `UsageInfo.error` string, read only to pull the retry-time hint
+   * out of a `rate-limited` classification (the exact duration lives in the
+   * message text, not the kind).
+   */
+  errorDetail?: string | null;
+}
+
+/** Human label for a classified usage error, for the no-bars branch of {@link formatUsageSummary}. */
+function formatUsageErrorKindLabel(
+  kind: UsageErrorKind | null | undefined,
+  detail: string | null | undefined,
+): string {
+  switch (kind) {
+    case 'no-credential':
+      return 'sign in / provision token';
+    case 'expired-credential':
+      return 're-auth for usage';
+    case 'rate-limited': {
+      const retryHint = detail?.match(/not retrying for (.+)\.$/)?.[1] ?? null;
+      return retryHint ? `rate-limited (retry ~${retryHint})` : 'rate-limited';
+    }
+    case 'no-usage-yet':
+      return 'no usage recorded yet';
+    case 'rejected':
+    case 'unreachable':
+    case 'headless-scope':
+    case null:
+    case undefined:
+    default:
+      return 'usage unavailable';
+  }
 }
 
 /** Format a one-line usage summary with compact bars for inline display. */
@@ -724,8 +843,10 @@ export function formatUsageSummary(
   } else if (opts?.unavailable) {
     // Signed-in account we could NOT fetch usage for (no live token in a reachable
     // home / org mismatch / fetch error). Say so explicitly instead of drawing a
-    // blank gauge that reads like "0% used".
-    parts.push(chalk.dim('usage unavailable'));
+    // blank gauge that reads like "0% used" — and name the SPECIFIC cause when
+    // the caller passed one, rather than the generic bucket that used to cover
+    // ~6 different failures (RUSH-3040).
+    parts.push(chalk.dim(formatUsageErrorKindLabel(opts.errorKind, opts.errorDetail)));
   }
 
   return parts.join('  ');
@@ -924,11 +1045,19 @@ async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     }
 
     const files = collectCodexSessionFiles(options?.home, sinceMs);
+    const now = new Date();
     for (const filePath of files) {
       const match = await readLatestCodexRateLimits(filePath);
       if (!match) continue;
 
-      const windows = normalizeCodexWindows(match.rateLimits);
+      // Same freshness filter Grok already applies (RUSH-3040): a window whose
+      // reset time or windowMinutes-derived expiry has passed is a STALE read,
+      // not a current one — rendering it as-is is how a codex bar kept showing
+      // "100% used" past its own reset. Try the next-older session file rather
+      // than surfacing a stale bar.
+      const windows = normalizeCodexWindows(match.rateLimits).filter((window) =>
+        isCachedUsageWindowFresh(window, match.capturedAt, now)
+      );
       if (windows.length === 0) continue;
 
       return {
@@ -942,9 +1071,13 @@ async function getCodexUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       };
     }
 
-    return { snapshot: null, error: null };
-  } catch {
-    return { snapshot: null, error: null };
+    // No session ever recorded a rate-limit event on this machine (or none of
+    // the ones found were still fresh) — a benign "nothing to show yet", not a
+    // failure (RUSH-3040). Distinct from the outer catch below, which is a
+    // genuine read/parse failure.
+    return { snapshot: null, error: usageNoRecentUsageError('Codex') };
+  } catch (err) {
+    return { snapshot: null, error: usageUnreachableError('Codex', err) };
   }
 }
 
@@ -2459,10 +2592,11 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const base = options?.home || os.homedir();
     const logPath = path.join(base, '.grok', 'logs', 'unified.jsonl');
-    if (!fs.existsSync(logPath)) return { snapshot: null, error: null };
+    // No log yet: a benign "nothing recorded here", not a failure (RUSH-3040).
+    if (!fs.existsSync(logPath)) return { snapshot: null, error: usageNoRecentUsageError('Grok') };
 
     const match = await readLatestGrokBilling(logPath);
-    if (!match) return { snapshot: null, error: null };
+    if (!match) return { snapshot: null, error: usageNoRecentUsageError('Grok') };
 
     // Grok has no live usage API (`network: false`) — bars are last-seen from
     // this machine's unified.jsonl only. Drop windows whose billing period has
@@ -2474,6 +2608,10 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const windows = match.windows.filter((window) =>
       isCachedUsageWindowFresh(window, match.capturedAt, now)
     );
+    // NOTE: an empty `windows` here (all windows expired) still returns a real
+    // snapshot, not the no-recent-usage marker — the plan/tier is still valid
+    // and callers (e.g. `formatUsageSummary`) render "no bars" correctly from
+    // an empty array. The marker above is only for "nothing was ever recorded".
 
     return {
       snapshot: {
@@ -2485,8 +2623,8 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    return { snapshot: null, error: usageUnreachableError('Grok', err) };
   }
 }
 
@@ -2501,14 +2639,38 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 async function getMuseUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const base = options?.home || os.homedir();
-    const live = await probeMuseRateLimits(base);
-    if (live) return { snapshot: live, error: null };
+
+    // Honour a live Retry-After rather than re-arming the penalty (see
+    // usage-backoff.ts). The local log fallback still works while the live
+    // probe is throttled — only report the throttle when there is truly
+    // nothing else to show.
+    const throttledUntil = usageRateLimitedUntil('muse', Date.now(), options?.usageScope);
+    if (throttledUntil) {
+      const local = await readMuseLocalSessionUsage(base);
+      if (local) return { snapshot: local, error: null };
+      return { snapshot: null, error: usageThrottledError('Muse', throttledUntil) };
+    }
+
+    const probe = await probeMuseRateLimits(base);
+    if (probe.snapshot) return { snapshot: probe.snapshot, error: null };
 
     const local = await readMuseLocalSessionUsage(base);
-    if (!local) return { snapshot: null, error: null };
-    return { snapshot: local, error: null };
-  } catch {
-    return { snapshot: null, error: null };
+    if (local) return { snapshot: local, error: null };
+
+    // No live snapshot and no local log — every source came up empty. Only
+    // now does the probe's own outcome become the reported error, mirroring
+    // Cursor's "surface the last resort's failure" pattern above.
+    if (!probe.hasKey) return { snapshot: null, error: usageNoCredentialError('Muse') };
+    if (probe.noHeaders) return { snapshot: null, error: usageNoRecentUsageError('Muse') };
+    return {
+      snapshot: null,
+      error: classifyUsageFetchFailure('Muse', 'muse', probe.status, probe.retryAfter, options?.usageScope),
+    };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed (RUSH-3040).
+    return { snapshot: null, error: usageUnreachableError('Muse', err) };
   }
 }
 
@@ -2534,24 +2696,41 @@ function resolveMuseApiKey(base: string): string | null {
   return null;
 }
 
+/** Result of {@link probeMuseRateLimits} — the live snapshot, or enough of the failure for the caller to classify it. */
+interface MuseProbeResult {
+  snapshot: UsageSnapshot | null;
+  /** False when no API key was resolvable at all (env/auth.json) — a no-credential state, not a fetch failure. */
+  hasKey: boolean;
+  /** The response's HTTP status when the fetch completed but failed, else null (unauthenticated, or the request threw). */
+  status: number | null;
+  retryAfter: string | null;
+  /** True when the response was 2xx but carried none of the rate-limit headers — not a failure, just nothing to report. */
+  noHeaders: boolean;
+}
+
 /**
  * Probe Meta Model API for rate-limit headers. Uses GET /v1/models (no token
- * spend). Returns null when unauthenticated or the headers are absent.
+ * spend). The 429 backoff is noted by the CALLER via
+ * {@link classifyUsageFetchFailure}, not here, so a throttled read is recorded
+ * exactly once regardless of which branch of `getMuseUsageInfo` observes it.
  */
-async function probeMuseRateLimits(base: string): Promise<UsageSnapshot | null> {
-  if (usageRateLimitedUntil('muse')) return null;
+async function probeMuseRateLimits(base: string): Promise<MuseProbeResult> {
   const key = resolveMuseApiKey(base);
-  if (!key) return null;
+  if (!key) return { snapshot: null, hasKey: false, status: null, retryAfter: null, noHeaders: false };
   try {
     const response = await fetch('https://api.meta.ai/v1/models', {
       headers: { Authorization: `Bearer ${key}` },
       signal: AbortSignal.timeout(8_000),
     });
-    if (response.status === 429) {
-      noteUsageRateLimited('muse', response.headers.get('retry-after'));
-      return null;
+    if (!response.ok) {
+      return {
+        snapshot: null,
+        hasKey: true,
+        status: response.status,
+        retryAfter: response.headers.get('retry-after'),
+        noHeaders: false,
+      };
     }
-    if (!response.ok) return null;
 
     const limitTokens = headerNumber(response.headers, 'x-ratelimit-limit-tokens');
     const remainingTokens = headerNumber(response.headers, 'x-ratelimit-remaining-tokens');
@@ -2581,16 +2760,24 @@ async function probeMuseRateLimits(base: string): Promise<UsageSnapshot | null> 
         windowMinutes: 1,
       });
     }
-    if (windows.length === 0) return null;
+    if (windows.length === 0) {
+      return { snapshot: null, hasKey: true, status: response.status, retryAfter: null, noHeaders: true };
+    }
     return {
-      source: 'live',
-      sourceLabel: 'Meta Model API rate limits',
-      capturedAt: new Date(),
-      windows,
-      plan: 'Meta Model API',
+      snapshot: {
+        source: 'live',
+        sourceLabel: 'Meta Model API rate limits',
+        capturedAt: new Date(),
+        windows,
+        plan: 'Meta Model API',
+      },
+      hasKey: true,
+      status: response.status,
+      retryAfter: null,
+      noHeaders: false,
     };
   } catch {
-    return null;
+    return { snapshot: null, hasKey: true, status: null, retryAfter: null, noHeaders: false };
   }
 }
 
@@ -3226,12 +3413,23 @@ async function refreshAntigravityAccessToken(refreshToken: string): Promise<stri
   }
 }
 
+/** Result of {@link fetchAntigravityQuota} — the buckets, or the last non-ok status seen across all endpoints (null on a pure network failure). */
+interface AntigravityQuotaFetchResult {
+  buckets: AntigravityQuotaBucket[] | null;
+  status: number | null;
+  retryAfter: string | null;
+}
+
 /**
  * POST :retrieveUserQuota against the Code Assist endpoints in order, returning
- * the first successful bucket list. null when every endpoint rejects (expired
- * token, no quota API for the account) or the network fails.
+ * the first successful bucket list. `buckets: null` when every endpoint rejects
+ * (expired token, no quota API for the account) or the network fails — `status`
+ * carries the LAST rejection's HTTP status (or null when every attempt threw)
+ * so the caller can classify the failure instead of it reading as silence.
  */
-async function fetchAntigravityQuota(accessToken: string): Promise<AntigravityQuotaBucket[] | null> {
+async function fetchAntigravityQuota(accessToken: string): Promise<AntigravityQuotaFetchResult> {
+  let lastStatus: number | null = null;
+  let lastRetryAfter: string | null = null;
   for (const url of ANTIGRAVITY_QUOTA_URLS) {
     try {
       const response = await fetch(url, {
@@ -3244,14 +3442,18 @@ async function fetchAntigravityQuota(accessToken: string): Promise<AntigravityQu
         body: '{}',
         signal: AbortSignal.timeout(5000),
       });
-      if (!response.ok) continue;
+      if (!response.ok) {
+        lastStatus = response.status;
+        lastRetryAfter = response.headers.get('retry-after');
+        continue;
+      }
       const data = (await response.json()) as AntigravityQuotaResponse;
-      return Array.isArray(data?.buckets) ? data.buckets : [];
+      return { buckets: Array.isArray(data?.buckets) ? data.buckets : [], status: response.status, retryAfter: null };
     } catch {
       continue;
     }
   }
-  return null;
+  return { buckets: null, status: lastStatus, retryAfter: lastRetryAfter };
 }
 
 /** Compact model tag for the inline bar — 'gemini-2.5-flash-lite' => '2.5FL'. */
@@ -3313,16 +3515,30 @@ export function normalizeAntigravityWindows(buckets: AntigravityQuotaBucket[]): 
 async function getAntigravityUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const token = await loadAntigravityOauth(options?.home);
-    if (!token) return { snapshot: null, error: null };
+    if (!token) return { snapshot: null, error: usageNoCredentialError('Antigravity') };
 
     let accessToken = normalizeString(token.access_token);
     if ((!accessToken || antigravityTokenNeedsRefresh(token.expiry)) && token.refresh_token) {
       accessToken = await refreshAntigravityAccessToken(token.refresh_token);
     }
-    if (!accessToken) return { snapshot: null, error: null };
+    if (!accessToken) return { snapshot: null, error: usageExpiredCredentialError('Antigravity') };
 
-    const buckets = await fetchAntigravityQuota(accessToken);
-    if (!buckets) return { snapshot: null, error: null };
+    // Honour a live Retry-After rather than re-arming the penalty (see
+    // usage-backoff.ts). No request at all while the window is open. Antigravity
+    // previously had NO rate-limit backoff at all (RUSH-3040) — every refresh
+    // re-hit a throttled endpoint.
+    const throttledUntil = usageRateLimitedUntil('antigravity', Date.now(), options?.usageScope);
+    if (throttledUntil) {
+      return { snapshot: null, error: usageThrottledError('Antigravity', throttledUntil) };
+    }
+
+    const { buckets, status, retryAfter } = await fetchAntigravityQuota(accessToken);
+    if (!buckets) {
+      return {
+        snapshot: null,
+        error: classifyUsageFetchFailure('Antigravity', 'antigravity', status, retryAfter, options?.usageScope),
+      };
+    }
 
     const windows = normalizeAntigravityWindows(buckets);
     if (windows.length === 0) return { snapshot: null, error: null };
@@ -3336,7 +3552,10 @@ async function getAntigravityUsageInfo(options?: UsageOptions): Promise<UsageInf
       },
       error: null,
     };
-  } catch {
-    return { snapshot: null, error: null };
+  } catch (err) {
+    // A thrown request (timeout, DNS, TLS, a malformed payload) is a failed
+    // read like any other — staying silent here would hand the caller a stale
+    // snapshot to render as confirmed (RUSH-3040).
+    return { snapshot: null, error: usageUnreachableError('Antigravity', err) };
   }
 }

@@ -24,13 +24,21 @@ import {
   usageNoCredentialError,
   usageExpiredCredentialError,
   usageRejectedError,
+  usageThrottledError,
+  usageUnreachableError,
   usageHeadlessScopeError,
   isUsageHeadlessScopeError,
   isClaudeUsageScopeDenied,
   USAGE_HEADLESS_SCOPE_MARKER,
+  usageNoRecentUsageError,
+  isUsageNoRecentUsageError,
+  USAGE_NO_RECENT_USAGE_MARKER,
+  classifyUsageErrorKind,
+  classifyUsageFetchFailure,
   probeClaudeStatus,
   probeKimiStatus,
   type UsageSnapshot,
+  type UsageErrorKind,
 } from './usage.js';
 import type { AccountInfo } from '../agents.js';
 import { noteUsageRateLimited, setUsageBackoffDirForTest } from '../usage-backoff.js';
@@ -942,6 +950,227 @@ describe('the throttle guard is exercised beyond Claude', () => {
   });
 });
 
+// RUSH-3040: usage.ts's error scheme was written for "four networked
+// providers" (Claude/Kimi/Droid/Cursor) and Antigravity/Muse were added later
+// with `error: null` on EVERY failure — an unreadable account was
+// indistinguishable from a healthy one with nothing to show. These cover the
+// no-credential and throttle-short-circuit paths for both, which need no live
+// network call (mirrors the Kimi/Claude pattern above — this repo does not
+// mock).
+describe('Antigravity and Muse get the same error scheme as the four original providers', () => {
+  let home: string;
+  let dir: string;
+  let prevPath: string | null;
+  let prevRealHome: string | undefined;
+  let prevNoKeychainProbe: string | undefined;
+  let prevMetaKey: string | undefined;
+  let prevModelKey: string | undefined;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-agy-muse-'));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-agy-muse-cache-'));
+    prevPath = setUsageBackoffDirForTest(dir);
+    prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = home;
+    // Antigravity falls back to an OS keyring probe when no file credential
+    // exists; without this guard, "no credential" finds the developer's real
+    // login on a dev machine and the test passes for the wrong reason.
+    prevNoKeychainProbe = process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    process.env.AGENTS_NO_KEYCHAIN_PROBE = '1';
+    // Muse resolves a key from the environment before it looks at
+    // ~/.config/muse/auth.json — clear both so "no credential" is genuine.
+    prevMetaKey = process.env.META_API_KEY;
+    prevModelKey = process.env.MODEL_API_KEY;
+    delete process.env.META_API_KEY;
+    delete process.env.MODEL_API_KEY;
+  });
+
+  afterEach(() => {
+    setUsageBackoffDirForTest(prevPath);
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
+    if (prevNoKeychainProbe === undefined) delete process.env.AGENTS_NO_KEYCHAIN_PROBE;
+    else process.env.AGENTS_NO_KEYCHAIN_PROBE = prevNoKeychainProbe;
+    if (prevMetaKey === undefined) delete process.env.META_API_KEY;
+    else process.env.META_API_KEY = prevMetaKey;
+    if (prevModelKey === undefined) delete process.env.MODEL_API_KEY;
+    else process.env.MODEL_API_KEY = prevModelKey;
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  /** A real, unexpired Antigravity `agy` OAuth credential at the file path the resolver looks for. */
+  const seedAntigravity = () => {
+    const credDir = path.join(home, '.gemini', 'antigravity-cli');
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(credDir, 'antigravity-oauth-token'),
+      JSON.stringify({
+        token: {
+          access_token: 'agy-tok-fresh',
+          refresh_token: 'agy-refresh-fresh',
+          expiry: new Date(Date.now() + 3600_000).toISOString(),
+        },
+      }),
+    );
+  };
+
+  it('reports a specific no-credential error for Antigravity, not silent null', async () => {
+    const usage = await getUsageInfo('antigravity', { home });
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(usageNoCredentialError('Antigravity'));
+  });
+
+  it('suppresses the Antigravity usage read while its window is open (no network call needed)', async () => {
+    seedAntigravity();
+    noteUsageRateLimited('antigravity', '2678');
+
+    const usage = await getUsageInfo('antigravity', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toContain('Antigravity rate-limited this machine');
+  });
+
+  it('reports a specific no-credential error for Muse when no key and no local log exist', async () => {
+    const usage = await getUsageInfo('muse', { home });
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(usageNoCredentialError('Muse'));
+  });
+
+  it('suppresses the Muse live probe while throttled but still reads the local session log', async () => {
+    process.env.META_API_KEY = 'muse-key-fresh';
+    const sessDir = path.join(home, '.local', 'share', 'muse', 'sessions', 's1');
+    fs.mkdirSync(sessDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessDir, 'session.jsonl'),
+      JSON.stringify({
+        payload: { event: { kind: 'model_completed', usage: { input_tokens: 1000, output_tokens: 500 } } },
+      }) + '\n',
+    );
+    noteUsageRateLimited('muse', '2678');
+
+    const usage = await getUsageInfo('muse', { home });
+
+    // The throttle only blocks the live probe — the local fallback still works.
+    expect(usage.error).toBeNull();
+    expect(usage.snapshot).not.toBeNull();
+  });
+
+  it('reports the throttle for Muse only once every source (live AND local log) is empty', async () => {
+    process.env.META_API_KEY = 'muse-key-fresh';
+    noteUsageRateLimited('muse', '2678');
+
+    const usage = await getUsageInfo('muse', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toContain('Muse rate-limited this machine');
+  });
+});
+
+describe('classifyUsageFetchFailure — shared Antigravity/Muse classification + 429 backoff', () => {
+  let dir: string;
+  let prevPath: string | null;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-classify-fetch-'));
+    prevPath = setUsageBackoffDirForTest(dir);
+  });
+
+  afterEach(() => {
+    setUsageBackoffDirForTest(prevPath);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('notes the 429 backoff and returns the rejected-429 message', () => {
+    const message = classifyUsageFetchFailure('Antigravity', 'antigravity', 429, '120', null);
+    expect(message).toBe(usageRejectedError('Antigravity', 429));
+
+    // The backoff was actually recorded — a second read short-circuits.
+    const usage = classifyUsageFetchFailure('Antigravity', 'antigravity', 429, null, null);
+    expect(usage).toBe(usageRejectedError('Antigravity', 429));
+  });
+
+  it('returns a plain rejection for a non-429 status, without touching the backoff', () => {
+    const message = classifyUsageFetchFailure('Muse', 'muse', 500, null, null);
+    expect(message).toBe(usageRejectedError('Muse', 500));
+  });
+
+  it('returns unreachable when there is no status at all (a thrown/network failure)', () => {
+    const message = classifyUsageFetchFailure('Muse', 'muse', null, null, null);
+    expect(message).toBe(usageUnreachableError('Muse'));
+  });
+});
+
+describe('classifyUsageErrorKind — the interface for view.ts (RUSH-3040)', () => {
+  // ## Interface for view-render
+  // `classifyUsageErrorKind(usageInfo.error)` returns a `UsageErrorKind | null`
+  // that the `agents view` renderer passes as `FormatUsageSummaryOpts.errorKind`
+  // (plus the raw `usageInfo.error` string as `errorDetail`, used only to pull
+  // the retry-time hint out of a `rate-limited` classification). This table is
+  // the full contract — every UsageInfo.error this file can construct maps to
+  // exactly one of these kinds, so the renderer never has to special-case a
+  // message string itself.
+  it('classifies every constructed error string into its documented kind', () => {
+    const cases: Array<[string, UsageErrorKind]> = [
+      [usageNoCredentialError('Kimi'), 'no-credential'],
+      [usageExpiredCredentialError('Droid'), 'expired-credential'],
+      [usageThrottledError('Cursor', Date.now() + 60_000), 'rate-limited'],
+      [usageRejectedError('Antigravity', 429), 'rate-limited'],
+      [usageRejectedError('Muse', 500), 'rejected'],
+      [usageNoRecentUsageError('Codex'), 'no-usage-yet'],
+      [usageUnreachableError('Grok'), 'unreachable'],
+    ];
+    for (const [error, kind] of cases) {
+      expect(classifyUsageErrorKind(error)).toBe(kind);
+    }
+  });
+
+  it('returns null for no error, and the headless-scope marker classifies distinctly', () => {
+    expect(classifyUsageErrorKind(null)).toBeNull();
+    expect(classifyUsageErrorKind(undefined)).toBeNull();
+    expect(classifyUsageErrorKind(usageHeadlessScopeError('Claude'))).toBe('headless-scope');
+  });
+
+  it('round-trips the no-recent-usage marker', () => {
+    const message = usageNoRecentUsageError('Grok');
+    expect(message).toContain(USAGE_NO_RECENT_USAGE_MARKER);
+    expect(isUsageNoRecentUsageError(message)).toBe(true);
+    expect(isUsageNoRecentUsageError('some other error')).toBe(false);
+    expect(isUsageNoRecentUsageError(null)).toBe(false);
+  });
+});
+
+describe('formatUsageSummary renders the SPECIFIC error kind, not a generic bucket', () => {
+  // The bug this closes: opts.unavailable used to render the bare string
+  // 'usage unavailable' for ~6 different causes. errorKind lets the no-bars
+  // branch name which one.
+  it('renders a distinct human label for each error kind', () => {
+    expect(formatUsageSummary(null, null, 3, { unavailable: true, errorKind: 'no-credential' })).toContain(
+      'sign in / provision token',
+    );
+    expect(formatUsageSummary(null, null, 3, { unavailable: true, errorKind: 'expired-credential' })).toContain(
+      're-auth for usage',
+    );
+    expect(formatUsageSummary(null, null, 3, { unavailable: true, errorKind: 'no-usage-yet' })).toContain(
+      'no usage recorded yet',
+    );
+  });
+
+  it('pulls the retry-time hint out of the raw error detail for rate-limited', () => {
+    const detail = usageThrottledError('Droid', Date.now() + 12 * 60_000);
+    const rendered = formatUsageSummary(null, null, 3, {
+      unavailable: true,
+      errorKind: 'rate-limited',
+      errorDetail: detail,
+    });
+    expect(rendered).toContain('rate-limited (retry ~');
+  });
+
+  it('falls back to the generic label when no errorKind is supplied (unchanged old behavior)', () => {
+    expect(formatUsageSummary(null, null, 3, { unavailable: true })).toContain('usage unavailable');
+  });
+});
+
 describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
   let home: string;
 
@@ -1058,6 +1287,35 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
     const session = info.snapshot?.windows.find((w) => w.key === 'session');
     expect(session?.usedPercent).toBe(42);
   });
+
+  it('reports a benign no-recent-usage marker when signed in but nothing was ever recorded (RUSH-3040)', async () => {
+    writeAuth(NOW);
+    // No writeSession() call — a fresh account with no rate-limit event on
+    // this machine yet. This used to be silently indistinguishable from a
+    // genuine read failure (both were `error: null`).
+    const info = await getUsageInfo('codex', { home });
+    expect(info.snapshot).toBeNull();
+    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+  });
+
+  it('skips a stale window and falls back to an earlier session that is still fresh (RUSH-3040)', async () => {
+    // Freshness is judged against the REAL wall clock (isCachedUsageWindowFresh
+    // compares to `new Date()`), so this test uses actual Date.now() rather than
+    // the fixed future `NOW` constant the rest of this suite uses.
+    const real = Date.now();
+    const HOUR_MS = 60 * 60 * 1000;
+    writeAuth(real - 3 * HOUR_MS);
+    // Newest file (checked first): a 30-minute window captured an hour ago —
+    // already expired. Without the freshness filter this stale 80% would win.
+    writeSession(real - HOUR_MS, 80, 30);
+    // Older file (checked second, still after the login floor): a 5-hour
+    // window captured 2 hours ago — still fresh.
+    writeSession(real - 2 * HOUR_MS, 15, 300);
+
+    const info = await getUsageInfo('codex', { home });
+    const session = info.snapshot?.windows.find((w) => w.key === 'session');
+    expect(session?.usedPercent).toBe(15);
+  });
 });
 
 describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
@@ -1154,6 +1412,15 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(info.snapshot?.windows).toEqual([]);
     expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
   });
+
+  it('reports a benign no-recent-usage marker when no log file exists yet (RUSH-3040)', async () => {
+    // No writeBillingLine() call — a fresh install with no Grok log at all.
+    // This used to be silently indistinguishable from a real read failure.
+    const info = await getUsageInfo('grok', { home });
+    expect(info.snapshot).toBeNull();
+    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+  });
+
   describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
     const usageKey = 'claude:org=oocred';
 
