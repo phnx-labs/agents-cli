@@ -999,9 +999,13 @@ of a team run, not one run's steps.
 **The edges are read, not inferred.** A teammate's `meta.json` records the
 orchestrator that spawned it as `parent_session_id`, which the session index
 carries as `teamOrigin.parentSessionId`; a teammate whose own record names none
-inherits its team's agreed-on spawner (`groupSessionsByTeam().spawnerSessionId`).
-Both appear on the edge as its `source`, so you can always tell which record
-established a link.
+inherits its team's agreed-on spawner (`groupSessionsByTeam().spawnerSessionId`)
+— but only when it was spawned inside that run's own window, because teams are
+grouped by name alone and `--tree` scans all-time, so without the window a second
+run of a team called `fleet-resume` would adopt the first run's teammates. That
+window is the spawn span of the teammates that did name the spawner, plus an
+hour. Both routes appear on the edge as its `source`, so you can always tell
+which record established a link.
 
 **A node is a session, never an inline sub-agent.** A `Task` / `Agent` tool call is a
 step inside one transcript (it shows in the single-session layout as
