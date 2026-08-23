@@ -346,17 +346,28 @@ whether it allows it:
 
 Consent is a **per-device setting** (the `browser.remote-control` config key,
 in this machine's `devices/<machine>/agents.yaml` `config:`) and **off by
-default**: a `browser --device <this-machine>` drive from elsewhere is refused
-with a message naming how to enable it, until the owner runs
+default**: a `browser --device <this-machine>` request that would **open** a
+browser is refused with a message naming how to enable it, until the owner runs
 `agents browser remote-control on` here. The key is machine-local — only this
 box can set it. Local drives (no `--device`) are never gated.
 
-The gate lives in the browser daemon, at the two points that can actually open a
-browser (`BrowserService.start` and the create branch of `resolveOrCreateTask`),
+The gate lives in the browser daemon, at the two points that can actually launch
+a browser (`BrowserService.start` and the create branch of `resolveOrCreateTask`),
 not on the `browser start` command. It has to: `navigate`, `click`, `screenshot`
-and the other page verbs create a browser implicitly when the caller has no live
+and the other page verbs launch a browser implicitly when the caller has no live
 task, so gating the one command left every one of them ungated. Read-only queries
 (`status`, `tabs`, `profiles list`) are not gated.
+
+**What this does NOT cover.** The gate is on *launching*, not on *attaching*. A
+request that resolves to a task which already exists — `--task <name>`, or the
+single-match-by-caller-identity path in `resolveOrCreateTask` — returns before
+the gate and can then drive that task's tabs. So on a machine whose browser is
+already running with live tasks, a remote `browser tab-add --device <box> --task
+<name>` can still act in the owner's authenticated profile with consent off, and
+`status` is ungated by design so task names are discoverable. This is
+pre-existing behaviour, not introduced or closed here; closing it means gating
+the attach path (`findTask` and its consumers) as well, which is tracked
+separately. Treat `remote-control off` as "no new browser", not as "no access".
 
 The marker travels **on the request**, not in the daemon's environment. The
 daemon is shared and long-lived, and one auto-started by a fleet-remote CLI

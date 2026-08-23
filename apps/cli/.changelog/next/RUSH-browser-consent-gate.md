@@ -5,8 +5,12 @@
   task. A `browser navigate --device <box>` therefore opened a browser on a
   machine whose owner never opted in, while `browser start --device <box>` was
   correctly refused. The gate now sits in the daemon at the two points that can
-  open a browser (`BrowserService.start` and the create branch of
-  `resolveOrCreateTask`), so every implicit-create verb is covered. The consent
+  launch a browser (`BrowserService.start` and the create branch of
+  `resolveOrCreateTask`), so every implicit-LAUNCH verb is covered. It does not
+  cover *attaching*: a request naming an existing task (`--task`, or the
+  single-match-by-caller path) returns before the gate and can drive that task's
+  tabs. That is pre-existing and tracked separately — `remote-control off` means
+  "no new browser", not "no access". The consent
   marker rides the IPC request rather than the daemon's environment: a daemon
   auto-started by a fleet-remote CLI inherits `AGENTS_FLEET_REMOTE=1`
   permanently, and reading that would have refused every later local drive.

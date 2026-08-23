@@ -56,11 +56,7 @@ export function assertRemoteControlAllowed(opts?: {
   if (enabled) return;
 
   const who = env.AGENTS_ACTOR_HOST || env.AGENTS_ACTOR || 'A fleet machine';
-  throw new Error(
-    `${who} tried to drive this machine's browser over \`browser --device\`, but remote ` +
-      `browser control is off here. To allow it, run on THIS machine:\n` +
-      `  agents browser remote-control on`,
-  );
+  throw new Error(remoteControlRefusal(who));
 }
 
 /**
