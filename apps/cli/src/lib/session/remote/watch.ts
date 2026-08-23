@@ -8,7 +8,7 @@ import { deviceIdentityArgs, sshTargetFor } from '../../devices/connect.js';
 import { machineId, normalizeHost } from '../../machine-id.js';
 import { SSH_OPTS, controlOpts, shellQuote } from '../../ssh-exec.js';
 import { buildWindowsAgentsCommand, remoteShellFor } from '../../hosts/remote-cmd.js';
-import type { ActiveSession } from '../active.js';
+import { isReapableOrphan, type ActiveSession } from '../active.js';
 import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
@@ -45,7 +45,11 @@ export function sessionWatchRowKey(scope: string, row: ActiveSession): string {
 
 export function toSessionWatchRow(scope: string, row: ActiveSession): SessionWatchRow {
   const rowKey = sessionWatchRowKey(scope, row);
-  const resumable = Boolean(row.sessionId);
+  // A dead, days-stale crash-orphan is folded OUT of the reconnectable set — it
+  // is not resumable, so the "Needs reconnecting" list stops ballooning with
+  // leaked --device tunnel sessions (RUSH-3011 / issue #3b). A live or
+  // recently-exited session stays resumable.
+  const resumable = Boolean(row.sessionId) && !isReapableOrphan(row);
   const viewingIn = row.viewingIn
     ? [row.viewingIn.app, row.viewingIn.tab ? `tab ${row.viewingIn.tab}` : undefined].filter(Boolean).join(' ')
     : null;

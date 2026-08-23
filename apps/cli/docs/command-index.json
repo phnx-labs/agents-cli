@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 550,
+  "commands": 552,
   "root": {
     "name": "agents",
     "path": "",
@@ -3732,6 +3732,51 @@
               "subcommands": []
             }
           ]
+        },
+        {
+          "name": "show",
+          "path": "browser show",
+          "aliases": [],
+          "description": "Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task",
+          "args": [
+            {
+              "name": "url",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--os-browser",
+              "description": "Use the OS default handler instead of the configured viewer",
+              "long": "--os-browser",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
         },
         {
           "name": "start",
@@ -19631,7 +19676,7 @@
         },
         {
           "flags": "--raw",
-          "description": "Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.",
+          "description": "Keep this interactive run direct when the device has opted into tmux wrapping. A no-op under the default tmux-off configuration; equivalent to AGENTS_NO_TMUX=1.",
           "long": "--raw",
           "required": false,
           "optional": false,
@@ -19640,7 +19685,7 @@
         },
         {
           "flags": "--no-tmux",
-          "description": "Spawn the agent directly instead of wrapping it in the shared tmux session. Same effect as --raw / AGENTS_NO_TMUX=1. Use this to see the agent's full startup output when a launch is failing; to turn the wrap off for every run on this machine, set `agents config set devices.<name>.tmux off`.",
+          "description": "Keep this run direct when tmux wrapping is enabled for the device. Same effect as --raw / AGENTS_NO_TMUX=1; it is a no-op under the default tmux-off configuration.",
           "long": "--no-tmux",
           "required": false,
           "optional": false,
@@ -19649,7 +19694,7 @@
         },
         {
           "flags": "--disable-tmux",
-          "description": "Alias for --no-tmux.",
+          "description": "Compatibility alias for --no-tmux; a no-op when tmux wrapping is already off.",
           "long": "--disable-tmux",
           "required": false,
           "optional": false,
@@ -24475,6 +24520,44 @@
           ],
           "examples": "# Most-invoked skills and commands, plus the installed ones you never invoke\n      agents sessions stats\n\n      # Just the dead weight — installed but never explicitly invoked\n      agents sessions stats --zero\n\n      # Skills only, last 30 days, machine-readable\n      agents sessions stats --kind skill --since 30d --json\n\n      # One plugin's resources, least-used first\n      agents sessions stats --plugin rush --bottom\n\n      # Backfill historical sessions first if coverage is low\n      agents sessions backfill resources",
           "notes": "- The signal captures EXPLICIT invocations only: slash commands and `Skill` tool calls. An auto-triggered skill (loaded by description match) emits no event, so it reads as 0 — that means \"never explicitly invoked\", not \"never loaded\".\n      - Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only. Other harnesses contribute nothing to these counts.\n      - Counts come from the SQLite index. New/changed sessions are recorded on their normal scan; run `agents sessions backfill resources` once to fold in historical sessions (a low coverage line means it hasn't run).\n      - --plugin filters the resource rows (this plugin's skills/commands), distinct from the top-level `agents sessions --plugin` which filters SESSIONS.",
+          "subcommands": []
+        },
+        {
+          "name": "stop",
+          "path": "sessions stop",
+          "aliases": [],
+          "description": "Stop a live agent outright — end its process and tear down its tmux/mux session",
+          "args": [
+            {
+              "name": "id",
+              "required": true,
+              "variadic": false,
+              "description": "Short or full id of the live session to stop"
+            }
+          ],
+          "options": [
+            {
+              "flags": "--local",
+              "description": "Only this machine (skip the cross-host sweep)",
+              "long": "--local",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "# Stop a live session by a short id prefix\n      agents sessions stop 4b2f1a9c\n\n      # Only look on this machine (skip the fleet sweep)\n      agents sessions stop 4b2f1a9c --local",
+          "notes": "stop ENDS the session; it does not background it. To keep an agent working\n      unattended instead, use `agents sessions detach <id>`, and bring it back\n      with `agents sessions resume <id>`.\n\n      A session that lives on another machine is stopped THERE over SSH — its pid\n      and tmux socket only mean something where it actually runs.",
           "subcommands": []
         },
         {

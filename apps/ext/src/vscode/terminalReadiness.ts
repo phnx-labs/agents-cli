@@ -358,6 +358,65 @@ export function disposeTerminal(terminal: vscode.Terminal): void {
   coreDispose(r.entry, 'terminal closed');
 }
 
+// --- Graceful agent teardown on a genuine tab close (#5b) -----------------
+//
+// `onDidCloseTerminal` fires for BOTH a real user close (Cmd+W / close tab) and
+// a window RELOAD — and the underlying agent (in a detached tmux/mux session)
+// survives both, so a naive "kill on close" would break crash-restore, which
+// re-registers the very session it just saw close. The one signal that cleanly
+// separates the two is `terminal.exitStatus.reason` (VS Code's
+// `TerminalExitReason`, stable since API 1.77):
+//
+//   User (3)      — the user closed the tab            → TEAR DOWN
+//   Shutdown (1)  — the window/app is reloading/quitting → keep (restore reattaches)
+//   Process (2)   — the agent exited on its own          → keep (already gone; #5a reaped the mux)
+//   Extension (4) — an extension closed it programmatically → keep
+//   Unknown (0)   — ambiguous                              → keep (fail safe)
+//
+// Only `User` tears down. Every other reason — including the ambiguous
+// `Unknown` — is left alone, so a reload/restore never kills a live agent.
+
+/**
+ * Whether a terminal close should tear down the underlying agent + its mux.
+ * TRUE only for a genuine USER close; every other (or absent) exit reason is
+ * left running so a window reload / programmatic close / natural exit can't kill
+ * a session crash-restore is about to reattach.
+ */
+export function shouldTearDownAgentOnClose(
+  reason: vscode.TerminalExitReason | undefined,
+): boolean {
+  return reason === vscode.TerminalExitReason.User;
+}
+
+export interface AgentCloseTeardown {
+  /** `terminal.exitStatus?.reason` at close time. */
+  reason: vscode.TerminalExitReason | undefined;
+  /** The closed tab's live CLI session id, when it tracked one. */
+  sessionId: string | undefined;
+  /** The device the agent runs on, when offloaded (`--device`); undefined for a local tab. */
+  host: string | undefined;
+  /**
+   * Runs `agents sessions stop <id>` — injected so the teardown decision is
+   * testable without spawning the CLI. Called ONLY for a genuine user close of
+   * a tab that tracks a live session id.
+   */
+  stop: (sessionId: string, opts: { local: boolean }) => Promise<void>;
+}
+
+/**
+ * On a genuine user close of an agent tab, stop the underlying agent and tear
+ * down its tmux/mux session so it doesn't linger orphaned-idle (#5b). A no-op
+ * for a reload/programmatic/natural close, and for a tab that never bound a
+ * session id (a plain shell, or an agent that hadn't reported one yet — nothing
+ * to stop). `--local` is passed for a local tab so the CLI skips the fleet
+ * sweep; an offloaded tab (`host` set) lets the CLI resolve + hop to that box.
+ */
+export async function maybeTearDownAgentOnClose(t: AgentCloseTeardown): Promise<void> {
+  if (!shouldTearDownAgentOnClose(t.reason)) return;
+  if (!t.sessionId) return;
+  await t.stop(t.sessionId, { local: !t.host });
+}
+
 // --- Shell adoption ------------------------------------------------------
 //
 // Polls the descendant process tree of an SH terminal looking for known

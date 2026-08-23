@@ -7,6 +7,7 @@
  * the whole suite is skipped at module load.
  */
 
+import { spawnSync } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -32,6 +33,9 @@ import {
   splitPane,
   AGENT_HOOK_SCHEMA,
   agentPaneDiedHook,
+  AGENTS_TMUX_HISTORY_LIMIT,
+  AGENTS_TMUX_CONFIG_SCHEMA,
+  buildCreateSessionArgs,
   TmuxSessionError,
 } from './session.js';
 
@@ -66,6 +70,69 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(slugifyName('hello world')).toBe('hello-world');
     expect(slugifyName('agent:claude.task')).toBe('agent-claude-task');
     expect(slugifyName('---trim---')).toBe('trim');
+  });
+
+  it('builds session creation with agents-cli server ergonomics before new-session', () => {
+    const args = buildCreateSessionArgs({ name: 'ergonomic', cmd: 'sleep 30' }, '/agents/tmux-defaults.conf');
+    expect(args).toEqual([
+      '-f', '/agents/tmux-defaults.conf',
+      'set-option', '-g', 'remain-on-exit', 'on', ';',
+      'new-session', '-d', '-s', 'ergonomic', '-P', '-F', '#{pane_id}',
+      '--', 'sh', '-c', 'sleep 30',
+    ]);
+  });
+
+  it('keeps explicit user tmux options and mouse-copy bindings', async () => {
+    const userHome = path.join(tempDir, 'home');
+    fs.mkdirSync(userHome);
+    fs.writeFileSync(path.join(userHome, '.tmux.conf'), [
+      'set-option -g mouse off',
+      'set-option -s set-clipboard external',
+      'set-option -g history-limit 50000',
+      'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X cancel',
+      'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X cancel',
+    ].join('\n'));
+
+    await createSession({
+      name: 'user-config',
+      cmd: 'sleep 30',
+      socket,
+      env: { ...process.env, HOME: userHome, XDG_CONFIG_HOME: path.join(userHome, '.config') },
+    });
+
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'mouse'] })).stdout.trim()).toBe('off');
+    expect((await runTmux({ socket, args: ['show-options', '-sv', 'set-clipboard'] })).stdout.trim()).toBe('external');
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'history-limit'] })).stdout.trim()).toBe('50000');
+    for (const table of ['copy-mode', 'copy-mode-vi']) {
+      const binding = (await runTmux({ socket, args: ['list-keys', '-T', table, 'MouseDragEnd1Pane'] })).stdout;
+      expect(binding).toContain('cancel');
+      expect(binding).not.toContain('copy-selection-no-clear');
+    }
+  });
+
+  it('configures mouse, OSC 52 clipboard, scrollback, and non-clearing mouse copy on its socket', async () => {
+    const unconfiguredHome = path.join(tempDir, 'unconfigured-home');
+    fs.mkdirSync(unconfiguredHome);
+    await createSession({
+      name: 'ergonomic',
+      cmd: 'sleep 30',
+      socket,
+      env: {
+        ...process.env,
+        HOME: unconfiguredHome,
+        XDG_CONFIG_HOME: path.join(unconfiguredHome, '.config'),
+      },
+    });
+
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'mouse'] })).stdout.trim()).toBe('on');
+    expect((await runTmux({ socket, args: ['show-options', '-sv', 'set-clipboard'] })).stdout.trim()).toBe('on');
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'history-limit'] })).stdout.trim())
+      .toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+
+    for (const table of ['copy-mode', 'copy-mode-vi']) {
+      const binding = (await runTmux({ socket, args: ['list-keys', '-T', table, 'MouseDragEnd1Pane'] })).stdout;
+      expect(binding).toContain('copy-selection-no-clear');
+    }
   });
 
   it('creates a detached session and reports it via hasSession + listSessions', async () => {
@@ -376,23 +443,39 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(panes[0]).toBe(`${agentPane}:0`);
   });
 
-  it('pane-guarded pane-died hook: exiting the agent pane fires the guard (dead husk kept for status read)', async () => {
-    // The true-branch: when the AGENT pane exits, the hook fires. remain-on-exit
-    // on the agent pane keeps it as a dead husk so runInTmux can read the exit status before teardown.
-    const meta = await createSession({ name: 'guardagent', cmd: 'sh -c "exit 7"', socket });
+  it('#5a: agent pane dies with NO client attached → the whole session is torn down (no lingering husk)', async () => {
+    // The core graceful-shutdown fix (AGENT_HOOK_SCHEMA v6): a wrapped agent that
+    // exits with nobody attached must NOT leave a dead `remain-on-exit` husk on the
+    // socket until the daemon's periodic reap — the "second exit" / orphaned-idle
+    // session bug. The session_attached-aware hook kill-sessions it the instant the
+    // agent pane dies. This is the exact scenario a closed terminal / a `/exit`
+    // after detaching produces: no attach client, agent exits, session must be GONE.
+    //
+    // Keep the agent ALIVE while we arm the hook, then kill its process on demand.
+    // A fast-exiting command could race the hook install under CI load (the pane
+    // would die before the hook is armed, so it would never fire). runInTmux has
+    // its own before-attach dead-pane check for exactly that window; here we just
+    // guarantee the hook is armed before the pane dies.
+    const meta = await createSession({ name: 'ag-shutdown', cmd: 'sh -c "sleep 300"', socket });
     const agentPane = meta.pane!;
+    expect(agentPane).toMatch(/^%\d+$/);
     await setSessionHook(
-      'guardagent',
+      'ag-shutdown',
       'pane-died',
-      agentPaneDiedHook('guardagent', agentPane),
+      agentPaneDiedHook('ag-shutdown', agentPane),
       socket,
     );
-    await wait(400);
-    // Guard matched the agent pane → the else-branch kill-pane did NOT run, so the
-    // dead husk survives and its exit status is still readable.
-    const exit = await paneExitStatus(agentPane, socket);
-    expect(exit.dead).toBe(true);
-    expect(exit.status).toBe(7);
+    // Make the agent exit deterministically: read the pane's real leaf pid and
+    // SIGKILL it, rather than racing send-keys against shell readiness under load.
+    // The pane dies with the hook armed and NO client attached (headless), so the
+    // hook's agent-pane branch kill-sessions — exactly what an unattended `/exit`
+    // does — instead of leaving a dead `remain-on-exit` husk.
+    const panePid = await waitForPanePid(agentPane, socket);
+    expect(panePid).toBeGreaterThan(0);
+    process.kill(panePid, 'SIGKILL');
+    const gone = await waitForSessionGone('ag-shutdown', socket);
+    expect(gone).toBe(true);
+    expect(await hasSession('ag-shutdown', socket)).toBe(false);
   });
 
   it('reconcileSessionHooks retrofits the guarded hook onto a session left with the OLD unconditional one', async () => {
@@ -525,6 +608,47 @@ function wait(ms: number): Promise<void> {
 }
 
 /**
+ * Poll a pane's `#{pane_pid}` until it resolves to a running process (a real,
+ * non-zero pid whose process actually exists), or the timeout elapses. The pane
+ * command starts asynchronously after `new-session` returns, so a bare read can
+ * observe pid 0 / a not-yet-running process under CI load. Returns 0 on timeout
+ * (a genuine miss still fails the caller's `> 0` assertion).
+ */
+async function waitForPanePid(pane: string, socket: string, timeoutMs = 5000): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const r = await runTmux({ socket, args: ['display-message', '-pt', pane, '-p', '#{pane_pid}'], throwOnError: false });
+    const pid = parseInt(r.stdout.trim(), 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      try { process.kill(pid, 0); return pid; } catch { /* not running yet */ }
+    }
+    if (Date.now() >= deadline) return 0;
+    await wait(50);
+  }
+}
+
+/**
+ * Poll `hasSession` until the named session is GONE, or the timeout elapses.
+ * Used by the #5a graceful-shutdown test: the session_attached-aware pane-died
+ * hook kill-sessions on agent-pane death when no client is attached, and that
+ * teardown is an async tmux operation whose latency varies under CI load — so
+ * poll for it rather than racing a fixed sleep. Returns true once it's gone,
+ * false if it never converged (so a genuine failure still fails the assertion).
+ */
+async function waitForSessionGone(
+  name: string,
+  socket: string,
+  timeoutMs = 20000,
+): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    if (!(await hasSession(name, socket))) return true;
+    if (Date.now() >= deadline) return false;
+    await wait(50);
+  }
+}
+
+/**
  * Poll `list-panes` until the session has exactly `expected` panes, or the
  * timeout elapses. Returns the last observed `#{pane_id}:#{pane_dead}` rows.
  *
@@ -600,3 +724,76 @@ async function waitForCapture(
     await wait(50);
   }
 }
+
+describe('already-running server reconcile (RUSH-3066)', () => {
+  // These drive the REAL createSession() against a REAL tmux server, because the
+  // bug being fixed lives in createSession's control flow, not in tmux. A test
+  // that only shells out to `tmux` directly would still pass with the fix
+  // deleted, which is exactly the ceremony apps/cli/AGENTS.md forbids.
+  const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ag-reconcile-'));
+
+  it('configures a server that was ALREADY running before agents-cli touched it', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const socket = path.join(dir, 's.sock');
+    try {
+      // A pre-existing server started WITHOUT our config — the state every
+      // machine is in at upgrade.
+      spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'preexisting'], { encoding: 'utf-8' });
+      const before = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      expect(before.stdout.trim()).toBe('off');
+
+      await createSession({ name: 'agent-1', socket, cmd: 'sleep 30' });
+
+      const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      const hist = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'history-limit'], { encoding: 'utf-8' });
+      const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
+      // Without the reconcile branch these are 'off' / '2000' / '' — tmux
+      // ignores -f on a server that is already up.
+      expect(mouse.stdout.trim()).toBe('on');
+      expect(hist.stdout.trim()).toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+      expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles on the attachExisting path too', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const socket = path.join(dir, 's.sock');
+    try {
+      spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'legacy'], { encoding: 'utf-8' });
+      await createSession({ name: 'legacy', socket, attachExisting: true });
+      const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
+      expect(mouse.stdout.trim()).toBe('on');
+      expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not source the user config twice on a cold start', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const home = path.join(dir, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    const marker = path.join(dir, 'sourced.log');
+    // A side-effectful user config, the way TPM's run-shell behaves.
+    fs.writeFileSync(path.join(home, '.tmux.conf'), `run-shell "echo x >> ${marker}"\n`);
+    const socket = path.join(dir, 's.sock');
+    try {
+      await createSession({ name: 'cold', socket, cmd: 'sleep 30', env: { ...process.env, HOME: home } });
+      // Give run-shell a moment to land.
+      await new Promise((r) => setTimeout(r, 400));
+      const fired = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf-8').trim().split('\n').length : 0;
+      expect(fired).toBeLessThanOrEqual(1);
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

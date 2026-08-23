@@ -32,6 +32,7 @@ export type InjectResolution =
   | { addressable: true; rail: InjectRail; target: InjectTarget; note?: string }
   | { addressable: false; reason: string };
 
+
 export interface ResolveOptions {
   /**
    * Allow the COARSE Ghostty path (raise the frontmost/opt-in window and type via

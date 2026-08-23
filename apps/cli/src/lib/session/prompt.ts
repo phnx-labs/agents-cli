@@ -154,6 +154,90 @@ export function cleanSessionPrompt(raw: string): string {
   return meaningful.join('\n').trim();
 }
 
+/**
+ * How a session's first user turn reads once its framework noise is stripped —
+ * so a UI row can show `[image]` / `$ cmd` / `/skill` instead of a screenshot
+ * path, a pasted shell line, or a skill's install directory.
+ */
+export type UserPromptKind = 'text' | 'image' | 'command' | 'skill';
+
+export interface ClassifiedPrompt {
+  /**
+   * The one-line, display-ready form of the prompt — never a bare path. NOT
+   * length-capped: the recap card shows it in full; row consumers cap it
+   * themselves (`deriveSessionRecap`).
+   */
+  clean: string;
+  kind: UserPromptKind;
+}
+
+/**
+ * A skill invocation injects a system line naming the skill's install directory:
+ *   "Base directory for this skill: /home/.../skills/<name>"
+ * which collapses to "/<name>" so a row shows the skill, not the path. Anchored
+ * to that exact injected line — a bare `.../skills/<name>` mention in ordinary
+ * prose is NOT a skill invocation and must keep its real text.
+ */
+const SKILL_BASEDIR_RE = /Base directory for this skill:\s*\S*[\/\\]skills[\/\\]([\w.-]+)/i;
+
+/**
+ * An explicit shell-prompt paste (`$ cmd`). Only the command survives. Deliberately
+ * `$`-only: a leading `>` is a markdown blockquote far more often than a shell
+ * prompt, so matching it misread quoted prose as a command.
+ */
+const COMMAND_PREFIX_RE = /^\$\s+(\S.*)$/;
+
+/**
+ * A filesystem path (absolute or `~`-rooted) ending in an image extension —
+ * matched even across the spaces a CleanShot filename carries. Used both to
+ * detect an image-only prompt and to drop the path from a mixed one.
+ */
+const IMAGE_PATH_RE = /[\/~][^\n]*?\.(?:png|jpe?g|gif|webp|heic|bmp|svg)\b/i;
+
+/**
+ * Classify a raw first user turn into a display-ready `{ clean, kind }`, so a
+ * Fleet/session row shows the user's actual intent rather than path noise:
+ *
+ *   - `skill`   — a `/skill` invocation's injected "Base directory for this
+ *                 skill: …" line collapses to `/<name>`.
+ *   - `command` — a `$ `-prefixed shell paste keeps only the first command.
+ *   - `image`   — a screenshot/image path standing alone, or an image
+ *                 attachment with no real accompanying text, becomes `[image]`.
+ *   - `text`    — everything else: wrapper tags stripped (via
+ *                 {@link cleanSessionPrompt}) and any inline image path replaced
+ *                 with `[image]` so a mixed prompt still drops the path.
+ *
+ * Pure and cross-harness (text markers, no per-agent branch). `hasImageAttachment`
+ * lets a caller that only has an already-extracted topic line still detect an
+ * image-only turn from the row's attachment list.
+ */
+export function classifyUserPrompt(
+  raw: string | undefined,
+  opts: { hasImageAttachment?: boolean } = {},
+): ClassifiedPrompt {
+  const text = (raw ?? '').replace(/\r/g, '').trim();
+
+  const skill = text.match(SKILL_BASEDIR_RE);
+  if (skill) return { clean: `/${skill[1]}`, kind: 'skill' };
+
+  const firstLine = text.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+
+  const cmd = firstLine.match(COMMAND_PREFIX_RE);
+  if (cmd) return { clean: `$ ${cmd[1]}`.trim(), kind: 'command' };
+
+  const cleaned = cleanSessionPrompt(text);
+  const cleanedFirst = cleaned.split('\n').map(line => line.trim()).find(Boolean) ?? '';
+
+  const imgMatch = firstLine.match(IMAGE_PATH_RE);
+  const imageOnly = !!imgMatch && firstLine.replace(imgMatch[0], '').replace(/[^\w]/g, '').length <= 8;
+  if (imageOnly || (opts.hasImageAttachment && !cleanedFirst)) {
+    return { clean: '[image]', kind: 'image' };
+  }
+
+  const display = (cleanedFirst || firstLine).replace(IMAGE_PATH_RE, '[image]').trim();
+  return { clean: display, kind: 'text' };
+}
+
 /** Extract a one-line topic from a raw user message, or undefined if the message is pure noise. */
 export function extractSessionTopic(raw: string): string | undefined {
   if (!raw.trim()) return undefined;

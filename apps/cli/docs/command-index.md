@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 550 commands._
+_69 command groups · 552 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -118,6 +118,7 @@ agents browser sessions                       Browse a profile's captured screen
 agents browser set                            Set browser emulation options
 agents browser set device <device-name>       Emulate a device (iPhone 14, iPad, MacBook Pro)
 agents browser set viewport <width> <height>  Set viewport size
+agents browser show <url>                     Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task
 agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser use <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
 agents browser status                         Show running browser tasks
 agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)
@@ -735,6 +736,7 @@ agents sessions render <selectors...>       Render one or more sessions as reada
 agents sessions resume [query] [prompt]     Resume a session by id (strict), or multi-select history into terminal tabs/splits.
 agents sessions share <session>             Publish one session as a redacted, self-contained web page and print the link.
 agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.
+agents sessions stop <id>                   Stop a live agent outright — end its process and tear down its tmux/mux session
 agents sessions tail [sessionId]            Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
 agents sessions trace <selectors...>        Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
 agents sessions watch                       Stream canonical live and recoverable session row changes as NDJSON

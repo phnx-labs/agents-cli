@@ -80,6 +80,13 @@ export function captureFleet(prev: FleetManifest | undefined, inputs: CaptureInp
     manifest.discovery = { ...prev.discovery };
   }
 
+  // Dismissals are operator state, not live state — a capture must never wipe
+  // them (fleet.ignored syncs; losing it re-suggests every dismissed node
+  // fleet-wide). Carry forward verbatim, same contract as `discovery`.
+  if (prev?.ignored && prev.ignored.length > 0) {
+    manifest.ignored = prev.ignored.map((e) => ({ ...e }));
+  }
+
   const bundles = inputs.secretsBundles ?? prev?.secrets?.bundles;
   if (bundles && bundles.length > 0) manifest.secrets = { bundles: [...bundles].sort() };
 

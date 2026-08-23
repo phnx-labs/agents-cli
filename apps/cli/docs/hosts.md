@@ -374,8 +374,8 @@ agents run <agent> ["<task>"] --device <device>
   │
   └─ no prompt?                interactive TTY-forwarded path
         ssh -tt <node> 'agents run <agent>'   (only when local stdin is a TTY)
-        remote agents-cli launches its normal interactive UI (tmux on the host)
-        network drop (ssh exit 255) → auto-reattach the live remote pane;
+        remote agents-cli launches its normal direct interactive UI
+        with tmux.enabled on: network drop (ssh exit 255) → auto-reattach the live remote pane;
         clean detach / agent exit → local CLI exits with that code
 ```
 
@@ -383,14 +383,14 @@ agents run <agent> ["<task>"] --device <device>
 > With a prompt, the run is headless, follows live by default, and `--no-follow`
 > detaches; track with `agents hosts ps` and `agents hosts logs <id>`. With no
 > prompt (and a local TTY), the local TTY is forwarded over SSH and the agent runs
-> interactively on the remote host (`ssh -tt`), using the remote machine's normal
-> tmux wrapper.
+> interactively on the remote host (`ssh -tt`). The remote machine spawns it
+> directly unless its device-local `tmux.enabled` setting opts into the wrapper.
 > Host runs are tracked in a **local** task store, not `agents cloud` (a separate
 > subsystem for Rush/Codex/Factory backends).
 >
-> **Surviving a network drop.** Because the remote agent runs in a *detached* tmux
-> session on the host, an SSH blink kills only the local client — the agent keeps
-> working. When an interactive host run with a known session id (Claude, or a
+> **Surviving a network drop with tmux enabled.** A remote agent wrapped in a
+> *detached* tmux session survives an SSH blink; a direct run does not. When a
+> wrapped interactive host run has a known session id (Claude, or a
 > `--resume`d run) drops (ssh reports its connection-layer code, 255), the local CLI
 > **re-attaches the live remote pane automatically** — it drives the host's own
 > `agents sessions focus <id> --local` over SSH, which JOINS the live pane when it

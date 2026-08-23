@@ -33,13 +33,14 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   is registered and assembled by `harnessLaunchRegistrations` and
   `buildNewAgentLaunchCommand` (`src/core/launchTarget.ts`), which delegate flag
   construction to `buildAgentLaunchCommand` (`src/core/agents.ts`). The two
-  launch paths (`launchAgent` and `openSingleAgent`) register their tab through the shared
-  `registerAgentTerminal`; other creation sites still call `terminals.register`
-  directly. An automatic launch registers against the `shell` def until adoption
+  launch paths (`launchAgent` and `openSingleAgent`) and every session resume,
+  Fleet focus, attach, and crash restore register their editor tab through the
+  shared `registerAgentTerminal`. An automatic launch registers against the `shell` def until adoption
   re-keys it to the harness the CLI picked — the `sh` prefix is load-bearing,
   since `armShellAdoptionForTerminal` only arms for it. An unregistered tab is
   invisible to Copy Session ID / Resume / Fork and is not restored after a
-  window reload.
+  window reload. Crash restore reopens only mappings still returned by the CLI's
+  canonical session list, so reaped stale transcripts are not resurrected.
 - Other reads use their CLI noun: `devices list/status/accounts`, `teams ...
   --json`, `watchdog status/history`, and `routines ... --json`. Ticket reads
   use `linear tasks --json` and `gh issue list` (the former `agents tickets`
@@ -47,6 +48,17 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   filesystem/polling fallbacks.
 - The extension must not add an action scheduler, transcript parser/watcher,
   lifecycle classifier, candidate cache, or raw agents config reader.
+- **Closing an agent tab tears the agent down via the CLI, not in the UI.** On a
+  genuine user close (Cmd+W) the close handler runs `agents sessions stop <id>`
+  so the underlying agent + its tmux/mux session shut down instead of lingering
+  idle. It fires ONLY for a real user close — a window reload/restore fires the
+  same `onDidCloseTerminal`, and killing there would break crash-restore (which
+  re-registers the closed session) — so the two are split by
+  `terminal.exitStatus.reason` (`TerminalExitReason.User` tears down; `Shutdown`,
+  `Extension`, `Process`, `Unknown` do not). The decision + injected-stop wiring
+  live in `src/vscode/terminalReadiness.ts` (`shouldTearDownAgentOnClose`,
+  `maybeTearDownAgentOnClose`); the CLI owns the teardown (`agents sessions
+  stop`), the extension only maps the event to it.
 
 ## Layout
 

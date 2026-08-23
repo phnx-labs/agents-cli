@@ -103,6 +103,33 @@ describe('config command', () => {
     expect(getOut).toContain('(unset)');
   });
 
+  it('sets, gets and unsets browser.viewer WITHOUT touching browser.profile', () => {
+    // Regression guard for a destructive bug: `getConfig`/`unsetConfig` both
+    // hardcoded 'browser.profile' in their `case 'browser'` arm, so
+    // `config get browser.viewer` reported browser.profile's value as if it were
+    // the answer, and `config unset browser.viewer` DELETED browser.profile
+    // while printing success. Neither arm is covered by a `never` binding — they
+    // switch on parsed.scope, where `case 'browser'` already existed — so only a
+    // test catches it.
+    runAgents(home, ['config', 'set', 'browser.profile', 'comet-local']);
+    runAgents(home, ['config', 'set', 'browser.viewer', 'reading']);
+
+    expect(runAgents(home, ['config', 'get', 'browser.profile'])).toContain('comet-local');
+    // The inversion: this used to print comet-local.
+    expect(runAgents(home, ['config', 'get', 'browser.viewer'])).toContain('reading');
+
+    // Both must be visible; browser.viewer was silently dropped by the
+    // `default: continue` arm of the device-property switch in `config list`.
+    const listed = runAgents(home, ['config', 'list']);
+    expect(listed).toContain('browser.profile');
+    expect(listed).toContain('browser.viewer');
+
+    runAgents(home, ['config', 'unset', 'browser.viewer']);
+    expect(runAgents(home, ['config', 'get', 'browser.viewer'])).toContain('(unset)');
+    // The destructive half: browser.profile must survive.
+    expect(runAgents(home, ['config', 'get', 'browser.profile'])).toContain('comet-local');
+  });
+
   it('lists configured values', () => {
     runAgents(home, ['config', 'set', 'run.claude@*.model', 'best']);
     runAgents(home, ['config', 'set', 'run.claude@*.tier.best', 'claude-opus-4-8']);

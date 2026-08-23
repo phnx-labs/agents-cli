@@ -11,11 +11,83 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { runTmux, TmuxCommandError } from './binary.js';
 import { ensureTmuxDir, getDefaultSocketPath, getSessionMetaPath } from './paths.js';
 
 /** Tmux session names must not contain `.` or `:` — those are reserved for window/pane addressing. */
 const VALID_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Ten times tmux's 2,000-line default, while keeping per-pane memory bounded:
+ * history storage scales with pane width, so a 200-column pane retains at most
+ * four million grid cells rather than an unbounded agent transcript.
+ */
+export const AGENTS_TMUX_HISTORY_LIMIT = 20_000;
+
+/**
+ * Bump when the generated startup config changes, so an ALREADY-RUNNING server
+ * picks the new settings up. tmux reads `-f` only when it actually starts a
+ * server: a second `new-session -f other.conf` against a live server exits 0
+ * and silently applies nothing (verified against tmux 3.4). Since agents-cli
+ * uses one long-lived shared socket, the normal state at upgrade is a running
+ * server — so without this reconcile every existing machine would get none of
+ * these defaults, silently. Same shape as AGENT_HOOK_SCHEMA below.
+ */
+export const AGENTS_TMUX_CONFIG_SCHEMA = 1;
+/** Server-scoped user-option recording which AGENTS_TMUX_CONFIG_SCHEMA is applied. */
+const CONFIG_SCHEMA_OPTION = '@ag_tmux_config_schema';
+
+let startupConfigSequence = 0;
+
+function tmuxConfigArgument(value: string): string {
+  return `"${value.replace(/([\\"$])/g, '\\$1')}"`;
+}
+
+/**
+ * tmux loads `-f` instead of its normal user config, so put agents-cli's
+ * defaults first and explicitly source the first user config tmux would have
+ * selected afterward. Configuration files execute in order; this makes these
+ * settings defaults while preserving every option or binding the user sets.
+ */
+function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
+  const effectiveEnv = env ?? process.env;
+  const home = effectiveEnv.HOME ?? os.homedir();
+  const candidates = [
+    path.join(home, '.tmux.conf'),
+    ...(effectiveEnv.XDG_CONFIG_HOME
+      ? [path.join(effectiveEnv.XDG_CONFIG_HOME, 'tmux', 'tmux.conf')]
+      : []),
+    path.join(home, '.config', 'tmux', 'tmux.conf'),
+  ];
+  // tmux's own start_cfg() sources EVERY entry of TMUX_CONF that exists, not
+  // just the first — a user with both ~/.tmux.conf and ~/.config/tmux/tmux.conf
+  // gets both. Sourcing only the first would silently drop the second and break
+  // the "never override a user-set value" contract this file exists to keep.
+  const userConfigs = candidates.filter((candidate) => fs.existsSync(candidate));
+  const startupConfig = path.join(
+    ensureTmuxDir(),
+    `startup-${process.pid}-${startupConfigSequence++}.conf`,
+  );
+  const lines = [
+    // Stamp the schema HERE as well as in reconcileServerConfig. Without it a
+    // cold start leaves the option unset, the post-new-session check sees a
+    // stale stamp, and the reconcile re-sources the user's config a second time
+    // on launch #1 — firing any run-shell side effect (TPM) twice.
+    `set-option -g ${CONFIG_SCHEMA_OPTION} ${AGENTS_TMUX_CONFIG_SCHEMA}`,
+    'set-option -g mouse on',
+    'set-option -s set-clipboard on',
+    `set-option -g history-limit ${AGENTS_TMUX_HISTORY_LIMIT}`,
+    'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
+    'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
+  ];
+  for (const userConfig of userConfigs) {
+    lines.push(`source-file -q ${tmuxConfigArgument(userConfig)}`);
+  }
+  fs.writeFileSync(startupConfig, `${lines.join('\n')}\n`, { mode: 0o600 });
+  return startupConfig;
+}
 
 /** Provenance written alongside each live tmux session. */
 export interface SessionMeta {
@@ -73,6 +145,24 @@ export interface ListedSession {
   meta?: SessionMeta;
 }
 
+/** Build the atomic server-configuration + session-creation command. */
+export function buildCreateSessionArgs(opts: CreateSessionOptions, startupConfig: string): string[] {
+  const args = [
+    '-f', startupConfig,
+    'set-option', '-g', 'remain-on-exit', 'on', ';',
+    'new-session', '-d', '-s', opts.name, '-P', '-F', '#{pane_id}',
+  ];
+  if (opts.width)  args.push('-x', String(opts.width));
+  if (opts.height) args.push('-y', String(opts.height));
+  if (opts.cwd)    args.push('-c', opts.cwd);
+  // Separator + child command. tmux passes the rest verbatim to exec, so no
+  // shell escaping is required — array args end-to-end.
+  if (opts.cmd) {
+    args.push('--', 'sh', '-c', opts.cmd);
+  }
+  return args;
+}
+
 export class TmuxSessionError extends Error {
   constructor(message: string, public readonly cause?: unknown) {
     super(message);
@@ -107,6 +197,43 @@ export async function hasSession(name: string, socket?: string): Promise<boolean
   return res.code === 0;
 }
 
+/** Which AGENTS_TMUX_CONFIG_SCHEMA a live server has applied; undefined when none. */
+async function appliedConfigSchema(socket: string): Promise<number | undefined> {
+  const res = await runTmux({
+    socket,
+    args: ['show-options', '-gv', CONFIG_SCHEMA_OPTION],
+    throwOnError: false,
+  }).catch(() => null);
+  if (!res || res.code !== 0) return undefined;
+  const n = Number(res.stdout.trim());
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Apply the generated startup config to an already-running server and stamp it.
+ * Failure is surfaced, not swallowed: a server left without these settings is
+ * the silent no-op this exists to prevent.
+ */
+async function reconcileServerConfig(socket: string, env: NodeJS.ProcessEnv | undefined): Promise<void> {
+  const conf = writeStartupConfig(env);
+  try {
+    const res = await runTmux({ socket, args: ['source-file', conf], throwOnError: false, env });
+    if (res.code !== 0) {
+      throw new TmuxSessionError(
+        `could not apply agents-cli tmux settings to the running server (${res.stderr.trim() || `exit ${res.code}`})`,
+      );
+    }
+    await runTmux({
+      socket,
+      args: ['set-option', '-g', CONFIG_SCHEMA_OPTION, String(AGENTS_TMUX_CONFIG_SCHEMA)],
+      throwOnError: false,
+      env,
+    }).catch(() => {});
+  } finally {
+    fs.rmSync(conf, { force: true });
+  }
+}
+
 /**
  * Create a new detached session. Throws when the name is already taken unless
  * `replace` or `attachExisting` is set.
@@ -123,6 +250,13 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   const existed = await hasSession(opts.name, socket);
   if (existed) {
     if (opts.attachExisting) {
+      // Reuse of a live session is precisely the already-running-server case,
+      // so it needs the same reconcile the create path gets — otherwise
+      // `agents tmux new --attach-existing` silently keeps a pre-fix server
+      // with none of these settings.
+      if ((await appliedConfigSchema(socket)) !== AGENTS_TMUX_CONFIG_SCHEMA) {
+        await reconcileServerConfig(socket, opts.env);
+      }
       const meta = readSessionMeta(opts.name);
       return meta ?? {
         name: opts.name,
@@ -139,26 +273,32 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
     await killSession(opts.name, socket);
   }
 
-  // Set remain-on-exit BEFORE the child command can finish — a fast-exiting
+  // Configure the agents-cli tmux server BEFORE the child command can finish — a fast-exiting
   // cmd (e.g. `echo BRIEF && true`) would otherwise collapse the only session,
   // exit the server, and the follow-up `set-option` would race with "no
   // server running". Server-wide (`-g`) is applied in the same tmux
   // invocation as new-session so they share one server lifetime.
   // `-P -F '#{pane_id}'` prints the new session's first pane id on stdout so we
   // can record the exact `%N` handle without a follow-up `list-panes`.
-  const args = ['set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', opts.name, '-P', '-F', '#{pane_id}'];
-  if (opts.width)  args.push('-x', String(opts.width));
-  if (opts.height) args.push('-y', String(opts.height));
-  if (opts.cwd)    args.push('-c', opts.cwd);
-  // Separator + child command. tmux passes the rest verbatim to exec, so no
-  // shell escaping is required — array args end-to-end.
-  if (opts.cmd) {
-    args.push('--', 'sh', '-c', opts.cmd);
+  const startupConfig = writeStartupConfig(opts.env);
+  const args = buildCreateSessionArgs(opts, startupConfig);
+  let res: Awaited<ReturnType<typeof runTmux>>;
+  try {
+    res = await runTmux({ socket, args, env: opts.env });
+  } finally {
+    fs.rmSync(startupConfig, { force: true });
   }
-
-  const res = await runTmux({ socket, args, env: opts.env });
   // Only the new-session command in the `;`-chained invocation emits output.
   const pane = /^%\d+$/.test(res.stdout.trim()) ? res.stdout.trim() : undefined;
+
+  // If the server was ALREADY running, its `-f` was ignored, so the config above
+  // never applied. Re-source it — the generated file ends by sourcing the user's
+  // own tmux.conf, so re-applying preserves the same precedence a cold start
+  // gives. Gated on a generation stamp so a user config with side effects (tpm's
+  // run-shell, for one) is not re-executed on every single launch.
+  if (existed || (await appliedConfigSchema(socket)) !== AGENTS_TMUX_CONFIG_SCHEMA) {
+    await reconcileServerConfig(socket, opts.env);
+  }
 
   // Keep the agent pane around after its process exits (so runInTmux can read
   // the exit status and capture the final error), but do NOT keep that behavior
@@ -499,8 +639,17 @@ export async function setSessionHook(name: string, hook: string, command: string
  *        variant could stall the hook on a loaded CI runner, letting the dead
  *        split survive until the test's wait timeout expired (flake in CI shard
  *        3: pane-guarded pane-died hook / user split exit).
+ *   v6 — the agent-pane branch is now `session_attached`-aware: with a client
+ *        attached it `detach-client`s (the interactive path, so runInTmux's
+ *        attach returns and reads the exit status, EXEC-23b unchanged); with NO
+ *        client it `kill-session`s outright. A `remain-on-exit` pane with no
+ *        attach client to reap it otherwise lingers as a dead husk until the
+ *        daemon's periodic `reapDeadTmuxPanes` sweep — so a run whose terminal
+ *        was closed, or a `/exit` after the user detached, left an idle-looking
+ *        dead session on the socket. Killing it the instant the agent exits is
+ *        the "one close tears down every layer" contract (#5a).
  */
-export const AGENT_HOOK_SCHEMA = 5;
+export const AGENT_HOOK_SCHEMA = 6;
 /** Per-session tmux user-option that records which AGENT_HOOK_SCHEMA a session's hook is at. */
 const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 
@@ -515,21 +664,28 @@ const HOOK_SCHEMA_OPTION = '@ag_hook_schema';
 const TMUX_HOOK_REPAIR_TIMEOUT_MS = 5_000;
 
 /**
- * The guarded `pane-died` hook. Detach the client ONLY when the agent pane dies
- * (so the blocking attach in runInTmux returns and the exit status can be read);
- * a user split's death runs the else-branch, closing just that split. The
- * else-branch goes through `run-shell -b -C` with an explicit `-t #{hook_pane}`
- * target: tmux format-expands the command at fire time and executes it inside
- * the server command queue in the background, so the event pane is always the
- * one killed without launching a second tmux client against the same socket and
- * without stalling the hook on a loaded runner. A bare `kill-pane` relied on
- * the hook context supplying a "current pane", while an external self-client
- * could race the server under load. Single source of truth: both the
- * spawn-wrap (exec.ts) and the daemon reconcile build the hook here, so the
- * two can never drift.
+ * The guarded `pane-died` hook. When the AGENT pane dies, tear the whole session
+ * down — but HOW depends on whether a client is attached:
+ *   - attached (`#{session_attached}`): `detach-client` so the blocking attach in
+ *     runInTmux returns and `resolveAfterAttach` reads the exit status off the
+ *     still-`remain-on-exit` dead pane, then kills the session (EXEC-23b, unchanged);
+ *   - no client: `kill-session` outright. Without this the dead pane sits under
+ *     `remain-on-exit` as an idle-looking husk until the daemon's periodic
+ *     `reapDeadTmuxPanes` sweep — the "second exit" / orphaned-idle session bug
+ *     when a wrapped agent exits with nobody attached (a closed terminal, or a
+ *     `/exit` after the user detached). `detach-client` on an unattached session
+ *     is a no-op, so the old hook left the husk; `kill-session` ends it at once.
+ * A user split's death still runs the else-branch, closing just that split via
+ * `run-shell -b -C` with an explicit `-t #{hook_pane}` target: tmux format-expands
+ * the command at fire time and executes it inside the server command queue in the
+ * background, so the event pane is always the one killed without launching a second
+ * tmux client against the same socket and without stalling the hook on a loaded
+ * runner. Single source of truth: both the spawn-wrap (exec.ts) and the daemon
+ * reconcile build the hook here, so the two can never drift.
  */
 export function agentPaneDiedHook(sessionName: string, agentPane: string): string {
-  return `if -F '#{==:#{hook_pane},${agentPane}}' 'detach-client -s =${sessionName}' 'run-shell -b -C "kill-pane -t #{hook_pane}"'`;
+  const agentPaneAction = `if -F '#{session_attached}' 'detach-client -s =${sessionName}' 'kill-session -t =${sessionName}'`;
+  return `if -F '#{==:#{hook_pane},${agentPane}}' "${agentPaneAction}" 'run-shell -b -C "kill-pane -t #{hook_pane}"'`;
 }
 
 /** Stamp a session's hook-schema marker to the current version. */

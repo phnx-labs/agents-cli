@@ -10,6 +10,7 @@
  * second renderer. Interactive routing and the browse loop live in
  * `sessions-picker-factory.ts` (shared with the computer twin).
  */
+import { showFile } from '../lib/open-url.js';
 import chalk from 'chalk';
 import { itemPicker } from '../lib/picker.js';
 import { isPromptCancelled } from './utils.js';
@@ -19,7 +20,6 @@ import {
   runBrowserSessions,
   buildBrowserSessionRows,
   matchesBrowserSessionRow,
-  openArtifact,
   formatBytes,
   type BrowserSessionRow,
   type BrowserArtifact,
@@ -114,11 +114,12 @@ function formatArtifactLabel(a: BrowserArtifact): string {
   return `${age.padEnd(11)}  ${a.name.padEnd(34)}  ${formatBytes(a.bytes).padStart(8)}`;
 }
 
-/** Open one artifact in the OS default app, printing its path (matches the
- *  non-interactive `--open` behavior) and any open failure. */
-function openAndReport(a: BrowserArtifact): void {
+/** Open one artifact, printing its path (matches the non-interactive `--open`
+ *  behavior) and any open failure. Routes through the same viewer seam as
+ *  `--open`, so the interactive and non-interactive halves cannot diverge. */
+async function openAndReport(a: BrowserArtifact): Promise<void> {
   console.log(a.path);
-  if (!openArtifact(a.path)) console.error(`Could not open ${a.path}`);
+  if ((await showFile(a.path)).via === 'none') console.error(`Could not open ${a.path}`);
 }
 
 /** Second-level picker over one row's captures, newest first. Enter opens the
@@ -160,11 +161,11 @@ const browserSessionsPicker = createSessionsPickerCommand<BrowserSessionRow, Bro
       return;
     }
     if (row.artifacts.length === 1) {
-      openAndReport(row.artifacts[0]);
+      await openAndReport(row.artifacts[0]);
       return;
     }
     const artifact = await pickArtifact(row);
-    if (artifact) openAndReport(artifact);
+    if (artifact) await openAndReport(artifact);
   },
 });
 

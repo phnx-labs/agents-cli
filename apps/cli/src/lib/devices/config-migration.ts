@@ -13,6 +13,13 @@
  *       `.history/devices/pins-<host>.json` (pins file wins on conflict — it
  *       is the destination); peers' pins are simply dropped from the tracked
  *       file (each peer owns/rewrites its own pins locally).
+ *   (e) legacy `.history/devices/ignored.json` (per-machine, UNTRACKED — a
+ *       dismissal never reached the rest of the fleet) folds into the central
+ *       TRACKED `fleet.ignored` list (RUSH-3062). Entries keep the legacy
+ *       file's `updatedAt` as `ignoredAt` and take THIS machine's id as
+ *       `ignoredOn` — the legacy store recorded neither, so the folding box
+ *       is the only attribution available. The legacy file is removed only
+ *       AFTER the central write lands.
  *
  * What stays put: a device doc's existing `config:` (already the right home)
  * and its `routines:` list (operator-owned, read cross-device by
@@ -37,6 +44,7 @@ import * as yaml from 'yaml';
 import {
   META_HEADER,
   getDevicesAutoLaunchPath,
+  getDevicesIgnoredPath,
   getDevicePinsPath,
   getUserAgentsDir,
   readMeta,
@@ -45,6 +53,7 @@ import {
 } from '../state.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { machineId } from '../machine-id.js';
+import { withIgnoredAdded } from './registry.js';
 import type { FleetDeviceOverride, FleetManifest } from '../fleet/types.js';
 
 /** One parsed device doc under ~/.agents/devices/. */
@@ -134,6 +143,31 @@ function isConfigMap(v: unknown): v is Record<string, unknown> {
 }
 
 /**
+ * The legacy per-machine ignored.json. Absent => null. A parse failure is
+ * logged loudly and reported as `undefined` so the caller LEAVES the file in
+ * place for a later retry — never silently emptied, the same corruption
+ * contract the ignore-list itself keeps (registry.ts's loadIgnoredEntries).
+ */
+function readLegacyIgnoredFile(p: string): { names: string[]; updatedAt?: string } | null | undefined {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(p, 'utf-8');
+  } catch {
+    return null; // absent — nothing to fold
+  }
+  try {
+    const parsed = JSON.parse(raw) as { ignored?: unknown; updatedAt?: unknown };
+    return {
+      names: Array.isArray(parsed.ignored) ? parsed.ignored.filter((n): n is string => typeof n === 'string') : [],
+      updatedAt: typeof parsed.updatedAt === 'string' ? parsed.updatedAt : undefined,
+    };
+  } catch (err) {
+    console.error(`device config migration: could not parse ${p} (${(err as Error).message}); leaving it for a later retry`);
+    return undefined;
+  }
+}
+
+/**
  * Fold every legacy device-config/pins location into the current layout. Safe
  * to call on every boot / config access: cheap no-op once folded.
  */
@@ -153,6 +187,10 @@ export function migrateDeviceConfigStores(): void {
 
   const autoLaunchFlags = readAutoLaunchFlags(autoLaunchPath);
   const docs = readDeviceDocs(devicesRoot);
+
+  const legacyIgnoredPath = getDevicesIgnoredPath();
+  const legacyIgnoredPending = fs.existsSync(legacyIgnoredPath);
+  const legacyIgnored = legacyIgnoredPending ? readLegacyIgnoredFile(legacyIgnoredPath) : null;
 
   const pinsPath = getDevicePinsPath();
   let selfPins: { agents?: Record<string, string>; isolatedAgents?: Record<string, string> } = {};
@@ -185,7 +223,7 @@ export function migrateDeviceConfigStores(): void {
   const hasDestinationWork = plans.length > 0 || newDocs.length > 0 || docAgents !== undefined || docIsolated !== undefined;
 
   const autoLaunchPending = fs.existsSync(autoLaunchPath);
-  if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending) return;
+  if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending && !legacyIgnoredPending) return;
 
   // ── 2. Destination writes FIRST (crash-safe), under the meta lock so they
   //    serialize against writeMetaUnlocked's own read-merge-write of the doc.
@@ -228,7 +266,19 @@ export function migrateDeviceConfigStores(): void {
         if (Object.keys(rest).length > 0) nextDevices[name] = rest;
       }
       const fleet: FleetManifest = { ...m.fleet, devices: nextDevices };
-      if (Object.keys(nextDevices).length === 0 && !fleet.defaults && !fleet.secrets && !fleet.routines) {
+      // Drop the whole `fleet` block only when NOTHING else lives in it. Every
+      // resident must be named here: `ignored` holds the user's dismissals and
+      // `discovery` their discovery policy, and deleting the block would not
+      // just lose them locally — `agents repo push` would sync the deletion
+      // fleet-wide. Add any new fleet.* key to this guard.
+      const fleetIsEmpty =
+        Object.keys(nextDevices).length === 0 &&
+        !fleet.defaults &&
+        !fleet.secrets &&
+        !fleet.routines &&
+        !fleet.discovery &&
+        !(fleet.ignored && fleet.ignored.length > 0);
+      if (fleetIsEmpty) {
         const { fleet: _, ...rest } = m;
         void _;
         return rest;
@@ -243,6 +293,22 @@ export function migrateDeviceConfigStores(): void {
       fs.rmSync(autoLaunchPath, { force: true });
     } catch (err) {
       console.error(`device config migration: could not remove ${autoLaunchPath} (${(err as Error).message}); a later run retries`);
+    }
+  }
+
+  // ── 4. Legacy ignored.json → central fleet.ignored ───────────────────────
+  // Destination write (updateMeta: withMetaLock + atomic write) lands BEFORE
+  // the legacy file is removed, so a crash re-folds on the next run and
+  // withIgnoredAdded's union-by-name makes that a no-op. A file that failed to
+  // parse (legacyIgnored === undefined) is left in place for that retry.
+  if (legacyIgnored) {
+    if (legacyIgnored.names.length > 0) {
+      updateMeta((m) => withIgnoredAdded(m, legacyIgnored.names, legacyIgnored.updatedAt ?? new Date().toISOString()));
+    }
+    try {
+      fs.rmSync(legacyIgnoredPath, { force: true });
+    } catch (err) {
+      console.error(`device config migration: could not remove ${legacyIgnoredPath} (${(err as Error).message}); a later run retries`);
     }
   }
 }

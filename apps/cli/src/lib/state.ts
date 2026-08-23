@@ -640,7 +640,9 @@ export function getTeamsAgentsDir(): string { return TEAMS_AGENTS_DIR; }
 export function getTeamsRegistryPath(): string { return path.join(HISTORY_DIR, 'teams', 'registry.json'); }
 
 /**
- * The devices dir (registry + ignore-list live here). Read at CALL time so a
+ * The devices dir (the registry lives here; the ignore-list moved to the
+ * tracked central agents.yaml as `fleet.ignored` — RUSH-3062). Read at CALL
+ * time so a
  * test can redirect it to a temp dir via AGENTS_DEVICES_DIR without racing the
  * module-load capture of HISTORY_DIR — mirrors the AGENTS_EVENTS_PATH /
  * AGENTS_SECRETS_AGENT_DIR test-isolation escape hatches. Never set in
@@ -654,7 +656,7 @@ function getDevicesDir(): string {
 /** Path to the device registry — SSH device profiles with platform/auth metadata. Durable runtime, per-machine (host list + addresses are NOT pulled by `agents repo push`). */
 export function getDevicesRegistryPath(): string { return path.join(getDevicesDir(), 'registry.json'); }
 
-/** Path to the device ignore-list — tailscale node names the user dismissed, so auto-discovery never re-suggests them. Per-machine, same dir as the registry. */
+/** Path to the LEGACY per-machine device ignore-list — superseded by the tracked `fleet.ignored` list in central agents.yaml (RUSH-3062); only lib/devices/config-migration.ts still reads it (to fold + remove it). */
 export function getDevicesIgnoredPath(): string { return path.join(getDevicesDir(), 'ignored.json'); }
 
 /** Path to the LEGACY device auto-launch preference file — which registered devices are eligible/preferred for the ext's auto-host selection. Superseded by the per-device doc `config:` block; only lib/devices/config-migration.ts still reads it (to fold + remove it). */

@@ -722,9 +722,9 @@ export function registerRunCommand(program: Command): void {
       "Open this run in a real terminal tab instead of here. Without a value the terminal is detected from your live sessions (`agents sessions --active` host), so it lands where you already work — Ghostty for a Ghostty user, iTerm for an iTerm user. Name one to force it: iterm | ghostty | terminal | tmux | vscodium-agent. This is how the menu bar's New Session opens.",
     )
     .option('--verbose', 'Show detailed execution logs')
-    .option('--raw', 'Interactive runs on macOS/Linux launch inside a shared tmux session (for %pane addressing + re-attach). Pass --raw to spawn the agent directly instead. Also disabled by AGENTS_NO_TMUX=1.')
-    .option('--no-tmux', 'Spawn the agent directly instead of wrapping it in the shared tmux session. Same effect as --raw / AGENTS_NO_TMUX=1. Use this to see the agent\'s full startup output when a launch is failing; to turn the wrap off for every run on this machine, set `agents config set devices.<name>.tmux off`.')
-    .option('--disable-tmux', 'Alias for --no-tmux.')
+    .option('--raw', 'Keep this interactive run direct when the device has opted into tmux wrapping. A no-op under the default tmux-off configuration; equivalent to AGENTS_NO_TMUX=1.')
+    .option('--no-tmux', 'Keep this run direct when tmux wrapping is enabled for the device. Same effect as --raw / AGENTS_NO_TMUX=1; it is a no-op under the default tmux-off configuration.')
+    .option('--disable-tmux', 'Compatibility alias for --no-tmux; a no-op when tmux wrapping is already off.')
     .option('--timeout <duration>', 'Kill the agent after this duration (e.g., 30m, 1h, 2h30m)')
     .option(
       '--fallback <agents>',

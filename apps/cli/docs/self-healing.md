@@ -37,9 +37,8 @@ Two things made this nasty before self-healing:
    `isVersionInstalled()`) only checks the JS wrapper at `node_modules/.bin/<cli>`,
    which *is* present. So the broken version got recorded as installed, pinned as
    the default, and picked to run.
-2. **The crash was invisible.** Interactive runs are wrapped in tmux
-   (see [Entrypoints & Loops](entrypoints-and-loops.md)); the `pane-died`
-   hook detached the client the instant the agent exited, leaving only a bare
+2. **The crash was invisible under the opt-in tmux wrap.** The `pane-died` hook
+   detached the client the instant the agent exited, leaving only a bare
    `[detached (from session …)]` with no error text.
 
 ## Three layers of defense
@@ -133,11 +132,10 @@ visible screen is just the "Pane is dead" banner) plus the exit code to stderr �
 so a launch that still fails lands in the caller's shell instead of a bare
 `[detached]`. A fast failure (dead before attach) always recaps; a post-attach
 **nonzero** exit recaps too; a clean exit or a manual `Ctrl-b d` detach stays
-quiet. The `--no-tmux` / `--disable-tmux` flag (and `AGENTS_NO_TMUX=1`) bypass the
-wrapper entirely to spawn the agent with full stdio — the fastest way to see a
-launch failure raw. When tmux itself is the problem on one box rather than one
-run, `agents config set devices.<name>.tmux off` turns the wrapper off there for
-good (machine-local; it never syncs to a peer).
+quiet. Interactive runs spawn directly by default. On a device where
+`tmux.enabled` is on, `--no-tmux` / `--disable-tmux` (or `AGENTS_NO_TMUX=1`)
+bypasses the wrapper for one run, and `agents config set devices.<name>.tmux off`
+turns it off durably on that machine.
 
 ## The health probe
 

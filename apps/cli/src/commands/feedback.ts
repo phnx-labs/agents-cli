@@ -9,6 +9,7 @@ import { arch, platform, release } from 'node:os';
 import { createRequire } from 'node:module';
 import type { Command } from 'commander';
 import chalk from 'chalk';
+import { showUrl } from '../lib/open-url.js';
 
 const REPO = 'phnx-labs/agents-cli';
 const DISCUSSION_BASE = `https://github.com/${REPO}/discussions/new`;
@@ -26,22 +27,6 @@ function readCliVersion(): string {
   }
 }
 
-function openInBrowser(url: string): boolean {
-  const openers: Array<[string, string[]]> =
-    process.platform === 'darwin'
-      ? [['open', [url]]]
-      : process.platform === 'win32'
-        ? [['cmd', ['/c', 'start', '""', url]]]
-        : [
-            ['xdg-open', [url]],
-            ['gnome-open', [url]]
-          ];
-  for (const [cmd, args] of openers) {
-    const r = spawnSync(cmd, args, { stdio: 'ignore' });
-    if (r.status === 0) return true;
-  }
-  return false;
-}
 
 function buildPrefill(kind: Kind, summary: string): { url: string; body: string } {
   const version = readCliVersion();
@@ -79,7 +64,7 @@ export function registerFeedbackCommand(program: Command): void {
     .option('-i, --idea', 'File as a feature idea (Discussions → Ideas)')
     .option('-q, --question', 'Ask a question (Discussions → Q&A)')
     .option('--print', 'Print the URL instead of opening it')
-    .action((summary: string[], opts: { bug?: boolean; idea?: boolean; question?: boolean; print?: boolean }) => {
+    .action(async (summary: string[], opts: { bug?: boolean; idea?: boolean; question?: boolean; print?: boolean }) => {
       const kind: Kind = opts.bug ? 'bug' : opts.idea ? 'idea' : 'question';
       const summaryText = (summary ?? []).join(' ').trim();
       const { url } = buildPrefill(kind, summaryText);
@@ -89,7 +74,7 @@ export function registerFeedbackCommand(program: Command): void {
         return;
       }
 
-      const opened = openInBrowser(url);
+      const opened = (await showUrl(url)).via !== 'none';
       if (opened) {
         console.log(chalk.dim(`Opened ${kind} form in your browser:\n  ${url}`));
       } else {

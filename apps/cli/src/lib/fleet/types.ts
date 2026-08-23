@@ -82,6 +82,24 @@ export interface FleetManifest {
    * machine's local device registry and is never committed.
    */
   discovery?: Record<string, 'approved' | 'ignored'>;
+  /**
+   * Tailnet node names the user dismissed from auto-discovery, with who
+   * dismissed each and when. Lives here rather than in a per-device doc because
+   * a dismissed node is deliberately NOT a device — it never enters the
+   * registry, so it has no per-device folder. Syncs fleet-wide with the rest of
+   * `agents.yaml`, so a dismissal on one box stops the suggestion on every box.
+   */
+  ignored?: IgnoredDeviceEntry[];
+}
+
+/** One dismissal record in {@link FleetManifest.ignored}. */
+export interface IgnoredDeviceEntry {
+  /** Tailscale node name the user dismissed. */
+  name: string;
+  /** ISO-8601 timestamp of the dismissal. */
+  ignoredAt: string;
+  /** machineId() of the box the dismissal was made on. */
+  ignoredOn: string;
 }
 
 /**

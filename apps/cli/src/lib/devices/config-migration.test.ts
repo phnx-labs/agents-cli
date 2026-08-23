@@ -218,4 +218,92 @@ describe('migrateDeviceConfigStores', () => {
     expect(readCentral()).toBe('');
     expect(readDoc('mac-mini')).toContain('maxAgents: 4');
   });
+
+  it('folds a legacy ignored.json into fleet.ignored, removes the file, and re-running is a no-op', async () => {
+    const legacy = path.join(TMP, '.agents', '.history', 'devices', 'ignored.json');
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(
+      legacy,
+      JSON.stringify({ ignored: ['old-phone', 'ipad165'], updatedAt: '2026-08-01T10:00:00.000Z' }),
+    );
+
+    const { migrateDeviceConfigStores, readMeta } = await freshModules();
+    migrateDeviceConfigStores();
+
+    // Entries preserved — the legacy file's updatedAt becomes ignoredAt, and
+    // the folding box is the only attribution the legacy store could offer.
+    const fleet = readMeta().fleet as unknown as { ignored: Array<Record<string, string>> };
+    expect(fleet.ignored).toEqual([
+      { name: 'ipad165', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' },
+      { name: 'old-phone', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' },
+    ]);
+    // The dismissal now lives in the TRACKED central file…
+    expect(readCentral()).toContain('ignored:');
+    // …and the legacy file is gone.
+    expect(fs.existsSync(legacy)).toBe(false);
+
+    // Second run: nothing to fold — no duplication, no rewrite.
+    const afterFirst = readCentral();
+    migrateDeviceConfigStores();
+    expect(readCentral()).toBe(afterFirst);
+    const fleet2 = readMeta().fleet as unknown as { ignored: Array<Record<string, string>> };
+    expect(fleet2.ignored).toHaveLength(2);
+  });
+
+  it('unions legacy names with existing fleet.ignored entries — existing who/when wins', async () => {
+    writeCentral(
+      'fleet:\n  devices: {}\n  ignored:\n    - name: ipad165\n      ignoredAt: "2026-07-01T00:00:00.000Z"\n      ignoredOn: zion\n',
+    );
+    const legacy = path.join(TMP, '.agents', '.history', 'devices', 'ignored.json');
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(legacy, JSON.stringify({ ignored: ['ipad165', 'kindle'], updatedAt: '2026-08-01T10:00:00.000Z' }));
+
+    const { migrateDeviceConfigStores, readMeta } = await freshModules();
+    migrateDeviceConfigStores();
+
+    const fleet = readMeta().fleet as unknown as { ignored: Array<Record<string, string>> };
+    expect(fleet.ignored).toEqual([
+      { name: 'ipad165', ignoredAt: '2026-07-01T00:00:00.000Z', ignoredOn: 'zion' }, // untouched
+      { name: 'kindle', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' }, // folded
+    ]);
+    expect(fs.existsSync(legacy)).toBe(false);
+  });
+
+  it('leaves a malformed legacy ignored.json in place (loudly) for a later retry', async () => {
+    const legacy = path.join(TMP, '.agents', '.history', 'devices', 'ignored.json');
+    fs.mkdirSync(path.dirname(legacy), { recursive: true });
+    fs.writeFileSync(legacy, '{ this is not json');
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { migrateDeviceConfigStores } = await freshModules();
+    try {
+      migrateDeviceConfigStores();
+
+      expect(fs.existsSync(legacy)).toBe(true); // never silently emptied
+      expect(readCentral()).not.toContain('ignored:');
+      expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('ignored.json'));
+    } finally {
+      errSpy.mockRestore();
+    }
+  });
+
+  it('never drops a populated fleet.ignored when the #2458 strip empties the rest of the fleet block', async () => {
+    // A box carrying BOTH legacy central per-device config AND dismissals: the
+    // strip must not delete the whole fleet block — the deletion would sync
+    // fleet-wide via `agents repo push`.
+    writeCentral(
+      'fleet:\n  devices:\n    mac-mini:\n      config:\n        maxAgents: 8\n  ignored:\n    - name: ipad165\n      ignoredAt: "2026-08-20T09:15:00.000Z"\n      ignoredOn: zion\n',
+    );
+
+    const { migrateDeviceConfigStores, readMeta } = await freshModules();
+    migrateDeviceConfigStores();
+
+    const fleet = readMeta().fleet as unknown as { devices: Record<string, unknown>; ignored: Array<Record<string, string>> };
+    expect(fleet).toBeDefined();
+    expect(fleet.ignored).toEqual([
+      { name: 'ipad165', ignoredAt: '2026-08-20T09:15:00.000Z', ignoredOn: 'zion' },
+    ]);
+    expect(fleet.devices).toEqual({}); // config stripped, block kept
+    expect(readDoc('mac-mini')).toContain('maxAgents: 8');
+  });
 });

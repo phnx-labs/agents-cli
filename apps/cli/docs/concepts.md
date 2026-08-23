@@ -209,7 +209,10 @@ Approval is portable even though connection metadata is not. Registering or
 ignoring a device records `approved` or `ignored` under `fleet.discovery` in
 the central `~/.agents/agents.yaml`; no entry means the device is still pending.
 `agents repo push user` carries those decisions, and `agents repo pull user`
-reconciles them into each machine's local registry and ignore-list. Approved
+reconciles them into each machine's local registry. The ignore-list itself is no
+longer machine-local: a dismissal lands in the tracked `fleet.ignored` block of
+the same `agents.yaml`, so ignoring a node on one box stops the suggestion on
+every box. Approved
 devices resolve their address live from Tailscale; addresses, SSH auth, and
 reachability never enter Git.
 

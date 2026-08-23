@@ -4,6 +4,14 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.333] - 2026-08-23
+
+- **The Fleet opens on the Sessions tab, not Agents.** The Floor 3-pane shell
+  now defaults its center to `sessions` — the primary surface where an operator
+  sees the work being landed — instead of the Agents roster, matching the
+  "rank by progress, not liveness" doctrine. Source:
+  `ui/settings/components/mission-control/UnifiedAgentsPane.tsx`.
+
 ## [0.9.332] - 2026-08-23
 
 - **`scripts/release.sh` no longer loses the version when it re-enters under
@@ -13,6 +21,20 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   every extension release died at the token step with a usage dump. The original
   argv is captured before parsing and replayed verbatim. Source:
   `scripts/release.sh`, covered by `scripts/release.test.sh`.
+
+- **Closing an agent tab (Cmd+W) now shuts the agent down instead of orphaning
+  an idle session (#5b).** `onDidCloseTerminal` fired for a real user close AND a
+  window reload, and the handler only unregistered internal state — it never
+  killed the underlying agent (which survives in a detached tmux/mux session), so
+  Cmd+W left a still-running idle session behind. On a genuine user close the
+  extension now runs `agents sessions stop <id>`, which tears down the agent and
+  its mux. A window **reload/restore** does not — the two are distinguished by
+  `terminal.exitStatus.reason` (`TerminalExitReason.User` tears down; `Shutdown`,
+  `Extension`, `Process`, and the ambiguous `Unknown` do not), so crash-restore,
+  which re-registers the closed session, is never killed. The CLI owns the
+  teardown; the extension only wires the user-close event to it. Source:
+  `src/vscode/terminalReadiness.ts` (`shouldTearDownAgentOnClose`,
+  `maybeTearDownAgentOnClose`), `src/vscode/extension.ts`.
 
 ## [0.9.331] - 2026-08-23
 
@@ -25,6 +47,13 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   and host. Each row has **↻ Resume** in addition to the group's **Resume all N**,
   posting the same resume action. Source: `ui/settings/components/mission-control/{SessionsPane.tsx,recapModel.ts}`.
   Spec: `.agents/artifacts/2026-08-23/mockup-session-row.html`.
+
+- **Fleet resume and crash recovery reopen agent sessions as full editor tabs.**
+  Fleet Focus, background Attach, remote tmux focus, command-palette Resume,
+  and unclean-shutdown recovery now share one registered editor-terminal path.
+  Restored tabs keep `AGENT_TERMINAL_ID` and session identity, while mappings
+  absent from the CLI's reaped session list are folded away. Source:
+  `src/vscode/{extension,settings,prewarm}.vscode.ts`.
 
 - **`Agents: New <Harness>` opens an agent again instead of asking which account
   (RUSH-3057).** 0.9.329 put the account picker on the bare command, so the

@@ -1,0 +1,1521 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Where the Agents Fight the Hooks</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-final">final</span></div>
+<h1>Where the Agents Fight the Hooks</h1>
+<p class="summary">Across 7,493 agent transcripts on 7 harnesses, hooks fire at five lifecycle moments — but the fighting is concentrated in exactly two: PreToolUse guards and the Stop gate. 1,696 hook fires, plus 1,450 permission-classifier denials — and the hooks that fire most are the ones agents obey least.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">13 guards fire real blocks; SessionStart + UserPromptSubmit hooks never block (inject/remind only)<span class="meta-sep" aria-hidden="true">·</span>Top collider: the Stop gate, 561 fires over just 51 sessions — 11 per session<span class="meta-sep" aria-hidden="true">·</span>The auto-mode permission classifier — not a hook — is the single biggest force at 1,450 denials<span class="meta-sep" aria-hidden="true">·</span>footer-guard: 0 blocks — the no-footer rule is fully internalized, the guard never has to fire<span class="meta-sep" aria-hidden="true">·</span>The owner-update reminder fires 811 times and is ignored 58% of the time — the loudest, least obeyed hook<span class="meta-sep" aria-hidden="true">·</span>main-branch-guard recovers 72% — its refusal pastes the worktree recipe instead of only stating the rule</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">hooks-battlefield-artifact</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-23</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#story" data-toc-for="story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a class="toc-item" href="#what-each-hook-is-for" data-toc-for="what-each-hook-is-for"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>What each hook is for</a><a class="toc-item" href="#what-each-hook-actually-prints" data-toc-for="what-each-hook-actually-prints"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>What each hook actually prints</a><a class="toc-item" href="#data" data-toc-for="data"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Data</a><a class="toc-item" href="#figure" data-toc-for="figure"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Figure</a><a class="toc-item" href="#did-the-hook-actually-work" data-toc-for="did-the-hook-actually-work"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Did the hook actually work?</a><a class="toc-item" href="#duplicates-tuning-and-the-linear-pollution-source" data-toc-for="duplicates-tuning-and-the-linear-pollution-source"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Duplicates, tuning, and the Linear-pollution source</a><a class="toc-item" href="#proposal-14-guards-down-to-8" data-toc-for="proposal-14-guards-down-to-8"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Proposal — 14 guards down to 8</a><a class="toc-item" href="#the-latency-bill-and-what-to-gate-off-in-plan-mode" data-toc-for="the-latency-bill-and-what-to-gate-off-in-plan-mode"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>The latency bill, and what to gate off in plan mode</a><a class="toc-item toc-sub" href="#the-mode-matrix" data-toc-for="the-mode-matrix">The mode matrix</a><a class="toc-item toc-sub" href="#a-hook-broke-for-18-hours-and-nothing-said-so" data-toc-for="a-hook-broke-for-18-hours-and-nothing-said-so">A hook broke for 18 hours and nothing said so</a><a class="toc-item" href="#the-same-duplication-one-layer-up-skills-and-commands" data-toc-for="the-same-duplication-one-layer-up-skills-and-commands"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>The same duplication, one layer up: skills and commands</a><a class="toc-item toc-sub" href="#share-public-and-share-private-are-two-flags-wearing-two-commands" data-toc-for="share-public-and-share-private-are-two-flags-wearing-two-commands">/share:public and /share:private are two flags wearing two commands</a><a class="toc-item" href="#insight" data-toc-for="insight"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Insight</a></nav><article class="artifact-body"><h2 id="story">Story</h2><p>You asked where the agents fight with the hooks. Here is the map,
+mined from <strong>7,493 real session transcripts</strong> across 7 harnesses (claude, codex,
+grok, kimi, cursor, droid, antigravity). Every number on this page comes from one
+snapshot of that corpus — it is live and still growing, so a re-run moves the
+counts by a few.</p>
+<p>A hook can fire at <strong>five lifecycle moments</strong>. Three of them are peaceful: SessionStart
+and UserPromptSubmit hooks only <em>inject</em> context or <em>remind</em> — they never stop an
+agent. The battlefield is <strong>PreToolUse</strong> (guards that veto a tool call before it runs)
+and <strong>Stop</strong> (the gate that refuses a premature "I'm done"). That is where every real
+fight happens.</p>
+<p>Two forces do the stopping. <strong>Hooks</strong> — 13 guards that fired 1,696 times. And a
+non-hook, the <strong>auto-mode permission classifier</strong>, which denied 1,450 tool calls on
+its own. The classifier is the single loudest antagonist, and for grok it is almost
+the <em>only</em> one it meets.</p>
+<p>One guard is worth naming for its silence: <strong>footer-guard has fired zero times.</strong> The
+"no Generated-with-Claude-Code footer" rule is so internalized that no agent ever tries
+it — the perfect guard is the one that never has to act.</p>
+<h2 id="what-each-hook-is-for">What each hook is for</h2><p>Read this first — every table after it refers to these names.</p>
+<p>Each hook is listed with its <strong>event</strong> (when it fires), its <strong>kind</strong> (what it does when it
+fires), a one-line <strong>purpose</strong>, and a <strong>verdict</strong>. Kind is the thing to read first: <code>inject</code>
+and <code>remind</code>/<code>nudge</code> never stop you; <code>block</code> and <code>gate</code> do. They are grouped by lifecycle
+moment, so the two lanes that can actually stop an agent stand apart from the eleven hooks
+that only ever add context.</p>
+<p><strong>SessionStart — all <code>inject</code> / <code>side-effect</code>, never blocks</strong></p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Purpose</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>session-identity</td>
+<td>Writes who-am-I (session id, transcript path, pid) so <code>sessions</code> / <code>--active</code> can join pid→session</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td><strong>linear-inject-tasks</strong></td>
+<td><strong>READS Linear and shows your projects/milestones/tickets in context. It only displays — it does not create tickets</strong></td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>device-topology</td>
+<td>Injects the fleet host list + live load</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>repo-inflight</td>
+<td>Injects open PRs + agents active on this repo</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>autosync</td>
+<td>Brings config / secrets / sessions current</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>git-pull-forward</td>
+<td>Fast-forwards the cwd repo when clean (ff-only)</td>
+<td>KEEP</td>
+</tr>
+</tbody></table>
+<p><strong>UserPromptSubmit — all <code>expand</code> / <code>remind</code>, never blocks</strong></p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Purpose</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>promptcuts</td>
+<td>Expands <code>#name</code> shortcuts into full instructions</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>bangcuts</td>
+<td>Runs <code>`!cmd`</code> inline and injects the output</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>vacation-recap</td>
+<td>On a long gap, nudges a back-from-vacation recap</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>verify-work-state (record)</td>
+<td>Records a goal boundary the Stop gate reads later</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>worktree-law-reminder</td>
+<td>Injects the "every write via a worktree" line each prompt</td>
+<td>KEEP</td>
+</tr>
+</tbody></table>
+<p><strong>PreToolUse — the block lane</strong></p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Kind</th>
+<th>Purpose</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>git-guard</td>
+<td>block · <strong>WHAT</strong></td>
+<td>Vetoes destructive git verbs anywhere: <code>reset --hard</code>, force-push, <code>checkout</code>/<code>switch</code>, <code>stash</code>, <code>clean</code>, <code>branch -d</code>. Worktree-aware</td>
+<td><strong>MERGE</strong> with main-branch-guard</td>
+</tr>
+<tr>
+<td>main-branch-guard</td>
+<td>block · <strong>WHERE</strong></td>
+<td>Vetoes the file <strong>tools</strong> (Write/Edit/…) and <code>git add</code>/<code>commit</code> in the PRIMARY worktree. <strong>Not raw shell writes</strong> — see below</td>
+<td><strong>MERGE</strong> into git-guard</td>
+</tr>
+<tr>
+<td>artifacts-confidential-guard</td>
+<td>block</td>
+<td>Stops publishing a confidential artifact to a public share. <strong>91% delivery</strong></td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>merge-guard</td>
+<td>block</td>
+<td>Stops admin-bypass merges and merges with no non-author verdict. <strong>85% delivery</strong></td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>rm-guard</td>
+<td>block</td>
+<td>Stops destructive <code>rm</code> on protected paths</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>secrets-guard</td>
+<td>block</td>
+<td>Stops secret-materializing one-liners (plaintext export, reveal)</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>large-file-add-guard</td>
+<td>block</td>
+<td>Stops <code>git add</code> of a file &gt; 5 MiB</td>
+<td><strong>MERGE</strong> into git-guard</td>
+</tr>
+<tr>
+<td>git-require-clean-tree</td>
+<td>block</td>
+<td>Stops pull/rebase on a dirty tree</td>
+<td><strong>MERGE</strong> into git-guard</td>
+</tr>
+<tr>
+<td>teams-roster-guard</td>
+<td>block</td>
+<td>Forces mixed rosters (blocks a 3rd same-harness teammate)</td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td>user-message-guard</td>
+<td>block</td>
+<td>Bounces an over-long owner notification</td>
+<td><strong>CUT</strong> — 10 fires, 30% delivery</td>
+</tr>
+<tr>
+<td>footer-guard</td>
+<td>block</td>
+<td>Stops the promo footer in PR/commit bodies</td>
+<td><strong>CUT</strong> — 0 fires in 7,493 transcripts</td>
+</tr>
+<tr>
+<td><strong>pr-description-reminder</strong></td>
+<td>nudge</td>
+<td>On <code>gh pr create/edit</code> with no run-proof, demands a screenshot/recording/test output + ticket link. <strong>89% delivery</strong></td>
+<td>KEEP</td>
+</tr>
+<tr>
+<td><strong>plan-html-reminder</strong></td>
+<td>nudge</td>
+<td>Render the plan as HTML before presenting. Fires on <code>ExitPlanMode</code> <em>and</em> at Stop. <strong>11% delivery, 60% never render</strong></td>
+<td><strong>CUT</strong></td>
+</tr>
+</tbody></table>
+<p><strong>Stop — the <code>gate</code> lane</strong></p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Purpose</th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>verify-work-complete</td>
+<td>Blocks a premature "done" without verification / handoff; also reinforces closing Linear + posting one update</td>
+<td>KEEP · but see ticketing note</td>
+</tr>
+<tr>
+<td>no-permission-stop-guard</td>
+<td>Blocks stopping on an unanswered permission prompt</td>
+<td>KEEP</td>
+</tr>
+</tbody></table>
+<h2 id="what-each-hook-actually-prints">What each hook actually prints</h2><p>Not paraphrased — these are real outputs, either captured from fleet transcripts or
+produced by running the hook against a crafted payload. Two shapes dominate.</p>
+<p><strong>Shape 1 — the <code>blocked_op:</code> triple.</strong> The Bash guards emit three machine-parseable
+lines: what was blocked, why, and the alternative. This is the format worth copying,
+because the third line is the one that makes an agent recover.</p>
+<pre><code>blocked_op: git.reset
+reason: git reset is denied (rewrites history or destroys work).
+do_this_instead: reconcile with `git rebase origin/&lt;default&gt;` (or `git pull --rebase`);
+  never `reset --hard`. Commit instead of stashing; resolve obstacles at the source.
+</code></pre>
+<pre><code>blocked_op: rm.protected-path
+reason: rm -r on protected path denied: ~/.agents. Protected paths: /, $HOME, ~/.agents,
+  ~/.ssh, ~/.config, … Variable-expansion targets ($VAR) are also denied because their
+  value is unknown at hook time.
+do_this_instead: use `trash` (or move to /tmp), or scope the path to a non-protected dir.
+</code></pre>
+<pre><code>blocked_op: secrets.export-plaintext
+reason: secrets export --plaintext prints a whole bundle to stdout — inside an agent
+  session that lands in the model context and the session transcript (RUSH-2774).
+do_this_instead: run the consuming command under `agents secrets exec &lt;bundle&gt; -- …`.
+</code></pre>
+<p><strong>Shape 2 — prose block, prefixed by the harness.</strong> The rule-bundled guards return a
+paragraph. The harness wraps it with the hook's own path, which is how you tell which
+file to go edit:</p>
+<pre><code>PreToolUse:Bash hook error: [~/.agents/.cache/shims/hooks/gh-merge-guard__merge-guard.sh]:
+Blocked: no non-author review verdict found ON this PR (phnx-labs/agents-cli#2921).
+A GitHub APPROVED review or an APPROVE verdict comment must be posted on the PR being
+merged — a verdict 'carried from' another PR satisfies nothing (the #2736 laundering
+pattern). Get the automated reviewer's verdict or spawn a non-author subagent review…
+</code></pre>
+<p><strong><code>main-branch-guard</code> — the one that hands over the fix.</strong> This is why it recovers 72%
+while others don't: <code>$REPO</code> is already filled in, so the agent can paste and continue.</p>
+<pre><code>Blocked: editing '/…/agents-cli/README.md' in the PRIMARY working tree of
+/…/agents-cli (branch 'main').
+
+No agent may modify the user's primary working tree — on ANY branch. …
+
+Create a worktree off the freshly-fetched default branch, then work there:
+  REPO=/…/agents-cli
+  git -C "$REPO" fetch origin
+  BASE=$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')
+  git -C "$REPO" worktree add -b &lt;slug&gt; "$REPO/.agents/worktrees/&lt;slug&gt;" "origin/$BASE"
+then edit under $REPO/.agents/worktrees/&lt;slug&gt;/, commit there, push, and open a PR.
+</code></pre>
+<p><strong><code>user-message-guard</code> — 770 chars of message, 380 chars of scolding about it.</strong></p>
+<pre><code>[concise-message-guard] This update is 1 lines / 770 chars — too long for a phone text.
+The owner reads these like texts from a worker, not a report. Rewrite as 1-4 short lines:
+lead with the one thing you need him to do (or 'FYI, no action'), plainest language, and
+put any detail behind a link (PR/ticket) or a file path he can open — the text is the
+pointer, not the payload. Then resend with agents notify --text "…".
+</code></pre>
+<p><strong>The silent majority print nothing at all.</strong> A guard that allows exits <code>0</code> with empty
+output — 284,387 of 285,667 fires looked exactly like this:</p>
+<pre><code>$ echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | git-guard.sh
+$ echo $?
+0
+</code></pre>
+<p><strong>SessionStart hooks inject markdown into the context instead.</strong> They never block; their
+entire product is text prepended to the session. Real injections from this session:</p>
+<pre><code>## In-flight in this repo (auto-injected)
+Open PRs:
+- #2914 fix: sync remote editor tab titles (RUSH-3011) (fix-session-tab-title-sync…)
+- #2909 fix(session): sync remote editor tab titles (fix-session-tab-title-sync-current)
+</code></pre>
+<pre><code>## Host &amp; Fleet
+You are running on **worker-a** (linux).
+- builder-1 — macos — offline
+- worker-b — linux — online — 6% load / 66% mem / busy
+…
+Fleet capacity: 190 cores · 418G free / 602G RAM (70% free) across 12 reachable devices.
+</code></pre>
+<p><code>linear-inject-tasks</code> uses the same shape but is by far the largest — roughly <strong>90 lines</strong>
+of board state per session, which is the real SessionStart context cost. <code>autosync</code>, by
+contrast, deliberately prints <strong>nothing</strong>: its own header says stdout stays empty because
+SessionStart stdout is injected into the model context.</p>
+<p><strong>The verdict this section supports:</strong> the <code>blocked_op:</code> triple is the right format —
+short, parseable, and it names the alternative. The prose guards should adopt it. And
+the length of a refusal is not what makes it work: <code>main-branch-guard</code> is long but
+recovers 72% because it ends in a runnable command, while <code>user-message-guard</code> spends
+380 characters and changes almost nothing.</p>
+<h2 id="data">Data</h2><p>Now the counts — every name below is defined in the table above.</p>
+<p><strong>Guards ranked by fires (all harnesses, <code>.jsonl</code> transcripts only)</strong></p>
+<table>
+<thead>
+<tr>
+<th>Guard</th>
+<th>Event</th>
+<th>Kind</th>
+<th>Fires</th>
+<th>Sessions</th>
+<th>Per session</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>verify-work-complete</td>
+<td>Stop</td>
+<td>hard · gate</td>
+<td>561</td>
+<td>51</td>
+<td><strong>11.0</strong></td>
+</tr>
+<tr>
+<td>git-guard</td>
+<td>PreToolUse</td>
+<td>hard · data-loss</td>
+<td>245</td>
+<td>138</td>
+<td>1.8</td>
+</tr>
+<tr>
+<td>merge-guard</td>
+<td>PreToolUse</td>
+<td>hard · workflow</td>
+<td>240</td>
+<td>85</td>
+<td>2.8</td>
+</tr>
+<tr>
+<td>pr-description-reminder</td>
+<td>PreToolUse</td>
+<td>soft · reminder</td>
+<td>174</td>
+<td>106</td>
+<td>1.6</td>
+</tr>
+<tr>
+<td>main-branch-guard</td>
+<td>PreToolUse</td>
+<td>hard · workflow</td>
+<td>131</td>
+<td>63</td>
+<td>2.1</td>
+</tr>
+<tr>
+<td>rm-guard</td>
+<td>PreToolUse</td>
+<td>hard · data-loss</td>
+<td>90</td>
+<td>60</td>
+<td>1.5</td>
+</tr>
+<tr>
+<td>plan-html-reminder</td>
+<td>PreToolUse</td>
+<td>soft · reminder</td>
+<td>76</td>
+<td>39</td>
+<td>1.9</td>
+</tr>
+<tr>
+<td>large-file-add-guard</td>
+<td>PreToolUse</td>
+<td>hard · data-loss</td>
+<td>38</td>
+<td>11</td>
+<td>3.5</td>
+</tr>
+<tr>
+<td>git-require-clean-tree</td>
+<td>PreToolUse</td>
+<td>hard · data-loss</td>
+<td>38</td>
+<td>10</td>
+<td>3.8</td>
+</tr>
+<tr>
+<td>artifacts-confidential-guard</td>
+<td>PreToolUse</td>
+<td>hard · data-loss</td>
+<td>35</td>
+<td>4</td>
+<td><strong>8.8</strong></td>
+</tr>
+<tr>
+<td>teams-roster-guard</td>
+<td>PreToolUse</td>
+<td>hard · workflow</td>
+<td>33</td>
+<td>4</td>
+<td><strong>8.2</strong></td>
+</tr>
+<tr>
+<td>user-message-guard</td>
+<td>PreToolUse</td>
+<td>hard · workflow</td>
+<td>21</td>
+<td>9</td>
+<td>2.3</td>
+</tr>
+<tr>
+<td>secrets-guard</td>
+<td>PreToolUse</td>
+<td>hard · secret</td>
+<td>14</td>
+<td>7</td>
+<td>2.0</td>
+</tr>
+<tr>
+<td>footer-guard</td>
+<td>PreToolUse</td>
+<td>hard · workflow</td>
+<td>0</td>
+<td>0</td>
+<td>—</td>
+</tr>
+<tr>
+<td><strong>total hook fires</strong></td>
+<td></td>
+<td></td>
+<td><strong>1,696</strong></td>
+<td></td>
+<td></td>
+</tr>
+<tr>
+<td><em>auto-mode classifier (not a hook)</em></td>
+<td>permission</td>
+<td>denial</td>
+<td>1,450</td>
+<td></td>
+<td></td>
+</tr>
+</tbody></table>
+<blockquote>
+<p><strong>Counting note.</strong> One fire is written into a transcript row twice — once under
+<code>message</code>, once under <code>toolUseResult</code>. Counting string occurrences therefore
+roughly doubles every guard. These are <strong>row counts: one row, one fire.</strong> An
+earlier revision of this page reported the occurrence counts (git-guard 456,
+merge-guard 453) and overstated every guard by ~2x.</p>
+</blockquote>
+<p><strong>Which agent collides, and how often</strong> (sessions hitting a hard block vs permission denials)</p>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Transcripts</th>
+<th>Sessions w/ hard block</th>
+<th>Rate</th>
+<th>Permission denials</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>claude</td>
+<td>3,923</td>
+<td>269</td>
+<td>6.9%</td>
+<td>542</td>
+</tr>
+<tr>
+<td>codex</td>
+<td>315</td>
+<td>39</td>
+<td>12.4%</td>
+<td>481</td>
+</tr>
+<tr>
+<td>grok</td>
+<td>3,145</td>
+<td>38</td>
+<td>1.2%</td>
+<td>420</td>
+</tr>
+<tr>
+<td>kimi</td>
+<td>12</td>
+<td>0</td>
+<td>0.0%</td>
+<td>7</td>
+</tr>
+<tr>
+<td>cursor</td>
+<td>9</td>
+<td>0</td>
+<td>0.0%</td>
+<td>0</td>
+</tr>
+<tr>
+<td>droid</td>
+<td>60</td>
+<td>0</td>
+<td>0.0%</td>
+<td>0</td>
+</tr>
+<tr>
+<td>antigravity</td>
+<td>29</td>
+<td>0</td>
+<td>0.0%</td>
+<td>0</td>
+</tr>
+</tbody></table>
+<h2 id="figure">Figure</h2><figure>
+<figcaption><strong>Figure 1 — The lifecycle battlefield.</strong> Every hook, placed at the moment it fires. Green = peaceful (injects context or nudges, never blocks). Red = combat (can veto a tool call or a stop). The fighting lives in two lanes only.</figcaption>
+
+<svg viewBox="0 0 1180 560" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hook lifecycle battlefield map" width="100%">
+  <defs>
+    <linearGradient id="combat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a1418"></stop><stop offset="1" stop-color="#2a0e12"></stop>
+    </linearGradient>
+    <linearGradient id="peace" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#12261a"></stop><stop offset="1" stop-color="#0e1f16"></stop>
+    </linearGradient>
+  </defs>
+
+  
+  <line x1="40" y1="52" x2="1140" y2="52" stroke="#3a3a3a" stroke-width="2"></line>
+  <polygon points="1140,52 1128,46 1128,58" fill="#3a3a3a"></polygon>
+  <text x="40" y="30" fill="#8a8a8a" font-size="15">agent lifecycle</text>
+  <text x="1050" y="30" fill="#8a8a8a" font-size="13">time →</text>
+
+  
+  
+  <g>
+    <rect x="34" y="66" width="212" height="462" rx="10" fill="url(#peace)" stroke="#1f3a2a"></rect>
+    <circle cx="140" cy="52" r="7" fill="#a3e635"></circle>
+    <text x="140" y="92" text-anchor="middle" fill="#a3e635" font-size="15" font-weight="700">SessionStart</text>
+    <text x="140" y="112" text-anchor="middle" fill="#6f9e5a" font-size="11">6 hooks · 0 blocks</text>
+    <text x="140" y="132" text-anchor="middle" fill="#5f7a52" font-size="10">inject / side-effect</text>
+    <g fill="#9fd67f">
+      <text x="140" y="168" text-anchor="middle">session-identity</text>
+      <text x="140" y="196" text-anchor="middle">linear-inject-tasks</text>
+      <text x="140" y="224" text-anchor="middle">device-topology</text>
+      <text x="140" y="252" text-anchor="middle">repo-inflight</text>
+      <text x="140" y="280" text-anchor="middle">autosync</text>
+      <text x="140" y="308" text-anchor="middle">git-pull-forward</text>
+    </g>
+  </g>
+
+  
+  <g>
+    <rect x="254" y="66" width="212" height="462" rx="10" fill="url(#peace)" stroke="#1f3a2a"></rect>
+    <circle cx="360" cy="52" r="7" fill="#a3e635"></circle>
+    <text x="360" y="92" text-anchor="middle" fill="#a3e635" font-size="15" font-weight="700">UserPromptSubmit</text>
+    <text x="360" y="112" text-anchor="middle" fill="#6f9e5a" font-size="11">5 hooks · 0 blocks</text>
+    <text x="360" y="132" text-anchor="middle" fill="#5f7a52" font-size="10">expand / remind</text>
+    <g fill="#9fd67f">
+      <text x="360" y="168" text-anchor="middle">promptcuts (#)</text>
+      <text x="360" y="196" text-anchor="middle">bangcuts (!)</text>
+      <text x="360" y="224" text-anchor="middle">vacation-recap</text>
+      <text x="360" y="252" text-anchor="middle">verify-work-state (rec)</text>
+      <text x="360" y="280" text-anchor="middle">worktree-law-reminder</text>
+    </g>
+  </g>
+
+  
+  <g>
+    <rect x="474" y="66" width="430" height="462" rx="10" fill="url(#combat)" stroke="#5a2028" stroke-width="1.5"></rect>
+    <circle cx="689" cy="52" r="7" fill="#ff5470"></circle>
+    <text x="689" y="92" text-anchor="middle" fill="#ff8a9c" font-size="15" font-weight="700">PreToolUse — the front line</text>
+    <text x="689" y="112" text-anchor="middle" fill="#d97a86" font-size="11">13 guards · 1,135 fires</text>
+    
+    <g>
+      
+      <g transform="translate(492,140)">
+        
+        <g transform="translate(0,0)"><text fill="#ffd7dd">git-guard</text><rect x="150" y="-10" width="200" height="13" rx="3" fill="#ff5470"></rect><text x="356" y="0" fill="#ffb3bd">245</text></g>
+        <g transform="translate(0,26)"><text fill="#ffd7dd">merge-guard</text><rect x="150" y="-10" width="196" height="13" rx="3" fill="#ff5470"></rect><text x="352" y="0" fill="#ffb3bd">240</text></g>
+        <g transform="translate(0,52)"><text fill="#ffd7dd">pr-desc-reminder</text><rect x="150" y="-10" width="142" height="13" rx="3" fill="#f0a35a"></rect><text x="298" y="0" fill="#f0c79a">174</text></g>
+        <g transform="translate(0,78)"><text fill="#ffd7dd">main-branch-guard</text><rect x="150" y="-10" width="107" height="13" rx="3" fill="#ff5470"></rect><text x="263" y="0" fill="#ffb3bd">131</text></g>
+        <g transform="translate(0,104)"><text fill="#ffd7dd">rm-guard</text><rect x="150" y="-10" width="73" height="13" rx="3" fill="#ff5470"></rect><text x="229" y="0" fill="#ffb3bd">90</text></g>
+        <g transform="translate(0,130)"><text fill="#ffd7dd">plan-html-reminder</text><rect x="150" y="-10" width="62" height="13" rx="3" fill="#f0a35a"></rect><text x="218" y="0" fill="#f0c79a">76</text></g>
+        <g transform="translate(0,156)"><text fill="#ffd7dd">large-file-add</text><rect x="150" y="-10" width="31" height="13" rx="3" fill="#ff5470"></rect><text x="187" y="0" fill="#ffb3bd">38</text></g>
+        <g transform="translate(0,182)"><text fill="#ffd7dd">clean-tree</text><rect x="150" y="-10" width="31" height="13" rx="3" fill="#ff5470"></rect><text x="187" y="0" fill="#ffb3bd">38</text></g>
+        <g transform="translate(0,208)"><text fill="#ffd7dd">artifacts-conf.</text><rect x="150" y="-10" width="29" height="13" rx="3" fill="#ff5470"></rect><text x="185" y="0" fill="#ffb3bd">35</text></g>
+        <g transform="translate(0,234)"><text fill="#ffd7dd">teams-roster</text><rect x="150" y="-10" width="27" height="13" rx="3" fill="#ff5470"></rect><text x="183" y="0" fill="#ffb3bd">33</text></g>
+        <g transform="translate(0,260)"><text fill="#ffd7dd">user-msg-guard</text><rect x="150" y="-10" width="17" height="13" rx="3" fill="#ff5470"></rect><text x="173" y="0" fill="#ffb3bd">21</text></g>
+        <g transform="translate(0,286)"><text fill="#ffd7dd">secrets-guard</text><rect x="150" y="-10" width="11" height="13" rx="3" fill="#ff5470"></rect><text x="167" y="0" fill="#ffb3bd">14</text></g>
+        <g transform="translate(0,312)"><text fill="#8a8a8a">footer-guard</text><rect x="150" y="-10" width="4" height="13" rx="3" fill="#3a5a3a"></rect><text x="160" y="0" fill="#7fae5f">0 · never fires</text></g>
+      </g>
+    </g>
+  </g>
+
+  
+  <g>
+    <rect x="912" y="66" width="150" height="462" rx="10" fill="url(#combat)" stroke="#5a2028" stroke-width="1.5"></rect>
+    <circle cx="987" cy="52" r="7" fill="#ff5470"></circle>
+    <text x="987" y="92" text-anchor="middle" fill="#ff8a9c" font-size="15" font-weight="700">Stop</text>
+    <text x="987" y="112" text-anchor="middle" fill="#d97a86" font-size="11">the "done?" gate</text>
+    <text x="987" y="132" text-anchor="middle" fill="#d97a86" font-size="11">561 fires</text>
+    <g>
+      <text x="987" y="176" text-anchor="middle" fill="#ffd7dd">verify-work-</text>
+      <text x="987" y="192" text-anchor="middle" fill="#ffd7dd">complete</text>
+      <rect x="927" y="206" width="120" height="12" rx="3" fill="#ff5470"></rect>
+      <text x="987" y="238" text-anchor="middle" fill="#ffb3bd" font-size="11">561 · 51 sess</text>
+      <text x="987" y="286" text-anchor="middle" fill="#ffd7dd">no-permission-</text>
+      <text x="987" y="302" text-anchor="middle" fill="#ffd7dd">stop-guard</text>
+      <text x="987" y="330" text-anchor="middle" fill="#d97a86" font-size="10">blocks premature</text>
+      <text x="987" y="344" text-anchor="middle" fill="#d97a86" font-size="10">stand-down</text>
+    </g>
+  </g>
+
+  
+  <g>
+    <rect x="1070" y="66" width="72" height="462" rx="10" fill="url(#peace)" stroke="#1f3a2a"></rect>
+    <text x="1106" y="300" text-anchor="middle" fill="#9fd67f" font-size="11" transform="rotate(90,1106,300)">Notification · attention-sentinel · 0 blocks</text>
+  </g>
+</svg>
+</figure><figure>
+<figcaption><strong>Figure 2 — Who collides.</strong> Hard hook-blocks (red) versus auto-mode permission denials (amber) per harness. grok almost never trips a hook — its whole fight is with the permission classifier.</figcaption>
+
+<svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Collisions per harness" width="100%">
+  
+  <line x1="120" y1="30" x2="120" y2="270" stroke="#3a3a3a"></line>
+  <line x1="120" y1="270" x2="960" y2="270" stroke="#3a3a3a"></line>
+  
+  <g fill="#8a8a8a">
+    <text x="112" y="274" text-anchor="end">0</text>
+    <line x1="120" y1="181" x2="960" y2="181" stroke="#242424"></line><text x="112" y="185" text-anchor="end">200</text>
+    <line x1="120" y1="93" x2="960" y2="93" stroke="#242424"></line><text x="112" y="97" text-anchor="end">400</text>
+    <line x1="120" y1="4" x2="960" y2="4" stroke="#242424"></line><text x="112" y="8" text-anchor="end">600</text>
+  </g>
+  <g>
+    <rect x="180" y="151" width="40" height="119" fill="#ff5470"><title>claude hard blocks: 269 sessions</title></rect>
+    <rect x="224" y="30" width="40" height="240" fill="#f0a35a"><title>claude permission denials: 542</title></rect>
+    <text x="222" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">claude</text>
+    <text x="200" y="145" text-anchor="middle" fill="#ffb3bd" font-size="11">269</text>
+    <text x="244" y="24" text-anchor="middle" fill="#f0c79a" font-size="11">542</text>
+  </g>
+  <g>
+    <rect x="360" y="253" width="40" height="17" fill="#ff5470"><title>codex hard blocks: 39 sessions</title></rect>
+    <rect x="404" y="57" width="40" height="213" fill="#f0a35a"><title>codex permission denials: 481</title></rect>
+    <text x="402" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">codex</text>
+    <text x="380" y="247" text-anchor="middle" fill="#ffb3bd" font-size="11">39</text>
+    <text x="424" y="51" text-anchor="middle" fill="#f0c79a" font-size="11">481</text>
+  </g>
+  <g>
+    <rect x="540" y="253" width="40" height="17" fill="#ff5470"><title>grok hard blocks: 38 sessions</title></rect>
+    <rect x="584" y="84" width="40" height="186" fill="#f0a35a"><title>grok permission denials: 420</title></rect>
+    <text x="582" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">grok</text>
+    <text x="560" y="247" text-anchor="middle" fill="#ffb3bd" font-size="11">38</text>
+    <text x="604" y="78" text-anchor="middle" fill="#f0c79a" font-size="11">420</text>
+  </g>
+  <g>
+    <rect x="720" y="268" width="40" height="2" fill="#ff5470"><title>kimi hard blocks: 0 sessions</title></rect>
+    <rect x="764" y="267" width="40" height="3" fill="#f0a35a"><title>kimi permission denials: 7</title></rect>
+    <text x="762" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">kimi</text>
+    <text x="740" y="262" text-anchor="middle" fill="#8a8a8a" font-size="11">0</text>
+    <text x="784" y="261" text-anchor="middle" fill="#8a8a8a" font-size="11">7</text>
+  </g>
+  <text x="850" y="288" text-anchor="middle" fill="#5f5f5f" font-size="11">cursor/droid/</text>
+  <text x="850" y="304" text-anchor="middle" fill="#5f5f5f" font-size="11">antigravity: 0</text>
+  
+  <g>
+    <rect x="600" y="34" width="14" height="14" fill="#ff5470"></rect><text x="620" y="46" fill="#cfcfcf">hard hook-block (sessions)</text>
+    <rect x="600" y="56" width="14" height="14" fill="#f0a35a"></rect><text x="620" y="68" fill="#cfcfcf">permission-classifier denials (events)</text>
+  </g>
+</svg>
+</figure><figure>
+<figcaption><strong>Figure 3 — Anatomy of the biggest fight: git-guard.</strong> What agents actually try that git-guard vetoes. `reset --hard` and `git checkout` (stranding the user's tree) lead — the exact history-destroying moves the worktree law exists to stop. 243 of git-guard's 245 fires carry a parseable verb.</figcaption>
+
+<svg viewBox="0 0 1000 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="git-guard blocked operations" width="100%">
+  
+  <g>
+    <g transform="translate(0,40)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.reset --hard</text><rect x="260" y="-11" width="617" height="22" rx="3" fill="#ff5470"></rect><text x="885" y="4" fill="#ffb3bd">53</text></g>
+    <g transform="translate(0,72)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.checkout</text><rect x="260" y="-11" width="605" height="22" rx="3" fill="#ff5470"></rect><text x="873" y="4" fill="#ffb3bd">52</text></g>
+    <g transform="translate(0,104)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.branch-delete</text><rect x="260" y="-11" width="419" height="22" rx="3" fill="#ff6f86"></rect><text x="687" y="4" fill="#ffb3bd">36</text></g>
+    <g transform="translate(0,136)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.stash</text><rect x="260" y="-11" width="291" height="22" rx="3" fill="#ff6f86"></rect><text x="559" y="4" fill="#ffb3bd">25</text></g>
+    <g transform="translate(0,168)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.worktree-rm-dirty</text><rect x="260" y="-11" width="268" height="22" rx="3" fill="#ff8a9c"></rect><text x="536" y="4" fill="#ffb3bd">23</text></g>
+    <g transform="translate(0,200)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.config-write</text><rect x="260" y="-11" width="140" height="22" rx="3" fill="#ffa3b2"></rect><text x="408" y="4" fill="#ffb3bd">12</text></g>
+    <g transform="translate(0,232)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.worktree-rm-unpushed</text><rect x="260" y="-11" width="128" height="22" rx="3" fill="#ffa3b2"></rect><text x="396" y="4" fill="#ffb3bd">11</text></g>
+    <g transform="translate(0,264)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.push-delete</text><rect x="260" y="-11" width="116" height="22" rx="3" fill="#ffa3b2"></rect><text x="384" y="4" fill="#ffb3bd">10</text></g>
+    <g transform="translate(0,296)"><text x="260" y="4" text-anchor="start" fill="#8a8a8a">+ 21 more across 9 rarer verbs</text></g>
+  </g>
+</svg>
+</figure><h2 id="did-the-hook-actually-work">Did the hook actually work?</h2><p>A block count says a hook fired. It does not say the agent then did the right
+thing. So for every fire that could be located in the message stream, the next
+40 messages were searched for the action the hook demanded — <code>artifacts render</code>
+after the plan nudge, <code>worktree add</code> after a primary-tree block, <code>agents feed post</code> after the owner-update line. Two numbers come out of it, and the second
+one matters more.</p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>Fires</th>
+<th>Sessions</th>
+<th>Complied</th>
+<th><strong>Refired</strong></th>
+<th>Verdict</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>feed-owner-update</td>
+<td>811</td>
+<td>272</td>
+<td><strong>42%</strong></td>
+<td>539</td>
+<td><strong>CUT THE PING</strong></td>
+</tr>
+<tr>
+<td>git-guard</td>
+<td>164</td>
+<td>110</td>
+<td>61%</td>
+<td>54</td>
+<td>working</td>
+</tr>
+<tr>
+<td>verify-work-complete</td>
+<td>148</td>
+<td>35</td>
+<td><em>97%</em></td>
+<td>113</td>
+<td>unmeasured</td>
+</tr>
+<tr>
+<td>pr-description-reminder</td>
+<td>136</td>
+<td>87</td>
+<td>65%</td>
+<td>49</td>
+<td>working</td>
+</tr>
+<tr>
+<td>main-branch-guard</td>
+<td>80</td>
+<td>51</td>
+<td>72%</td>
+<td>29</td>
+<td>working</td>
+</tr>
+<tr>
+<td>plan-html-reminder</td>
+<td>57</td>
+<td>32</td>
+<td>53%</td>
+<td>25</td>
+<td>TUNE (see below)</td>
+</tr>
+<tr>
+<td>teams-roster-guard</td>
+<td>17</td>
+<td>4</td>
+<td>71%</td>
+<td>13</td>
+<td>working</td>
+</tr>
+<tr>
+<td>user-message-guard</td>
+<td>10</td>
+<td>7</td>
+<td>60%</td>
+<td>3</td>
+<td>working</td>
+</tr>
+</tbody></table>
+<p><strong>Refired is the real signal.</strong> A hook that has to say the same thing twice in one
+session did not teach the first time. Compliance can be faked by an agent that
+happens to do the right thing anyway; a re-fire cannot.</p>
+<p><strong>Every compliance number here is a lower bound.</strong> It is only as good as the
+pattern used to recognise the demanded action, and a too-narrow pattern
+manufactures a false defect. main-branch-guard is the worked example: scored
+against <code>worktree add</code> alone it reads <strong>29%</strong> and looks broken. But an agent
+that already <em>has</em> a worktree and merely aimed a write at the wrong path does
+not need a new one — it needs to re-aim, and 36 of its 61 recoveries did exactly
+that. Scored against both recoveries it is <strong>72%</strong>, and the guard is fine.
+Treat a low number as a question, not a verdict.</p>
+<figure>
+<figcaption><strong>Figure 4 — Obeyed vs ignored.</strong> Each hook's fires split by whether the demanded action appeared in the following 40 messages. One bar is the outlier that matters: the owner-update reminder, ignored more often than obeyed and wider than every guard combined.</figcaption>
+
+<svg viewBox="0 0 1000 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Hook compliance" width="100%">
+  <g>
+    <rect x="600" y="14" width="14" height="14" fill="#7fae5f"></rect><text x="620" y="26" fill="#cfcfcf">complied</text>
+    <rect x="740" y="14" width="14" height="14" fill="#ff5470"></rect><text x="760" y="26" fill="#cfcfcf">ignored</text>
+  </g>
+  <g>
+    <g transform="translate(0,70)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">feed-owner-update</text><rect x="250" y="-11" width="277" height="22" fill="#7fae5f"></rect><rect x="527" y="-11" width="385" height="22" fill="#ff5470"></rect><text x="920" y="4" fill="#ffb3bd" font-size="12">42%</text></g>
+    <g transform="translate(0,104)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">git-guard</text><rect x="250" y="-11" width="82" height="22" fill="#7fae5f"></rect><rect x="332" y="-11" width="52" height="22" fill="#ff5470"></rect><text x="392" y="4" fill="#8a8a8a" font-size="12">61%</text></g>
+    <g transform="translate(0,138)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">pr-desc-reminder</text><rect x="250" y="-11" width="73" height="22" fill="#7fae5f"></rect><rect x="323" y="-11" width="39" height="22" fill="#ff5470"></rect><text x="370" y="4" fill="#8a8a8a" font-size="12">65%</text></g>
+    <g transform="translate(0,172)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">main-branch-guard</text><rect x="250" y="-11" width="48" height="22" fill="#7fae5f"></rect><rect x="298" y="-11" width="18" height="22" fill="#ff5470"></rect><text x="324" y="4" fill="#8a8a8a" font-size="12">72%</text></g>
+    <g transform="translate(0,206)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">plan-html-reminder</text><rect x="250" y="-11" width="25" height="22" fill="#7fae5f"></rect><rect x="275" y="-11" width="22" height="22" fill="#ff5470"></rect><text x="305" y="4" fill="#8a8a8a" font-size="12">53%</text></g>
+    <g transform="translate(0,240)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">teams-roster-guard</text><rect x="250" y="-11" width="10" height="22" fill="#7fae5f"></rect><rect x="260" y="-11" width="4" height="22" fill="#ff5470"></rect><text x="272" y="4" fill="#8a8a8a" font-size="12">71%</text></g>
+    <g transform="translate(0,274)"><text x="238" y="4" text-anchor="end" fill="#cfcfcf">user-message-guard</text><rect x="250" y="-11" width="5" height="22" fill="#7fae5f"></rect><rect x="255" y="-11" width="3" height="22" fill="#ff5470"></rect><text x="266" y="4" fill="#8a8a8a" font-size="12">60%</text></g>
+  </g>
+  <text x="250" y="316" fill="#5f5f5f" font-size="11">bar width = fires, to scale — the owner-update reminder dwarfs every guard in the system</text>
+</svg>
+</figure><p><strong>The owner-update reminder is the worst hook in the system.</strong> 811 fires across 272
+sessions — three per session, and more than any single guard fires — and 58%
+of them are ignored. Worse, the 42% that <em>are</em> obeyed are obeyed by running
+<code>agents feed post … --level important</code>, and <code>feed.broadcast.owner</code> forwards an
+important post to iMessage. So the reminder's only successful outcome is a phone
+buzz, fired without regard to whether the session shipped anything worth one. It
+hardcodes the escalation level instead of letting the outcome pick it.</p>
+<p><strong>The primary tree is not actually protected from writes — only from commits.</strong>
+Probed against a real repo, all four file tools are vetoed and all eleven raw-shell
+writes are not:</p>
+<table>
+<thead>
+<tr>
+<th>probe</th>
+<th>result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>Write</code> · <code>Edit</code> · <code>MultiEdit</code> · <code>NotebookEdit</code></td>
+<td><strong>blocked</strong> (4/4)</td>
+</tr>
+<tr>
+<td><code>echo &gt;</code> · <code>&gt;&gt;</code> · <code>sed -i</code> · <code>tee</code> · <code>cp</code> · <code>mv</code> · <code>: &gt;</code> · <code>touch</code> · <code>mkdir</code> · <code>rm</code> · <code>python3 -c open(...,'w')</code></td>
+<td><strong>allowed (11/11)</strong></td>
+</tr>
+<tr>
+<td><code>git add</code> · <code>git commit</code></td>
+<td>blocked</td>
+</tr>
+</tbody></table>
+<p>So the real guarantee is <em>"an agent cannot <strong>commit</strong> to your checkout"</em>, not <em>"an
+agent cannot modify it"</em>. These are not evasions — <code>echo x &gt; file</code> and <code>sed -i</code> are
+ordinary commands an agent writes without any intent to circumvent. The commit choke
+point still prevents anything from landing, but a dirtied working tree is a real cost
+the earlier wording hid.</p>
+<p><strong>main-branch-guard is healthy, and its refusal is the model to copy.</strong> 72% of
+blocked agents recover within 40 messages — 25 open a fresh worktree, 36 re-aim
+into one they already had. The reason is visible in the refusal text itself
+(<code>main-branch-guard.sh:198-203</code>): it does not just say <em>no</em>, it pastes the
+four-line worktree recipe with <code>$REPO</code> already filled in. A guard that hands over
+the fix outperforms one that only states the rule. The 24 non-recoveries are
+mostly sessions that changed direction entirely, not agents left stuck.</p>
+<p><strong>The Stop gate's 97% is not a real number.</strong> For a gate whose demand is "keep
+working," the only measurable compliance is "did any tool call follow," which is
+true almost by construction. What <em>is</em> real: 561 fires across 51 sessions, <strong>11
+per session</strong>. Whatever it is teaching, it is teaching it eleven times.</p>
+<h2 id="duplicates-tuning-and-the-linear-pollution-source">Duplicates, tuning, and the Linear-pollution source</h2><blockquote>
+<p>Source claims in this section were re-verified against <code>.agents-system</code> at
+<code>origin/main</code> (<code>011b7e0</code>) with a clean tree — not a stale local checkout. That
+commit already includes PR #362, which changed this very hook set today.</p>
+</blockquote>
+<p><strong>git-guard vs main-branch-guard are NOT duplicates — they're two axes.</strong> git-guard polices
+<em>what operation</em> (destructive git verbs, anywhere); main-branch-guard polices <em>where</em> (never
+the primary tree). <code>git commit</code> in your checkout → main-branch-guard. <code>reset --hard</code> in a
+worktree → git-guard. Merging the policies would be wrong. <strong>But they share ~200 lines of
+identical command-parsing shell</strong> (<code>extract_sh_c_inner</code>, <code>check_segment</code>,
+<code>check_command_string</code>, <code>-C</code> resolution), and the <code>_json_field</code> JSON extractor is
+copy-pasted into <strong>11</strong> scripts — <code>git-guard</code>, <code>main-branch-guard</code>, <code>merge-guard</code>,
+<code>rm-guard</code>, <code>secrets-guard</code>, <code>footer-guard</code>, <code>large-file-add-guard</code>,
+<code>teams-roster-guard</code>, <code>pr-description-reminder</code>, <code>01-git-require-clean-tree</code>, and
+<code>09-git-pull-forward</code> (counted with <code>git grep -l _json_field origin/main</code>, so it is
+the shipped tree, not a working copy). That is the real consolidation win: lift one
+shared git-command-parser into <code>hooks/lib/</code> (they already share <code>git-facts.sh</code>) —
+same behavior, one place to fix.</p>
+<p><strong>pr-description-reminder already does what you described</strong> — it's the run-proof gate, not a
+vague "write a description" nudge. Keep it. Only blind spot: a <code>--fill</code>/<code>--template</code>/editor
+body it can't read (fails open there).</p>
+<p><strong>plan-html-reminder — the earlier diagnosis here was wrong, and the measurement says so.</strong>
+It is <em>not</em> true that the hook only fires on the formal plan-exit tool: <code>hooks.yaml</code> registers
+the same script twice, once on <code>PreToolUse</code>/<code>ExitPlanMode</code> and once on <code>Stop</code>, precisely to
+cover harnesses (Codex, Grok) whose plan mode is collaboration state rather than a tool call.</p>
+<p>The measured failure mode is different. Of 57 blocks:</p>
+<table>
+<thead>
+<tr>
+<th>what the agent did next</th>
+<th>count</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>never attempted a render — ignored the block</td>
+<td><strong>34 (60%)</strong></td>
+</tr>
+<tr>
+<td>rendered, and cleared</td>
+<td>19</td>
+</tr>
+<tr>
+<td>rendered, and was re-blocked anyway</td>
+<td><strong>4 (7%)</strong></td>
+</tr>
+</tbody></table>
+<p>So "the render bar is too strict" explains <strong>4 cases</strong>, not the bulk. Loosening it — the fix
+an earlier revision of this page recommended — would address 7% of the problem. The bulk is
+agents that read the block and simply did not render.</p>
+<p>The remaining true gap is narrower: a plan presented as an ordinary message in <strong>default</strong>
+mode is invisible to both entries. <code>PreToolUse</code> needs an <code>ExitPlanMode</code> call, and the <code>Stop</code>
+backstop exits early when <code>permission_mode</code> is present and not <code>plan</code> — which is exactly what
+PR #362 landed today, deliberately, to stop false-positives on answers that merely <em>discuss</em>
+a plan. Widening it back re-breaks what #362 just fixed. That is a genuine tradeoff (missed
+plans vs. false blocks), not an obvious fix, so it is flagged rather than patched.</p>
+<p><strong>Linear pollution is NOT caused by a hook — no hook creates tickets.</strong> Agents create them
+because two <em>rules</em> tell them to, and 100+ agents obey with no cross-session dedup:</p>
+<ul>
+<li><code>conventions.md</code>: <em>"open one if missing (one per unit of delivery)"</em></li>
+<li>your global close-session rule: <em>"File every follow-up you were about to suggest as a real ticket."</em></li>
+</ul>
+<p>The <code>verify-work-complete</code> Stop gate reinforces it at session end. The result is volume +
+redundant tickets + misclassification (each agent guesses project/labels). <code>linear-inject</code>
+only <em>reads</em> your board. Fixing this is a rules edit, not a hook edit.</p>
+<h2 id="proposal-14-guards-down-to-8">Proposal — 14 guards down to 8</h2><p>The criterion is not "does the agent obey." It is <strong>does the hook push the agent to
+finish the work end to end, without excuses.</strong> Scored that way — what the session
+actually did in the 40 messages after each fire — the portfolio splits cleanly.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>hook</th>
+<th>fires</th>
+<th><strong>delivered after</strong></th>
+<th>why</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>merge → 1</strong></td>
+<td>git-guard</td>
+<td>245</td>
+<td>39%</td>
+<td>all four parse git commands on <code>Bash</code></td>
+</tr>
+<tr>
+<td></td>
+<td>main-branch-guard</td>
+<td>131</td>
+<td>59%</td>
+<td>matcher is a superset of git-guard's</td>
+</tr>
+<tr>
+<td></td>
+<td>git-require-clean-tree</td>
+<td>38</td>
+<td>59%</td>
+<td>same parser again</td>
+</tr>
+<tr>
+<td></td>
+<td>large-file-add-guard</td>
+<td>38</td>
+<td>—</td>
+<td>inspects <code>git add</code> — same parser again</td>
+</tr>
+<tr>
+<td><strong>keep</strong></td>
+<td>pr-description-reminder</td>
+<td>174</td>
+<td><strong>89%</strong></td>
+<td>the evidence gate; blocks without derailing</td>
+</tr>
+<tr>
+<td></td>
+<td>merge-guard</td>
+<td>240</td>
+<td><strong>85%</strong></td>
+<td>blocks the bypass, agent still ships</td>
+</tr>
+<tr>
+<td></td>
+<td>artifacts-confidential-guard</td>
+<td>35</td>
+<td><strong>91%</strong></td>
+<td>prevents a leak at near-zero drag</td>
+</tr>
+<tr>
+<td></td>
+<td>verify-work-complete + verify-work-state</td>
+<td>561</td>
+<td>21%</td>
+<td>the <em>only</em> anti-excuse mechanism</td>
+</tr>
+<tr>
+<td></td>
+<td>rm-guard · secrets-guard</td>
+<td>90 · 14</td>
+<td>39% · 54%</td>
+<td>data loss, credentials</td>
+</tr>
+<tr>
+<td></td>
+<td>teams-roster-guard</td>
+<td>33</td>
+<td>60%</td>
+<td>cheap, rarely fires</td>
+</tr>
+<tr>
+<td><strong>cut</strong></td>
+<td><strong>plan-html-reminder</strong></td>
+<td>76</td>
+<td><strong>11%</strong></td>
+<td>worst in the system</td>
+</tr>
+<tr>
+<td></td>
+<td>footer-guard</td>
+<td><strong>0</strong></td>
+<td>—</td>
+<td>never fired once in 7,493 transcripts</td>
+</tr>
+<tr>
+<td></td>
+<td>user-message-guard</td>
+<td>21</td>
+<td>30%</td>
+<td>marginal at any volume</td>
+</tr>
+</tbody></table>
+<p><strong>Merge the four git guards into one.</strong> <code>main-branch-guard</code>'s matcher
+(<code>Bash|Write|Edit|MultiEdit|NotebookEdit</code>) is a <strong>superset</strong> of <code>git-guard</code>'s (<code>Bash</code>),
+so every Bash tool call today spawns both scripts and parses the same command string
+twice with near-identical code — that is where the ~200 duplicated lines live. Two
+axes (<em>what operation</em> vs <em>where</em>) are two <strong>functions</strong>, not two hooks. Folding
+<code>git-require-clean-tree</code> and <code>large-file-add-guard</code> in costs nothing: both already
+parse git commands. One spawn, one parser, one place to fix.</p>
+<p><strong><code>plan-html-reminder</code> is the least helpful hook you have.</strong> 11% delivery — the lowest
+of anything measured — and it interrupts at exactly the moment the agent is about to
+hand over a plan. 60% of the time the agent does not even attempt the render it asks
+for. It is ceremony charged at the delivery moment.</p>
+<p><strong><code>footer-guard</code> has never fired — and its first fire was a false positive.</strong> Zero
+blocks across 7,493 transcripts; the rule text alone fully internalized the behavior.
+Then, while this page was being written, it fired for the first time — on an edit that
+merely <em>quoted the banned string inside documentation about the guard itself</em>. It
+matches the literal text anywhere in a <code>Bash</code> command, so writing about it trips it.
+A guard whose only recorded fire is a false positive is not a deterrent, it is a tax.</p>
+<p><strong>What actually forces delivery is thin.</strong> Eleven of thirteen guards prevent <em>damage</em>;
+essentially one hook — the Stop gate, plus the <code>verify-work-state</code> record that gives it
+a goal boundary — prevents <em>quitting</em>. If the goal is agents that finish without
+excuses, the leverage is not in tuning guards. It is that the entire anti-excuse job
+rests on one hook firing 11 times per session.</p>
+<p><strong>Compact the messages.</strong> <code>rules/README.md:57</code> already states the principle — <em>"Every
+line costs context on every agent, on every machine, forever."</em> The guard refusals and
+these very descriptions violate it. <code>main-branch-guard</code>'s refusal is the model worth
+copying, though: it pastes the four-line worktree recipe with <code>$REPO</code> filled in, and
+it recovers 72%. Short, and it hands over the fix.</p>
+<h2 id="the-latency-bill-and-what-to-gate-off-in-plan-mode">The latency bill, and what to gate off in plan mode</h2><p>The hook shims write timings to <code>~/.agents/.cache/perf/perf.db</code>. <strong>285,667 recorded
+fires. 284 of them changed the outcome.</strong></p>
+<blockquote>
+<p><strong>Window.</strong> That table covers <strong>2026-08-03 → 08-08 only</strong> — 4.2 days, ~67,700 hook
+fires a day. Timing collection has not written a row since 2026-08-08, so these are
+a five-day sample from earlier this month, not an all-time or current total. The
+per-call latencies and the hit rate are what that window measured; the block counts
+elsewhere on this page come from the transcript corpus and are current.</p>
+</blockquote>
+<figure>
+<figcaption><strong>Figure 5 — What every Bash call pays.</strong> Nine guards fire on every single <code>Bash</code> tool call, serially, before the command runs. Bar width is measured average latency; the number on the right is how often that guard actually blocked anything.</figcaption>
+
+<svg viewBox="0 0 1000 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Per-Bash-call guard latency" width="100%">
+  <g>
+    <g transform="translate(0,40)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">git-guard</text><rect x="240" y="-11" width="520" height="22" rx="3" fill="#ff5470"></rect><text x="770" y="4" fill="#ffb3bd">63 ms</text><text x="850" y="4" fill="#8a8a8a">0.89%</text></g>
+    <g transform="translate(0,72)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">rm-guard</text><rect x="240" y="-11" width="495" height="22" rx="3" fill="#ff5470"></rect><text x="745" y="4" fill="#ffb3bd">60 ms</text><text x="850" y="4" fill="#8a8a8a">0.33%</text></g>
+    <g transform="translate(0,104)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">main-branch-guard</text><rect x="240" y="-11" width="446" height="22" rx="3" fill="#ff6f86"></rect><text x="696" y="4" fill="#ffb3bd">54 ms</text><text x="850" y="4" fill="#8a8a8a">0.44%</text></g>
+    <g transform="translate(0,136)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">large-file-add-guard</text><rect x="240" y="-11" width="206" height="22" rx="3" fill="#ff8a9c"></rect><text x="456" y="4" fill="#ffb3bd">25 ms</text><text x="850" y="4" fill="#8a8a8a">0.14%</text></g>
+    <g transform="translate(0,168)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">merge-guard</text><rect x="240" y="-11" width="157" height="22" rx="3" fill="#ffa3b2"></rect><text x="407" y="4" fill="#ffb3bd">19 ms</text><text x="850" y="4" fill="#8a8a8a">0.87%</text></g>
+    <g transform="translate(0,200)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">pr-description-reminder</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#ffa3b2"></rect><text x="399" y="4" fill="#ffb3bd">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.63%</text></g>
+    <g transform="translate(0,232)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">git-require-clean-tree</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#ffa3b2"></rect><text x="399" y="4" fill="#ffb3bd">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.14%</text></g>
+    <g transform="translate(0,264)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">user-message-guard</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#ffa3b2"></rect><text x="399" y="4" fill="#ffb3bd">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.08%</text></g>
+    <g transform="translate(0,296)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">footer-guard</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#6a6a6a"></rect><text x="399" y="4" fill="#8a8a8a">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.00%</text></g>
+  </g>
+  <line x1="240" y1="318" x2="760" y2="318" stroke="#3a3a3a"></line>
+  <text x="240" y="340" fill="#ff8a9c" font-size="14" font-weight="700">293 ms added to every Bash call</text>
+  <text x="850" y="340" fill="#8a8a8a" font-size="12">hit rate</text>
+</svg>
+</figure><p><strong>Every <code>Bash</code> tool call pays 293 ms</strong> before the command starts, across nine guards
+(the nine bars above, summed).
+Total recorded hook wall-clock: <strong>2.66 hours</strong>. The hit rate that buys is <strong>0.099%</strong>.</p>
+<p>That is not an argument for deleting the guards — <code>git-guard</code>'s 245 fires include 53
+prevented <code>reset --hard</code>es, and its cost is worth paying. It <em>is</em> an argument for not
+running a guard in a mode where it cannot possibly fire.</p>
+<h3 id="the-mode-matrix">The mode matrix</h3><p><code>matches.permission_mode</code> already exists and is merged
+(<code>apps/cli/src/lib/hooks/match.ts:145</code>), so this is a <strong>config change in <code>hooks.yaml</code>,
+not new code</strong>.</p>
+<table>
+<thead>
+<tr>
+<th>Hook</th>
+<th>plan</th>
+<th>edit / auto</th>
+<th>why</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>git-guard</td>
+<td><strong>on</strong></td>
+<td><strong>on</strong></td>
+<td>Bash still runs in plan mode; <code>reset --hard</code> is still reachable</td>
+</tr>
+<tr>
+<td>rm-guard</td>
+<td><strong>on</strong></td>
+<td><strong>on</strong></td>
+<td>same — data loss is mode-independent</td>
+</tr>
+<tr>
+<td>secrets-guard</td>
+<td><strong>on</strong></td>
+<td><strong>on</strong></td>
+<td>a credential can leak from a read-only session</td>
+</tr>
+<tr>
+<td>main-branch-guard</td>
+<td><em>bash only</em></td>
+<td><strong>on</strong></td>
+<td>its Write/Edit arm is already dead in plan mode</td>
+</tr>
+<tr>
+<td>merge-guard</td>
+<td><strong>off</strong></td>
+<td><strong>on</strong></td>
+<td>nothing merges from a planning turn</td>
+</tr>
+<tr>
+<td>pr-description-reminder</td>
+<td><strong>off</strong></td>
+<td><strong>on</strong></td>
+<td>nothing opens a PR from a planning turn</td>
+</tr>
+<tr>
+<td>large-file-add-guard</td>
+<td><strong>off</strong></td>
+<td><strong>on</strong></td>
+<td>no <code>git add</code> in plan mode</td>
+</tr>
+<tr>
+<td>git-require-clean-tree</td>
+<td><strong>off</strong></td>
+<td><strong>on</strong></td>
+<td>no pull/rebase in plan mode</td>
+</tr>
+<tr>
+<td>footer-guard</td>
+<td><strong>off</strong></td>
+<td><strong>off</strong></td>
+<td>cut entirely — 0 real blocks</td>
+</tr>
+<tr>
+<td>user-message-guard</td>
+<td><strong>off</strong></td>
+<td><strong>off</strong></td>
+<td>cut entirely — 0.08%</td>
+</tr>
+<tr>
+<td>verify-work-complete</td>
+<td><strong>plan-aware</strong></td>
+<td><strong>on</strong></td>
+<td>"done" in plan mode means <em>the plan is delivered</em>, not <em>the PR is merged</em> — it should audit against the plan, not the delivery chain</td>
+</tr>
+</tbody></table>
+<p>Two different savings sit in that table, and they should not be added together
+carelessly — an earlier revision of this page did exactly that:</p>
+<table>
+<thead>
+<tr>
+<th>step</th>
+<th>guards</th>
+<th>saved</th>
+<th>per-<code>Bash</code> cost</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>today</td>
+<td>—</td>
+<td>—</td>
+<td><strong>293 ms</strong></td>
+</tr>
+<tr>
+<td>gate the four delivery-phase guards off in plan mode</td>
+<td><code>merge-guard</code> 19 · <code>pr-description-reminder</code> 18 · <code>large-file-add-guard</code> 25 · <code>git-require-clean-tree</code> 18</td>
+<td><strong>80 ms</strong></td>
+<td><strong>213 ms</strong></td>
+</tr>
+<tr>
+<td>plus cut <code>footer-guard</code> and <code>user-message-guard</code> outright</td>
+<td>18 · 18</td>
+<td><strong>36 ms</strong></td>
+<td><strong>177 ms</strong></td>
+</tr>
+</tbody></table>
+<p>Only the first row is a mode gate; the second is deletion, and it applies in <em>every</em>
+mode rather than just plan. Merging the four git guards into one script would cut
+further still — three fewer process spawns per call — but that number is not measured
+yet and is deliberately not claimed here.</p>
+<h3 id="a-hook-broke-for-18-hours-and-nothing-said-so">A hook broke for 18 hours and nothing said so</h3><p><code>activity-log-result</code> exited <strong>127 — command not found — 983 times</strong>, while still
+costing 40 ms per call. Worth stating precisely, because the raw count reads worse
+than the truth: every one of those failures falls inside a single <strong>18-hour window on
+2026-08-03 22:14 → 08-04 16:11</strong>, and there are none after it. Running the hook today
+exits 0. So this was a bounded incident that resolved itself, not a hook that is
+broken now.</p>
+<p>The defect it exposes is still real: <strong>for eighteen hours a hook could not run at all,
+and nothing reported it.</strong> The shim bakes an absolute path into one version home
+(<code>.../versions/claude/2.1.219/home/.claude/hooks/11-activity-log.py</code>), so any session
+whose version home does not carry that file gets <code>127</code> — silently, at full latency
+cost, with the agent none the wiser. A hook that cannot execute should fail loudly at
+install or sync time. The only reason this is visible at all is that the shim happens
+to record exit codes; nothing reads them.</p>
+<h2 id="the-same-duplication-one-layer-up-skills-and-commands">The same duplication, one layer up: skills and commands</h2><p>The guards duplicate a command parser. The <strong>skills</strong> duplicate a pipeline — and
+the numbers are worse, because prose has no compiler to catch it.</p>
+<figure>
+<figcaption><strong>Figure 6 — One pipeline, three skills teaching it.</strong> Every skill that produces an HTML artifact re-teaches the same five mechanics. Counts are occurrences of each concept inside each SKILL.md.</figcaption>
+
+<svg viewBox="0 0 1000 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Skill overlap" width="100%">
+  <g fill="#8a8a8a">
+    <text x="300" y="34" text-anchor="middle">artifacts render</text>
+    <text x="440" y="34" text-anchor="middle">frontmatter</text>
+    <text x="580" y="34" text-anchor="middle">light/dark</text>
+    <text x="710" y="34" text-anchor="middle">inline-SVG</text>
+    <text x="860" y="34" text-anchor="middle">headless inspect</text>
+  </g>
+  <g>
+    <g transform="translate(0,80)">
+      <text x="210" y="5" text-anchor="end" fill="#cfcfcf">artifacts · 131 ln</text>
+      <circle cx="300" cy="0" r="14" fill="#7fae5f"></circle><text x="300" y="5" text-anchor="middle" fill="#0e1f16">2</text>
+      <circle cx="440" cy="0" r="18" fill="#7fae5f"></circle><text x="440" y="5" text-anchor="middle" fill="#0e1f16">4</text>
+      <circle cx="580" cy="0" r="16" fill="#7fae5f"></circle><text x="580" y="5" text-anchor="middle" fill="#0e1f16">3</text>
+      <circle cx="710" cy="0" r="14" fill="#7fae5f"></circle><text x="710" y="5" text-anchor="middle" fill="#0e1f16">2</text>
+      <circle cx="860" cy="0" r="14" fill="#7fae5f"></circle><text x="860" y="5" text-anchor="middle" fill="#0e1f16">2</text>
+    </g>
+    <g transform="translate(0,150)">
+      <text x="210" y="5" text-anchor="end" fill="#ffd7dd">plan-render · 208 ln</text>
+      <circle cx="300" cy="0" r="18" fill="#ff5470"></circle><text x="300" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="440" cy="0" r="14" fill="#ff5470"></circle><text x="440" y="5" text-anchor="middle" fill="#2a0e12">2</text>
+      <circle cx="580" cy="0" r="18" fill="#ff5470"></circle><text x="580" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="710" cy="0" r="16" fill="#ff5470"></circle><text x="710" y="5" text-anchor="middle" fill="#2a0e12">3</text>
+      <circle cx="860" cy="0" r="18" fill="#ff5470"></circle><text x="860" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+    </g>
+    <g transform="translate(0,220)">
+      <text x="210" y="5" text-anchor="end" fill="#ffd7dd">visualize · 166 ln</text>
+      <circle cx="300" cy="0" r="14" fill="#ff5470"></circle><text x="300" y="5" text-anchor="middle" fill="#2a0e12">2</text>
+      <circle cx="440" cy="0" r="11" fill="#ff5470"></circle><text x="440" y="5" text-anchor="middle" fill="#2a0e12">1</text>
+      <circle cx="580" cy="0" r="18" fill="#ff5470"></circle><text x="580" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="710" cy="0" r="18" fill="#ff5470"></circle><text x="710" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="860" cy="0" r="18" fill="#ff5470"></circle><text x="860" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+    </g>
+  </g>
+  <line x1="230" y1="265" x2="920" y2="265" stroke="#3a3a3a"></line>
+  <text x="230" y="292" fill="#ff8a9c" font-size="14" font-weight="700">505 lines across 3 skills — one pipeline</text>
+  <text x="920" y="292" text-anchor="end" fill="#7fae5f" font-size="13">keep 1 · delete 2</text>
+</svg>
+</figure><p><strong><code>plan-render</code> and <code>visualize</code> are <code>artifacts</code> with a different noun in front.</strong>
+All three teach: author Markdown → <code>artifacts render</code> → branded light/dark HTML with
+inline-SVG figures → inspect it headlessly. The <em>policies</em> genuinely differ — a plan
+owes a current-vs-proposed figure and a declared <code>surface:</code>, a visual owes one
+striking hero — but that is a <strong>section</strong>, not a skill. The pipeline underneath is
+identical, and a pipeline written out three times is a pipeline that drifts three
+ways.</p>
+<p>The consolidation follows the artifact CLI's own model: the noun is already a
+<code>kind:</code> in frontmatter (<code>kind: visual</code> renders this page; plans use <code>kind: plan</code>).
+The skills should mirror what the tool already does rather than re-partition it.</p>
+<h3 id="share-public-and-share-private-are-two-flags-wearing-two-commands"><code>/share:public</code> and <code>/share:private</code> are two flags wearing two commands</h3><p>16 and 18 lines. Masking the words <em>public</em> / <em>private</em> / <em>unlisted</em> and diffing them,
+the entire functional difference is:</p>
+<pre><code>public    agents artifacts share &lt;file&gt;
+private   agents artifacts share &lt;file&gt; --no-cover --expire 7d
+</code></pre>
+<p>Resolving the file, checking <code>share status</code>, reporting the link — duplicated in both.
+<code>private.md</code> step 1 gives it away in writing: <em>"(same as <code>/share:public</code>)"</em>. A file
+that documents its own duplication is the clearest possible signal.</p>
+<p>The CLI already takes the flags and a <code>share</code> skill already exists, so the surface
+should be <strong>one</strong> command where public is the default and private is a modifier.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>today</th>
+<th>proposed</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>pipeline skills</td>
+<td><code>artifacts</code> 131 · <code>plan-render</code> 208 · <code>visualize</code> 166</td>
+<td><strong><code>artifacts</code></strong> (~200), with <code>kind: plan</code> and <code>kind: visual</code> sections</td>
+</tr>
+<tr>
+<td>share surface</td>
+<td><code>share</code> skill 67 · <code>/share:public</code> 16 · <code>/share:private</code> 18</td>
+<td><strong><code>share</code></strong> skill + one <code>/share</code></td>
+</tr>
+<tr>
+<td>total</td>
+<td><strong>606 lines</strong></td>
+<td><strong>~270</strong></td>
+</tr>
+</tbody></table>
+<p><strong>One caveat before cutting.</strong> <code>plan-html-reminder</code> greps rendered plans for a
+declared <code>surface:</code> and specific figure markup, so any consolidation has to preserve
+those exact contracts or the guard starts false-blocking the very plans it is meant
+to enforce. Its test suite is the check.</p>
+<h2 id="insight">Insight</h2><ul>
+<li><strong>The map has two hot lanes, not five.</strong> SessionStart (6 hooks) and UserPromptSubmit (5 hooks) never block — they inject Linear/topology/inflight context and expand promptcuts/bangcuts. All the friction is PreToolUse + Stop. If you are auditing "where agents fight hooks," you can ignore 60% of the hook surface.</li>
+<li><strong>The Stop gate is the heaviest hook in the system</strong> — 561 fires, 11 per session it touches, more than git-guard and merge-guard put together. Among PreToolUse guards those two lead (245 and 240): git-guard's top vetoes are <code>reset --hard</code>, <code>checkout</code>, <code>branch-delete</code>, <code>stash</code> — exactly the history-destroying moves the agentic-git workflow forbids; merge-guard's are admin-bypass and merging with no non-author verdict.</li>
+<li><strong>The loudest antagonist is not a hook.</strong> The auto-mode permission classifier denied 1,450 tool calls — <strong>more than all 13 PreToolUse guards combined (1,135)</strong>. For grok it is almost the <em>entire</em> experience of "being stopped".</li>
+<li><strong>codex fights hardest per session (12.4%), grok softest (1.2%).</strong> claude sits at 6.9% but spreads across all 13 guards; grok concentrates on the classifier + merge-guard.</li>
+<li><strong>A guard firing zero times is a rule that won.</strong> footer-guard: 0 fires. Nobody tries the banned footer anymore — the guard is pure standing deterrent. The inverse also holds: a hook that fires three times a session and is ignored 58% of the time is a rule nobody internalized, and the fix is the message, not more volume.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0aXRsZTogV2hlcmUgdGhlIEFnZW50cyBGaWdodCB0aGUgSG9va3MKc3VtbWFyeTogPgogIEFjcm9zcyA3LDQ5MyBhZ2VudCB0cmFuc2NyaXB0cyBvbiA3IGhhcm5lc3NlcywgaG9va3MgZmlyZSBhdCBmaXZlIGxpZmVjeWNsZQogIG1vbWVudHMg4oCUIGJ1dCB0aGUgZmlnaHRpbmcgaXMgY29uY2VudHJhdGVkIGluIGV4YWN0bHkgdHdvOiBQcmVUb29sVXNlIGd1YXJkcyBhbmQKICB0aGUgU3RvcCBnYXRlLiAxLDY5NiBob29rIGZpcmVzLCBwbHVzIDEsNDUwIHBlcm1pc3Npb24tY2xhc3NpZmllciBkZW5pYWxzIOKAlAogIGFuZCB0aGUgaG9va3MgdGhhdCBmaXJlIG1vc3QgYXJlIHRoZSBvbmVzIGFnZW50cyBvYmV5IGxlYXN0LgpzdGF0dXM6IGZpbmFsCmRhdGU6IDIwMjYtMDgtMjMKY29udGV4dDogYWdlbnRzLWNsaSBob29rIHN5c3RlbSDigJQgYWN0aXZhdGlvbiBtYXAgKyBhZ2VudC9ndWFyZCBjb2xsaXNpb25zIG1pbmVkIGZyb20gZmxlZXQgdHJhbnNjcmlwdHMKZmFjdHM6CiAgLSAiMTMgZ3VhcmRzIGZpcmUgcmVhbCBibG9ja3M7IFNlc3Npb25TdGFydCArIFVzZXJQcm9tcHRTdWJtaXQgaG9va3MgbmV2ZXIgYmxvY2sgKGluamVjdC9yZW1pbmQgb25seSkiCiAgLSAiVG9wIGNvbGxpZGVyOiB0aGUgU3RvcCBnYXRlLCA1NjEgZmlyZXMgb3ZlciBqdXN0IDUxIHNlc3Npb25zIOKAlCAxMSBwZXIgc2Vzc2lvbiIKICAtICJUaGUgYXV0by1tb2RlIHBlcm1pc3Npb24gY2xhc3NpZmllciDigJQgbm90IGEgaG9vayDigJQgaXMgdGhlIHNpbmdsZSBiaWdnZXN0IGZvcmNlIGF0IDEsNDUwIGRlbmlhbHMiCiAgLSAiZm9vdGVyLWd1YXJkOiAwIGJsb2NrcyDigJQgdGhlIG5vLWZvb3RlciBydWxlIGlzIGZ1bGx5IGludGVybmFsaXplZCwgdGhlIGd1YXJkIG5ldmVyIGhhcyB0byBmaXJlIgogIC0gIlRoZSBvd25lci11cGRhdGUgcmVtaW5kZXIgZmlyZXMgODExIHRpbWVzIGFuZCBpcyBpZ25vcmVkIDU4JSBvZiB0aGUgdGltZSDigJQgdGhlIGxvdWRlc3QsIGxlYXN0IG9iZXllZCBob29rIgogIC0gIm1haW4tYnJhbmNoLWd1YXJkIHJlY292ZXJzIDcyJSDigJQgaXRzIHJlZnVzYWwgcGFzdGVzIHRoZSB3b3JrdHJlZSByZWNpcGUgaW5zdGVhZCBvZiBvbmx5IHN0YXRpbmcgdGhlIHJ1bGUiCi0tLQoKIyMgU3RvcnkKCgpZb3UgYXNrZWQgd2hlcmUgdGhlIGFnZW50cyBmaWdodCB3aXRoIHRoZSBob29rcy4gSGVyZSBpcyB0aGUgbWFwLAptaW5lZCBmcm9tICoqNyw0OTMgcmVhbCBzZXNzaW9uIHRyYW5zY3JpcHRzKiogYWNyb3NzIDcgaGFybmVzc2VzIChjbGF1ZGUsIGNvZGV4LApncm9rLCBraW1pLCBjdXJzb3IsIGRyb2lkLCBhbnRpZ3Jhdml0eSkuIEV2ZXJ5IG51bWJlciBvbiB0aGlzIHBhZ2UgY29tZXMgZnJvbSBvbmUKc25hcHNob3Qgb2YgdGhhdCBjb3JwdXMg4oCUIGl0IGlzIGxpdmUgYW5kIHN0aWxsIGdyb3dpbmcsIHNvIGEgcmUtcnVuIG1vdmVzIHRoZQpjb3VudHMgYnkgYSBmZXcuCgpBIGhvb2sgY2FuIGZpcmUgYXQgKipmaXZlIGxpZmVjeWNsZSBtb21lbnRzKiouIFRocmVlIG9mIHRoZW0gYXJlIHBlYWNlZnVsOiBTZXNzaW9uU3RhcnQKYW5kIFVzZXJQcm9tcHRTdWJtaXQgaG9va3Mgb25seSAqaW5qZWN0KiBjb250ZXh0IG9yICpyZW1pbmQqIOKAlCB0aGV5IG5ldmVyIHN0b3AgYW4KYWdlbnQuIFRoZSBiYXR0bGVmaWVsZCBpcyAqKlByZVRvb2xVc2UqKiAoZ3VhcmRzIHRoYXQgdmV0byBhIHRvb2wgY2FsbCBiZWZvcmUgaXQgcnVucykKYW5kICoqU3RvcCoqICh0aGUgZ2F0ZSB0aGF0IHJlZnVzZXMgYSBwcmVtYXR1cmUgIkknbSBkb25lIikuIFRoYXQgaXMgd2hlcmUgZXZlcnkgcmVhbApmaWdodCBoYXBwZW5zLgoKVHdvIGZvcmNlcyBkbyB0aGUgc3RvcHBpbmcuICoqSG9va3MqKiDigJQgMTMgZ3VhcmRzIHRoYXQgZmlyZWQgMSw2OTYgdGltZXMuIEFuZCBhCm5vbi1ob29rLCB0aGUgKiphdXRvLW1vZGUgcGVybWlzc2lvbiBjbGFzc2lmaWVyKiosIHdoaWNoIGRlbmllZCAxLDQ1MCB0b29sIGNhbGxzIG9uCml0cyBvd24uIFRoZSBjbGFzc2lmaWVyIGlzIHRoZSBzaW5nbGUgbG91ZGVzdCBhbnRhZ29uaXN0LCBhbmQgZm9yIGdyb2sgaXQgaXMgYWxtb3N0CnRoZSAqb25seSogb25lIGl0IG1lZXRzLgoKT25lIGd1YXJkIGlzIHdvcnRoIG5hbWluZyBmb3IgaXRzIHNpbGVuY2U6ICoqZm9vdGVyLWd1YXJkIGhhcyBmaXJlZCB6ZXJvIHRpbWVzLioqIFRoZQoibm8gR2VuZXJhdGVkLXdpdGgtQ2xhdWRlLUNvZGUgZm9vdGVyIiBydWxlIGlzIHNvIGludGVybmFsaXplZCB0aGF0IG5vIGFnZW50IGV2ZXIgdHJpZXMKaXQg4oCUIHRoZSBwZXJmZWN0IGd1YXJkIGlzIHRoZSBvbmUgdGhhdCBuZXZlciBoYXMgdG8gYWN0LgoKIyMgV2hhdCBlYWNoIGhvb2sgaXMgZm9yCgoKUmVhZCB0aGlzIGZpcnN0IOKAlCBldmVyeSB0YWJsZSBhZnRlciBpdCByZWZlcnMgdG8gdGhlc2UgbmFtZXMuCgpFYWNoIGhvb2sgaXMgbGlzdGVkIHdpdGggaXRzICoqZXZlbnQqKiAod2hlbiBpdCBmaXJlcyksIGl0cyAqKmtpbmQqKiAod2hhdCBpdCBkb2VzIHdoZW4gaXQKZmlyZXMpLCBhIG9uZS1saW5lICoqcHVycG9zZSoqLCBhbmQgYSAqKnZlcmRpY3QqKi4gS2luZCBpcyB0aGUgdGhpbmcgdG8gcmVhZCBmaXJzdDogYGluamVjdGAKYW5kIGByZW1pbmRgL2BudWRnZWAgbmV2ZXIgc3RvcCB5b3U7IGBibG9ja2AgYW5kIGBnYXRlYCBkby4gVGhleSBhcmUgZ3JvdXBlZCBieSBsaWZlY3ljbGUKbW9tZW50LCBzbyB0aGUgdHdvIGxhbmVzIHRoYXQgY2FuIGFjdHVhbGx5IHN0b3AgYW4gYWdlbnQgc3RhbmQgYXBhcnQgZnJvbSB0aGUgZWxldmVuIGhvb2tzCnRoYXQgb25seSBldmVyIGFkZCBjb250ZXh0LgoKKipTZXNzaW9uU3RhcnQg4oCUIGFsbCBgaW5qZWN0YCAvIGBzaWRlLWVmZmVjdGAsIG5ldmVyIGJsb2NrcyoqCgp8IEhvb2sgfCBQdXJwb3NlIHwgVmVyZGljdCB8CnwtLS18LS0tfC0tLXwKfCBzZXNzaW9uLWlkZW50aXR5IHwgV3JpdGVzIHdoby1hbS1JIChzZXNzaW9uIGlkLCB0cmFuc2NyaXB0IHBhdGgsIHBpZCkgc28gYHNlc3Npb25zYCAvIGAtLWFjdGl2ZWAgY2FuIGpvaW4gcGlk4oaSc2Vzc2lvbiB8IEtFRVAgfAp8ICoqbGluZWFyLWluamVjdC10YXNrcyoqIHwgKipSRUFEUyBMaW5lYXIgYW5kIHNob3dzIHlvdXIgcHJvamVjdHMvbWlsZXN0b25lcy90aWNrZXRzIGluIGNvbnRleHQuIEl0IG9ubHkgZGlzcGxheXMg4oCUIGl0IGRvZXMgbm90IGNyZWF0ZSB0aWNrZXRzKiogfCBLRUVQIHwKfCBkZXZpY2UtdG9wb2xvZ3kgfCBJbmplY3RzIHRoZSBmbGVldCBob3N0IGxpc3QgKyBsaXZlIGxvYWQgfCBLRUVQIHwKfCByZXBvLWluZmxpZ2h0IHwgSW5qZWN0cyBvcGVuIFBScyArIGFnZW50cyBhY3RpdmUgb24gdGhpcyByZXBvIHwgS0VFUCB8CnwgYXV0b3N5bmMgfCBCcmluZ3MgY29uZmlnIC8gc2VjcmV0cyAvIHNlc3Npb25zIGN1cnJlbnQgfCBLRUVQIHwKfCBnaXQtcHVsbC1mb3J3YXJkIHwgRmFzdC1mb3J3YXJkcyB0aGUgY3dkIHJlcG8gd2hlbiBjbGVhbiAoZmYtb25seSkgfCBLRUVQIHwKCioqVXNlclByb21wdFN1Ym1pdCDigJQgYWxsIGBleHBhbmRgIC8gYHJlbWluZGAsIG5ldmVyIGJsb2NrcyoqCgp8IEhvb2sgfCBQdXJwb3NlIHwgVmVyZGljdCB8CnwtLS18LS0tfC0tLXwKfCBwcm9tcHRjdXRzIHwgRXhwYW5kcyBgI25hbWVgIHNob3J0Y3V0cyBpbnRvIGZ1bGwgaW5zdHJ1Y3Rpb25zIHwgS0VFUCB8CnwgYmFuZ2N1dHMgfCBSdW5zIGBgIGAhY21kYCBgYCBpbmxpbmUgYW5kIGluamVjdHMgdGhlIG91dHB1dCB8IEtFRVAgfAp8IHZhY2F0aW9uLXJlY2FwIHwgT24gYSBsb25nIGdhcCwgbnVkZ2VzIGEgYmFjay1mcm9tLXZhY2F0aW9uIHJlY2FwIHwgS0VFUCB8CnwgdmVyaWZ5LXdvcmstc3RhdGUgKHJlY29yZCkgfCBSZWNvcmRzIGEgZ29hbCBib3VuZGFyeSB0aGUgU3RvcCBnYXRlIHJlYWRzIGxhdGVyIHwgS0VFUCB8Cnwgd29ya3RyZWUtbGF3LXJlbWluZGVyIHwgSW5qZWN0cyB0aGUgImV2ZXJ5IHdyaXRlIHZpYSBhIHdvcmt0cmVlIiBsaW5lIGVhY2ggcHJvbXB0IHwgS0VFUCB8CgoqKlByZVRvb2xVc2Ug4oCUIHRoZSBibG9jayBsYW5lKioKCnwgSG9vayB8IEtpbmQgfCBQdXJwb3NlIHwgVmVyZGljdCB8CnwtLS18LS0tfC0tLXwtLS18CnwgZ2l0LWd1YXJkIHwgYmxvY2sgwrcgKipXSEFUKiogfCBWZXRvZXMgZGVzdHJ1Y3RpdmUgZ2l0IHZlcmJzIGFueXdoZXJlOiBgcmVzZXQgLS1oYXJkYCwgZm9yY2UtcHVzaCwgYGNoZWNrb3V0YC9gc3dpdGNoYCwgYHN0YXNoYCwgYGNsZWFuYCwgYGJyYW5jaCAtZGAuIFdvcmt0cmVlLWF3YXJlIHwgKipNRVJHRSoqIHdpdGggbWFpbi1icmFuY2gtZ3VhcmQgfAp8IG1haW4tYnJhbmNoLWd1YXJkIHwgYmxvY2sgwrcgKipXSEVSRSoqIHwgVmV0b2VzIHRoZSBmaWxlICoqdG9vbHMqKiAoV3JpdGUvRWRpdC/igKYpIGFuZCBgZ2l0IGFkZGAvYGNvbW1pdGAgaW4gdGhlIFBSSU1BUlkgd29ya3RyZWUuICoqTm90IHJhdyBzaGVsbCB3cml0ZXMqKiDigJQgc2VlIGJlbG93IHwgKipNRVJHRSoqIGludG8gZ2l0LWd1YXJkIHwKfCBhcnRpZmFjdHMtY29uZmlkZW50aWFsLWd1YXJkIHwgYmxvY2sgfCBTdG9wcyBwdWJsaXNoaW5nIGEgY29uZmlkZW50aWFsIGFydGlmYWN0IHRvIGEgcHVibGljIHNoYXJlLiAqKjkxJSBkZWxpdmVyeSoqIHwgS0VFUCB8CnwgbWVyZ2UtZ3VhcmQgfCBibG9jayB8IFN0b3BzIGFkbWluLWJ5cGFzcyBtZXJnZXMgYW5kIG1lcmdlcyB3aXRoIG5vIG5vbi1hdXRob3IgdmVyZGljdC4gKio4NSUgZGVsaXZlcnkqKiB8IEtFRVAgfAp8IHJtLWd1YXJkIHwgYmxvY2sgfCBTdG9wcyBkZXN0cnVjdGl2ZSBgcm1gIG9uIHByb3RlY3RlZCBwYXRocyB8IEtFRVAgfAp8IHNlY3JldHMtZ3VhcmQgfCBibG9jayB8IFN0b3BzIHNlY3JldC1tYXRlcmlhbGl6aW5nIG9uZS1saW5lcnMgKHBsYWludGV4dCBleHBvcnQsIHJldmVhbCkgfCBLRUVQIHwKfCBsYXJnZS1maWxlLWFkZC1ndWFyZCB8IGJsb2NrIHwgU3RvcHMgYGdpdCBhZGRgIG9mIGEgZmlsZSA+IDUgTWlCIHwgKipNRVJHRSoqIGludG8gZ2l0LWd1YXJkIHwKfCBnaXQtcmVxdWlyZS1jbGVhbi10cmVlIHwgYmxvY2sgfCBTdG9wcyBwdWxsL3JlYmFzZSBvbiBhIGRpcnR5IHRyZWUgfCAqKk1FUkdFKiogaW50byBnaXQtZ3VhcmQgfAp8IHRlYW1zLXJvc3Rlci1ndWFyZCB8IGJsb2NrIHwgRm9yY2VzIG1peGVkIHJvc3RlcnMgKGJsb2NrcyBhIDNyZCBzYW1lLWhhcm5lc3MgdGVhbW1hdGUpIHwgS0VFUCB8CnwgdXNlci1tZXNzYWdlLWd1YXJkIHwgYmxvY2sgfCBCb3VuY2VzIGFuIG92ZXItbG9uZyBvd25lciBub3RpZmljYXRpb24gfCAqKkNVVCoqIOKAlCAxMCBmaXJlcywgMzAlIGRlbGl2ZXJ5IHwKfCBmb290ZXItZ3VhcmQgfCBibG9jayB8IFN0b3BzIHRoZSBwcm9tbyBmb290ZXIgaW4gUFIvY29tbWl0IGJvZGllcyB8ICoqQ1VUKiog4oCUIDAgZmlyZXMgaW4gNyw0OTMgdHJhbnNjcmlwdHMgfAp8ICoqcHItZGVzY3JpcHRpb24tcmVtaW5kZXIqKiB8IG51ZGdlIHwgT24gYGdoIHByIGNyZWF0ZS9lZGl0YCB3aXRoIG5vIHJ1bi1wcm9vZiwgZGVtYW5kcyBhIHNjcmVlbnNob3QvcmVjb3JkaW5nL3Rlc3Qgb3V0cHV0ICsgdGlja2V0IGxpbmsuICoqODklIGRlbGl2ZXJ5KiogfCBLRUVQIHwKfCAqKnBsYW4taHRtbC1yZW1pbmRlcioqIHwgbnVkZ2UgfCBSZW5kZXIgdGhlIHBsYW4gYXMgSFRNTCBiZWZvcmUgcHJlc2VudGluZy4gRmlyZXMgb24gYEV4aXRQbGFuTW9kZWAgKmFuZCogYXQgU3RvcC4gKioxMSUgZGVsaXZlcnksIDYwJSBuZXZlciByZW5kZXIqKiB8ICoqQ1VUKiogfAoKKipTdG9wIOKAlCB0aGUgYGdhdGVgIGxhbmUqKgoKfCBIb29rIHwgUHVycG9zZSB8IFZlcmRpY3QgfAp8LS0tfC0tLXwtLS18CnwgdmVyaWZ5LXdvcmstY29tcGxldGUgfCBCbG9ja3MgYSBwcmVtYXR1cmUgImRvbmUiIHdpdGhvdXQgdmVyaWZpY2F0aW9uIC8gaGFuZG9mZjsgYWxzbyByZWluZm9yY2VzIGNsb3NpbmcgTGluZWFyICsgcG9zdGluZyBvbmUgdXBkYXRlIHwgS0VFUCDCtyBidXQgc2VlIHRpY2tldGluZyBub3RlIHwKfCBuby1wZXJtaXNzaW9uLXN0b3AtZ3VhcmQgfCBCbG9ja3Mgc3RvcHBpbmcgb24gYW4gdW5hbnN3ZXJlZCBwZXJtaXNzaW9uIHByb21wdCB8IEtFRVAgfAoKIyMgV2hhdCBlYWNoIGhvb2sgYWN0dWFsbHkgcHJpbnRzCgpOb3QgcGFyYXBocmFzZWQg4oCUIHRoZXNlIGFyZSByZWFsIG91dHB1dHMsIGVpdGhlciBjYXB0dXJlZCBmcm9tIGZsZWV0IHRyYW5zY3JpcHRzIG9yCnByb2R1Y2VkIGJ5IHJ1bm5pbmcgdGhlIGhvb2sgYWdhaW5zdCBhIGNyYWZ0ZWQgcGF5bG9hZC4gVHdvIHNoYXBlcyBkb21pbmF0ZS4KCioqU2hhcGUgMSDigJQgdGhlIGBibG9ja2VkX29wOmAgdHJpcGxlLioqIFRoZSBCYXNoIGd1YXJkcyBlbWl0IHRocmVlIG1hY2hpbmUtcGFyc2VhYmxlCmxpbmVzOiB3aGF0IHdhcyBibG9ja2VkLCB3aHksIGFuZCB0aGUgYWx0ZXJuYXRpdmUuIFRoaXMgaXMgdGhlIGZvcm1hdCB3b3J0aCBjb3B5aW5nLApiZWNhdXNlIHRoZSB0aGlyZCBsaW5lIGlzIHRoZSBvbmUgdGhhdCBtYWtlcyBhbiBhZ2VudCByZWNvdmVyLgoKYGBgCmJsb2NrZWRfb3A6IGdpdC5yZXNldApyZWFzb246IGdpdCByZXNldCBpcyBkZW5pZWQgKHJld3JpdGVzIGhpc3Rvcnkgb3IgZGVzdHJveXMgd29yaykuCmRvX3RoaXNfaW5zdGVhZDogcmVjb25jaWxlIHdpdGggYGdpdCByZWJhc2Ugb3JpZ2luLzxkZWZhdWx0PmAgKG9yIGBnaXQgcHVsbCAtLXJlYmFzZWApOwogIG5ldmVyIGByZXNldCAtLWhhcmRgLiBDb21taXQgaW5zdGVhZCBvZiBzdGFzaGluZzsgcmVzb2x2ZSBvYnN0YWNsZXMgYXQgdGhlIHNvdXJjZS4KYGBgCgpgYGAKYmxvY2tlZF9vcDogcm0ucHJvdGVjdGVkLXBhdGgKcmVhc29uOiBybSAtciBvbiBwcm90ZWN0ZWQgcGF0aCBkZW5pZWQ6IH4vLmFnZW50cy4gUHJvdGVjdGVkIHBhdGhzOiAvLCAkSE9NRSwgfi8uYWdlbnRzLAogIH4vLnNzaCwgfi8uY29uZmlnLCDigKYgVmFyaWFibGUtZXhwYW5zaW9uIHRhcmdldHMgKCRWQVIpIGFyZSBhbHNvIGRlbmllZCBiZWNhdXNlIHRoZWlyCiAgdmFsdWUgaXMgdW5rbm93biBhdCBob29rIHRpbWUuCmRvX3RoaXNfaW5zdGVhZDogdXNlIGB0cmFzaGAgKG9yIG1vdmUgdG8gL3RtcCksIG9yIHNjb3BlIHRoZSBwYXRoIHRvIGEgbm9uLXByb3RlY3RlZCBkaXIuCmBgYAoKYGBgCmJsb2NrZWRfb3A6IHNlY3JldHMuZXhwb3J0LXBsYWludGV4dApyZWFzb246IHNlY3JldHMgZXhwb3J0IC0tcGxhaW50ZXh0IHByaW50cyBhIHdob2xlIGJ1bmRsZSB0byBzdGRvdXQg4oCUIGluc2lkZSBhbiBhZ2VudAogIHNlc3Npb24gdGhhdCBsYW5kcyBpbiB0aGUgbW9kZWwgY29udGV4dCBhbmQgdGhlIHNlc3Npb24gdHJhbnNjcmlwdCAoUlVTSC0yNzc0KS4KZG9fdGhpc19pbnN0ZWFkOiBydW4gdGhlIGNvbnN1bWluZyBjb21tYW5kIHVuZGVyIGBhZ2VudHMgc2VjcmV0cyBleGVjIDxidW5kbGU+IC0tIOKApmAuCmBgYAoKKipTaGFwZSAyIOKAlCBwcm9zZSBibG9jaywgcHJlZml4ZWQgYnkgdGhlIGhhcm5lc3MuKiogVGhlIHJ1bGUtYnVuZGxlZCBndWFyZHMgcmV0dXJuIGEKcGFyYWdyYXBoLiBUaGUgaGFybmVzcyB3cmFwcyBpdCB3aXRoIHRoZSBob29rJ3Mgb3duIHBhdGgsIHdoaWNoIGlzIGhvdyB5b3UgdGVsbCB3aGljaApmaWxlIHRvIGdvIGVkaXQ6CgpgYGAKUHJlVG9vbFVzZTpCYXNoIGhvb2sgZXJyb3I6IFt+Ly5hZ2VudHMvLmNhY2hlL3NoaW1zL2hvb2tzL2doLW1lcmdlLWd1YXJkX19tZXJnZS1ndWFyZC5zaF06CkJsb2NrZWQ6IG5vIG5vbi1hdXRob3IgcmV2aWV3IHZlcmRpY3QgZm91bmQgT04gdGhpcyBQUiAocGhueC1sYWJzL2FnZW50cy1jbGkjMjkyMSkuCkEgR2l0SHViIEFQUFJPVkVEIHJldmlldyBvciBhbiBBUFBST1ZFIHZlcmRpY3QgY29tbWVudCBtdXN0IGJlIHBvc3RlZCBvbiB0aGUgUFIgYmVpbmcKbWVyZ2VkIOKAlCBhIHZlcmRpY3QgJ2NhcnJpZWQgZnJvbScgYW5vdGhlciBQUiBzYXRpc2ZpZXMgbm90aGluZyAodGhlICMyNzM2IGxhdW5kZXJpbmcKcGF0dGVybikuIEdldCB0aGUgYXV0b21hdGVkIHJldmlld2VyJ3MgdmVyZGljdCBvciBzcGF3biBhIG5vbi1hdXRob3Igc3ViYWdlbnQgcmV2aWV34oCmCmBgYAoKKipgbWFpbi1icmFuY2gtZ3VhcmRgIOKAlCB0aGUgb25lIHRoYXQgaGFuZHMgb3ZlciB0aGUgZml4LioqIFRoaXMgaXMgd2h5IGl0IHJlY292ZXJzIDcyJQp3aGlsZSBvdGhlcnMgZG9uJ3Q6IGAkUkVQT2AgaXMgYWxyZWFkeSBmaWxsZWQgaW4sIHNvIHRoZSBhZ2VudCBjYW4gcGFzdGUgYW5kIGNvbnRpbnVlLgoKYGBgCkJsb2NrZWQ6IGVkaXRpbmcgJy/igKYvYWdlbnRzLWNsaS9SRUFETUUubWQnIGluIHRoZSBQUklNQVJZIHdvcmtpbmcgdHJlZSBvZgov4oCmL2FnZW50cy1jbGkgKGJyYW5jaCAnbWFpbicpLgoKTm8gYWdlbnQgbWF5IG1vZGlmeSB0aGUgdXNlcidzIHByaW1hcnkgd29ya2luZyB0cmVlIOKAlCBvbiBBTlkgYnJhbmNoLiDigKYKCkNyZWF0ZSBhIHdvcmt0cmVlIG9mZiB0aGUgZnJlc2hseS1mZXRjaGVkIGRlZmF1bHQgYnJhbmNoLCB0aGVuIHdvcmsgdGhlcmU6CiAgUkVQTz0v4oCmL2FnZW50cy1jbGkKICBnaXQgLUMgIiRSRVBPIiBmZXRjaCBvcmlnaW4KICBCQVNFPSQoZ2l0IC1DICIkUkVQTyIgc3ltYm9saWMtcmVmIC0tc2hvcnQgcmVmcy9yZW1vdGVzL29yaWdpbi9IRUFEIHwgc2VkICdzI15vcmlnaW4vIyMnKQogIGdpdCAtQyAiJFJFUE8iIHdvcmt0cmVlIGFkZCAtYiA8c2x1Zz4gIiRSRVBPLy5hZ2VudHMvd29ya3RyZWVzLzxzbHVnPiIgIm9yaWdpbi8kQkFTRSIKdGhlbiBlZGl0IHVuZGVyICRSRVBPLy5hZ2VudHMvd29ya3RyZWVzLzxzbHVnPi8sIGNvbW1pdCB0aGVyZSwgcHVzaCwgYW5kIG9wZW4gYSBQUi4KYGBgCgoqKmB1c2VyLW1lc3NhZ2UtZ3VhcmRgIOKAlCA3NzAgY2hhcnMgb2YgbWVzc2FnZSwgMzgwIGNoYXJzIG9mIHNjb2xkaW5nIGFib3V0IGl0LioqCgpgYGAKW2NvbmNpc2UtbWVzc2FnZS1ndWFyZF0gVGhpcyB1cGRhdGUgaXMgMSBsaW5lcyAvIDc3MCBjaGFycyDigJQgdG9vIGxvbmcgZm9yIGEgcGhvbmUgdGV4dC4KVGhlIG93bmVyIHJlYWRzIHRoZXNlIGxpa2UgdGV4dHMgZnJvbSBhIHdvcmtlciwgbm90IGEgcmVwb3J0LiBSZXdyaXRlIGFzIDEtNCBzaG9ydCBsaW5lczoKbGVhZCB3aXRoIHRoZSBvbmUgdGhpbmcgeW91IG5lZWQgaGltIHRvIGRvIChvciAnRllJLCBubyBhY3Rpb24nKSwgcGxhaW5lc3QgbGFuZ3VhZ2UsIGFuZApwdXQgYW55IGRldGFpbCBiZWhpbmQgYSBsaW5rIChQUi90aWNrZXQpIG9yIGEgZmlsZSBwYXRoIGhlIGNhbiBvcGVuIOKAlCB0aGUgdGV4dCBpcyB0aGUKcG9pbnRlciwgbm90IHRoZSBwYXlsb2FkLiBUaGVuIHJlc2VuZCB3aXRoIGFnZW50cyBub3RpZnkgLS10ZXh0ICLigKYiLgpgYGAKCioqVGhlIHNpbGVudCBtYWpvcml0eSBwcmludCBub3RoaW5nIGF0IGFsbC4qKiBBIGd1YXJkIHRoYXQgYWxsb3dzIGV4aXRzIGAwYCB3aXRoIGVtcHR5Cm91dHB1dCDigJQgMjg0LDM4NyBvZiAyODUsNjY3IGZpcmVzIGxvb2tlZCBleGFjdGx5IGxpa2UgdGhpczoKCmBgYAokIGVjaG8gJ3sidG9vbF9uYW1lIjoiQmFzaCIsInRvb2xfaW5wdXQiOnsiY29tbWFuZCI6ImdpdCBzdGF0dXMifX0nIHwgZ2l0LWd1YXJkLnNoCiQgZWNobyAkPwowCmBgYAoKKipTZXNzaW9uU3RhcnQgaG9va3MgaW5qZWN0IG1hcmtkb3duIGludG8gdGhlIGNvbnRleHQgaW5zdGVhZC4qKiBUaGV5IG5ldmVyIGJsb2NrOyB0aGVpcgplbnRpcmUgcHJvZHVjdCBpcyB0ZXh0IHByZXBlbmRlZCB0byB0aGUgc2Vzc2lvbi4gUmVhbCBpbmplY3Rpb25zIGZyb20gdGhpcyBzZXNzaW9uOgoKYGBgCiMjIEluLWZsaWdodCBpbiB0aGlzIHJlcG8gKGF1dG8taW5qZWN0ZWQpCk9wZW4gUFJzOgotICMyOTE0IGZpeDogc3luYyByZW1vdGUgZWRpdG9yIHRhYiB0aXRsZXMgKFJVU0gtMzAxMSkgKGZpeC1zZXNzaW9uLXRhYi10aXRsZS1zeW5j4oCmKQotICMyOTA5IGZpeChzZXNzaW9uKTogc3luYyByZW1vdGUgZWRpdG9yIHRhYiB0aXRsZXMgKGZpeC1zZXNzaW9uLXRhYi10aXRsZS1zeW5jLWN1cnJlbnQpCmBgYAoKYGBgCiMjIEhvc3QgJiBGbGVldApZb3UgYXJlIHJ1bm5pbmcgb24gKip3b3JrZXItYSoqIChsaW51eCkuCi0gYnVpbGRlci0xIOKAlCBtYWNvcyDigJQgb2ZmbGluZQotIHdvcmtlci1iIOKAlCBsaW51eCDigJQgb25saW5lIOKAlCA2JSBsb2FkIC8gNjYlIG1lbSAvIGJ1c3kK4oCmCkZsZWV0IGNhcGFjaXR5OiAxOTAgY29yZXMgwrcgNDE4RyBmcmVlIC8gNjAyRyBSQU0gKDcwJSBmcmVlKSBhY3Jvc3MgMTIgcmVhY2hhYmxlIGRldmljZXMuCmBgYAoKYGxpbmVhci1pbmplY3QtdGFza3NgIHVzZXMgdGhlIHNhbWUgc2hhcGUgYnV0IGlzIGJ5IGZhciB0aGUgbGFyZ2VzdCDigJQgcm91Z2hseSAqKjkwIGxpbmVzKioKb2YgYm9hcmQgc3RhdGUgcGVyIHNlc3Npb24sIHdoaWNoIGlzIHRoZSByZWFsIFNlc3Npb25TdGFydCBjb250ZXh0IGNvc3QuIGBhdXRvc3luY2AsIGJ5CmNvbnRyYXN0LCBkZWxpYmVyYXRlbHkgcHJpbnRzICoqbm90aGluZyoqOiBpdHMgb3duIGhlYWRlciBzYXlzIHN0ZG91dCBzdGF5cyBlbXB0eSBiZWNhdXNlClNlc3Npb25TdGFydCBzdGRvdXQgaXMgaW5qZWN0ZWQgaW50byB0aGUgbW9kZWwgY29udGV4dC4KCioqVGhlIHZlcmRpY3QgdGhpcyBzZWN0aW9uIHN1cHBvcnRzOioqIHRoZSBgYmxvY2tlZF9vcDpgIHRyaXBsZSBpcyB0aGUgcmlnaHQgZm9ybWF0IOKAlApzaG9ydCwgcGFyc2VhYmxlLCBhbmQgaXQgbmFtZXMgdGhlIGFsdGVybmF0aXZlLiBUaGUgcHJvc2UgZ3VhcmRzIHNob3VsZCBhZG9wdCBpdC4gQW5kCnRoZSBsZW5ndGggb2YgYSByZWZ1c2FsIGlzIG5vdCB3aGF0IG1ha2VzIGl0IHdvcms6IGBtYWluLWJyYW5jaC1ndWFyZGAgaXMgbG9uZyBidXQKcmVjb3ZlcnMgNzIlIGJlY2F1c2UgaXQgZW5kcyBpbiBhIHJ1bm5hYmxlIGNvbW1hbmQsIHdoaWxlIGB1c2VyLW1lc3NhZ2UtZ3VhcmRgIHNwZW5kcwozODAgY2hhcmFjdGVycyBhbmQgY2hhbmdlcyBhbG1vc3Qgbm90aGluZy4KCiMjIERhdGEKCgpOb3cgdGhlIGNvdW50cyDigJQgZXZlcnkgbmFtZSBiZWxvdyBpcyBkZWZpbmVkIGluIHRoZSB0YWJsZSBhYm92ZS4KCioqR3VhcmRzIHJhbmtlZCBieSBmaXJlcyAoYWxsIGhhcm5lc3NlcywgYC5qc29ubGAgdHJhbnNjcmlwdHMgb25seSkqKgoKfCBHdWFyZCB8IEV2ZW50IHwgS2luZCB8IEZpcmVzIHwgU2Vzc2lvbnMgfCBQZXIgc2Vzc2lvbiB8CnwtLS18LS0tfC0tLXwtLS06fC0tLTp8LS0tOnwKfCB2ZXJpZnktd29yay1jb21wbGV0ZSB8IFN0b3AgfCBoYXJkIMK3IGdhdGUgfCA1NjEgfCA1MSB8ICoqMTEuMCoqIHwKfCBnaXQtZ3VhcmQgfCBQcmVUb29sVXNlIHwgaGFyZCDCtyBkYXRhLWxvc3MgfCAyNDUgfCAxMzggfCAxLjggfAp8IG1lcmdlLWd1YXJkIHwgUHJlVG9vbFVzZSB8IGhhcmQgwrcgd29ya2Zsb3cgfCAyNDAgfCA4NSB8IDIuOCB8CnwgcHItZGVzY3JpcHRpb24tcmVtaW5kZXIgfCBQcmVUb29sVXNlIHwgc29mdCDCtyByZW1pbmRlciB8IDE3NCB8IDEwNiB8IDEuNiB8CnwgbWFpbi1icmFuY2gtZ3VhcmQgfCBQcmVUb29sVXNlIHwgaGFyZCDCtyB3b3JrZmxvdyB8IDEzMSB8IDYzIHwgMi4xIHwKfCBybS1ndWFyZCB8IFByZVRvb2xVc2UgfCBoYXJkIMK3IGRhdGEtbG9zcyB8IDkwIHwgNjAgfCAxLjUgfAp8IHBsYW4taHRtbC1yZW1pbmRlciB8IFByZVRvb2xVc2UgfCBzb2Z0IMK3IHJlbWluZGVyIHwgNzYgfCAzOSB8IDEuOSB8CnwgbGFyZ2UtZmlsZS1hZGQtZ3VhcmQgfCBQcmVUb29sVXNlIHwgaGFyZCDCtyBkYXRhLWxvc3MgfCAzOCB8IDExIHwgMy41IHwKfCBnaXQtcmVxdWlyZS1jbGVhbi10cmVlIHwgUHJlVG9vbFVzZSB8IGhhcmQgwrcgZGF0YS1sb3NzIHwgMzggfCAxMCB8IDMuOCB8CnwgYXJ0aWZhY3RzLWNvbmZpZGVudGlhbC1ndWFyZCB8IFByZVRvb2xVc2UgfCBoYXJkIMK3IGRhdGEtbG9zcyB8IDM1IHwgNCB8ICoqOC44KiogfAp8IHRlYW1zLXJvc3Rlci1ndWFyZCB8IFByZVRvb2xVc2UgfCBoYXJkIMK3IHdvcmtmbG93IHwgMzMgfCA0IHwgKio4LjIqKiB8CnwgdXNlci1tZXNzYWdlLWd1YXJkIHwgUHJlVG9vbFVzZSB8IGhhcmQgwrcgd29ya2Zsb3cgfCAyMSB8IDkgfCAyLjMgfAp8IHNlY3JldHMtZ3VhcmQgfCBQcmVUb29sVXNlIHwgaGFyZCDCtyBzZWNyZXQgfCAxNCB8IDcgfCAyLjAgfAp8IGZvb3Rlci1ndWFyZCB8IFByZVRvb2xVc2UgfCBoYXJkIMK3IHdvcmtmbG93IHwgMCB8IDAgfCDigJQgfAp8ICoqdG90YWwgaG9vayBmaXJlcyoqIHwgfCB8ICoqMSw2OTYqKiB8IHwgfAp8ICphdXRvLW1vZGUgY2xhc3NpZmllciAobm90IGEgaG9vaykqIHwgcGVybWlzc2lvbiB8IGRlbmlhbCB8IDEsNDUwIHwgfCB8Cgo+ICoqQ291bnRpbmcgbm90ZS4qKiBPbmUgZmlyZSBpcyB3cml0dGVuIGludG8gYSB0cmFuc2NyaXB0IHJvdyB0d2ljZSDigJQgb25jZSB1bmRlcgo+IGBtZXNzYWdlYCwgb25jZSB1bmRlciBgdG9vbFVzZVJlc3VsdGAuIENvdW50aW5nIHN0cmluZyBvY2N1cnJlbmNlcyB0aGVyZWZvcmUKPiByb3VnaGx5IGRvdWJsZXMgZXZlcnkgZ3VhcmQuIFRoZXNlIGFyZSAqKnJvdyBjb3VudHM6IG9uZSByb3csIG9uZSBmaXJlLioqIEFuCj4gZWFybGllciByZXZpc2lvbiBvZiB0aGlzIHBhZ2UgcmVwb3J0ZWQgdGhlIG9jY3VycmVuY2UgY291bnRzIChnaXQtZ3VhcmQgNDU2LAo+IG1lcmdlLWd1YXJkIDQ1MykgYW5kIG92ZXJzdGF0ZWQgZXZlcnkgZ3VhcmQgYnkgfjJ4LgoKKipXaGljaCBhZ2VudCBjb2xsaWRlcywgYW5kIGhvdyBvZnRlbioqIChzZXNzaW9ucyBoaXR0aW5nIGEgaGFyZCBibG9jayB2cyBwZXJtaXNzaW9uIGRlbmlhbHMpCgp8IEhhcm5lc3MgfCBUcmFuc2NyaXB0cyB8IFNlc3Npb25zIHcvIGhhcmQgYmxvY2sgfCBSYXRlIHwgUGVybWlzc2lvbiBkZW5pYWxzIHwKfC0tLXwtLS06fC0tLTp8LS0tOnwtLS06fAp8IGNsYXVkZSB8IDMsOTIzIHwgMjY5IHwgNi45JSB8IDU0MiB8CnwgY29kZXggfCAzMTUgfCAzOSB8IDEyLjQlIHwgNDgxIHwKfCBncm9rIHwgMywxNDUgfCAzOCB8IDEuMiUgfCA0MjAgfAp8IGtpbWkgfCAxMiB8IDAgfCAwLjAlIHwgNyB8CnwgY3Vyc29yIHwgOSB8IDAgfCAwLjAlIHwgMCB8CnwgZHJvaWQgfCA2MCB8IDAgfCAwLjAlIHwgMCB8CnwgYW50aWdyYXZpdHkgfCAyOSB8IDAgfCAwLjAlIHwgMCB8CgojIyBGaWd1cmUKCgo8ZmlndXJlPgo8ZmlnY2FwdGlvbj48c3Ryb25nPkZpZ3VyZSAxIOKAlCBUaGUgbGlmZWN5Y2xlIGJhdHRsZWZpZWxkLjwvc3Ryb25nPiBFdmVyeSBob29rLCBwbGFjZWQgYXQgdGhlIG1vbWVudCBpdCBmaXJlcy4gR3JlZW4gPSBwZWFjZWZ1bCAoaW5qZWN0cyBjb250ZXh0IG9yIG51ZGdlcywgbmV2ZXIgYmxvY2tzKS4gUmVkID0gY29tYmF0IChjYW4gdmV0byBhIHRvb2wgY2FsbCBvciBhIHN0b3ApLiBUaGUgZmlnaHRpbmcgbGl2ZXMgaW4gdHdvIGxhbmVzIG9ubHkuPC9maWdjYXB0aW9uPgoKPHN2ZyB2aWV3Qm94PSIwIDAgMTE4MCA1NjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJIb29rIGxpZmVjeWNsZSBiYXR0bGVmaWVsZCBtYXAiIHdpZHRoPSIxMDAlIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIHVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIj4KICA8ZGVmcz4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0iY29tYmF0IiB4MT0iMCIgeTE9IjAiIHgyPSIwIiB5Mj0iMSI+CiAgICAgIDxzdG9wIG9mZnNldD0iMCIgc3RvcC1jb2xvcj0iIzNhMTQxOCIvPjxzdG9wIG9mZnNldD0iMSIgc3RvcC1jb2xvcj0iIzJhMGUxMiIvPgogICAgPC9saW5lYXJHcmFkaWVudD4KICAgIDxsaW5lYXJHcmFkaWVudCBpZD0icGVhY2UiIHgxPSIwIiB5MT0iMCIgeDI9IjAiIHkyPSIxIj4KICAgICAgPHN0b3Agb2Zmc2V0PSIwIiBzdG9wLWNvbG9yPSIjMTIyNjFhIi8+PHN0b3Agb2Zmc2V0PSIxIiBzdG9wLWNvbG9yPSIjMGUxZjE2Ii8+CiAgICA8L2xpbmVhckdyYWRpZW50PgogIDwvZGVmcz4KCiAgPCEtLSB0aW1lbGluZSBhcnJvdyAtLT4KICA8bGluZSB4MT0iNDAiIHkxPSI1MiIgeDI9IjExNDAiIHkyPSI1MiIgc3Ryb2tlPSIjM2EzYTNhIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8cG9seWdvbiBwb2ludHM9IjExNDAsNTIgMTEyOCw0NiAxMTI4LDU4IiBmaWxsPSIjM2EzYTNhIi8+CiAgPHRleHQgeD0iNDAiIHk9IjMwIiBmaWxsPSIjOGE4YThhIiBmb250LXNpemU9IjE1Ij5hZ2VudCBsaWZlY3ljbGU8L3RleHQ+CiAgPHRleHQgeD0iMTA1MCIgeT0iMzAiIGZpbGw9IiM4YThhOGEiIGZvbnQtc2l6ZT0iMTMiPnRpbWUg4oaSPC90ZXh0PgoKICA8IS0tIGZpdmUgbGFuZXMgLS0+CiAgPCEtLSBTZXNzaW9uU3RhcnQgLS0+CiAgPGc+CiAgICA8cmVjdCB4PSIzNCIgeT0iNjYiIHdpZHRoPSIyMTIiIGhlaWdodD0iNDYyIiByeD0iMTAiIGZpbGw9InVybCgjcGVhY2UpIiBzdHJva2U9IiMxZjNhMmEiLz4KICAgIDxjaXJjbGUgY3g9IjE0MCIgY3k9IjUyIiByPSI3IiBmaWxsPSIjYTNlNjM1Ii8+CiAgICA8dGV4dCB4PSIxNDAiIHk9IjkyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjYTNlNjM1IiBmb250LXNpemU9IjE1IiBmb250LXdlaWdodD0iNzAwIj5TZXNzaW9uU3RhcnQ8L3RleHQ+CiAgICA8dGV4dCB4PSIxNDAiIHk9IjExMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZmOWU1YSIgZm9udC1zaXplPSIxMSI+NiBob29rcyDCtyAwIGJsb2NrczwvdGV4dD4KICAgIDx0ZXh0IHg9IjE0MCIgeT0iMTMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNWY3YTUyIiBmb250LXNpemU9IjEwIj5pbmplY3QgLyBzaWRlLWVmZmVjdDwvdGV4dD4KICAgIDxnIGZpbGw9IiM5ZmQ2N2YiIGZvbnQtc2l6ZT0iMTEiPgogICAgICA8dGV4dCB4PSIxNDAiIHk9IjE2OCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+c2Vzc2lvbi1pZGVudGl0eTwvdGV4dD4KICAgICAgPHRleHQgeD0iMTQwIiB5PSIxOTYiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmxpbmVhci1pbmplY3QtdGFza3M8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjE0MCIgeT0iMjI0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5kZXZpY2UtdG9wb2xvZ3k8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjE0MCIgeT0iMjUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5yZXBvLWluZmxpZ2h0PC90ZXh0PgogICAgICA8dGV4dCB4PSIxNDAiIHk9IjI4MCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+YXV0b3N5bmM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjE0MCIgeT0iMzA4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5naXQtcHVsbC1mb3J3YXJkPC90ZXh0PgogICAgPC9nPgogIDwvZz4KCiAgPCEtLSBVc2VyUHJvbXB0U3VibWl0IC0tPgogIDxnPgogICAgPHJlY3QgeD0iMjU0IiB5PSI2NiIgd2lkdGg9IjIxMiIgaGVpZ2h0PSI0NjIiIHJ4PSIxMCIgZmlsbD0idXJsKCNwZWFjZSkiIHN0cm9rZT0iIzFmM2EyYSIvPgogICAgPGNpcmNsZSBjeD0iMzYwIiBjeT0iNTIiIHI9IjciIGZpbGw9IiNhM2U2MzUiLz4KICAgIDx0ZXh0IHg9IjM2MCIgeT0iOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNhM2U2MzUiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiPlVzZXJQcm9tcHRTdWJtaXQ8L3RleHQ+CiAgICA8dGV4dCB4PSIzNjAiIHk9IjExMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzZmOWU1YSIgZm9udC1zaXplPSIxMSI+NSBob29rcyDCtyAwIGJsb2NrczwvdGV4dD4KICAgIDx0ZXh0IHg9IjM2MCIgeT0iMTMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNWY3YTUyIiBmb250LXNpemU9IjEwIj5leHBhbmQgLyByZW1pbmQ8L3RleHQ+CiAgICA8ZyBmaWxsPSIjOWZkNjdmIiBmb250LXNpemU9IjExIj4KICAgICAgPHRleHQgeD0iMzYwIiB5PSIxNjgiIHRleHQtYW5jaG9yPSJtaWRkbGUiPnByb21wdGN1dHMgKCMpPC90ZXh0PgogICAgICA8dGV4dCB4PSIzNjAiIHk9IjE5NiIgdGV4dC1hbmNob3I9Im1pZGRsZSI+YmFuZ2N1dHMgKCEpPC90ZXh0PgogICAgICA8dGV4dCB4PSIzNjAiIHk9IjIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+dmFjYXRpb24tcmVjYXA8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjM2MCIgeT0iMjUyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj52ZXJpZnktd29yay1zdGF0ZSAocmVjKTwvdGV4dD4KICAgICAgPHRleHQgeD0iMzYwIiB5PSIyODAiIHRleHQtYW5jaG9yPSJtaWRkbGUiPndvcmt0cmVlLWxhdy1yZW1pbmRlcjwvdGV4dD4KICAgIDwvZz4KICA8L2c+CgogIDwhLS0gUHJlVG9vbFVzZSAoQ09NQkFUKSAtLT4KICA8Zz4KICAgIDxyZWN0IHg9IjQ3NCIgeT0iNjYiIHdpZHRoPSI0MzAiIGhlaWdodD0iNDYyIiByeD0iMTAiIGZpbGw9InVybCgjY29tYmF0KSIgc3Ryb2tlPSIjNWEyMDI4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPGNpcmNsZSBjeD0iNjg5IiBjeT0iNTIiIHI9IjciIGZpbGw9IiNmZjU0NzAiLz4KICAgIDx0ZXh0IHg9IjY4OSIgeT0iOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZjhhOWMiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiPlByZVRvb2xVc2Ug4oCUIHRoZSBmcm9udCBsaW5lPC90ZXh0PgogICAgPHRleHQgeD0iNjg5IiB5PSIxMTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNkOTdhODYiIGZvbnQtc2l6ZT0iMTEiPjEzIGd1YXJkcyDCtyAxLDEzNSBmaXJlczwvdGV4dD4KICAgIDwhLS0gZ3VhcmQgY2hpcHMgYXMgbWluaSByb3dzIHdpdGggYmFyIC0tPgogICAgPGcgZm9udC1zaXplPSIxMSI+CiAgICAgIDwhLS0gaGVscGVyOiBuYW1lIGxlZnQsIGNvdW50LWJhciByaWdodCAtLT4KICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoNDkyLDE0MCkiPgogICAgICAgIDwhLS0gcm93cyAtLT4KICAgICAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDApIj48dGV4dCBmaWxsPSIjZmZkN2RkIj5naXQtZ3VhcmQ8L3RleHQ+PHJlY3QgeD0iMTUwIiB5PSItMTAiIHdpZHRoPSIyMDAiIGhlaWdodD0iMTMiIHJ4PSIzIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iMzU2IiB5PSIwIiBmaWxsPSIjZmZiM2JkIj4yNDU8L3RleHQ+PC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMjYpIj48dGV4dCBmaWxsPSIjZmZkN2RkIj5tZXJnZS1ndWFyZDwvdGV4dD48cmVjdCB4PSIxNTAiIHk9Ii0xMCIgd2lkdGg9IjE5NiIgaGVpZ2h0PSIxMyIgcng9IjMiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIzNTIiIHk9IjAiIGZpbGw9IiNmZmIzYmQiPjI0MDwvdGV4dD48L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCw1MikiPjx0ZXh0IGZpbGw9IiNmZmQ3ZGQiPnByLWRlc2MtcmVtaW5kZXI8L3RleHQ+PHJlY3QgeD0iMTUwIiB5PSItMTAiIHdpZHRoPSIxNDIiIGhlaWdodD0iMTMiIHJ4PSIzIiBmaWxsPSIjZjBhMzVhIi8+PHRleHQgeD0iMjk4IiB5PSIwIiBmaWxsPSIjZjBjNzlhIj4xNzQ8L3RleHQ+PC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsNzgpIj48dGV4dCBmaWxsPSIjZmZkN2RkIj5tYWluLWJyYW5jaC1ndWFyZDwvdGV4dD48cmVjdCB4PSIxNTAiIHk9Ii0xMCIgd2lkdGg9IjEwNyIgaGVpZ2h0PSIxMyIgcng9IjMiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIyNjMiIHk9IjAiIGZpbGw9IiNmZmIzYmQiPjEzMTwvdGV4dD48L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwxMDQpIj48dGV4dCBmaWxsPSIjZmZkN2RkIj5ybS1ndWFyZDwvdGV4dD48cmVjdCB4PSIxNTAiIHk9Ii0xMCIgd2lkdGg9IjczIiBoZWlnaHQ9IjEzIiByeD0iMyIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjIyOSIgeT0iMCIgZmlsbD0iI2ZmYjNiZCI+OTA8L3RleHQ+PC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMTMwKSI+PHRleHQgZmlsbD0iI2ZmZDdkZCI+cGxhbi1odG1sLXJlbWluZGVyPC90ZXh0PjxyZWN0IHg9IjE1MCIgeT0iLTEwIiB3aWR0aD0iNjIiIGhlaWdodD0iMTMiIHJ4PSIzIiBmaWxsPSIjZjBhMzVhIi8+PHRleHQgeD0iMjE4IiB5PSIwIiBmaWxsPSIjZjBjNzlhIj43NjwvdGV4dD48L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwxNTYpIj48dGV4dCBmaWxsPSIjZmZkN2RkIj5sYXJnZS1maWxlLWFkZDwvdGV4dD48cmVjdCB4PSIxNTAiIHk9Ii0xMCIgd2lkdGg9IjMxIiBoZWlnaHQ9IjEzIiByeD0iMyIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjE4NyIgeT0iMCIgZmlsbD0iI2ZmYjNiZCI+Mzg8L3RleHQ+PC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMTgyKSI+PHRleHQgZmlsbD0iI2ZmZDdkZCI+Y2xlYW4tdHJlZTwvdGV4dD48cmVjdCB4PSIxNTAiIHk9Ii0xMCIgd2lkdGg9IjMxIiBoZWlnaHQ9IjEzIiByeD0iMyIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjE4NyIgeT0iMCIgZmlsbD0iI2ZmYjNiZCI+Mzg8L3RleHQ+PC9nPgogICAgICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMjA4KSI+PHRleHQgZmlsbD0iI2ZmZDdkZCI+YXJ0aWZhY3RzLWNvbmYuPC90ZXh0PjxyZWN0IHg9IjE1MCIgeT0iLTEwIiB3aWR0aD0iMjkiIGhlaWdodD0iMTMiIHJ4PSIzIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iMTg1IiB5PSIwIiBmaWxsPSIjZmZiM2JkIj4zNTwvdGV4dD48L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwyMzQpIj48dGV4dCBmaWxsPSIjZmZkN2RkIj50ZWFtcy1yb3N0ZXI8L3RleHQ+PHJlY3QgeD0iMTUwIiB5PSItMTAiIHdpZHRoPSIyNyIgaGVpZ2h0PSIxMyIgcng9IjMiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIxODMiIHk9IjAiIGZpbGw9IiNmZmIzYmQiPjMzPC90ZXh0PjwvZz4KICAgICAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDI2MCkiPjx0ZXh0IGZpbGw9IiNmZmQ3ZGQiPnVzZXItbXNnLWd1YXJkPC90ZXh0PjxyZWN0IHg9IjE1MCIgeT0iLTEwIiB3aWR0aD0iMTciIGhlaWdodD0iMTMiIHJ4PSIzIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iMTczIiB5PSIwIiBmaWxsPSIjZmZiM2JkIj4yMTwvdGV4dD48L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwyODYpIj48dGV4dCBmaWxsPSIjZmZkN2RkIj5zZWNyZXRzLWd1YXJkPC90ZXh0PjxyZWN0IHg9IjE1MCIgeT0iLTEwIiB3aWR0aD0iMTEiIGhlaWdodD0iMTMiIHJ4PSIzIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iMTY3IiB5PSIwIiBmaWxsPSIjZmZiM2JkIj4xNDwvdGV4dD48L2c+CiAgICAgICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwzMTIpIj48dGV4dCBmaWxsPSIjOGE4YThhIj5mb290ZXItZ3VhcmQ8L3RleHQ+PHJlY3QgeD0iMTUwIiB5PSItMTAiIHdpZHRoPSI0IiBoZWlnaHQ9IjEzIiByeD0iMyIgZmlsbD0iIzNhNWEzYSIvPjx0ZXh0IHg9IjE2MCIgeT0iMCIgZmlsbD0iIzdmYWU1ZiI+MCDCtyBuZXZlciBmaXJlczwvdGV4dD48L2c+CiAgICAgIDwvZz4KICAgIDwvZz4KICA8L2c+CgogIDwhLS0gU3RvcCAoQ09NQkFUKSAtLT4KICA8Zz4KICAgIDxyZWN0IHg9IjkxMiIgeT0iNjYiIHdpZHRoPSIxNTAiIGhlaWdodD0iNDYyIiByeD0iMTAiIGZpbGw9InVybCgjY29tYmF0KSIgc3Ryb2tlPSIjNWEyMDI4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPGNpcmNsZSBjeD0iOTg3IiBjeT0iNTIiIHI9IjciIGZpbGw9IiNmZjU0NzAiLz4KICAgIDx0ZXh0IHg9Ijk4NyIgeT0iOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZjhhOWMiIGZvbnQtc2l6ZT0iMTUiIGZvbnQtd2VpZ2h0PSI3MDAiPlN0b3A8L3RleHQ+CiAgICA8dGV4dCB4PSI5ODciIHk9IjExMiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q5N2E4NiIgZm9udC1zaXplPSIxMSI+dGhlICJkb25lPyIgZ2F0ZTwvdGV4dD4KICAgIDx0ZXh0IHg9Ijk4NyIgeT0iMTMyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZDk3YTg2IiBmb250LXNpemU9IjExIj41NjEgZmlyZXM8L3RleHQ+CiAgICA8ZyBmb250LXNpemU9IjExIj4KICAgICAgPHRleHQgeD0iOTg3IiB5PSIxNzYiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmQ3ZGQiPnZlcmlmeS13b3JrLTwvdGV4dD4KICAgICAgPHRleHQgeD0iOTg3IiB5PSIxOTIiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmQ3ZGQiPmNvbXBsZXRlPC90ZXh0PgogICAgICA8cmVjdCB4PSI5MjciIHk9IjIwNiIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIxMiIgcng9IjMiIGZpbGw9IiNmZjU0NzAiLz4KICAgICAgPHRleHQgeD0iOTg3IiB5PSIyMzgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmIzYmQiIGZvbnQtc2l6ZT0iMTEiPjU2MSDCtyA1MSBzZXNzPC90ZXh0PgogICAgICA8dGV4dCB4PSI5ODciIHk9IjI4NiIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmZDdkZCI+bm8tcGVybWlzc2lvbi08L3RleHQ+CiAgICAgIDx0ZXh0IHg9Ijk4NyIgeT0iMzAyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjZmZkN2RkIj5zdG9wLWd1YXJkPC90ZXh0PgogICAgICA8dGV4dCB4PSI5ODciIHk9IjMzMCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2Q5N2E4NiIgZm9udC1zaXplPSIxMCI+YmxvY2tzIHByZW1hdHVyZTwvdGV4dD4KICAgICAgPHRleHQgeD0iOTg3IiB5PSIzNDQiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNkOTdhODYiIGZvbnQtc2l6ZT0iMTAiPnN0YW5kLWRvd248L3RleHQ+CiAgICA8L2c+CiAgPC9nPgoKICA8IS0tIE5vdGlmaWNhdGlvbiBsYW5lIG5vdGUgLS0+CiAgPGc+CiAgICA8cmVjdCB4PSIxMDcwIiB5PSI2NiIgd2lkdGg9IjcyIiBoZWlnaHQ9IjQ2MiIgcng9IjEwIiBmaWxsPSJ1cmwoI3BlYWNlKSIgc3Ryb2tlPSIjMWYzYTJhIi8+CiAgICA8dGV4dCB4PSIxMTA2IiB5PSIzMDAiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM5ZmQ2N2YiIGZvbnQtc2l6ZT0iMTEiIHRyYW5zZm9ybT0icm90YXRlKDkwLDExMDYsMzAwKSI+Tm90aWZpY2F0aW9uIMK3IGF0dGVudGlvbi1zZW50aW5lbCDCtyAwIGJsb2NrczwvdGV4dD4KICA8L2c+Cjwvc3ZnPgo8L2ZpZ3VyZT4KCjxmaWd1cmU+CjxmaWdjYXB0aW9uPjxzdHJvbmc+RmlndXJlIDIg4oCUIFdobyBjb2xsaWRlcy48L3N0cm9uZz4gSGFyZCBob29rLWJsb2NrcyAocmVkKSB2ZXJzdXMgYXV0by1tb2RlIHBlcm1pc3Npb24gZGVuaWFscyAoYW1iZXIpIHBlciBoYXJuZXNzLiBncm9rIGFsbW9zdCBuZXZlciB0cmlwcyBhIGhvb2sg4oCUIGl0cyB3aG9sZSBmaWdodCBpcyB3aXRoIHRoZSBwZXJtaXNzaW9uIGNsYXNzaWZpZXIuPC9maWdjYXB0aW9uPgoKPHN2ZyB2aWV3Qm94PSIwIDAgMTAwMCAzNDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJDb2xsaXNpb25zIHBlciBoYXJuZXNzIiB3aWR0aD0iMTAwJSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCB1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSI+CiAgPCEtLSBheGVzIC0tPgogIDxsaW5lIHgxPSIxMjAiIHkxPSIzMCIgeDI9IjEyMCIgeTI9IjI3MCIgc3Ryb2tlPSIjM2EzYTNhIi8+CiAgPGxpbmUgeDE9IjEyMCIgeTE9IjI3MCIgeDI9Ijk2MCIgeTI9IjI3MCIgc3Ryb2tlPSIjM2EzYTNhIi8+CiAgPCEtLSBzY2FsZTogbWF4IDU0MiAtPiAyNDBweCAtLT4KICA8ZyBmb250LXNpemU9IjEyIiBmaWxsPSIjOGE4YThhIj4KICAgIDx0ZXh0IHg9IjExMiIgeT0iMjc0IiB0ZXh0LWFuY2hvcj0iZW5kIj4wPC90ZXh0PgogICAgPGxpbmUgeDE9IjEyMCIgeTE9IjE4MSIgeDI9Ijk2MCIgeTI9IjE4MSIgc3Ryb2tlPSIjMjQyNDI0Ii8+PHRleHQgeD0iMTEyIiB5PSIxODUiIHRleHQtYW5jaG9yPSJlbmQiPjIwMDwvdGV4dD4KICAgIDxsaW5lIHgxPSIxMjAiIHkxPSI5MyIgeDI9Ijk2MCIgeTI9IjkzIiBzdHJva2U9IiMyNDI0MjQiLz48dGV4dCB4PSIxMTIiIHk9Ijk3IiB0ZXh0LWFuY2hvcj0iZW5kIj40MDA8L3RleHQ+CiAgICA8bGluZSB4MT0iMTIwIiB5MT0iNCIgeDI9Ijk2MCIgeTI9IjQiIHN0cm9rZT0iIzI0MjQyNCIvPjx0ZXh0IHg9IjExMiIgeT0iOCIgdGV4dC1hbmNob3I9ImVuZCI+NjAwPC90ZXh0PgogIDwvZz4KICA8Zz4KICAgIDxyZWN0IHg9IjE4MCIgeT0iMTUxIiB3aWR0aD0iNDAiIGhlaWdodD0iMTE5IiBmaWxsPSIjZmY1NDcwIj48dGl0bGU+Y2xhdWRlIGhhcmQgYmxvY2tzOiAyNjkgc2Vzc2lvbnM8L3RpdGxlPjwvcmVjdD4KICAgIDxyZWN0IHg9IjIyNCIgeT0iMzAiIHdpZHRoPSI0MCIgaGVpZ2h0PSIyNDAiIGZpbGw9IiNmMGEzNWEiPjx0aXRsZT5jbGF1ZGUgcGVybWlzc2lvbiBkZW5pYWxzOiA1NDI8L3RpdGxlPjwvcmVjdD4KICAgIDx0ZXh0IHg9IjIyMiIgeT0iMjg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjY2ZjZmNmIiBmb250LXNpemU9IjEzIj5jbGF1ZGU8L3RleHQ+CiAgICA8dGV4dCB4PSIyMDAiIHk9IjE0NSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2ZmYjNiZCIgZm9udC1zaXplPSIxMSI+MjY5PC90ZXh0PgogICAgPHRleHQgeD0iMjQ0IiB5PSIyNCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwYzc5YSIgZm9udC1zaXplPSIxMSI+NTQyPC90ZXh0PgogIDwvZz4KICA8Zz4KICAgIDxyZWN0IHg9IjM2MCIgeT0iMjUzIiB3aWR0aD0iNDAiIGhlaWdodD0iMTciIGZpbGw9IiNmZjU0NzAiPjx0aXRsZT5jb2RleCBoYXJkIGJsb2NrczogMzkgc2Vzc2lvbnM8L3RpdGxlPjwvcmVjdD4KICAgIDxyZWN0IHg9IjQwNCIgeT0iNTciIHdpZHRoPSI0MCIgaGVpZ2h0PSIyMTMiIGZpbGw9IiNmMGEzNWEiPjx0aXRsZT5jb2RleCBwZXJtaXNzaW9uIGRlbmlhbHM6IDQ4MTwvdGl0bGU+PC9yZWN0PgogICAgPHRleHQgeD0iNDAyIiB5PSIyODgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNjZmNmY2YiIGZvbnQtc2l6ZT0iMTMiPmNvZGV4PC90ZXh0PgogICAgPHRleHQgeD0iMzgwIiB5PSIyNDciIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmIzYmQiIGZvbnQtc2l6ZT0iMTEiPjM5PC90ZXh0PgogICAgPHRleHQgeD0iNDI0IiB5PSI1MSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwYzc5YSIgZm9udC1zaXplPSIxMSI+NDgxPC90ZXh0PgogIDwvZz4KICA8Zz4KICAgIDxyZWN0IHg9IjU0MCIgeT0iMjUzIiB3aWR0aD0iNDAiIGhlaWdodD0iMTciIGZpbGw9IiNmZjU0NzAiPjx0aXRsZT5ncm9rIGhhcmQgYmxvY2tzOiAzOCBzZXNzaW9uczwvdGl0bGU+PC9yZWN0PgogICAgPHJlY3QgeD0iNTg0IiB5PSI4NCIgd2lkdGg9IjQwIiBoZWlnaHQ9IjE4NiIgZmlsbD0iI2YwYTM1YSI+PHRpdGxlPmdyb2sgcGVybWlzc2lvbiBkZW5pYWxzOiA0MjA8L3RpdGxlPjwvcmVjdD4KICAgIDx0ZXh0IHg9IjU4MiIgeT0iMjg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjY2ZjZmNmIiBmb250LXNpemU9IjEzIj5ncm9rPC90ZXh0PgogICAgPHRleHQgeD0iNTYwIiB5PSIyNDciIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiNmZmIzYmQiIGZvbnQtc2l6ZT0iMTEiPjM4PC90ZXh0PgogICAgPHRleHQgeD0iNjA0IiB5PSI3OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2YwYzc5YSIgZm9udC1zaXplPSIxMSI+NDIwPC90ZXh0PgogIDwvZz4KICA8Zz4KICAgIDxyZWN0IHg9IjcyMCIgeT0iMjY4IiB3aWR0aD0iNDAiIGhlaWdodD0iMiIgZmlsbD0iI2ZmNTQ3MCI+PHRpdGxlPmtpbWkgaGFyZCBibG9ja3M6IDAgc2Vzc2lvbnM8L3RpdGxlPjwvcmVjdD4KICAgIDxyZWN0IHg9Ijc2NCIgeT0iMjY3IiB3aWR0aD0iNDAiIGhlaWdodD0iMyIgZmlsbD0iI2YwYTM1YSI+PHRpdGxlPmtpbWkgcGVybWlzc2lvbiBkZW5pYWxzOiA3PC90aXRsZT48L3JlY3Q+CiAgICA8dGV4dCB4PSI3NjIiIHk9IjI4OCIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iI2NmY2ZjZiIgZm9udC1zaXplPSIxMyI+a2ltaTwvdGV4dD4KICAgIDx0ZXh0IHg9Ijc0MCIgeT0iMjYyIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjOGE4YThhIiBmb250LXNpemU9IjExIj4wPC90ZXh0PgogICAgPHRleHQgeD0iNzg0IiB5PSIyNjEiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiM4YThhOGEiIGZvbnQtc2l6ZT0iMTEiPjc8L3RleHQ+CiAgPC9nPgogIDx0ZXh0IHg9Ijg1MCIgeT0iMjg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNWY1ZjVmIiBmb250LXNpemU9IjExIj5jdXJzb3IvZHJvaWQvPC90ZXh0PgogIDx0ZXh0IHg9Ijg1MCIgeT0iMzA0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjNWY1ZjVmIiBmb250LXNpemU9IjExIj5hbnRpZ3Jhdml0eTogMDwvdGV4dD4KICA8IS0tIGxlZ2VuZCAtLT4KICA8ZyBmb250LXNpemU9IjEyIj4KICAgIDxyZWN0IHg9IjYwMCIgeT0iMzQiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjYyMCIgeT0iNDYiIGZpbGw9IiNjZmNmY2YiPmhhcmQgaG9vay1ibG9jayAoc2Vzc2lvbnMpPC90ZXh0PgogICAgPHJlY3QgeD0iNjAwIiB5PSI1NiIgd2lkdGg9IjE0IiBoZWlnaHQ9IjE0IiBmaWxsPSIjZjBhMzVhIi8+PHRleHQgeD0iNjIwIiB5PSI2OCIgZmlsbD0iI2NmY2ZjZiI+cGVybWlzc2lvbi1jbGFzc2lmaWVyIGRlbmlhbHMgKGV2ZW50cyk8L3RleHQ+CiAgPC9nPgo8L3N2Zz4KPC9maWd1cmU+Cgo8ZmlndXJlPgo8ZmlnY2FwdGlvbj48c3Ryb25nPkZpZ3VyZSAzIOKAlCBBbmF0b215IG9mIHRoZSBiaWdnZXN0IGZpZ2h0OiBnaXQtZ3VhcmQuPC9zdHJvbmc+IFdoYXQgYWdlbnRzIGFjdHVhbGx5IHRyeSB0aGF0IGdpdC1ndWFyZCB2ZXRvZXMuIGByZXNldCAtLWhhcmRgIGFuZCBgZ2l0IGNoZWNrb3V0YCAoc3RyYW5kaW5nIHRoZSB1c2VyJ3MgdHJlZSkgbGVhZCDigJQgdGhlIGV4YWN0IGhpc3RvcnktZGVzdHJveWluZyBtb3ZlcyB0aGUgd29ya3RyZWUgbGF3IGV4aXN0cyB0byBzdG9wLiAyNDMgb2YgZ2l0LWd1YXJkJ3MgMjQ1IGZpcmVzIGNhcnJ5IGEgcGFyc2VhYmxlIHZlcmIuPC9maWdjYXB0aW9uPgoKPHN2ZyB2aWV3Qm94PSIwIDAgMTAwMCAzNjAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJnaXQtZ3VhcmQgYmxvY2tlZCBvcGVyYXRpb25zIiB3aWR0aD0iMTAwJSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCB1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSI+CiAgPCEtLSBob3Jpem9udGFsIGJhcnMsIG1heCA5MiAtPiA2MjBweCwgNi43IHB4L3VuaXQsIHgwPTI2MCAtLT4KICA8ZyBmb250LXNpemU9IjEzIj4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsNDApIj48dGV4dCB4PSIyNDgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPmdpdC5yZXNldCAtLWhhcmQ8L3RleHQ+PHJlY3QgeD0iMjYwIiB5PSItMTEiIHdpZHRoPSI2MTciIGhlaWdodD0iMjIiIHJ4PSIzIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iODg1IiB5PSI0IiBmaWxsPSIjZmZiM2JkIj41MzwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDcyKSI+PHRleHQgeD0iMjQ4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5naXQuY2hlY2tvdXQ8L3RleHQ+PHJlY3QgeD0iMjYwIiB5PSItMTEiIHdpZHRoPSI2MDUiIGhlaWdodD0iMjIiIHJ4PSIzIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iODczIiB5PSI0IiBmaWxsPSIjZmZiM2JkIj41MjwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDEwNCkiPjx0ZXh0IHg9IjI0OCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+Z2l0LmJyYW5jaC1kZWxldGU8L3RleHQ+PHJlY3QgeD0iMjYwIiB5PSItMTEiIHdpZHRoPSI0MTkiIGhlaWdodD0iMjIiIHJ4PSIzIiBmaWxsPSIjZmY2Zjg2Ii8+PHRleHQgeD0iNjg3IiB5PSI0IiBmaWxsPSIjZmZiM2JkIj4zNjwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDEzNikiPjx0ZXh0IHg9IjI0OCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+Z2l0LnN0YXNoPC90ZXh0PjxyZWN0IHg9IjI2MCIgeT0iLTExIiB3aWR0aD0iMjkxIiBoZWlnaHQ9IjIyIiByeD0iMyIgZmlsbD0iI2ZmNmY4NiIvPjx0ZXh0IHg9IjU1OSIgeT0iNCIgZmlsbD0iI2ZmYjNiZCI+MjU8L3RleHQ+PC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwxNjgpIj48dGV4dCB4PSIyNDgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPmdpdC53b3JrdHJlZS1ybS1kaXJ0eTwvdGV4dD48cmVjdCB4PSIyNjAiIHk9Ii0xMSIgd2lkdGg9IjI2OCIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiNmZjhhOWMiLz48dGV4dCB4PSI1MzYiIHk9IjQiIGZpbGw9IiNmZmIzYmQiPjIzPC90ZXh0PjwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMjAwKSI+PHRleHQgeD0iMjQ4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5naXQuY29uZmlnLXdyaXRlPC90ZXh0PjxyZWN0IHg9IjI2MCIgeT0iLTExIiB3aWR0aD0iMTQwIiBoZWlnaHQ9IjIyIiByeD0iMyIgZmlsbD0iI2ZmYTNiMiIvPjx0ZXh0IHg9IjQwOCIgeT0iNCIgZmlsbD0iI2ZmYjNiZCI+MTI8L3RleHQ+PC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwyMzIpIj48dGV4dCB4PSIyNDgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPmdpdC53b3JrdHJlZS1ybS11bnB1c2hlZDwvdGV4dD48cmVjdCB4PSIyNjAiIHk9Ii0xMSIgd2lkdGg9IjEyOCIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiNmZmEzYjIiLz48dGV4dCB4PSIzOTYiIHk9IjQiIGZpbGw9IiNmZmIzYmQiPjExPC90ZXh0PjwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMjY0KSI+PHRleHQgeD0iMjQ4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5naXQucHVzaC1kZWxldGU8L3RleHQ+PHJlY3QgeD0iMjYwIiB5PSItMTEiIHdpZHRoPSIxMTYiIGhlaWdodD0iMjIiIHJ4PSIzIiBmaWxsPSIjZmZhM2IyIi8+PHRleHQgeD0iMzg0IiB5PSI0IiBmaWxsPSIjZmZiM2JkIj4xMDwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDI5NikiPjx0ZXh0IHg9IjI2MCIgeT0iNCIgdGV4dC1hbmNob3I9InN0YXJ0IiBmaWxsPSIjOGE4YThhIj4rIDIxIG1vcmUgYWNyb3NzIDkgcmFyZXIgdmVyYnM8L3RleHQ+PC9nPgogIDwvZz4KPC9zdmc+CjwvZmlndXJlPgoKIyMgRGlkIHRoZSBob29rIGFjdHVhbGx5IHdvcms/CgoKQSBibG9jayBjb3VudCBzYXlzIGEgaG9vayBmaXJlZC4gSXQgZG9lcyBub3Qgc2F5IHRoZSBhZ2VudCB0aGVuIGRpZCB0aGUgcmlnaHQKdGhpbmcuIFNvIGZvciBldmVyeSBmaXJlIHRoYXQgY291bGQgYmUgbG9jYXRlZCBpbiB0aGUgbWVzc2FnZSBzdHJlYW0sIHRoZSBuZXh0CjQwIG1lc3NhZ2VzIHdlcmUgc2VhcmNoZWQgZm9yIHRoZSBhY3Rpb24gdGhlIGhvb2sgZGVtYW5kZWQg4oCUIGBhcnRpZmFjdHMgcmVuZGVyYAphZnRlciB0aGUgcGxhbiBudWRnZSwgYHdvcmt0cmVlIGFkZGAgYWZ0ZXIgYSBwcmltYXJ5LXRyZWUgYmxvY2ssIGBhZ2VudHMgZmVlZApwb3N0YCBhZnRlciB0aGUgb3duZXItdXBkYXRlIGxpbmUuIFR3byBudW1iZXJzIGNvbWUgb3V0IG9mIGl0LCBhbmQgdGhlIHNlY29uZApvbmUgbWF0dGVycyBtb3JlLgoKfCBIb29rIHwgRmlyZXMgfCBTZXNzaW9ucyB8IENvbXBsaWVkIHwgKipSZWZpcmVkKiogfCBWZXJkaWN0IHwKfC0tLXwtLS06fC0tLTp8LS0tOnwtLS06fC0tLXwKfCBmZWVkLW93bmVyLXVwZGF0ZSB8IDgxMSB8IDI3MiB8ICoqNDIlKiogfCA1MzkgfCAqKkNVVCBUSEUgUElORyoqIHwKfCBnaXQtZ3VhcmQgfCAxNjQgfCAxMTAgfCA2MSUgfCA1NCB8IHdvcmtpbmcgfAp8IHZlcmlmeS13b3JrLWNvbXBsZXRlIHwgMTQ4IHwgMzUgfCAqOTclKiB8IDExMyB8IHVubWVhc3VyZWQgfAp8IHByLWRlc2NyaXB0aW9uLXJlbWluZGVyIHwgMTM2IHwgODcgfCA2NSUgfCA0OSB8IHdvcmtpbmcgfAp8IG1haW4tYnJhbmNoLWd1YXJkIHwgODAgfCA1MSB8IDcyJSB8IDI5IHwgd29ya2luZyB8CnwgcGxhbi1odG1sLXJlbWluZGVyIHwgNTcgfCAzMiB8IDUzJSB8IDI1IHwgVFVORSAoc2VlIGJlbG93KSB8CnwgdGVhbXMtcm9zdGVyLWd1YXJkIHwgMTcgfCA0IHwgNzElIHwgMTMgfCB3b3JraW5nIHwKfCB1c2VyLW1lc3NhZ2UtZ3VhcmQgfCAxMCB8IDcgfCA2MCUgfCAzIHwgd29ya2luZyB8CgoqKlJlZmlyZWQgaXMgdGhlIHJlYWwgc2lnbmFsLioqIEEgaG9vayB0aGF0IGhhcyB0byBzYXkgdGhlIHNhbWUgdGhpbmcgdHdpY2UgaW4gb25lCnNlc3Npb24gZGlkIG5vdCB0ZWFjaCB0aGUgZmlyc3QgdGltZS4gQ29tcGxpYW5jZSBjYW4gYmUgZmFrZWQgYnkgYW4gYWdlbnQgdGhhdApoYXBwZW5zIHRvIGRvIHRoZSByaWdodCB0aGluZyBhbnl3YXk7IGEgcmUtZmlyZSBjYW5ub3QuCgoqKkV2ZXJ5IGNvbXBsaWFuY2UgbnVtYmVyIGhlcmUgaXMgYSBsb3dlciBib3VuZC4qKiBJdCBpcyBvbmx5IGFzIGdvb2QgYXMgdGhlCnBhdHRlcm4gdXNlZCB0byByZWNvZ25pc2UgdGhlIGRlbWFuZGVkIGFjdGlvbiwgYW5kIGEgdG9vLW5hcnJvdyBwYXR0ZXJuCm1hbnVmYWN0dXJlcyBhIGZhbHNlIGRlZmVjdC4gbWFpbi1icmFuY2gtZ3VhcmQgaXMgdGhlIHdvcmtlZCBleGFtcGxlOiBzY29yZWQKYWdhaW5zdCBgd29ya3RyZWUgYWRkYCBhbG9uZSBpdCByZWFkcyAqKjI5JSoqIGFuZCBsb29rcyBicm9rZW4uIEJ1dCBhbiBhZ2VudAp0aGF0IGFscmVhZHkgKmhhcyogYSB3b3JrdHJlZSBhbmQgbWVyZWx5IGFpbWVkIGEgd3JpdGUgYXQgdGhlIHdyb25nIHBhdGggZG9lcwpub3QgbmVlZCBhIG5ldyBvbmUg4oCUIGl0IG5lZWRzIHRvIHJlLWFpbSwgYW5kIDM2IG9mIGl0cyA2MSByZWNvdmVyaWVzIGRpZCBleGFjdGx5CnRoYXQuIFNjb3JlZCBhZ2FpbnN0IGJvdGggcmVjb3ZlcmllcyBpdCBpcyAqKjcyJSoqLCBhbmQgdGhlIGd1YXJkIGlzIGZpbmUuClRyZWF0IGEgbG93IG51bWJlciBhcyBhIHF1ZXN0aW9uLCBub3QgYSB2ZXJkaWN0LgoKPGZpZ3VyZT4KPGZpZ2NhcHRpb24+PHN0cm9uZz5GaWd1cmUgNCDigJQgT2JleWVkIHZzIGlnbm9yZWQuPC9zdHJvbmc+IEVhY2ggaG9vaydzIGZpcmVzIHNwbGl0IGJ5IHdoZXRoZXIgdGhlIGRlbWFuZGVkIGFjdGlvbiBhcHBlYXJlZCBpbiB0aGUgZm9sbG93aW5nIDQwIG1lc3NhZ2VzLiBPbmUgYmFyIGlzIHRoZSBvdXRsaWVyIHRoYXQgbWF0dGVyczogdGhlIG93bmVyLXVwZGF0ZSByZW1pbmRlciwgaWdub3JlZCBtb3JlIG9mdGVuIHRoYW4gb2JleWVkIGFuZCB3aWRlciB0aGFuIGV2ZXJ5IGd1YXJkIGNvbWJpbmVkLjwvZmlnY2FwdGlvbj4KCjxzdmcgdmlld0JveD0iMCAwIDEwMDAgMzQwIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iSG9vayBjb21wbGlhbmNlIiB3aWR0aD0iMTAwJSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCB1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSI+CiAgPGcgZm9udC1zaXplPSIxMyI+CiAgICA8cmVjdCB4PSI2MDAiIHk9IjE0IiB3aWR0aD0iMTQiIGhlaWdodD0iMTQiIGZpbGw9IiM3ZmFlNWYiLz48dGV4dCB4PSI2MjAiIHk9IjI2IiBmaWxsPSIjY2ZjZmNmIj5jb21wbGllZDwvdGV4dD4KICAgIDxyZWN0IHg9Ijc0MCIgeT0iMTQiIHdpZHRoPSIxNCIgaGVpZ2h0PSIxNCIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9Ijc2MCIgeT0iMjYiIGZpbGw9IiNjZmNmY2YiPmlnbm9yZWQ8L3RleHQ+CiAgPC9nPgogIDxnIGZvbnQtc2l6ZT0iMTMiPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCw3MCkiPjx0ZXh0IHg9IjIzOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+ZmVlZC1vd25lci11cGRhdGU8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSItMTEiIHdpZHRoPSIyNzciIGhlaWdodD0iMjIiIGZpbGw9IiM3ZmFlNWYiLz48cmVjdCB4PSI1MjciIHk9Ii0xMSIgd2lkdGg9IjM4NSIgaGVpZ2h0PSIyMiIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjkyMCIgeT0iNCIgZmlsbD0iI2ZmYjNiZCIgZm9udC1zaXplPSIxMiI+NDIlPC90ZXh0PjwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMTA0KSI+PHRleHQgeD0iMjM4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5naXQtZ3VhcmQ8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSItMTEiIHdpZHRoPSI4MiIgaGVpZ2h0PSIyMiIgZmlsbD0iIzdmYWU1ZiIvPjxyZWN0IHg9IjMzMiIgeT0iLTExIiB3aWR0aD0iNTIiIGhlaWdodD0iMjIiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIzOTIiIHk9IjQiIGZpbGw9IiM4YThhOGEiIGZvbnQtc2l6ZT0iMTIiPjYxJTwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDEzOCkiPjx0ZXh0IHg9IjIzOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+cHItZGVzYy1yZW1pbmRlcjwvdGV4dD48cmVjdCB4PSIyNTAiIHk9Ii0xMSIgd2lkdGg9IjczIiBoZWlnaHQ9IjIyIiBmaWxsPSIjN2ZhZTVmIi8+PHJlY3QgeD0iMzIzIiB5PSItMTEiIHdpZHRoPSIzOSIgaGVpZ2h0PSIyMiIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjM3MCIgeT0iNCIgZmlsbD0iIzhhOGE4YSIgZm9udC1zaXplPSIxMiI+NjUlPC90ZXh0PjwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMTcyKSI+PHRleHQgeD0iMjM4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5tYWluLWJyYW5jaC1ndWFyZDwvdGV4dD48cmVjdCB4PSIyNTAiIHk9Ii0xMSIgd2lkdGg9IjQ4IiBoZWlnaHQ9IjIyIiBmaWxsPSIjN2ZhZTVmIi8+PHJlY3QgeD0iMjk4IiB5PSItMTEiIHdpZHRoPSIxOCIgaGVpZ2h0PSIyMiIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjMyNCIgeT0iNCIgZmlsbD0iIzhhOGE4YSIgZm9udC1zaXplPSIxMiI+NzIlPC90ZXh0PjwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMjA2KSI+PHRleHQgeD0iMjM4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5wbGFuLWh0bWwtcmVtaW5kZXI8L3RleHQ+PHJlY3QgeD0iMjUwIiB5PSItMTEiIHdpZHRoPSIyNSIgaGVpZ2h0PSIyMiIgZmlsbD0iIzdmYWU1ZiIvPjxyZWN0IHg9IjI3NSIgeT0iLTExIiB3aWR0aD0iMjIiIGhlaWdodD0iMjIiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIzMDUiIHk9IjQiIGZpbGw9IiM4YThhOGEiIGZvbnQtc2l6ZT0iMTIiPjUzJTwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDI0MCkiPjx0ZXh0IHg9IjIzOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+dGVhbXMtcm9zdGVyLWd1YXJkPC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iLTExIiB3aWR0aD0iMTAiIGhlaWdodD0iMjIiIGZpbGw9IiM3ZmFlNWYiLz48cmVjdCB4PSIyNjAiIHk9Ii0xMSIgd2lkdGg9IjQiIGhlaWdodD0iMjIiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIyNzIiIHk9IjQiIGZpbGw9IiM4YThhOGEiIGZvbnQtc2l6ZT0iMTIiPjcxJTwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDI3NCkiPjx0ZXh0IHg9IjIzOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+dXNlci1tZXNzYWdlLWd1YXJkPC90ZXh0PjxyZWN0IHg9IjI1MCIgeT0iLTExIiB3aWR0aD0iNSIgaGVpZ2h0PSIyMiIgZmlsbD0iIzdmYWU1ZiIvPjxyZWN0IHg9IjI1NSIgeT0iLTExIiB3aWR0aD0iMyIgaGVpZ2h0PSIyMiIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjI2NiIgeT0iNCIgZmlsbD0iIzhhOGE4YSIgZm9udC1zaXplPSIxMiI+NjAlPC90ZXh0PjwvZz4KICA8L2c+CiAgPHRleHQgeD0iMjUwIiB5PSIzMTYiIGZpbGw9IiM1ZjVmNWYiIGZvbnQtc2l6ZT0iMTEiPmJhciB3aWR0aCA9IGZpcmVzLCB0byBzY2FsZSDigJQgdGhlIG93bmVyLXVwZGF0ZSByZW1pbmRlciBkd2FyZnMgZXZlcnkgZ3VhcmQgaW4gdGhlIHN5c3RlbTwvdGV4dD4KPC9zdmc+CjwvZmlndXJlPgoKKipUaGUgb3duZXItdXBkYXRlIHJlbWluZGVyIGlzIHRoZSB3b3JzdCBob29rIGluIHRoZSBzeXN0ZW0uKiogODExIGZpcmVzIGFjcm9zcyAyNzIKc2Vzc2lvbnMg4oCUIHRocmVlIHBlciBzZXNzaW9uLCBhbmQgbW9yZSB0aGFuIGFueSBzaW5nbGUgZ3VhcmQgZmlyZXMg4oCUIGFuZCA1OCUKb2YgdGhlbSBhcmUgaWdub3JlZC4gV29yc2UsIHRoZSA0MiUgdGhhdCAqYXJlKiBvYmV5ZWQgYXJlIG9iZXllZCBieSBydW5uaW5nCmBhZ2VudHMgZmVlZCBwb3N0IOKApiAtLWxldmVsIGltcG9ydGFudGAsIGFuZCBgZmVlZC5icm9hZGNhc3Qub3duZXJgIGZvcndhcmRzIGFuCmltcG9ydGFudCBwb3N0IHRvIGlNZXNzYWdlLiBTbyB0aGUgcmVtaW5kZXIncyBvbmx5IHN1Y2Nlc3NmdWwgb3V0Y29tZSBpcyBhIHBob25lCmJ1enosIGZpcmVkIHdpdGhvdXQgcmVnYXJkIHRvIHdoZXRoZXIgdGhlIHNlc3Npb24gc2hpcHBlZCBhbnl0aGluZyB3b3J0aCBvbmUuIEl0CmhhcmRjb2RlcyB0aGUgZXNjYWxhdGlvbiBsZXZlbCBpbnN0ZWFkIG9mIGxldHRpbmcgdGhlIG91dGNvbWUgcGljayBpdC4KCioqVGhlIHByaW1hcnkgdHJlZSBpcyBub3QgYWN0dWFsbHkgcHJvdGVjdGVkIGZyb20gd3JpdGVzIOKAlCBvbmx5IGZyb20gY29tbWl0cy4qKgpQcm9iZWQgYWdhaW5zdCBhIHJlYWwgcmVwbywgYWxsIGZvdXIgZmlsZSB0b29scyBhcmUgdmV0b2VkIGFuZCBhbGwgZWxldmVuIHJhdy1zaGVsbAp3cml0ZXMgYXJlIG5vdDoKCnwgcHJvYmUgfCByZXN1bHQgfAp8LS0tfC0tLXwKfCBgV3JpdGVgIMK3IGBFZGl0YCDCtyBgTXVsdGlFZGl0YCDCtyBgTm90ZWJvb2tFZGl0YCB8ICoqYmxvY2tlZCoqICg0LzQpIHwKfCBgZWNobyA+YCDCtyBgPj5gIMK3IGBzZWQgLWlgIMK3IGB0ZWVgIMK3IGBjcGAgwrcgYG12YCDCtyBgOiA+YCDCtyBgdG91Y2hgIMK3IGBta2RpcmAgwrcgYHJtYCDCtyBgcHl0aG9uMyAtYyBvcGVuKC4uLiwndycpYCB8ICoqYWxsb3dlZCAoMTEvMTEpKiogfAp8IGBnaXQgYWRkYCDCtyBgZ2l0IGNvbW1pdGAgfCBibG9ja2VkIHwKClNvIHRoZSByZWFsIGd1YXJhbnRlZSBpcyAqImFuIGFnZW50IGNhbm5vdCAqKmNvbW1pdCoqIHRvIHlvdXIgY2hlY2tvdXQiKiwgbm90ICoiYW4KYWdlbnQgY2Fubm90IG1vZGlmeSBpdCIqLiBUaGVzZSBhcmUgbm90IGV2YXNpb25zIOKAlCBgZWNobyB4ID4gZmlsZWAgYW5kIGBzZWQgLWlgIGFyZQpvcmRpbmFyeSBjb21tYW5kcyBhbiBhZ2VudCB3cml0ZXMgd2l0aG91dCBhbnkgaW50ZW50IHRvIGNpcmN1bXZlbnQuIFRoZSBjb21taXQgY2hva2UKcG9pbnQgc3RpbGwgcHJldmVudHMgYW55dGhpbmcgZnJvbSBsYW5kaW5nLCBidXQgYSBkaXJ0aWVkIHdvcmtpbmcgdHJlZSBpcyBhIHJlYWwgY29zdAp0aGUgZWFybGllciB3b3JkaW5nIGhpZC4KCioqbWFpbi1icmFuY2gtZ3VhcmQgaXMgaGVhbHRoeSwgYW5kIGl0cyByZWZ1c2FsIGlzIHRoZSBtb2RlbCB0byBjb3B5LioqIDcyJSBvZgpibG9ja2VkIGFnZW50cyByZWNvdmVyIHdpdGhpbiA0MCBtZXNzYWdlcyDigJQgMjUgb3BlbiBhIGZyZXNoIHdvcmt0cmVlLCAzNiByZS1haW0KaW50byBvbmUgdGhleSBhbHJlYWR5IGhhZC4gVGhlIHJlYXNvbiBpcyB2aXNpYmxlIGluIHRoZSByZWZ1c2FsIHRleHQgaXRzZWxmCihgbWFpbi1icmFuY2gtZ3VhcmQuc2g6MTk4LTIwM2ApOiBpdCBkb2VzIG5vdCBqdXN0IHNheSAqbm8qLCBpdCBwYXN0ZXMgdGhlCmZvdXItbGluZSB3b3JrdHJlZSByZWNpcGUgd2l0aCBgJFJFUE9gIGFscmVhZHkgZmlsbGVkIGluLiBBIGd1YXJkIHRoYXQgaGFuZHMgb3Zlcgp0aGUgZml4IG91dHBlcmZvcm1zIG9uZSB0aGF0IG9ubHkgc3RhdGVzIHRoZSBydWxlLiBUaGUgMjQgbm9uLXJlY292ZXJpZXMgYXJlCm1vc3RseSBzZXNzaW9ucyB0aGF0IGNoYW5nZWQgZGlyZWN0aW9uIGVudGlyZWx5LCBub3QgYWdlbnRzIGxlZnQgc3R1Y2suCgoqKlRoZSBTdG9wIGdhdGUncyA5NyUgaXMgbm90IGEgcmVhbCBudW1iZXIuKiogRm9yIGEgZ2F0ZSB3aG9zZSBkZW1hbmQgaXMgImtlZXAKd29ya2luZywiIHRoZSBvbmx5IG1lYXN1cmFibGUgY29tcGxpYW5jZSBpcyAiZGlkIGFueSB0b29sIGNhbGwgZm9sbG93LCIgd2hpY2ggaXMKdHJ1ZSBhbG1vc3QgYnkgY29uc3RydWN0aW9uLiBXaGF0ICppcyogcmVhbDogNTYxIGZpcmVzIGFjcm9zcyA1MSBzZXNzaW9ucywgKioxMQpwZXIgc2Vzc2lvbioqLiBXaGF0ZXZlciBpdCBpcyB0ZWFjaGluZywgaXQgaXMgdGVhY2hpbmcgaXQgZWxldmVuIHRpbWVzLgoKIyMgRHVwbGljYXRlcywgdHVuaW5nLCBhbmQgdGhlIExpbmVhci1wb2xsdXRpb24gc291cmNlCgoKPiBTb3VyY2UgY2xhaW1zIGluIHRoaXMgc2VjdGlvbiB3ZXJlIHJlLXZlcmlmaWVkIGFnYWluc3QgYC5hZ2VudHMtc3lzdGVtYCBhdAo+IGBvcmlnaW4vbWFpbmAgKGAwMTFiN2UwYCkgd2l0aCBhIGNsZWFuIHRyZWUg4oCUIG5vdCBhIHN0YWxlIGxvY2FsIGNoZWNrb3V0LiBUaGF0Cj4gY29tbWl0IGFscmVhZHkgaW5jbHVkZXMgUFIgIzM2Miwgd2hpY2ggY2hhbmdlZCB0aGlzIHZlcnkgaG9vayBzZXQgdG9kYXkuCgoKKipnaXQtZ3VhcmQgdnMgbWFpbi1icmFuY2gtZ3VhcmQgYXJlIE5PVCBkdXBsaWNhdGVzIOKAlCB0aGV5J3JlIHR3byBheGVzLioqIGdpdC1ndWFyZCBwb2xpY2VzCip3aGF0IG9wZXJhdGlvbiogKGRlc3RydWN0aXZlIGdpdCB2ZXJicywgYW55d2hlcmUpOyBtYWluLWJyYW5jaC1ndWFyZCBwb2xpY2VzICp3aGVyZSogKG5ldmVyCnRoZSBwcmltYXJ5IHRyZWUpLiBgZ2l0IGNvbW1pdGAgaW4geW91ciBjaGVja291dCDihpIgbWFpbi1icmFuY2gtZ3VhcmQuIGByZXNldCAtLWhhcmRgIGluIGEKd29ya3RyZWUg4oaSIGdpdC1ndWFyZC4gTWVyZ2luZyB0aGUgcG9saWNpZXMgd291bGQgYmUgd3JvbmcuICoqQnV0IHRoZXkgc2hhcmUgfjIwMCBsaW5lcyBvZgppZGVudGljYWwgY29tbWFuZC1wYXJzaW5nIHNoZWxsKiogKGBleHRyYWN0X3NoX2NfaW5uZXJgLCBgY2hlY2tfc2VnbWVudGAsCmBjaGVja19jb21tYW5kX3N0cmluZ2AsIGAtQ2AgcmVzb2x1dGlvbiksIGFuZCB0aGUgYF9qc29uX2ZpZWxkYCBKU09OIGV4dHJhY3RvciBpcwpjb3B5LXBhc3RlZCBpbnRvICoqMTEqKiBzY3JpcHRzIOKAlCBgZ2l0LWd1YXJkYCwgYG1haW4tYnJhbmNoLWd1YXJkYCwgYG1lcmdlLWd1YXJkYCwKYHJtLWd1YXJkYCwgYHNlY3JldHMtZ3VhcmRgLCBgZm9vdGVyLWd1YXJkYCwgYGxhcmdlLWZpbGUtYWRkLWd1YXJkYCwKYHRlYW1zLXJvc3Rlci1ndWFyZGAsIGBwci1kZXNjcmlwdGlvbi1yZW1pbmRlcmAsIGAwMS1naXQtcmVxdWlyZS1jbGVhbi10cmVlYCwgYW5kCmAwOS1naXQtcHVsbC1mb3J3YXJkYCAoY291bnRlZCB3aXRoIGBnaXQgZ3JlcCAtbCBfanNvbl9maWVsZCBvcmlnaW4vbWFpbmAsIHNvIGl0IGlzCnRoZSBzaGlwcGVkIHRyZWUsIG5vdCBhIHdvcmtpbmcgY29weSkuIFRoYXQgaXMgdGhlIHJlYWwgY29uc29saWRhdGlvbiB3aW46IGxpZnQgb25lCnNoYXJlZCBnaXQtY29tbWFuZC1wYXJzZXIgaW50byBgaG9va3MvbGliL2AgKHRoZXkgYWxyZWFkeSBzaGFyZSBgZ2l0LWZhY3RzLnNoYCkg4oCUCnNhbWUgYmVoYXZpb3IsIG9uZSBwbGFjZSB0byBmaXguCgoqKnByLWRlc2NyaXB0aW9uLXJlbWluZGVyIGFscmVhZHkgZG9lcyB3aGF0IHlvdSBkZXNjcmliZWQqKiDigJQgaXQncyB0aGUgcnVuLXByb29mIGdhdGUsIG5vdCBhCnZhZ3VlICJ3cml0ZSBhIGRlc2NyaXB0aW9uIiBudWRnZS4gS2VlcCBpdC4gT25seSBibGluZCBzcG90OiBhIGAtLWZpbGxgL2AtLXRlbXBsYXRlYC9lZGl0b3IKYm9keSBpdCBjYW4ndCByZWFkIChmYWlscyBvcGVuIHRoZXJlKS4KCioqcGxhbi1odG1sLXJlbWluZGVyIOKAlCB0aGUgZWFybGllciBkaWFnbm9zaXMgaGVyZSB3YXMgd3JvbmcsIGFuZCB0aGUgbWVhc3VyZW1lbnQgc2F5cyBzby4qKgpJdCBpcyAqbm90KiB0cnVlIHRoYXQgdGhlIGhvb2sgb25seSBmaXJlcyBvbiB0aGUgZm9ybWFsIHBsYW4tZXhpdCB0b29sOiBgaG9va3MueWFtbGAgcmVnaXN0ZXJzCnRoZSBzYW1lIHNjcmlwdCB0d2ljZSwgb25jZSBvbiBgUHJlVG9vbFVzZWAvYEV4aXRQbGFuTW9kZWAgYW5kIG9uY2Ugb24gYFN0b3BgLCBwcmVjaXNlbHkgdG8KY292ZXIgaGFybmVzc2VzIChDb2RleCwgR3Jvaykgd2hvc2UgcGxhbiBtb2RlIGlzIGNvbGxhYm9yYXRpb24gc3RhdGUgcmF0aGVyIHRoYW4gYSB0b29sIGNhbGwuCgpUaGUgbWVhc3VyZWQgZmFpbHVyZSBtb2RlIGlzIGRpZmZlcmVudC4gT2YgNTcgYmxvY2tzOgoKfCB3aGF0IHRoZSBhZ2VudCBkaWQgbmV4dCB8IGNvdW50IHwKfC0tLXwtLS06fAp8IG5ldmVyIGF0dGVtcHRlZCBhIHJlbmRlciDigJQgaWdub3JlZCB0aGUgYmxvY2sgfCAqKjM0ICg2MCUpKiogfAp8IHJlbmRlcmVkLCBhbmQgY2xlYXJlZCB8IDE5IHwKfCByZW5kZXJlZCwgYW5kIHdhcyByZS1ibG9ja2VkIGFueXdheSB8ICoqNCAoNyUpKiogfAoKU28gInRoZSByZW5kZXIgYmFyIGlzIHRvbyBzdHJpY3QiIGV4cGxhaW5zICoqNCBjYXNlcyoqLCBub3QgdGhlIGJ1bGsuIExvb3NlbmluZyBpdCDigJQgdGhlIGZpeAphbiBlYXJsaWVyIHJldmlzaW9uIG9mIHRoaXMgcGFnZSByZWNvbW1lbmRlZCDigJQgd291bGQgYWRkcmVzcyA3JSBvZiB0aGUgcHJvYmxlbS4gVGhlIGJ1bGsgaXMKYWdlbnRzIHRoYXQgcmVhZCB0aGUgYmxvY2sgYW5kIHNpbXBseSBkaWQgbm90IHJlbmRlci4KClRoZSByZW1haW5pbmcgdHJ1ZSBnYXAgaXMgbmFycm93ZXI6IGEgcGxhbiBwcmVzZW50ZWQgYXMgYW4gb3JkaW5hcnkgbWVzc2FnZSBpbiAqKmRlZmF1bHQqKgptb2RlIGlzIGludmlzaWJsZSB0byBib3RoIGVudHJpZXMuIGBQcmVUb29sVXNlYCBuZWVkcyBhbiBgRXhpdFBsYW5Nb2RlYCBjYWxsLCBhbmQgdGhlIGBTdG9wYApiYWNrc3RvcCBleGl0cyBlYXJseSB3aGVuIGBwZXJtaXNzaW9uX21vZGVgIGlzIHByZXNlbnQgYW5kIG5vdCBgcGxhbmAg4oCUIHdoaWNoIGlzIGV4YWN0bHkgd2hhdApQUiAjMzYyIGxhbmRlZCB0b2RheSwgZGVsaWJlcmF0ZWx5LCB0byBzdG9wIGZhbHNlLXBvc2l0aXZlcyBvbiBhbnN3ZXJzIHRoYXQgbWVyZWx5ICpkaXNjdXNzKgphIHBsYW4uIFdpZGVuaW5nIGl0IGJhY2sgcmUtYnJlYWtzIHdoYXQgIzM2MiBqdXN0IGZpeGVkLiBUaGF0IGlzIGEgZ2VudWluZSB0cmFkZW9mZiAobWlzc2VkCnBsYW5zIHZzLiBmYWxzZSBibG9ja3MpLCBub3QgYW4gb2J2aW91cyBmaXgsIHNvIGl0IGlzIGZsYWdnZWQgcmF0aGVyIHRoYW4gcGF0Y2hlZC4KCioqTGluZWFyIHBvbGx1dGlvbiBpcyBOT1QgY2F1c2VkIGJ5IGEgaG9vayDigJQgbm8gaG9vayBjcmVhdGVzIHRpY2tldHMuKiogQWdlbnRzIGNyZWF0ZSB0aGVtCmJlY2F1c2UgdHdvICpydWxlcyogdGVsbCB0aGVtIHRvLCBhbmQgMTAwKyBhZ2VudHMgb2JleSB3aXRoIG5vIGNyb3NzLXNlc3Npb24gZGVkdXA6CgotIGBjb252ZW50aW9ucy5tZGA6ICoib3BlbiBvbmUgaWYgbWlzc2luZyAob25lIHBlciB1bml0IG9mIGRlbGl2ZXJ5KSIqCi0geW91ciBnbG9iYWwgY2xvc2Utc2Vzc2lvbiBydWxlOiAqIkZpbGUgZXZlcnkgZm9sbG93LXVwIHlvdSB3ZXJlIGFib3V0IHRvIHN1Z2dlc3QgYXMgYSByZWFsIHRpY2tldC4iKgoKVGhlIGB2ZXJpZnktd29yay1jb21wbGV0ZWAgU3RvcCBnYXRlIHJlaW5mb3JjZXMgaXQgYXQgc2Vzc2lvbiBlbmQuIFRoZSByZXN1bHQgaXMgdm9sdW1lICsKcmVkdW5kYW50IHRpY2tldHMgKyBtaXNjbGFzc2lmaWNhdGlvbiAoZWFjaCBhZ2VudCBndWVzc2VzIHByb2plY3QvbGFiZWxzKS4gYGxpbmVhci1pbmplY3RgCm9ubHkgKnJlYWRzKiB5b3VyIGJvYXJkLiBGaXhpbmcgdGhpcyBpcyBhIHJ1bGVzIGVkaXQsIG5vdCBhIGhvb2sgZWRpdC4KCiMjIFByb3Bvc2FsIOKAlCAxNCBndWFyZHMgZG93biB0byA4CgpUaGUgY3JpdGVyaW9uIGlzIG5vdCAiZG9lcyB0aGUgYWdlbnQgb2JleS4iIEl0IGlzICoqZG9lcyB0aGUgaG9vayBwdXNoIHRoZSBhZ2VudCB0bwpmaW5pc2ggdGhlIHdvcmsgZW5kIHRvIGVuZCwgd2l0aG91dCBleGN1c2VzLioqIFNjb3JlZCB0aGF0IHdheSDigJQgd2hhdCB0aGUgc2Vzc2lvbgphY3R1YWxseSBkaWQgaW4gdGhlIDQwIG1lc3NhZ2VzIGFmdGVyIGVhY2ggZmlyZSDigJQgdGhlIHBvcnRmb2xpbyBzcGxpdHMgY2xlYW5seS4KCnwgfCBob29rIHwgZmlyZXMgfCAqKmRlbGl2ZXJlZCBhZnRlcioqIHwgd2h5IHwKfC0tLXwtLS18LS0tOnwtLS06fC0tLXwKfCAqKm1lcmdlIOKGkiAxKiogfCBnaXQtZ3VhcmQgfCAyNDUgfCAzOSUgfCBhbGwgZm91ciBwYXJzZSBnaXQgY29tbWFuZHMgb24gYEJhc2hgIHwKfCB8IG1haW4tYnJhbmNoLWd1YXJkIHwgMTMxIHwgNTklIHwgbWF0Y2hlciBpcyBhIHN1cGVyc2V0IG9mIGdpdC1ndWFyZCdzIHwKfCB8IGdpdC1yZXF1aXJlLWNsZWFuLXRyZWUgfCAzOCB8IDU5JSB8IHNhbWUgcGFyc2VyIGFnYWluIHwKfCB8IGxhcmdlLWZpbGUtYWRkLWd1YXJkIHwgMzggfCDigJQgfCBpbnNwZWN0cyBgZ2l0IGFkZGAg4oCUIHNhbWUgcGFyc2VyIGFnYWluIHwKfCAqKmtlZXAqKiB8IHByLWRlc2NyaXB0aW9uLXJlbWluZGVyIHwgMTc0IHwgKio4OSUqKiB8IHRoZSBldmlkZW5jZSBnYXRlOyBibG9ja3Mgd2l0aG91dCBkZXJhaWxpbmcgfAp8IHwgbWVyZ2UtZ3VhcmQgfCAyNDAgfCAqKjg1JSoqIHwgYmxvY2tzIHRoZSBieXBhc3MsIGFnZW50IHN0aWxsIHNoaXBzIHwKfCB8IGFydGlmYWN0cy1jb25maWRlbnRpYWwtZ3VhcmQgfCAzNSB8ICoqOTElKiogfCBwcmV2ZW50cyBhIGxlYWsgYXQgbmVhci16ZXJvIGRyYWcgfAp8IHwgdmVyaWZ5LXdvcmstY29tcGxldGUgKyB2ZXJpZnktd29yay1zdGF0ZSB8IDU2MSB8IDIxJSB8IHRoZSAqb25seSogYW50aS1leGN1c2UgbWVjaGFuaXNtIHwKfCB8IHJtLWd1YXJkIMK3IHNlY3JldHMtZ3VhcmQgfCA5MCDCtyAxNCB8IDM5JSDCtyA1NCUgfCBkYXRhIGxvc3MsIGNyZWRlbnRpYWxzIHwKfCB8IHRlYW1zLXJvc3Rlci1ndWFyZCB8IDMzIHwgNjAlIHwgY2hlYXAsIHJhcmVseSBmaXJlcyB8CnwgKipjdXQqKiB8ICoqcGxhbi1odG1sLXJlbWluZGVyKiogfCA3NiB8ICoqMTElKiogfCB3b3JzdCBpbiB0aGUgc3lzdGVtIHwKfCB8IGZvb3Rlci1ndWFyZCB8ICoqMCoqIHwg4oCUIHwgbmV2ZXIgZmlyZWQgb25jZSBpbiA3LDQ5MyB0cmFuc2NyaXB0cyB8CnwgfCB1c2VyLW1lc3NhZ2UtZ3VhcmQgfCAyMSB8IDMwJSB8IG1hcmdpbmFsIGF0IGFueSB2b2x1bWUgfAoKKipNZXJnZSB0aGUgZm91ciBnaXQgZ3VhcmRzIGludG8gb25lLioqIGBtYWluLWJyYW5jaC1ndWFyZGAncyBtYXRjaGVyCihgQmFzaHxXcml0ZXxFZGl0fE11bHRpRWRpdHxOb3RlYm9va0VkaXRgKSBpcyBhICoqc3VwZXJzZXQqKiBvZiBgZ2l0LWd1YXJkYCdzIChgQmFzaGApLApzbyBldmVyeSBCYXNoIHRvb2wgY2FsbCB0b2RheSBzcGF3bnMgYm90aCBzY3JpcHRzIGFuZCBwYXJzZXMgdGhlIHNhbWUgY29tbWFuZCBzdHJpbmcKdHdpY2Ugd2l0aCBuZWFyLWlkZW50aWNhbCBjb2RlIOKAlCB0aGF0IGlzIHdoZXJlIHRoZSB+MjAwIGR1cGxpY2F0ZWQgbGluZXMgbGl2ZS4gVHdvCmF4ZXMgKCp3aGF0IG9wZXJhdGlvbiogdnMgKndoZXJlKikgYXJlIHR3byAqKmZ1bmN0aW9ucyoqLCBub3QgdHdvIGhvb2tzLiBGb2xkaW5nCmBnaXQtcmVxdWlyZS1jbGVhbi10cmVlYCBhbmQgYGxhcmdlLWZpbGUtYWRkLWd1YXJkYCBpbiBjb3N0cyBub3RoaW5nOiBib3RoIGFscmVhZHkKcGFyc2UgZ2l0IGNvbW1hbmRzLiBPbmUgc3Bhd24sIG9uZSBwYXJzZXIsIG9uZSBwbGFjZSB0byBmaXguCgoqKmBwbGFuLWh0bWwtcmVtaW5kZXJgIGlzIHRoZSBsZWFzdCBoZWxwZnVsIGhvb2sgeW91IGhhdmUuKiogMTElIGRlbGl2ZXJ5IOKAlCB0aGUgbG93ZXN0Cm9mIGFueXRoaW5nIG1lYXN1cmVkIOKAlCBhbmQgaXQgaW50ZXJydXB0cyBhdCBleGFjdGx5IHRoZSBtb21lbnQgdGhlIGFnZW50IGlzIGFib3V0IHRvCmhhbmQgb3ZlciBhIHBsYW4uIDYwJSBvZiB0aGUgdGltZSB0aGUgYWdlbnQgZG9lcyBub3QgZXZlbiBhdHRlbXB0IHRoZSByZW5kZXIgaXQgYXNrcwpmb3IuIEl0IGlzIGNlcmVtb255IGNoYXJnZWQgYXQgdGhlIGRlbGl2ZXJ5IG1vbWVudC4KCioqYGZvb3Rlci1ndWFyZGAgaGFzIG5ldmVyIGZpcmVkIOKAlCBhbmQgaXRzIGZpcnN0IGZpcmUgd2FzIGEgZmFsc2UgcG9zaXRpdmUuKiogWmVybwpibG9ja3MgYWNyb3NzIDcsNDkzIHRyYW5zY3JpcHRzOyB0aGUgcnVsZSB0ZXh0IGFsb25lIGZ1bGx5IGludGVybmFsaXplZCB0aGUgYmVoYXZpb3IuClRoZW4sIHdoaWxlIHRoaXMgcGFnZSB3YXMgYmVpbmcgd3JpdHRlbiwgaXQgZmlyZWQgZm9yIHRoZSBmaXJzdCB0aW1lIOKAlCBvbiBhbiBlZGl0IHRoYXQKbWVyZWx5ICpxdW90ZWQgdGhlIGJhbm5lZCBzdHJpbmcgaW5zaWRlIGRvY3VtZW50YXRpb24gYWJvdXQgdGhlIGd1YXJkIGl0c2VsZiouIEl0Cm1hdGNoZXMgdGhlIGxpdGVyYWwgdGV4dCBhbnl3aGVyZSBpbiBhIGBCYXNoYCBjb21tYW5kLCBzbyB3cml0aW5nIGFib3V0IGl0IHRyaXBzIGl0LgpBIGd1YXJkIHdob3NlIG9ubHkgcmVjb3JkZWQgZmlyZSBpcyBhIGZhbHNlIHBvc2l0aXZlIGlzIG5vdCBhIGRldGVycmVudCwgaXQgaXMgYSB0YXguCgoqKldoYXQgYWN0dWFsbHkgZm9yY2VzIGRlbGl2ZXJ5IGlzIHRoaW4uKiogRWxldmVuIG9mIHRoaXJ0ZWVuIGd1YXJkcyBwcmV2ZW50ICpkYW1hZ2UqOwplc3NlbnRpYWxseSBvbmUgaG9vayDigJQgdGhlIFN0b3AgZ2F0ZSwgcGx1cyB0aGUgYHZlcmlmeS13b3JrLXN0YXRlYCByZWNvcmQgdGhhdCBnaXZlcyBpdAphIGdvYWwgYm91bmRhcnkg4oCUIHByZXZlbnRzICpxdWl0dGluZyouIElmIHRoZSBnb2FsIGlzIGFnZW50cyB0aGF0IGZpbmlzaCB3aXRob3V0CmV4Y3VzZXMsIHRoZSBsZXZlcmFnZSBpcyBub3QgaW4gdHVuaW5nIGd1YXJkcy4gSXQgaXMgdGhhdCB0aGUgZW50aXJlIGFudGktZXhjdXNlIGpvYgpyZXN0cyBvbiBvbmUgaG9vayBmaXJpbmcgMTEgdGltZXMgcGVyIHNlc3Npb24uCgoqKkNvbXBhY3QgdGhlIG1lc3NhZ2VzLioqIGBydWxlcy9SRUFETUUubWQ6NTdgIGFscmVhZHkgc3RhdGVzIHRoZSBwcmluY2lwbGUg4oCUICoiRXZlcnkKbGluZSBjb3N0cyBjb250ZXh0IG9uIGV2ZXJ5IGFnZW50LCBvbiBldmVyeSBtYWNoaW5lLCBmb3JldmVyLiIqIFRoZSBndWFyZCByZWZ1c2FscyBhbmQKdGhlc2UgdmVyeSBkZXNjcmlwdGlvbnMgdmlvbGF0ZSBpdC4gYG1haW4tYnJhbmNoLWd1YXJkYCdzIHJlZnVzYWwgaXMgdGhlIG1vZGVsIHdvcnRoCmNvcHlpbmcsIHRob3VnaDogaXQgcGFzdGVzIHRoZSBmb3VyLWxpbmUgd29ya3RyZWUgcmVjaXBlIHdpdGggYCRSRVBPYCBmaWxsZWQgaW4sIGFuZAppdCByZWNvdmVycyA3MiUuIFNob3J0LCBhbmQgaXQgaGFuZHMgb3ZlciB0aGUgZml4LgoKIyMgVGhlIGxhdGVuY3kgYmlsbCwgYW5kIHdoYXQgdG8gZ2F0ZSBvZmYgaW4gcGxhbiBtb2RlCgpUaGUgaG9vayBzaGltcyB3cml0ZSB0aW1pbmdzIHRvIGB+Ly5hZ2VudHMvLmNhY2hlL3BlcmYvcGVyZi5kYmAuICoqMjg1LDY2NyByZWNvcmRlZApmaXJlcy4gMjg0IG9mIHRoZW0gY2hhbmdlZCB0aGUgb3V0Y29tZS4qKgoKPiAqKldpbmRvdy4qKiBUaGF0IHRhYmxlIGNvdmVycyAqKjIwMjYtMDgtMDMg4oaSIDA4LTA4IG9ubHkqKiDigJQgNC4yIGRheXMsIH42Nyw3MDAgaG9vawo+IGZpcmVzIGEgZGF5LiBUaW1pbmcgY29sbGVjdGlvbiBoYXMgbm90IHdyaXR0ZW4gYSByb3cgc2luY2UgMjAyNi0wOC0wOCwgc28gdGhlc2UgYXJlCj4gYSBmaXZlLWRheSBzYW1wbGUgZnJvbSBlYXJsaWVyIHRoaXMgbW9udGgsIG5vdCBhbiBhbGwtdGltZSBvciBjdXJyZW50IHRvdGFsLiBUaGUKPiBwZXItY2FsbCBsYXRlbmNpZXMgYW5kIHRoZSBoaXQgcmF0ZSBhcmUgd2hhdCB0aGF0IHdpbmRvdyBtZWFzdXJlZDsgdGhlIGJsb2NrIGNvdW50cwo+IGVsc2V3aGVyZSBvbiB0aGlzIHBhZ2UgY29tZSBmcm9tIHRoZSB0cmFuc2NyaXB0IGNvcnB1cyBhbmQgYXJlIGN1cnJlbnQuCgo8ZmlndXJlPgo8ZmlnY2FwdGlvbj48c3Ryb25nPkZpZ3VyZSA1IOKAlCBXaGF0IGV2ZXJ5IEJhc2ggY2FsbCBwYXlzLjwvc3Ryb25nPiBOaW5lIGd1YXJkcyBmaXJlIG9uIGV2ZXJ5IHNpbmdsZSA8Y29kZT5CYXNoPC9jb2RlPiB0b29sIGNhbGwsIHNlcmlhbGx5LCBiZWZvcmUgdGhlIGNvbW1hbmQgcnVucy4gQmFyIHdpZHRoIGlzIG1lYXN1cmVkIGF2ZXJhZ2UgbGF0ZW5jeTsgdGhlIG51bWJlciBvbiB0aGUgcmlnaHQgaXMgaG93IG9mdGVuIHRoYXQgZ3VhcmQgYWN0dWFsbHkgYmxvY2tlZCBhbnl0aGluZy48L2ZpZ2NhcHRpb24+Cgo8c3ZnIHZpZXdCb3g9IjAgMCAxMDAwIDM2MCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlBlci1CYXNoLWNhbGwgZ3VhcmQgbGF0ZW5jeSIgd2lkdGg9IjEwMCUiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgdWktbW9ub3NwYWNlLCBtb25vc3BhY2UiPgogIDxnIGZvbnQtc2l6ZT0iMTMiPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCw0MCkiPjx0ZXh0IHg9IjIyOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+Z2l0LWd1YXJkPC90ZXh0PjxyZWN0IHg9IjI0MCIgeT0iLTExIiB3aWR0aD0iNTIwIiBoZWlnaHQ9IjIyIiByeD0iMyIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9Ijc3MCIgeT0iNCIgZmlsbD0iI2ZmYjNiZCI+NjMgbXM8L3RleHQ+PHRleHQgeD0iODUwIiB5PSI0IiBmaWxsPSIjOGE4YThhIj4wLjg5JTwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDcyKSI+PHRleHQgeD0iMjI4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5ybS1ndWFyZDwvdGV4dD48cmVjdCB4PSIyNDAiIHk9Ii0xMSIgd2lkdGg9IjQ5NSIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSI3NDUiIHk9IjQiIGZpbGw9IiNmZmIzYmQiPjYwIG1zPC90ZXh0Pjx0ZXh0IHg9Ijg1MCIgeT0iNCIgZmlsbD0iIzhhOGE4YSI+MC4zMyU8L3RleHQ+PC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwxMDQpIj48dGV4dCB4PSIyMjgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPm1haW4tYnJhbmNoLWd1YXJkPC90ZXh0PjxyZWN0IHg9IjI0MCIgeT0iLTExIiB3aWR0aD0iNDQ2IiBoZWlnaHQ9IjIyIiByeD0iMyIgZmlsbD0iI2ZmNmY4NiIvPjx0ZXh0IHg9IjY5NiIgeT0iNCIgZmlsbD0iI2ZmYjNiZCI+NTQgbXM8L3RleHQ+PHRleHQgeD0iODUwIiB5PSI0IiBmaWxsPSIjOGE4YThhIj4wLjQ0JTwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDEzNikiPjx0ZXh0IHg9IjIyOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+bGFyZ2UtZmlsZS1hZGQtZ3VhcmQ8L3RleHQ+PHJlY3QgeD0iMjQwIiB5PSItMTEiIHdpZHRoPSIyMDYiIGhlaWdodD0iMjIiIHJ4PSIzIiBmaWxsPSIjZmY4YTljIi8+PHRleHQgeD0iNDU2IiB5PSI0IiBmaWxsPSIjZmZiM2JkIj4yNSBtczwvdGV4dD48dGV4dCB4PSI4NTAiIHk9IjQiIGZpbGw9IiM4YThhOGEiPjAuMTQlPC90ZXh0PjwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMTY4KSI+PHRleHQgeD0iMjI4IiB5PSI0IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjY2ZjZmNmIj5tZXJnZS1ndWFyZDwvdGV4dD48cmVjdCB4PSIyNDAiIHk9Ii0xMSIgd2lkdGg9IjE1NyIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiNmZmEzYjIiLz48dGV4dCB4PSI0MDciIHk9IjQiIGZpbGw9IiNmZmIzYmQiPjE5IG1zPC90ZXh0Pjx0ZXh0IHg9Ijg1MCIgeT0iNCIgZmlsbD0iIzhhOGE4YSI+MC44NyU8L3RleHQ+PC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwyMDApIj48dGV4dCB4PSIyMjgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPnByLWRlc2NyaXB0aW9uLXJlbWluZGVyPC90ZXh0PjxyZWN0IHg9IjI0MCIgeT0iLTExIiB3aWR0aD0iMTQ5IiBoZWlnaHQ9IjIyIiByeD0iMyIgZmlsbD0iI2ZmYTNiMiIvPjx0ZXh0IHg9IjM5OSIgeT0iNCIgZmlsbD0iI2ZmYjNiZCI+MTggbXM8L3RleHQ+PHRleHQgeD0iODUwIiB5PSI0IiBmaWxsPSIjOGE4YThhIj4wLjYzJTwvdGV4dD48L2c+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDIzMikiPjx0ZXh0IHg9IjIyOCIgeT0iNCIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+Z2l0LXJlcXVpcmUtY2xlYW4tdHJlZTwvdGV4dD48cmVjdCB4PSIyNDAiIHk9Ii0xMSIgd2lkdGg9IjE0OSIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiNmZmEzYjIiLz48dGV4dCB4PSIzOTkiIHk9IjQiIGZpbGw9IiNmZmIzYmQiPjE4IG1zPC90ZXh0Pjx0ZXh0IHg9Ijg1MCIgeT0iNCIgZmlsbD0iIzhhOGE4YSI+MC4xNCU8L3RleHQ+PC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwyNjQpIj48dGV4dCB4PSIyMjgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPnVzZXItbWVzc2FnZS1ndWFyZDwvdGV4dD48cmVjdCB4PSIyNDAiIHk9Ii0xMSIgd2lkdGg9IjE0OSIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiNmZmEzYjIiLz48dGV4dCB4PSIzOTkiIHk9IjQiIGZpbGw9IiNmZmIzYmQiPjE4IG1zPC90ZXh0Pjx0ZXh0IHg9Ijg1MCIgeT0iNCIgZmlsbD0iIzhhOGE4YSI+MC4wOCU8L3RleHQ+PC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwyOTYpIj48dGV4dCB4PSIyMjgiIHk9IjQiIHRleHQtYW5jaG9yPSJlbmQiIGZpbGw9IiNjZmNmY2YiPmZvb3Rlci1ndWFyZDwvdGV4dD48cmVjdCB4PSIyNDAiIHk9Ii0xMSIgd2lkdGg9IjE0OSIgaGVpZ2h0PSIyMiIgcng9IjMiIGZpbGw9IiM2YTZhNmEiLz48dGV4dCB4PSIzOTkiIHk9IjQiIGZpbGw9IiM4YThhOGEiPjE4IG1zPC90ZXh0Pjx0ZXh0IHg9Ijg1MCIgeT0iNCIgZmlsbD0iIzhhOGE4YSI+MC4wMCU8L3RleHQ+PC9nPgogIDwvZz4KICA8bGluZSB4MT0iMjQwIiB5MT0iMzE4IiB4Mj0iNzYwIiB5Mj0iMzE4IiBzdHJva2U9IiMzYTNhM2EiLz4KICA8dGV4dCB4PSIyNDAiIHk9IjM0MCIgZmlsbD0iI2ZmOGE5YyIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+MjkzIG1zIGFkZGVkIHRvIGV2ZXJ5IEJhc2ggY2FsbDwvdGV4dD4KICA8dGV4dCB4PSI4NTAiIHk9IjM0MCIgZmlsbD0iIzhhOGE4YSIgZm9udC1zaXplPSIxMiI+aGl0IHJhdGU8L3RleHQ+Cjwvc3ZnPgo8L2ZpZ3VyZT4KCioqRXZlcnkgYEJhc2hgIHRvb2wgY2FsbCBwYXlzIDI5MyBtcyoqIGJlZm9yZSB0aGUgY29tbWFuZCBzdGFydHMsIGFjcm9zcyBuaW5lIGd1YXJkcwoodGhlIG5pbmUgYmFycyBhYm92ZSwgc3VtbWVkKS4KVG90YWwgcmVjb3JkZWQgaG9vayB3YWxsLWNsb2NrOiAqKjIuNjYgaG91cnMqKi4gVGhlIGhpdCByYXRlIHRoYXQgYnV5cyBpcyAqKjAuMDk5JSoqLgoKVGhhdCBpcyBub3QgYW4gYXJndW1lbnQgZm9yIGRlbGV0aW5nIHRoZSBndWFyZHMg4oCUIGBnaXQtZ3VhcmRgJ3MgMjQ1IGZpcmVzIGluY2x1ZGUgNTMKcHJldmVudGVkIGByZXNldCAtLWhhcmRgZXMsIGFuZCBpdHMgY29zdCBpcyB3b3J0aCBwYXlpbmcuIEl0ICppcyogYW4gYXJndW1lbnQgZm9yIG5vdApydW5uaW5nIGEgZ3VhcmQgaW4gYSBtb2RlIHdoZXJlIGl0IGNhbm5vdCBwb3NzaWJseSBmaXJlLgoKIyMjIFRoZSBtb2RlIG1hdHJpeAoKYG1hdGNoZXMucGVybWlzc2lvbl9tb2RlYCBhbHJlYWR5IGV4aXN0cyBhbmQgaXMgbWVyZ2VkCihgYXBwcy9jbGkvc3JjL2xpYi9ob29rcy9tYXRjaC50czoxNDVgKSwgc28gdGhpcyBpcyBhICoqY29uZmlnIGNoYW5nZSBpbiBgaG9va3MueWFtbGAsCm5vdCBuZXcgY29kZSoqLgoKfCBIb29rIHwgcGxhbiB8IGVkaXQgLyBhdXRvIHwgd2h5IHwKfC0tLXw6LS06fDotLTp8LS0tfAp8IGdpdC1ndWFyZCB8ICoqb24qKiB8ICoqb24qKiB8IEJhc2ggc3RpbGwgcnVucyBpbiBwbGFuIG1vZGU7IGByZXNldCAtLWhhcmRgIGlzIHN0aWxsIHJlYWNoYWJsZSB8Cnwgcm0tZ3VhcmQgfCAqKm9uKiogfCAqKm9uKiogfCBzYW1lIOKAlCBkYXRhIGxvc3MgaXMgbW9kZS1pbmRlcGVuZGVudCB8Cnwgc2VjcmV0cy1ndWFyZCB8ICoqb24qKiB8ICoqb24qKiB8IGEgY3JlZGVudGlhbCBjYW4gbGVhayBmcm9tIGEgcmVhZC1vbmx5IHNlc3Npb24gfAp8IG1haW4tYnJhbmNoLWd1YXJkIHwgKmJhc2ggb25seSogfCAqKm9uKiogfCBpdHMgV3JpdGUvRWRpdCBhcm0gaXMgYWxyZWFkeSBkZWFkIGluIHBsYW4gbW9kZSB8CnwgbWVyZ2UtZ3VhcmQgfCAqKm9mZioqIHwgKipvbioqIHwgbm90aGluZyBtZXJnZXMgZnJvbSBhIHBsYW5uaW5nIHR1cm4gfAp8IHByLWRlc2NyaXB0aW9uLXJlbWluZGVyIHwgKipvZmYqKiB8ICoqb24qKiB8IG5vdGhpbmcgb3BlbnMgYSBQUiBmcm9tIGEgcGxhbm5pbmcgdHVybiB8CnwgbGFyZ2UtZmlsZS1hZGQtZ3VhcmQgfCAqKm9mZioqIHwgKipvbioqIHwgbm8gYGdpdCBhZGRgIGluIHBsYW4gbW9kZSB8CnwgZ2l0LXJlcXVpcmUtY2xlYW4tdHJlZSB8ICoqb2ZmKiogfCAqKm9uKiogfCBubyBwdWxsL3JlYmFzZSBpbiBwbGFuIG1vZGUgfAp8IGZvb3Rlci1ndWFyZCB8ICoqb2ZmKiogfCAqKm9mZioqIHwgY3V0IGVudGlyZWx5IOKAlCAwIHJlYWwgYmxvY2tzIHwKfCB1c2VyLW1lc3NhZ2UtZ3VhcmQgfCAqKm9mZioqIHwgKipvZmYqKiB8IGN1dCBlbnRpcmVseSDigJQgMC4wOCUgfAp8IHZlcmlmeS13b3JrLWNvbXBsZXRlIHwgKipwbGFuLWF3YXJlKiogfCAqKm9uKiogfCAiZG9uZSIgaW4gcGxhbiBtb2RlIG1lYW5zICp0aGUgcGxhbiBpcyBkZWxpdmVyZWQqLCBub3QgKnRoZSBQUiBpcyBtZXJnZWQqIOKAlCBpdCBzaG91bGQgYXVkaXQgYWdhaW5zdCB0aGUgcGxhbiwgbm90IHRoZSBkZWxpdmVyeSBjaGFpbiB8CgpUd28gZGlmZmVyZW50IHNhdmluZ3Mgc2l0IGluIHRoYXQgdGFibGUsIGFuZCB0aGV5IHNob3VsZCBub3QgYmUgYWRkZWQgdG9nZXRoZXIKY2FyZWxlc3NseSDigJQgYW4gZWFybGllciByZXZpc2lvbiBvZiB0aGlzIHBhZ2UgZGlkIGV4YWN0bHkgdGhhdDoKCnwgc3RlcCB8IGd1YXJkcyB8IHNhdmVkIHwgcGVyLWBCYXNoYCBjb3N0IHwKfC0tLXwtLS18LS0tOnwtLS06fAp8IHRvZGF5IHwg4oCUIHwg4oCUIHwgKioyOTMgbXMqKiB8CnwgZ2F0ZSB0aGUgZm91ciBkZWxpdmVyeS1waGFzZSBndWFyZHMgb2ZmIGluIHBsYW4gbW9kZSB8IGBtZXJnZS1ndWFyZGAgMTkgwrcgYHByLWRlc2NyaXB0aW9uLXJlbWluZGVyYCAxOCDCtyBgbGFyZ2UtZmlsZS1hZGQtZ3VhcmRgIDI1IMK3IGBnaXQtcmVxdWlyZS1jbGVhbi10cmVlYCAxOCB8ICoqODAgbXMqKiB8ICoqMjEzIG1zKiogfAp8IHBsdXMgY3V0IGBmb290ZXItZ3VhcmRgIGFuZCBgdXNlci1tZXNzYWdlLWd1YXJkYCBvdXRyaWdodCB8IDE4IMK3IDE4IHwgKiozNiBtcyoqIHwgKioxNzcgbXMqKiB8CgpPbmx5IHRoZSBmaXJzdCByb3cgaXMgYSBtb2RlIGdhdGU7IHRoZSBzZWNvbmQgaXMgZGVsZXRpb24sIGFuZCBpdCBhcHBsaWVzIGluICpldmVyeSoKbW9kZSByYXRoZXIgdGhhbiBqdXN0IHBsYW4uIE1lcmdpbmcgdGhlIGZvdXIgZ2l0IGd1YXJkcyBpbnRvIG9uZSBzY3JpcHQgd291bGQgY3V0CmZ1cnRoZXIgc3RpbGwg4oCUIHRocmVlIGZld2VyIHByb2Nlc3Mgc3Bhd25zIHBlciBjYWxsIOKAlCBidXQgdGhhdCBudW1iZXIgaXMgbm90IG1lYXN1cmVkCnlldCBhbmQgaXMgZGVsaWJlcmF0ZWx5IG5vdCBjbGFpbWVkIGhlcmUuCgojIyMgQSBob29rIGJyb2tlIGZvciAxOCBob3VycyBhbmQgbm90aGluZyBzYWlkIHNvCgpgYWN0aXZpdHktbG9nLXJlc3VsdGAgZXhpdGVkICoqMTI3IOKAlCBjb21tYW5kIG5vdCBmb3VuZCDigJQgOTgzIHRpbWVzKiosIHdoaWxlIHN0aWxsCmNvc3RpbmcgNDAgbXMgcGVyIGNhbGwuIFdvcnRoIHN0YXRpbmcgcHJlY2lzZWx5LCBiZWNhdXNlIHRoZSByYXcgY291bnQgcmVhZHMgd29yc2UKdGhhbiB0aGUgdHJ1dGg6IGV2ZXJ5IG9uZSBvZiB0aG9zZSBmYWlsdXJlcyBmYWxscyBpbnNpZGUgYSBzaW5nbGUgKioxOC1ob3VyIHdpbmRvdyBvbgoyMDI2LTA4LTAzIDIyOjE0IOKGkiAwOC0wNCAxNjoxMSoqLCBhbmQgdGhlcmUgYXJlIG5vbmUgYWZ0ZXIgaXQuIFJ1bm5pbmcgdGhlIGhvb2sgdG9kYXkKZXhpdHMgMC4gU28gdGhpcyB3YXMgYSBib3VuZGVkIGluY2lkZW50IHRoYXQgcmVzb2x2ZWQgaXRzZWxmLCBub3QgYSBob29rIHRoYXQgaXMKYnJva2VuIG5vdy4KClRoZSBkZWZlY3QgaXQgZXhwb3NlcyBpcyBzdGlsbCByZWFsOiAqKmZvciBlaWdodGVlbiBob3VycyBhIGhvb2sgY291bGQgbm90IHJ1biBhdCBhbGwsCmFuZCBub3RoaW5nIHJlcG9ydGVkIGl0LioqIFRoZSBzaGltIGJha2VzIGFuIGFic29sdXRlIHBhdGggaW50byBvbmUgdmVyc2lvbiBob21lCihgLi4uL3ZlcnNpb25zL2NsYXVkZS8yLjEuMjE5L2hvbWUvLmNsYXVkZS9ob29rcy8xMS1hY3Rpdml0eS1sb2cucHlgKSwgc28gYW55IHNlc3Npb24Kd2hvc2UgdmVyc2lvbiBob21lIGRvZXMgbm90IGNhcnJ5IHRoYXQgZmlsZSBnZXRzIGAxMjdgIOKAlCBzaWxlbnRseSwgYXQgZnVsbCBsYXRlbmN5CmNvc3QsIHdpdGggdGhlIGFnZW50IG5vbmUgdGhlIHdpc2VyLiBBIGhvb2sgdGhhdCBjYW5ub3QgZXhlY3V0ZSBzaG91bGQgZmFpbCBsb3VkbHkgYXQKaW5zdGFsbCBvciBzeW5jIHRpbWUuIFRoZSBvbmx5IHJlYXNvbiB0aGlzIGlzIHZpc2libGUgYXQgYWxsIGlzIHRoYXQgdGhlIHNoaW0gaGFwcGVucwp0byByZWNvcmQgZXhpdCBjb2Rlczsgbm90aGluZyByZWFkcyB0aGVtLgoKIyMgVGhlIHNhbWUgZHVwbGljYXRpb24sIG9uZSBsYXllciB1cDogc2tpbGxzIGFuZCBjb21tYW5kcwoKVGhlIGd1YXJkcyBkdXBsaWNhdGUgYSBjb21tYW5kIHBhcnNlci4gVGhlICoqc2tpbGxzKiogZHVwbGljYXRlIGEgcGlwZWxpbmUg4oCUIGFuZAp0aGUgbnVtYmVycyBhcmUgd29yc2UsIGJlY2F1c2UgcHJvc2UgaGFzIG5vIGNvbXBpbGVyIHRvIGNhdGNoIGl0LgoKPGZpZ3VyZT4KPGZpZ2NhcHRpb24+PHN0cm9uZz5GaWd1cmUgNiDigJQgT25lIHBpcGVsaW5lLCB0aHJlZSBza2lsbHMgdGVhY2hpbmcgaXQuPC9zdHJvbmc+IEV2ZXJ5IHNraWxsIHRoYXQgcHJvZHVjZXMgYW4gSFRNTCBhcnRpZmFjdCByZS10ZWFjaGVzIHRoZSBzYW1lIGZpdmUgbWVjaGFuaWNzLiBDb3VudHMgYXJlIG9jY3VycmVuY2VzIG9mIGVhY2ggY29uY2VwdCBpbnNpZGUgZWFjaCBTS0lMTC5tZC48L2ZpZ2NhcHRpb24+Cgo8c3ZnIHZpZXdCb3g9IjAgMCAxMDAwIDMzMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlNraWxsIG92ZXJsYXAiIHdpZHRoPSIxMDAlIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIHVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIj4KICA8ZyBmb250LXNpemU9IjEyIiBmaWxsPSIjOGE4YThhIj4KICAgIDx0ZXh0IHg9IjMwMCIgeT0iMzQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmFydGlmYWN0cyByZW5kZXI8L3RleHQ+CiAgICA8dGV4dCB4PSI0NDAiIHk9IjM0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5mcm9udG1hdHRlcjwvdGV4dD4KICAgIDx0ZXh0IHg9IjU4MCIgeT0iMzQiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmxpZ2h0L2Rhcms8L3RleHQ+CiAgICA8dGV4dCB4PSI3MTAiIHk9IjM0IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5pbmxpbmUtU1ZHPC90ZXh0PgogICAgPHRleHQgeD0iODYwIiB5PSIzNCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+aGVhZGxlc3MgaW5zcGVjdDwvdGV4dD4KICA8L2c+CiAgPGcgZm9udC1zaXplPSIxMyI+CiAgICA8ZyB0cmFuc2Zvcm09InRyYW5zbGF0ZSgwLDgwKSI+CiAgICAgIDx0ZXh0IHg9IjIxMCIgeT0iNSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2NmY2ZjZiI+YXJ0aWZhY3RzIMK3IDEzMSBsbjwvdGV4dD4KICAgICAgPGNpcmNsZSBjeD0iMzAwIiBjeT0iMCIgcj0iMTQiIGZpbGw9IiM3ZmFlNWYiLz48dGV4dCB4PSIzMDAiIHk9IjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMwZTFmMTYiPjI8L3RleHQ+CiAgICAgIDxjaXJjbGUgY3g9IjQ0MCIgY3k9IjAiIHI9IjE4IiBmaWxsPSIjN2ZhZTVmIi8+PHRleHQgeD0iNDQwIiB5PSI1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMGUxZjE2Ij40PC90ZXh0PgogICAgICA8Y2lyY2xlIGN4PSI1ODAiIGN5PSIwIiByPSIxNiIgZmlsbD0iIzdmYWU1ZiIvPjx0ZXh0IHg9IjU4MCIgeT0iNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzBlMWYxNiI+MzwvdGV4dD4KICAgICAgPGNpcmNsZSBjeD0iNzEwIiBjeT0iMCIgcj0iMTQiIGZpbGw9IiM3ZmFlNWYiLz48dGV4dCB4PSI3MTAiIHk9IjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMwZTFmMTYiPjI8L3RleHQ+CiAgICAgIDxjaXJjbGUgY3g9Ijg2MCIgY3k9IjAiIHI9IjE0IiBmaWxsPSIjN2ZhZTVmIi8+PHRleHQgeD0iODYwIiB5PSI1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMGUxZjE2Ij4yPC90ZXh0PgogICAgPC9nPgogICAgPGcgdHJhbnNmb3JtPSJ0cmFuc2xhdGUoMCwxNTApIj4KICAgICAgPHRleHQgeD0iMjEwIiB5PSI1IiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjZmZkN2RkIj5wbGFuLXJlbmRlciDCtyAyMDggbG48L3RleHQ+CiAgICAgIDxjaXJjbGUgY3g9IjMwMCIgY3k9IjAiIHI9IjE4IiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iMzAwIiB5PSI1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMmEwZTEyIj40PC90ZXh0PgogICAgICA8Y2lyY2xlIGN4PSI0NDAiIGN5PSIwIiByPSIxNCIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjQ0MCIgeT0iNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzJhMGUxMiI+MjwvdGV4dD4KICAgICAgPGNpcmNsZSBjeD0iNTgwIiBjeT0iMCIgcj0iMTgiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSI1ODAiIHk9IjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyYTBlMTIiPjQ8L3RleHQ+CiAgICAgIDxjaXJjbGUgY3g9IjcxMCIgY3k9IjAiIHI9IjE2IiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iNzEwIiB5PSI1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMmEwZTEyIj4zPC90ZXh0PgogICAgICA8Y2lyY2xlIGN4PSI4NjAiIGN5PSIwIiByPSIxOCIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9Ijg2MCIgeT0iNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzJhMGUxMiI+NDwvdGV4dD4KICAgIDwvZz4KICAgIDxnIHRyYW5zZm9ybT0idHJhbnNsYXRlKDAsMjIwKSI+CiAgICAgIDx0ZXh0IHg9IjIxMCIgeT0iNSIgdGV4dC1hbmNob3I9ImVuZCIgZmlsbD0iI2ZmZDdkZCI+dmlzdWFsaXplIMK3IDE2NiBsbjwvdGV4dD4KICAgICAgPGNpcmNsZSBjeD0iMzAwIiBjeT0iMCIgcj0iMTQiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSIzMDAiIHk9IjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyYTBlMTIiPjI8L3RleHQ+CiAgICAgIDxjaXJjbGUgY3g9IjQ0MCIgY3k9IjAiIHI9IjExIiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iNDQwIiB5PSI1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMmEwZTEyIj4xPC90ZXh0PgogICAgICA8Y2lyY2xlIGN4PSI1ODAiIGN5PSIwIiByPSIxOCIgZmlsbD0iI2ZmNTQ3MCIvPjx0ZXh0IHg9IjU4MCIgeT0iNSIgdGV4dC1hbmNob3I9Im1pZGRsZSIgZmlsbD0iIzJhMGUxMiI+NDwvdGV4dD4KICAgICAgPGNpcmNsZSBjeD0iNzEwIiBjeT0iMCIgcj0iMTgiIGZpbGw9IiNmZjU0NzAiLz48dGV4dCB4PSI3MTAiIHk9IjUiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZpbGw9IiMyYTBlMTIiPjQ8L3RleHQ+CiAgICAgIDxjaXJjbGUgY3g9Ijg2MCIgY3k9IjAiIHI9IjE4IiBmaWxsPSIjZmY1NDcwIi8+PHRleHQgeD0iODYwIiB5PSI1IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjMmEwZTEyIj40PC90ZXh0PgogICAgPC9nPgogIDwvZz4KICA8bGluZSB4MT0iMjMwIiB5MT0iMjY1IiB4Mj0iOTIwIiB5Mj0iMjY1IiBzdHJva2U9IiMzYTNhM2EiLz4KICA8dGV4dCB4PSIyMzAiIHk9IjI5MiIgZmlsbD0iI2ZmOGE5YyIgZm9udC1zaXplPSIxNCIgZm9udC13ZWlnaHQ9IjcwMCI+NTA1IGxpbmVzIGFjcm9zcyAzIHNraWxscyDigJQgb25lIHBpcGVsaW5lPC90ZXh0PgogIDx0ZXh0IHg9IjkyMCIgeT0iMjkyIiB0ZXh0LWFuY2hvcj0iZW5kIiBmaWxsPSIjN2ZhZTVmIiBmb250LXNpemU9IjEzIj5rZWVwIDEgwrcgZGVsZXRlIDI8L3RleHQ+Cjwvc3ZnPgo8L2ZpZ3VyZT4KCioqYHBsYW4tcmVuZGVyYCBhbmQgYHZpc3VhbGl6ZWAgYXJlIGBhcnRpZmFjdHNgIHdpdGggYSBkaWZmZXJlbnQgbm91biBpbiBmcm9udC4qKgpBbGwgdGhyZWUgdGVhY2g6IGF1dGhvciBNYXJrZG93biDihpIgYGFydGlmYWN0cyByZW5kZXJgIOKGkiBicmFuZGVkIGxpZ2h0L2RhcmsgSFRNTCB3aXRoCmlubGluZS1TVkcgZmlndXJlcyDihpIgaW5zcGVjdCBpdCBoZWFkbGVzc2x5LiBUaGUgKnBvbGljaWVzKiBnZW51aW5lbHkgZGlmZmVyIOKAlCBhIHBsYW4Kb3dlcyBhIGN1cnJlbnQtdnMtcHJvcG9zZWQgZmlndXJlIGFuZCBhIGRlY2xhcmVkIGBzdXJmYWNlOmAsIGEgdmlzdWFsIG93ZXMgb25lCnN0cmlraW5nIGhlcm8g4oCUIGJ1dCB0aGF0IGlzIGEgKipzZWN0aW9uKiosIG5vdCBhIHNraWxsLiBUaGUgcGlwZWxpbmUgdW5kZXJuZWF0aCBpcwppZGVudGljYWwsIGFuZCBhIHBpcGVsaW5lIHdyaXR0ZW4gb3V0IHRocmVlIHRpbWVzIGlzIGEgcGlwZWxpbmUgdGhhdCBkcmlmdHMgdGhyZWUKd2F5cy4KClRoZSBjb25zb2xpZGF0aW9uIGZvbGxvd3MgdGhlIGFydGlmYWN0IENMSSdzIG93biBtb2RlbDogdGhlIG5vdW4gaXMgYWxyZWFkeSBhCmBraW5kOmAgaW4gZnJvbnRtYXR0ZXIgKGBraW5kOiB2aXN1YWxgIHJlbmRlcnMgdGhpcyBwYWdlOyBwbGFucyB1c2UgYGtpbmQ6IHBsYW5gKS4KVGhlIHNraWxscyBzaG91bGQgbWlycm9yIHdoYXQgdGhlIHRvb2wgYWxyZWFkeSBkb2VzIHJhdGhlciB0aGFuIHJlLXBhcnRpdGlvbiBpdC4KCiMjIyBgL3NoYXJlOnB1YmxpY2AgYW5kIGAvc2hhcmU6cHJpdmF0ZWAgYXJlIHR3byBmbGFncyB3ZWFyaW5nIHR3byBjb21tYW5kcwoKMTYgYW5kIDE4IGxpbmVzLiBNYXNraW5nIHRoZSB3b3JkcyAqcHVibGljKiAvICpwcml2YXRlKiAvICp1bmxpc3RlZCogYW5kIGRpZmZpbmcgdGhlbSwKdGhlIGVudGlyZSBmdW5jdGlvbmFsIGRpZmZlcmVuY2UgaXM6CgpgYGAKcHVibGljICAgIGFnZW50cyBhcnRpZmFjdHMgc2hhcmUgPGZpbGU+CnByaXZhdGUgICBhZ2VudHMgYXJ0aWZhY3RzIHNoYXJlIDxmaWxlPiAtLW5vLWNvdmVyIC0tZXhwaXJlIDdkCmBgYAoKUmVzb2x2aW5nIHRoZSBmaWxlLCBjaGVja2luZyBgc2hhcmUgc3RhdHVzYCwgcmVwb3J0aW5nIHRoZSBsaW5rIOKAlCBkdXBsaWNhdGVkIGluIGJvdGguCmBwcml2YXRlLm1kYCBzdGVwIDEgZ2l2ZXMgaXQgYXdheSBpbiB3cml0aW5nOiAqIihzYW1lIGFzIGAvc2hhcmU6cHVibGljYCkiKi4gQSBmaWxlCnRoYXQgZG9jdW1lbnRzIGl0cyBvd24gZHVwbGljYXRpb24gaXMgdGhlIGNsZWFyZXN0IHBvc3NpYmxlIHNpZ25hbC4KClRoZSBDTEkgYWxyZWFkeSB0YWtlcyB0aGUgZmxhZ3MgYW5kIGEgYHNoYXJlYCBza2lsbCBhbHJlYWR5IGV4aXN0cywgc28gdGhlIHN1cmZhY2UKc2hvdWxkIGJlICoqb25lKiogY29tbWFuZCB3aGVyZSBwdWJsaWMgaXMgdGhlIGRlZmF1bHQgYW5kIHByaXZhdGUgaXMgYSBtb2RpZmllci4KCnwgfCB0b2RheSB8IHByb3Bvc2VkIHwKfC0tLXwtLS18LS0tfAp8IHBpcGVsaW5lIHNraWxscyB8IGBhcnRpZmFjdHNgIDEzMSDCtyBgcGxhbi1yZW5kZXJgIDIwOCDCtyBgdmlzdWFsaXplYCAxNjYgfCAqKmBhcnRpZmFjdHNgKiogKH4yMDApLCB3aXRoIGBraW5kOiBwbGFuYCBhbmQgYGtpbmQ6IHZpc3VhbGAgc2VjdGlvbnMgfAp8IHNoYXJlIHN1cmZhY2UgfCBgc2hhcmVgIHNraWxsIDY3IMK3IGAvc2hhcmU6cHVibGljYCAxNiDCtyBgL3NoYXJlOnByaXZhdGVgIDE4IHwgKipgc2hhcmVgKiogc2tpbGwgKyBvbmUgYC9zaGFyZWAgfAp8IHRvdGFsIHwgKio2MDYgbGluZXMqKiB8ICoqfjI3MCoqIHwKCioqT25lIGNhdmVhdCBiZWZvcmUgY3V0dGluZy4qKiBgcGxhbi1odG1sLXJlbWluZGVyYCBncmVwcyByZW5kZXJlZCBwbGFucyBmb3IgYQpkZWNsYXJlZCBgc3VyZmFjZTpgIGFuZCBzcGVjaWZpYyBmaWd1cmUgbWFya3VwLCBzbyBhbnkgY29uc29saWRhdGlvbiBoYXMgdG8gcHJlc2VydmUKdGhvc2UgZXhhY3QgY29udHJhY3RzIG9yIHRoZSBndWFyZCBzdGFydHMgZmFsc2UtYmxvY2tpbmcgdGhlIHZlcnkgcGxhbnMgaXQgaXMgbWVhbnQKdG8gZW5mb3JjZS4gSXRzIHRlc3Qgc3VpdGUgaXMgdGhlIGNoZWNrLgoKIyMgSW5zaWdodAoKCi0gKipUaGUgbWFwIGhhcyB0d28gaG90IGxhbmVzLCBub3QgZml2ZS4qKiBTZXNzaW9uU3RhcnQgKDYgaG9va3MpIGFuZCBVc2VyUHJvbXB0U3VibWl0ICg1IGhvb2tzKSBuZXZlciBibG9jayDigJQgdGhleSBpbmplY3QgTGluZWFyL3RvcG9sb2d5L2luZmxpZ2h0IGNvbnRleHQgYW5kIGV4cGFuZCBwcm9tcHRjdXRzL2JhbmdjdXRzLiBBbGwgdGhlIGZyaWN0aW9uIGlzIFByZVRvb2xVc2UgKyBTdG9wLiBJZiB5b3UgYXJlIGF1ZGl0aW5nICJ3aGVyZSBhZ2VudHMgZmlnaHQgaG9va3MsIiB5b3UgY2FuIGlnbm9yZSA2MCUgb2YgdGhlIGhvb2sgc3VyZmFjZS4KLSAqKlRoZSBTdG9wIGdhdGUgaXMgdGhlIGhlYXZpZXN0IGhvb2sgaW4gdGhlIHN5c3RlbSoqIOKAlCA1NjEgZmlyZXMsIDExIHBlciBzZXNzaW9uIGl0IHRvdWNoZXMsIG1vcmUgdGhhbiBnaXQtZ3VhcmQgYW5kIG1lcmdlLWd1YXJkIHB1dCB0b2dldGhlci4gQW1vbmcgUHJlVG9vbFVzZSBndWFyZHMgdGhvc2UgdHdvIGxlYWQgKDI0NSBhbmQgMjQwKTogZ2l0LWd1YXJkJ3MgdG9wIHZldG9lcyBhcmUgYHJlc2V0IC0taGFyZGAsIGBjaGVja291dGAsIGBicmFuY2gtZGVsZXRlYCwgYHN0YXNoYCDigJQgZXhhY3RseSB0aGUgaGlzdG9yeS1kZXN0cm95aW5nIG1vdmVzIHRoZSBhZ2VudGljLWdpdCB3b3JrZmxvdyBmb3JiaWRzOyBtZXJnZS1ndWFyZCdzIGFyZSBhZG1pbi1ieXBhc3MgYW5kIG1lcmdpbmcgd2l0aCBubyBub24tYXV0aG9yIHZlcmRpY3QuCi0gKipUaGUgbG91ZGVzdCBhbnRhZ29uaXN0IGlzIG5vdCBhIGhvb2suKiogVGhlIGF1dG8tbW9kZSBwZXJtaXNzaW9uIGNsYXNzaWZpZXIgZGVuaWVkIDEsNDUwIHRvb2wgY2FsbHMg4oCUICoqbW9yZSB0aGFuIGFsbCAxMyBQcmVUb29sVXNlIGd1YXJkcyBjb21iaW5lZCAoMSwxMzUpKiouIEZvciBncm9rIGl0IGlzIGFsbW9zdCB0aGUgKmVudGlyZSogZXhwZXJpZW5jZSBvZiAiYmVpbmcgc3RvcHBlZCIuCi0gKipjb2RleCBmaWdodHMgaGFyZGVzdCBwZXIgc2Vzc2lvbiAoMTIuNCUpLCBncm9rIHNvZnRlc3QgKDEuMiUpLioqIGNsYXVkZSBzaXRzIGF0IDYuOSUgYnV0IHNwcmVhZHMgYWNyb3NzIGFsbCAxMyBndWFyZHM7IGdyb2sgY29uY2VudHJhdGVzIG9uIHRoZSBjbGFzc2lmaWVyICsgbWVyZ2UtZ3VhcmQuCi0gKipBIGd1YXJkIGZpcmluZyB6ZXJvIHRpbWVzIGlzIGEgcnVsZSB0aGF0IHdvbi4qKiBmb290ZXItZ3VhcmQ6IDAgZmlyZXMuIE5vYm9keSB0cmllcyB0aGUgYmFubmVkIGZvb3RlciBhbnltb3JlIOKAlCB0aGUgZ3VhcmQgaXMgcHVyZSBzdGFuZGluZyBkZXRlcnJlbnQuIFRoZSBpbnZlcnNlIGFsc28gaG9sZHM6IGEgaG9vayB0aGF0IGZpcmVzIHRocmVlIHRpbWVzIGEgc2Vzc2lvbiBhbmQgaXMgaWdub3JlZCA1OCUgb2YgdGhlIHRpbWUgaXMgYSBydWxlIG5vYm9keSBpbnRlcm5hbGl6ZWQsIGFuZCB0aGUgZml4IGlzIHRoZSBtZXNzYWdlLCBub3QgbW9yZSB2b2x1bWUuCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

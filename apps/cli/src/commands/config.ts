@@ -104,6 +104,7 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'notes':
           return raw.trim();
         case 'browser.profile':
+        case 'browser.viewer':
           return raw.trim();
       }
       // A device property with no arm above used to fall out of the switch and
@@ -153,7 +154,7 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       // browser.profile targets this machine; devices.<name>.browser.profile
       // targets a peer.
       setConfigValue(
-        'browser.profile',
+        parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         value as string,
         parsed.device ? { device: parsed.device } : undefined,
       );
@@ -202,8 +203,12 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
     }
     case 'browser': {
       const target = parsed.device ? { device: parsed.device } : undefined;
-      const had = getConfigValue('browser.profile', target).value !== undefined;
-      unsetConfigValue('browser.profile', target);
+      // Must follow parsed.property. Hardcoding 'browser.profile' here meant
+      // `config unset browser.viewer` deleted the user's browser.profile while
+      // printing success, and left browserViewer in place.
+      const name = parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile';
+      const had = getConfigValue(name, target).value !== undefined;
+      unsetConfigValue(name, target);
       return had;
     }
     case 'project': {
@@ -241,7 +246,7 @@ function getConfig(parsed: ParsedConfigKey): unknown {
       return getConfigValue('auto.pool').value;
     case 'browser': {
       return getConfigValue(
-        'browser.profile',
+        parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         parsed.device ? { device: parsed.device } : undefined,
       ).value;
     }
@@ -312,6 +317,12 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     const key = 'browser.profile';
     yield { key, value: browserProfile, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
+
+  const browserViewer = getConfigValue('browser.viewer').value;
+  if (browserViewer !== undefined) {
+    const key = 'browser.viewer';
+    yield { key, value: browserViewer, hint: configKeyStorageHint(parseConfigKey(key)) };
+  }
 }
 
 /** Collect device-scope config entries. */
@@ -351,7 +362,18 @@ function* listDeviceConfigEntries(device: string): Generator<{ key: string; valu
         if (device === machineId()) continue;
         key = `${prefix}browser.profile`;
         break;
+      case 'browser.viewer':
+        // Same duplication rule as browser.profile above.
+        if (device === machineId()) continue;
+        key = `${prefix}browser.viewer`;
+        break;
       default:
+        // A `default: continue` here silently drops any device property with no
+        // arm — which is how browser.viewer was invisible to `config list` after
+        // being added everywhere else. This is the fourth switch enumerating
+        // DeviceConfigProperty; unlike parseValue's it cannot use a `never`
+        // binding (it must keep skipping properties that are deliberately not
+        // listed), so the completeness test in config.test.ts is the guard.
         continue;
     }
     yield { key, value: entry.value, hint: configKeyStorageHint(parseConfigKey(key)) };
