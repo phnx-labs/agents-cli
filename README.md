@@ -54,7 +54,7 @@ agents setup status                    # readiness for browser, computer, fleet,
 agents run claude "explain this repo"  # run any agent on your existing subscription
 ```
 
-`agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
+Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` exists only for [team spaces](#sign-in). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
 Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`apps/cli/docs/QUICKSTART.md`](apps/cli/docs/QUICKSTART.md).
 
@@ -900,7 +900,7 @@ agents setup mine remove jack --purge
 
 Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](apps/cli/docs/profiles.md). Full reference: [Make it yours](apps/cli/docs/mine.md).
 
-> Personal use is free and Apache-2.0. Redistributing a branded build commercially will require a license in a future release.
+> Branded builds are free for personal and commercial use alike. New versions ship under FSL-1.1-Apache-2.0: every user and company may use, modify, and redistribute; only offering agents-cli itself as a competing commercial product or service is barred, and each version automatically becomes Apache-2.0 two years after release.
 
 ---
 
@@ -1007,7 +1007,7 @@ agents browser profiles create cloud \
 
 ## Sign in
 
-`agents auth` signs this machine in to **Phoenix ID** — the Phoenix Labs account layer that spaces and plan tiers hang off. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
+Signing in is **optional**. Every local feature — `agents run`, sessions, teams, fleet dispatch, secrets, browser, computer — works with no account. The one thing an account unlocks is **team spaces**, the hosted surface under `agents auth space`. `agents auth` signs this machine in to **Phoenix ID**, the Phoenix Labs account layer behind team spaces. Sign-in is Google-only and runs a device-code flow: the CLI shows a code, your browser confirms it, and the CLI picks the session up.
 
 ```bash
 agents auth login                        # shows a code, opens a Phoenix-branded page
@@ -1501,7 +1501,7 @@ Claude Code, Codex CLI, Antigravity, Grok Build, and others each have their own 
 
 ### Is it free?
 
-Yes. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
+Yes — every feature, with no account and no signup. `agents run`, sessions, teams, fleet dispatch, secrets, browser, and computer automation all work the moment you install. The optional `agents auth login` exists only to unlock hosted team spaces (`agents auth space`); there are no paid tiers. This developer tool is entirely free because we believe developers should have the best tools — fast and robust — so they can create the best products for their users.
 
 ### Is this like `nvm` / `mise` / `asdf` for AI agents?
 
@@ -1594,4 +1594,4 @@ Commands in [`apps/cli/src/commands/`](apps/cli/src/commands/), libraries in [`a
 
 ## License
 
-Apache-2.0 -- see [LICENSE](./LICENSE).
+FSL-1.1-Apache-2.0 -- see [LICENSE](./LICENSE). Free for every user and company to use, modify, and redistribute; the only barred use is offering agents-cli itself as a competing commercial product or service. Each version automatically becomes Apache-2.0 two years after its release.

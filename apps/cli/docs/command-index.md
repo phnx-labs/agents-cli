@@ -58,10 +58,10 @@ agents artifacts share update               Re-deploy the Worker script to the c
 agents artifacts unshare <targets...>       Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 ```
 
-## auth — Sign in to Phoenix ID — the account layer behind spaces and plan tiers
+## auth — Sign in to Phoenix ID — the account layer behind team spaces
 
 ```
-agents auth                            Sign in to Phoenix ID — the account layer behind spaces and plan tiers
+agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
 agents auth logout                     Clear this machine's session (no other device is affected)
 agents auth space                      Spaces — share work with teammates

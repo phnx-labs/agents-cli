@@ -2,7 +2,7 @@
 
 `agents setup mine` mints a **personally-named CLI** that _is_ agents-cli. Run it
 as `jack` instead of `agents`, hide the commands you don't want, and pin a curated
-set of skills/plugins — all under your own name. Free and Apache-2.0.
+set of skills/plugins — all under your own name. Free, under FSL-1.1-Apache-2.0.
 
 ```bash
 agents setup mine            # wizard: pick a name, choose what to turn off
@@ -77,5 +77,8 @@ agents --help        # unchanged — every command still there
   silently strips skills/plugins for the plain `agents` user. Note that running
   `<brand> sync` explicitly will materialize the brand's curated set into the
   shared homes — run `agents sync` to restore the full set.
-- **Commercial white-label** (redistributing a branded build to customers) will
-  require a license in a future release; personal use is free.
+- **White-label is free**, personal or commercial. The FSL-1.1-Apache-2.0
+  license lets every user and company use, modify, and redistribute branded
+  builds; only offering agents-cli itself as a competing commercial product or
+  service is barred, and each version automatically becomes Apache-2.0 two
+  years after release.

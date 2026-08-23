@@ -23,9 +23,10 @@ import { setHelpSections } from '../lib/help.js';
 import { runOrDie } from '../lib/format.js';
 
 /**
- * `agents auth` — sign in to Phoenix ID, the account layer behind teams and
- * plan tiers. Everything here goes through `lib/identity`; this file builds no
- * URLs and reads no credential files of its own.
+ * `agents auth` — sign in to Phoenix ID, the account layer behind team spaces.
+ * Signing in is optional: every local feature works with no account. Everything
+ * here goes through `lib/identity`; this file builds no URLs and reads no
+ * credential files of its own.
  */
 
 function sleep(ms: number): Promise<void> {
@@ -116,7 +117,7 @@ async function requireSpace(ref?: string): Promise<Awaited<ReturnType<typeof lis
 export function registerAuthCommand(program: Command): void {
   const auth = program
     .command('auth')
-    .description('Sign in to Phoenix ID — the account layer behind spaces and plan tiers');
+    .description('Sign in to Phoenix ID — the account layer behind team spaces');
 
   setHelpSections(auth, {
     examples: `agents auth login                         # device-code sign-in via your browser
@@ -124,7 +125,8 @@ agents auth whoami                        # who this machine is signed in as
 agents auth space create "Design Team"    # start a space
 agents auth space invite ada@example.com  # add a teammate
 agents auth logout                        # clear this machine only`,
-    notes: `Sign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.
+    notes: `Signing in is optional — every local feature works with no account; team spaces are what it unlocks.
+Sign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.
 The session lives in this machine's agents state dir, so logging out here signs out nothing else.
 Point at a different backend with PHOENIX_ID_BASE (defaults to the production service).`,
   });
