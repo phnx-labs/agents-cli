@@ -21,6 +21,9 @@ import {
   setClaudeUsageCachePathForTest,
   deriveUsageHeadroom,
   formatUsageSummary,
+  classifyUsageErrorKind,
+  classifyUsageFetchFailure,
+  isUsageNoRecentUsageError,
   usageNoCredentialError,
   usageExpiredCredentialError,
   usageRejectedError,
@@ -33,7 +36,7 @@ import {
   type UsageSnapshot,
 } from './usage.js';
 import type { AccountInfo } from '../agents.js';
-import { noteUsageRateLimited, setUsageBackoffDirForTest } from '../usage-backoff.js';
+import { noteUsageRateLimited, setUsageBackoffDirForTest, usageRateLimitedUntil } from '../usage-backoff.js';
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from '../secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from '../secrets/bundles.js';
 import { _resetFileStoreForTest } from '../secrets/filestore.js';
@@ -663,6 +666,57 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
     expect(out).toContain('(headless)');
     expect(out).not.toMatch(/usage unavailable(?! \(headless\))/);
   });
+
+  it.each([
+    [usageExpiredCredentialError('Kimi'), 're-auth for usage'],
+    [usageNoCredentialError('Cursor'), 'sign in / provision token'],
+    ['Codex: no usage recorded yet on this machine.', 'no usage recorded yet'],
+  ])('renders the specific unavailable state from %s', (error, expected) => {
+    const out = formatUsageSummary(null, null, 3, {
+      unavailable: true,
+      errorKind: classifyUsageErrorKind(error),
+      errorDetail: error,
+    });
+
+    expect(out).toContain(expected);
+    expect(out).not.toContain('usage unavailable');
+  });
+
+  it('renders a recorded Retry-After as a compact rate-limit hint', () => {
+    const error = 'Muse rate-limited this machine; not retrying for 12m.';
+    const out = formatUsageSummary(null, null, 3, {
+      unavailable: true,
+      errorKind: classifyUsageErrorKind(error),
+      errorDetail: error,
+    });
+
+    expect(out).toContain('rate-limited (retry ~12m)');
+  });
+});
+
+describe('shared network usage failure classification', () => {
+  let dir: string;
+  let prevPath: string | null;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-shared-usage-failure-'));
+    prevPath = setUsageBackoffDirForTest(dir);
+  });
+
+  afterEach(() => {
+    setUsageBackoffDirForTest(prevPath);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['antigravity' as const, 'Antigravity'],
+    ['muse' as const, 'Muse'],
+  ])('records %s 429 backoff and returns a specific error', (agentId, agent) => {
+    const error = classifyUsageFetchFailure(agent, agentId, 429, '120', 'account-1');
+
+    expect(error).toBe(usageRejectedError(agent, 429));
+    expect(usageRateLimitedUntil(agentId, Date.now(), 'account-1')).not.toBeNull();
+  });
 });
 
 describe('Claude setup-token usage-scope detection (RUSH-2392)', () => {
@@ -995,6 +1049,27 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
     const info = await getUsageInfo('codex', { home });
     expect(info.snapshot).toBeNull();
+    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+  });
+
+  it('reports a benign no-usage marker when no local session exists yet', async () => {
+    writeAuth(Date.now() - HOUR);
+
+    const info = await getUsageInfo('codex', { home });
+
+    expect(info.snapshot).toBeNull();
+    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+  });
+
+  it('drops a Codex window after its derived expiry', async () => {
+    const capturedAt = Date.now() - 2 * HOUR;
+    writeAuth(capturedAt - HOUR);
+    writeSession(capturedAt, 100, 60);
+
+    const info = await getUsageInfo('codex', { home });
+
+    expect(info.snapshot).toBeNull();
+    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
   });
 
   it('reports a session written after the current login', async () => {
@@ -1099,6 +1174,13 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     });
     fs.appendFileSync(p, line + '\n');
   }
+
+  it('reports a benign no-usage marker before the first local log exists', async () => {
+    const info = await getUsageInfo('grok', { home });
+
+    expect(info.snapshot).toBeNull();
+    expect(isUsageNoRecentUsageError(info.error)).toBe(true);
+  });
 
   it('renders the latest in-period creditUsagePercent as the week bar', async () => {
     const now = Date.now();
