@@ -14,7 +14,7 @@
  * problem (pid registry, the SessionStart hook index, the activity log; see
  * `feed-post.ts` `resolvePostIdentity`), never a second parser.
  */
-import { showFile, openArtifactSync } from '../open-url.js';
+import { showFile } from '../open-url.js';
 import * as fs from 'fs';
 import { formatBytes } from '../format.js';
 // Re-exported for the picker, which lists artifacts from this module's rows.
@@ -166,14 +166,7 @@ export function resolveArtifact(groups: ProfileArtifacts[], selector: string): s
   return hit ? hit.path : null;
 }
 
-/**
- * Open a file in the OS default app. Returns true on success.
- *
- * Kept for the interactive picker, which cannot await. Everything else should
- * use `showFile`, which routes browser-renderable kinds to the configured
- * viewer profile instead of the OS handler.
- */
-export const openArtifact = openArtifactSync;
+
 
 // ─── Task-first grouping (RUSH-2407) ───────────────────────────────────────
 

@@ -18,7 +18,7 @@
  * one stderr line naming the reason, and a total failure returns `via: 'none'`
  * so the caller can print the URL rather than silently doing nothing.
  */
-import { spawn, spawnSync } from 'child_process';
+import { spawn } from 'child_process';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
 
@@ -51,7 +51,10 @@ export interface ShowOptions {
  */
 const BROWSER_RENDERABLE = new Set(['.html', '.htm', '.svg', '.xhtml']);
 
-function osOpen(target: string, spawnOpen?: (cmd: string, args: string[]) => boolean): ShowOutcome {
+async function osOpen(
+  target: string,
+  spawnOpen?: (cmd: string, args: string[]) => boolean,
+): Promise<ShowOutcome> {
   const candidates: Array<[string, string[]]> =
     process.platform === 'darwin'
       ? [['open', [target]]]
@@ -70,18 +73,45 @@ function osOpen(target: string, spawnOpen?: (cmd: string, args: string[]) => boo
       if (spawnOpen(cmd, args)) return { via: 'os', command: cmd };
       continue;
     }
-    // spawnSync, NOT a detached spawn. `spawn` does not throw for a missing
-    // binary — it emits an async `error` event — so a detached spawn cannot tell
-    // success from "xdg-open is not installed", and every caller's failure branch
-    // becomes unreachable. The two implementations this seam replaced both used
-    // `spawnSync(...).status === 0` and genuinely detected failure; keeping that
-    // is what makes `via: 'none'` reachable and the fallback to the next
-    // candidate real. These openers hand off to the desktop and return in
-    // milliseconds, so the block is not a stall.
-    const { status, error } = spawnSync(cmd, args, { stdio: 'ignore' });
-    if (!error && status === 0) return { via: 'os', command: cmd };
+    if (await trySpawn(cmd, args)) return { via: 'os', command: cmd };
   }
   return { via: 'none', reason: 'no working OS opener on this platform' };
+}
+
+/**
+ * Launch a detached opener and report whether it actually started.
+ *
+ * Detection without blocking, which is the whole trick here. A bare detached
+ * `spawn` cannot tell success from "xdg-open is not installed" — it does not
+ * throw for a missing binary, it emits `error` asynchronously — so the failure
+ * branches of every caller were dead. But `spawnSync` is not the answer either:
+ * it waits for the child's whole lifetime, and `devices lease` opens a console
+ * and then immediately prompts for a pasted key, so a blocking open would stall
+ * that prompt behind the browser.
+ *
+ * Racing `spawn` against `error` gives both: Node emits `spawn` as soon as the
+ * child is successfully created (measured: 1ms, and it does NOT wait for exit),
+ * and `error` for ENOENT. We unref on success so the opener outlives us.
+ */
+function trySpawn(cmd: string, args: string[]): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    try {
+      const child = spawn(cmd, args, { stdio: 'ignore', detached: true });
+      child.on('error', () => done(false));
+      child.on('spawn', () => {
+        child.unref();
+        done(true);
+      });
+    } catch {
+      done(false);
+    }
+  });
 }
 
 /**
@@ -174,14 +204,4 @@ export async function showFile(filePath: string, opts: ShowOptions = {}): Promis
     return osOpen(filePath, opts.spawnOpen);
   }
   return showUrl(pathToFileURL(filePath).href, opts);
-}
-
-/**
- * Synchronous OS-default open. Returns true on success.
- *
- * Deliberately does NOT consult the viewer — it is the OS-handler primitive that
- * {@link osOpen} and the interactive artifact picker share.
- */
-export function openArtifactSync(filePath: string): boolean {
-  return osOpen(filePath).via === 'os';
 }

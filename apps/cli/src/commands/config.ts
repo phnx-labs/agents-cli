@@ -203,8 +203,12 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
     }
     case 'browser': {
       const target = parsed.device ? { device: parsed.device } : undefined;
-      const had = getConfigValue('browser.profile', target).value !== undefined;
-      unsetConfigValue('browser.profile', target);
+      // Must follow parsed.property. Hardcoding 'browser.profile' here meant
+      // `config unset browser.viewer` deleted the user's browser.profile while
+      // printing success, and left browserViewer in place.
+      const name = parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile';
+      const had = getConfigValue(name, target).value !== undefined;
+      unsetConfigValue(name, target);
       return had;
     }
     case 'project': {
@@ -242,7 +246,7 @@ function getConfig(parsed: ParsedConfigKey): unknown {
       return getConfigValue('auto.pool').value;
     case 'browser': {
       return getConfigValue(
-        'browser.profile',
+        parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         parsed.device ? { device: parsed.device } : undefined,
       ).value;
     }
