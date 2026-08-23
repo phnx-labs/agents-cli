@@ -291,6 +291,13 @@ export interface HookMatches {
   git_dirty?: boolean;               // working tree has changes
   cwd_includes?: string | string[];  // cwd contains any of these substrings
   project_has?: string;              // project root contains this file
+  /**
+   * Permission modes the hook fires in (e.g. `plan`). Unlike the other
+   * predicates this one is fail-open on absence: an input that carries no
+   * permission_mode/permissionMode field passes, because only some harnesses
+   * (Claude Code) report the live mode — an explicit non-listed value skips.
+   */
+  permission_mode?: string | string[];
 }
 
 /**

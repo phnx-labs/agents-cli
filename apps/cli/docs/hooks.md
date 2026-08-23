@@ -260,6 +260,7 @@ All predicates live in `matches:`. They AND together — every declared predicat
 | `cwd_includes` | Current working directory contains any of these substrings (`string` or `string[]`) | `cwd_includes: "/projects/myapp"` |
 | `project_has` | Project root (nearest `.git` ancestor) contains this file or directory | `project_has: "Cargo.toml"` |
 | `git_dirty` | Working tree dirty state matches this boolean | `git_dirty: true` |
+| `permission_mode` | Reported permission mode is one of these values (`string` or `string[]`). Fail-open: an input with no `permission_mode`/`permissionMode` field passes, because only some harnesses (Claude Code) report the live mode | `permission_mode: "plan"` |
 
 ### Matcher Implementation Notes
 
@@ -270,6 +271,7 @@ All predicates live in `matches:`. They AND together — every declared predicat
 - `cwd_includes`: `src/lib/hooks/match.ts:152` — `cwd.includes(n)` for each needle; passes if any matches
 - `project_has`: `src/lib/hooks/match.ts:160` — walks up to the nearest `.git` directory via `findProjectRoot()`, then checks `fs.existsSync(path.join(root, matches.project_has))`
 - `git_dirty`: `src/lib/hooks/match.ts:166` — runs `git status --porcelain` in `cwd`; returns true if output is non-empty
+- `permission_mode`: `src/lib/hooks/match.ts` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
 
 ## Script Resolution
 

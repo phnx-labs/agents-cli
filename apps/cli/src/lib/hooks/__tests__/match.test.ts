@@ -52,6 +52,27 @@ describe('shouldFire predicate evaluator', () => {
     });
   });
 
+  describe('permission_mode', () => {
+    it('passes when input mode is in the allowlist', () => {
+      expect(shouldFire({ permission_mode: 'plan' }, { permission_mode: 'plan' })).toBe(true);
+    });
+    it('passes with array form', () => {
+      expect(
+        shouldFire({ permission_mode: ['plan', 'acceptEdits'] }, { permission_mode: 'acceptEdits' })
+      ).toBe(true);
+    });
+    it('reads the camelCase spelling', () => {
+      expect(shouldFire({ permission_mode: 'plan' }, { permissionMode: 'plan' })).toBe(true);
+      expect(shouldFire({ permission_mode: 'plan' }, { permissionMode: 'default' })).toBe(false);
+    });
+    it('skips on an explicit non-listed mode', () => {
+      expect(shouldFire({ permission_mode: 'plan' }, { permission_mode: 'default' })).toBe(false);
+    });
+    it('fails open when the input carries no mode field (harness does not report mode)', () => {
+      expect(shouldFire({ permission_mode: 'plan' }, {})).toBe(true);
+    });
+  });
+
   describe('tool_args_match', () => {
     it('matches against serialized object', () => {
       expect(

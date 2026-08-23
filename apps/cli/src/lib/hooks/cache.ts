@@ -289,6 +289,14 @@ def should_fire():
             if not tn or tn not in allowed:
                 return False
 
+    v = m.get("permission_mode")
+    if v is not None:
+        allowed = arr(v)
+        if allowed:
+            pm = inp.get("permission_mode") or inp.get("permissionMode")
+            if pm and pm not in allowed:
+                return False
+
     v = m.get("tool_args_match")
     if v is not None:
         ta = inp.get("tool_args")

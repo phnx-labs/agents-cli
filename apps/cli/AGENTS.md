@@ -67,7 +67,9 @@ migrator is the single source of truth for legacy handling.
 
 System + user `hooks.yaml` merged, user wins on same name. Per-entry `matches:`
 predicates (`prompt_contains`, `prompt_matches`, `tool_name`, `tool_args_match`,
-`cwd_includes`, `project_has`, `git_dirty`) AND together at fire time. Per-entry
+`cwd_includes`, `project_has`, `git_dirty`, `permission_mode`) AND together at
+fire time — `permission_mode` alone is fail-open on absence, since only some
+harnesses report the live mode in hook input. Per-entry
 `enabled: false` disables a system-shipped hook from the user side. The `agents:`
 field in `ManifestHook` is `@deprecated` — the capability table decides which
 agents register a hook.

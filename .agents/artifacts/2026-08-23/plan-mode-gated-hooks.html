@@ -1,0 +1,413 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Mode-gated hooks: planning hooks fire only in plan mode</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-awaiting-go">awaiting-go</span></div>
+<h1>Mode-gated hooks: planning hooks fire only in plan mode</h1>
+<p class="summary">Claude Code reports the live permission mode to every hook, but offers no declarative mode filter and no custom modes. Gate the planning hook's Stop backstop on permission_mode now; then add a declarative modes: field to agents-cli hook manifests as the durable mechanism.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">permission_mode is a common hook stdin field: default · plan · acceptEdits · auto · dontAsk · bypassPermissions<span class="meta-sep" aria-hidden="true">·</span>No settings-level mode matcher exists; matchers filter by tool name only<span class="meta-sep" aria-hidden="true">·</span>Custom permission modes are not supported — the set of six is fixed<span class="meta-sep" aria-hidden="true">·</span>Exactly 1 of 27 registered .agents-system hooks is planning-related (1 script, 2 registrations)<span class="meta-sep" aria-hidden="true">·</span>0 hooks in .agents-system read permission_mode today<span class="meta-sep" aria-hidden="true">·</span>Live false positive: the Stop backstop blocked this session's Q&amp;A answer on 2026-08-23</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=code.claude.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://code.claude.com/docs/en/hooks" target="_blank" rel="noopener">Claude Code docs — hooks input schema</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=code.claude.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://code.claude.com/docs/en/permission-modes" target="_blank" rel="noopener">Claude Code docs — the six permission modes</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">plan-mode-gated-hooks</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-23</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#intent" data-toc-for="intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Proposed changes</a><a class="toc-item toc-sub" href="#option-1-gate-the-script-ships-today-agents-system-only" data-toc-for="option-1-gate-the-script-ships-today-agents-system-only">Option 1 — gate the script (ships today, .agents-system only)</a><a class="toc-item toc-sub" href="#option-2-declarative-modes-in-agents-cli-manifests-the-durable-mechanism" data-toc-for="option-2-declarative-modes-in-agents-cli-manifests-the-durable-mechanism">Option 2 — declarative modes: in agents-cli manifests (the durable mechanism)</a><a class="toc-item toc-sub" href="#custom-modes-findings-no-work-proposed" data-toc-for="custom-modes-findings-no-work-proposed">Custom modes — findings, no work proposed</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#files" data-toc-for="files"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Files</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ul>
+<li><strong>The one decision: how far to take mode-gating.</strong> Option 1 is a ~6-line early-exit in <code>plan-html-reminder.sh</code> (ships today, fixes the false positive). Option 2 is a declarative <code>modes:</code> field on hook manifests in agents-cli (a real CLI feature: types, sync wiring, a shared gate shim, tests). Recommended: <strong>both, staged</strong> — 1 now, 2 as the durable mechanism.</li>
+<li><strong>Custom modes are off the table.</strong> Claude Code's permission modes are a fixed set of six; there is no supported way to define a seventh. The closest supported stand-ins are custom subagents (<code>.claude/agents/*.md</code>) and skills — no work proposed here unless you want one built.</li>
+<li><strong>Multi-harness safety.</strong> Only Claude Code sends <code>permission_mode</code>. The gate must treat an absent field as "run the hook" so Codex/Grok/Kimi keep the existing transcript-scan backstop.</li>
+</ul>
+<h2 id="intent">Intent</h2><p>Your ask, restated: in <code>~/.agents/.system</code>, make hooks activatable per mode — planning-instruction hooks should run only in plan mode — and check whether Claude Code supports defining a custom mode.</p>
+<div class="artifact-callout">
+<p><strong>Proposal:</strong> gate <code>plan-html-reminder.sh</code>'s Stop path on <code>permission_mode == "plan"</code> now (absent field falls through to today's behavior), then add a declarative <code>modes:</code> field to agents-cli's hook manifests so any hook can be mode-scoped without copy-pasted shell. <strong>No custom mode:</strong> not supported by Claude Code — the six built-in modes are the whole set.</p>
+</div><h2 id="purpose">Purpose</h2><p>Planning-instruction hooks exist to enforce plan presentation; outside plan mode they are pure overhead — a transcript scan on every stop, and (as today's live false positive showed) a wrongful block on ordinary answers that mention the word "plan". Mode-gating removes that noise without weakening the check where it belongs, and the declarative form gives every future hook the same knob for free.</p>
+<h2 id="current-architecture">Current architecture</h2><p>Hooks are declared in two manifests — <code>agents.yaml</code> (<code>hooks:</code> map) and per-subrule <code>hooks.yaml</code> — and <code>agents sync</code> writes them into every harness version home. At runtime the harness sends each hook a JSON blob on stdin. Claude Code includes <code>permission_mode</code> in that blob; <strong>no script reads it today</strong>.</p>
+<p>The only planning hook is one script registered twice:</p>
+<pre><code>rules/subrules/plan-presentation/hooks.yaml
+  plan-html-reminder        PreToolUse  matcher: ExitPlanMode   # inherently plan-only
+  plan-html-stop-reminder   Stop        (no matcher)            # fires on EVERY stop
+</code></pre>
+<p>The Stop registration exists as a backstop for harnesses whose plan mode has no exit tool (Codex). It self-gates by regex-scanning the last assistant message and transcript for plan markers — which is how it blocked today's research answer that merely contained the words "plan" and "option".</p>
+<div class="artifact-figure-diagram">
+<svg viewBox="0 0 960 560" role="img" aria-label="Hook pipeline from manifests through agents sync into harness settings, then the runtime Stop event; today the Stop hook runs in every mode, proposed adds a permission_mode gate" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arB" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#38bdf8"></path></marker>
+    <marker id="arG" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#a3e635"></path></marker>
+    <marker id="arR" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#f87171"></path></marker>
+  </defs>
+
+  <text x="24" y="26" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#a3e635">REGISTRATION — manifests → agents sync → every harness home</text>
+
+  <rect x="24" y="40" width="200" height="78" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="36" y="62" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">agents.yaml  hooks:</text>
+  <text x="36" y="80" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">21 system hooks</text>
+  <text x="36" y="96" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">guards · inject · verify</text>
+
+  <rect x="24" y="130" width="200" height="78" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="36" y="152" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">subrule hooks.yaml</text>
+  <text x="36" y="170" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">6 rule-bundled guards</text>
+  <text x="36" y="186" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#f59e0b">plan-presentation lives here</text>
+
+  <line x1="224" y1="79" x2="292" y2="112" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arB)"></line>
+  <line x1="224" y1="169" x2="292" y2="136" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arB)"></line>
+
+  <rect x="296" y="88" width="180" height="72" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="308" y="112" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">agents sync</text>
+  <text x="308" y="130" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">collectSubruleHooks</text>
+  <text x="308" y="146" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">writes hook registrations</text>
+
+  <line x1="476" y1="124" x2="540" y2="124" stroke="#38bdf8" stroke-width="1.5" marker-end="url(#arB)"></line>
+
+  <rect x="544" y="72" width="392" height="104" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="556" y="94" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">Harness version homes</text>
+  <text x="556" y="114" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">claude settings.json · codex · grok · kimi · cursor · droid</text>
+  <text x="556" y="138" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#f59e0b">only Claude Code sends permission_mode on stdin;</text>
+  <text x="556" y="154" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#f59e0b">other harnesses omit the field entirely</text>
+
+  <text x="24" y="248" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#f87171">TODAY — Stop backstop runs in every session, every mode</text>
+
+  <rect x="24" y="262" width="168" height="64" rx="8" fill="#141018" stroke="#c084fc" stroke-width="1.5"></rect>
+  <text x="36" y="286" font-family="JetBrains Mono, monospace" font-size="11" fill="#c084fc">Stop event</text>
+  <text x="36" y="304" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">any harness, any mode</text>
+
+  <line x1="192" y1="294" x2="256" y2="294" stroke="#f87171" stroke-width="1.5" marker-end="url(#arR)"></line>
+
+  <rect x="260" y="262" width="300" height="64" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="272" y="284" font-family="JetBrains Mono, monospace" font-size="11" fill="#f87171">plan-html-reminder.sh (Stop)</text>
+  <text x="272" y="302" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">regex-scans transcript for plan markers</text>
+  <text x="272" y="318" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">every stop pays the scan</text>
+
+  <line x1="560" y1="294" x2="624" y2="294" stroke="#f87171" stroke-width="1.5" marker-end="url(#arR)"></line>
+
+  <rect x="628" y="262" width="308" height="64" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="640" y="284" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#f87171">False positive (today, this session)</text>
+  <text x="640" y="302" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">Q&amp;A answer mentioning “plan” + “options”</text>
+  <text x="640" y="318" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">blocked; demanded a rendered HTML plan</text>
+
+  <text x="24" y="382" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#a3e635">PROPOSED — permission_mode gate first, transcript scan only as fallback</text>
+
+  <rect x="24" y="396" width="168" height="64" rx="8" fill="#141018" stroke="#c084fc" stroke-width="1.5"></rect>
+  <text x="36" y="420" font-family="JetBrains Mono, monospace" font-size="11" fill="#c084fc">Stop event</text>
+  <text x="36" y="438" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">stdin JSON</text>
+
+  <line x1="192" y1="428" x2="256" y2="428" stroke="#a3e635" stroke-width="1.5" marker-end="url(#arG)"></line>
+
+  <rect x="260" y="392" width="240" height="76" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="272" y="414" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">permission_mode gate</text>
+  <text x="272" y="432" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">"plan" → run the check</text>
+  <text x="272" y="448" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">other value → exit 0 silently</text>
+  <text x="272" y="462" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#f59e0b">absent → fall through (Codex, Grok…)</text>
+
+  <line x1="500" y1="414" x2="564" y2="414" stroke="#a3e635" stroke-width="1.5" marker-end="url(#arG)"></line>
+  <line x1="500" y1="450" x2="564" y2="450" stroke="#38bdf8" stroke-width="1.5" stroke-dasharray="3 3" marker-end="url(#arB)"></line>
+
+  <rect x="568" y="392" width="368" height="40" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="580" y="416" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">plan session → HTML-plan check runs exactly as today</text>
+
+  <rect x="568" y="440" width="368" height="40" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="580" y="464" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#c8c8c8">no-field harness → existing transcript-marker backstop</text>
+
+  <text x="24" y="520" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#8a8a8a">Fixed mode set (no custom modes):</text>
+  <text x="24" y="540" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">plan</text>
+  <text x="70" y="540" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">· default · acceptEdits · auto · dontAsk · bypassPermissions</text>
+</svg>
+</div><p>Caption: registration flows left to right; the two runtime lanes contrast today's fire-everywhere Stop backstop with the proposed mode gate. Harnesses that never send <code>permission_mode</code> keep exactly today's behavior.</p>
+<h2 id="proposed-changes">Proposed changes</h2><h3 id="option-1-gate-the-script-ships-today-agents-system-only">Option 1 — gate the script (ships today, .agents-system only)</h3><p>Early-exit at the top of <code>rules/subrules/plan-presentation/plan-html-reminder.sh</code>, right after the existing stdin parse:</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">tool=$(printf '%s' "$input" | jq -r '(.tool_name // .toolName) // empty' 2&gt;/dev/null) || tool=""</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">event=$(printf '%s' "$input" | jq -r '(.hook_event_name // .hookEventName) // empty' 2&gt;/dev/null) || event=""</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">perm_mode=$(printf '%s' "$input" | jq -r '(.permission_mode // .permissionMode) // empty' 2&gt;/dev/null) || perm_mode=""</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"># Mode gate (Claude Code sends permission_mode; other harnesses omit it).</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"># A reported non-plan mode means this stop cannot be presenting a plan —</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"># skip the transcript scan entirely. Absent field → keep the backstop.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">if [ "$event" = "Stop" ] &amp;&amp; [ -n "$perm_mode" ] &amp;&amp; [ "$perm_mode" != "plan" ]; then</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  exit 0</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">fi</span></span></pre></div><p>The PreToolUse registration needs nothing — its <code>ExitPlanMode</code> matcher already only exists in plan mode.</p>
+<h3 id="option-2-declarative-modes-in-agents-cli-manifests-the-durable-mechanism">Option 2 — declarative <code>modes:</code> in agents-cli manifests (the durable mechanism)</h3><p>Any hook entry may declare the modes it applies to; sync wraps it in one shared gate shim:</p>
+<pre><code># rules/subrules/plan-presentation/hooks.yaml (after)
+plan-html-stop-reminder:
+  script: plan-html-reminder.sh
+  events: [Stop]
+  modes: [plan]        # new — omit = all modes (today's behavior)
+  timeout: 5
+</code></pre>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">// apps/cli/src/lib/types.ts</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">export interface ManifestHook {</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  script: string;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  events: HookEvent[];</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  matcher?: string;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  /** Permission modes this hook fires in; omitted = all. Gated at runtime</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">   *  via hook-mode-gate; harnesses that do not report a mode always run. */</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  modes?: string[];</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  timeout?: number;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">}</span></span></pre></div><p>Sync installs a single <code>hook-mode-gate.sh</code> next to the hooks and registers gated entries as <code>hook-mode-gate.sh plan -- &lt;script&gt;</code>; the shim buffers stdin, checks <code>permission_mode</code> against its arguments (absent field → pass through), and pipes the original stdin to the real script. One implementation, zero per-hook boilerplate, works for every future mode-scoped hook.</p>
+<h3 id="custom-modes-findings-no-work-proposed">Custom modes — findings, no work proposed</h3><p>Permission modes are a fixed set of six; hooks and the <code>--permission-mode</code> flag accept only those. No output-style or custom-mode surface exists in the current docs. Supported stand-ins if a named custom behavior is ever wanted: a custom subagent definition or a skill.</p>
+<h2 id="public-interface">Public Interface</h2><p>The only new public surface is the manifest field. Hook script contracts (stdin JSON, exit codes) are unchanged.</p>
+<pre><code># ManifestHook schema — agents.yaml hooks: entries and subrule hooks.yaml
+&lt;name&gt;:
+  script: &lt;path relative to hooks/ or subrule dir&gt;
+  events: [PreToolUse | PostToolUse | Stop | UserPromptSubmit | SessionStart | Notification]
+  matcher: &lt;tool-name regex&gt;       # existing, optional
+  modes: [plan | default | acceptEdits | auto | dontAsk | bypassPermissions]  # NEW, optional
+  timeout: &lt;seconds&gt;
+</code></pre>
+<p>Omitting <code>modes:</code> keeps today's fire-in-every-mode behavior, so every existing manifest is valid unchanged. A harness that does not report a mode always runs the hook regardless of <code>modes:</code>.</p>
+<h2 id="files">Files</h2><table>
+<thead>
+<tr>
+<th>Change</th>
+<th>File</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Option 1 gate</td>
+<td><code>.agents-system/rules/subrules/plan-presentation/plan-html-reminder.sh</code></td>
+<td>Low — additive early-exit; absent field preserves today's path</td>
+</tr>
+<tr>
+<td>Option 1 test</td>
+<td><code>.agents-system/rules/subrules/plan-presentation/plan-html-reminder_test.sh</code></td>
+<td>Low — add non-plan-mode Stop case + absent-field case</td>
+</tr>
+<tr>
+<td>Option 2 type</td>
+<td><code>agents-cli/apps/cli/src/lib/types.ts</code> (<code>ManifestHook.modes</code>)</td>
+<td>Low</td>
+</tr>
+<tr>
+<td>Option 2 shim + wiring</td>
+<td>hook sync path + new <code>hook-mode-gate.sh</code></td>
+<td>Medium — touches registration for every harness; needs the completeness tests</td>
+</tr>
+<tr>
+<td>Option 2 manifest</td>
+<td><code>.agents-system/rules/subrules/plan-presentation/hooks.yaml</code></td>
+<td>Low — replaces the Option 1 inline gate once landed</td>
+</tr>
+</tbody></table>
+<h2 id="plan">Plan</h2><ol>
+<li>Land Option 1 in <code>.agents-system</code> (worktree + PR): gate + two test cases.</li>
+<li>Verify live: a Claude Code non-plan session stops clean; a plan-mode session still gets the HTML-plan block; a Codex-style stdin (no <code>permission_mode</code>) still triggers the backstop.</li>
+<li>Land Option 2 in agents-cli: <code>modes</code> on <code>ManifestHook</code>, gate shim, sync wiring, tests, docs + CHANGELOG.</li>
+<li>Flip <code>plan-presentation/hooks.yaml</code> to <code>modes: [plan]</code> and drop the inline gate from the script.</li>
+</ol>
+<h2 id="validation">Validation</h2><pre><code># non-plan Stop on Claude Code → silent pass
+printf '{"hook_event_name":"Stop","permission_mode":"default"}' | plan-html-reminder.sh; echo rc=$?
+# plan-mode Stop with no rendered HTML → block (exit 2)
+printf '{"hook_event_name":"Stop","permission_mode":"plan","transcript_path":"..."}' | plan-html-reminder.sh; echo rc=$?
+# no permission_mode field → today's transcript backstop unchanged
+</code></pre>
+<h2 id="risks">Risks</h2><ul>
+<li>A harness that starts sending <code>permission_mode</code> with different semantics (Grok camelCase already handled) could skip a legitimate block — mitigated by only skipping on an explicit non-plan value.</li>
+<li>Option 2's shim must not swallow stdin or exit codes; the existing hook test suites gate this.</li>
+</ul>
+<h2 id="tracking">Tracking</h2><p>Ticket to be filed on approval (one per landed unit: the <code>.agents-system</code> gate PR, the agents-cli <code>modes:</code> PR); ids will be recorded here.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogaW50ZXJuYWwKdGl0bGU6ICJNb2RlLWdhdGVkIGhvb2tzOiBwbGFubmluZyBob29rcyBmaXJlIG9ubHkgaW4gcGxhbiBtb2RlIgpzdW1tYXJ5OiA+CiAgQ2xhdWRlIENvZGUgcmVwb3J0cyB0aGUgbGl2ZSBwZXJtaXNzaW9uIG1vZGUgdG8gZXZlcnkgaG9vaywgYnV0IG9mZmVycyBubwogIGRlY2xhcmF0aXZlIG1vZGUgZmlsdGVyIGFuZCBubyBjdXN0b20gbW9kZXMuIEdhdGUgdGhlIHBsYW5uaW5nIGhvb2sncyBTdG9wCiAgYmFja3N0b3Agb24gcGVybWlzc2lvbl9tb2RlIG5vdzsgdGhlbiBhZGQgYSBkZWNsYXJhdGl2ZSBtb2RlczogZmllbGQgdG8KICBhZ2VudHMtY2xpIGhvb2sgbWFuaWZlc3RzIGFzIHRoZSBkdXJhYmxlIG1lY2hhbmlzbS4Kc3RhdHVzOiBhd2FpdGluZy1nbwpmYWN0czoKICAtICJwZXJtaXNzaW9uX21vZGUgaXMgYSBjb21tb24gaG9vayBzdGRpbiBmaWVsZDogZGVmYXVsdCDCtyBwbGFuIMK3IGFjY2VwdEVkaXRzIMK3IGF1dG8gwrcgZG9udEFzayDCtyBieXBhc3NQZXJtaXNzaW9ucyIKICAtICJObyBzZXR0aW5ncy1sZXZlbCBtb2RlIG1hdGNoZXIgZXhpc3RzOyBtYXRjaGVycyBmaWx0ZXIgYnkgdG9vbCBuYW1lIG9ubHkiCiAgLSAiQ3VzdG9tIHBlcm1pc3Npb24gbW9kZXMgYXJlIG5vdCBzdXBwb3J0ZWQg4oCUIHRoZSBzZXQgb2Ygc2l4IGlzIGZpeGVkIgogIC0gIkV4YWN0bHkgMSBvZiAyNyByZWdpc3RlcmVkIC5hZ2VudHMtc3lzdGVtIGhvb2tzIGlzIHBsYW5uaW5nLXJlbGF0ZWQgKDEgc2NyaXB0LCAyIHJlZ2lzdHJhdGlvbnMpIgogIC0gIjAgaG9va3MgaW4gLmFnZW50cy1zeXN0ZW0gcmVhZCBwZXJtaXNzaW9uX21vZGUgdG9kYXkiCiAgLSAiTGl2ZSBmYWxzZSBwb3NpdGl2ZTogdGhlIFN0b3AgYmFja3N0b3AgYmxvY2tlZCB0aGlzIHNlc3Npb24ncyBRJkEgYW5zd2VyIG9uIDIwMjYtMDgtMjMiCmxpbmtzOgogIC0gdXJsOiBodHRwczovL2NvZGUuY2xhdWRlLmNvbS9kb2NzL2VuL2hvb2tzCiAgICBsYWJlbDogIkNsYXVkZSBDb2RlIGRvY3Mg4oCUIGhvb2tzIGlucHV0IHNjaGVtYSIKICAtIHVybDogaHR0cHM6Ly9jb2RlLmNsYXVkZS5jb20vZG9jcy9lbi9wZXJtaXNzaW9uLW1vZGVzCiAgICBsYWJlbDogIkNsYXVkZSBDb2RlIGRvY3Mg4oCUIHRoZSBzaXggcGVybWlzc2lvbiBtb2RlcyIKLS0tCgojIyBGb2N1cyBmb3IgcmV2aWV3CgotICoqVGhlIG9uZSBkZWNpc2lvbjogaG93IGZhciB0byB0YWtlIG1vZGUtZ2F0aW5nLioqIE9wdGlvbiAxIGlzIGEgfjYtbGluZSBlYXJseS1leGl0IGluIGBwbGFuLWh0bWwtcmVtaW5kZXIuc2hgIChzaGlwcyB0b2RheSwgZml4ZXMgdGhlIGZhbHNlIHBvc2l0aXZlKS4gT3B0aW9uIDIgaXMgYSBkZWNsYXJhdGl2ZSBgbW9kZXM6YCBmaWVsZCBvbiBob29rIG1hbmlmZXN0cyBpbiBhZ2VudHMtY2xpIChhIHJlYWwgQ0xJIGZlYXR1cmU6IHR5cGVzLCBzeW5jIHdpcmluZywgYSBzaGFyZWQgZ2F0ZSBzaGltLCB0ZXN0cykuIFJlY29tbWVuZGVkOiAqKmJvdGgsIHN0YWdlZCoqIOKAlCAxIG5vdywgMiBhcyB0aGUgZHVyYWJsZSBtZWNoYW5pc20uCi0gKipDdXN0b20gbW9kZXMgYXJlIG9mZiB0aGUgdGFibGUuKiogQ2xhdWRlIENvZGUncyBwZXJtaXNzaW9uIG1vZGVzIGFyZSBhIGZpeGVkIHNldCBvZiBzaXg7IHRoZXJlIGlzIG5vIHN1cHBvcnRlZCB3YXkgdG8gZGVmaW5lIGEgc2V2ZW50aC4gVGhlIGNsb3Nlc3Qgc3VwcG9ydGVkIHN0YW5kLWlucyBhcmUgY3VzdG9tIHN1YmFnZW50cyAoYC5jbGF1ZGUvYWdlbnRzLyoubWRgKSBhbmQgc2tpbGxzIOKAlCBubyB3b3JrIHByb3Bvc2VkIGhlcmUgdW5sZXNzIHlvdSB3YW50IG9uZSBidWlsdC4KLSAqKk11bHRpLWhhcm5lc3Mgc2FmZXR5LioqIE9ubHkgQ2xhdWRlIENvZGUgc2VuZHMgYHBlcm1pc3Npb25fbW9kZWAuIFRoZSBnYXRlIG11c3QgdHJlYXQgYW4gYWJzZW50IGZpZWxkIGFzICJydW4gdGhlIGhvb2siIHNvIENvZGV4L0dyb2svS2ltaSBrZWVwIHRoZSBleGlzdGluZyB0cmFuc2NyaXB0LXNjYW4gYmFja3N0b3AuCgojIyBJbnRlbnQKCllvdXIgYXNrLCByZXN0YXRlZDogaW4gYH4vLmFnZW50cy8uc3lzdGVtYCwgbWFrZSBob29rcyBhY3RpdmF0YWJsZSBwZXIgbW9kZSDigJQgcGxhbm5pbmctaW5zdHJ1Y3Rpb24gaG9va3Mgc2hvdWxkIHJ1biBvbmx5IGluIHBsYW4gbW9kZSDigJQgYW5kIGNoZWNrIHdoZXRoZXIgQ2xhdWRlIENvZGUgc3VwcG9ydHMgZGVmaW5pbmcgYSBjdXN0b20gbW9kZS4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPgo8cD48c3Ryb25nPlByb3Bvc2FsOjwvc3Ryb25nPiBnYXRlIDxjb2RlPnBsYW4taHRtbC1yZW1pbmRlci5zaDwvY29kZT4ncyBTdG9wIHBhdGggb24gPGNvZGU+cGVybWlzc2lvbl9tb2RlID09ICJwbGFuIjwvY29kZT4gbm93IChhYnNlbnQgZmllbGQgZmFsbHMgdGhyb3VnaCB0byB0b2RheSdzIGJlaGF2aW9yKSwgdGhlbiBhZGQgYSBkZWNsYXJhdGl2ZSA8Y29kZT5tb2Rlczo8L2NvZGU+IGZpZWxkIHRvIGFnZW50cy1jbGkncyBob29rIG1hbmlmZXN0cyBzbyBhbnkgaG9vayBjYW4gYmUgbW9kZS1zY29wZWQgd2l0aG91dCBjb3B5LXBhc3RlZCBzaGVsbC4gPHN0cm9uZz5ObyBjdXN0b20gbW9kZTo8L3N0cm9uZz4gbm90IHN1cHBvcnRlZCBieSBDbGF1ZGUgQ29kZSDigJQgdGhlIHNpeCBidWlsdC1pbiBtb2RlcyBhcmUgdGhlIHdob2xlIHNldC48L3A+CjwvZGl2PgoKIyMgUHVycG9zZQoKUGxhbm5pbmctaW5zdHJ1Y3Rpb24gaG9va3MgZXhpc3QgdG8gZW5mb3JjZSBwbGFuIHByZXNlbnRhdGlvbjsgb3V0c2lkZSBwbGFuIG1vZGUgdGhleSBhcmUgcHVyZSBvdmVyaGVhZCDigJQgYSB0cmFuc2NyaXB0IHNjYW4gb24gZXZlcnkgc3RvcCwgYW5kIChhcyB0b2RheSdzIGxpdmUgZmFsc2UgcG9zaXRpdmUgc2hvd2VkKSBhIHdyb25nZnVsIGJsb2NrIG9uIG9yZGluYXJ5IGFuc3dlcnMgdGhhdCBtZW50aW9uIHRoZSB3b3JkICJwbGFuIi4gTW9kZS1nYXRpbmcgcmVtb3ZlcyB0aGF0IG5vaXNlIHdpdGhvdXQgd2Vha2VuaW5nIHRoZSBjaGVjayB3aGVyZSBpdCBiZWxvbmdzLCBhbmQgdGhlIGRlY2xhcmF0aXZlIGZvcm0gZ2l2ZXMgZXZlcnkgZnV0dXJlIGhvb2sgdGhlIHNhbWUga25vYiBmb3IgZnJlZS4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgpIb29rcyBhcmUgZGVjbGFyZWQgaW4gdHdvIG1hbmlmZXN0cyDigJQgYGFnZW50cy55YW1sYCAoYGhvb2tzOmAgbWFwKSBhbmQgcGVyLXN1YnJ1bGUgYGhvb2tzLnlhbWxgIOKAlCBhbmQgYGFnZW50cyBzeW5jYCB3cml0ZXMgdGhlbSBpbnRvIGV2ZXJ5IGhhcm5lc3MgdmVyc2lvbiBob21lLiBBdCBydW50aW1lIHRoZSBoYXJuZXNzIHNlbmRzIGVhY2ggaG9vayBhIEpTT04gYmxvYiBvbiBzdGRpbi4gQ2xhdWRlIENvZGUgaW5jbHVkZXMgYHBlcm1pc3Npb25fbW9kZWAgaW4gdGhhdCBibG9iOyAqKm5vIHNjcmlwdCByZWFkcyBpdCB0b2RheSoqLgoKVGhlIG9ubHkgcGxhbm5pbmcgaG9vayBpcyBvbmUgc2NyaXB0IHJlZ2lzdGVyZWQgdHdpY2U6CgpgYGAKcnVsZXMvc3VicnVsZXMvcGxhbi1wcmVzZW50YXRpb24vaG9va3MueWFtbAogIHBsYW4taHRtbC1yZW1pbmRlciAgICAgICAgUHJlVG9vbFVzZSAgbWF0Y2hlcjogRXhpdFBsYW5Nb2RlICAgIyBpbmhlcmVudGx5IHBsYW4tb25seQogIHBsYW4taHRtbC1zdG9wLXJlbWluZGVyICAgU3RvcCAgICAgICAgKG5vIG1hdGNoZXIpICAgICAgICAgICAgIyBmaXJlcyBvbiBFVkVSWSBzdG9wCmBgYAoKVGhlIFN0b3AgcmVnaXN0cmF0aW9uIGV4aXN0cyBhcyBhIGJhY2tzdG9wIGZvciBoYXJuZXNzZXMgd2hvc2UgcGxhbiBtb2RlIGhhcyBubyBleGl0IHRvb2wgKENvZGV4KS4gSXQgc2VsZi1nYXRlcyBieSByZWdleC1zY2FubmluZyB0aGUgbGFzdCBhc3Npc3RhbnQgbWVzc2FnZSBhbmQgdHJhbnNjcmlwdCBmb3IgcGxhbiBtYXJrZXJzIOKAlCB3aGljaCBpcyBob3cgaXQgYmxvY2tlZCB0b2RheSdzIHJlc2VhcmNoIGFuc3dlciB0aGF0IG1lcmVseSBjb250YWluZWQgdGhlIHdvcmRzICJwbGFuIiBhbmQgIm9wdGlvbiIuCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSI+Cjxzdmcgdmlld0JveD0iMCAwIDk2MCA1NjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iSG9vayBwaXBlbGluZSBmcm9tIG1hbmlmZXN0cyB0aHJvdWdoIGFnZW50cyBzeW5jIGludG8gaGFybmVzcyBzZXR0aW5ncywgdGhlbiB0aGUgcnVudGltZSBTdG9wIGV2ZW50OyB0b2RheSB0aGUgU3RvcCBob29rIHJ1bnMgaW4gZXZlcnkgbW9kZSwgcHJvcG9zZWQgYWRkcyBhIHBlcm1pc3Npb25fbW9kZSBnYXRlIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDxkZWZzPgogICAgPG1hcmtlciBpZD0iYXJCIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI3IiByZWZZPSI0IiBvcmllbnQ9ImF1dG8iPjxwYXRoIGQ9Ik0wLDAgTDgsNCBMMCw4IHoiIGZpbGw9IiMzOGJkZjgiLz48L21hcmtlcj4KICAgIDxtYXJrZXIgaWQ9ImFyRyIgbWFya2VyV2lkdGg9IjkiIG1hcmtlckhlaWdodD0iOSIgcmVmWD0iNyIgcmVmWT0iNCIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEw4LDQgTDAsOCB6IiBmaWxsPSIjYTNlNjM1Ii8+PC9tYXJrZXI+CiAgICA8bWFya2VyIGlkPSJhclIiIG1hcmtlcldpZHRoPSI5IiBtYXJrZXJIZWlnaHQ9IjkiIHJlZlg9IjciIHJlZlk9IjQiIG9yaWVudD0iYXV0byI+PHBhdGggZD0iTTAsMCBMOCw0IEwwLDggeiIgZmlsbD0iI2Y4NzE3MSIvPjwvbWFya2VyPgogIDwvZGVmcz4KCiAgPHRleHQgeD0iMjQiIHk9IjI2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2EzZTYzNSI+UkVHSVNUUkFUSU9OIOKAlCBtYW5pZmVzdHMg4oaSIGFnZW50cyBzeW5jIOKGkiBldmVyeSBoYXJuZXNzIGhvbWU8L3RleHQ+CgogIDxyZWN0IHg9IjI0IiB5PSI0MCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSI3OCIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNiIgeT0iNjIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjYTNlNjM1Ij5hZ2VudHMueWFtbCAgaG9va3M6PC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSI4MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNjOGM4YzgiPjIxIHN5c3RlbSBob29rczwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iOTYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5ndWFyZHMgwrcgaW5qZWN0IMK3IHZlcmlmeTwvdGV4dD4KCiAgPHJlY3QgeD0iMjQiIHk9IjEzMCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSI3OCIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNiIgeT0iMTUyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2EzZTYzNSI+c3VicnVsZSBob29rcy55YW1sPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSIxNzAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjYzhjOGM4Ij42IHJ1bGUtYnVuZGxlZCBndWFyZHM8L3RleHQ+CiAgPHRleHQgeD0iMzYiIHk9IjE4NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNmNTllMGIiPnBsYW4tcHJlc2VudGF0aW9uIGxpdmVzIGhlcmU8L3RleHQ+CgogIDxsaW5lIHgxPSIyMjQiIHkxPSI3OSIgeDI9IjI5MiIgeTI9IjExMiIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhckIpIi8+CiAgPGxpbmUgeDE9IjIyNCIgeTE9IjE2OSIgeDI9IjI5MiIgeTI9IjEzNiIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhckIpIi8+CgogIDxyZWN0IHg9IjI5NiIgeT0iODgiIHdpZHRoPSIxODAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzA4IiB5PSIxMTIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjMzhiZGY4Ij5hZ2VudHMgc3luYzwvdGV4dD4KICA8dGV4dCB4PSIzMDgiIHk9IjEzMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNjOGM4YzgiPmNvbGxlY3RTdWJydWxlSG9va3M8L3RleHQ+CiAgPHRleHQgeD0iMzA4IiB5PSIxNDYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj53cml0ZXMgaG9vayByZWdpc3RyYXRpb25zPC90ZXh0PgoKICA8bGluZSB4MT0iNDc2IiB5MT0iMTI0IiB4Mj0iNTQwIiB5Mj0iMTI0IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FyQikiLz4KCiAgPHJlY3QgeD0iNTQ0IiB5PSI3MiIgd2lkdGg9IjM5MiIgaGVpZ2h0PSIxMDQiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTU2IiB5PSI5NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPkhhcm5lc3MgdmVyc2lvbiBob21lczwvdGV4dD4KICA8dGV4dCB4PSI1NTYiIHk9IjExNCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmNsYXVkZSBzZXR0aW5ncy5qc29uIMK3IGNvZGV4IMK3IGdyb2sgwrcga2ltaSDCtyBjdXJzb3IgwrcgZHJvaWQ8L3RleHQ+CiAgPHRleHQgeD0iNTU2IiB5PSIxMzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZjU5ZTBiIj5vbmx5IENsYXVkZSBDb2RlIHNlbmRzIHBlcm1pc3Npb25fbW9kZSBvbiBzdGRpbjs8L3RleHQ+CiAgPHRleHQgeD0iNTU2IiB5PSIxNTQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjZjU5ZTBiIj5vdGhlciBoYXJuZXNzZXMgb21pdCB0aGUgZmllbGQgZW50aXJlbHk8L3RleHQ+CgogIDx0ZXh0IHg9IjI0IiB5PSIyNDgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjZjg3MTcxIj5UT0RBWSDigJQgU3RvcCBiYWNrc3RvcCBydW5zIGluIGV2ZXJ5IHNlc3Npb24sIGV2ZXJ5IG1vZGU8L3RleHQ+CgogIDxyZWN0IHg9IjI0IiB5PSIyNjIiIHdpZHRoPSIxNjgiIGhlaWdodD0iNjQiIHJ4PSI4IiBmaWxsPSIjMTQxMDE4IiBzdHJva2U9IiNjMDg0ZmMiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzYiIHk9IjI4NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjMDg0ZmMiPlN0b3AgZXZlbnQ8L3RleHQ+CiAgPHRleHQgeD0iMzYiIHk9IjMwNCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmFueSBoYXJuZXNzLCBhbnkgbW9kZTwvdGV4dD4KCiAgPGxpbmUgeDE9IjE5MiIgeTE9IjI5NCIgeDI9IjI1NiIgeTI9IjI5NCIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhclIpIi8+CgogIDxyZWN0IHg9IjI2MCIgeT0iMjYyIiB3aWR0aD0iMzAwIiBoZWlnaHQ9IjY0IiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI3MiIgeT0iMjg0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y4NzE3MSI+cGxhbi1odG1sLXJlbWluZGVyLnNoIChTdG9wKTwvdGV4dD4KICA8dGV4dCB4PSIyNzIiIHk9IjMwMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiNjOGM4YzgiPnJlZ2V4LXNjYW5zIHRyYW5zY3JpcHQgZm9yIHBsYW4gbWFya2VyczwvdGV4dD4KICA8dGV4dCB4PSIyNzIiIHk9IjMxOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmV2ZXJ5IHN0b3AgcGF5cyB0aGUgc2NhbjwvdGV4dD4KCiAgPGxpbmUgeDE9IjU2MCIgeTE9IjI5NCIgeDI9IjYyNCIgeTI9IjI5NCIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhclIpIi8+CgogIDxyZWN0IHg9IjYyOCIgeT0iMjYyIiB3aWR0aD0iMzA4IiBoZWlnaHQ9IjY0IiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjY0MCIgeT0iMjg0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y4NzE3MSI+RmFsc2UgcG9zaXRpdmUgKHRvZGF5LCB0aGlzIHNlc3Npb24pPC90ZXh0PgogIDx0ZXh0IHg9IjY0MCIgeT0iMzAyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2M4YzhjOCI+USZhbXA7QSBhbnN3ZXIgbWVudGlvbmluZyDigJxwbGFu4oCdICsg4oCcb3B0aW9uc+KAnTwvdGV4dD4KICA8dGV4dCB4PSI2NDAiIHk9IjMxOCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmJsb2NrZWQ7IGRlbWFuZGVkIGEgcmVuZGVyZWQgSFRNTCBwbGFuPC90ZXh0PgoKICA8dGV4dCB4PSIyNCIgeT0iMzgyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2EzZTYzNSI+UFJPUE9TRUQg4oCUIHBlcm1pc3Npb25fbW9kZSBnYXRlIGZpcnN0LCB0cmFuc2NyaXB0IHNjYW4gb25seSBhcyBmYWxsYmFjazwvdGV4dD4KCiAgPHJlY3QgeD0iMjQiIHk9IjM5NiIgd2lkdGg9IjE2OCIgaGVpZ2h0PSI2NCIgcng9IjgiIGZpbGw9IiMxNDEwMTgiIHN0cm9rZT0iI2MwODRmYyIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNiIgeT0iNDIwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2MwODRmYyI+U3RvcCBldmVudDwvdGV4dD4KICA8dGV4dCB4PSIzNiIgeT0iNDM4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+c3RkaW4gSlNPTjwvdGV4dD4KCiAgPGxpbmUgeDE9IjE5MiIgeTE9IjQyOCIgeDI9IjI1NiIgeTI9IjQyOCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhckcpIi8+CgogIDxyZWN0IHg9IjI2MCIgeT0iMzkyIiB3aWR0aD0iMjQwIiBoZWlnaHQ9Ijc2IiByeD0iOCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI3MiIgeT0iNDE0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2EzZTYzNSI+cGVybWlzc2lvbl9tb2RlIGdhdGU8L3RleHQ+CiAgPHRleHQgeD0iMjcyIiB5PSI0MzIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjYzhjOGM4Ij4icGxhbiIg4oaSIHJ1biB0aGUgY2hlY2s8L3RleHQ+CiAgPHRleHQgeD0iMjcyIiB5PSI0NDgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjYzhjOGM4Ij5vdGhlciB2YWx1ZSDihpIgZXhpdCAwIHNpbGVudGx5PC90ZXh0PgogIDx0ZXh0IHg9IjI3MiIgeT0iNDYyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2Y1OWUwYiI+YWJzZW50IOKGkiBmYWxsIHRocm91Z2ggKENvZGV4LCBHcm9r4oCmKTwvdGV4dD4KCiAgPGxpbmUgeDE9IjUwMCIgeTE9IjQxNCIgeDI9IjU2NCIgeTI9IjQxNCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhckcpIi8+CiAgPGxpbmUgeDE9IjUwMCIgeTE9IjQ1MCIgeDI9IjU2NCIgeTI9IjQ1MCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBtYXJrZXItZW5kPSJ1cmwoI2FyQikiLz4KCiAgPHJlY3QgeD0iNTY4IiB5PSIzOTIiIHdpZHRoPSIzNjgiIGhlaWdodD0iNDAiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTgwIiB5PSI0MTYiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjYzhjOGM4Ij5wbGFuIHNlc3Npb24g4oaSIEhUTUwtcGxhbiBjaGVjayBydW5zIGV4YWN0bHkgYXMgdG9kYXk8L3RleHQ+CgogIDxyZWN0IHg9IjU2OCIgeT0iNDQwIiB3aWR0aD0iMzY4IiBoZWlnaHQ9IjQwIiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU4MCIgeT0iNDY0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2M4YzhjOCI+bm8tZmllbGQgaGFybmVzcyDihpIgZXhpc3RpbmcgdHJhbnNjcmlwdC1tYXJrZXIgYmFja3N0b3A8L3RleHQ+CgogIDx0ZXh0IHg9IjI0IiB5PSI1MjAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIj5GaXhlZCBtb2RlIHNldCAobm8gY3VzdG9tIG1vZGVzKTo8L3RleHQ+CiAgPHRleHQgeD0iMjQiIHk9IjU0MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPnBsYW48L3RleHQ+CiAgPHRleHQgeD0iNzAiIHk9IjU0MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiM4YThhOGEiPsK3IGRlZmF1bHQgwrcgYWNjZXB0RWRpdHMgwrcgYXV0byDCtyBkb250QXNrIMK3IGJ5cGFzc1Blcm1pc3Npb25zPC90ZXh0Pgo8L3N2Zz4KPC9kaXY+CgpDYXB0aW9uOiByZWdpc3RyYXRpb24gZmxvd3MgbGVmdCB0byByaWdodDsgdGhlIHR3byBydW50aW1lIGxhbmVzIGNvbnRyYXN0IHRvZGF5J3MgZmlyZS1ldmVyeXdoZXJlIFN0b3AgYmFja3N0b3Agd2l0aCB0aGUgcHJvcG9zZWQgbW9kZSBnYXRlLiBIYXJuZXNzZXMgdGhhdCBuZXZlciBzZW5kIGBwZXJtaXNzaW9uX21vZGVgIGtlZXAgZXhhY3RseSB0b2RheSdzIGJlaGF2aW9yLgoKIyMgUHJvcG9zZWQgY2hhbmdlcwoKIyMjIE9wdGlvbiAxIOKAlCBnYXRlIHRoZSBzY3JpcHQgKHNoaXBzIHRvZGF5LCAuYWdlbnRzLXN5c3RlbSBvbmx5KQoKRWFybHktZXhpdCBhdCB0aGUgdG9wIG9mIGBydWxlcy9zdWJydWxlcy9wbGFuLXByZXNlbnRhdGlvbi9wbGFuLWh0bWwtcmVtaW5kZXIuc2hgLCByaWdodCBhZnRlciB0aGUgZXhpc3Rpbmcgc3RkaW4gcGFyc2U6CgpgYGBkaWZmCiB0b29sPSQocHJpbnRmICclcycgIiRpbnB1dCIgfCBqcSAtciAnKC50b29sX25hbWUgLy8gLnRvb2xOYW1lKSAvLyBlbXB0eScgMj4vZGV2L251bGwpIHx8IHRvb2w9IiIKIGV2ZW50PSQocHJpbnRmICclcycgIiRpbnB1dCIgfCBqcSAtciAnKC5ob29rX2V2ZW50X25hbWUgLy8gLmhvb2tFdmVudE5hbWUpIC8vIGVtcHR5JyAyPi9kZXYvbnVsbCkgfHwgZXZlbnQ9IiIKK3Blcm1fbW9kZT0kKHByaW50ZiAnJXMnICIkaW5wdXQiIHwganEgLXIgJygucGVybWlzc2lvbl9tb2RlIC8vIC5wZXJtaXNzaW9uTW9kZSkgLy8gZW1wdHknIDI+L2Rldi9udWxsKSB8fCBwZXJtX21vZGU9IiIKKworIyBNb2RlIGdhdGUgKENsYXVkZSBDb2RlIHNlbmRzIHBlcm1pc3Npb25fbW9kZTsgb3RoZXIgaGFybmVzc2VzIG9taXQgaXQpLgorIyBBIHJlcG9ydGVkIG5vbi1wbGFuIG1vZGUgbWVhbnMgdGhpcyBzdG9wIGNhbm5vdCBiZSBwcmVzZW50aW5nIGEgcGxhbiDigJQKKyMgc2tpcCB0aGUgdHJhbnNjcmlwdCBzY2FuIGVudGlyZWx5LiBBYnNlbnQgZmllbGQg4oaSIGtlZXAgdGhlIGJhY2tzdG9wLgoraWYgWyAiJGV2ZW50IiA9ICJTdG9wIiBdICYmIFsgLW4gIiRwZXJtX21vZGUiIF0gJiYgWyAiJHBlcm1fbW9kZSIgIT0gInBsYW4iIF07IHRoZW4KKyAgZXhpdCAwCitmaQpgYGAKClRoZSBQcmVUb29sVXNlIHJlZ2lzdHJhdGlvbiBuZWVkcyBub3RoaW5nIOKAlCBpdHMgYEV4aXRQbGFuTW9kZWAgbWF0Y2hlciBhbHJlYWR5IG9ubHkgZXhpc3RzIGluIHBsYW4gbW9kZS4KCiMjIyBPcHRpb24gMiDigJQgZGVjbGFyYXRpdmUgYG1vZGVzOmAgaW4gYWdlbnRzLWNsaSBtYW5pZmVzdHMgKHRoZSBkdXJhYmxlIG1lY2hhbmlzbSkKCkFueSBob29rIGVudHJ5IG1heSBkZWNsYXJlIHRoZSBtb2RlcyBpdCBhcHBsaWVzIHRvOyBzeW5jIHdyYXBzIGl0IGluIG9uZSBzaGFyZWQgZ2F0ZSBzaGltOgoKYGBgeWFtbAojIHJ1bGVzL3N1YnJ1bGVzL3BsYW4tcHJlc2VudGF0aW9uL2hvb2tzLnlhbWwgKGFmdGVyKQpwbGFuLWh0bWwtc3RvcC1yZW1pbmRlcjoKICBzY3JpcHQ6IHBsYW4taHRtbC1yZW1pbmRlci5zaAogIGV2ZW50czogW1N0b3BdCiAgbW9kZXM6IFtwbGFuXSAgICAgICAgIyBuZXcg4oCUIG9taXQgPSBhbGwgbW9kZXMgKHRvZGF5J3MgYmVoYXZpb3IpCiAgdGltZW91dDogNQpgYGAKCmBgYGRpZmYKIC8vIGFwcHMvY2xpL3NyYy9saWIvdHlwZXMudHMKIGV4cG9ydCBpbnRlcmZhY2UgTWFuaWZlc3RIb29rIHsKICAgc2NyaXB0OiBzdHJpbmc7CiAgIGV2ZW50czogSG9va0V2ZW50W107CiAgIG1hdGNoZXI/OiBzdHJpbmc7CisgIC8qKiBQZXJtaXNzaW9uIG1vZGVzIHRoaXMgaG9vayBmaXJlcyBpbjsgb21pdHRlZCA9IGFsbC4gR2F0ZWQgYXQgcnVudGltZQorICAgKiAgdmlhIGhvb2stbW9kZS1nYXRlOyBoYXJuZXNzZXMgdGhhdCBkbyBub3QgcmVwb3J0IGEgbW9kZSBhbHdheXMgcnVuLiAqLworICBtb2Rlcz86IHN0cmluZ1tdOwogICB0aW1lb3V0PzogbnVtYmVyOwogfQpgYGAKClN5bmMgaW5zdGFsbHMgYSBzaW5nbGUgYGhvb2stbW9kZS1nYXRlLnNoYCBuZXh0IHRvIHRoZSBob29rcyBhbmQgcmVnaXN0ZXJzIGdhdGVkIGVudHJpZXMgYXMgYGhvb2stbW9kZS1nYXRlLnNoIHBsYW4gLS0gPHNjcmlwdD5gOyB0aGUgc2hpbSBidWZmZXJzIHN0ZGluLCBjaGVja3MgYHBlcm1pc3Npb25fbW9kZWAgYWdhaW5zdCBpdHMgYXJndW1lbnRzIChhYnNlbnQgZmllbGQg4oaSIHBhc3MgdGhyb3VnaCksIGFuZCBwaXBlcyB0aGUgb3JpZ2luYWwgc3RkaW4gdG8gdGhlIHJlYWwgc2NyaXB0LiBPbmUgaW1wbGVtZW50YXRpb24sIHplcm8gcGVyLWhvb2sgYm9pbGVycGxhdGUsIHdvcmtzIGZvciBldmVyeSBmdXR1cmUgbW9kZS1zY29wZWQgaG9vay4KCiMjIyBDdXN0b20gbW9kZXMg4oCUIGZpbmRpbmdzLCBubyB3b3JrIHByb3Bvc2VkCgpQZXJtaXNzaW9uIG1vZGVzIGFyZSBhIGZpeGVkIHNldCBvZiBzaXg7IGhvb2tzIGFuZCB0aGUgYC0tcGVybWlzc2lvbi1tb2RlYCBmbGFnIGFjY2VwdCBvbmx5IHRob3NlLiBObyBvdXRwdXQtc3R5bGUgb3IgY3VzdG9tLW1vZGUgc3VyZmFjZSBleGlzdHMgaW4gdGhlIGN1cnJlbnQgZG9jcy4gU3VwcG9ydGVkIHN0YW5kLWlucyBpZiBhIG5hbWVkIGN1c3RvbSBiZWhhdmlvciBpcyBldmVyIHdhbnRlZDogYSBjdXN0b20gc3ViYWdlbnQgZGVmaW5pdGlvbiBvciBhIHNraWxsLgoKIyMgUHVibGljIEludGVyZmFjZQoKVGhlIG9ubHkgbmV3IHB1YmxpYyBzdXJmYWNlIGlzIHRoZSBtYW5pZmVzdCBmaWVsZC4gSG9vayBzY3JpcHQgY29udHJhY3RzIChzdGRpbiBKU09OLCBleGl0IGNvZGVzKSBhcmUgdW5jaGFuZ2VkLgoKYGBgeWFtbAojIE1hbmlmZXN0SG9vayBzY2hlbWEg4oCUIGFnZW50cy55YW1sIGhvb2tzOiBlbnRyaWVzIGFuZCBzdWJydWxlIGhvb2tzLnlhbWwKPG5hbWU+OgogIHNjcmlwdDogPHBhdGggcmVsYXRpdmUgdG8gaG9va3MvIG9yIHN1YnJ1bGUgZGlyPgogIGV2ZW50czogW1ByZVRvb2xVc2UgfCBQb3N0VG9vbFVzZSB8IFN0b3AgfCBVc2VyUHJvbXB0U3VibWl0IHwgU2Vzc2lvblN0YXJ0IHwgTm90aWZpY2F0aW9uXQogIG1hdGNoZXI6IDx0b29sLW5hbWUgcmVnZXg+ICAgICAgICMgZXhpc3RpbmcsIG9wdGlvbmFsCiAgbW9kZXM6IFtwbGFuIHwgZGVmYXVsdCB8IGFjY2VwdEVkaXRzIHwgYXV0byB8IGRvbnRBc2sgfCBieXBhc3NQZXJtaXNzaW9uc10gICMgTkVXLCBvcHRpb25hbAogIHRpbWVvdXQ6IDxzZWNvbmRzPgpgYGAKCk9taXR0aW5nIGBtb2RlczpgIGtlZXBzIHRvZGF5J3MgZmlyZS1pbi1ldmVyeS1tb2RlIGJlaGF2aW9yLCBzbyBldmVyeSBleGlzdGluZyBtYW5pZmVzdCBpcyB2YWxpZCB1bmNoYW5nZWQuIEEgaGFybmVzcyB0aGF0IGRvZXMgbm90IHJlcG9ydCBhIG1vZGUgYWx3YXlzIHJ1bnMgdGhlIGhvb2sgcmVnYXJkbGVzcyBvZiBgbW9kZXM6YC4KCiMjIEZpbGVzCgp8IENoYW5nZSB8IEZpbGUgfCBSaXNrIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IE9wdGlvbiAxIGdhdGUgfCBgLmFnZW50cy1zeXN0ZW0vcnVsZXMvc3VicnVsZXMvcGxhbi1wcmVzZW50YXRpb24vcGxhbi1odG1sLXJlbWluZGVyLnNoYCB8IExvdyDigJQgYWRkaXRpdmUgZWFybHktZXhpdDsgYWJzZW50IGZpZWxkIHByZXNlcnZlcyB0b2RheSdzIHBhdGggfAp8IE9wdGlvbiAxIHRlc3QgfCBgLmFnZW50cy1zeXN0ZW0vcnVsZXMvc3VicnVsZXMvcGxhbi1wcmVzZW50YXRpb24vcGxhbi1odG1sLXJlbWluZGVyX3Rlc3Quc2hgIHwgTG93IOKAlCBhZGQgbm9uLXBsYW4tbW9kZSBTdG9wIGNhc2UgKyBhYnNlbnQtZmllbGQgY2FzZSB8CnwgT3B0aW9uIDIgdHlwZSB8IGBhZ2VudHMtY2xpL2FwcHMvY2xpL3NyYy9saWIvdHlwZXMudHNgIChgTWFuaWZlc3RIb29rLm1vZGVzYCkgfCBMb3cgfAp8IE9wdGlvbiAyIHNoaW0gKyB3aXJpbmcgfCBob29rIHN5bmMgcGF0aCArIG5ldyBgaG9vay1tb2RlLWdhdGUuc2hgIHwgTWVkaXVtIOKAlCB0b3VjaGVzIHJlZ2lzdHJhdGlvbiBmb3IgZXZlcnkgaGFybmVzczsgbmVlZHMgdGhlIGNvbXBsZXRlbmVzcyB0ZXN0cyB8CnwgT3B0aW9uIDIgbWFuaWZlc3QgfCBgLmFnZW50cy1zeXN0ZW0vcnVsZXMvc3VicnVsZXMvcGxhbi1wcmVzZW50YXRpb24vaG9va3MueWFtbGAgfCBMb3cg4oCUIHJlcGxhY2VzIHRoZSBPcHRpb24gMSBpbmxpbmUgZ2F0ZSBvbmNlIGxhbmRlZCB8CgojIyBQbGFuCgoxLiBMYW5kIE9wdGlvbiAxIGluIGAuYWdlbnRzLXN5c3RlbWAgKHdvcmt0cmVlICsgUFIpOiBnYXRlICsgdHdvIHRlc3QgY2FzZXMuCjIuIFZlcmlmeSBsaXZlOiBhIENsYXVkZSBDb2RlIG5vbi1wbGFuIHNlc3Npb24gc3RvcHMgY2xlYW47IGEgcGxhbi1tb2RlIHNlc3Npb24gc3RpbGwgZ2V0cyB0aGUgSFRNTC1wbGFuIGJsb2NrOyBhIENvZGV4LXN0eWxlIHN0ZGluIChubyBgcGVybWlzc2lvbl9tb2RlYCkgc3RpbGwgdHJpZ2dlcnMgdGhlIGJhY2tzdG9wLgozLiBMYW5kIE9wdGlvbiAyIGluIGFnZW50cy1jbGk6IGBtb2Rlc2Agb24gYE1hbmlmZXN0SG9va2AsIGdhdGUgc2hpbSwgc3luYyB3aXJpbmcsIHRlc3RzLCBkb2NzICsgQ0hBTkdFTE9HLgo0LiBGbGlwIGBwbGFuLXByZXNlbnRhdGlvbi9ob29rcy55YW1sYCB0byBgbW9kZXM6IFtwbGFuXWAgYW5kIGRyb3AgdGhlIGlubGluZSBnYXRlIGZyb20gdGhlIHNjcmlwdC4KCiMjIFZhbGlkYXRpb24KCmBgYGJhc2gKIyBub24tcGxhbiBTdG9wIG9uIENsYXVkZSBDb2RlIOKGkiBzaWxlbnQgcGFzcwpwcmludGYgJ3siaG9va19ldmVudF9uYW1lIjoiU3RvcCIsInBlcm1pc3Npb25fbW9kZSI6ImRlZmF1bHQifScgfCBwbGFuLWh0bWwtcmVtaW5kZXIuc2g7IGVjaG8gcmM9JD8KIyBwbGFuLW1vZGUgU3RvcCB3aXRoIG5vIHJlbmRlcmVkIEhUTUwg4oaSIGJsb2NrIChleGl0IDIpCnByaW50ZiAneyJob29rX2V2ZW50X25hbWUiOiJTdG9wIiwicGVybWlzc2lvbl9tb2RlIjoicGxhbiIsInRyYW5zY3JpcHRfcGF0aCI6Ii4uLiJ9JyB8IHBsYW4taHRtbC1yZW1pbmRlci5zaDsgZWNobyByYz0kPwojIG5vIHBlcm1pc3Npb25fbW9kZSBmaWVsZCDihpIgdG9kYXkncyB0cmFuc2NyaXB0IGJhY2tzdG9wIHVuY2hhbmdlZApgYGAKCiMjIFJpc2tzCgotIEEgaGFybmVzcyB0aGF0IHN0YXJ0cyBzZW5kaW5nIGBwZXJtaXNzaW9uX21vZGVgIHdpdGggZGlmZmVyZW50IHNlbWFudGljcyAoR3JvayBjYW1lbENhc2UgYWxyZWFkeSBoYW5kbGVkKSBjb3VsZCBza2lwIGEgbGVnaXRpbWF0ZSBibG9jayDigJQgbWl0aWdhdGVkIGJ5IG9ubHkgc2tpcHBpbmcgb24gYW4gZXhwbGljaXQgbm9uLXBsYW4gdmFsdWUuCi0gT3B0aW9uIDIncyBzaGltIG11c3Qgbm90IHN3YWxsb3cgc3RkaW4gb3IgZXhpdCBjb2RlczsgdGhlIGV4aXN0aW5nIGhvb2sgdGVzdCBzdWl0ZXMgZ2F0ZSB0aGlzLgoKIyMgVHJhY2tpbmcKClRpY2tldCB0byBiZSBmaWxlZCBvbiBhcHByb3ZhbCAob25lIHBlciBsYW5kZWQgdW5pdDogdGhlIGAuYWdlbnRzLXN5c3RlbWAgZ2F0ZSBQUiwgdGhlIGFnZW50cy1jbGkgYG1vZGVzOmAgUFIpOyBpZHMgd2lsbCBiZSByZWNvcmRlZCBoZXJlLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

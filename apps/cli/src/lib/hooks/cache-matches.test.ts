@@ -172,6 +172,12 @@ echo "call=$count"
       { name: 'cwd-miss', matches: { cwd_includes: 'work' }, input: { cwd: '/home/me/play' } },
       { name: 'and-pass', matches: { prompt_contains: '#', tool_name: 'Bash' }, input: { prompt: 'do #foo', tool_name: 'Bash' } },
       { name: 'and-fail', matches: { prompt_contains: '#', tool_name: 'Bash' }, input: { prompt: 'do #foo', tool_name: 'Read' } },
+      { name: 'mode-hit', matches: { permission_mode: 'plan' }, input: { permission_mode: 'plan' } },
+      { name: 'mode-miss', matches: { permission_mode: 'plan' }, input: { permission_mode: 'default' } },
+      { name: 'mode-absent-fails-open', matches: { permission_mode: 'plan' }, input: { prompt: 'no mode field' } },
+      { name: 'mode-array-hit', matches: { permission_mode: ['plan', 'acceptEdits'] }, input: { permission_mode: 'acceptEdits' } },
+      { name: 'mode-camel-hit', matches: { permission_mode: 'plan' }, input: { permissionMode: 'plan' } },
+      { name: 'mode-camel-miss', matches: { permission_mode: 'plan' }, input: { permissionMode: 'bypassPermissions' } },
     ];
 
     for (const fx of fixtures) {
