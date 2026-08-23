@@ -53,6 +53,23 @@ function openQuestionBlock(partial: Partial<OpenBlock> = {}): OpenBlock {
 }
 
 describe('reconcileAttention', () => {
+  it.each([
+    ['Claude question', 'claude', 'question', [{ label: 'A' }], 'lifecycle'],
+    ['Claude notification', 'claude', 'permission', undefined, 'lifecycle'],
+    ['Codex permission', 'codex', 'permission', undefined, 'lifecycle'],
+    ['plan review', 'gemini', 'plan_review', undefined, 'lifecycle'],
+    ['prose fallback', 'opencode', 'question', undefined, 'heuristic'],
+    ['no hook event', 'kimi', 'question', [{ label: 'Continue' }], 'lifecycle'],
+  ] as const)('%s uses the shared lifecycle projection', (_fixture, kind, reason, options, source) => {
+    const item = reconcileAttention({
+      session: session({
+        kind, sessionId: `fixture-${kind}-${reason}`, activity: 'waiting_input', awaitingReason: reason,
+        question: { text: 'Needs operator input', reason, ...(options ? { options: [...options] } : {}) }, lastActivityMs: 9000,
+      }),
+      nowMs: 10_000,
+    });
+    expect(item).toMatchObject({ source, state: 'open' });
+  });
   it('block wins: an open block is authoritative even when the session reports working', () => {
     const item = reconcileAttention({
       block: openQuestionBlock(),
