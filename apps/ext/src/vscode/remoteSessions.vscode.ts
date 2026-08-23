@@ -138,7 +138,7 @@ export async function discoverHosts(devices?: readonly DeviceRef[]): Promise<Rec
 /**
  * Recent (historical, non-active) sessions for one host — what the Floor shows when a
  * host filter has 0 live agents instead of a blank pane. Uses the clean-array
- * `agents sessions --json [--host <t>] --limit N` path (flat SessionMeta), normalized
+ * `agents sessions --json [--device <t>] --limit N` path (flat SessionMeta), normalized
  * onto the same RemoteSession shape as active sessions so the card path is identical.
  * Fetched lazily (only when a host is empty), never on the hot poll.
  */
@@ -171,7 +171,7 @@ export async function fetchRecentForHost(
         projectRules,
       ));
   } catch {
-    // An older agents-cli (before the clean `--host --json` array) streams a
+    // An older agents-cli (before the clean `--device --json` array) streams a
     // non-JSON banner, so JSON.parse throws -> no recent shown. Graceful: the RECENT
     // section simply stays empty until the engine change is released.
     return [];

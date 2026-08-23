@@ -57,7 +57,7 @@ export function buildAgentRunLaunchCommand(
 ): string {
   let cmd = `agents run ${agentKey} --interactive`;
   if (host) {
-    cmd += ` --host ${shellQuoteHost(host)}`;
+    cmd += ` --device ${shellQuoteHost(host)}`;
   }
   if (agentKey === 'claude' && claudeSessionId) {
     cmd += ` --session-id ${claudeSessionId}`;
@@ -75,7 +75,7 @@ function shellQuoteHost(value: string): string {
  * resolves host (affinity) → harness (cross-harness headroom) → account
  * (balanced), and exits nonzero with a fail-loud `no healthy … resets <time>`
  * error when every layer is exhausted. A terminal already on a device resumes
- * ON that device (`--host`); a local terminal omits it and lets affinity pick.
+ * ON that device (`--device`); a local terminal omits it and lets affinity pick.
  * `--session-id` is honored only when the CLI picks claude (existing
  * claude-only semantics) and ignored otherwise — passing it unconditionally
  * keeps the local terminal's AGENT_SESSION_ID aligned with the session Claude
@@ -87,7 +87,7 @@ export function buildAutoRunLaunchCommand(opts: {
 }): string {
   let cmd = 'agents run auto --interactive';
   if (opts.host) {
-    cmd += ` --host ${shellQuoteHost(opts.host)}`;
+    cmd += ` --device ${shellQuoteHost(opts.host)}`;
   }
   cmd += ` --session-id ${opts.sessionId}`;
   return cmd;

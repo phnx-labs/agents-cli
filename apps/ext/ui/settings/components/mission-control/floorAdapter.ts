@@ -422,7 +422,7 @@ export function deriveReplyTargetFromRemote(r: RemoteSessionLike): ReplyTarget {
   const ctx = (r.context || '').toLowerCase()
   if (r.cloudTaskId || ctx === 'cloud') {
     if (!r.cloudTaskId) return { kind: 'none', host: r.host, reason: 'Cloud task id unknown' }
-    // Cloud accounts are host-scoped: a local fetch reports this-mac's tasks, a --host
+    // Cloud accounts are host-scoped: a local fetch reports this-mac's tasks, a --device
     // fetch reports that host's. Keep the owner so the host handler ssh-wraps when remote.
     return { kind: 'cloud', host: r.host, cloudTaskId: r.cloudTaskId, cloudProvider: r.cloudProvider }
   }

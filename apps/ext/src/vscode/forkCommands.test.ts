@@ -88,7 +88,7 @@ describe('fork command contributions', () => {
       local: false,
       viewColumn: 'Active',
     });
-    expect(queuedCommand).toContain("--host 'chosen-host' --cwd '/Users/muqsit/src/agents-cli'");
+    expect(queuedCommand).toContain("--device 'chosen-host' --cwd '/Users/muqsit/src/agents-cli'");
     expect(queuedCommand).not.toContain('--remote-cwd');
     expect(queuedCommand).toEndWith('queue /continue source-id --device source-machine');
     expect(edge).toEqual({

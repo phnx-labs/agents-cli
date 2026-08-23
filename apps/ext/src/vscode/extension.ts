@@ -33,6 +33,10 @@ import * as notifications from './notifications.vscode';
 import * as terminals from './terminals.vscode';
 import { fetchRemoteSessionLabelSource, fetchSessionIdentity, fetchRecapSessions, LOCAL_LABEL, LOCAL_MACHINE_ID, mapWithConcurrency } from './remoteSessions.vscode';
 import { sessionPresentationStore } from '../core/sessionPresentationStore';
+import {
+  isScaffoldingSessionTopic,
+  planSessionTabLabelUpdate,
+} from '../core/sessionTabLabelSync';
 import { runRecapHeadless, isRecapSupported } from './recap.vscode';
 import { buildAgentTerminalEnv } from '../core/terminals';
 import {
@@ -415,7 +419,7 @@ async function registerAgentTerminal(
     terminals.setAgentType(terminal, resumeKey);
   }
   // Stamp the host BEFORE the label poller starts: the poller reads the entry
-  // to decide whether to look the session up locally or over `--host`.
+  // to decide whether to look the session up locally or over `--device`.
   if (host) {
     terminals.setHost(terminal, host);
   }
@@ -1831,7 +1835,7 @@ async function openSingleAgent(
   host?: string
 ) {
   // A host target ('local'/undefined = this machine) always routes through
-  // `agents run <agent> --host <device>` so the CLI does the SSH offload —
+  // `agents run <agent> --device <device>` so the CLI does the SSH offload —
   // including agents that launch as raw binaries locally.
   const targetHost = host && host !== 'local' ? host : undefined;
 
@@ -1887,7 +1891,7 @@ async function openSingleAgent(
     // poller that fills in the tab title, and Session Resume / Trace / Fork.
     // A host run used to skip it and let the remote coin its own id, which left
     // remote tabs stuck on the bare agent prefix with an empty status bar and no
-    // way to resume them by id. `agents run --host` accepts a caller-supplied
+    // way to resume them by id. `agents run --device` accepts a caller-supplied
     // `--session-id` and pins the remote session to it (hosts/run-target.ts
     // resolveHostSessionId), so the id we generate here is the id the remote
     // session actually uses.
@@ -2908,7 +2912,7 @@ function activeSessionTerminalEntry(): terminals.EditorTerminal | undefined {
  * `Agents: Resume (Pick Host)` — reopen the ACTIVE tab's session on another
  * device. Only the host changes: the harness and its pinned version stay, so
  * the host picker is the one decision the user makes. Transcripts sync
- * fleet-wide, so `agents run --host <picked> --resume <id>` picks the session
+ * fleet-wide, so `agents run --device <picked> --resume <id>` picks the session
  * up wherever it lands (see buildVersionedResumeCommand).
  *
  * Deliberate divergence from the batch path: no `cwd` is passed, so the new
@@ -3503,17 +3507,12 @@ function isLocalDeviceName(name: string): boolean {
   return isLocalActiveMapKey(activeMapCacheKey(name));
 }
 
-function isScaffoldingTopic(text: string): boolean {
-  return /^Base directory for this skill:/i.test(text)
-    || /^<command-(?:name|message)>/i.test(text);
-}
-
 /** Stamp a {label, topic} pair onto the tab — persisted name, else LLM/5-word. */
 async function applyLabelSource(
   terminal: vscode.Terminal,
   source: { label: string | null; topic: string | null },
 ): Promise<string | undefined> {
-  const topic = source.topic && !isScaffoldingTopic(source.topic) ? source.topic : null;
+  const topic = source.topic && !isScaffoldingSessionTopic(source.topic) ? source.topic : null;
   const ticket = topic ? extractLinearTicketId(topic) : null;
   if (source.label) {
     const label = ticket ? `${ticket} ${source.label}` : source.label;
@@ -3573,7 +3572,7 @@ async function fetchAndSetAutoLabel(
   if (!opts.useFullConversation) {
     const live = sessionPresentationStore.liveSession(sessionId);
     if (live) {
-      const topic = live.topic.trim() && !isScaffoldingTopic(live.topic) ? live.topic.trim() : null;
+      const topic = live.topic.trim() && !isScaffoldingSessionTopic(live.topic) ? live.topic.trim() : null;
       // Reuse isDerivedSessionName so a real one-word /rename ("RUSH-2058",
       // "Auth") is kept and only Claude's `<dirname>-<n>` placeholder is dropped.
       const rawLabel = live.label.trim();
@@ -3636,6 +3635,47 @@ async function fetchAndSetAutoLabel(
     return autoLabel ?? undefined;
   } catch {
     return undefined;
+  }
+}
+
+/**
+ * Apply harness-owned names from the canonical fleet stream to editor tabs.
+ * The stream is already elected once per editor process; this is presentation
+ * reconciliation only, never another query or lifecycle loop.
+ */
+async function syncCanonicalSessionTabLabels(context: vscode.ExtensionContext): Promise<void> {
+  const display = getDisplayPrefs(context);
+  if (!display.autoLabelInTabTitles) return;
+
+  for (const entry of terminals.getAllTerminals()) {
+    if (!entry.sessionId || !entry.agentConfig) continue;
+    const live = sessionPresentationStore.liveSession(entry.sessionId);
+    if (!live) continue;
+    const update = planSessionTabLabelUpdate({
+      manualLabel: entry.label,
+      autoLabel: entry.autoLabel,
+    }, live);
+    if (!update) continue;
+
+    if (update.clearManualLabel) {
+      await terminals.setLabel(entry.terminal, undefined, context);
+    }
+    terminals.setAutoLabel(entry.terminal, update.label);
+
+    // Renaming briefly activates a terminal. Apply immediately only to the tab
+    // the user is already viewing; an inactive tab stores the new autoLabel and
+    // the existing focus handler renders it when that tab is next selected.
+    if (vscode.window.activeTerminal !== entry.terminal) continue;
+    updateStatusBarForTerminal(entry.terminal, context.extensionPath);
+    if (display.showLabelsInTitles) {
+      const newTitle = buildTerminalTitle(
+        entry.agentConfig.title,
+        update.label,
+        context,
+        entry.sessionId,
+      );
+      await terminals.renameTerminal(entry.terminal, newTitle);
+    }
   }
 }
 
@@ -4055,7 +4095,7 @@ function applyHydratedSessionId(
  *     THIS machine (no host, or --device targeting this host).
  *  2. CLI `agents sessions --active` joined on AGENT_TERMINAL_ID — one fetch
  *     per host, shared across all tabs on that host (TTL + in-flight coalesce,
- *     hard timeout). Uses `--host <device>` for real offloads; never `--where`.
+ *     hard timeout). Uses `--device <device>` for real offloads; never `--where`.
  *
  * Failures leave the id unmapped (blank bar), never invent a wrong id.
  */
@@ -4169,7 +4209,7 @@ function updateStatusBarForTerminal(terminal: vscode.Terminal, extensionPath: st
       entry?.agentType === 'codex',
     );
 
-    // When we already know the session id (e.g. an offloaded --host tab, where the
+    // When we already know the session id (e.g. an offloaded --device tab, where the
     // live-id lookup below can't reach the remote box), resolve its real
     // version/account from the session feed (host-aware), re-fetching when the
     // cached identity is for a different session. We deliberately do NOT fall back
@@ -4773,7 +4813,7 @@ const FORK_ID_WAIT_MS = 60_000;
 // every recent transcript — on this machine, or on any fleet device you switch to
 // — and fork the one you pick. A row's machine is where its fork runs, so picking
 // a session that lives on `yosemite-s0` starts the sibling agent THERE (over
-// `agents run --host`), where its transcript actually is.
+// `agents run --device`), where its transcript actually is.
 
 /** Rows requested from the one device currently shown in the browser. Enough to
  *  reach yesterday's work without turning the picker into a scroll marathon. */
@@ -4974,7 +5014,8 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
       displayTitle = def.title;
     }
 
-    const title = buildTerminalTitle(displayTitle, session.label, context, session.sessionId || null);
+    const titleLabel = session.label || session.autoLabel;
+    const title = buildTerminalTitle(displayTitle, titleLabel, context, session.sessionId || null);
 
     const terminal = vscode.window.createTerminal({
       iconPath: agentConfig.iconPath,
@@ -4988,6 +5029,7 @@ async function restoreAgentTerminals(context: vscode.ExtensionContext): Promise<
     // Carry the tab's original creation time across the reload — the agent it is
     // being restored onto is older than this widget (see register's createdAt).
     terminals.register(terminal, session.terminalId, agentConfig, pid, context, session.label, session.createdAt);
+    if (session.autoLabel) terminals.setAutoLabel(terminal, session.autoLabel);
     readiness.registerTerminal(terminal);
 
     // Preserve the version pin across reloads. The env var above is belt; this
@@ -5278,7 +5320,10 @@ function initMonitorFollower(context: vscode.ExtensionContext): void {
         childPid: p.childPid,
       });
     } else if (proto.isSessionCliFact(event)) {
-      if (sessionPresentationStore.apply(event.payload)) void settings.refreshFloorFromSessionStream();
+      if (sessionPresentationStore.apply(event.payload)) {
+        void settings.refreshFloorFromSessionStream();
+        void syncCanonicalSessionTabLabels(context);
+      }
     }
   });
   context.subscriptions.push({ dispose: factSub });

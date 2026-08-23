@@ -384,7 +384,7 @@ export interface RawActiveSession {
   machine?: string;
   /**
    * AGI EXT / editor tab id (`AGENT_TERMINAL_ID`) when the launch inherited it.
-   * Join key for "which session is MY tab running?" across `--host`/`--device`.
+   * Join key for "which session is MY tab running?" across local/`--device` runs.
    */
   terminalId?: string;
   /** How the CLI says a reply reaches this session. `reply` is null for raw TTYs
@@ -932,7 +932,7 @@ export interface SessionLabelSource {
  *
  * **The payload has two shapes, and the remote one is the shape that matters
  * here.** Locally, `agents sessions <id> --json` renders the detail view and
- * emits `{ session, events }`. With `--host` the lookup is routed to the peer
+ * emits `{ session, events }`. With `--device` the lookup is routed to the peer
  * and comes back as the FLAT array of `SessionMeta` records instead (the same
  * shape `fetchRecentForHost` consumes). Reading only `.session` therefore found
  * nothing for exactly the offloaded tabs this exists to label. Both are handled;
@@ -1002,7 +1002,7 @@ export interface SessionIdentity {
  * versions and their signed-in accounts (the box-wide default), which is
  * unrelated to a specific running session. Handles the same two payload shapes
  * as {@link parseSessionLabelSource} (local `{ session, events }` and the flat
- * `SessionMeta[]` array returned with `--host`); `sessionId` disambiguates.
+ * `SessionMeta[]` array returned with `--device`); `sessionId` disambiguates.
  */
 export function parseSessionIdentity(rawJson: string, sessionId?: string): SessionIdentity | null {
   let data: unknown;

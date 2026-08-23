@@ -142,7 +142,7 @@ describe('picked row -> launch command', () => {
       request.agentKey, 'new-id', undefined, undefined, undefined,
       request.strategy, undefined, { host: request.host, local: request.local, remoteCwd: picked.cwd },
     );
-    expect(command).toContain("--host 'yosemite-s1'");
+    expect(command).toContain("--device 'yosemite-s1'");
     expect(command).toContain("--remote-cwd '/home/muqsit/src/github.com/muqsitnawaz/agents-cli'");
     expect(command).not.toContain(" --cwd ");
     expect(request.prompt).toBe('/continue sess-remote');
@@ -162,7 +162,7 @@ describe('picked row -> launch command', () => {
       request.agentKey, 'new-id', undefined, undefined, undefined,
       request.strategy, undefined, { host: request.host, local: request.local },
     );
-    expect(command).not.toContain('--host');
+    expect(command).not.toContain('--device');
     expect(command).not.toContain('--remote-cwd');
   });
 });

@@ -1,6 +1,6 @@
 // Per-host inventory + configuration for the Fleet host detail pane.
 //
-// Data path: `agents view [--host <name>] --json --resources all` gives the
+// Data path: `agents view [--device <name>] --json --resources all` gives the
 // installed agents, versions, accounts, usage, and synced resources on a host
 // (over SSH for remotes — the passthrough runs `view` on the target). `agents
 // hosts list --json` gives the registry metadata (enrolled / source / caps /
@@ -93,7 +93,7 @@ function windowPercent(windows: unknown, key: string): number | null {
   return typeof pct === 'number' ? pct : null;
 }
 
-/** Parse `agents view [--host] --json --resources all` output (array or single). */
+/** Parse `agents view [--device] --json --resources all` output (array or single). */
 export function parseHostAgents(rawJson: string): HostAgentInfo[] {
   let data: unknown;
   try {
@@ -158,6 +158,13 @@ function shellArg(value: string): string {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+/** CLI args for the canonical local or fleet-routed inventory read. */
+export function buildHostInventoryArgs(host: string): string {
+  return host === LOCAL_HOST
+    ? 'view --json --resources all'
+    : `view --device ${shellArg(host)} --no-tty --json --resources all`;
+}
+
 /** Reject host/cap values that could smuggle shell/flags before they reach the CLI. */
 export function isSafeHostToken(value: string): boolean {
   // Host names, ssh aliases, and user@host targets — no spaces, quotes, or shell
@@ -199,9 +206,7 @@ export async function fetchHostInventory(host: string, force = false): Promise<H
     }
 
     const isLocal = host === LOCAL_HOST;
-    const args = isLocal
-      ? 'view --json --resources all'
-      : `view --host ${shellArg(host)} --no-tty --json --resources all`;
+    const args = buildHostInventoryArgs(host);
     try {
       const { stdout } = await runAgents(args, {
         timeout: isLocal ? 15_000 : 30_000,

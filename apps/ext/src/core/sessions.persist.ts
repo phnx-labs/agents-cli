@@ -15,10 +15,11 @@ export interface PersistedSession {
   terminalId: string;           // AGENT_TERMINAL_ID (e.g., "CL-1234567890-1")
   prefix: string;               // Agent prefix (e.g., "CL", "CX", "SH")
   sessionId?: string;           // CLI session ID for resume (e.g., Claude's session ID)
-  host?: string;                // Device the agent was offloaded to (`agents run --host`); the
+  host?: string;                // Device the agent was offloaded to (`agents run --device`); the
                                 // transcript lives there, so a restored tab must keep routing
                                 // its session lookups through that host.
   label?: string;               // User-set label
+  autoLabel?: string;           // Harness/LLM-generated label; remains replaceable
   agentType?: string;           // Agent type key (e.g., "claude", "codex")
   version?: string;             // Pinned agent version, if known (e.g., "2.1.113")
   createdAt: number;            // Timestamp

@@ -11,7 +11,9 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
 - The elected extension monitor owns one `agents sessions watch --json` child
   across editor windows. It broadcasts versioned `reset`, `upsert`, `remove`,
   `scope`, and `heartbeat` events; each extension host has one presentation
-  store and derives no lifecycle state.
+  store and derives no lifecycle state. Editor tabs reconcile their provisional
+  topic-based auto-labels from that same stream when a harness-owned session
+  `label` arrives; a manual tab label still wins.
 - Resume/Fork opens one on-demand listing with `agents sessions --all --json
   --no-interactive --limit 60`, then calls `agents sessions resume <id>
   --vscodium` or `agents sessions fork <id>`.
@@ -20,7 +22,8 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   resolves the device and the account without prompting — the everyday launch
   opens an agent, never a question. `(Pick Host)` is the one explicit-choice
   route: it asks for the device, then uses `agents run <harness>@` so the picker
-  shows that device's installed versions/accounts. `(Auto)` uses
+  shows that device's installed versions/accounts, and emits the CLI's canonical
+  `--device` flag, never the retired `--host` spelling. `(Auto)` uses
   `agents run <harness> --strategy balanced`, so agents-cli chooses both. The
   generic automatic launch stays `agents run auto --interactive --device auto
   --strategy balanced --mode auto`. Launches also add `--project <slug>` when

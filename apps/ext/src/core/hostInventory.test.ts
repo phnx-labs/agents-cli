@@ -1,7 +1,14 @@
 import { test, expect, describe } from 'bun:test';
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import { parseHostAgents, parseHostMeta, summarizeResources, isSafeHostToken, isSafeCap } from './hostInventory';
+import {
+  buildHostInventoryArgs,
+  parseHostAgents,
+  parseHostMeta,
+  summarizeResources,
+  isSafeHostToken,
+  isSafeCap,
+} from './hostInventory';
 
 const DIR = join(import.meta.dir, 'testdata', 'hostInventory');
 const viewJson = readFileSync(join(DIR, 'view-host.json'), 'utf8');
@@ -107,5 +114,17 @@ describe('input guards', () => {
     expect(isSafeCap('gpu')).toBe(true);
     expect(isSafeCap('fast-box')).toBe(true);
     expect(isSafeCap('gpu; rm')).toBe(false);
+  });
+});
+
+describe('buildHostInventoryArgs', () => {
+  test('routes remote inventory through the canonical device flag', () => {
+    expect(buildHostInventoryArgs('yosemite-s1')).toBe(
+      "view --device 'yosemite-s1' --no-tty --json --resources all",
+    );
+  });
+
+  test('keeps local inventory local', () => {
+    expect(buildHostInventoryArgs('this-mac')).toBe('view --json --resources all');
   });
 });

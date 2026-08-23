@@ -827,7 +827,7 @@ describe('buildRemoteFocusCommand — attach a remote session over SSH', () => {
 
 describe('parseSessionLabelSource', () => {
   // A tab whose agent runs on another machine has no local transcript; this is
-  // the parse of `agents sessions <id> --host <name> --json` that lets it be
+  // the parse of `agents sessions <id> --device <name> --json` that lets it be
   // labelled at all.
   const record = (session: Record<string, unknown>) => JSON.stringify({ session, events: [] });
 
@@ -905,7 +905,7 @@ describe('isDerivedSessionName', () => {
 });
 
 describe('parseSessionLabelSource — the REMOTE payload shape', () => {
-  // Captured from a real `agents sessions <id> --host yosemite-s0 --json` run,
+  // Captured from a real `agents sessions <id> --device yosemite-s0 --json` run,
   // not hand-written. The first cut of this parser only understood the LOCAL
   // `{ session, events }` shape and returned null for every offloaded tab — the
   // exact case it exists to serve — because the fixtures were written from the

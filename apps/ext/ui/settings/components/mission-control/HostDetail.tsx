@@ -5,7 +5,7 @@ import type { HostInventory, HostAgentVersion } from './floorModel'
 // Host detail + configure pane. Opens when a host is clicked in FloorSidebar.
 // Shows registry metadata and configure actions (enroll / remove / caps), plus
 // the installed agents/versions/accounts/usage/resource-drift fetched from
-// `agents view --host <name> --json --resources all`. No decorative glyphs —
+// `agents view --device <name> --json --resources all`. No decorative glyphs —
 // status is conveyed with the .hd CSS dot and plain text.
 
 interface HostDetailProps {
