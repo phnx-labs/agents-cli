@@ -81,6 +81,37 @@ describe('routine archive discovery', () => {
   });
 });
 
+describe('timestamp-less Claude discovery', () => {
+  const sessionId = '22222222-3333-4444-8555-666666666666';
+  const projectDir = path.join(getHistoryDir(), 'versions', 'claude', 'test-timestampless', 'home', '.claude', 'projects', 'title-fallback');
+  const transcriptPath = path.join(projectDir, `${sessionId}.jsonl`);
+
+  afterEach(() => {
+    fs.rmSync(path.join(getHistoryDir(), 'versions', 'claude', 'test-timestampless'), { recursive: true, force: true });
+    const db = getDB();
+    db.prepare(`DELETE FROM sessions WHERE id = ?`).run(sessionId);
+    db.prepare(`DELETE FROM session_text WHERE session_id = ?`).run(sessionId);
+    db.prepare(`DELETE FROM scan_ledger WHERE file_path = ?`).run(transcriptPath);
+  });
+
+  it('keeps a parsed title when the transcript has no timestamp', async () => {
+    fs.mkdirSync(projectDir, { recursive: true });
+    fs.writeFileSync(
+      transcriptPath,
+      [
+        JSON.stringify({ type: 'user', cwd: '/workspace/title-fallback', sessionId, message: { role: 'user', content: 'first prompt' } }),
+        JSON.stringify({ type: 'ai-title', aiTitle: 'Generated session title', sessionId }),
+      ].join('\n') + '\n',
+      'utf-8',
+    );
+
+    const sessions = await discoverSessions({ agent: 'claude', all: true, limit: 100 });
+    const hit = sessions.find((session) => session.id === sessionId);
+
+    expect(hit?.label).toBe('Generated session title');
+  });
+});
+
 describe('buildFtsQuery', () => {
   it('returns empty expression for whitespace-only input', () => {
     expect(buildFtsQuery('').expr).toBe('');

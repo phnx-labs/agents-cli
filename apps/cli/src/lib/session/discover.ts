@@ -1635,7 +1635,9 @@ async function readClaudeMeta(
       accountKey: acct.key,
       accountOrg: acct.orgName ?? undefined,
       model: scan.model,
-      label,
+      // Keep parsed ai-title/custom-title values even when the transcript has
+      // no timestamp and therefore takes this stat-backed fallback path.
+      label: label || scan.label,
       messageCount: scan.messageCount,
       toolCallCount: scan.toolCallCount,
       tokenCount: scan.tokenCount,
