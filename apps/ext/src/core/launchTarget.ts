@@ -73,9 +73,15 @@ export function launchOptsForTarget(target: LaunchTarget): LaunchTargetOpts {
 /**
  * Keep the three per-harness command variants distinct:
  *
- * - default: configured placement, then ask which device-local account to run;
+ * - default: configured placement, balanced account — no prompt at all;
  * - pick-host: ask for the device, then ask which account on it to run;
  * - auto: let agents-cli choose both the device and account without a prompt.
+ *
+ * The bare `New <Harness>` is the command bound to a keybinding and pressed
+ * dozens of times a day, so it must open an agent, not a question: RUSH-2961
+ * put the account picker on it and every launch then stopped on a seven-row
+ * prompt. Explicit choice lives on `(Pick Host)`, which is already the "I am
+ * being specific about this launch" route.
  */
 export function launchOptsForHarnessCommand(
   variant: HarnessLaunchVariant,
@@ -83,7 +89,7 @@ export function launchOptsForHarnessCommand(
 ): HarnessLaunchOpts {
   switch (variant) {
     case 'default':
-      return { ...launchOptsForTarget(defaultTarget), accountPicker: true };
+      return { ...launchOptsForTarget(defaultTarget) };
     case 'pick-host':
       return { pickHost: true, accountPicker: true };
     case 'auto':

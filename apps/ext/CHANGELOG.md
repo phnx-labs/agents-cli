@@ -4,6 +4,19 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.331] - 2026-08-23
+
+- **`Agents: New <Harness>` opens an agent again instead of asking which account
+  (RUSH-3057).** 0.9.329 put the account picker on the bare command, so the
+  keybinding everyone presses dozens of times a day emitted
+  `agents run claude@ --interactive --device auto --mode auto` and stopped on a
+  seven-row prompt before anything launched. The default is balanced rotation
+  again — `agents run <harness> --interactive --device auto --strategy balanced
+  --mode auto`, which already skips signed-out and rate-limited accounts — and
+  explicit choice moves to `(Pick Host)`, which asks for the device and then
+  shows that device's versions/accounts. `(Auto)` is unchanged. Source:
+  `src/core/launchTarget.ts`.
+
 ## [0.9.329] - 2026-08-20
 
 - **New Agent separates placement from account choice (RUSH-2961).**

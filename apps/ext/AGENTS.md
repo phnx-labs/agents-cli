@@ -16,9 +16,11 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   --no-interactive --limit 60`, then calls `agents sessions resume <id>
   --vscodium` or `agents sessions fork <id>`.
 - `Agents: New <Harness>` passes the configured target to
-  `agents run <harness>@ --interactive`, so agents-cli resolves the device first
-  and the picker shows that device's installed versions/accounts. `(Pick Host)`
-  asks for the device before using the same account picker. `(Auto)` uses
+  `agents run <harness> --interactive --strategy balanced`, so agents-cli
+  resolves the device and the account without prompting — the everyday launch
+  opens an agent, never a question. `(Pick Host)` is the one explicit-choice
+  route: it asks for the device, then uses `agents run <harness>@` so the picker
+  shows that device's installed versions/accounts. `(Auto)` uses
   `agents run <harness> --strategy balanced`, so agents-cli chooses both. The
   generic automatic launch stays `agents run auto --interactive --device auto
   --strategy balanced --mode auto`. Launches also add `--project <slug>` when

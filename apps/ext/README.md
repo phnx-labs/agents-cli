@@ -59,7 +59,7 @@ curl -fsSL https://raw.githubusercontent.com/phnx-labs/agents-cli/main/scripts/i
 
 Spawn any agent as a full-screen editor tab. Built-in support for Claude Code, Codex, Antigravity, OpenCode, and Cursor. Add custom agents through settings.
 
-**Where a new agent runs** is `agents.launch.defaultTarget`: `auto` (default — agents-cli picks the device), `local` (this machine), or `ask` (prompt every time). Under `auto`, mark your compute boxes once with `agents devices role <name> worker` and every `Agents: New <Harness>` rotates over those workers instead of the machine you are sitting at. Once the device is resolved, the command lists the versions/accounts installed there for you to choose. `Agents: New <Harness> (Pick Host)` asks for the device first and then shows that device's versions/accounts. `Agents: New <Harness> (Auto)` chooses both automatically.
+**Where a new agent runs** is `agents.launch.defaultTarget`: `auto` (default — agents-cli picks the device), `local` (this machine), or `ask` (prompt every time). Under `auto`, mark your compute boxes once with `agents devices role <name> worker` and every `Agents: New <Harness>` rotates over those workers instead of the machine you are sitting at. The device and the version/account are both chosen for you — the account by balanced rotation, which skips signed-out and rate-limited ones — so the command opens an agent without a prompt. `Agents: New <Harness> (Pick Host)` is the explicit route: it asks for the device first and then shows that device's versions/accounts to choose from. `Agents: New <Harness> (Auto)` chooses both automatically, ignoring the configured target.
 
 ### Session Persistence
 

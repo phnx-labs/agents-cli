@@ -382,9 +382,9 @@ async function pickLaunchHost(
 // --- The one launch engine --------------------------------------------------
 // Every "New agent" command routes through launchAgent. The command is just a
 // route: it fills in whichever of {agentKey, host} the user pinned, and the
-// engine resolves the rest. The per-harness default and Pick Host variants ask
-// agents-cli to show the chosen device's account/version picker; the explicit
-// (Auto) variant uses balanced rotation without a picker.
+// engine resolves the rest. Only the Pick Host variant asks agents-cli to show
+// the chosen device's account/version picker; the per-harness default and the
+// (Auto) variant both use balanced rotation and never prompt.
 /**
  * Everything a freshly created agent terminal needs beyond `createTerminal`.
  *
@@ -1500,7 +1500,7 @@ export async function activate(context: vscode.ExtensionContext) {
 
   // Per-harness launch commands — every one is a thin route into launchAgent.
   // For each non-shell agent:
-  //   New <Harness>              -> configured device target, then account/version picker
+  //   New <Harness>              -> configured device target + balanced account/version
   //   New <Harness> (Pick Host)  -> device picker, then account/version picker
   //   New <Harness> (Auto)       -> automatic device + balanced account/version
   for (const def of BUILT_IN_AGENTS) {

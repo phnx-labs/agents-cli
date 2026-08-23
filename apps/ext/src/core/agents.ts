@@ -278,8 +278,8 @@ export function wrapNativeAgentCommand(command: string, isShell: boolean): strin
 // The launch contract (apps/ext/AGENTS.md § "Launch contract"): EVERY agent
 // runner launches through `agents run <agent> --interactive --mode auto`, on
 // this machine, an auto-picked host, or a picked host alike. Account selection
-// is supplied by the launch target: the default and Pick Host routes use the
-// trailing `@` picker, while Auto adds `--strategy balanced`. The
+// is supplied by the launch target: the default and Auto routes add
+// `--strategy balanced`, while only Pick Host uses the trailing `@` picker. The
 // only thing that is NOT a runner is 'shell' — a plain terminal, not an agent — so
 // it is the single exclusion. There is deliberately no per-harness allowlist: a
 // bare, strategy-less launch (into whatever account happens to be pinned) is never

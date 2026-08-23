@@ -43,13 +43,13 @@ describe('launchOptsForTarget', () => {
 });
 
 describe('launchOptsForHarnessCommand', () => {
-  it('default auto-picks the device and asks for its account/version', () => {
-    expect(launchOptsForHarnessCommand('default', 'auto')).toEqual({ accountPicker: true });
+  it('default auto-picks the device and the account, with no prompt on either', () => {
+    expect(launchOptsForHarnessCommand('default', 'auto')).toEqual({});
   });
 
-  it('preserves explicit local or ask placement while still asking for the account/version', () => {
-    expect(launchOptsForHarnessCommand('default', 'local')).toEqual({ local: true, accountPicker: true });
-    expect(launchOptsForHarnessCommand('default', 'ask')).toEqual({ pickHost: true, accountPicker: true });
+  it('preserves explicit local or ask placement and never adds an account prompt', () => {
+    expect(launchOptsForHarnessCommand('default', 'local')).toEqual({ local: true });
+    expect(launchOptsForHarnessCommand('default', 'ask')).toEqual({ pickHost: true });
   });
 
   it('Pick Host asks for both layers while Auto asks for neither', () => {
@@ -77,17 +77,21 @@ describe('registered harness launch commands', () => {
   it('reads the configured default target when the command is invoked', () => {
     let target: 'auto' | 'local' = 'auto';
     const [registration] = harnessLaunchRegistrations('claude', 'agents.newClaude', () => target);
-    expect(registration.launchOptions()).toEqual({ agentKey: 'claude', accountPicker: true });
+    expect(registration.launchOptions()).toEqual({ agentKey: 'claude' });
     target = 'local';
-    expect(registration.launchOptions()).toEqual({ agentKey: 'claude', local: true, accountPicker: true });
+    expect(registration.launchOptions()).toEqual({ agentKey: 'claude', local: true });
   });
 
-  it('builds each active harness default as automatic device placement followed by the account picker', () => {
+  it('builds each active harness default as automatic device and balanced account, with no picker', () => {
     for (const agent of RUNNERS) {
       const [registration] = harnessLaunchRegistrations(agent.key, agent.commandId, () => 'auto');
-      expect(buildNewAgentLaunchCommand(registration.launchOptions())).toBe(
-        `agents run ${agent.key}@ --interactive --device auto --mode auto`,
+      const command = buildNewAgentLaunchCommand(registration.launchOptions());
+      expect(command).toBe(
+        `agents run ${agent.key} --interactive --device auto --strategy balanced --mode auto`,
       );
+      // The trailing `@` is what makes agents-cli stop and prompt. RUSH-3057:
+      // the everyday launch command must never carry it.
+      expect(command).not.toContain(`${agent.key}@`);
     }
   });
 
@@ -110,15 +114,15 @@ describe('registered harness launch commands', () => {
     }
   });
 
-  it('keeps configured local and prompted-device defaults on the picker path', () => {
+  it('keeps configured local and prompted-device defaults on the balanced path', () => {
     const [local] = harnessLaunchRegistrations('claude', 'agents.newClaude', () => 'local');
     expect(buildNewAgentLaunchCommand(local.launchOptions())).toBe(
-      'agents run claude@ --interactive --mode auto',
+      'agents run claude --interactive --strategy balanced --mode auto',
     );
 
     const [ask] = harnessLaunchRegistrations('claude', 'agents.newClaude', () => 'ask');
     expect(buildNewAgentLaunchCommand({ ...ask.launchOptions(), host: 'worker-box' })).toBe(
-      "agents run claude@ --interactive --host 'worker-box' --mode auto",
+      "agents run claude --interactive --host 'worker-box' --strategy balanced --mode auto",
     );
   });
 });
