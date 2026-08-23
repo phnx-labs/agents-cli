@@ -10,12 +10,16 @@ import {
   REFRESH_BURN_DIVISOR,
   HOURLY_CALL_CAP,
   USAGE_REFRESH_TICK_MS,
+  FAILURE_QUARANTINE_MS,
+  FAILURE_QUARANTINE_THRESHOLD,
   computeNextRefreshDelayMs,
   pruneCallTimestamps,
   shouldRefreshAccount,
   nextHeadroomEntry,
+  orderUsageAccounts,
   runUsageRefresh,
   readHeadroomEntry,
+  writeHeadroomEntries,
   setHeadroomCachePathForTest,
   type HeadroomEntry,
 } from './usage-refresh.js';
@@ -140,6 +144,26 @@ describe('runUsageRefresh — refreshes only due, uncapped, un-backed-off local 
     expect(entry?.nextRefreshAt).toBeGreaterThan(NOW);
   });
 
+  it('seeds a never-cached account before cached accounts and rotates each tick', async () => {
+    const cached = 'claude:org=cached';
+    const coldA = 'claude:org=cold-a';
+    const coldB = 'claude:org=cold-b';
+    writeHeadroomEntries({
+      [cached]: nextHeadroomEntry(null, sessionSnap(10, NOW - REFRESH_INTERVAL_MS), NOW - REFRESH_INTERVAL_MS),
+    });
+    const accounts = [cached, coldA, coldB].map((usageKey) => ({
+      usageKey,
+      agentId: 'claude' as const,
+      fetch: async () => ({ snapshot: sessionSnap(20, NOW), error: null }),
+    }));
+
+    const firstTick = orderUsageAccounts(accounts, { [cached]: readHeadroomEntry(cached)! }, 0);
+    const secondTick = orderUsageAccounts(accounts, { [cached]: readHeadroomEntry(cached)! }, 1);
+
+    expect(firstTick.map((account) => account.usageKey)).toEqual([coldA, coldB, cached]);
+    expect(secondTick.map((account) => account.usageKey)).toEqual([coldB, coldA, cached]);
+  });
+
   it('skips a provider under a live 429 backoff without calling fetch', async () => {
     let called = false;
     const result = await runUsageRefresh({
@@ -153,6 +177,70 @@ describe('runUsageRefresh — refreshes only due, uncapped, un-backed-off local 
     expect(called).toBe(false);
     expect(result.skippedBackoff).toBe(1);
     expect(result.refreshed).toBe(0);
+    expect(readHeadroomEntry('claude:org=x')?.nextRefreshAt).toBeGreaterThan(NOW);
+  });
+
+  it('reschedules backed-off accounts at distinct jittered due times', async () => {
+    const keys = ['claude:org=a', 'claude:org=b', 'claude:org=c'];
+    await runUsageRefresh({
+      now: NOW,
+      listAccounts: async () => keys.map((usageKey) => ({
+        usageKey,
+        agentId: 'claude' as const,
+        fetch: async () => ({ snapshot: sessionSnap(10, NOW), error: null }),
+      })),
+      writeUsageCache: writeClaudeUsageCache,
+      backoffUntil: () => NOW + 30 * 60_000,
+    });
+
+    const dueTimes = keys.map((key) => readHeadroomEntry(key)?.nextRefreshAt);
+    expect(new Set(dueTimes).size).toBe(keys.length);
+    expect(dueTimes.every((due) => due !== undefined && due > NOW)).toBe(true);
+    expect(dueTimes.every((due) => due !== undefined && due <= NOW + keys.length * 5_000)).toBe(true);
+  });
+
+  it('quarantines a chronic failure while healthy siblings keep refreshing', async () => {
+    const chronic = 'claude:org=chronic';
+    const healthy = 'claude:org=healthy';
+    let chronicCalls = 0;
+    let healthyCalls = 0;
+    const runAt = async (now: number) => runUsageRefresh({
+      now,
+      listAccounts: async () => [
+        {
+          usageKey: chronic,
+          agentId: 'claude',
+          fetch: async () => {
+            chronicCalls += 1;
+            return { snapshot: null, error: 'rate limited' };
+          },
+        },
+        {
+          usageKey: healthy,
+          agentId: 'claude',
+          fetch: async () => {
+            healthyCalls += 1;
+            return { snapshot: sessionSnap(20 + healthyCalls, now), error: null };
+          },
+        },
+      ],
+      writeUsageCache: writeClaudeUsageCache,
+      backoffUntil: () => null,
+    });
+
+    for (let cycle = 0; cycle < FAILURE_QUARANTINE_THRESHOLD; cycle += 1) {
+      await runAt(NOW + cycle * REFRESH_INTERVAL_MS);
+    }
+    const quarantined = readHeadroomEntry(chronic);
+    expect(quarantined?.consecutiveFailures).toBe(FAILURE_QUARANTINE_THRESHOLD);
+    expect(quarantined?.nextRefreshAt).toBe(
+      NOW + (FAILURE_QUARANTINE_THRESHOLD - 1) * REFRESH_INTERVAL_MS + FAILURE_QUARANTINE_MS,
+    );
+
+    await runAt(NOW + FAILURE_QUARANTINE_THRESHOLD * REFRESH_INTERVAL_MS);
+    expect(chronicCalls).toBe(FAILURE_QUARANTINE_THRESHOLD);
+    expect(healthyCalls).toBe(FAILURE_QUARANTINE_THRESHOLD + 1);
+    expect(readClaudeUsageCache(healthy)?.windows[0]?.usedPercent).toBe(24);
   });
 
   it('schedules the next attempt 5 minutes out after a successful refresh', async () => {

@@ -19,8 +19,8 @@
  *    floor and ceiling are both 5 minutes.
  *  - **Hard hourly cap** (`HOURLY_CALL_CAP`) so a stuck "due" loop cannot
  *    hammer an endpoint past ~12 calls/account/hour.
- *  - **429 backoff.** A provider under `usageRateLimitedUntil` is skipped
- *    entirely — no live fetch, no Touch ID, no re-armed penalty.
+ *  - **429 backoff.** An account (or provider-wide scope) under
+ *    `usageRateLimitedUntil` is skipped — no live fetch or re-armed penalty.
  *  - **File-only credentials on the daemon path.** Refresh never opens the
  *    ACL-bound macOS keychain item (Touch ID storm). It uses the no-ACL
  *    access-token cache / setup-token / `.credentials.json` only
@@ -37,8 +37,8 @@
  *     serializes read-modify-write; no lost updates.
  *  3. **macOS keychain ACL / Touch ID** — fileOnly refresh never calls
  *     `security find-generic-password` on Claude's ACL item.
- *  4. **Provider 429** — whole provider skipped until Retry-After; cache
- *     freezes (visible as aged `capturedAt`) rather than hammering.
+ *  4. **Account 429** — that account is skipped until Retry-After while its
+ *     siblings continue; a provider-wide penalty still skips all accounts.
  *  5. **Expired access token (no refresh)** — usage path never rotates
  *     single-use refresh tokens; counts as `failed`, reschedules 5m later.
  *  6. **No file credential on this host** — account skipped / failed; no
@@ -83,6 +83,12 @@ export const REFRESH_BURN_DIVISOR = 4;
 export const HOURLY_CALL_CAP = 12;
 /** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
 export const USAGE_REFRESH_TICK_MS = 60 * 1000;
+/** Consecutive failed live reads before one broken account is quarantined. */
+export const FAILURE_QUARANTINE_THRESHOLD = 3;
+/** A chronic offender waits this long while healthy siblings keep their cadence. */
+export const FAILURE_QUARANTINE_MS = 30 * 60 * 1000;
+const SKIP_JITTER_MIN_MS = 2_000;
+const SKIP_JITTER_RANGE_MS = 3_001;
 const HOUR_MS = 60 * 60 * 1000;
 
 /**
@@ -103,6 +109,8 @@ export interface HeadroomEntry {
   callTimestamps: number[];
   /** Epoch ms this entry was written. */
   computedAt: number;
+  /** Consecutive live-fetch misses; absent on entries written before this field. */
+  consecutiveFailures?: number;
 }
 
 interface HeadroomCacheFile {
@@ -223,7 +231,41 @@ export function nextHeadroomEntry(
     nextRefreshAt: now + computeNextRefreshDelayMs(headroom.minutesToLimit),
     callTimestamps,
     computedAt: now,
+    consecutiveFailures: snapshot ? 0 : (prev?.consecutiveFailures ?? 0) + 1,
   };
+}
+
+/** Stable per-account delay in [2s, 5s], used to spread skipped accounts. */
+function skipJitterMs(usageKey: string): number {
+  let hash = 0;
+  for (const char of usageKey) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return SKIP_JITTER_MIN_MS + (hash % SKIP_JITTER_RANGE_MS);
+}
+
+function skippedHeadroomEntry(
+  prev: HeadroomEntry | null,
+  usageKey: string,
+  now: number,
+  index: number,
+): HeadroomEntry {
+  return {
+    status: prev?.status ?? null,
+    minutesToLimit: prev?.minutesToLimit ?? null,
+    sessionUsedPercent: prev?.sessionUsedPercent ?? null,
+    capturedAt: prev?.capturedAt ?? null,
+    nextRefreshAt: now + (index + 1) * skipJitterMs(usageKey),
+    callTimestamps: pruneCallTimestamps(prev?.callTimestamps ?? [], now),
+    computedAt: now,
+    consecutiveFailures: prev?.consecutiveFailures ?? 0,
+  };
+}
+
+function failedHeadroomEntry(prev: HeadroomEntry | null, now: number): HeadroomEntry {
+  const next = nextHeadroomEntry(prev, null, now);
+  if ((next.consecutiveFailures ?? 0) >= FAILURE_QUARANTINE_THRESHOLD) {
+    next.nextRefreshAt = now + FAILURE_QUARANTINE_MS;
+  }
+  return next;
 }
 
 /** An account whose credentials live on the publisher host. */
@@ -232,6 +274,22 @@ export interface LocalUsageAccount {
   agentId: AgentId;
   /** Live-fetch this account's usage; the daemon passes the real network fetch. */
   fetch: () => Promise<UsageInfo>;
+}
+
+/** Cold accounts lead each pass; both cold and cached groups rotate every tick. */
+export function orderUsageAccounts(
+  accounts: LocalUsageAccount[],
+  cache: Record<string, HeadroomEntry>,
+  tick: number,
+): LocalUsageAccount[] {
+  const rotate = (group: LocalUsageAccount[]): LocalUsageAccount[] => {
+    if (group.length < 2) return group;
+    const start = tick % group.length;
+    return [...group.slice(start), ...group.slice(0, start)];
+  };
+  const cold = accounts.filter((account) => cache[account.usageKey] == null);
+  const cached = accounts.filter((account) => cache[account.usageKey] != null);
+  return [...rotate(cold), ...rotate(cached)];
 }
 
 /**
@@ -308,7 +366,7 @@ export interface UsageRefreshResult {
 
 /**
  * One refresher tick: for each local account that is due, under its hourly cap,
- * and not provider-backed-off, live-fetch its usage, update the cache, and
+ * and not backed off, live-fetch its usage, update the cache, and
  * reschedule from the new burn projection. Never throws — a single account's
  * failed fetch leaves its cache untouched and counts as `failed`.
  */
@@ -322,16 +380,21 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     failed: 0,
   };
 
-  const accounts = await deps.listAccounts();
   const cache = readHeadroomCache();
+  const accounts = orderUsageAccounts(
+    await deps.listAccounts(),
+    cache,
+    Math.floor(now / USAGE_REFRESH_TICK_MS),
+  );
   const updates: Record<string, HeadroomEntry> = {};
 
-  for (const account of accounts) {
+  for (const [index, account] of accounts.entries()) {
     const entry = cache[account.usageKey] ?? null;
 
-    // A provider under a 429 penalty is off-limits — poking it re-arms the
+    // A penalized account/provider is off-limits — poking it re-arms the
     // penalty (the whole reason usage-backoff exists).
     if ((deps.backoffUntil(account.agentId, account.usageKey) ?? 0) > now) {
+      updates[account.usageKey] = skippedHeadroomEntry(entry, account.usageKey, now, index);
       result.skippedBackoff += 1;
       continue;
     }
@@ -351,11 +414,11 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
         // No live snapshot (expired token / fetch miss): don't rewrite the usage
         // cache, but still record the call + reschedule so a broken account
         // isn't retried every tick.
-        updates[account.usageKey] = nextHeadroomEntry(entry, null, now);
+        updates[account.usageKey] = failedHeadroomEntry(entry, now);
         result.failed += 1;
       }
     } catch {
-      updates[account.usageKey] = nextHeadroomEntry(entry, null, now);
+      updates[account.usageKey] = failedHeadroomEntry(entry, now);
       result.failed += 1;
     }
   }
