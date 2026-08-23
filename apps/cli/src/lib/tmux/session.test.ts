@@ -34,6 +34,7 @@ import {
   AGENT_HOOK_SCHEMA,
   agentPaneDiedHook,
   AGENTS_TMUX_HISTORY_LIMIT,
+  AGENTS_TMUX_CONFIG_SCHEMA,
   buildCreateSessionArgs,
   TmuxSessionError,
 } from './session.js';
@@ -668,34 +669,73 @@ async function waitForCapture(
 }
 
 describe('already-running server reconcile (RUSH-3066)', () => {
-  // tmux reads -f ONLY when it starts a server. A second `new-session -f other.conf`
-  // against a live server exits 0 and applies nothing — so without an explicit
-  // reconcile, every machine whose server was already up (the normal state at
-  // upgrade) would silently get none of the ergonomics defaults. Real tmux, no mocks.
-  it('a second -f against a live server is ignored, and source-file repairs it', async () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-tmux-reconcile-'));
-    const sock = path.join(dir, 's.sock');
-    const cold = path.join(dir, 'cold.conf');
-    const warm = path.join(dir, 'warm.conf');
-    fs.writeFileSync(cold, 'set-option -g history-limit 11111\n');
-    fs.writeFileSync(warm, `set-option -g history-limit ${AGENTS_TMUX_HISTORY_LIMIT}\nset-option -g mouse on\n`);
-    const tmux = (args: string[]) =>
-      spawnSync('tmux', ['-S', sock, ...args], { encoding: 'utf-8' });
+  // These drive the REAL createSession() against a REAL tmux server, because the
+  // bug being fixed lives in createSession's control flow, not in tmux. A test
+  // that only shells out to `tmux` directly would still pass with the fix
+  // deleted, which is exactly the ceremony apps/cli/AGENTS.md forbids.
+  const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ag-reconcile-'));
+
+  it('configures a server that was ALREADY running before agents-cli touched it', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const socket = path.join(dir, 's.sock');
     try {
-      spawnSync('tmux', ['-f', cold, '-S', sock, 'new-session', '-d', '-s', 'one'], { encoding: 'utf-8' });
-      if (tmux(['has-session', '-t', '=one']).status !== 0) return; // tmux unavailable here
+      // A pre-existing server started WITHOUT our config — the state every
+      // machine is in at upgrade.
+      spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'preexisting'], { encoding: 'utf-8' });
+      const before = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      expect(before.stdout.trim()).toBe('off');
 
-      // -f on a live server: ignored.
-      spawnSync('tmux', ['-f', warm, '-S', sock, 'new-session', '-d', '-s', 'two'], { encoding: 'utf-8' });
-      expect(tmux(['show-options', '-gv', 'history-limit']).stdout.trim()).toBe('11111');
-      expect(tmux(['show-options', '-gv', 'mouse']).stdout.trim()).toBe('off');
+      await createSession({ name: 'agent-1', socket, cmd: 'sleep 30' });
 
-      // source-file on the live server: applied.
-      tmux(['source-file', warm]);
-      expect(tmux(['show-options', '-gv', 'history-limit']).stdout.trim()).toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
-      expect(tmux(['show-options', '-gv', 'mouse']).stdout.trim()).toBe('on');
+      const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      const hist = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'history-limit'], { encoding: 'utf-8' });
+      const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
+      // Without the reconcile branch these are 'off' / '2000' / '' — tmux
+      // ignores -f on a server that is already up.
+      expect(mouse.stdout.trim()).toBe('on');
+      expect(hist.stdout.trim()).toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+      expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
     } finally {
-      tmux(['kill-server']);
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('reconciles on the attachExisting path too', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const socket = path.join(dir, 's.sock');
+    try {
+      spawnSync('tmux', ['-f', '/dev/null', '-S', socket, 'new-session', '-d', '-s', 'legacy'], { encoding: 'utf-8' });
+      await createSession({ name: 'legacy', socket, attachExisting: true });
+      const mouse = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', 'mouse'], { encoding: 'utf-8' });
+      const stamp = spawnSync('tmux', ['-S', socket, 'show-options', '-gv', '@ag_tmux_config_schema'], { encoding: 'utf-8' });
+      expect(mouse.stdout.trim()).toBe('on');
+      expect(stamp.stdout.trim()).toBe(String(AGENTS_TMUX_CONFIG_SCHEMA));
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('does not source the user config twice on a cold start', async () => {
+    if (!isTmuxInstalled()) return;
+    const dir = mk();
+    const home = path.join(dir, 'home');
+    fs.mkdirSync(home, { recursive: true });
+    const marker = path.join(dir, 'sourced.log');
+    // A side-effectful user config, the way TPM's run-shell behaves.
+    fs.writeFileSync(path.join(home, '.tmux.conf'), `run-shell "echo x >> ${marker}"\n`);
+    const socket = path.join(dir, 's.sock');
+    try {
+      await createSession({ name: 'cold', socket, cmd: 'sleep 30', env: { ...process.env, HOME: home } });
+      // Give run-shell a moment to land.
+      await new Promise((r) => setTimeout(r, 400));
+      const fired = fs.existsSync(marker) ? fs.readFileSync(marker, 'utf-8').trim().split('\n').length : 0;
+      expect(fired).toBeLessThanOrEqual(1);
+    } finally {
+      spawnSync('tmux', ['-S', socket, 'kill-server'], { encoding: 'utf-8' });
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });

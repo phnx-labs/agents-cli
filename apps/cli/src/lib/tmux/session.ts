@@ -71,6 +71,11 @@ function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
     `startup-${process.pid}-${startupConfigSequence++}.conf`,
   );
   const lines = [
+    // Stamp the schema HERE as well as in reconcileServerConfig. Without it a
+    // cold start leaves the option unset, the post-new-session check sees a
+    // stale stamp, and the reconcile re-sources the user's config a second time
+    // on launch #1 — firing any run-shell side effect (TPM) twice.
+    `set-option -g ${CONFIG_SCHEMA_OPTION} ${AGENTS_TMUX_CONFIG_SCHEMA}`,
     'set-option -g mouse on',
     'set-option -s set-clipboard on',
     `set-option -g history-limit ${AGENTS_TMUX_HISTORY_LIMIT}`,
@@ -245,6 +250,13 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   const existed = await hasSession(opts.name, socket);
   if (existed) {
     if (opts.attachExisting) {
+      // Reuse of a live session is precisely the already-running-server case,
+      // so it needs the same reconcile the create path gets — otherwise
+      // `agents tmux new --attach-existing` silently keeps a pre-fix server
+      // with none of these settings.
+      if ((await appliedConfigSchema(socket)) !== AGENTS_TMUX_CONFIG_SCHEMA) {
+        await reconcileServerConfig(socket, opts.env);
+      }
       const meta = readSessionMeta(opts.name);
       return meta ?? {
         name: opts.name,
