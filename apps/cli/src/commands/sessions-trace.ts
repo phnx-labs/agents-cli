@@ -119,6 +119,49 @@ export function chooseFormat(options: TraceOptions, isTTY: boolean): RenderForma
   return isTTY ? 'html' : 'text';
 }
 
+/**
+ * Decide the trace layout from what the user TYPED (`selectorCount`) vs what
+ * those selectors RESOLVED to (`resolvedCount`). Keyed on selector count so a
+ * single content-search selector that happens to match two sessions never
+ * silently becomes a compare — every unsupported combination fails loud with a
+ * clear message. Pure, so the boundaries are unit-tested without the command.
+ */
+export function decideTraceLayout(
+  options: Pick<TraceOptions, 'tree' | 'compare'>,
+  selectorCount: number,
+  resolvedCount: number,
+): 'single' | 'compare' {
+  if (options.tree) {
+    throw new Error(
+      '`--tree` (lineage: a parent + its team) is not implemented yet — it lands in a follow-up PR. ' +
+      'Pass one selector for a single trajectory, or exactly two to compare.',
+    );
+  }
+  const wantCompare = options.compare === true || selectorCount >= 2;
+  if (wantCompare) {
+    if (selectorCount !== 2) {
+      throw new Error(
+        `Comparing needs exactly two selectors; you passed ${selectorCount}. ` +
+        'Pass two session selectors (ids or queries), each matching one session.',
+      );
+    }
+    if (resolvedCount !== 2) {
+      throw new Error(
+        `Each selector must match exactly one session to compare; the two selectors matched ${resolvedCount}. ` +
+        'Use more specific selectors (e.g. full session ids).',
+      );
+    }
+    return 'compare';
+  }
+  if (resolvedCount > 1) {
+    throw new Error(
+      `${resolvedCount} sessions matched — pass a more specific selector for one trajectory, ` +
+      'or two selectors to compare them.',
+    );
+  }
+  return 'single';
+}
+
 /** Attach the trace behaviour to a command node (canonical or top-level alias). */
 export function configureTraceCommand(cmd: Command): Command {
   cmd
@@ -195,28 +238,11 @@ layout lands in a follow-up PR.`,
       return;
     }
 
-    if (options.tree) {
-      // Fail loud — lineage (a parent + its team) is not implemented yet.
-      throw new Error(
-        '`--tree` (lineage: a parent + its team) is not implemented yet — it lands in a follow-up PR. ' +
-        'Pass one selector for a single trajectory, or exactly two to compare.',
-      );
-    }
-
-    if (sessions.length > 2) {
-      // Fail loud — never silently trace only the first of several.
-      throw new Error(
-        `\`agents sessions trace\` renders one session or compares exactly two in this release; ${sessions.length} matched. ` +
-        'Lineage (a parent + its team) lands in a follow-up PR — pass one or two selectors.',
-      );
-    }
-
-    if (options.compare && sessions.length < 2) {
-      // Fail loud — `--compare` asked for a layout this selection can't produce.
-      throw new Error(
-        `\`--compare\` needs two selectors to compare; ${sessions.length} matched. Pass a second selector.`,
-      );
-    }
+    // Layout is keyed on what the USER TYPED (selector count), not the resolved
+    // count — a single content-search selector matching two sessions must NOT
+    // silently become a compare. All the fail-loud boundaries live in the pure
+    // decideTraceLayout so they are unit-tested (see sessions-trace.test.ts).
+    const layout = decideTraceLayout(options, selectors.length, sessions.length);
 
     const redact = options.redact !== false;
     const knownSecrets = redact ? knownSecretValuesFromEnv() : undefined;
@@ -227,7 +253,7 @@ layout lands in a follow-up PR.`,
       return buildTrajectory(events, session, { redact, knownSecrets });
     };
 
-    if (sessions.length === 2) {
+    if (layout === 'compare') {
       const cmp = diffTrajectories(buildOne(sessions[0]), buildOne(sessions[1]));
       const idPart = `${sessions[0].shortId || sessions[0].id}-vs-${sessions[1].shortId || sessions[1].id}`;
 

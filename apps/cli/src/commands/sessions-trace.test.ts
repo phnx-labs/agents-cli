@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { Command } from 'commander';
 import {
   chooseFormat,
+  decideTraceLayout,
   buildTraceEnvelope,
   buildCompareTraceEnvelope,
   registerSessionsTraceCommand,
@@ -15,6 +16,31 @@ import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
 function meta(overrides: Partial<SessionMeta> = {}): SessionMeta {
   return { id: 'sess-0001', shortId: 'sess0001', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', filePath: '/tmp/s.jsonl', ...overrides };
 }
+
+describe('decideTraceLayout — keyed on selector count, not resolved count', () => {
+  it('one selector resolving to one session → single', () => {
+    expect(decideTraceLayout({}, 1, 1)).toBe('single');
+  });
+  it('two selectors each resolving to one → compare', () => {
+    expect(decideTraceLayout({}, 2, 2)).toBe('compare');
+  });
+  it('the blocker: ONE selector resolving to TWO sessions fails loud, never a silent compare', () => {
+    expect(() => decideTraceLayout({}, 1, 2)).toThrow(/matched — pass a more specific selector/);
+  });
+  it('--compare with one selector fails loud', () => {
+    expect(() => decideTraceLayout({ compare: true }, 1, 1)).toThrow(/needs exactly two selectors/);
+  });
+  it('three or more selectors fail loud', () => {
+    expect(() => decideTraceLayout({}, 3, 3)).toThrow(/needs exactly two selectors/);
+  });
+  it('two selectors that resolve to a wrong count (ambiguous / same) fail loud', () => {
+    expect(() => decideTraceLayout({}, 2, 3)).toThrow(/must match exactly one session/);
+    expect(() => decideTraceLayout({}, 2, 1)).toThrow(/must match exactly one session/);
+  });
+  it('--tree (lineage) fails loud until PR3', () => {
+    expect(() => decideTraceLayout({ tree: true }, 1, 1)).toThrow(/--tree.*not implemented yet/);
+  });
+});
 
 describe('chooseFormat — audience auto-selection', () => {
   it('explicit flags always win', () => {
