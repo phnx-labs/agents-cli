@@ -647,7 +647,9 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   const [tick, setTick] = useState(0)
   // ---------- Floor 3-pane shell state ----------
   const floorPrefs0 = useRef(loadFloorPrefs()).current
-  const [center, setCenter] = useState<CenterMode>('agents')
+  // Sessions is the primary surface (the work an operator lands), so the Floor
+  // opens on it, not the Agents roster — matches "rank by progress" (root AGENTS.md).
+  const [center, setCenter] = useState<CenterMode>('sessions')
   // Dynamic task tabs: double-clicking a backlog ticket or an agent card opens a
   // closeable tab in the sub-tab strip. activeTaskTab === null means a fixed center
   // tab is showing; otherwise the named task tab owns the center pane.

@@ -4,6 +4,14 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.333] - 2026-08-23
+
+- **The Fleet opens on the Sessions tab, not Agents.** The Floor 3-pane shell
+  now defaults its center to `sessions` — the primary surface where an operator
+  sees the work being landed — instead of the Agents roster, matching the
+  "rank by progress, not liveness" doctrine. Source:
+  `ui/settings/components/mission-control/UnifiedAgentsPane.tsx`.
+
 ## [0.9.332] - 2026-08-23
 
 - **`scripts/release.sh` no longer loses the version when it re-enters under
