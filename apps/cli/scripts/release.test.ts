@@ -64,7 +64,7 @@ describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audi
     // has NO "does live main reproduce the attested tree" equality gate -- that
     // gate forced main to stay quiet for the whole release. (The catch-up recovery
     // path keeps it, since there main already carries the bump.)
-    const primaryStart = RELEASE_SH.indexOf('CI_COMMIT="$RELEASE_COMMIT"');
+    const primaryStart = RELEASE_SH.indexOf('CI_COMMIT="$RELEASE_CI_HEAD"');
     const primaryEnd = RELEASE_SH.indexOf('PUBLISH_SHA="$CI_COMMIT"');
     expect(primaryStart).toBeGreaterThan(0);
     expect(primaryEnd).toBeGreaterThan(primaryStart);
@@ -73,6 +73,18 @@ describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audi
     expect(primaryPath).not.toContain('git fetch --quiet origin "$DEFAULT_BRANCH"');
     expect(RELEASE_SH).toContain('wait_for_attestation "$ATTESTED_TREE"');
     expect(RELEASE_SH).toContain('merge deferred until after publish');
+  });
+
+  it('keys the tag/publish to the STABLE branch head, not a re-synthesized commit (retry-safe)', () => {
+    // git commit-tree stamps wall-clock time, so RELEASE_COMMIT gets a fresh SHA
+    // every run for identical content. The primary path must publish the stable,
+    // already-pushed RELEASE_CI_HEAD so a retry after a transient home-base failure
+    // does not die at the tag-mismatch check (review of #2966).
+    expect(RELEASE_SH).toContain('CI_COMMIT="$RELEASE_CI_HEAD"');
+    expect(RELEASE_SH).not.toContain('CI_COMMIT="$RELEASE_COMMIT"');
+    // The already-published re-run lands a still-open deferred bump PR so the
+    // .changelog/next queue cannot drift into a later release.
+    expect(RELEASE_SH).toContain('STUCK_BUMP_PR');
   });
 
   it('merges the version-bump PR AFTER publish, non-gating (never dies on it)', () => {

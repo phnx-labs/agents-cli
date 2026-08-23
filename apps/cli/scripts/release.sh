@@ -956,6 +956,20 @@ if $PHNX_TARGET_PUBLISHED; then
       || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, which is not version $TARGET"
     gray "Tag v$TARGET already present for the published release."
   fi
+  # A prior run may have published but left the decoupled version-bump PR unmerged
+  # (the async merge is best-effort -- main moved / CHANGELOG conflict). Land it now
+  # on a re-run so main's history and the .changelog/next queue don't drift into a
+  # later release (review of #2966). Best-effort + lease-verified; a still-stuck PR
+  # just prints the manual merge.
+  STUCK_BUMP_PR="$(gh pr list --head "$RELEASE_BRANCH" --state open --json number --jq '.[0].number // empty' 2>/dev/null || true)"
+  if [[ -n "$STUCK_BUMP_PR" ]] && scripts/release-lease.sh verify >/dev/null 2>&1; then
+    if gh pr merge "$STUCK_BUMP_PR" --squash --delete-branch; then
+      green "Landed the deferred version-bump PR #$STUCK_BUMP_PR into $DEFAULT_BRANCH"
+    else
+      yellow "$PHNX_PKG@$TARGET is published; its bump PR #$STUCK_BUMP_PR still needs a manual merge:"
+      yellow "  gh pr merge $STUCK_BUMP_PR --squash --delete-branch"
+    fi
+  fi
   exit 0
 fi
 
@@ -1156,7 +1170,16 @@ else
   # bytes ARE this commit's tree and the attestation proves it was tested. A
   # concurrent commit on main can neither block nor contaminate the release; the
   # version bump lands on main asynchronously after publish (RUSH-2395 audit).
-  CI_COMMIT="$RELEASE_COMMIT"
+  #
+  # Use RELEASE_CI_HEAD -- the STABLE, already-resolved branch head (the reused
+  # open-PR head, or the RELEASE_COMMIT we just pushed) -- NOT a re-derived
+  # RELEASE_COMMIT. git commit-tree stamps wall-clock time, so re-synthesizing it
+  # every run mints a fresh SHA for identical content; keying the tag to that would
+  # make a retry after a transient home-base publish failure die at the tag-mismatch
+  # check below (v$TARGET already points at the prior run's SHA). RELEASE_CI_HEAD is
+  # the exact commit whose tree was attested (wait_for_attestation, phase 3), so its
+  # tree == the published tree by construction.
+  CI_COMMIT="$RELEASE_CI_HEAD"
   [[ -n "${CI_COMMIT:-}" ]] || die "internal: no attested release commit resolved -- refusing to publish"
   [[ "$(git show "$CI_COMMIT:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
     || die "attested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
@@ -1254,4 +1277,5 @@ if [[ -n "${PR_NUMBER:-}" ]] && ! $HISTORICAL_CATCHUP; then
 fi
 
 green "Released $TARGET"
-gray "Local $DEFAULT_BRANCH is behind origin by the release commit -- run: git pull --ff-only"
+gray "$PHNX_PKG@$TARGET is live. The version bump lands on $DEFAULT_BRANCH via the release PR"
+gray "  (merged above, or -- if it deferred on a conflict -- when that PR is merged)."
