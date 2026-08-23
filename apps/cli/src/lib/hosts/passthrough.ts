@@ -35,6 +35,11 @@ import { resolveRemoteOsSync } from './remote-os.js';
 // 6–7× cheaper graph (RUSH-2374 proposal 2).
 import { machineId } from '../machine-id.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../smart-launch.js';
+import {
+  isDeviceInteractive,
+  resolveInteractiveDevice,
+  interactiveUnsetError,
+} from '../devices/interactive-host.js';
 import { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
@@ -606,6 +611,22 @@ export async function maybeRunOnHost(
     }
     process.stderr.write(chalk.gray(`[agents] device=auto → ${plan.host}\n`));
     hostName = plan.host;
+  }
+
+  // `interactive` is the second affinity sentinel: the box the human sits at
+  // (`interactive.host`). Resolved here, ahead of the isSelfHost check below, for
+  // the same reason `auto` is — a pin naming THIS machine must run locally rather
+  // than self-SSH. It never falls back to the local box when unset: rendering to
+  // a screen nobody is watching is the exact failure the sentinel prevents.
+  if (isDeviceInteractive(hostName)) {
+    const pinned = resolveInteractiveDevice();
+    if (!pinned) {
+      process.stderr.write(`${interactiveUnsetError()}\n`);
+      process.exitCode = 1;
+      return true;
+    }
+    process.stderr.write(chalk.gray(`[agents] device=interactive → ${pinned}\n`));
+    hostName = pinned;
   }
 
   // Running against your own machine is just a local run — skip the SSH round-trip.

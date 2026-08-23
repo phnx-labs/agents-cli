@@ -260,6 +260,9 @@ one profile name span machines:
 
 ```bash
 agents browser navigate --device zion --url https://example.com
+
+# or, without naming a box — resolves interactive.host
+agents browser navigate --device interactive --url https://example.com
 ```
 
 ### Cleaning up dead profiles (`prune`)

@@ -21,6 +21,11 @@ import { getCliVersion } from '../lib/version.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
+import {
+  isDeviceInteractive,
+  resolveInteractiveDevice,
+  interactiveUnsetError,
+} from '../lib/devices/interactive-host.js';
 import { registerFleetCaptureCommand } from './fleet-capture.js';
 import { registerFleetApplyAlias } from './apply.js';
 import {
@@ -2351,6 +2356,15 @@ the target when it exists, else the remote home. Same portable-cwd rule as
       // nothing to resolve "self" to, and mis-report the pick as "Unknown
       // device").
       let target = name;
+      if (isDeviceInteractive(name)) {
+        const pinned = resolveInteractiveDevice();
+        if (!pinned) {
+          console.error(chalk.red(interactiveUnsetError()));
+          process.exit(1);
+        }
+        process.stderr.write(chalk.gray(`[agents] device=interactive → ${pinned}\n`));
+        target = pinned;
+      }
       if (isDeviceAuto(name)) {
         const plan = resolveDeviceAffinity({});
         if (!plan.host) {

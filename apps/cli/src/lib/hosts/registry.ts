@@ -30,6 +30,11 @@ import { resolveRemoteOsSync } from './remote-os.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { resolveDeviceProfile } from '../devices/resolve-profile.js';
 import { isDeviceAuto, resolveDeviceAffinity, type DeviceAffinityPlan } from '../smart-launch.js';
+import {
+  isDeviceInteractive,
+  resolveInteractiveDevice,
+  interactiveUnsetError,
+} from '../devices/interactive-host.js';
 import { localMachineId } from '../session/origin-machine.js';
 
 // Re-export so existing importers (tests, commands) keep their path; the class
@@ -206,6 +211,12 @@ export async function matchHost(name: string, opts: MatchHostOptions = {}): Prom
   // returning nothing — callers that already special-case "target is this
   // machine" (teams add/create, the passthrough self-host check) then treat it as
   // local exactly as they would if the user had typed the local name.
+  if (isDeviceInteractive(name)) {
+    const pinned = resolveInteractiveDevice();
+    if (!pinned) throw new Error(interactiveUnsetError());
+    name = pinned;
+  }
+
   if (isDeviceAuto(name)) {
     const plan = (opts.resolveAuto ?? (() => resolveDeviceAffinity({})))();
     const picked = plan.host ?? normalizeHost(localMachineId());
