@@ -1,6 +1,5 @@
 import React, { useMemo, useRef, useState, useCallback, useLayoutEffect } from 'react'
 import { Icon } from './icons'
-import { AgentAvatar, agentIdFromPrefix } from './AgentAvatar'
 import {
   needsReconnect,
   type FloorAgent,
@@ -10,12 +9,12 @@ import {
 } from './floorModel'
 import {
   scopeSessions,
-  sortSessions,
   groupSessions,
   sessionChipCounts,
   type SessionSection,
   type SessionScope,
 } from './sessionsModel'
+import { sessionRowView, type SessionRowView } from './recapModel'
 
 // The Sessions surface: one place to see every session you own — local + remote,
 // active + orphaned — and resume any of them, or a whole project's worth after a
@@ -23,9 +22,90 @@ import {
 // sort / group runs client-side, and the list is virtualized (fixed-offset
 // windowing below), so hundreds of rows render like twenty.
 
-const ROW_H = 34
-const HEADER_H = 30
-const OVERSCAN = 8
+const ROW_H = 108
+const ROW_EXPANDED_EXTRA = 96
+const HEADER_H = 36
+const OVERSCAN = 4
+
+export const SESSION_ROW_CSS = `
+.sw-sessions .sx-band {
+  display: flex; align-items: center; gap: 9px; padding: 9px 14px; height: auto;
+  font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace;
+  font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: #8b94a6; background: #111828; border-bottom: 1px solid #1b2334; border-top: 0;
+}
+.sw-sessions .sx-band .g { width: 7px; height: 7px; border-radius: 50%; background: #a78bfa; font-size: 0; color: transparent; }
+.sw-sessions .sx-band .lab { letter-spacing: 1.2px; color: #8b94a6; }
+.sw-sessions .sx-band .cnt { color: #5c6675; font-size: 11px; letter-spacing: 0; text-transform: none; }
+.sw-sessions .sx-band-act {
+  margin-left: auto; font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace;
+  font-size: 11.5px; color: #a3e635; letter-spacing: 0; text-transform: none; font-weight: 400;
+  border: 1px solid #34401a; background: #161e0b; border-radius: 6px; padding: 3px 10px;
+}
+.sw-sessions .sx-row {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 12px 14px; cursor: default;
+  border-top: 0; border-bottom: 1px solid #1b2334;
+  grid-template-columns: none;
+}
+.sw-sessions .sx-row:last-child { border-bottom: none; }
+.sw-sessions .sx-row:hover { background: #0f1625; }
+.sw-sessions .sx-row.sel { background: rgba(163, 230, 53, 0.06); }
+.sw-sessions .sx-row.active { background: #0f1625; }
+.sw-sessions .sx-cb { flex: none; margin-top: 2px; width: 14px; height: 14px; border: 1.5px solid #5c6675; border-radius: 3px; background: transparent; }
+.sw-sessions .sx-cb.on { background: #a3e635; border-color: #a3e635; }
+.sw-sessions .sx-star { flex: none; margin-top: 1px; color: #5c6675; font-size: 13px; }
+.sw-sessions .sx-star.on { color: #f5c518; }
+.sw-sessions .sx-pdot { width: 8px; height: 8px; border-radius: 50%; background: #a78bfa; flex: none; margin-top: 5px; }
+.sw-sessions .sx-pdot.off { background: #5c6675; }
+.sw-sessions .sx-grow { min-width: 0; flex: 1; }
+.sw-sessions .sx-titleline { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.sw-sessions .sx-ttl { color: #e6e9ef; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sw-sessions .sx-src { font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 9.5px; letter-spacing: .3px; text-transform: uppercase; padding: 1px 5px; border-radius: 4px; flex: none; }
+.sw-sessions .sx-src.agent { color: #4ade80; background: #0d2417; border: 1px solid #1c4a2f; }
+.sw-sessions .sx-src.last { color: #6ea8fe; background: #0c1a2e; border: 1px solid #1c3a5a; }
+.sw-sessions .sx-src.rename { color: #a78bfa; background: #1a1430; border: 1px solid #342a52; }
+.sw-sessions .sx-roleline { display: flex; align-items: flex-start; gap: 9px; margin-top: 3px; font-size: 12.5px; }
+.sw-sessions .sx-roletag { font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 10.5px; font-weight: 700; flex: none; width: 62px; text-align: right; padding-top: 1px; letter-spacing: .2px; white-space: nowrap; }
+.sw-sessions .sx-roletag.you { color: #6ea8fe; }
+.sw-sessions .sx-roletag.agent { color: #d97757; }
+.sw-sessions .sx-rolebody { min-width: 0; color: #8b94a6; }
+.sw-sessions .sx-rolebody.clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sw-sessions .sx-expand { font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; color: #5eead4; cursor: pointer; margin-left: 6px; background: none; border: 0; padding: 0; }
+.sw-sessions .sx-expand:hover { color: #a3e635; }
+.sw-sessions .sx-imgchip, .sw-sessions .sx-cmdchip, .sw-sessions .sx-slashchip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px;
+  border-radius: 5px; padding: 0 6px; margin-right: 5px;
+}
+.sw-sessions .sx-imgchip { color: #5eead4; background: #0c1a20; border: 1px solid #123; }
+.sw-sessions .sx-cmdchip { color: #f5b544; background: #1c1608; border: 1px solid #3a2e12; }
+.sw-sessions .sx-slashchip { color: #a78bfa; background: #160f28; border: 1px solid #2a2050; }
+.sw-sessions .sx-full { margin: 6px 0 2px 71px; padding: 9px 11px; border-left: 2px solid #223; background: #0b101c; border-radius: 0 7px 7px 0; color: #8b94a6; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; }
+.sw-sessions .sx-metarow { display: flex; align-items: center; gap: 7px; margin-top: 8px; flex-wrap: wrap; padding-left: 71px; }
+.sw-sessions .sx-chip { display: inline-flex; align-items: center; gap: 5px; font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; padding: 1.5px 7px; border-radius: 5px; border: 1px solid #1b2334; color: #8b94a6; white-space: nowrap; background: #0c1220; }
+.sw-sessions .sx-chip.repo { color: #5eead4; border-color: #123; }
+.sw-sessions .sx-chip.pr { color: #a3e635; border-color: #2c3a16; background: #141c0a; }
+.sw-sessions .sx-chip.pr .ci { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; display: inline-block; }
+.sw-sessions .sx-chip.pr .ci.run { background: #f5b544; }
+.sw-sessions .sx-chip.pr .ci.fail { background: #f87171; }
+.sw-sessions .sx-chip.branch { color: #a78bfa; border-color: #241d3a; }
+.sw-sessions .sx-chip.host { color: #8b94a6; }
+.sw-sessions .sx-chip.nopr { color: #5c6675; }
+.sw-sessions .sx-rowactions { display: flex; align-items: center; gap: 10px; flex: none; margin-top: 0; }
+.sw-sessions button { appearance: none; font-family: inherit; }
+.sw-sessions .sx-resumebtn {
+  font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; color: #a3e635;
+  border: 1px solid #34401a; background: #161e0b; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.sw-sessions .sx-resumebtn:hover { background: #1e2a0d; border-color: #4a5a24; }
+.sw-sessions .sx-age { color: #5c6675; font-size: 12px; flex: none; width: 34px; text-align: right; margin-top: 1px; }
+.sw-sessions .sx-live { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; flex: none; margin-top: 4px; box-shadow: 0 0 6px #4ade8066; }
+.sw-sessions .sx-live.idle { background: #f5b544; box-shadow: 0 0 6px #f5b54455; }
+.sw-sessions .sx-live.done { background: #5c6675; box-shadow: none; }
+.sw-sessions .sx-live.orphan { background: #a78bfa; box-shadow: 0 0 6px #a78bfa66; }
+`
 
 interface SessionsPaneProps {
   agents: FloorAgent[]
@@ -45,16 +125,10 @@ type VItem =
   | { kind: 'header'; section: SessionSection; height: number }
   | { kind: 'row'; agent: FloorAgent; section: SessionSection; height: number }
 
-// A resumable, detached session is the acute case; colour its dot distinctly.
-function statusClass(a: FloorAgent): string {
-  const ls = (a.liveStatus ?? '').toLowerCase()
-  if (ls === 'crashed') return 'fail'
-  if (needsReconnect(a)) return 'orphan'
-  if (a.phase === 'waiting') return 'wait'
-  if (a.phase === 'failed') return 'fail'
-  if (a.phase === 'running' || a.phase === 'stalled') return 'run'
-  if (a.phase === 'done') return 'done'
-  return 'idle'
+function rowHeight(expanded: boolean, lastFull: string): number {
+  if (!expanded) return ROW_H
+  const lines = Math.max(2, lastFull.split(/\n/).length + Math.ceil(lastFull.length / 88))
+  return ROW_H + ROW_EXPANDED_EXTRA + Math.min(lines, 10) * 16
 }
 
 const SORT_OPTS: { value: SessionSort; label: string }[] = [
@@ -80,6 +154,7 @@ export function SessionsPane({ agents, onToggleStar, onResume, onResumeMany, onS
   const [sort, setSort] = useState<SessionSort>('recent')
   const [desc, setDesc] = useState(true)
   const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set())
 
   const counts = useMemo(() => sessionChipCounts(agents), [agents])
 
@@ -96,10 +171,14 @@ export function SessionsPane({ agents, onToggleStar, onResume, onResumeMany, onS
     const out: VItem[] = []
     for (const s of sections) {
       out.push({ kind: 'header', section: s, height: HEADER_H })
-      for (const a of s.agents) out.push({ kind: 'row', agent: a, section: s, height: ROW_H })
+      for (const a of s.agents) {
+        const open = expanded.has(a.id)
+        const lastFull = open ? sessionRowView(a).lastFull : ''
+        out.push({ kind: 'row', agent: a, section: s, height: rowHeight(open, lastFull) })
+      }
     }
     return out
-  }, [sections])
+  }, [sections, expanded])
 
   // Prefix-sum offsets: offsets[i] = pixel top of item i; offsets[n] = total height.
   const offsets = useMemo(() => {
@@ -159,9 +238,18 @@ export function SessionsPane({ agents, onToggleStar, onResume, onResumeMany, onS
   const reconnectAll = useMemo(() => scoped.filter(needsReconnect), [scoped])
 
   const resumeSection = useCallback((s: SessionSection) => onResumeMany(s.agents), [onResumeMany])
+  const toggleExpand = useCallback((id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }, [])
 
   return (
     <div className="sw-sessions">
+      <style>{SESSION_ROW_CSS}</style>
       <div className="sx-filters">
         <div className="sx-chips">
           {(['all', 'active', 'orphaned', 'starred'] as SessionFilter[]).map((f) => (
@@ -229,10 +317,13 @@ export function SessionsPane({ agents, onToggleStar, onResume, onResumeMany, onS
                     agent={it.agent}
                     selected={selected.has(it.agent.id)}
                     active={selectedId === it.agent.id}
+                    expanded={expanded.has(it.agent.id)}
+                    height={it.height}
                     onToggleSelect={toggleSelect}
                     onToggleStar={onToggleStar}
                     onResume={onResume}
                     onSelect={onSelect}
+                    onToggleExpand={toggleExpand}
                   />
                 )
               )}
@@ -267,10 +358,9 @@ export function SessionsPane({ agents, onToggleStar, onResume, onResumeMany, onS
 
 function SectionHeaderImpl({ section, reconnectCount, onResumeAll }: { section: SessionSection; reconnectCount: number; onResumeAll: () => void }) {
   const isReconnect = section.band === 'reconnect'
-  const glyph = section.kind === 'starred' ? '★' : isReconnect ? '◍' : section.band === 'done' ? '✓' : '●'
   return (
     <div className={`sx-band${isReconnect ? ' recon' : ''}${section.kind === 'starred' ? ' star' : ''}`} style={{ height: HEADER_H }}>
-      <span className="g">{glyph}</span>
+      <span className="g" aria-hidden />
       <span className="lab">{section.label}</span>
       <span className="cnt">{section.agents.length}</span>
       {reconnectCount > 0 && (
@@ -285,28 +375,46 @@ interface RowProps {
   agent: FloorAgent
   selected: boolean
   active: boolean
+  expanded: boolean
+  height: number
   onToggleSelect: (id: string) => void
   onToggleStar: (a: FloorAgent) => void
   onResume: (a: FloorAgent) => void
   onSelect: (a: FloorAgent) => void
+  onToggleExpand: (id: string) => void
 }
 
-function SessionRowImpl({ agent: a, selected, active, onToggleSelect, onToggleStar, onResume, onSelect }: RowProps) {
-  const remote = a.host !== 'this-mac'
+function PromptChips({ you }: { you: SessionRowView['you'] }) {
+  if (you.kind === 'image') {
+    return <><span className="sx-imgchip">{'\u{1F5BC}'} screenshot</span>{you.text}</>
+  }
+  if (you.kind === 'command') {
+    return <><span className="sx-cmdchip">$ {you.chip}</span>{you.text}</>
+  }
+  if (you.kind === 'skill') {
+    return <><span className="sx-slashchip">{you.chip}</span>{you.text}</>
+  }
+  return <>{you.text}</>
+}
+
+function SessionRowImpl({
+  agent: a, selected, active, expanded, height,
+  onToggleSelect, onToggleStar, onResume, onSelect, onToggleExpand,
+}: RowProps) {
   const reconnect = needsReconnect(a)
-  // A live, attached session focuses; a detached / crashed one resumes.
-  const actionLabel = reconnect || a.phase === 'done' ? 'Resume' : 'Focus'
   // pidAlive (from the CLI) tells the user WHAT resume will do: an orphaned session
   // whose process still runs is reattached; a crashed/dead one is relaunched from
   // its transcript. The CLI decides the mechanism — this is the honest tooltip.
+  // Per-row Resume posts the SAME onResume the group "Resume all N" uses.
   const resumeTitle = reconnect
     ? (a.pidAlive === false ? 'Resume — relaunch from the transcript (process has exited)' : 'Reattach — the process is still running on its machine')
-    : actionLabel === 'Resume' ? 'Resume this session' : 'Focus this session in its terminal'
-  const title = (a.topic || a.prompt || a.name || '').split('\n')[0] || a.name
+    : 'Resume this session'
+  const row = sessionRowView(a)
+  const liveClass = row.live === 'run' ? '' : row.live
   return (
     <div
       className={`sx-row${selected ? ' sel' : ''}${active ? ' active' : ''}`}
-      style={{ height: ROW_H }}
+      style={{ minHeight: height }}
       onClick={() => onSelect(a)}
     >
       <button
@@ -319,24 +427,54 @@ function SessionRowImpl({ agent: a, selected, active, onToggleSelect, onToggleSt
         title={a.pinned ? 'Unstar' : 'Star — pin to top'}
         onClick={(e) => { e.stopPropagation(); onToggleStar(a) }}
       >{a.pinned ? '★' : '☆'}</button>
-      <span className={`sx-dot ${statusClass(a)}`} title={a.liveStatus || a.phase} />
-      <AgentAvatar id={agentIdFromPrefix(a.abbr) ?? a.abbr.toLowerCase()} size={18} title={a.abbr} />
-      <span className="sx-topic" title={title}>{title}</span>
-      <span className="sx-meta">
-        <span className="proj">{a.project}</span>
-        <span className="sep"> · </span>
-        {a.hostLabel ?? a.host}
-        {remote && <span className="sx-badge rem">remote</span>}
+      <span className={`sx-pdot${reconnect ? '' : ' off'}`} title={a.liveStatus || a.phase} />
+      <span className="sx-grow">
+        <div className="sx-titleline">
+          <span className="sx-ttl" title={row.title}>{row.title}</span>
+          <span className={`sx-src ${row.recapSourceClass}`}>{row.recapSource}</span>
+        </div>
+        <div className="sx-roleline">
+          <span className="sx-roletag you">You ›</span>
+          <span className="sx-rolebody clip"><PromptChips you={row.you} /></span>
+        </div>
+        {row.lastLine && (
+          <div className="sx-roleline">
+            <span className="sx-roletag agent">{row.harnessTag}</span>
+            <span className={`sx-rolebody${expanded ? '' : ' clip'}`}>
+              {row.lastLine}
+              {row.lastFull && (
+                <button
+                  className="sx-expand"
+                  aria-expanded={expanded}
+                  onClick={(e) => { e.stopPropagation(); onToggleExpand(a.id) }}
+                >{expanded ? '⌃ less' : '⌄ more'}</button>
+              )}
+            </span>
+          </div>
+        )}
+        {expanded && row.lastFull && <div className="sx-full">{row.lastFull}</div>}
+        <div className="sx-metarow">
+          {row.repo && <span className="sx-chip repo">▪ {row.repo}</span>}
+          {row.pr && (
+            <span className="sx-chip pr">
+              <span className={`ci${row.pr.ci === 'running' ? ' run' : row.pr.ci === 'failed' ? ' fail' : ''}`} />
+              {' '}{row.pr.label}
+            </span>
+          )}
+          {row.branch && <span className="sx-chip branch">⑂ {row.branch}</span>}
+          {row.host && <span className="sx-chip host">{row.host}</span>}
+          {!row.pr && <span className="sx-chip nopr">no PR</span>}
+        </div>
       </span>
-      <span className="sx-age">
-        {a.tok > 0 && <span className="tps">{a.tok} t/s · </span>}
-        {a.needs ? <span className="needs">needs you</span> : a.since}
+      <span className="sx-rowactions">
+        <button
+          className="sx-resumebtn"
+          title={resumeTitle}
+          onClick={(e) => { e.stopPropagation(); onResume(a) }}
+        >↻ Resume</button>
+        <span className="sx-age">{row.age}</span>
+        <span className={`sx-live${liveClass ? ` ${liveClass}` : ''}`} title={a.liveStatus || a.phase} />
       </span>
-      <button
-        className={`sx-resume${reconnect ? ' pri' : ''}`}
-        title={resumeTitle}
-        onClick={(e) => { e.stopPropagation(); onResume(a) }}
-      >{actionLabel}</button>
     </div>
   )
 }

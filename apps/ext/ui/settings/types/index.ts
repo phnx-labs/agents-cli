@@ -389,6 +389,18 @@ export interface TerminalDetail {
   attachments?: SessionAttachment[]
   lastFilePath?: string | null
   narrative?: string
+  /** Last assistant prose from the transcript / watch JSON. Distinct from `narrative`. */
+  lastAssistantMessage?: string
+  /**
+   * CLI session-row contract (ADAPTER SEAM). Present once `agents sessions watch
+   * --json` carries them; `recapModel.sessionRowView` prefers these over derived
+   * FloorAgent / TerminalDetail fields.
+   */
+  title?: string | null
+  recapSource?: 'agent recap' | 'last line' | 'renamed' | 'agent' | 'last' | 'rename' | null
+  userPromptClean?: string | null
+  userPromptKind?: 'text' | 'image' | 'command' | 'skill' | null
+  lastAgentLine?: string | null
   cwd?: string | null
   branch?: string | null
   recentFileStats?: Record<string, { added: number; removed: number }>

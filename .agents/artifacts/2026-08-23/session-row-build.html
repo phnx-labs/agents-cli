@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>AGI EXT — session row build</title>
+<style>
+  :root{
+    --bg:#0a0e14; --panel:#0d1220; --panel2:#111828; --line:#1b2334;
+    --text:#e6e9ef; --muted:#8b94a6; --dim:#5c6675;
+    --lime:#a3e635; --purple:#a78bfa;
+    --font:-apple-system,BlinkMacSystemFont,"Inter","Segoe UI",sans-serif;
+    --mono:"JetBrains Mono","SF Mono",ui-monospace,monospace;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font);font-size:14px;line-height:1.45}
+  .wrap{max-width:1120px;margin:0 auto;padding:26px 22px 70px}
+  h1{font-size:19px;margin:0 0 4px}
+  .sub{color:var(--muted);font-size:13px;margin:0 0 22px;max-width:880px}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:11px;overflow:hidden}
+  .grouphdr{display:flex;align-items:center;gap:9px;padding:9px 14px;border-bottom:1px solid var(--line);background:var(--panel2)}
+  .grouphdr .dot{width:7px;height:7px;border-radius:50%;background:var(--purple)}
+  .grouphdr .lbl{font-family:var(--mono);font-size:11px;letter-spacing:1.2px;color:var(--muted);text-transform:uppercase}
+  .grouphdr .cnt{color:var(--dim);font-size:11px}
+  .grouphdr .spacer{flex:1}
+  .resumeall{font-family:var(--mono);font-size:11.5px;color:var(--lime);border:1px solid #34401a;background:#161e0b;border-radius:6px;padding:3px 10px}
+  button{font-family:inherit}
+  
+.sw-sessions .sx-band {
+  display: flex; align-items: center; gap: 9px; padding: 9px 14px; height: auto;
+  font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace;
+  font-size: 11px; letter-spacing: 1.2px; text-transform: uppercase;
+  color: #8b94a6; background: #111828; border-bottom: 1px solid #1b2334; border-top: 0;
+}
+.sw-sessions .sx-band .g { width: 7px; height: 7px; border-radius: 50%; background: #a78bfa; font-size: 0; color: transparent; }
+.sw-sessions .sx-band .lab { letter-spacing: 1.2px; color: #8b94a6; }
+.sw-sessions .sx-band .cnt { color: #5c6675; font-size: 11px; letter-spacing: 0; text-transform: none; }
+.sw-sessions .sx-band-act {
+  margin-left: auto; font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace;
+  font-size: 11.5px; color: #a3e635; letter-spacing: 0; text-transform: none; font-weight: 400;
+  border: 1px solid #34401a; background: #161e0b; border-radius: 6px; padding: 3px 10px;
+}
+.sw-sessions .sx-row {
+  display: flex; align-items: flex-start; gap: 11px;
+  padding: 12px 14px; cursor: default;
+  border-top: 0; border-bottom: 1px solid #1b2334;
+  grid-template-columns: none;
+}
+.sw-sessions .sx-row:last-child { border-bottom: none; }
+.sw-sessions .sx-row:hover { background: #0f1625; }
+.sw-sessions .sx-row.sel { background: rgba(163, 230, 53, 0.06); }
+.sw-sessions .sx-row.active { background: #0f1625; }
+.sw-sessions .sx-cb { flex: none; margin-top: 2px; width: 14px; height: 14px; border: 1.5px solid #5c6675; border-radius: 3px; background: transparent; }
+.sw-sessions .sx-cb.on { background: #a3e635; border-color: #a3e635; }
+.sw-sessions .sx-star { flex: none; margin-top: 1px; color: #5c6675; font-size: 13px; }
+.sw-sessions .sx-star.on { color: #f5c518; }
+.sw-sessions .sx-pdot { width: 8px; height: 8px; border-radius: 50%; background: #a78bfa; flex: none; margin-top: 5px; }
+.sw-sessions .sx-pdot.off { background: #5c6675; }
+.sw-sessions .sx-grow { min-width: 0; flex: 1; }
+.sw-sessions .sx-titleline { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.sw-sessions .sx-ttl { color: #e6e9ef; font-size: 13.5px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sw-sessions .sx-src { font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 9.5px; letter-spacing: .3px; text-transform: uppercase; padding: 1px 5px; border-radius: 4px; flex: none; }
+.sw-sessions .sx-src.agent { color: #4ade80; background: #0d2417; border: 1px solid #1c4a2f; }
+.sw-sessions .sx-src.last { color: #6ea8fe; background: #0c1a2e; border: 1px solid #1c3a5a; }
+.sw-sessions .sx-src.rename { color: #a78bfa; background: #1a1430; border: 1px solid #342a52; }
+.sw-sessions .sx-roleline { display: flex; align-items: flex-start; gap: 9px; margin-top: 3px; font-size: 12.5px; }
+.sw-sessions .sx-roletag { font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 10.5px; font-weight: 700; flex: none; width: 62px; text-align: right; padding-top: 1px; letter-spacing: .2px; white-space: nowrap; }
+.sw-sessions .sx-roletag.you { color: #6ea8fe; }
+.sw-sessions .sx-roletag.agent { color: #d97757; }
+.sw-sessions .sx-rolebody { min-width: 0; color: #8b94a6; }
+.sw-sessions .sx-rolebody.clip { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sw-sessions .sx-expand { font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; color: #5eead4; cursor: pointer; margin-left: 6px; background: none; border: 0; padding: 0; }
+.sw-sessions .sx-expand:hover { color: #a3e635; }
+.sw-sessions .sx-imgchip, .sw-sessions .sx-cmdchip, .sw-sessions .sx-slashchip {
+  display: inline-flex; align-items: center; gap: 4px;
+  font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px;
+  border-radius: 5px; padding: 0 6px; margin-right: 5px;
+}
+.sw-sessions .sx-imgchip { color: #5eead4; background: #0c1a20; border: 1px solid #123; }
+.sw-sessions .sx-cmdchip { color: #f5b544; background: #1c1608; border: 1px solid #3a2e12; }
+.sw-sessions .sx-slashchip { color: #a78bfa; background: #160f28; border: 1px solid #2a2050; }
+.sw-sessions .sx-full { margin: 6px 0 2px 71px; padding: 9px 11px; border-left: 2px solid #223; background: #0b101c; border-radius: 0 7px 7px 0; color: #8b94a6; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; }
+.sw-sessions .sx-metarow { display: flex; align-items: center; gap: 7px; margin-top: 8px; flex-wrap: wrap; padding-left: 71px; }
+.sw-sessions .sx-chip { display: inline-flex; align-items: center; gap: 5px; font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; padding: 1.5px 7px; border-radius: 5px; border: 1px solid #1b2334; color: #8b94a6; white-space: nowrap; background: #0c1220; }
+.sw-sessions .sx-chip.repo { color: #5eead4; border-color: #123; }
+.sw-sessions .sx-chip.pr { color: #a3e635; border-color: #2c3a16; background: #141c0a; }
+.sw-sessions .sx-chip.pr .ci { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; display: inline-block; }
+.sw-sessions .sx-chip.pr .ci.run { background: #f5b544; }
+.sw-sessions .sx-chip.pr .ci.fail { background: #f87171; }
+.sw-sessions .sx-chip.branch { color: #a78bfa; border-color: #241d3a; }
+.sw-sessions .sx-chip.host { color: #8b94a6; }
+.sw-sessions .sx-chip.nopr { color: #5c6675; }
+.sw-sessions .sx-rowactions { display: flex; align-items: center; gap: 10px; flex: none; margin-top: 0; }
+.sw-sessions button { appearance: none; font-family: inherit; }
+.sw-sessions .sx-resumebtn {
+  font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; color: #a3e635;
+  border: 1px solid #34401a; background: #161e0b; border-radius: 6px; padding: 3px 10px; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
+}
+.sw-sessions .sx-resumebtn:hover { background: #1e2a0d; border-color: #4a5a24; }
+.sw-sessions .sx-age { color: #5c6675; font-size: 12px; flex: none; width: 34px; text-align: right; margin-top: 1px; }
+.sw-sessions .sx-live { width: 10px; height: 10px; border-radius: 50%; background: #4ade80; flex: none; margin-top: 4px; box-shadow: 0 0 6px #4ade8066; }
+.sw-sessions .sx-live.idle { background: #f5b544; box-shadow: 0 0 6px #f5b54455; }
+.sw-sessions .sx-live.done { background: #5c6675; box-shadow: none; }
+.sw-sessions .sx-live.orphan { background: #a78bfa; box-shadow: 0 0 6px #a78bfa66; }
+
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Recap v3 — three roles, same place every row</h1>
+  <p class="sub">Build screenshot — SessionsPane SessionRow against the approved mockup.</p>
+  <div class="panel sw-sessions">
+    <div class="grouphdr"><span class="dot"></span><span class="lbl">Needs reconnecting</span><span class="cnt">53</span><span class="spacer"></span><span class="resumeall">Resume all 53</span></div>
+    <div class="sx-row" style="min-height:108px"><button class="sx-cb" title="Select"></button><button class="sx-star" title="Star — pin to top">☆</button><span class="sx-pdot" title="orphaned"></span><span class="sx-grow"><div class="sx-titleline"><span class="sx-ttl" title="Redesigning the SVAtlas landscape hero section">Redesigning the SVAtlas landscape hero section</span><span class="sx-src agent">agent recap</span></div><div class="sx-roleline"><span class="sx-roletag you">You ›</span><span class="sx-rolebody clip"><span class="sx-imgchip">🖼 screenshot</span>The landscape mode looks cramped — can we give the hero more room?</span></div><div class="sx-roleline"><span class="sx-roletag agent">Claude ›</span><span class="sx-rolebody clip">&quot;Widened the hero to a 2-col grid and pushed the CTA down. Screenshot attached — does the spacing read better now?&quot;<button class="sx-expand" aria-expanded="false">⌄ more</button></span></div><div class="sx-metarow"><span class="sx-chip repo">▪ svatlas</span><span class="sx-chip pr"><span class="ci run"></span> PR #418</span><span class="sx-chip host">yosemite-s1</span></div></span><span class="sx-rowactions"><button class="sx-resumebtn" title="Reattach — the process is still running on its machine">↻ Resume</button><span class="sx-age">2d</span><span class="sx-live" title="orphaned"></span></span></div>
+<div class="sx-row" style="min-height:240px"><button class="sx-cb" title="Select"></button><button class="sx-star on" title="Unstar">★</button><span class="sx-pdot" title="orphaned"></span><span class="sx-grow"><div class="sx-titleline"><span class="sx-ttl" title="Explaining the Crabbox CI currency model">Explaining the Crabbox CI currency model</span><span class="sx-src last">last line</span></div><div class="sx-roleline"><span class="sx-roletag you">You ›</span><span class="sx-rolebody clip"><span class="sx-cmdchip">$ crabbox status</span>Helping understand the currency I set up for the agency — does it use Crabbox?</span></div><div class="sx-roleline"><span class="sx-roletag agent">Claude ›</span><span class="sx-rolebody">&quot;Yes — every run mints a per-repo credit against the microVM pool…&quot;<button class="sx-expand" aria-expanded="true">⌃ less</button></span></div><div class="sx-full">Yes — every CI run mints a per-repo credit against the shared microVM pool, admitted under a CPU/memory fairness gate so no single repo starves the others. The &quot;currency&quot; you set up is the per-repo admission budget in specifications.md. Fork runs get zero durable credit — they never touch trusted caches. Want me to write this up in the concepts doc?</div><div class="sx-metarow"><span class="sx-chip repo">▪ agents-cli</span><span class="sx-chip host">yosemite-s1</span><span class="sx-chip nopr">no PR</span></div></span><span class="sx-rowactions"><button class="sx-resumebtn" title="Reattach — the process is still running on its machine">↻ Resume</button><span class="sx-age">6d</span><span class="sx-live idle" title="orphaned"></span></span></div>
+<div class="sx-row" style="min-height:108px"><button class="sx-cb" title="Select"></button><button class="sx-star" title="Star — pin to top">☆</button><span class="sx-pdot" title="orphaned"></span><span class="sx-grow"><div class="sx-titleline"><span class="sx-ttl" title="Continuing the usage-cache fix from a prior session">Continuing the usage-cache fix from a prior session</span><span class="sx-src rename">renamed</span></div><div class="sx-roleline"><span class="sx-roletag you">You ›</span><span class="sx-rolebody clip"><span class="sx-slashchip">/continue</span>pick up the agents view cache work</span></div><div class="sx-roleline"><span class="sx-roletag agent">Claude ›</span><span class="sx-rolebody clip">&quot;Rebased onto main, re-ran the failing test — green. Opening the PR now.&quot;<button class="sx-expand" aria-expanded="false">⌄ more</button></span></div><div class="sx-metarow"><span class="sx-chip repo">▪ agents-cli</span><span class="sx-chip pr"><span class="ci"></span> PR #2922</span><span class="sx-chip branch">⑂ fix-usage-cache</span><span class="sx-chip host">yosemite-s1</span></div></span><span class="sx-rowactions"><button class="sx-resumebtn" title="Reattach — the process is still running on its machine">↻ Resume</button><span class="sx-age">2d</span><span class="sx-live done" title="orphaned"></span></span></div>
+  </div>
+</div>
+</body>
+</html>

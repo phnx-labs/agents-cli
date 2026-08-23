@@ -6,6 +6,16 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.331] - 2026-08-23
 
+- **Fleet session rows are a consistent 3-line recap.** Every Sessions-surface
+  row now shows title + provenance (`agent recap` / `last line` / `renamed`),
+  a processed **You ›** prompt (image → `screenshot` chip with the path dropped,
+  pasted command → `$ cmd`, skill boilerplate → `/continue`, text as-is), and a
+  dimmed **Claude ›** last line with `⌄ more` expanding the full last message
+  inline. Role tags are a fixed column. Chips carry repo, PR + CI dot, branch,
+  and host. Each row has **↻ Resume** in addition to the group's **Resume all N**,
+  posting the same resume action. Source: `ui/settings/components/mission-control/{SessionsPane.tsx,recapModel.ts}`.
+  Spec: `.agents/artifacts/2026-08-23/mockup-session-row.html`.
+
 - **`Agents: New <Harness>` opens an agent again instead of asking which account
   (RUSH-3057).** 0.9.329 put the account picker on the bare command, so the
   keybinding everyone presses dozens of times a day emitted

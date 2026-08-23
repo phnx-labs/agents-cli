@@ -59,6 +59,30 @@ ui/editor      Custom document viewers
 assets         Extension artwork
 ```
 
+## Fleet session row
+
+The Sessions surface (`ui/settings/components/mission-control/SessionsPane.tsx`)
+renders every row as three aligned lines, matching the committed mockup at
+`.agents/artifacts/2026-08-23/mockup-session-row.html`:
+
+- **Title** (bold) + provenance badge (`agent recap` | `last line` | `renamed`).
+- **You ›** — the user's prompt, processed: image → `screenshot` chip (no path),
+  pasted command → `$ cmd` chip, skill → `/continue` chip, plain text as-is.
+  Role tags are a fixed 62px right-aligned column.
+- **Claude ›** (or the harness name) — last agent line, dimmed; `⌄ more`
+  expands the full last message inline.
+- Chips: repo (cwd basename), PR # with a CI dot (green/amber/red), branch, host.
+- Per-row **↻ Resume** posts the same `onResume` the group's **Resume all N** uses.
+- Right-edge live dot: green working, amber idle, grey done. Reconnect is the
+  left pdot + group band.
+
+Prompt processing and the CLI-watch adapter live in `recapModel.ts`
+(`processUserPrompt`, `sessionRowView`). Prefer watch JSON fields (`title`,
+`recapSource`, `userPromptClean`, `userPromptKind`, `lastAgentLine`) when
+present; otherwise bind `TerminalDetail` / `FloorAgent`
+(`narrative`, `lastAssistantMessage`, `firstUserMessage`, `branch`, `cwd`,
+`status`, `prompt`, `resp`).
+
 ## Build and test
 
 Run `bun install` once in `apps/ext`, then:
