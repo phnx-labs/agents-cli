@@ -174,13 +174,18 @@ export interface ClassifiedPrompt {
 /**
  * A skill invocation injects a system line naming the skill's install directory:
  *   "Base directory for this skill: /home/.../skills/<name>"
- * Both forms collapse to "/<name>" so a row shows the skill, not the path.
+ * which collapses to "/<name>" so a row shows the skill, not the path. Anchored
+ * to that exact injected line — a bare `.../skills/<name>` mention in ordinary
+ * prose is NOT a skill invocation and must keep its real text.
  */
 const SKILL_BASEDIR_RE = /Base directory for this skill:\s*\S*[\/\\]skills[\/\\]([\w.-]+)/i;
-const SKILL_PATH_RE = /[\/\\]skills[\/\\]([\w.-]+)(?:[\/\\]|\b)/i;
 
-/** An explicit shell-prompt paste (`$ cmd` / `> cmd`). Only the command survives. */
-const COMMAND_PREFIX_RE = /^[$>»]\s+(\S.*)$/;
+/**
+ * An explicit shell-prompt paste (`$ cmd`). Only the command survives. Deliberately
+ * `$`-only: a leading `>` is a markdown blockquote far more often than a shell
+ * prompt, so matching it misread quoted prose as a command.
+ */
+const COMMAND_PREFIX_RE = /^\$\s+(\S.*)$/;
 
 /**
  * A filesystem path (absolute or `~`-rooted) ending in an image extension —
@@ -193,9 +198,9 @@ const IMAGE_PATH_RE = /[\/~][^\n]*?\.(?:png|jpe?g|gif|webp|heic|bmp|svg)\b/i;
  * Classify a raw first user turn into a display-ready `{ clean, kind }`, so a
  * Fleet/session row shows the user's actual intent rather than path noise:
  *
- *   - `skill`   — a `/skill` invocation's "Base directory for this skill: …"
- *                 (or a bare `…/skills/<name>` path) collapses to `/<name>`.
- *   - `command` — a `$ `/`> `-prefixed shell paste keeps only the first command.
+ *   - `skill`   — a `/skill` invocation's injected "Base directory for this
+ *                 skill: …" line collapses to `/<name>`.
+ *   - `command` — a `$ `-prefixed shell paste keeps only the first command.
  *   - `image`   — a screenshot/image path standing alone, or an image
  *                 attachment with no real accompanying text, becomes `[image]`.
  *   - `text`    — everything else: wrapper tags stripped (via
@@ -212,7 +217,7 @@ export function classifyUserPrompt(
 ): ClassifiedPrompt {
   const text = (raw ?? '').replace(/\r/g, '').trim();
 
-  const skill = text.match(SKILL_BASEDIR_RE) ?? text.match(SKILL_PATH_RE);
+  const skill = text.match(SKILL_BASEDIR_RE);
   if (skill) return { clean: `/${skill[1]}`, kind: 'skill' };
 
   const firstLine = text.split('\n').map(line => line.trim()).find(Boolean) ?? '';

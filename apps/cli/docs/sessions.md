@@ -36,8 +36,8 @@ is doing*, not the stale first prompt (`src/lib/session/active.ts`
 
 | Field | Meaning |
 | --- | --- |
-| `title` | The shown title, best-source-wins. Ladder: `label` → cached agent recap → last agent line → first-prompt topic. |
-| `recapSource` | Which rung produced `title`: `'label'` \| `'agent'` \| `'last'` \| `'prompt'`. A `'last'`/`'agent'` title is agent-derived; `'prompt'` is the last-resort fallback. |
+| `title` | The shown title, best-source-wins. Ladder: `label` (a `/rename` or agent-generated title) → last agent line → first-prompt topic. |
+| `recapSource` | Which rung produced `title`: `'label'` \| `'last'` \| `'prompt'`. A `'last'` title is agent-derived; `'prompt'` is the last-resort fallback. |
 | `userPromptClean` | The first user turn cleaned for a "You" line: a screenshot path folds to `[image]`, a pasted `$ cmd` to the command, a `/skill` install path to `/<name>`, so path noise never shows. |
 | `userPromptKind` | `'text'` \| `'image'` \| `'command'` \| `'skill'` — what that first turn was (`classifyUserPrompt`). |
 | `lastAgentLine` | The most recent assistant line (transcript tail) — the always-current signal of what the agent last said. |

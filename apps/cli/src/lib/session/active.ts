@@ -289,12 +289,12 @@ export type ActiveStatus =
 /**
  * Which rung of the recap ladder produced a row's shown {@link ActiveSession.title}
  * (RUSH-3011), best-first:
- *   - `label`  — a `/rename` or harness-set label; always wins.
- *   - `agent`  — a cached agent recap/narrative (supplied by the caller).
- *   - `last`   — the last assistant line from the transcript tail.
+ *   - `label`  — a `/rename` or harness-set label (incl. an agent-generated
+ *                title, which lands in `label`); always wins.
+ *   - `last`   — the last assistant line from the transcript tail; agent-derived.
  *   - `prompt` — the first-user-prompt topic; the last-resort fallback.
  */
-export type RecapSource = 'label' | 'agent' | 'last' | 'prompt';
+export type RecapSource = 'label' | 'last' | 'prompt';
 
 export interface ActiveSession {
   context: ActiveContext;
@@ -315,10 +315,10 @@ export interface ActiveSession {
   /**
    * The row's shown title — WHAT the session is, best-source-wins (RUSH-3011).
    * The ladder ({@link deriveSessionRecap}): a `/rename` or harness `label` →
-   * a cached agent recap → the last agent line (`lastAgentLine`) → the
-   * first-prompt `topic`. A session whose agent did work shows an agent-derived
-   * line, not the stale first prompt. Folded on at the end of
-   * {@link getActiveSessions}; `recapSource` names which rung produced it.
+   * the last agent line (`lastAgentLine`) → the first-prompt `topic`. A session
+   * whose agent did work shows an agent-derived line, not the stale first
+   * prompt. Folded on at the end of {@link getActiveSessions}; `recapSource`
+   * names which rung produced it.
    */
   title?: string;
   /** Which ladder rung produced {@link title}. */
@@ -2515,27 +2515,24 @@ function recapLine(s: string | undefined, max = 120): string | undefined {
  * prompt (`userPromptClean`/`userPromptKind`) and the `lastAgentLine`. Pure over
  * one row; exported for tests and folded in by {@link foldRecap}.
  *
- * Ladder, best-first: a `/rename`/harness `label` → a cached agent recap
- * (`opts.agentRecap`, when a caller has one) → the last assistant line → the
- * first-prompt topic. Rungs 2–3 are agent-derived, so a session that produced
- * work stops showing its stale first prompt as the title.
+ * Ladder, best-first: a `/rename`/harness `label` → the last assistant line →
+ * the first-prompt topic. The `last` rung is agent-derived, so a session that
+ * produced work stops showing its stale first prompt as the title. (`topic` is
+ * the row's already-extracted first line, so image detection here is
+ * path-based; a pure-attachment turn with no first-line text stays on `prompt`.)
  */
 export function deriveSessionRecap(
-  row: Pick<ActiveSession, 'label' | 'topic' | 'tail' | 'attachments'>,
-  opts: { agentRecap?: string } = {},
+  row: Pick<ActiveSession, 'label' | 'topic' | 'tail'>,
 ): { title?: string; recapSource?: RecapSource; userPromptClean?: string; userPromptKind?: UserPromptKind; lastAgentLine?: string } {
   const lastAgentLine = recapLine(row.tail?.length ? row.tail[row.tail.length - 1] : undefined);
-  const hasImageAttachment = !!row.attachments?.some(a => a.mediaType?.startsWith('image'));
-  const { clean: userPromptClean, kind: userPromptKind } = classifyUserPrompt(row.topic ?? '', { hasImageAttachment });
+  const { clean: userPromptClean, kind: userPromptKind } = classifyUserPrompt(row.topic ?? '');
 
   const label = recapLine(row.label);
-  const agent = recapLine(opts.agentRecap);
   const prompt = recapLine(userPromptClean || row.topic);
 
   let title: string | undefined;
   let recapSource: RecapSource | undefined;
   if (label) { title = label; recapSource = 'label'; }
-  else if (agent) { title = agent; recapSource = 'agent'; }
   else if (lastAgentLine) { title = lastAgentLine; recapSource = 'last'; }
   else if (prompt) { title = prompt; recapSource = 'prompt'; }
 

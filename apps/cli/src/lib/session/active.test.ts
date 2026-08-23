@@ -361,12 +361,7 @@ describe('deriveSessionRecap (recap ladder — show what the agent DID, not the 
     expect(r).toMatchObject({ title: 'ship the auth fix', recapSource: 'label' });
   });
 
-  it('prefers a supplied agent recap over the tail and prompt', () => {
-    const r = deriveSessionRecap({ topic: 'first prompt', tail: ['agent last line'] }, { agentRecap: 'refactored the parser' });
-    expect(r).toMatchObject({ title: 'refactored the parser', recapSource: 'agent' });
-  });
-
-  it('uses the last agent line when there is no label or recap (the always-current fix)', () => {
+  it('uses the last agent line when there is no label (the always-current fix)', () => {
     const r = deriveSessionRecap({ topic: 'add a widget', tail: ['opened PR #123', 'now fixing CI'] });
     expect(r).toMatchObject({ title: 'now fixing CI', recapSource: 'last', lastAgentLine: 'now fixing CI' });
   });
@@ -376,8 +371,8 @@ describe('deriveSessionRecap (recap ladder — show what the agent DID, not the 
     expect(r).toMatchObject({ title: 'add a widget', recapSource: 'prompt' });
   });
 
-  it('cleans an image-only first prompt into the userPrompt fields', () => {
-    const r = deriveSessionRecap({ topic: '', attachments: [{ mediaType: 'image/png' }] });
+  it('cleans an image-path first prompt into the userPrompt fields', () => {
+    const r = deriveSessionRecap({ topic: '/Users/muqsit/Screenshots/CleanShot 2026-08-20 at 1.png' });
     expect(r).toMatchObject({ userPromptClean: '[image]', userPromptKind: 'image' });
   });
 

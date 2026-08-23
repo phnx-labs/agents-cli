@@ -17,9 +17,21 @@ describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
     expect(r).toEqual({ clean: '$ crabbox status', kind: 'command' });
   });
 
-  it('collapses a skill install path to /<name>', () => {
+  it('collapses a skill install path to /<name> — only the injected system line', () => {
     const r = classifyUserPrompt('Base directory for this skill: /home/u/.claude/skills/blog\n\nWrite a post');
     expect(r).toEqual({ clean: '/blog', kind: 'skill' });
+  });
+
+  it('does NOT treat an ordinary prose mention of a skills/ path as a skill invocation', () => {
+    const r = classifyUserPrompt('review the docs under ~/.agents/skills/blog and check the CHANGELOG');
+    expect(r.kind).toBe('text');
+    expect(r.clean).toContain('review the docs');
+  });
+
+  it('does NOT treat a markdown blockquote as a command', () => {
+    const r = classifyUserPrompt('> quoting the article: agents are the future — thoughts?');
+    expect(r.kind).toBe('text');
+    expect(r.clean).not.toMatch(/^\$/);
   });
 
   it('strips wrapper tags from plain text', () => {
