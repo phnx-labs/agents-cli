@@ -593,6 +593,41 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: snapshot([{ key: 'week', usedPercent: 10 }]) }), NOW)).toBe(false);
     expect(isUsageVerified(candidate({ version: '1.0.0' }), NOW)).toBe(false);
   });
+
+  it('isUsageVerified: a fresh snapshot with no windows verifies nothing', () => {
+    // Grok reports a subscription tier and no meters, so its cached row is
+    // plan-only. Freshness alone must not make it "verified": it carries no
+    // utilization to route on.
+    const planOnly = snapshotAt(new Date(NOW - 60_000), []);
+    planOnly.plan = 'SuperGrok Heavy';
+
+    expect(isUsageVerified(candidate({ version: '0.2.118', usageSnapshot: planOnly }), NOW)).toBe(false);
+  });
+
+  it('a meterless pool stays spread instead of pinning to the most recently logged account', () => {
+    // Both accounts are plan-only; one's billing log was touched a minute ago,
+    // the other's three days ago — the normal steady state for grok. If the
+    // recent one counted as verified, preferVerified would narrow to it every
+    // draw, and running it would refresh its log and pin it permanently.
+    const recent = snapshotAt(new Date(NOW - 60_000), []);
+    recent.plan = 'SuperGrok Heavy';
+    const older = snapshotAt(new Date(NOW - 3 * 24 * 3600 * 1000), []);
+    older.plan = 'X Premium+';
+
+    const picks = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const result = pickBalancedCandidate(
+        [
+          candidate({ version: '0.2.118', usageSnapshot: recent }),
+          candidate({ version: '0.2.101', usageSnapshot: older }),
+        ],
+        NOW,
+      )!;
+      picks.add(result.picked.version);
+    }
+
+    expect([...picks].sort()).toEqual(['0.2.101', '0.2.118']);
+  });
 });
 
 describe('--strategy available applies the same freshness rule as balanced', () => {

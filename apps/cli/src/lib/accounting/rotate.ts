@@ -196,10 +196,20 @@ export const USAGE_DECISION_MAX_AGE_MS = 5 * 60 * 1000;
 /**
  * Whether this candidate's usage number is recent enough to route on. A missing
  * snapshot is unverified by definition — there is no number to trust.
+ *
+ * A snapshot with NO windows is unverified for the same reason, however fresh
+ * it is: it carries a subscription plan and no utilization, so there is still
+ * no number. Freshness alone would make a meterless harness (Grok reports a
+ * tier and no meters) verify against nothing — and since `preferVerified`
+ * narrows the pool to verified candidates, the one account whose billing log
+ * was touched most recently would win every draw, then win again because
+ * running it refreshes that log. That self-reinforcing pin is exactly what the
+ * narrowing rule below exists to prevent.
  */
 export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date.now()): boolean {
-  const capturedAt = candidate.usageSnapshot?.capturedAt;
-  if (!capturedAt) return false;
+  const snapshot = candidate.usageSnapshot;
+  const capturedAt = snapshot?.capturedAt;
+  if (!capturedAt || !snapshot?.windows.length) return false;
   return nowMs - capturedAt.getTime() <= USAGE_DECISION_MAX_AGE_MS;
 }
 
