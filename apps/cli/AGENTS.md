@@ -433,6 +433,13 @@ line capped at 80 characters — a newline or an over-long value is rejected
 loudly, never truncated. It is NOT `notes`: `notes` stays an appended list of
 long-form operator scratch that is never shown in device listings.
 
+`agents devices ignored` lists the tailnet nodes dismissed from auto-discovery —
+each with when it was dismissed and which machine dismissed it, read from the
+tracked `fleet.ignored` block that `agents devices ignore` writes and
+`agents repo push/pull` syncs. The `agents devices list` footer names how many
+are hidden so a dismissed box is never silently absent; `agents devices unignore
+<name>` puts one back (RUSH-3062).
+
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
 `agents repo push/pull`, and answers "which device shows me artifacts?" It is
