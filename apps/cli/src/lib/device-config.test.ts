@@ -136,6 +136,60 @@ describe('device-scope keys (per-device doc config:)', () => {
   });
 });
 
+describe('description key (one-line synced summary)', () => {
+  it('round-trips through devices/<host>/agents.yaml under config:, never central', async () => {
+    const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
+
+    setConfigValue('description', 'gpu box — cuda 12.4');
+
+    const doc = readDoc();
+    expect(doc).toContain('config:');
+    expect(doc).toContain('description: gpu box — cuda 12.4');
+    expect(readCentral()).not.toContain('description');
+
+    expect(getConfigValue('description')).toMatchObject({ value: 'gpu box — cuda 12.4', source: 'device' });
+
+    unsetConfigValue('description');
+    expect(getConfigValue('description').value).toBeUndefined();
+    expect(readDoc()).not.toContain('description');
+  });
+
+  it('is shared: any box may set it for a peer, landing in the peer’s tracked doc', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+
+    setConfigValue('description', 'release runner', { device: 'mac-mini' });
+
+    expect(readDoc('mac-mini')).toContain('description: release runner');
+    expect(readDoc()).not.toContain('description');
+    expect(getConfigValue('description', { device: 'mac-mini' }).value).toBe('release runner');
+  });
+
+  it('rejects a newline outright — never silently truncated', async () => {
+    const { setConfigValue } = await freshModules();
+    expect(() => setConfigValue('description', 'line one\nline two')).toThrow(/single line/);
+    expect(() => setConfigValue('description', 'line one\r\nline two')).toThrow(/single line/);
+  });
+
+  it('rejects an over-long value with a readable error naming the cap', async () => {
+    const { setConfigValue } = await freshModules();
+    const tooLong = 'x'.repeat(81);
+    expect(() => setConfigValue('description', tooLong)).toThrow(/at most 80 characters \(got 81\)/);
+    expect(() => setConfigValue('description', 'x'.repeat(80))).not.toThrow();
+  });
+
+  it('leaves notes untouched as an appended string-list', async () => {
+    const { setConfigValue, getConfigValue } = await freshModules();
+
+    setConfigValue('description', 'gpu box');
+    setConfigValue('notes', ['runs the releases']);
+    setConfigValue('notes', ['runs the releases', 'loud fans']);
+
+    expect(getConfigValue('notes')).toMatchObject({ value: ['runs the releases', 'loud fans'], source: 'device' });
+    expect(getConfigValue('description')).toMatchObject({ value: 'gpu box', source: 'device' });
+    expect(() => setConfigValue('notes', 'just a string')).toThrow(/expects a list of strings/);
+  });
+});
+
 describe('fleet-defaults layer (central fleet.defaults.config)', () => {
   it('--fleet writes land centrally under fleet.defaults.config', async () => {
     const { setConfigValue, getConfigValue, unsetConfigValue } = await freshModules();
@@ -297,6 +351,7 @@ describe('listConfig', () => {
       'browser.remote-control',
       'browser.task-idle-minutes',
       'daemon.enabled',
+      'description',
       'interactive.host',
       'notes',
       'platform',

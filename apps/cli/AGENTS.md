@@ -416,6 +416,16 @@ keys, `role` is **shared**: it lives in that device's tracked
 push/pull`, because every box has to agree on where agents may land. The
 vocabulary is `worker | personal` only.
 
+`devices.<name>.description` (stored as `description`) is the free-text sibling
+of `role`: one line saying what the box is FOR — "gpu box — cuda 12.4", "release
+runner" — where `role` is the two-value placement switch. Like `role` it is
+**shared**: it lives in the device's tracked `devices/<name>/agents.yaml`
+`config.description` and syncs with `agents repo push/pull`, and any box may set
+it for any device. It renders in device tables, so it is validated as a single
+line capped at 80 characters — a newline or an over-long value is rejected
+loudly, never truncated. It is NOT `notes`: `notes` stays an appended list of
+long-form operator scratch that never renders in tables.
+
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
 `agents repo push/pull`, and answers "which device shows me artifacts?" It is

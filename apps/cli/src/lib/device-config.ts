@@ -251,7 +251,25 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     scope: 'device',
     visibility: 'shared',
     type: 'string-list',
-    description: 'Free-form operator notes about this device (one entry per `agents devices config <name> notes <text>`).',
+    description:
+      'Free-form operator notes about this device (one entry per `agents devices config <name> notes <text>`). ' +
+      'Long-form scratch, never rendered in tables — for the one-line synced summary of what the box is for, use `description`.',
+  },
+  {
+    name: 'description',
+    yamlKey: 'description',
+    scope: 'device',
+    visibility: 'shared',
+    type: 'string',
+    description:
+      'One line saying what this device is FOR ("gpu box — cuda 12.4"), rendered in device tables and synced fleet-wide. ' +
+      'Replaces the value on each set; for appended long-form scratch use `notes`.',
+    validate: (v) => {
+      const s = v as string;
+      if (s.includes('\n') || s.includes('\r')) return 'description must be a single line.';
+      if (s.length > 80) return `description must be at most 80 characters (got ${s.length}) — it renders in a table.`;
+      return null;
+    },
   },
   {
     name: 'ssh.user',

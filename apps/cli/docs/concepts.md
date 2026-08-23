@@ -233,9 +233,12 @@ reads the effective value back, `key value` sets it with validation,
 <text>` appends a free-form operator note, and `--fleet` targets the
 fleet-wide defaults layer. `--json` reports each key's `source` (`device` |
 `fleet` | `default`). Device-scope keys: `role` (`worker` \| `personal`; also
-`agents devices role`), `agents.max-concurrent`, `scheduler.enabled`,
+`agents devices role`), `description` (one line saying what the box is for —
+synced fleet-wide, rendered in tables; capped at 80 chars, single line only),
+`agents.max-concurrent`, `scheduler.enabled`,
 `daemon.enabled`, `watchdog.enabled`, `tmux.enabled`,
-`browser.remote-control`, `browser.profile`, `notes`, the `ssh.*` profile
+`browser.remote-control`, `browser.profile`, `notes` (an appended list of
+long-form operator scratch — not the one-line `description`), the `ssh.*` profile
 overrides, `platform`, `auto-launch.*`. Keys only the owning box reads
 (`scheduler.enabled`, `daemon.enabled`, `tmux.enabled`,
 `browser.remote-control`, `browser.task-idle-minutes`, `browser.profile`) are
