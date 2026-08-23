@@ -4,8 +4,8 @@
   matcher rather than per command, so `browser`, `run`, `sessions` and `secrets`
   inherit it; `teams` and `ssh` resolve it explicitly because they leave the
   fleet passthrough before the matcher runs. A few narrower `--device` surfaces
-  do not consult the matcher and still reject the token — they fail loud rather
-  than mis-routing, and are a follow-up.
+  do not consult the matcher. None of them mis-routes: most fail loud, and
+  `devices harnesses` filters to an empty result. Wiring them up is a follow-up.
   It exists because a skill cannot teach a host name: guidance that says
   "deliver it to <box>" is wrong on every other fleet and stale the moment the
   pin changes, so agents were left inferring the target or skipping the step. A

@@ -246,7 +246,15 @@ describe('device-name validation — shape vs policy', () => {
   it('addIgnored accepts one too — otherwise the node can be neither registered nor dismissed', async () => {
     // With both strict, `agents devices ignore auto` threw and the node stayed
     // pending, re-prompting on every sync with no way out.
-    const { addIgnored } = await import('./registry.js');
-    await expect(addIgnored('auto')).resolves.toBeTruthy();
+    const { addIgnored, removeIgnored } = await import('./registry.js');
+    try {
+      await expect(addIgnored('auto')).resolves.toBeTruthy();
+    } finally {
+      // The ignore list lives in `fleet.ignored` in agents.yaml, keyed off HOME
+      // rather than AGENTS_DEVICES_DIR, so this file's beforeEach cannot sweep
+      // it. Harmless while this is the last test; a trap for the next one
+      // appended after it.
+      await removeIgnored('auto');
+    }
   });
 });

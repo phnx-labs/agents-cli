@@ -72,8 +72,9 @@ describe('resolveInteractiveDevice', () => {
   it('cannot be pinned to a reserved sentinel — rejected at write time', async () => {
     // Fixed at the source rather than on read. Refusing on read could only ever
     // report "none is set", which tells the user to run the command they just
-    // ran. assertValidDeviceName rejects the whole reserved set, so a bad pin
-    // never lands.
+    // ran. assertRegistrableDeviceName rejects the reserved set — NOT
+    // assertValidDeviceName, which stays shape-only so `devices sync` can keep
+    // registering an observed node that happens to be named `auto`.
     const { setConfigValue } = await fresh();
     for (const bad of ['interactive', 'auto', 'all']) {
       expect(() => setConfigValue('interactive.host', bad), bad).toThrow(/reserved/i);
