@@ -60,6 +60,23 @@ export interface RemoteQuestion {
   options: RemoteQuestionOption[];
 }
 
+export interface RemoteAttention {
+  key: string;
+  sessionId: string;
+  kind: 'question' | 'permission' | 'plan_review' | 'declared' | 'failure' | 'stall' | 'review';
+  source: 'hook' | 'declared' | 'lifecycle' | 'heuristic' | 'system';
+  state: 'open' | 'answered' | 'consumed' | 'continued' | 'resolved';
+  openedAt: string;
+  fingerprint: string;
+  question?: { text?: string; options?: Array<{ label?: string; description?: string; id?: string; deliveryKey?: string }> };
+}
+
+export interface RemotePullRequest {
+  url: string; number: number; title: string; state: 'open' | 'merged' | 'closed'; isDraft: boolean;
+  ci: 'passed' | 'failed' | 'running' | null; review: 'approved' | 'changes_requested' | 'review_required' | null;
+  mergeable: 'mergeable' | 'conflicting' | 'unknown'; readyToMerge: boolean;
+}
+
 export interface RemoteAttachment {
   path: string;
   label: string;
@@ -187,6 +204,8 @@ export interface RemoteSession {
    *  options), from the CLI state engine. null when the CLI supplied none — the UI
    *  then falls back to parsing lastResponse for options. */
   question: RemoteQuestion | null;
+  attention?: RemoteAttention;
+  pullRequest?: RemotePullRequest;
   /** Last few assistant turns (most-recent last), one line each — panel context. [] when none. */
   tail: string[];
   /** Live plan checklist from the CLI's most recent `TodoWrite` (RUSH-1380). Lets the
@@ -356,6 +375,9 @@ export interface RawActiveSession {
    *  only for waiting_input sessions; the options are the real choices (AskUserQuestion
    *  options, or canonical Approve/Deny for plan/permission). */
   question?: { text?: string; reason?: string; options?: Array<{ label?: string; description?: string; key?: string } | null> } | null;
+  attention?: RemoteAttention;
+  /** Track B adapter seam for the CLI-projected PR signal. */
+  pullRequest?: RemotePullRequest;
   /** Last few assistant turns (most-recent last), from the CLI state engine. */
   tail?: string[];
   /** Live plan progress (CLI ActiveSession.todos, RUSH-1380): the latest TodoWrite
@@ -621,6 +643,8 @@ export function normalizeActiveSession(
     awaitingReason: asStr(raw.awaitingReason),
     lastResponse: preview,
     question: normalizeQuestion(raw.question),
+    attention: raw.attention,
+    pullRequest: raw.pullRequest,
     tail: Array.isArray(raw.tail) ? raw.tail.map((t) => asStr(t)).filter(Boolean) : [],
     todos: todos.length ? todos : undefined,
     output: asStr(raw.output),

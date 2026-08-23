@@ -30,7 +30,7 @@ import { FloorRail } from './FloorRail'
 import { FloorSubtabs, openTaskTab, closeTaskTab, type FixedTab, type TaskTab } from './FloorSubtabs'
 import { BacklogCenter } from './BacklogCenter'
 import { PrBoardPane } from './PrBoardPane'
-import { buildPrBoard, collectPrUrls, type PrStatusLike } from './prBoardModel'
+import { buildPrBoard, type PrStatusLike } from './prBoardModel'
 import { RecapPane } from './RecapPane'
 import { buildRecap, type RecapForkEdge } from './recapModel'
 import { TaskDetail } from '../bench/TaskDetail'
@@ -663,9 +663,6 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Recent (historical) sessions per host, fetched lazily only when a host filter has
   // 0 live agents — so an empty host shows recent work instead of a blank pane.
   const [recentByHost, setRecentByHost] = useState<Record<string, RemoteSessionLike[]>>({})
-  // PR board: statuses for every PR URL the live feed carries. null = not fetched
-  // yet (the gh fan-out runs lazily when the PRs center opens).
-  const [prStatuses, setPrStatuses] = useState<PrStatusLike[] | null>(null)
   const [prMerging, setPrMerging] = useState<Set<string>>(() => new Set())
   const [prErrors, setPrErrors] = useState<Record<string, string>>({})
   // Recap ledger: fleet-wide recent (ended) sessions. null = not fetched yet — the
@@ -861,15 +858,10 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         const rh = typeof msg.host === 'string' ? msg.host : ''
         const recent = Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : []
         setRecentByHost((p) => ({ ...p, [rh]: recent }))
-      } else if (msg?.type === 'prBoard') {
-        setPrStatuses(Array.isArray(msg.statuses) ? (msg.statuses as PrStatusLike[]) : [])
       } else if (msg?.type === 'mergePrResult') {
         const mu = typeof msg.url === 'string' ? msg.url : ''
         setPrMerging((prev) => { const next = new Set(prev); next.delete(mu); return next })
-        if (msg.ok === true) {
-          // Merged: refetch so the row settles (and any dependent rows update).
-          setPrStatuses(null)
-        } else {
+        if (msg.ok !== true) {
           setPrErrors((prev) => ({ ...prev, [mu]: typeof msg.error === 'string' ? msg.error : 'merge failed' }))
         }
       } else if (msg?.type === 'recapSessions') {
@@ -1528,8 +1520,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   // Local agents (drop the synthetic watchdog row) + genuinely-remote sessions
   // (host !== 'this-mac' so we don't double count this machine's own agents).
   const floorLocalAgents = useMemo(
-    () => adaptUnified(items.filter((i) => i.kind !== 'watchdog'), { pinned, workspaceRepo: workspaceRepoName, nowMs, localHostName, projectRules }),
-    [items, pinned, workspaceRepoName, nowMs, localHostName, projectRules]
+    () => adaptUnified(items.filter((i) => i.kind !== 'watchdog'), { pinned, workspaceRepo: workspaceRepoName, nowMs, localHostName, projectRules, projectedSessions: remoteSessions }),
+    [items, pinned, workspaceRepoName, nowMs, localHostName, projectRules, remoteSessions]
   )
   // Session UUIDs already open as a terminal tab in THIS window (the rich, local
   // source). Used to avoid double-listing an agent that the machine-wide fetch also
@@ -1599,14 +1591,12 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     [hostFilter, hostHasNoActive, recentByHost, pinned, localHostName, projectRules]
   )
 
-  // PR board: lazy gh fan-out over the live feed's PR URLs on first open of the
-  // PRs center (and again after a merge clears prStatuses back to null).
-  useEffect(() => {
-    if (center === 'prs' && prStatuses === null) {
-      postMessage({ type: 'fetchPrBoard', urls: collectPrUrls(floorAgents) })
-    }
-  }, [center, prStatuses, floorAgents])
-  const prRows = useMemo(() => buildPrBoard(prStatuses ?? [], floorAgents), [prStatuses, floorAgents])
+  // PR status is part of the CLI feed projection; the extension never polls GitHub.
+  const projectedPrStatuses = useMemo(
+    () => remoteSessions.map((session) => session.pullRequest).filter((status): status is PrStatusLike => !!status),
+    [remoteSessions],
+  )
+  const prRows = useMemo(() => buildPrBoard(projectedPrStatuses, floorAgents), [projectedPrStatuses, floorAgents])
   // Recap ledger: lazy fleet sweep the first time the Recap center opens; live
   // sessions are excluded (the feed owns what's running, the ledger what finished).
   useEffect(() => {
@@ -2076,8 +2066,8 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
     // Recap count = today's finished sessions (0 until the lazy sweep has run).
     { center: 'recap', label: 'Recap', count: recapDays[0]?.label === 'Today' ? recapDays[0].sessions : 0 },
     // PRs count = open rows once fetched; before the first fetch, the URL count.
-    { center: 'prs', label: 'PRs', count: prStatuses === null ? collectPrUrls(floorAgents).length : prRows.filter((r) => r.state === 'open').length },
-  ], [floorAgents, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, recapDays, prStatuses, prRows])
+    { center: 'prs', label: 'PRs', count: prRows.filter((r) => r.state === 'open').length },
+  ], [floorAgents, needsAgents.length, floorTickets.length, managedProjects.length, fleetDevices.length, recapDays, prRows])
 
   // Resolve the active task tab (if any) back to a bench FlatTask so its detail renders.
   const activeTab = activeTaskTab ? openTaskTabs.find((t) => t.id === activeTaskTab) ?? null : null
@@ -2144,7 +2134,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   ) : center === 'prs' ? (
     <PrBoardPane
       rows={prRows}
-      loading={prStatuses === null}
+      loading={false}
       merging={prMerging}
       errors={prErrors}
       onMerge={(url) => {
@@ -2153,7 +2143,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
         postMessage({ type: 'mergePr', url })
       }}
       onOpenUrl={(url) => postMessage({ type: 'openExternal', url })}
-      onRefresh={() => setPrStatuses(null)}
+      onRefresh={() => {}}
       onSelectAgent={selectFloorAgent}
     />
   ) : (
@@ -2179,6 +2169,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
             cur.includes(a) ? cur.filter((c) => c !== a) : [...cur, a]
           )),
           showBackground,
+          openAttentionCount: needsAgents.length,
           onToggleBackground: () => setShowBackground((current) => !current),
         }}
       />

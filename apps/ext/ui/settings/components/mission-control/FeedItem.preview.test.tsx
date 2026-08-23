@@ -173,3 +173,11 @@ describe('reply delivery failure is visible on the feed row', () => {
     expect(html).not.toContain('class="summary')
   })
 })
+
+test('attention source is visible and a resolved item renders a receipt outside Needs you', () => {
+  const html = render(agent({ attentionSource: 'declared', attentionState: 'answered', needs: false }), false)
+  expect(html).toContain('data-testid="attention-source"')
+  expect(html).toContain('declared')
+  expect(html).toContain('data-testid="attention-receipt"')
+  expect(html).toContain('answered')
+})

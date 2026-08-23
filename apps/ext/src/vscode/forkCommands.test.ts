@@ -146,12 +146,12 @@ describe('fork command contributions', () => {
         calls.push(`${host}:${terminalId}`);
         if (calls.length === 1) return null;
         sessionPresentationStore.apply({
-          version: 1,
+          v: 1,
           streamId: 'fork-test',
           sequence: 1,
           type: 'reset',
           scope: 'chosen-host',
-          rows: [
+          agents: [
             {
               rowKey: 'fork-row',
               sourceDevice: 'chosen-host',
@@ -159,7 +159,7 @@ describe('fork command contributions', () => {
               sessionId: 'sibling-session-id',
               machine: 'chosen-host',
             },
-          ],
+          ], attention: [],
         });
         return remoteForkSessionId(host, terminalId);
       },

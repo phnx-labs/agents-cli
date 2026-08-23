@@ -6,6 +6,14 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 
 ## [0.9.333] - 2026-08-23
 
+- **Fleet Needs You now projects `agents feed watch --json`.** The elected
+  monitor carries CLI-owned agent and attention envelopes into one presentation
+  store; local editor tabs join the same attention by session/terminal id. Both
+  floor adapters use open attention and exact fingerprints/options instead of
+  parsing transcripts, tool calls, response prose, failure state, or PR state.
+  Cards show attention source and resolution receipts; the extension no longer
+  runs its own `gh pr view` status poller.
+
 - **The Fleet opens on the Sessions tab, not Agents.** The Floor 3-pane shell
   now defaults its center to `sessions` — the primary surface where an operator
   sees the work being landed — instead of the Agents roster, matching the

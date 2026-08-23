@@ -18,6 +18,7 @@ export class SessionCliReplay {
   private replaySequence = 0;
   private readonly scopes = new Map<string, {
     rows: Map<string, unknown>;
+    attention: Map<string, unknown>;
     capturedAt: number;
     status?: 'available' | 'unavailable';
     reason?: string;
@@ -25,19 +26,25 @@ export class SessionCliReplay {
 
   ingest(event: SessionCliEvent): void {
     const current = this.scopes.get(event.scope) ?? {
-      rows: new Map<string, unknown>(),
+      rows: new Map<string, unknown>(), attention: new Map<string, unknown>(),
       capturedAt: event.capturedAt,
     };
     current.capturedAt = event.capturedAt;
     if (event.type === 'reset') {
-      current.rows = new Map((event.rows ?? []).flatMap((row) => {
+      current.rows = new Map((event.agents ?? []).flatMap((row) => {
         const rowKey = row && typeof row === 'object' ? (row as { rowKey?: unknown }).rowKey : undefined;
         return typeof rowKey === 'string' ? [[rowKey, row] as const] : [];
       }));
-    } else if (event.type === 'upsert' && event.rowKey && event.row) {
-      current.rows.set(event.rowKey, event.row);
-    } else if (event.type === 'remove' && event.rowKey) {
-      current.rows.delete(event.rowKey);
+      current.attention = new Map((Array.isArray(event.attention) ? event.attention : []).flatMap((item) => {
+        const key = item && typeof item === 'object' ? (item as { key?: unknown }).key : undefined;
+        return typeof key === 'string' ? [[key, item] as const] : [];
+      }));
+    } else if (event.type === 'agent.upsert' && event.rowKey && event.agent) {
+      current.rows.set(event.rowKey, event.agent);
+    } else if (event.type === 'attention.upsert' && event.rowKey && event.attention && !Array.isArray(event.attention)) {
+      current.attention.set(event.rowKey, event.attention);
+    } else if (event.type === 'attention.remove' && event.rowKey) {
+      current.attention.delete(event.rowKey);
     } else if (event.type === 'scope' && event.status) {
       current.status = event.status;
       current.reason = event.reason;
@@ -50,12 +57,12 @@ export class SessionCliReplay {
     for (const [scope, current] of this.scopes) {
       const streamId = `replay:${clientKey}:${scope}:${++this.replaySequence}`;
       events.push({
-        version: 1, type: 'reset', streamId, sequence: 1,
-        capturedAt: current.capturedAt, scope, rows: [...current.rows.values()],
+        v: 1, type: 'reset', streamId, sequence: 1,
+        capturedAt: current.capturedAt, scope, agents: [...current.rows.values()], attention: [...current.attention.values()],
       });
       if (current.status) {
         events.push({
-          version: 1, type: 'scope', streamId, sequence: 2,
+          v: 1, type: 'scope', streamId, sequence: 2,
           capturedAt: current.capturedAt, scope, status: current.status,
           ...(current.reason ? { reason: current.reason } : {}),
         });
@@ -89,7 +96,7 @@ export class SessionCliStream {
     void resolveAgentsBin().then((bin) => {
       if (!this.wantRunning || this.child) return;
       const augmented = bootstrapPath(bin);
-      this.attach(spawn(bin, ['sessions', 'watch', '--json'], {
+      this.attach(spawn(bin, ['feed', 'watch', '--json'], {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: { ...process.env, PATH: `${augmented}:${process.env.PATH ?? ''}` },
       }));
@@ -106,12 +113,12 @@ export class SessionCliStream {
     lines.on('line', (line) => {
       try {
         const event = JSON.parse(line) as SessionCliEvent;
-        if (event?.version === 1 && typeof event.streamId === 'string'
+        if ((event?.v === 1 || event?.version === 1) && typeof event.streamId === 'string'
           && Number.isInteger(event.sequence) && typeof event.type === 'string') {
           this.options.emit(event);
         }
       } catch {
-        this.options.onError?.(`agents sessions watch emitted invalid JSON: ${line.slice(0, 160)}`);
+        this.options.onError?.(`agents feed watch emitted invalid JSON: ${line.slice(0, 160)}`);
       }
     });
     let stderr = '';
@@ -122,7 +129,7 @@ export class SessionCliStream {
       if (!this.wantRunning) return;
       if (code !== 0) {
         this.options.onError?.(
-          stderr.trim() || 'agents sessions watch exited; restarting stream',
+          stderr.trim() || 'agents feed watch exited; restarting stream',
         );
       }
       this.scheduleRestart();

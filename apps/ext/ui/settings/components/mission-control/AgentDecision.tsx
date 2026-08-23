@@ -46,6 +46,7 @@ export function AgentDecision({ agent: a, error, onOption, onFreeText, onAttach,
         <div className="ql">
           {label}
           {chip && <span className={chip.cls}>{chip.text}</span>}
+          {a.attentionSource && <span className="why" data-testid="attention-source">{a.attentionSource}</span>}
         </div>
         {showTask && (
           <div className="qtask" title={origTask}>
@@ -71,6 +72,9 @@ export function AgentDecision({ agent: a, error, onOption, onFreeText, onAttach,
           onFreeText={onFreeText}
           onAttach={onAttach}
         />
+        {!a.needs && a.attentionState && a.attentionState !== 'open' && (
+          <div className="receipt" data-testid="attention-receipt">{a.attentionState}</div>
+        )}
       </div>
     </div>
   )

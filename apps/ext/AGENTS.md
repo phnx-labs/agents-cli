@@ -8,10 +8,11 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
 
 - agents-cli owns sessions, devices, accounts, teams, watchdog,
   routines, lifecycle, ranking, deduplication, and scheduling.
-- The elected extension monitor owns one `agents sessions watch --json` child
-  across editor windows. It broadcasts versioned `reset`, `upsert`, `remove`,
-  `scope`, and `heartbeat` events; each extension host has one presentation
-  store and derives no lifecycle state. Editor tabs reconcile their provisional
+- The elected extension monitor owns one `agents feed watch --json` child
+  across editor windows. It projects versioned agent, attention, activity,
+  scope, and heartbeat envelopes; each extension host has one presentation
+  store and derives no lifecycle or Needs-You state. Local tabs join the same
+  projected attention record by session or terminal id. Editor tabs reconcile their provisional
   topic-based auto-labels from that same stream when a harness-owned session
   `label` arrives; a manual tab label still wins.
 - Resume/Fork opens one on-demand listing with `agents sessions --all --json

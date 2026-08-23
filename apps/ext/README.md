@@ -84,6 +84,11 @@ the harness generates a name or the session is renamed; a label set with
 
 The dashboard's mission control. A live grid of interactive agents and cloud dispatches beside your Linear cycle. Background/headless runs are hidden by default; use the **Background** feed toggle when you need them. Compose and dispatch work with the Cmd+K composer, drag issue cards onto agents, or send a ticket straight to the cloud.
 
+**Needs you** projects the CLI feed's canonical attention ledger. Cards retain
+the exact choices and source; answered items leave the count immediately while
+the activity lane keeps a compact resolution receipt. The extension does not
+inspect transcripts or independently poll GitHub to decide what needs a person.
+
 Agent cards surface outputs such as PRs, spawned teams, created tickets, and plan
 artifacts. `.html` and `ref-*.md` plans detected in session output, worktree
 files, or attachments appear as one-click preview chips. Screenshots and other

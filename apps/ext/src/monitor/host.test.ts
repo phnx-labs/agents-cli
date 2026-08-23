@@ -1,6 +1,6 @@
 // Follower replay round-trip (no mocks).
 //
-// A real MonitorHost, a real child process standing in for `agents sessions
+// A real MonitorHost, a real child process standing in for `agents feed
 // watch --json`, a real MonitorFollower over a real Unix socket.
 //
 // Regression: the host registered its request handler as `(payload) =>
@@ -35,13 +35,14 @@ function tempSocketPath(): string {
  */
 function spawnFakeWatch(): ChildProcessWithoutNullStreams {
   const reset = JSON.stringify({
-    version: 1,
+    v: 1,
     type: 'reset',
     streamId: 'test-stream',
     sequence: 1,
     capturedAt: 1,
     scope: 'testbox',
-    rows: [{ rowKey: 'row-1', sessionId: 'sess-1', status: 'running' }],
+    agents: [{ rowKey: 'row-1', sessionId: 'sess-1', status: 'running' }],
+    attention: [],
   });
   const child = spawn(
     process.execPath,
@@ -107,9 +108,9 @@ describe('MonitorHost replays session state to a late follower', () => {
 
     const reset = received
       .filter((e) => e.type === MONITOR_FACT.sessionCli)
-      .map((e) => e.payload as { type?: string; scope?: string; rows?: unknown[] })
+      .map((e) => e.payload as { type?: string; scope?: string; agents?: unknown[] })
       .find((p) => p.type === 'reset');
     expect(reset?.scope).toBe('testbox');
-    expect(reset?.rows).toHaveLength(1);
+    expect(reset?.agents).toHaveLength(1);
   });
 });

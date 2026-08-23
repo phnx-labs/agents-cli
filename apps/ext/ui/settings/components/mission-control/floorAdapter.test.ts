@@ -141,12 +141,14 @@ describe('toFloorAgentFromUnified', () => {
         agent: null,
         // last response is a real choice question
       }),
-      { pinned: new Set(), workspaceRepo: 'swarmify', nowMs: NOW },
+      { pinned: new Set(), workspaceRepo: 'swarmify', nowMs: NOW, projectedSessions: [{ host: 'this-mac', terminalId: 't1', sessionId: 's1', phase: 'waiting', agentType: 'claude', attention: { key: 'a1', sessionId: 's1', kind: 'question', source: 'hook', state: 'open', openedAt: '2026-08-23T00:00:00Z', fingerprint: 'exact-fingerprint', question: { text: 'Which path?', options: [{ label: 'A', id: 'a' }, { label: 'B', id: 'b' }] } } } as RemoteSessionLike] },
     )
     // no agent.last_messages, so resp is empty (the now-line, not the body, carries the
     // live activity); phase is waiting from the flag; needs is still true.
     expect(a.phase).toBe('waiting')
     expect(a.needs).toBe(true)
+    expect(a.question?.clusterKey).toBe('exact-fingerprint')
+    expect(a.attentionSource).toBe('hook')
     expect(a.host).toBe('this-mac')
     expect(a.abbr).toBe('CC')
   })
@@ -224,14 +226,14 @@ describe('toFloorAgentFromUnified', () => {
     expect(noName.hostLabel).toBeUndefined()
   })
 
-  test('a failed agent needs you and gets a retry question', () => {
+  test('a failed agent does not invent attention or a retry question', () => {
     const a = toFloorAgentFromUnified(
       baseUnified({ status: 'failed', active: false, activity: 'build broke' }),
       { pinned: new Set(), workspaceRepo: null, nowMs: NOW },
     )
     expect(a.phase).toBe('failed')
-    expect(a.needs).toBe(true)
-    expect(a.question?.kind).toBe('retry')
+    expect(a.needs).toBe(false)
+    expect(a.question).toBeNull()
   })
 
   test('a running agent does not need you', () => {
@@ -244,18 +246,18 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.lastActivityMs).toBe(NOW - 5000)
   })
 
-  test('a completed agent with an open PR is done + unreviewed (needs you)', () => {
+  test('a completed agent with an open PR does not derive needs-you', () => {
     const a = toFloorAgentFromUnified(
       baseUnified({ status: 'completed', active: false, prUrl: 'https://github.com/o/r/pull/9' }),
       { pinned: new Set(['term-1']), workspaceRepo: null, nowMs: NOW },
     )
     expect(a.phase).toBe('done')
-    expect(a.needs).toBe(true)
+    expect(a.needs).toBe(false)
     expect(a.pr).toBe('#9')
     expect(a.pinned).toBe(true)
   })
 
-  test('a headless agent parses its last message into a structured choice question', () => {
+  test('a headless agent does not parse its last message into a question', () => {
     const a = toFloorAgentFromUnified(
       baseUnified({
         id: 'agent-x',
@@ -275,8 +277,8 @@ describe('toFloorAgentFromUnified', () => {
     expect(a.phase).toBe('waiting')
     expect(a.project).toBe('prix-api')
     expect(a.branch).toBe('feat-rl')
-    expect(a.question?.kind).toBe('choice')
-    expect(a.question?.options.length).toBeGreaterThanOrEqual(2)
+    expect(a.needs).toBe(false)
+    expect(a.question).toBeNull()
   })
 
   test('maps the ORIGINAL task (terminal firstUserMessage) into prompt, distinct from the last message', () => {
@@ -412,6 +414,7 @@ describe('toFloorAgentFromRemote', () => {
       replyRail: '',
       replyMuxTarget: '',
       replyMuxSocket: '',
+      attention: { key: 'a2', sessionId: 'abcd1234efgh', kind: 'question', source: 'lifecycle', state: 'open', openedAt: '2026-08-23T00:00:00Z', fingerprint: 'remote-fingerprint', question: { text: 'Merge the green PR?', options: [{ label: 'Merge', id: 'merge' }, { label: 'Wait', id: 'wait' }] } },
     }
     const a = toFloorAgentFromRemote(r, new Set())
     expect(a.host).toBe('yosemite-s0')
@@ -424,7 +427,8 @@ describe('toFloorAgentFromRemote', () => {
     expect(a.ticket).toBe('RUSH-812')
     expect(a.createdTickets).toEqual(['RUSH-901'])
     expect(a.spawnedTeam).toBe('rate-limiter')
-    expect(a.question?.kind).toBe('confirm')
+    expect(a.question?.kind).toBe('choice')
+    expect(a.question?.clusterKey).toBe('remote-fingerprint')
     // No lastActivityMs on the payload → heartbeat falls back to session-start.
     expect(a.lastActivityMs).toBe(NOW - 42_000)
     // a genuinely-remote host is already its real name — no display override.

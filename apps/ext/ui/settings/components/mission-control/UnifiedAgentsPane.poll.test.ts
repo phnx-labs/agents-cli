@@ -97,7 +97,7 @@ describe('Floor poll / timer budget (no recurring probes)', () => {
   })
 })
 
-test('renders a single waiting question through the pane question-cluster path', () => {
+test('does not derive a Needs-You question from local tool calls', () => {
   const now = Date.now()
   const terminal: TerminalDetail = {
     id: 'terminal-1',
@@ -138,7 +138,7 @@ test('renders a single waiting question through the pane question-cluster path',
     onSearch: () => {},
   }))
 
-  expect(html).toContain('Drop the old table?')
-  expect(html).toContain('Drop it')
-  expect(html).toContain('Keep it')
+  expect(html).not.toContain('Drop the old table?')
+  expect(html).not.toContain('Drop it')
+  expect(html).not.toContain('Keep it')
 })

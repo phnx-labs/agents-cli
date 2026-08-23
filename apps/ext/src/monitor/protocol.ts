@@ -126,14 +126,19 @@ export const MONITOR_FACT = {
 } as const;
 
 export interface SessionCliFactPayload {
-  version: 1;
-  type: 'reset' | 'upsert' | 'remove' | 'scope' | 'heartbeat';
+  /** Adapter seam for Track B: accept canonical `v` and legacy `version`. */
+  version?: 1;
+  v?: 1;
+  type: 'reset' | 'agent.upsert' | 'attention.upsert' | 'attention.remove' | 'activity.append' | 'scope' | 'heartbeat';
   streamId: string;
   sequence: number;
   capturedAt: number;
   scope: string;
-  rows?: unknown[];
-  row?: unknown;
+  agents?: unknown[];
+  attention?: unknown[] | unknown;
+  agent?: unknown;
+  resolution?: unknown;
+  event?: unknown;
   rowKey?: string;
   status?: 'available' | 'unavailable';
   reason?: string;
@@ -145,7 +150,7 @@ export function isSessionCliFact(
   const payload = event.payload as SessionCliFactPayload | undefined;
   return event.type === MONITOR_FACT.sessionCli
     && !!payload
-    && payload.version === 1
+    && (payload.v === 1 || payload.version === 1)
     && typeof payload.streamId === 'string'
     && Number.isInteger(payload.sequence)
     && typeof payload.type === 'string';

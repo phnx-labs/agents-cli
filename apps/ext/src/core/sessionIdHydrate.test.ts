@@ -7,10 +7,10 @@ afterEach(() => sessionPresentationStore.clear());
 describe('session id hydration from the canonical CLI stream', () => {
   test('maps terminal ids without launching another agents sessions query', async () => {
     sessionPresentationStore.apply({
-      version: 1,
+      v: 1,
       type: 'reset',
       streamId: 'stream-a', sequence: 1, capturedAt: 1, scope: 'box-a',
-      rows: [{ rowKey: 'one', sourceDevice: 'box-a', sessionId: 'session-1', terminalId: 'CX-1', machine: 'box-a' }],
+      agents: [{ rowKey: 'one', sourceDevice: 'box-a', sessionId: 'session-1', terminalId: 'CX-1', machine: 'box-a' }], attention: [],
     });
     expect(await fetchTerminalIdSessionMap('box-a')).toEqual(new Map([['CX-1', 'session-1']]));
     expect(await resolveSessionIdForTerminal('CX-1', 'box-a')).toBe('session-1');
@@ -18,13 +18,13 @@ describe('session id hydration from the canonical CLI stream', () => {
 
   test('scopes remote rows by host', async () => {
     sessionPresentationStore.apply({
-      version: 1,
+      v: 1,
       type: 'reset',
       streamId: 'stream-b', sequence: 1, capturedAt: 1, scope: 'fleet',
-      rows: [
+      agents: [
         { rowKey: 'one', sourceDevice: 'box-a', sessionId: 'one', terminalId: 'T-1', machine: 'box-a' },
         { rowKey: 'two', sourceDevice: 'box-b', sessionId: 'two', terminalId: 'T-2', machine: 'box-b' },
-      ],
+      ], attention: [],
     });
     expect(await fetchTerminalIdSessionMap('box-a')).toEqual(new Map([['T-1', 'one']]));
   });

@@ -208,6 +208,7 @@ function FeedItemImpl({ agent: a, selected, plain, error, onSelect, onOption, on
         <span className="path">{meta}</span>
         {!plain && wt && <span className="wtchip mono" title={a.worktreePath || wt}>{wt}</span>}
         <span className="when">
+          {a.attentionSource && <span className="pill" data-testid="attention-source">{a.attentionSource}</span>}
           {marker}
           {todoBadge}
           {ticketBadge}
@@ -309,6 +310,9 @@ function FeedItemImpl({ agent: a, selected, plain, error, onSelect, onOption, on
             onAttach={() => onAttach(a)}
           />
         </div>
+      )}
+      {!a.needs && a.attentionState && a.attentionState !== 'open' && (
+        <div className="receipt" data-testid="attention-receipt">{a.attentionState}</div>
       )}
       {/* Contextual follow-up: an agent that isn't working (idle or done) and isn't
           already asking for you is ready for the next task. Queue one right on its row,

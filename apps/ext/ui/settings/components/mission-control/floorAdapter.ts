@@ -1,7 +1,7 @@
 // SHELL adapter: real UnifiedAgent / RemoteSession / UnifiedTask -> Floor view-model.
 //
 // The view-model TYPES are owned by floorModel.ts (the shared webview contract) and
-// the pure derivations (derivePhase / deriveNeeds / parseStructuredQuestion /
+// the pure lifecycle projection and presentation helpers
 // toFloorTicket) live there too — this file only translates the real data shapes into
 // the inputs those functions expect. No logic is reimplemented here.
 //
@@ -13,10 +13,6 @@
 
 import {
   derivePhase,
-  deriveNeeds,
-  parseStructuredQuestion,
-  structuredQuestionFromToolCalls,
-  structuredQuestionFromRemote,
   toFloorTicket,
   latestTodos,
   todosWithFallback,
@@ -121,6 +117,7 @@ export interface UnifiedAgentLike {
 export interface RemoteSessionLike {
   host: string
   sessionId: string
+  terminalId?: string
   agentType: string
   cwd: string
   project: string
@@ -136,10 +133,16 @@ export interface RemoteSessionLike {
   tokPerSec: number
   waitingForInput: boolean
   lastResponse: string
-  /** The structured decision the agent is waiting on (question/plan/permission +
-   *  options + select keys), from the CLI state engine. null when the CLI supplied
-   *  none — the adapter then falls back to parsing lastResponse. */
+  /** Legacy session question retained for transport compatibility; streamed rows
+   * render only the canonical `attention` record below. */
   question?: { text: string; reason: 'question' | 'plan_review' | 'permission'; options: Array<{ label: string; description?: string; key?: string }> } | null
+  attention?: {
+    key: string; sessionId: string; kind: 'question' | 'permission' | 'plan_review' | 'declared' | 'failure' | 'stall' | 'review'
+    source: 'hook' | 'declared' | 'lifecycle' | 'heuristic' | 'system'
+    state: 'open' | 'answered' | 'consumed' | 'continued' | 'resolved'; openedAt: string; fingerprint: string
+    question?: { text?: string; options?: Array<{ label?: string; description?: string; id?: string; deliveryKey?: string }> }
+  }
+  pullRequest?: import('./prBoardModel').PrStatusLike
   /** Last few assistant turns (most-recent last) — panel context. */
   tail?: string[]
   /** Live plan checklist from the CLI's latest `TodoWrite` (RUSH-1380). Populates the
@@ -450,14 +453,32 @@ export function deriveReplyTargetFromRemote(r: RemoteSessionLike): ReplyTarget {
 // ---------- adapters ----------
 
 /**
- * Map a local UnifiedAgent to a FloorAgent. waiting comes from the terminal's
- * waitingForInput flag or a headless agent's input_required status; an open PR marks a
- * done agent unreviewed (needs-you). Phase + needs are derived by floorModel, not here.
+ * Map a local editor tab to the CLI-projected agent with the same session/terminal id.
+ * The terminal contributes only editor-owned display, reply, and recent-tool metadata.
  */
 export function toFloorAgentFromUnified(
   u: UnifiedAgentLike,
-  opts: { pinned: Set<string>; workspaceRepo?: string | null; nowMs: number; localHostName?: string; projectRules?: ProjectRule[] },
+  opts: { pinned: Set<string>; workspaceRepo?: string | null; nowMs: number; localHostName?: string; projectRules?: ProjectRule[]; projectedSessions?: RemoteSessionLike[] },
 ): FloorAgent {
+  const projected = opts.projectedSessions?.find((r) =>
+    (!!u.sessionId && r.sessionId === u.sessionId) || (!!u.terminal?.id && r.terminalId === u.terminal.id))
+  if (projected) {
+    const floor = toFloorAgentFromRemote({ ...projected, host: 'this-mac' }, opts.pinned, opts.localHostName, opts.projectRules)
+    return {
+      ...floor,
+      id: u.id,
+      name: u.displayName,
+      host: 'this-mac',
+      hostLabel: opts.localHostName || undefined,
+      reply: u.terminal?.id
+        ? { kind: 'terminal', host: 'this-mac', terminalId: u.terminal.id }
+        : floor.reply,
+      files: u.files.length,
+      tools: u.toolCalls,
+      recent: u.terminal?.recentToolCalls ?? [],
+      recentEvents: u.terminal?.recentEvents ?? [],
+    }
+  }
   const waitingForInput = u.terminal?.waitingForInput === true || u.agent?.status === 'input_required'
   const prOpenUnreviewed = !!u.prUrl
   const ci = u.ci ?? null
@@ -467,7 +488,8 @@ export function toFloorAgentFromUnified(
     active: u.active,
     prOpenUnreviewed,
   })
-  const needs = deriveNeeds(phase, prOpenUnreviewed, ci)
+  const attention: RemoteSessionLike['attention'] = undefined
+  const needs = false
   const lastMsgs = u.agent?.last_messages
   // The full recent-messages window (up to the CLI's last N) drives the detail Activity
   // feed; the single last one still feeds `resp` (card body / question parsing).
@@ -535,9 +557,11 @@ export function toFloorAgentFromUnified(
     // The Sessions surface's row title: the task line, falling back to the tab name.
     topic: prompt || u.displayName,
     messages,
-    // Prefer the AskUserQuestion tool-call's own question + options (they live in the
-    // tool INPUT, invisible to the text heuristic); fall back to parsing the last message.
-    question: structuredQuestionFromToolCalls(u.terminal?.recentToolCalls) ?? parseStructuredQuestion(resp, phase),
+    // A tab without a matching feed projection never invents a decision.
+    question: structuredQuestionFromAttention(attention),
+    attentionSource: attention?.source,
+    attentionState: attention?.state,
+    attentionFingerprint: attention?.fingerprint,
     reply,
     // Persist the last non-empty checklist so it survives the recent-tool window cap.
     todos: stickyTodos(u.id, u.terminal?.recentToolCalls),
@@ -573,14 +597,13 @@ export function detectSessionRateLimited(
 
 /**
  * Map a cross-host RemoteSession to a FloorAgent. The backend already normalized the
- * phase + activity + throughput, so we trust those and only re-derive needs + the
- * structured question (both pure). Host stays the remote machine name.
+ * phase, activity, throughput, and attention, so this is presentation-only.
  */
 export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>, localHostName?: string, projectRules: ProjectRule[] = []): FloorAgent {
   const phase = r.phase
   const prOpenUnreviewed = !!r.prUrl
   const ci = r.ci ?? null
-  const needs = deriveNeeds(phase, prOpenUnreviewed, ci)
+  const needs = r.attention?.state === 'open'
   let { verb, target } = splitActivity(r.activity)
   // Live plan progress from the CLI (RUSH-1380): map to the checklist the UI renders,
   // and — when there's no live tool action (idle/waiting/no preview) but a plan is in
@@ -672,9 +695,11 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
     // Prefer the last few assistant turns from the CLI (context feed); fall back to the
     // single last response when the CLI supplied no tail.
     messages: r.tail && r.tail.length ? r.tail : r.lastResponse ? [r.lastResponse] : [],
-    // Prefer the CLI's authoritative decision (real options + select keys, extracted at
-    // the source); fall back to parsing the last response for a plain prose question.
-    question: structuredQuestionFromRemote(r.question) ?? parseStructuredQuestion(resp, phase),
+    // Exact CLI-projected attention; no transcript, tool-call, or prose parsing.
+    question: structuredQuestionFromAttention(r.attention),
+    attentionSource: r.attention?.source,
+    attentionState: r.attention?.state,
+    attentionFingerprint: r.attention?.fingerprint,
     reply: deriveReplyTargetFromRemote(r),
     // Live plan checklist from the CLI's TodoWrite (RUSH-1380). Empty when the session
     // wrote no todo list; the CLI now carries this for remote/device-dispatched agents.
@@ -698,9 +723,26 @@ export function toFloorAgentFromRemote(r: RemoteSessionLike, pinned: Set<string>
 /** Map local UnifiedAgents (watchdog rows should be filtered out by the caller). */
 export function adaptUnified(
   agents: UnifiedAgentLike[],
-  opts: { pinned: Set<string>; workspaceRepo?: string | null; nowMs: number; localHostName?: string; projectRules?: ProjectRule[] },
+  opts: { pinned: Set<string>; workspaceRepo?: string | null; nowMs: number; localHostName?: string; projectRules?: ProjectRule[]; projectedSessions?: RemoteSessionLike[] },
 ): FloorAgent[] {
   return agents.map((a) => toFloorAgentFromUnified(a, opts))
+}
+
+/** Presentation-only mapping of the CLI's canonical AttentionItem. */
+export function structuredQuestionFromAttention(attention: RemoteSessionLike['attention']): FloorAgent['question'] {
+  const text = attention?.question?.text?.trim()
+  if (!attention || !text) return null
+  const choices = attention.question?.options ?? []
+  const options = choices.map((o) => o.label?.trim() ?? '').filter(Boolean)
+  const reason = attention.kind === 'permission' ? 'permission' : attention.kind === 'plan_review' ? 'plan_review' : 'question'
+  return {
+    kind: options.length > 1 ? 'choice' : attention.kind === 'permission' ? 'confirm' : 'retry',
+    text,
+    options,
+    optionKeys: choices.map((o) => o.deliveryKey ?? o.id ?? ''),
+    clusterKey: attention.fingerprint,
+    reason,
+  }
 }
 
 /** Map genuinely-remote sessions (caller drops host === 'this-mac' to avoid double count). */

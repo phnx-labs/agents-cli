@@ -2258,19 +2258,6 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         }
         break;
       }
-      case 'fetchPrBoard': {
-        // PR board: CI + review + mergeable per PR URL (TTL-cached gh pr view).
-        const urls = Array.isArray(message.urls) ? message.urls.filter((u: unknown) => typeof u === 'string') : [];
-        try {
-          const { fetchPrStatuses } = await import('./prBoard.vscode');
-          const statuses = await fetchPrStatuses(urls);
-          settingsPanel?.webview.postMessage({ type: 'prBoard', statuses });
-        } catch (err) {
-          console.error('[SETTINGS] Error fetching PR board:', err);
-          settingsPanel?.webview.postMessage({ type: 'prBoard', statuses: [] });
-        }
-        break;
-      }
       case 'mergePr': {
         // Board merge action. Plain --rebase, no --admin — branch protection stays
         // in force; a refusal comes back to the row as an inline error.

@@ -172,6 +172,9 @@ export interface FloorAgent {
   topic?: string         // the session's task/label line from the roster (topic/label/prompt). The Sessions surface's row title + search field. Falls back to prompt/name when absent.
   messages: string[]     // the last few assistant messages (from the CLI's last_messages window); [] when none. Drives the detail-pane Activity feed.
   question: StructuredQuestion | null
+  attentionSource?: 'hook' | 'declared' | 'lifecycle' | 'heuristic' | 'system'
+  attentionState?: 'open' | 'answered' | 'consumed' | 'continued' | 'resolved'
+  attentionFingerprint?: string
   reply: ReplyTarget     // how a user reply reaches this agent (host dispatches on kind)
   todos: TodoItem[]      // task checklist from the latest TodoWrite; empty when none
   summary: string        // the "what is it doing" line (CLI-provided); '' when unknown

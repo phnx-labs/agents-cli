@@ -48,6 +48,7 @@ interface SavedViewsProps {
     availableAbbrs: AgentAbbr[]
     onToggleAbbr: (a: AgentAbbr) => void
     showBackground: boolean
+    openAttentionCount?: number
     onToggleBackground: () => void
   }
 }
@@ -151,7 +152,7 @@ export function SavedViews({
                 title={on ? `Clear ${o.label} filter` : `Filter: ${o.label}`}
                 onClick={() => feedFilters.onToggleStatus(o.value)}
               >
-                {o.label}
+                {o.label}{o.value === 'needs' && feedFilters.openAttentionCount !== undefined ? ` · ${feedFilters.openAttentionCount}` : ''}
               </span>
             )
           })}
