@@ -331,8 +331,23 @@ describe('sessionRowView adapter seam', () => {
     expect(row.title).toBe('Explaining the Crabbox CI currency model')
     expect(row.recapSource).toBe('last line')
     expect(row.you.kind).toBe('command')
+    expect(row.you.chip).toBe('crabbox status')
+    expect(row.you.text).toContain('Helping understand the currency')
     expect(row.lastLine).toBe(quoteAgentLine('Yes — every run mints a per-repo credit'))
     expect(row.lastFull).toContain('shared microVM pool')
+  })
+
+  test('command remainder does not keep a stray $ after the chip', () => {
+    const p = processUserPrompt('please run\n$ git status\nthanks', 'command')
+    expect(p.chip).toBe('git status')
+    expect(p.text).toBe('please run\nthanks')
+    expect(p.text).not.toContain('$')
+  })
+
+  test('hinted command without a $ prefix still splits chip from caption', () => {
+    const p = processUserPrompt('crabbox status Helping understand the currency', 'command')
+    expect(p.chip).toBe('crabbox status')
+    expect(p.text).toContain('Helping understand the currency')
   })
 
   test('prLabel and harnessLabel', () => {

@@ -166,6 +166,22 @@ describe('SessionRow — mockup contract', () => {
 })
 
 describe('SessionsPane bulk Resume all', () => {
+  test('filter chips keep sx-chip; meta chips live under sx-metarow', () => {
+    const html = renderToStaticMarkup(
+      <SessionsPane
+        agents={[agent({ id: 'a', liveStatus: 'orphaned' })]}
+        onToggleStar={noop}
+        onResume={noop}
+        onResumeMany={noop}
+        onSelect={noop}
+      />,
+    )
+    expect(html).toContain('class="sx-chip on')
+    expect(html).toContain('sx-metarow')
+    expect(html).toContain('.sx-metarow .sx-chip')
+    expect(html).toContain('sx-chip repo')
+  })
+
   test('reconnect group exposes Resume all N', () => {
     const html = renderToStaticMarkup(
       <SessionsPane

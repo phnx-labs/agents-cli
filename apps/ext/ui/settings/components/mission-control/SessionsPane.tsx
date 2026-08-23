@@ -22,8 +22,8 @@ import { sessionRowView, type SessionRowView } from './recapModel'
 // sort / group runs client-side, and the list is virtualized (fixed-offset
 // windowing below), so hundreds of rows render like twenty.
 
-const ROW_H = 108
-const ROW_EXPANDED_EXTRA = 96
+const ROW_H = 140
+const ROW_EXPANDED_EXTRA = 56
 const HEADER_H = 36
 const OVERSCAN = 4
 
@@ -44,7 +44,7 @@ export const SESSION_ROW_CSS = `
 }
 .sw-sessions .sx-row {
   display: flex; align-items: flex-start; gap: 11px;
-  padding: 12px 14px; cursor: default;
+  padding: 12px 14px; cursor: default; overflow: hidden;
   border-top: 0; border-bottom: 1px solid #1b2334;
   grid-template-columns: none;
 }
@@ -81,17 +81,17 @@ export const SESSION_ROW_CSS = `
 .sw-sessions .sx-imgchip { color: #5eead4; background: #0c1a20; border: 1px solid #123; }
 .sw-sessions .sx-cmdchip { color: #f5b544; background: #1c1608; border: 1px solid #3a2e12; }
 .sw-sessions .sx-slashchip { color: #a78bfa; background: #160f28; border: 1px solid #2a2050; }
-.sw-sessions .sx-full { margin: 6px 0 2px 71px; padding: 9px 11px; border-left: 2px solid #223; background: #0b101c; border-radius: 0 7px 7px 0; color: #8b94a6; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; }
+.sw-sessions .sx-full { margin: 6px 0 2px 71px; padding: 9px 11px; border-left: 2px solid #223; background: #0b101c; border-radius: 0 7px 7px 0; color: #8b94a6; font-size: 12.5px; line-height: 1.55; white-space: pre-wrap; max-height: 160px; overflow-y: auto; }
 .sw-sessions .sx-metarow { display: flex; align-items: center; gap: 7px; margin-top: 8px; flex-wrap: wrap; padding-left: 71px; }
-.sw-sessions .sx-chip { display: inline-flex; align-items: center; gap: 5px; font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; padding: 1.5px 7px; border-radius: 5px; border: 1px solid #1b2334; color: #8b94a6; white-space: nowrap; background: #0c1220; }
-.sw-sessions .sx-chip.repo { color: #5eead4; border-color: #123; }
-.sw-sessions .sx-chip.pr { color: #a3e635; border-color: #2c3a16; background: #141c0a; }
-.sw-sessions .sx-chip.pr .ci { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; display: inline-block; }
-.sw-sessions .sx-chip.pr .ci.run { background: #f5b544; }
-.sw-sessions .sx-chip.pr .ci.fail { background: #f87171; }
-.sw-sessions .sx-chip.branch { color: #a78bfa; border-color: #241d3a; }
-.sw-sessions .sx-chip.host { color: #8b94a6; }
-.sw-sessions .sx-chip.nopr { color: #5c6675; }
+.sw-sessions .sx-metarow .sx-chip { display: inline-flex; align-items: center; gap: 5px; font-family: "JetBrains Mono","SF Mono",ui-monospace,monospace; font-size: 11px; padding: 1.5px 7px; border-radius: 5px; border: 1px solid #1b2334; color: #8b94a6; white-space: nowrap; background: #0c1220; }
+.sw-sessions .sx-metarow .sx-chip.repo { color: #5eead4; border-color: #123; }
+.sw-sessions .sx-metarow .sx-chip.pr { color: #a3e635; border-color: #2c3a16; background: #141c0a; }
+.sw-sessions .sx-metarow .sx-chip.pr .ci { width: 6px; height: 6px; border-radius: 50%; background: #4ade80; display: inline-block; }
+.sw-sessions .sx-metarow .sx-chip.pr .ci.run { background: #f5b544; }
+.sw-sessions .sx-metarow .sx-chip.pr .ci.fail { background: #f87171; }
+.sw-sessions .sx-metarow .sx-chip.branch { color: #a78bfa; border-color: #241d3a; }
+.sw-sessions .sx-metarow .sx-chip.host { color: #8b94a6; }
+.sw-sessions .sx-metarow .sx-chip.nopr { color: #5c6675; }
 .sw-sessions .sx-rowactions { display: flex; align-items: center; gap: 10px; flex: none; margin-top: 0; }
 .sw-sessions button { appearance: none; font-family: inherit; }
 .sw-sessions .sx-resumebtn {
@@ -414,7 +414,7 @@ function SessionRowImpl({
   return (
     <div
       className={`sx-row${selected ? ' sel' : ''}${active ? ' active' : ''}`}
-      style={{ minHeight: height }}
+      style={{ height }}
       onClick={() => onSelect(a)}
     >
       <button

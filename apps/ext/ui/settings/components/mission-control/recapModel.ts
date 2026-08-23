@@ -368,8 +368,10 @@ function stripPaths(text: string): string {
   return text
     .replace(new RegExp(IMAGE_PATH_RE.source, 'gi'), ' ')
     .replace(ABS_PATH_RE, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
+    .split('\n')
+    .map((l) => l.replace(/[ \t]+/g, ' ').trim())
+    .filter(Boolean)
+    .join('\n')
 }
 
 function hasImageAttachment(
@@ -402,11 +404,12 @@ export function processUserPrompt(
     return { kind: 'image', chip: 'screenshot', text: stripPaths(cleanSessionPrompt(raw)) }
   }
   if (kind === 'command') {
-    const cmd = extractCommand(raw) ?? firstLine(cleanSessionPrompt(raw))
+    const cmd = extractCommand(raw) ?? firstCommandTokens(firstLine(cleanSessionPrompt(raw)))
     let rest = raw
     if (BASH_INPUT_RE.test(raw)) rest = raw.replace(BASH_INPUT_RE, '\n')
-    rest = rest.replace(FENCE_CMD_RE, '\n').replace(/^\s*(?:\$|❯)\s+/, '')
+    rest = rest.replace(FENCE_CMD_RE, '\n')
     if (cmd) rest = rest.replace(cmd, '')
+    rest = rest.replace(/^\s*[\$❯]\s*/gm, '')
     return { kind: 'command', chip: truncateCmd(cmd.replace(/^\$\s+/, '')), text: stripPaths(cleanSessionPrompt(rest)) }
   }
   if (kind === 'skill') {
