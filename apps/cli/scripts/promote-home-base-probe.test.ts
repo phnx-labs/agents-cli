@@ -185,7 +185,10 @@ describe('release.sh: the promote preflight gates the mutating phases (RUSH-3026
     const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
     const call = lines.findIndex((l) => l.trim() === 'assert_promote_home_base');
     expect(call, 'assert_promote_home_base must be invoked').toBeGreaterThanOrEqual(0);
-    const merge = lines.findIndex((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l));
+    // The version-bump merge is now the async, post-publish `if … && gh pr merge …`
+    // form (RUSH-2395 decouple), so match `gh pr merge "$PR_NUMBER" --squash`
+    // anywhere on the line rather than anchored to start-of-line.
+    const merge = lines.findIndex((l) => /gh pr merge "\$PR_NUMBER" --squash/.test(l));
     const tag = lines.findIndex((l) => /^git push origin "v\$TARGET"$/.test(l));
     expect(merge).toBeGreaterThan(call);
     expect(tag).toBeGreaterThan(call);
