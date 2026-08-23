@@ -42,10 +42,11 @@ export interface ParsedAutoConfigKey {
   property: 'pool';
 }
 
-/** The default browser profile (device-scope, self or peer). */
+/** A device-scope browser key (self or peer): the profile agents drive, or the
+ *  browser that shows the user a page. */
 export interface ParsedBrowserConfigKey {
   scope: 'browser';
-  property: 'profile';
+  property: 'profile' | 'viewer';
   device?: string;
 }
 
@@ -80,9 +81,11 @@ export type DeviceConfigProperty =
   | 'browser.remote-control'
   | 'browser.task-idle-minutes'
   | 'notes'
-  | 'browser.profile';
+  | 'browser.profile'
+  | 'browser.viewer';
 
 const DEVICE_CONFIG_PROPERTIES: DeviceConfigProperty[] = [
+  'browser.viewer',
   'role',
   'max-agents',
   'scheduler',
@@ -174,12 +177,16 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'browser', property: 'profile' };
   }
 
+  if (raw === 'browser.viewer') {
+    return { scope: 'browser', property: 'viewer' };
+  }
+
   if (raw === 'project.root') {
     return { scope: 'project', property: 'root' };
   }
 
   const deviceMatch = raw.match(
-    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile)$/,
+    /^devices\.(.+)\.(role|max-agents|scheduler|daemon|watchdog|tmux|notes|browser\.remote-control|browser\.task-idle-minutes|browser\.profile|browser\.viewer)$/,
   );
   if (deviceMatch) {
     return {
@@ -205,7 +212,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     throw new Error(`Invalid auto config key '${key}'. Use auto.pool.`);
   }
   if (raw.startsWith('browser.')) {
-    throw new Error(`Invalid browser config key '${key}'. Use browser.profile.`);
+    throw new Error(`Invalid browser config key '${key}'. Use browser.profile or browser.viewer.`);
   }
   if (raw.startsWith('project.')) {
     throw new Error(`Invalid project config key '${key}'. Use project.root.`);
@@ -236,7 +243,9 @@ export function formatConfigKey(parsed: ParsedConfigKey): string {
     case 'auto':
       return 'auto.pool';
     case 'browser':
-      return parsed.device ? `devices.${parsed.device}.browser.profile` : 'browser.profile';
+      return parsed.device
+        ? `devices.${parsed.device}.browser.${parsed.property}`
+        : `browser.${parsed.property}`;
     case 'project':
       return 'project.root';
     case 'device':
@@ -255,7 +264,14 @@ export function listKnownConfigKeys(): string[] {
   for (const tier of MODEL_TIERS) {
     keys.push(`run.<agent@version>.tier.${tier}`);
   }
-  keys.push('interactive.host', 'usage.primary-host', 'auto.pool', 'browser.profile', 'project.root');
+  keys.push(
+    'interactive.host',
+    'usage.primary-host',
+    'auto.pool',
+    'browser.profile',
+    'browser.viewer',
+    'project.root',
+  );
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
     keys.push(`devices.<name>.${prop}`);
   }
@@ -289,6 +305,8 @@ export function devicePropertyToConfigName(property: DeviceConfigProperty): stri
       return 'notes';
     case 'browser.profile':
       return 'browser.profile';
+    case 'browser.viewer':
+      return 'browser.viewer';
   }
 }
 
@@ -309,10 +327,12 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
       return 'config.usagePrimaryHost';
     case 'auto':
       return 'config.autoPool';
-    case 'browser':
+    case 'browser': {
+      const yamlKey = parsed.property === 'viewer' ? 'browserViewer' : 'defaultBrowserProfile';
       return parsed.device
-        ? `devices/${parsed.device}/agents.yaml config.defaultBrowserProfile`
-        : 'devices/<self>/agents.yaml config.defaultBrowserProfile';
+        ? `devices/${parsed.device}/agents.yaml config.${yamlKey}`
+        : `devices/<self>/agents.yaml config.${yamlKey}`;
+    }
     case 'project':
       return 'devices.<self>.projectRoot';
     case 'device':

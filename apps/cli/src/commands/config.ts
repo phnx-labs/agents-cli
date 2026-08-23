@@ -104,6 +104,7 @@ function parseValue(key: string, parsed: ParsedConfigKey, raw: string): unknown 
         case 'notes':
           return raw.trim();
         case 'browser.profile':
+        case 'browser.viewer':
           return raw.trim();
       }
       // A device property with no arm above used to fall out of the switch and
@@ -153,7 +154,7 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       // browser.profile targets this machine; devices.<name>.browser.profile
       // targets a peer.
       setConfigValue(
-        'browser.profile',
+        parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         value as string,
         parsed.device ? { device: parsed.device } : undefined,
       );

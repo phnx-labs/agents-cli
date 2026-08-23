@@ -9,12 +9,14 @@
   This matters beyond tidiness: the configured profile is where the fleet's
   logins accumulate, so a page opened there is one you are already signed in for,
   and a login it acquires is inherited by every later agent.
+  The seam does not auto-start the browser daemon: showing a page is a side
+  errand, so blocking it on a cold start would be a surprising stall. Daemon
+  already running -> the viewer; not running -> the OS handler.
   Source: `src/lib/open-url.ts`.
 - **New `browser.viewer` config key** (device scope) — a profile name, or `os`
   to keep using the OS default handler. Unset follows `browser.profile`.
   Deliberately distinct from `browser.profile`: one is the profile agents drive,
-  the other is the browser that shows you a page. `--os-browser` is the
-  per-command escape hatch. Source: `src/lib/device-config.ts`.
+  the other is the browser that shows you a page. Source: `src/lib/device-config.ts`.
 - **New `show` IPC action** — opens a tab bound to no task, so the abandoned-task
   reaper never closes a page you are reading. That is the whole reason it is not
   `navigate`. Screenshots, PDFs and recordings still go to the OS app, where

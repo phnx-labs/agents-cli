@@ -31,8 +31,9 @@ export type ShowOutcome =
 export interface ShowOptions {
   /**
    * Force the OS default handler, ignoring `browser.viewer`. This is the
-   * `--os-browser` escape hatch: the user wants their own browser for this one
-   * call (a page whose session lives in their personal profile, say).
+   * The programmatic escape hatch, for a caller that must use the user's own
+   * browser regardless of configuration. There is deliberately no CLI flag for
+   * it: `agents config set browser.viewer os` is the user-facing control.
    */
   osBrowser?: boolean;
   /** Explicit profile override, ahead of `browser.viewer`. */
@@ -69,16 +70,16 @@ function osOpen(target: string, spawnOpen?: (cmd: string, args: string[]) => boo
       if (spawnOpen(cmd, args)) return { via: 'os', command: cmd };
       continue;
     }
-    try {
-      // Detached: the opener outliving this process is the point, and a blocking
-      // wait would hang a CLI that is about to prompt for a pasted credential.
-      const p = spawn(cmd, args, { stdio: 'ignore', detached: true });
-      p.on('error', () => {});
-      p.unref();
-      return { via: 'os', command: cmd };
-    } catch {
-      continue;
-    }
+    // spawnSync, NOT a detached spawn. `spawn` does not throw for a missing
+    // binary — it emits an async `error` event — so a detached spawn cannot tell
+    // success from "xdg-open is not installed", and every caller's failure branch
+    // becomes unreachable. The two implementations this seam replaced both used
+    // `spawnSync(...).status === 0` and genuinely detected failure; keeping that
+    // is what makes `via: 'none'` reachable and the fallback to the next
+    // candidate real. These openers hand off to the desktop and return in
+    // milliseconds, so the block is not a stall.
+    const { status, error } = spawnSync(cmd, args, { stdio: 'ignore' });
+    if (!error && status === 0) return { via: 'os', command: cmd };
   }
   return { via: 'none', reason: 'no working OS opener on this platform' };
 }
@@ -144,7 +145,15 @@ export async function showUrl(url: string, opts: ShowOptions = {}): Promise<Show
 
   try {
     const { sendIPCRequest } = await import('./browser/ipc.js');
-    const response = await sendIPCRequest({ action: 'show', url, profile: viewer.profile } as never);
+    // Deliberately does NOT auto-start the browser daemon. Showing a page is a
+    // side errand — `devices lease` opens a console and immediately prompts for
+    // a pasted key — so blocking that on a daemon cold start is a surprising
+    // multi-second stall. Daemon already up: use the viewer. Not up: the OS
+    // handler is the fast, correct answer.
+    const response = await sendIPCRequest(
+      { action: 'show', url, profile: viewer.profile },
+      { autoStartDaemon: false },
+    );
     if (response.ok) return { via: 'profile', profile: viewer.profile, tabId: response.tabId };
     console.error(`[viewer] ${viewer.profile}: ${response.error} — using the OS browser.`);
   } catch (err) {
@@ -168,23 +177,11 @@ export async function showFile(filePath: string, opts: ShowOptions = {}): Promis
 }
 
 /**
- * Synchronous OS-default open, for the one caller that cannot await.
+ * Synchronous OS-default open. Returns true on success.
  *
- * Prefer {@link showFile}. This exists so the interactive artifact picker keeps
- * its boolean return; it deliberately does NOT consult the viewer.
+ * Deliberately does NOT consult the viewer — it is the OS-handler primitive that
+ * {@link osOpen} and the interactive artifact picker share.
  */
 export function openArtifactSync(filePath: string): boolean {
-  const candidates: Array<[string, string[]]> =
-    process.platform === 'darwin'
-      ? [['open', [filePath]]]
-      : process.platform === 'win32'
-        ? [['cmd', ['/c', 'start', '', filePath]]]
-        : [
-            ['xdg-open', [filePath]],
-            ['gnome-open', [filePath]],
-          ];
-  for (const [cmd, args] of candidates) {
-    if (spawnSync(cmd, args, { stdio: 'ignore' }).status === 0) return true;
-  }
-  return false;
+  return osOpen(filePath).via === 'os';
 }

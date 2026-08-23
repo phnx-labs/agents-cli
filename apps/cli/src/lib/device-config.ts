@@ -165,7 +165,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       "Which browser THIS machine shows YOU a page in (an .html artifact, `agents feedback`, a login " +
       "dashboard): a profile name, or `os` for the OS default handler. Unset follows browser.profile. " +
       "Distinct from browser.profile, which is the profile agents DRIVE — see RUSH-2709 for why " +
-      "collapsing the two was a mistake. Per-command escape hatch: --os-browser.",
+      "collapsing the two was a mistake. Set it to `os` to keep the OS default handler.",
     validate: (v: unknown) =>
       typeof v === 'string' && v.length > 0 ? null : 'browser.viewer must be `os` or a profile name.',
   },

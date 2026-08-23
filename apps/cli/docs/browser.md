@@ -248,8 +248,8 @@ the viewer once:
 | a profile name | that profile |
 | `os` | the OS default handler |
 
-Set it with `agents config set browser.viewer <name>`. Per command, `--os-browser`
-forces the OS handler for that one call.
+Set it with `agents config set browser.viewer <name>`, or `agents config set
+browser.viewer os` to keep the OS default handler.
 
 Two deliberate carve-outs. Screenshots, PDFs and recordings go to the OS default
 **app** regardless — Preview and QuickTime are the better viewer and a CDP tab is

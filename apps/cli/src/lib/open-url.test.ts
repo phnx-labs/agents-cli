@@ -22,7 +22,9 @@ const CHROME = {
   name: 'work',
   browser: 'chrome' as const,
   binary: process.execPath,
-  endpoints: ['cdp://127.0.0.1:9222'],
+  // NOT 9222: that is the standard Chrome debug port, and a test that dials it
+  // can attach to a real browser on the developer's machine.
+  endpoints: ['cdp://127.0.0.1:39871'],
 };
 
 beforeEach(() => {
@@ -56,7 +58,7 @@ describe('resolveViewer', () => {
   it('browser.viewer overrides browser.profile', async () => {
     const { createProfile, setConfigValue, resolveViewer } = await fresh();
     await createProfile(CHROME);
-    await createProfile({ ...CHROME, name: 'reading', endpoints: ['cdp://127.0.0.1:9223'] });
+      await createProfile({ ...CHROME, name: 'reading', endpoints: ['cdp://127.0.0.1:39872'] });
     setConfigValue('browser.profile', 'work');
     setConfigValue('browser.viewer', 'reading');
 
@@ -72,9 +74,9 @@ describe('resolveViewer', () => {
     expect(await resolveViewer()).toBe('os');
   });
 
-  it('--os-browser beats a configured viewer', async () => {
-    // The escape hatch. If this ever stops winning, a user who explicitly asked
-    // for their own browser silently gets the agent profile instead.
+  it('the osBrowser option beats a configured viewer', async () => {
+    // If this ever stops winning, a caller that explicitly asked for the user's
+    // own browser silently gets the agent profile instead.
     const { createProfile, setConfigValue, resolveViewer } = await fresh();
     await createProfile(CHROME);
     setConfigValue('browser.viewer', 'work');
@@ -126,18 +128,22 @@ describe('showFile — which kinds a browser tab is right for', () => {
     }
   });
 
-  it('routes an .html artifact through the viewer, not the OS handler', async () => {
-    const { createProfile, setConfigValue, resolveViewer, showFile } = await fresh();
+  it('tries the viewer for an .html artifact, and says so when it cannot reach it', async () => {
+    // With no daemon reachable the profile attempt FALLS BACK to the OS handler
+    // — that is correct, and it is why this asserts the attempt rather than the
+    // absence of an OS open. The stderr line names the profile, so it is proof
+    // the .html went to the viewer branch; a .png never produces one.
+    const { createProfile, setConfigValue, showFile } = await fresh();
     await createProfile(CHROME);
     setConfigValue('browser.viewer', 'work');
+    const err = vi.spyOn(console, 'error').mockImplementation(() => undefined);
 
-    // The routing decision is the contract; the daemon round-trip is covered by
-    // the ipc tests. Assert the decision, then that a .html does NOT take the
-    // OS path while a .png does.
-    expect(await resolveViewer()).toEqual({ profile: 'work' });
     await showFile('/tmp/plan.html', { spawnOpen });
-    const osTargets = opened.flat();
-    expect(osTargets.some((t) => t.endsWith('plan.html'))).toBe(false);
+    expect(err).toHaveBeenCalledWith(expect.stringContaining('work'));
+
+    err.mockClear();
+    await showFile('/tmp/capture.png', { spawnOpen });
+    expect(err).not.toHaveBeenCalled();
   });
 
   it('with no viewer configured, an .html still opens — via the OS handler', async () => {
