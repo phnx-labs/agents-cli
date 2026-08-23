@@ -73,6 +73,44 @@ describe('shouldFire predicate evaluator', () => {
     });
   });
 
+  describe('permission_mode_not', () => {
+    it('skips in the named mode', () => {
+      expect(shouldFire({ permission_mode_not: 'plan' }, { permission_mode: 'plan' })).toBe(false);
+    });
+    it('fires in every other mode', () => {
+      expect(shouldFire({ permission_mode_not: 'plan' }, { permission_mode: 'default' })).toBe(true);
+      expect(
+        shouldFire({ permission_mode_not: 'plan' }, { permission_mode: 'acceptEdits' })
+      ).toBe(true);
+    });
+    it('fires on a mode the exclusion list has never heard of', () => {
+      // The whole reason this predicate exists: an allowlist would stop firing
+      // here, silently un-guarding the tool call.
+      expect(
+        shouldFire({ permission_mode_not: 'plan' }, { permission_mode: 'someFutureMode' })
+      ).toBe(true);
+    });
+    it('accepts the array form', () => {
+      expect(
+        shouldFire({ permission_mode_not: ['plan', 'acceptEdits'] }, { permission_mode: 'acceptEdits' })
+      ).toBe(false);
+      expect(
+        shouldFire({ permission_mode_not: ['plan', 'acceptEdits'] }, { permission_mode: 'default' })
+      ).toBe(true);
+    });
+    it('reads the camelCase spelling', () => {
+      expect(shouldFire({ permission_mode_not: 'plan' }, { permissionMode: 'plan' })).toBe(false);
+    });
+    it('fails open when the harness reports no mode', () => {
+      expect(shouldFire({ permission_mode_not: 'plan' }, {})).toBe(true);
+    });
+    it('ANDs with the positive form rather than overriding it', () => {
+      const m = { permission_mode: ['plan', 'default'], permission_mode_not: 'plan' };
+      expect(shouldFire(m, { permission_mode: 'default' })).toBe(true);
+      expect(shouldFire(m, { permission_mode: 'plan' })).toBe(false);
+    });
+  });
+
   describe('tool_args_match', () => {
     it('matches against serialized object', () => {
       expect(

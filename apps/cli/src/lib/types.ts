@@ -298,6 +298,15 @@ export interface HookMatches {
    * (Claude Code) report the live mode — an explicit non-listed value skips.
    */
   permission_mode?: string | string[];
+  /**
+   * Permission modes the hook must NOT fire in (e.g. `plan`). The inverse of
+   * `permission_mode`, and the correct predicate for gating a guard off in one
+   * mode: expressing that with the allowlist means enumerating every other
+   * mode, which silently stops firing when a harness adds or renames one. Same
+   * fail-open-on-absence rule — an input with no mode field still fires — so an
+   * unknown mode errs toward running the hook, never toward skipping it.
+   */
+  permission_mode_not?: string | string[];
 }
 
 /**

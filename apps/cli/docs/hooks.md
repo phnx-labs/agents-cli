@@ -261,6 +261,7 @@ All predicates live in `matches:`. They AND together — every declared predicat
 | `project_has` | Project root (nearest `.git` ancestor) contains this file or directory | `project_has: "Cargo.toml"` |
 | `git_dirty` | Working tree dirty state matches this boolean | `git_dirty: true` |
 | `permission_mode` | Reported permission mode is one of these values (`string` or `string[]`). Fail-open: an input with no `permission_mode`/`permissionMode` field passes, because only some harnesses (Claude Code) report the live mode | `permission_mode: "plan"` |
+| `permission_mode_not` | Reported permission mode is **not** one of these values (`string` or `string[]`). Same fail-open rule. Use this — not an enumerated `permission_mode` allowlist — to gate a hook **off** in one mode | `permission_mode_not: "plan"` |
 
 ### Matcher Implementation Notes
 
@@ -272,6 +273,7 @@ All predicates live in `matches:`. They AND together — every declared predicat
 - `project_has`: `src/lib/hooks/match.ts:174` — walks up to the nearest `.git` directory via `findProjectRoot()`, then checks `fs.existsSync(path.join(root, matches.project_has))`
 - `git_dirty`: `src/lib/hooks/match.ts:180` — runs `git status --porcelain` in `cwd`; returns true if output is non-empty
 - `permission_mode`: `src/lib/hooks/match.ts:145` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
+- `permission_mode_not`: `src/lib/hooks/match.ts:156` — the inverse; skips only on an explicit value **inside** the deny list. It exists because the allowlist cannot express "everywhere except plan" without naming every other mode, and such an enumeration silently stops firing the moment a harness adds or renames one — for a guard, that means it quietly stops guarding. Naming the mode to skip keeps unknown modes firing, so the failure direction is "ran unnecessarily", never "did not run". Both forms AND together when declared on the same hook
 
 ## Script Resolution
 

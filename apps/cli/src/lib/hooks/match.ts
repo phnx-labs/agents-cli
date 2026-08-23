@@ -153,6 +153,20 @@ export function shouldFire(matches: HookMatches | undefined, input: HookInput): 
     }
   }
 
+  if (matches.permission_mode_not !== undefined) {
+    const denied = arrayOf(matches.permission_mode_not);
+    if (denied.length > 0) {
+      // The negative form exists because the positive one cannot express
+      // "everywhere except plan" without enumerating every other mode — and an
+      // enumeration silently stops firing the moment a harness adds or renames
+      // one, which for a guard means it quietly stops guarding. Naming the mode
+      // to skip keeps every unknown mode firing, so the failure direction is
+      // "ran unnecessarily", never "did not run".
+      const mode = input.permission_mode || input.permissionMode;
+      if (mode && denied.includes(mode)) return false;
+    }
+  }
+
   if (matches.tool_args_match !== undefined) {
     const serialized =
       typeof input.tool_args === 'string'
