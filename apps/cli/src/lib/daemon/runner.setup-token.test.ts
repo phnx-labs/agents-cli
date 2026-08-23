@@ -9,6 +9,7 @@ import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from '.
 import { _resetFileStoreForTest } from '../secrets/filestore.js';
 import { secretsKeychainItem } from '../secrets/index.js';
 import { getVersionHomePath } from '../installations/versions.js';
+import { setConfiguredDeviceRole } from '../device-config.js';
 
 // A routine authenticates through a per-account, non-rotating `claude setup-token`
 // (the mint-auth cure for the single-use-refresh-token revocation storm). The daemon
@@ -104,5 +105,43 @@ describe('buildRoutineSpawnEnv — CLAUDE_CODE_OAUTH_TOKEN handling', () => {
     // No provisioned setup-token → the ambient value is dropped, routine uses the
     // version home's own login instead.
     expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+  });
+
+  // On a PERSONAL device (the user's own interactive box), routines defer to the
+  // per-version login exactly like an interactive run — the setup-token is a
+  // worker-only credential (RUSH-2395). This mirrors the adapter matrix in
+  // harness/adapters/claude.test.ts on the routines path.
+  describe('on a personal device', () => {
+    it('does NOT inject a provisioned setup-token — defers to the per-version login', () => {
+      const device = `rush-2395-personal-defer-${process.pid}`;
+      process.env.AGENTS_SYNC_MACHINE_ID = device;
+      setConfiguredDeviceRole(device, 'personal');
+      const version = `rush-2395-personal-defer-v-${process.pid}`;
+      const email = 'alpha@example.com';
+      makeVersionHome(version, email);
+      // A per-account setup-token IS provisioned; on a worker this would be injected.
+      writeAuthBundle({ [claudeAccountTokenKey(email)]: 'sk-ant-oat01-alpha' });
+
+      const env = buildRoutineSpawnEnv({ ...process.env } as Record<string, string>, 'claude', version);
+
+      // Personal box → the routine runs on the login, not the setup-token.
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    });
+
+    it('strips an inherited copy of its OWN setup-token so the login wins', () => {
+      const device = `rush-2395-personal-strip-${process.pid}`;
+      process.env.AGENTS_SYNC_MACHINE_ID = device;
+      setConfiguredDeviceRole(device, 'personal');
+      const version = `rush-2395-personal-strip-v-${process.pid}`;
+      const email = 'alpha@example.com';
+      makeVersionHome(version, email);
+      writeAuthBundle({ [claudeAccountTokenKey(email)]: 'sk-ant-oat01-alpha' });
+      // A leaked copy of this account's own token inherited from a headless parent.
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = 'sk-ant-oat01-alpha';
+
+      const env = buildRoutineSpawnEnv({ ...process.env } as Record<string, string>, 'claude', version);
+
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    });
   });
 });
