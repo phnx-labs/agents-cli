@@ -2,12 +2,13 @@
  * Tests for the watchdog runner (RUSH-1415) — the CONSUMER tick.
  *
  * Drives real synthetic ActiveSession inputs through runWatchdogTick with the I/O
- * seams supplied (sessions, clock, tail, policy) and dryRun injection, so no live
- * terminal is needed. The pure logic (classifyTerminal / isLikelyTrulyBlocked /
- * resolveInjectTargetForSession) runs for real — nothing is mocked. Each case
- * asserts the exact tick behavior: nudge fires only on promise-without-toolcall +
- * addressable, and it SKIPS on waiting-on-user, completion, addressable:false, and
- * within cooldown; handsoff never injects.
+ * seams supplied (sessions, clock, tail, policy, the decider) and dryRun injection,
+ * so no live terminal and no real `agents run` are needed. The pure logic
+ * (classifyTerminal / resolveInjectTargetForSession) runs for real — nothing is
+ * mocked. The decision itself comes from an injected `smartDecider` (production runs
+ * the batched agent; watchdog-agent.test.ts covers that path). Each case asserts the
+ * exact tick behavior: a nudge is delivered + booked only when CONFIRMED and
+ * addressable; it SKIPS within cooldown / when un-addressable; handsoff never injects.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -42,7 +43,6 @@ function run(opts: WatchdogTickOptions) {
 
 const NOW = 1_700_000_000_000;
 const STALE_AGO = NOW - 6 * 60_000; // 6m ago: past the 5m stall, before the 1h dormant window.
-const FORCE_REVIEW_AGO = NOW - 20 * 60_000; // 20m ago: PAST the 15m FORCE_REVIEW_STALL_MS, still under the 1h dormant window.
 
 /** A tmux-addressable session (highest-precedence rail) whose activity is `stale`. */
 function tmuxSession(over: Partial<ActiveSession> & { mux?: MuxLocation } = {}): ActiveSession {
@@ -79,12 +79,12 @@ function ghosttySession(over: Partial<ActiveSession> = {}): ActiveSession {
 }
 
 // A Claude assistant turn that ANNOUNCES an action with no tool call after it —
-// the promise-without-toolcall signal isLikelyTrulyBlocked looks for.
+// the idle-but-unfinished case the agent nudges.
 const PROMISE_TAIL = [
   '{"type":"user","message":{"role":"user","content":[{"type":"text","text":"add the flag"}]}}',
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me run the tests now."}]}}',
 ];
-// A completed turn — COMPLETION_HINTS ("finished") make isLikelyTrulyBlocked refuse.
+// A completed turn — the agent judges this idle-and-done.
 const DONE_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The feature is finished and pushed."}]}}',
 ];
@@ -92,10 +92,22 @@ const DONE_TAIL = [
 const ASK_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Should I proceed with running the tests?"}]}}',
 ];
-// A stall with no promise, no completion, no waiting hint — ambiguous → escalate.
+// A stall with no promise, no completion, no waiting hint — ambiguous.
 const AMBIGUOUS_TAIL = [
   '{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"The config has three sections."}]}}',
 ];
+
+// Shared synthetic deciders (the agent is injected in tests). A NUDGE verdict for
+// idle-but-unfinished; a DONE skip (needsHuman:false, never poked) for finished work.
+const nudgeDecider: SmartDecider = async () => ({ nudge: true, reason: 'idle but unfinished — drive it to finish' });
+const doneDecider: SmartDecider = async () => ({ nudge: false, reason: 'task complete', needsHuman: false });
+/** An injectFn stub reporting a CONFIRMED delivery on the target's backend. */
+function confirmingInject(captured?: { target?: InjectTarget }) {
+  return async (target: InjectTarget, _text: string, _o: { dryRun?: boolean }) => {
+    if (captured) captured.target = target;
+    return { ok: true as const, confirmed: true as const, backend: target.backend, writes: 2 };
+  };
+}
 
 /** A VS Codium (IDE) session parked on a question — the vscodium inject rail. */
 function vscodiumSession(over: Partial<ActiveSession> = {}): ActiveSession {
@@ -134,7 +146,7 @@ describe('runWatchdogTick — nudge fires', () => {
     const s = tmuxSession();
     const result = await run({
       sessions: [s], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL,
+      tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider,
     });
 
     const o = result.outcomes[0];
@@ -152,7 +164,7 @@ describe('runWatchdogTick — nudge fires', () => {
   it('honors a custom nudge text', async () => {
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      nudgeText: 'Keep going.', tailFor: () => PROMISE_TAIL,
+      nudgeText: 'Keep going.', tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider,
     });
     expect(result.outcomes[0].injected).toBe(true);
     expect(result.outcomes[0].nudgeText).toBe('Keep going.');
@@ -210,46 +222,28 @@ describe('runWatchdogTick — parked-on-question escalates to the brain', () => 
 });
 
 describe('runWatchdogTick — skips (no nudge)', () => {
-  it('SKIPS a completed session (no promise-without-toolcall)', async () => {
+  it('SKIPS a completed (idle-and-done) session, never booking a nudge', async () => {
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => DONE_TAIL,
+      tailFor: () => DONE_TAIL, smartDecider: doneDecider,
     });
     const o = result.outcomes[0];
     expect(o.stall).toBe('stalled');
     expect(o.decision).toBe('skip');
     expect(o.injected).toBeUndefined();
     expect(result.counts.nudged).toBe(0);
-  });
-
-  it('SKIPS a completed session even PAST the 15m force-review window (never nudges a finished session)', async () => {
-    // Regression: isLikelyTrulyBlocked short-circuits to `true` at >=15m stall
-    // (FORCE_REVIEW_STALL_MS) BEFORE its completion check, so the deterministic
-    // path must screen completions out itself. This session is idle 20m with a
-    // "finished" tail — it must still be skipped, not injected with "Continue.".
-    const s = tmuxSession({ startedAtMs: FORCE_REVIEW_AGO });
-    const result = await run({
-      sessions: [s], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => DONE_TAIL,
-    });
-    const o = result.outcomes[0];
-    expect(o.stall).toBe('stalled');
-    expect(o.stalledForMs).toBeGreaterThanOrEqual(15 * 60_000); // past FORCE_REVIEW
-    expect(o.decision).toBe('skip');
-    expect(o.injected).toBeUndefined();
-    expect(o.reason).toMatch(/completion/i);
-    expect(result.counts.nudged).toBe(0);
+    // A done skip (needsHuman:false) is never poked and never booked.
     expect(readLedger()['sess-tmux']).toBeUndefined();
   });
 
   it('SKIPS and FLAGS an un-addressable NUDGE-WORTHY stall (ghostty, no tmux) — flag only, NEVER pages the owner', async () => {
-    // PROMISE_TAIL → isLikelyTrulyBlocked → deterministic `nudge` (a drive-forward
-    // poke, NOT needsHuman). An un-addressable poke must NOT page Muqsit's phone —
-    // it flags for the tray only. No block published, no cooldown recorded.
+    // The agent judges it idle-but-unfinished (a drive-forward poke, NOT needsHuman).
+    // An un-addressable poke must NOT page Muqsit's phone — it flags for the tray
+    // only. No block published, no cooldown recorded.
     const blocks: OpenBlock[] = [];
     const result = await run({
       sessions: [ghosttySession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL, publishBlockFn: (b) => blocks.push(b),
+      tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider, publishBlockFn: (b) => blocks.push(b),
     });
     const o = result.outcomes[0];
     expect(o.decision).toBe('skip');
@@ -282,14 +276,14 @@ describe('runWatchdogTick — skips (no nudge)', () => {
   });
 
   it('handsoff policy: detects + flags a nudge-worthy stall but NEVER injects or pages', async () => {
-    // PROMISE_TAIL → deterministic `nudge` (drive-forward poke, NOT needsHuman).
+    // The agent judges it idle-but-unfinished (drive-forward poke, NOT needsHuman).
     // Hands-off means "don't nudge it forward" — it must NOT page Muqsit for a poke.
     // Flag only: no block published, no cooldown recorded.
     const policyFor = (): WatchdogPolicy => 'handsoff';
     const blocks: OpenBlock[] = [];
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL, policyFor, publishBlockFn: (b) => blocks.push(b),
+      tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider, policyFor, publishBlockFn: (b) => blocks.push(b),
     });
     const o = result.outcomes[0];
     expect(o.policy).toBe('handsoff');
@@ -323,7 +317,7 @@ describe('runWatchdogTick — dry run (default, no --nudge)', () => {
   it('reports WOULD-nudge without injecting or touching the cooldown', async () => {
     const result = await run({
       sessions: [tmuxSession()], nowMs: NOW, nudge: false, injectDryRun: true, stateDir,
-      tailFor: () => PROMISE_TAIL,
+      tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider,
     });
     const o = result.outcomes[0];
     expect(o.decision).toBe('nudge');
@@ -397,26 +391,70 @@ describe('runWatchdogTick — delivery routing (answer-router + vscodium)', () =
     // answer-router's own resolver cannot build a vscodium target; the tick must
     // pre-resolve via resolveInjectTargetForSession (vscodium-aware) and inject
     // into the precise integrated terminal keyed by the session id.
-    let captured: InjectTarget | null = null;
-    const injectFn = async (target: InjectTarget, _text: string, _o: { dryRun?: boolean }) => {
-      captured = target;
-      return { ok: true as const, backend: target.backend, writes: 2 };
-    };
-    // Brain drives the parked question forward.
+    const captured: { target?: InjectTarget } = {};
+    // Brain drives the parked question forward; the stub reports a CONFIRMED delivery
+    // so this test isolates target RESOLUTION from the confirmation behavior.
     const smartDecider: SmartDecider = async () => ({ nudge: true, reason: 'proceed', text: 'Finish it; use the sensible default.' });
     const result = await run({
       sessions: [vscodiumSession()], nowMs: NOW, nudge: true, stateDir,
-      tailFor: () => ASK_TAIL, smartDecider, injectFn,
+      tailFor: () => ASK_TAIL, smartDecider, injectFn: confirmingInject(captured),
     });
     const o = result.outcomes[0];
     expect(o.decision).toBe('nudge');
     expect(o.rail).toBe('vscodium');
     expect(o.via).toBe('inject');
     expect(o.injected).toBe(true);
-    expect(captured).not.toBeNull();
-    expect(captured!).toMatchObject({ backend: 'vscodium', terminalId: 'sess-codium', cli: 'codium', scheme: 'vscodium' });
+    expect(captured.target).toMatchObject({ backend: 'vscodium', terminalId: 'sess-codium', cli: 'codium', scheme: 'vscodium' });
     expect(result.counts.nudged).toBe(1);
     expect(readLedger()['sess-codium']).toBe(NOW);
+  });
+});
+
+describe('runWatchdogTick — confirmed vs unconfirmed delivery', () => {
+  it('an UNCONFIRMED delivery (vscodium fire-and-forget) is recorded undelivered, NOT a nudge', async () => {
+    // The real defect: `codium --open-url` exits 0 but the ext may no-op the verb.
+    // injectFn reports ok:true, confirmed:false — the tick must NOT count it as a
+    // landed nudge (decision skip, injected false), while still starting the
+    // cooldown so a possibly-working ext session is not re-hit every tick.
+    const unconfirmedInject = async (target: InjectTarget) =>
+      ({ ok: true as const, confirmed: false as const, backend: target.backend, writes: 2 });
+    const smartDecider: SmartDecider = async () => ({ nudge: true, reason: 'proceed' });
+    const result = await run({
+      sessions: [vscodiumSession()], nowMs: NOW, nudge: true, stateDir,
+      tailFor: () => ASK_TAIL, smartDecider, injectFn: unconfirmedInject,
+    });
+    const o = result.outcomes[0];
+    expect(o.decision).toBe('skip');
+    expect(o.injected).toBe(false);
+    expect(o.reason).toMatch(/unconfirmed/i);
+    expect(result.counts.nudged).toBe(0);
+    // Cooldown IS started (avoid every-tick spam) even though it wasn't confirmed.
+    expect(readLedger()['sess-codium']).toBe(NOW);
+  });
+
+  it('a CONFIRMED tmux delivery is booked as a nudge', async () => {
+    const result = await run({
+      sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
+      tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider, injectFn: confirmingInject(),
+    });
+    const o = result.outcomes[0];
+    expect(o.decision).toBe('nudge');
+    expect(o.injected).toBe(true);
+    expect(result.counts.nudged).toBe(1);
+    expect(readLedger()['sess-tmux']).toBe(NOW);
+  });
+});
+
+describe('runWatchdogTick — the agent decides only when something is idle', () => {
+  it('does NOT consult the decider when the only session is active', async () => {
+    let called = false;
+    const spyDecider: SmartDecider = async () => { called = true; return { nudge: false, reason: 'x' }; };
+    const s = tmuxSession({ startedAtMs: NOW - 5_000 }); // active, under the stall threshold
+    await run({
+      sessions: [s], nowMs: NOW, nudge: true, injectDryRun: true, stateDir,
+      tailFor: () => PROMISE_TAIL, smartDecider: spyDecider,
+    });
+    expect(called).toBe(false);
   });
 });
 
@@ -431,7 +469,7 @@ describe('runWatchdogTick — the cooldown ledger is lock-serialized (no lost up
     const common = {
       nowMs: NOW, nudge: true, injectDryRun: true, stateDir: shared,
       logPath: path.join(shared, 'watchdog.log'), openBlockFor: () => null,
-      tailFor: () => PROMISE_TAIL,
+      tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider,
     };
     await Promise.all([
       runWatchdogTick({ ...common, sessions: [a] }),
@@ -571,11 +609,11 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
     // fix: neither an un-addressable poke nor a hands-off poke publishes a block.
 
     it('un-addressable NUDGE-worthy poke → flag only, no block, no cooldown write', async () => {
-      // PROMISE_TAIL → isLikelyTrulyBlocked → deterministic nudge (drive-forward).
+      // The agent judges it idle-but-unfinished (drive-forward, NOT needsHuman).
       const published: OpenBlock[] = [];
       const result = await run({
         sessions: [ghosttySession()], nowMs: NOW, nudge: true, stateDir,
-        tailFor: () => PROMISE_TAIL, publishBlockFn: (b) => published.push(b),
+        tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider, publishBlockFn: (b) => published.push(b),
         openBlockFor: () => null,
       });
       const o = result.outcomes[0];
@@ -590,10 +628,10 @@ describe('runWatchdogTick — brain says needs-human → wires the owner feed', 
     it('handsoff NUDGE-worthy poke → flag only, never injects, no block, no cooldown write', async () => {
       const published: OpenBlock[] = [];
       let injected = false;
-      const injectFn = async () => { injected = true; return { ok: true as const, backend: 'tmux' as const, writes: 2 }; };
+      const injectFn = async () => { injected = true; return { ok: true as const, confirmed: true as const, backend: 'tmux' as const, writes: 2 }; };
       const result = await run({
         sessions: [tmuxSession()], nowMs: NOW, nudge: true, stateDir,
-        tailFor: () => PROMISE_TAIL, policyFor: () => 'handsoff',
+        tailFor: () => PROMISE_TAIL, smartDecider: nudgeDecider, policyFor: () => 'handsoff',
         publishBlockFn: (b) => published.push(b), injectFn, openBlockFor: () => null,
       });
       const o = result.outcomes[0];

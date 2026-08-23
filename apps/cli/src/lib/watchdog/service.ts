@@ -10,7 +10,6 @@ import { runWatchdogTick, type WatchdogThresholds, type WatchdogTickResult } fro
 export interface WatchdogPassOptions {
   nudge: boolean;
   nudgeText?: string;
-  smart?: boolean;
   smartAgent?: string;
   thresholds?: WatchdogThresholds;
   allowGhosttyFocus?: boolean;
@@ -43,7 +42,6 @@ export async function runWatchdogPass(opts: WatchdogPassOptions): Promise<Watchd
   const result = await runWatchdogTick({
     nudge: opts.nudge,
     nudgeText: opts.nudgeText,
-    smart: opts.smart,
     smartAgent: opts.smartAgent,
     thresholds: opts.thresholds,
     allowGhosttyFocus: opts.allowGhosttyFocus,

@@ -13,7 +13,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { appendWatchdogEvents, boundTailLines, parseWatchdogEvents, trimToLast, formatEvent, WATCHDOG_TAIL_MAX_CHARS, type WatchdogEvent } from './log.js';
 
-const KNOWN_KINDS = new Set(['tick', 'decision', 'nudge', 'rotate', 'error']);
+const KNOWN_KINDS = new Set(['tick', 'decision', 'nudge', 'undelivered', 'rotate', 'error']);
 
 let dir: string;
 let logPath: string;

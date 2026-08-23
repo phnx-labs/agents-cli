@@ -4,7 +4,6 @@ import * as os from 'os';
 import * as path from 'path';
 import { readTailLines, findSessionJsonlIn, readWatchdogTail } from './read.js';
 import { summarizeWatchdogTail } from './watchdogTail.js';
-import { isLikelyTrulyBlocked } from './watchdog.js';
 
 const FIXTURE = path.join(import.meta.dirname, 'testdata', 'tail-sample-claude.jsonl');
 
@@ -122,22 +121,12 @@ describe('findSessionJsonlIn', () => {
   });
 });
 
-describe('watchdog tail pipeline (read -> summarize -> detect)', () => {
-  it('feeds real transcript lines into the pure detectors', () => {
+describe('watchdog tail pipeline (read -> summarize)', () => {
+  it('feeds real transcript lines into the pure summarizer the agent reads', () => {
     const tail = readTailLines(FIXTURE, 20);
     const summary = summarizeWatchdogTail(tail, 'claude');
     expect(summary.lastUserMessage).toBe('port the watchdog into agents-cli');
     expect(summary.lastAssistantMessage).toContain('I will write the module');
-
-    // The last assistant turn promises action with no tool_use after it, so the
-    // detector should flag it as likely blocked.
-    const blocked = isLikelyTrulyBlocked({
-      terminalId: 'CC-1',
-      agentType: 'claude',
-      tailLines: tail,
-      stalledForMs: 120_000,
-    });
-    expect(blocked).toBe(true);
   });
 
   it('readWatchdogTail returns [] when the session cannot be resolved', () => {

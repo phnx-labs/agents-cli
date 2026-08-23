@@ -21,7 +21,7 @@ import { withFileLock, atomicWriteFileSync, ensureLockTarget } from '../fs-atomi
 export const WATCHDOG_LOG_PATH = path.join(os.homedir(), '.agents', '.cache', 'logs', 'watchdog.log');
 
 /** Kinds the Factory reader accepts. Keep in lockstep with watchdogLog.ts. */
-export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'rotate' | 'error';
+export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'undelivered' | 'rotate' | 'error';
 
 /** JSONL row shape — a verbatim replica of the Factory reader's WatchdogEvent. */
 export interface WatchdogEvent {
@@ -52,7 +52,7 @@ export interface WatchdogInspection {
   stalledForMs?: number;
 }
 
-const WATCHDOG_EVENT_KINDS = new Set<WatchdogEventKind>(['tick', 'decision', 'nudge', 'rotate', 'error']);
+const WATCHDOG_EVENT_KINDS = new Set<WatchdogEventKind>(['tick', 'decision', 'nudge', 'undelivered', 'rotate', 'error']);
 
 /** Parse the audit log without letting a partial final append hide valid rows. */
 export function parseWatchdogEvents(text: string): WatchdogEvent[] {

@@ -1,14 +1,19 @@
-// Watchdog: pure logic for detecting stalled agent terminals and rendering
-// prompts to a headless decider instance that decides whether to nudge them.
-// Ported from Swarmify (extension/src/core/watchdog.ts) — behavior verbatim.
-// Terminal/session delivery lives elsewhere; this module reads no files and
-// touches no host APIs so it can be unit-tested in isolation.
+// Watchdog: pure logic for detecting stalled agent terminals and rendering the
+// prompt that the watchdog AGENT reads to decide idle-vs-unfinished and craft a
+// nudge. There is deliberately no heuristic decider here (no regex over the tail
+// guessing "done" vs "stuck") — that judgment is the agent's job. This module
+// only classifies idleness by timestamp and renders/parses the agent's I/O, so
+// it reads no files and touches no host APIs and can be unit-tested in isolation.
 
 export interface WatchdogCandidate {
   terminalId: string;
   agentType: 'claude' | 'codex' | 'gemini';
   tailLines: string[];
   stalledForMs: number;
+  /** The originating task / first prompt / topic — so the agent can judge "was given a task but hasn't finished it". */
+  task?: string;
+  /** Working directory of the session, for context. */
+  cwd?: string;
 }
 
 export interface Decision {
@@ -16,53 +21,13 @@ export interface Decision {
   action: 'nudge' | 'skip';
   text: string;
   reason: string;
+  /**
+   * Set by the agent on a SKIP to distinguish "genuinely needs the human"
+   * (true → surface it) from "the task is actually done" (false/absent → leave
+   * it alone, do not poke). `done` is a distinct terminal state from `idle`.
+   */
+  needsHuman?: boolean;
 }
-
-const FORCE_REVIEW_STALL_MS = 15 * 60 * 1000;
-const BLOCKED_HINTS = [
-  'blocked',
-  'stuck',
-  "can't",
-  'cannot',
-  'unable',
-  'failed',
-  'error',
-  'exception',
-  'traceback',
-  'timed out',
-  'timeout',
-  'rate limit',
-  'permission denied',
-];
-const WAITING_HINTS = [
-  'waiting on user',
-  'awaiting user',
-  'askuserquestion',
-];
-const COMPLETION_HINTS = [
-  'done',
-  'completed',
-  'all set',
-  'finished',
-];
-const TOOL_CALL_HINTS = [
-  '"type":"tool_use"',
-  '"type":"tool_call"',
-  '"type":"function_call"',
-];
-const ASSISTANT_LINE_HINTS = [
-  '"type":"assistant"',
-  '"role":"assistant"',
-  '"payload":{"type":"message"',
-];
-const PROMISE_HINTS = [
-  "i'll",
-  'i will',
-  'let me',
-  'going to',
-  "next i'll",
-  'next i will',
-];
 
 export type StallStatus =
   | { kind: 'active' }
@@ -95,14 +60,16 @@ export function classifyTerminal(input: ClassifyInput): StallStatus {
   return { kind: 'stalled', stalledForMs: age };
 }
 
-export const WATCHDOG_SYSTEM_PROMPT = `You are the watchdog for AI coding agents running in terminals. Your one job is to get
-IDLE agents moving to completion: each agent has a goal and is expected to DRIVE TO
-COMPLETION end-to-end, but the terminals below have gone idle. Read each one's goal and
-WHY it stopped, then decide NUDGE (send a message that unsticks it and drives it to
-finish) or SKIP (it genuinely needs the human).
+export const WATCHDOG_SYSTEM_PROMPT = `You are the watchdog for AI coding agents running in terminals. You are given the idle
+sessions on this machine — each with its originating TASK, how long it has been idle, and
+the tail of its transcript. Your one job is to tell, for each one, whether it is
+IDLE-BUT-UNFINISHED (it was given a task, went quiet, and has NOT finished or handed it
+off) or IDLE-AND-DONE (it finished, or it genuinely needs the human). Idle-but-unfinished
+is the dangerous state — the work is most likely to be silently abandoned — so those get a
+NUDGE that drives them to finish. Everything else is a SKIP.
 
-Read the transcript before judging — an agent that already reached a decision needs "do
-it," not "decide."
+Read each transcript before judging — an agent that already reached a decision needs "do
+it," not "decide." Judge from the task + tail, not from keywords.
 
 NUDGE when the agent went idle and could keep going on its own:
 - It asked permission for an obvious or already-authorized next step
@@ -123,18 +90,19 @@ The nudge text MUST carry context, not shove:
 - Tell it to use best judgment and finish end-to-end WITHOUT asking again.
 - Imperative, 1-2 sentences, no emojis, under 240 characters.
 
-SKIP when the agent genuinely needs the human (these belong in the user's feed, not a
-nudge):
-- Credentials, auth, login, 2FA, or biometric.
-- An irreversible or outward-facing action that needs sign-off (force-push, delete
-  prod data, publish/release, spend money, send an external message) — UNLESS the House
-  Rules below authorize it.
-- A real product or intent decision with genuine ambiguity (not a trivial default).
-- The task is actually complete.
-- You cannot tell what the agent is doing.
+SKIP in two distinct cases — mark which with "needsHuman":
+- needsHuman=true — the agent is genuinely blocked on a human (these belong in the user's
+  feed): credentials, auth, login, 2FA, or biometric; an irreversible or outward-facing
+  action needing sign-off (force-push, delete prod data, publish/release, spend money,
+  send an external message) UNLESS the House Rules below authorize it; a real product or
+  intent decision with genuine ambiguity (not a trivial default); or you cannot tell what
+  the agent is doing.
+- needsHuman=false — the task is actually complete (idle-and-done). Leave it alone; do NOT
+  poke a finished session.
 
-Respond with ONLY a JSON array (no prose, no code fence):
-[{"terminalId":"<id>","action":"nudge"|"skip","text":"<message or empty>","reason":"<brief>"}]`;
+Respond with ONLY a JSON array (no prose, no code fence). Include "needsHuman" on every
+skip:
+[{"terminalId":"<id>","action":"nudge"|"skip","text":"<message or empty>","reason":"<brief>","needsHuman":true|false}]`;
 
 // User-editable playbook appended below the built-in prompt. The user maintains
 // the source at ~/.agents/playbooks/watchdog.md (read by the delivery layer);
@@ -147,10 +115,12 @@ export function composePromptWithPlaybook(basePrompt: string, playbook: string):
 
 export function renderWatchdogPrompt(candidates: WatchdogCandidate[], playbook = ''): string {
   const systemPrompt = composePromptWithPlaybook(WATCHDOG_SYSTEM_PROMPT, playbook);
-  const parts: string[] = [systemPrompt, '', 'STALLED TERMINALS:', ''];
+  const parts: string[] = [systemPrompt, '', 'IDLE SESSIONS:', ''];
   for (const c of candidates) {
     const seconds = Math.round(c.stalledForMs / 1000);
     parts.push(`--- terminal ${c.terminalId} (${c.agentType}, idle ${seconds}s) ---`);
+    if (c.task) parts.push(`task: ${c.task}`);
+    if (c.cwd) parts.push(`cwd: ${c.cwd}`);
     parts.push('last JSONL lines:');
     for (const line of c.tailLines) {
       parts.push(line);
@@ -183,39 +153,11 @@ export function parseWatchdogResponse(stdout: string): Decision[] {
     const text = typeof obj.text === 'string' ? obj.text : '';
     const reason = typeof obj.reason === 'string' ? obj.reason : '';
     if (!terminalId || !action) continue;
-    decisions.push({ terminalId, action, text, reason });
+    // needsHuman only meaningful on a skip; a nudge is never "needs human".
+    const needsHuman = action === 'skip' && obj.needsHuman === true ? true
+      : action === 'skip' && obj.needsHuman === false ? false
+      : undefined;
+    decisions.push({ terminalId, action, text, reason, needsHuman });
   }
   return decisions;
-}
-
-export function isLikelyTrulyBlocked(candidate: WatchdogCandidate): boolean {
-  // With no tail to reason over, only a very long stall counts as blocked.
-  if (candidate.tailLines.length === 0) return candidate.stalledForMs >= FORCE_REVIEW_STALL_MS;
-
-  const lowerTail = candidate.tailLines.join('\n').toLowerCase();
-  // Waiting-on-user and completion hints are checked BEFORE the 15m force-review
-  // short-circuit — a long-idle OPEN QUESTION must defer (not be blindly
-  // force-nudged) and a finished task is done. The old order tested stall age
-  // first, so a 15m-60m idle session whose tail said "waiting on user" / "done"
-  // was force-nudged anyway. Precedence fixed here (watchdog-brain-v2).
-  if (WAITING_HINTS.some((hint) => lowerTail.includes(hint))) return false;
-  if (COMPLETION_HINTS.some((hint) => lowerTail.includes(hint))) return false;
-  if (candidate.stalledForMs >= FORCE_REVIEW_STALL_MS) return true;
-  if (BLOCKED_HINTS.some((hint) => lowerTail.includes(hint))) return true;
-
-  let sawToolAfter = false;
-  for (let i = candidate.tailLines.length - 1; i >= 0; i--) {
-    const line = candidate.tailLines[i].toLowerCase();
-    if (TOOL_CALL_HINTS.some((hint) => line.includes(hint))) {
-      sawToolAfter = true;
-      continue;
-    }
-    if (!sawToolAfter) {
-      const isAssistantLine = ASSISTANT_LINE_HINTS.some((hint) => line.includes(hint));
-      const hasPromise = PROMISE_HINTS.some((hint) => line.includes(hint));
-      if (isAssistantLine && hasPromise) return true;
-    }
-  }
-
-  return false;
 }

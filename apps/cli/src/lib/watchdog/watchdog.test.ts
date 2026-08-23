@@ -4,7 +4,6 @@ import {
   composePromptWithPlaybook,
   renderWatchdogPrompt,
   parseWatchdogResponse,
-  isLikelyTrulyBlocked,
   WATCHDOG_SYSTEM_PROMPT,
 } from './watchdog.js';
 
@@ -126,11 +125,19 @@ describe('renderWatchdogPrompt', () => {
     );
     expect(out).toContain('## House Rules');
     expect(out).toContain('TEST_MARKER');
-    // House Rules must be ABOVE the stalled-terminals payload, not after it.
+    // House Rules must be ABOVE the idle-sessions payload, not after it.
     const houseIdx = out.indexOf('## House Rules');
-    const stalledIdx = out.indexOf('STALLED TERMINALS:');
+    const idleIdx = out.indexOf('IDLE SESSIONS:');
     expect(houseIdx).toBeGreaterThan(-1);
-    expect(stalledIdx).toBeGreaterThan(houseIdx);
+    expect(idleIdx).toBeGreaterThan(houseIdx);
+  });
+
+  it('includes the originating task and cwd so the agent can judge unfinished-vs-done', () => {
+    const out = renderWatchdogPrompt([
+      { terminalId: 'CC-1', agentType: 'claude', tailLines: ['{}'], stalledForMs: 60_000, task: 'port the watchdog', cwd: '/repo/agents-cli' },
+    ]);
+    expect(out).toContain('task: port the watchdog');
+    expect(out).toContain('cwd: /repo/agents-cli');
   });
 
   it('embeds terminal id, agent type, stall duration, and JSONL tail', () => {
@@ -217,127 +224,27 @@ describe('parseWatchdogResponse', () => {
     expect(d).toHaveLength(1);
     expect(d[0].text).toBe('Run tests.');
   });
-});
 
-describe('isLikelyTrulyBlocked', () => {
-  it('returns true for explicit blocked/error hints', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 120_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"The command failed with permission denied."}]}}'],
-      })
-    ).toBe(true);
+  it('parses needsHuman on a skip (true = surface it, false = idle-and-done)', () => {
+    const d = parseWatchdogResponse(
+      '[{"terminalId":"A","action":"skip","text":"","reason":"needs creds","needsHuman":true},' +
+      '{"terminalId":"B","action":"skip","text":"","reason":"done","needsHuman":false}]'
+    );
+    expect(d).toHaveLength(2);
+    expect(d[0].needsHuman).toBe(true);
+    expect(d[1].needsHuman).toBe(false);
   });
 
-  it('returns true when assistant promised action but no tool call followed', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 120_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"I will run bun test now."}]}}'],
-      })
-    ).toBe(true);
-  });
-
-  it('returns false when a tool call happened after the promise', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 120_000,
-        tailLines: [
-          '{"type":"assistant","message":{"content":[{"type":"text","text":"I will run bun test now."}]}}',
-          '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Bash","input":{"command":"bun test"}}]}}',
-        ],
-      })
-    ).toBe(false);
-  });
-
-  it('returns false for waiting-on-user hints', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 120_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting on user response."}]}}'],
-      })
-    ).toBe(false);
-  });
-
-  it('returns true for very long stalls even without textual hints', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 901_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"thinking"}]}}'],
-      })
-    ).toBe(true);
-  });
-
-  it('returns false on an empty tail below the force-review threshold', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 120_000,
-        tailLines: [],
-      })
-    ).toBe(false);
-  });
-
-  it('completion hints suppress a nudge even when a promise is present', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 120_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"I will stop here, all set and finished."}]}}'],
-      })
-    ).toBe(false);
-  });
-
-  // Precedence fix (watchdog-brain-v2): the 15m FORCE_REVIEW short-circuit used to
-  // fire BEFORE the waiting/completion checks, so a long-idle OPEN QUESTION was
-  // blindly force-nudged. Now waiting/completion win and it defers.
-  it('a long-idle (>15m) WAITING-on-user session is NOT force-nudged (defers, was a bug)', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 20 * 60_000, // 20m — past FORCE_REVIEW_STALL_MS
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"Waiting on user to choose an option."}]}}'],
-      })
-    ).toBe(false);
-  });
-
-  it('a long-idle (>15m) COMPLETED session is NOT force-nudged (defers, was a bug)', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 20 * 60_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"All done, the task is finished."}]}}'],
-      })
-    ).toBe(false);
-  });
-
-  it('a long-idle (>15m) session with a neutral tail still force-reviews as blocked', () => {
-    expect(
-      isLikelyTrulyBlocked({
-        terminalId: 'CC-1',
-        agentType: 'claude',
-        stalledForMs: 20 * 60_000,
-        tailLines: ['{"type":"assistant","message":{"content":[{"type":"text","text":"thinking about the approach"}]}}'],
-      })
-    ).toBe(true);
+  it('never carries needsHuman on a nudge', () => {
+    const d = parseWatchdogResponse(
+      '[{"terminalId":"A","action":"nudge","text":"go","reason":"unfinished","needsHuman":true}]'
+    );
+    expect(d[0].action).toBe('nudge');
+    expect(d[0].needsHuman).toBeUndefined();
   });
 });
 
-describe('WATCHDOG_SYSTEM_PROMPT — drive-to-completion judgment', () => {
+describe('WATCHDOG_SYSTEM_PROMPT — idle-vs-unfinished judgment', () => {
   it('instructs NUDGE on needless questions and SKIP on genuine human-only cases', () => {
     const p = WATCHDOG_SYSTEM_PROMPT;
     // Drive-forward framing.
@@ -357,7 +264,7 @@ describe('WATCHDOG_SYSTEM_PROMPT — drive-to-completion judgment', () => {
     const p = WATCHDOG_SYSTEM_PROMPT;
     // Idle is the target, and the brain reads before it judges.
     expect(p).toMatch(/idle/i);
-    expect(p).toMatch(/read the transcript/i);
+    expect(p).toMatch(/read (each|the) transcript/i);
     expect(p).toMatch(/already reached|already decided/i);
     // Nudge carries context and names a concrete next step.
     expect(p).toMatch(/restate the goal/i);

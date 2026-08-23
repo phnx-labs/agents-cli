@@ -7,7 +7,7 @@ import * as path from 'path';
 
 export const WATCHDOG_LOG_PATH = path.join(os.homedir(), '.agents', '.cache', 'logs', 'watchdog.log');
 
-export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'rotate' | 'error';
+export type WatchdogEventKind = 'tick' | 'decision' | 'nudge' | 'undelivered' | 'rotate' | 'error';
 
 export interface WatchdogEvent {
   ts: number;
@@ -46,7 +46,7 @@ export function parseEvents(text: string): WatchdogEvent[] {
       const kind = parsed.kind;
       const message = typeof parsed.message === 'string' ? parsed.message : '';
       if (!Number.isFinite(ts)) continue;
-      if (kind !== 'tick' && kind !== 'decision' && kind !== 'nudge' && kind !== 'rotate' && kind !== 'error') continue;
+      if (kind !== 'tick' && kind !== 'decision' && kind !== 'nudge' && kind !== 'undelivered' && kind !== 'rotate' && kind !== 'error') continue;
       out.push({
         ts,
         kind,

@@ -92,11 +92,33 @@ export interface InjectOptions {
 export interface InjectResult {
   ok: boolean;
   backend: InjectBackend;
+  /**
+   * Delivery is CONFIRMED to have reached the running agent, not merely dispatched.
+   *
+   * For tmux / iterm / ghostty / pty, `ok` already means delivered: `tmux
+   * send-keys` errors on a missing pane, `osascript write text` errors on a bad
+   * session id, and a pty write errors if the sidecar can't reach the fd — so a
+   * successful transport IS the confirmation. For **vscodium**, `ok` only means the
+   * editor CLI accepted the `--open-url` hand-off; whether the swarm-ext extension
+   * actually parsed the verb and typed anything is unknown from the CLI side (the
+   * ext must ack — RUSH follow-up). So vscodium is delivered-but-UNCONFIRMED, and
+   * the watchdog must not book a nudge as landed on that alone.
+   */
+  confirmed: boolean;
   /** Discrete writes delivered: 2 for the Ink-safe text+Enter split, 1 when combined or enter=false. */
   writes: number;
   /** For the tmux / AppleScript backends (or any dryRun), the spec(s) that ran / would run. */
   specs?: LaunchSpec[];
   error?: string;
+}
+
+/**
+ * Whether a successful transport on this backend CONFIRMS delivery to the agent.
+ * Everything but vscodium self-confirms (see InjectResult.confirmed); vscodium's
+ * `--open-url` is fire-and-forget until the swarm-ext extension acks the verb.
+ */
+export function backendConfirmsDelivery(backend: InjectBackend): boolean {
+  return backend !== 'vscodium';
 }
 
 /** Carriage return — what Enter delivers into a raw PTY/tmux byte stream. */
@@ -272,21 +294,22 @@ async function injectPty(
   o: { enter: boolean; combined: boolean; host?: string; dryRun?: boolean },
 ): Promise<InjectResult> {
   if (o.host && o.host !== 'local') {
-    return { ok: false, backend: 'pty', writes: 0, error: 'pty injection is local-only (the sidecar is not a remote surface)' };
+    return { ok: false, confirmed: false, backend: 'pty', writes: 0, error: 'pty injection is local-only (the sidecar is not a remote surface)' };
   }
   // Same Ink-safe split as tmux: text write, then a separate CR write.
   const writes: string[] = o.enter && o.combined ? [text + CR] : o.enter ? [text, CR] : [text];
 
-  if (o.dryRun) return { ok: true, backend: 'pty', writes: writes.length };
+  if (o.dryRun) return { ok: true, confirmed: true, backend: 'pty', writes: writes.length };
 
   try {
     for (const input of writes) {
       const res = await ptyRequest('write', target.id, { input });
-      if (!res.ok) return { ok: false, backend: 'pty', writes: 0, error: res.error ?? 'pty write failed' };
+      if (!res.ok) return { ok: false, confirmed: false, backend: 'pty', writes: 0, error: res.error ?? 'pty write failed' };
     }
-    return { ok: true, backend: 'pty', writes: writes.length };
+    // A successful sidecar write reached the fd — real delivery.
+    return { ok: true, confirmed: true, backend: 'pty', writes: writes.length };
   } catch (err) {
-    return { ok: false, backend: 'pty', writes: 0, error: err instanceof Error ? err.message : String(err) };
+    return { ok: false, confirmed: false, backend: 'pty', writes: 0, error: err instanceof Error ? err.message : String(err) };
   }
 }
 
@@ -328,7 +351,9 @@ export async function injectIntoTerminal(
         ? enter ? 2 : 1
         : enter && !combined ? 2 : 1;
 
-  if (opts.dryRun) return { ok: true, backend: target.backend, writes, specs };
+  const confirmed = backendConfirmsDelivery(target.backend);
+
+  if (opts.dryRun) return { ok: true, confirmed, backend: target.backend, writes, specs };
 
   // AppleScript backends: guard on the backend's own availability, but only for a
   // LOCAL run (a remote host is assumed to have the app — its ssh leg reports failure).
@@ -337,14 +362,14 @@ export async function injectIntoTerminal(
       const backend = target.backend === 'iterm' ? itermBackend : ghosttyBackend;
       const ctx = opts.ctx ?? currentContext();
       if (!backend.isAvailable(ctx)) {
-        return { ok: false, backend: target.backend, writes: 0, specs, error: `${backend.label} is not available here (platform ${ctx.platform})` };
+        return { ok: false, confirmed: false, backend: target.backend, writes: 0, specs, error: `${backend.label} is not available here (platform ${ctx.platform})` };
       }
     }
   }
 
   for (const spec of specs) {
     const res = await runSpec(spec, opts.host, opts.resolveHost);
-    if (!res.ok) return { ok: false, backend: target.backend, writes: 0, specs, error: res.error };
+    if (!res.ok) return { ok: false, confirmed: false, backend: target.backend, writes: 0, specs, error: res.error };
   }
-  return { ok: true, backend: target.backend, writes, specs };
+  return { ok: true, confirmed, backend: target.backend, writes, specs };
 }

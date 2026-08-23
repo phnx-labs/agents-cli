@@ -158,8 +158,7 @@ export function registerWatchdogCommand(program: Command): void {
     .option('--cooldown <dur>', 'Minimum time between nudges to the same session', humanMs(DEFAULT_THRESHOLDS.cooldownMs))
     .option('--dormant <dur>', 'Idle time after which a session is left alone (dormant)', humanMs(DEFAULT_THRESHOLDS.dormantMs))
     .option('--text <text>', 'Nudge text delivered into the terminal', 'Continue.')
-    .option('--smart', 'Use the LLM decider (agents run) instead of the deterministic path (non-reproducible)')
-    .option('--smart-agent <agent>', 'Agent the --smart decider runs as', 'claude')
+    .option('--smart-agent <agent>', 'Agent the watchdog decider runs as', 'claude')
     .option('--allow-ghostty-focus', 'Permit the coarse, focus-stealing Ghostty path (off by default)')
     .option('--verbose', 'Show healthy and non-actionable session inspections too')
     .option('--json', 'Emit the tick result as JSON (for the menu-bar / scripts)')
@@ -179,7 +178,6 @@ export function registerWatchdogCommand(program: Command): void {
         runWatchdogPass({
           nudge: willInject,
           nudgeText: opts.text,
-          smart: opts.smart === true,
           smartAgent: opts.smartAgent,
           thresholds,
           allowGhosttyFocus: opts.allowGhosttyFocus === true,
@@ -250,17 +248,14 @@ export function registerWatchdogCommand(program: Command): void {
       agents watchdog rotate off
     `,
     notes: `
-      Decision path: a cheap deterministic pre-filter resolves the obvious cases
-      (clearly complete -> skip; a clear promise-without-toolcall -> nudge) and
-      ESCALATES the judgment-heavy cases -- a session parked on a question, or an
-      ambiguous stall -- to a smart brain. The brain drives the agent to finish
-      end-to-end when it asked a needless / already-authorized question or paused
-      with work left, and leaves it for the human on genuine cases (credentials,
-      an irreversible or outward-facing action, a real ambiguous decision, or a
-      completed task). The brain is a customizable 'watchdog' workflow (drop a
-      WORKFLOW.md in project/user workflows/ to override the prompt + model);
-      absent one, the built-in prompt runs via 'agents run --mode plan'. Pass
-      --smart to force every stalled candidate through the brain.
+      Decision path: the watchdog is an AGENT, not a heuristic script. Every idle
+      session on this machine (its task + transcript tail) is handed to ONE
+      'agents run --mode plan' call per tick, which judges each: idle-but-unfinished
+      (was given a task, went quiet, not finished/handed off) -> NUDGE that drives
+      it to finish; idle-and-done or genuinely-needs-human -> SKIP. The agent is a
+      customizable 'watchdog' workflow (drop a WORKFLOW.md in project/user
+      workflows/ to override the prompt + model); absent one, the built-in prompt
+      runs. Nothing is nudged when nothing is idle (no agent is spawned).
 
       Delivery (answer-router): a running agent is steered via its mailbox; a
       parked-on-question agent is answered into its EXACT split -- tmux / iTerm /
