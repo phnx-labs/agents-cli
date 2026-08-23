@@ -181,12 +181,15 @@ export function assertValidDeviceName(name: string): void {
  * Throw if `name` cannot be used for a NEW device: bad shape, or a reserved
  * routing sentinel.
  *
- * Deliberately separate from {@link assertValidDeviceName}. Folding the reserved
- * check into the shape check put policy on every read path, so one pre-existing
- * node named `auto` would abort the whole `agents devices sync` (the upsert loop
- * has no per-node catch) and break pure reads like `configuredDeviceRole` — a
- * machine whose own hostname collided would fail its auth gate. Policy belongs
- * only where a name is being CHOSEN.
+ * Deliberately separate from {@link assertValidDeviceName}, and called from
+ * exactly two kinds of place: `agents devices add <name>`, and the config keys
+ * that point AT a device (`interactive.host`, `usage.primary-host`).
+ *
+ * Not from `upsertDevice`, `addIgnored` or the discovery writers. Those all
+ * receive tailnet node names the user never typed — `devices sync` upserts every
+ * observed node in a loop with no per-node catch, so one node named `auto` would
+ * abort the entire sync and register nothing after it. A name the fleet OBSERVES
+ * is not a name anyone CHOSE; only the second kind is policy's business.
  */
 export function assertRegistrableDeviceName(name: string): void {
   assertValidDeviceName(name);
@@ -316,7 +319,7 @@ export interface DeviceInput {
  * platform so the two can never drift. Returns the resulting profile.
  */
 export async function upsertDevice(name: string, input: DeviceInput): Promise<DeviceProfile> {
-  assertRegistrableDeviceName(name);
+  assertValidDeviceName(name);
   const p = registryPath();
   return withRegistryLock(p, async () => {
     const reg = await loadDevices();
@@ -437,7 +440,7 @@ export async function isIgnored(name: string): Promise<boolean> {
 
 /** Add a node name to the ignore-list. Idempotent. Returns the resulting set. */
 export async function addIgnored(name: string): Promise<Set<string>> {
-  assertRegistrableDeviceName(name);
+  assertValidDeviceName(name);
   const p = ignoredPath();
   return withRegistryLock(p, async () => {
     const set = await loadIgnored();

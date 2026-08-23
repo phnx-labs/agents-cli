@@ -20,6 +20,7 @@ import ora from 'ora';
 import { getCliVersion } from '../lib/version.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { machineId } from '../lib/session/sync/config.js';
+import { assertRegistrableDeviceName } from '../lib/devices/registry.js';
 import { isDeviceAuto, resolveDeviceAffinity } from '../lib/smart-launch.js';
 import {
   isDeviceInteractive,
@@ -2088,6 +2089,10 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     .option('--platform <platform>', 'windows | linux | macos')
     .action(async (name: string, target: string, opts: { platform?: string }) => {
       try {
+        // The one place a device name is CHOSEN rather than observed, so the one
+        // place the reserved-sentinel policy belongs. upsertDevice itself stays
+        // shape-only — `devices sync` feeds it tailnet node names in a loop.
+        assertRegistrableDeviceName(name);
         const { host, user } = splitUserHost(target);
         const isIp = /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
         const d = await upsertDevice(name, {
