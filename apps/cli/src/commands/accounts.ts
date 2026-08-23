@@ -97,15 +97,61 @@ async function printAccounts(json: boolean, fleet = false): Promise<void> {
     console.log(JSON.stringify([...records.map(account => publicAccount(inspectAccount(account.name))), ...native], null, 2));
     return;
   }
-  console.log(chalk.bold('Provider account bundles\n'));
-  if (!records.length) console.log(chalk.gray("  None. Add one with 'agents accounts add <name> --provider <provider> --auth <type>'."));
-  for (const account of records) {
-    const present = inspectAccount(account.name).secretPresent ? chalk.green('ready') : chalk.red('missing on this device');
-    console.log(`  ${chalk.cyan(account.name)}  ${account.provider}  ${account.auth}  ${present}`);
+  console.log(renderAccountList(records, native));
+}
+
+/** Pure text renderer for `agents accounts list` — grouped, column-aligned, labels first-class. */
+export function renderAccountList(
+  records: { name: string; provider: string; auth: string }[],
+  native: { agent: AgentId; name?: string; display: string; versions: string[] }[],
+): string {
+  const out: string[] = [];
+
+  // Native logins, grouped by harness — the selection surface for `<harness>#<label>`.
+  out.push(chalk.bold('Native logins') + chalk.gray('     ') + chalk.gray('run <harness>#<label>'));
+  if (!native.length) {
+    out.push(chalk.gray('  No signed-in native accounts found.'));
+  } else {
+    const byHarness = new Map<AgentId, typeof native>();
+    for (const acct of native) {
+      const list = byHarness.get(acct.agent) ?? [];
+      list.push(acct);
+      byHarness.set(acct.agent, list);
+    }
+    const harnessW = Math.max(6, ...[...byHarness.keys()].map(h => h.length));
+    const labelW = Math.max(6, ...native.map(a => (a.name ?? '—').length));
+    const idW = Math.max(8, ...native.map(a => a.display.length));
+    let sawDefault = false;
+    for (const [harness, list] of [...byHarness.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+      const defaultVersion = getGlobalDefault(harness);
+      list.forEach((acct, i) => {
+        const harnessCell = chalk.gray((i === 0 ? harness : '').padEnd(harnessW));
+        const rawLabel = acct.name ?? '—';
+        const labelCell = acct.name ? chalk.cyan(rawLabel.padEnd(labelW)) : chalk.gray(rawLabel.padEnd(labelW));
+        const isDefault = defaultVersion ? acct.versions.includes(defaultVersion) : false;
+        if (isDefault) sawDefault = true;
+        const marker = isDefault ? chalk.green('*') : ' ';
+        out.push(`  ${harnessCell}  ${labelCell}${marker} ${acct.display.padEnd(idW)}  ${chalk.gray(acct.versions.join(', '))}`);
+      });
+    }
+    if (sawDefault) out.push(chalk.gray('\n  * default account for that harness (used when you pass neither @version nor #label)'));
   }
-  console.log(chalk.bold('\nNative harness logins\n'));
-  if (!native.length) console.log(chalk.gray('  No signed-in native accounts found.'));
-  for (const account of native) console.log(`  ${account.name ? `${chalk.cyan(account.name)} · ` : ''}${account.display}  ${account.agent}  ${account.versions.join(', ')}`);
+
+  // Provider bundles — the durable API-key/setup-token accounts, selected with `--account <name>`.
+  out.push('');
+  out.push(chalk.bold('Provider bundles') + chalk.gray('  run <harness> --account <name>'));
+  if (!records.length) {
+    out.push(chalk.gray("  None. Add one with 'agents accounts add <name> --provider <provider> --auth <type>'."));
+  } else {
+    const nameW = Math.max(4, ...records.map(a => a.name.length));
+    const provW = Math.max(8, ...records.map(a => a.provider.length));
+    const authW = Math.max(10, ...records.map(a => a.auth.length));
+    for (const account of records) {
+      const present = inspectAccount(account.name).secretPresent ? chalk.green('ready') : chalk.red('missing on this device');
+      out.push(`  ${chalk.cyan(account.name.padEnd(nameW))}  ${account.provider.padEnd(provW)}  ${account.auth.padEnd(authW)}  ${present}`);
+    }
+  }
+  return out.join('\n');
 }
 
 function parseAuth(raw: string): AccountAuthKind {

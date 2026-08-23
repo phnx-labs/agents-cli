@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`agents accounts list` is grouped, aligned, and label-first (RUSH-3053).** The native-logins section was a ragged, ungrouped wall — 15 logins in one flat list, no columns, no labels, opaque ids dumped raw. It now groups logins **by harness** (printed once per group), aligns **label · identity · version** into columns, marks the **default account per harness** with `*`, and prints the `run <harness>#<label>` / `run <harness> --account <name>` selector hints inline. Provider bundles keep their own aligned section. `--json` output is unchanged. This completes RUSH-3053's list-redesign track — the `<harness>#<label>` account selector itself shipped in 1.22.47. The renderer is extracted as the pure, unit-tested `renderAccountList`. Source: `apps/cli/src/commands/accounts.ts`.
+
 ## 1.22.46
 
 - **`agents auth` returns, against Phoenix ID instead of a sibling product's backend (RUSH-2581).** 1.22.45 removed the account layer that authenticated against Rush's `api.prix.dev`. It comes back pointed at **Phoenix ID** (`phnx-labs/phoenix-id`), agents-cli's own account service: `agents auth login` runs a device-code flow whose browser page is Phoenix-branded and Google-only, `agents auth whoami` reports the signed-in account, `agents auth logout` clears **this machine** and nothing else, and the team surface nests as `agents auth space` (`list`/`create`/`members`/`invite`/`role`/`remove`). Everything goes through one new seam, `lib/identity/` — one base URL (`PHOENIX_ID_BASE`), one session file, one HTTP funnel, one error type — replacing the shape that had the backend URL hardcoded in five files and the session token re-read by seven separate functions. agents-cli reads no other product's credentials: there is no `~/.rush/user.yaml` fallback. Source: `apps/cli/src/lib/identity/{client,index}.ts`, `apps/cli/src/commands/auth.ts`.
