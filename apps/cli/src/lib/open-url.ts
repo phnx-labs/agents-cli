@@ -93,7 +93,7 @@ async function osOpen(
  * child is successfully created (measured: 1ms, and it does NOT wait for exit),
  * and `error` for ENOENT. We unref on success so the opener outlives us.
  */
-function trySpawn(cmd: string, args: string[]): Promise<boolean> {
+export function trySpawn(cmd: string, args: string[]): Promise<boolean> {
   return new Promise((resolve) => {
     let settled = false;
     const done = (ok: boolean): void => {

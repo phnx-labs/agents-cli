@@ -159,42 +159,56 @@ describe('showFile — which kinds a browser tab is right for', () => {
   });
 });
 
-describe('osOpen — detection without blocking', () => {
-  // trySpawn races `spawn` against its `error` event. The pair of properties
-  // that matters: a missing binary must be DETECTED (so the next candidate and
-  // `via:'none'` stay live), and a long-running opener must NOT be waited on
-  // (spawnSync waited for the child's whole lifetime, which would stall
-  // `devices lease` behind the browser, right before it prompts for a key).
-  const FAKE = { name: 'nope', browser: 'chrome' as const, endpoints: ['cdp://127.0.0.1:39899'] };
+describe('trySpawn — detection without blocking', () => {
+  // Tested directly, NOT through showUrl. Driving the non-injected path meant
+  // spawning the real platform opener against a real URL, so `bun run test` on
+  // any Mac opened example.com in the developer's browser; on Linux CI xdg-open
+  // is absent so it ENOENT'd and nobody noticed. These use binaries that exist
+  // (or provably do not) and open nothing.
 
-  it('reports via:none when no opener works, so a caller can print the URL', async () => {
+  it('detects a missing binary instead of reporting success', async () => {
+    // The whole reason this is not a bare detached spawn: `spawn` does not throw
+    // for ENOENT, it emits `error` asynchronously, so a fire-and-forget spawn
+    // cannot tell "opened" from "xdg-open is not installed".
+    const { trySpawn } = await fresh();
+    expect(await trySpawn('definitely-not-a-real-opener-binary', ['x'])).toBe(false);
+  });
+
+  it('resolves on spawn without waiting for the child to exit', async () => {
+    // The reason this is not spawnSync: that waited for the child's whole
+    // lifetime, which would stall `devices lease` behind the browser right
+    // before it prompts for a pasted key.
+    const { trySpawn } = await fresh();
+    const started = Date.now();
+    expect(await trySpawn('/bin/sleep', ['2'])).toBe(true);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
+  it('reports via:none when every candidate fails, so a caller can print the URL', async () => {
     const { showUrl } = await fresh();
     const out = await showUrl('https://example.com', { spawnOpen: () => false });
     expect(out.via).toBe('none');
     expect(out.via === 'none' && out.reason).toMatch(/opener/i);
   });
 
-  it('does not wait for the opener to exit', async () => {
-    // Through the real (non-injected) path: a viewer-less machine falls to the
-    // OS branch. If this ever regresses to a blocking wait, the assertion is
-    // the wall clock, not a mock.
-    const { showUrl } = await fresh();
-    const started = Date.now();
-    await showUrl('https://example.com');
-    expect(Date.now() - started).toBeLessThan(3_000);
-  }, 10_000);
-
-  it('falls through to the next candidate when the first opener fails', async () => {
+  it('tries every platform candidate before giving up', async () => {
+    // `toBeGreaterThanOrEqual(1)` could not fail — darwin and win32 have exactly
+    // one candidate, so a mutant that stopped after the first still passed.
+    // Assert the actual list for this platform.
     const { showUrl } = await fresh();
     const tried: string[] = [];
-    const out = await showUrl('https://example.com', {
+    await showUrl('https://example.com', {
       spawnOpen: (cmd) => {
         tried.push(cmd);
         return false;
       },
     });
-    expect(out.via).toBe('none');
-    // Every platform candidate was attempted, not just the first.
-    expect(tried.length).toBeGreaterThanOrEqual(1);
+    const expected =
+      process.platform === 'darwin'
+        ? ['open']
+        : process.platform === 'win32'
+          ? ['cmd']
+          : ['xdg-open', 'gnome-open'];
+    expect(tried).toEqual(expected);
   });
 });
