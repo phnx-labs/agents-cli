@@ -52,6 +52,18 @@ describe('renderTrajectoryCompareText', () => {
     expect(text).toContain('only in claude sess0001 (0): none');
   });
 
+  it('applies redaction to both sessions before compare renders', () => {
+    const secret = 'sk-supersecrettoken1234567890';
+    const withSecret: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'c1', command: `deploy --token ${secret}` },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Bash', callId: 'c1', outcome: 'ok' },
+    ];
+    const a = buildTrajectory(withSecret, meta({ id: 'a' }), { redact: true, knownSecrets: [secret] });
+    const b = buildTrajectory(eventsB, meta({ id: 'b', agent: 'codex' }), { redact: true, knownSecrets: [secret] });
+    const text = renderTrajectoryCompareText(diffTrajectories(a, b));
+    expect(text).not.toContain(secret);
+  });
+
   it('caps the diff lines with maxDiffLines and counts the rest', () => {
     const manyEvents: SessionEvent[] = [];
     for (let i = 0; i < 20; i++) {

@@ -3,14 +3,16 @@
  * the second selector turns the single-session trajectory into a **compare**.
  *
  * Aligns the two sessions' TOOL steps (thinking steps carry no comparable
- * identity) with a classic LCS edit script keyed on tool name, in order —
- * cheap, deterministic, and matches how a human reads "where did these two
- * runs diverge": the first point their tool sequence stops lining up.
+ * identity) with the `diff` package's `diffArrays` (already a dependency,
+ * `lib/diff-text.ts`), comparator-keyed on tool name, in order — cheap,
+ * deterministic, and matches how a human reads "where did these two runs
+ * diverge": the first point their tool sequence stops lining up.
  *
  * Pure and framework-free, exactly like `trajectory.ts`: takes two already-built
  * `SessionTrajectory` models (never re-parses a transcript) and returns a plain
  * diff object the HTML/text/JSON renderers project.
  */
+import { diffArrays } from 'diff';
 import type { SessionMeta } from './types.js';
 import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
 
@@ -65,39 +67,31 @@ type EditOp =
   | { type: 'add'; stepB: TrajectoryStep };
 
 /**
- * A textbook LCS edit script over two step sequences, equality keyed on tool
- * name. `dp[i][j]` = length of the LCS of `a[i:]` and `b[j:]`; backtracking
- * from `(0, 0)` prefers `same` whenever the tools match, and otherwise walks
- * toward whichever neighbour holds the longer common subsequence — the
- * standard minimal-edit-script tie-break.
+ * Turn `diffArrays`' run-length change objects into a per-step edit script.
+ *
+ * `diffArrays(a, b, { comparator })` (Myers' diff under the hood) returns
+ * consecutive-run chunks, not individual elements, and — per its own docs —
+ * an unchanged chunk's `value` is drawn from `b`, not `a`. Neither shape is
+ * what a divergence marker needs (a stepA/stepB PAIR per matched step, with
+ * both sides' own ordinals/timestamps), so this walks two cursors over the
+ * original arrays in lockstep with the run lengths `diffArrays` reports,
+ * recovering the exact `a[i]`/`b[j]` pairing for every `same` step.
  */
 function computeEditScript(a: TrajectoryStep[], b: TrajectoryStep[]): EditOp[] {
-  const n = a.length;
-  const m = b.length;
-  const dp: number[][] = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0));
-  for (let i = n - 1; i >= 0; i--) {
-    for (let j = m - 1; j >= 0; j--) {
-      dp[i][j] = a[i].tool === b[j].tool ? dp[i + 1][j + 1] + 1 : Math.max(dp[i + 1][j], dp[i][j + 1]);
-    }
-  }
+  const changes = diffArrays(a, b, { comparator: (x, y) => x.tool === y.tool });
   const ops: EditOp[] = [];
   let i = 0;
   let j = 0;
-  while (i < n && j < m) {
-    if (a[i].tool === b[j].tool) {
-      ops.push({ type: 'same', stepA: a[i], stepB: b[j] });
-      i++;
-      j++;
-    } else if (dp[i + 1][j] >= dp[i][j + 1]) {
-      ops.push({ type: 'remove', stepA: a[i] });
-      i++;
+  for (const change of changes) {
+    const count = change.count ?? change.value.length;
+    if (change.removed) {
+      for (let k = 0; k < count; k++) ops.push({ type: 'remove', stepA: a[i++] });
+    } else if (change.added) {
+      for (let k = 0; k < count; k++) ops.push({ type: 'add', stepB: b[j++] });
     } else {
-      ops.push({ type: 'add', stepB: b[j] });
-      j++;
+      for (let k = 0; k < count; k++) ops.push({ type: 'same', stepA: a[i++], stepB: b[j++] });
     }
   }
-  while (i < n) { ops.push({ type: 'remove', stepA: a[i] }); i++; }
-  while (j < m) { ops.push({ type: 'add', stepB: b[j] }); j++; }
   return ops;
 }
 
