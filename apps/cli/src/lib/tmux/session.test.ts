@@ -7,6 +7,7 @@
  * the whole suite is skipped at module load.
  */
 
+import { spawnSync } from 'child_process';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -665,3 +666,37 @@ async function waitForCapture(
     await wait(50);
   }
 }
+
+describe('already-running server reconcile (RUSH-3066)', () => {
+  // tmux reads -f ONLY when it starts a server. A second `new-session -f other.conf`
+  // against a live server exits 0 and applies nothing — so without an explicit
+  // reconcile, every machine whose server was already up (the normal state at
+  // upgrade) would silently get none of the ergonomics defaults. Real tmux, no mocks.
+  it('a second -f against a live server is ignored, and source-file repairs it', async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-tmux-reconcile-'));
+    const sock = path.join(dir, 's.sock');
+    const cold = path.join(dir, 'cold.conf');
+    const warm = path.join(dir, 'warm.conf');
+    fs.writeFileSync(cold, 'set-option -g history-limit 11111\n');
+    fs.writeFileSync(warm, `set-option -g history-limit ${AGENTS_TMUX_HISTORY_LIMIT}\nset-option -g mouse on\n`);
+    const tmux = (args: string[]) =>
+      spawnSync('tmux', ['-S', sock, ...args], { encoding: 'utf-8' });
+    try {
+      spawnSync('tmux', ['-f', cold, '-S', sock, 'new-session', '-d', '-s', 'one'], { encoding: 'utf-8' });
+      if (tmux(['has-session', '-t', '=one']).status !== 0) return; // tmux unavailable here
+
+      // -f on a live server: ignored.
+      spawnSync('tmux', ['-f', warm, '-S', sock, 'new-session', '-d', '-s', 'two'], { encoding: 'utf-8' });
+      expect(tmux(['show-options', '-gv', 'history-limit']).stdout.trim()).toBe('11111');
+      expect(tmux(['show-options', '-gv', 'mouse']).stdout.trim()).toBe('off');
+
+      // source-file on the live server: applied.
+      tmux(['source-file', warm]);
+      expect(tmux(['show-options', '-gv', 'history-limit']).stdout.trim()).toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+      expect(tmux(['show-options', '-gv', 'mouse']).stdout.trim()).toBe('on');
+    } finally {
+      tmux(['kill-server']);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

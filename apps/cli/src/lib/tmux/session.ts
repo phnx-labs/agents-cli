@@ -26,6 +26,19 @@ const VALID_NAME = /^[A-Za-z0-9_-]{1,64}$/;
  */
 export const AGENTS_TMUX_HISTORY_LIMIT = 20_000;
 
+/**
+ * Bump when the generated startup config changes, so an ALREADY-RUNNING server
+ * picks the new settings up. tmux reads `-f` only when it actually starts a
+ * server: a second `new-session -f other.conf` against a live server exits 0
+ * and silently applies nothing (verified against tmux 3.4). Since agents-cli
+ * uses one long-lived shared socket, the normal state at upgrade is a running
+ * server — so without this reconcile every existing machine would get none of
+ * these defaults, silently. Same shape as AGENT_HOOK_SCHEMA below.
+ */
+export const AGENTS_TMUX_CONFIG_SCHEMA = 1;
+/** Server-scoped user-option recording which AGENTS_TMUX_CONFIG_SCHEMA is applied. */
+const CONFIG_SCHEMA_OPTION = '@ag_tmux_config_schema';
+
 let startupConfigSequence = 0;
 
 function tmuxConfigArgument(value: string): string {
@@ -48,7 +61,11 @@ function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
       : []),
     path.join(home, '.config', 'tmux', 'tmux.conf'),
   ];
-  const userConfig = candidates.find((candidate) => fs.existsSync(candidate));
+  // tmux's own start_cfg() sources EVERY entry of TMUX_CONF that exists, not
+  // just the first — a user with both ~/.tmux.conf and ~/.config/tmux/tmux.conf
+  // gets both. Sourcing only the first would silently drop the second and break
+  // the "never override a user-set value" contract this file exists to keep.
+  const userConfigs = candidates.filter((candidate) => fs.existsSync(candidate));
   const startupConfig = path.join(
     ensureTmuxDir(),
     `startup-${process.pid}-${startupConfigSequence++}.conf`,
@@ -60,7 +77,9 @@ function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
     'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
     'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
   ];
-  if (userConfig) lines.push(`source-file -q ${tmuxConfigArgument(userConfig)}`);
+  for (const userConfig of userConfigs) {
+    lines.push(`source-file -q ${tmuxConfigArgument(userConfig)}`);
+  }
   fs.writeFileSync(startupConfig, `${lines.join('\n')}\n`, { mode: 0o600 });
   return startupConfig;
 }
@@ -173,6 +192,43 @@ export async function hasSession(name: string, socket?: string): Promise<boolean
   return res.code === 0;
 }
 
+/** Which AGENTS_TMUX_CONFIG_SCHEMA a live server has applied; undefined when none. */
+async function appliedConfigSchema(socket: string): Promise<number | undefined> {
+  const res = await runTmux({
+    socket,
+    args: ['show-options', '-gv', CONFIG_SCHEMA_OPTION],
+    throwOnError: false,
+  }).catch(() => null);
+  if (!res || res.code !== 0) return undefined;
+  const n = Number(res.stdout.trim());
+  return Number.isFinite(n) ? n : undefined;
+}
+
+/**
+ * Apply the generated startup config to an already-running server and stamp it.
+ * Failure is surfaced, not swallowed: a server left without these settings is
+ * the silent no-op this exists to prevent.
+ */
+async function reconcileServerConfig(socket: string, env: NodeJS.ProcessEnv | undefined): Promise<void> {
+  const conf = writeStartupConfig(env);
+  try {
+    const res = await runTmux({ socket, args: ['source-file', conf], throwOnError: false, env });
+    if (res.code !== 0) {
+      throw new TmuxSessionError(
+        `could not apply agents-cli tmux settings to the running server (${res.stderr.trim() || `exit ${res.code}`})`,
+      );
+    }
+    await runTmux({
+      socket,
+      args: ['set-option', '-g', CONFIG_SCHEMA_OPTION, String(AGENTS_TMUX_CONFIG_SCHEMA)],
+      throwOnError: false,
+      env,
+    }).catch(() => {});
+  } finally {
+    fs.rmSync(conf, { force: true });
+  }
+}
+
 /**
  * Create a new detached session. Throws when the name is already taken unless
  * `replace` or `attachExisting` is set.
@@ -222,6 +278,15 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   }
   // Only the new-session command in the `;`-chained invocation emits output.
   const pane = /^%\d+$/.test(res.stdout.trim()) ? res.stdout.trim() : undefined;
+
+  // If the server was ALREADY running, its `-f` was ignored, so the config above
+  // never applied. Re-source it — the generated file ends by sourcing the user's
+  // own tmux.conf, so re-applying preserves the same precedence a cold start
+  // gives. Gated on a generation stamp so a user config with side effects (tpm's
+  // run-shell, for one) is not re-executed on every single launch.
+  if (existed || (await appliedConfigSchema(socket)) !== AGENTS_TMUX_CONFIG_SCHEMA) {
+    await reconcileServerConfig(socket, opts.env);
+  }
 
   // Keep the agent pane around after its process exits (so runInTmux can read
   // the exit status and capture the final error), but do NOT keep that behavior
