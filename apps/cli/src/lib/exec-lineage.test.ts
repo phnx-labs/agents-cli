@@ -11,11 +11,14 @@ import { buildExecEnv } from './exec.js';
 describe('AGENTS_PARENT_SESSION_ID lineage', () => {
   const savedParent = process.env.AGENTS_SESSION_ID;
   const savedAgentParent = process.env.AGENT_SESSION_ID;
+  const savedLineageParent = process.env.AGENTS_PARENT_SESSION_ID;
   afterEach(() => {
     if (savedParent === undefined) delete process.env.AGENTS_SESSION_ID;
     else process.env.AGENTS_SESSION_ID = savedParent;
     if (savedAgentParent === undefined) delete process.env.AGENT_SESSION_ID;
     else process.env.AGENT_SESSION_ID = savedAgentParent;
+    if (savedLineageParent === undefined) delete process.env.AGENTS_PARENT_SESSION_ID;
+    else process.env.AGENTS_PARENT_SESSION_ID = savedLineageParent;
   });
 
   const PARENT = '11111111-1111-4111-8111-111111111111';
@@ -39,6 +42,7 @@ describe('AGENTS_PARENT_SESSION_ID lineage', () => {
   it('does not name a same-session resume as its own parent', () => {
     process.env.AGENTS_SESSION_ID = CHILD;
     delete process.env.AGENT_SESSION_ID;
+    process.env.AGENTS_PARENT_SESSION_ID = PARENT;
     const env = buildExecEnv({ agent: 'codex', cwd: process.cwd(), mode: 'auto', effort: 'auto', sessionId: CHILD });
     expect(env.AGENTS_PARENT_SESSION_ID).toBeUndefined();
   });
@@ -46,6 +50,7 @@ describe('AGENTS_PARENT_SESSION_ID lineage', () => {
   it('sets no parent when the spawner has no session', () => {
     delete process.env.AGENTS_SESSION_ID;
     delete process.env.AGENT_SESSION_ID;
+    process.env.AGENTS_PARENT_SESSION_ID = PARENT;
     const env = buildExecEnv({ agent: 'codex', cwd: process.cwd(), mode: 'auto', effort: 'auto', sessionId: CHILD });
     expect(env.AGENTS_PARENT_SESSION_ID).toBeUndefined();
   });

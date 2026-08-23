@@ -459,6 +459,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   // every event the child emits. `options.sessionId` is the CHILD's id, so read the
   // spawner from the live env; guard a same-session resume from naming itself parent.
   // Local-spawn scope here; forwarding it across the `--device` SSH hop is Phase 4.
+  delete result.AGENTS_PARENT_SESSION_ID;
   const spawnerSessionId = process.env.AGENTS_SESSION_ID || process.env.AGENT_SESSION_ID;
   if (spawnerSessionId && spawnerSessionId !== options.sessionId) {
     result.AGENTS_PARENT_SESSION_ID = spawnerSessionId;
