@@ -17,6 +17,7 @@ vi.mock('../state.js', () => ({
   META_HEADER: '',
   getUserAgentsDir: vi.fn(() => path.join(TEST_ROOT, '.agents')),
   getDevicesAutoLaunchPath: vi.fn(() => path.join(TEST_ROOT, 'auto-launch.json')),
+  getDevicesIgnoredPath: vi.fn(() => path.join(TEST_ROOT, 'ignored.json')),
   getDevicePinsPath: vi.fn(() => path.join(TEST_ROOT, 'pins.json')),
 }));
 
