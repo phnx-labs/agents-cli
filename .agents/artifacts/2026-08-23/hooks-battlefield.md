@@ -2,17 +2,17 @@
 kind: visual
 title: Where the Agents Fight the Hooks
 summary: >
-  Across ~7,290 agent transcripts on 7 harnesses, hooks fire at five lifecycle
+  Across 7,493 agent transcripts on 7 harnesses, hooks fire at five lifecycle
   moments — but the fighting is concentrated in exactly two: PreToolUse guards and
-  the Stop gate. 1,599 hook fires, plus 1,401 permission-classifier denials —
+  the Stop gate. 1,696 hook fires, plus 1,450 permission-classifier denials —
   and the hooks that fire most are the ones agents obey least.
 status: final
 date: 2026-08-23
 context: agents-cli hook system — activation map + agent/guard collisions mined from fleet transcripts
 facts:
   - "13 guards fire real blocks; SessionStart + UserPromptSubmit hooks never block (inject/remind only)"
-  - "Top collider: the Stop gate, 524 fires over just 47 sessions — 11 per session"
-  - "The auto-mode permission classifier — not a hook — is the single biggest force at 1,401 denials"
+  - "Top collider: the Stop gate, 561 fires over just 51 sessions — 11 per session"
+  - "The auto-mode permission classifier — not a hook — is the single biggest force at 1,450 denials"
   - "footer-guard: 0 blocks — the no-footer rule is fully internalized, the guard never has to fire"
   - "The owner-update reminder fires 811 times and is ignored 58% of the time — the loudest, least obeyed hook"
   - "main-branch-guard recovers 72% — its refusal pastes the worktree recipe instead of only stating the rule"
@@ -22,8 +22,10 @@ facts:
 
 
 You asked where the agents fight with the hooks. Here is the map,
-mined from **~7,290 real session transcripts** across 7 harnesses (claude, codex,
-grok, kimi, cursor, droid, antigravity).
+mined from **7,493 real session transcripts** across 7 harnesses (claude, codex,
+grok, kimi, cursor, droid, antigravity). Every number on this page comes from one
+snapshot of that corpus — it is live and still growing, so a re-run moves the
+counts by a few.
 
 A hook can fire at **five lifecycle moments**. Four of them are peaceful: SessionStart
 and UserPromptSubmit hooks only *inject* context or *remind* — they never stop an
@@ -31,8 +33,8 @@ agent. The battlefield is **PreToolUse** (guards that veto a tool call before it
 and **Stop** (the gate that refuses a premature "I'm done"). That is where every real
 fight happens.
 
-Two forces do the stopping. **Hooks** — 13 guards that fired 1,599 times. And a
-non-hook, the **auto-mode permission classifier**, which denied 1,401 tool calls on
+Two forces do the stopping. **Hooks** — 13 guards that fired 1,696 times. And a
+non-hook, the **auto-mode permission classifier**, which denied 1,450 tool calls on
 its own. The classifier is the single loudest antagonist, and for grok it is almost
 the *only* one it meets.
 
@@ -76,19 +78,19 @@ that only ever add context.
 
 | Hook | Kind | Purpose | Verdict |
 |---|---|---|---|
-| git-guard | block · **WHAT** | Vetoes destructive/irreversible git *verbs* (reset --hard, force-push, checkout/switch, stash, clean, branch -d, rewrite). Worktree-aware: allows rebase/force-with-lease inside a worktree | KEEP · share code w/ main-branch-guard |
-| main-branch-guard | block · **WHERE** | Vetoes any write/commit to the PRIMARY worktree, on any branch | KEEP · share code w/ git-guard |
-| artifacts-confidential-guard | block | Stops publishing a confidential artifact to a public share — 35 fires across only 4 sessions, so it is one repeated fight, not a broad one | KEEP |
-| merge-guard | block | Stops admin-bypass merges and merges with no non-author verdict | KEEP |
+| git-guard | block · **WHAT** | Vetoes destructive git verbs anywhere: `reset --hard`, force-push, `checkout`/`switch`, `stash`, `clean`, `branch -d`. Worktree-aware | **MERGE** with main-branch-guard |
+| main-branch-guard | block · **WHERE** | Vetoes any write or commit to the PRIMARY worktree, on any branch | **MERGE** into git-guard |
+| artifacts-confidential-guard | block | Stops publishing a confidential artifact to a public share. **91% delivery** | KEEP |
+| merge-guard | block | Stops admin-bypass merges and merges with no non-author verdict. **85% delivery** | KEEP |
 | rm-guard | block | Stops destructive `rm` on protected paths | KEEP |
 | secrets-guard | block | Stops secret-materializing one-liners (plaintext export, reveal) | KEEP |
-| large-file-add-guard | block | Stops `git add` of a file > 5 MiB | KEEP |
-| git-require-clean-tree | block | Stops pull/rebase on a dirty tree | KEEP |
+| large-file-add-guard | block | Stops `git add` of a file > 5 MiB | **MERGE** into git-guard |
+| git-require-clean-tree | block | Stops pull/rebase on a dirty tree | **MERGE** into git-guard |
 | teams-roster-guard | block | Forces mixed rosters (blocks a 3rd same-harness teammate) | KEEP |
-| user-message-guard | block | Bounces an over-long owner notification | KEEP |
-| footer-guard | block | Stops the "Generated with Claude Code" footer — 0 fires, pure deterrent | KEEP |
-| **pr-description-reminder** | nudge | **On `gh pr create/edit` with no run-proof → demands a screenshot/recording/test-output + ticket link. This IS the "attach mockups + test results" gate you wanted** | KEEP |
-| **plan-html-reminder** | nudge | Render the plan as HTML before presenting. **Only fires on the formal plan-exit tool — an agent that presents a plan as a plain message bypasses it entirely** | TUNE |
+| user-message-guard | block | Bounces an over-long owner notification | **CUT** — 10 fires, 30% delivery |
+| footer-guard | block | Stops the promo footer in PR/commit bodies | **CUT** — 0 fires in 7,493 transcripts |
+| **pr-description-reminder** | nudge | On `gh pr create/edit` with no run-proof, demands a screenshot/recording/test output + ticket link. **89% delivery** | KEEP |
+| **plan-html-reminder** | nudge | Render the plan as HTML before presenting. Fires on `ExitPlanMode` *and* at Stop. **11% delivery, 60% never render** | **CUT** |
 
 **Stop — the `gate` lane**
 
@@ -106,22 +108,22 @@ Now the counts — every name below is defined in the table above.
 
 | Guard | Event | Kind | Fires | Sessions | Per session |
 |---|---|---|---:|---:|---:|
-| verify-work-complete | Stop | hard · gate | 524 | 47 | **11.1** |
-| git-guard | PreToolUse | hard · data-loss | 237 | 133 | 1.8 |
-| merge-guard | PreToolUse | hard · workflow | 227 | 82 | 2.8 |
-| pr-description-reminder | PreToolUse | soft · reminder | 168 | 102 | 1.6 |
-| main-branch-guard | PreToolUse | hard · workflow | 122 | 63 | 1.9 |
-| rm-guard | PreToolUse | hard · data-loss | 88 | 58 | 1.5 |
-| plan-html-reminder | PreToolUse | soft · reminder | 66 | 36 | 1.8 |
-| large-file-add-guard | PreToolUse | hard · data-loss | 36 | 11 | 3.3 |
-| artifacts-confidential-guard | PreToolUse | hard · data-loss | 35 | 4 | 8.8 |
-| git-require-clean-tree | PreToolUse | hard · data-loss | 33 | 10 | 3.3 |
-| teams-roster-guard | PreToolUse | hard · workflow | 28 | 4 | 7.0 |
+| verify-work-complete | Stop | hard · gate | 561 | 51 | **11.0** |
+| git-guard | PreToolUse | hard · data-loss | 245 | 138 | 1.8 |
+| merge-guard | PreToolUse | hard · workflow | 240 | 85 | 2.8 |
+| pr-description-reminder | PreToolUse | soft · reminder | 174 | 106 | 1.6 |
+| main-branch-guard | PreToolUse | hard · workflow | 131 | 63 | 2.1 |
+| rm-guard | PreToolUse | hard · data-loss | 90 | 60 | 1.5 |
+| plan-html-reminder | PreToolUse | soft · reminder | 76 | 39 | 1.9 |
+| large-file-add-guard | PreToolUse | hard · data-loss | 38 | 11 | 3.5 |
+| git-require-clean-tree | PreToolUse | hard · data-loss | 38 | 10 | 3.8 |
+| artifacts-confidential-guard | PreToolUse | hard · data-loss | 35 | 4 | **8.8** |
+| teams-roster-guard | PreToolUse | hard · workflow | 33 | 4 | **8.2** |
 | user-message-guard | PreToolUse | hard · workflow | 21 | 9 | 2.3 |
 | secrets-guard | PreToolUse | hard · secret | 14 | 7 | 2.0 |
 | footer-guard | PreToolUse | hard · workflow | 0 | 0 | — |
-| **total hook fires** | | | **1,599** | | |
-| *auto-mode classifier (not a hook)* | permission | denial | 1,401 | 767 | 1.8 |
+| **total hook fires** | | | **1,696** | | |
+| *auto-mode classifier (not a hook)* | permission | denial | 1,450 | | |
 
 > **Counting note.** One fire is written into a transcript row twice — once under
 > `message`, once under `toolUseResult`. Counting string occurrences therefore
@@ -133,13 +135,13 @@ Now the counts — every name below is defined in the table above.
 
 | Harness | Transcripts | Sessions w/ hard block | Rate | Permission denials |
 |---|---:|---:|---:|---:|
-| claude | 3,865 | 199 | 5.1% | 526 |
-| codex | 304 | 20 | 6.6% | 454 |
-| grok | 3,140 | 35 | 1.1% | 419 |
-| kimi | 12 | 0 | 0% | 7 |
-| cursor | 9 | 0 | 0% | 0 |
-| droid | 60 | 0 | 0% | 0 |
-| antigravity | 29 | 0 | 0% | 0 |
+| claude | 3,923 | 269 | 6.9% | 542 |
+| codex | 315 | 39 | 12.4% | 481 |
+| grok | 3,145 | 38 | 1.2% | 420 |
+| kimi | 12 | 0 | 0.0% | 7 |
+| cursor | 9 | 0 | 0.0% | 0 |
+| droid | 60 | 0 | 0.0% | 0 |
+| antigravity | 29 | 0 | 0.0% | 0 |
 
 ## Figure
 
@@ -202,24 +204,24 @@ Now the counts — every name below is defined in the table above.
     <rect x="474" y="66" width="430" height="462" rx="10" fill="url(#combat)" stroke="#5a2028" stroke-width="1.5"/>
     <circle cx="689" cy="52" r="7" fill="#ff5470"/>
     <text x="689" y="92" text-anchor="middle" fill="#ff8a9c" font-size="15" font-weight="700">PreToolUse — the front line</text>
-    <text x="689" y="112" text-anchor="middle" fill="#d97a86" font-size="11">13 guards · 1,075 fires</text>
+    <text x="689" y="112" text-anchor="middle" fill="#d97a86" font-size="11">13 guards · 1,135 fires</text>
     <!-- guard chips as mini rows with bar -->
     <g font-size="11">
       <!-- helper: name left, count-bar right -->
       <g transform="translate(492,140)">
         <!-- rows -->
-        <g transform="translate(0,0)"><text fill="#ffd7dd">git-guard</text><rect x="150" y="-10" width="200" height="13" rx="3" fill="#ff5470"/><text x="356" y="0" fill="#ffb3bd">237</text></g>
-        <g transform="translate(0,26)"><text fill="#ffd7dd">merge-guard</text><rect x="150" y="-10" width="192" height="13" rx="3" fill="#ff5470"/><text x="348" y="0" fill="#ffb3bd">227</text></g>
-        <g transform="translate(0,52)"><text fill="#ffd7dd">pr-desc-reminder</text><rect x="150" y="-10" width="142" height="13" rx="3" fill="#f0a35a"/><text x="298" y="0" fill="#f0c79a">168</text></g>
-        <g transform="translate(0,78)"><text fill="#ffd7dd">main-branch-guard</text><rect x="150" y="-10" width="103" height="13" rx="3" fill="#ff5470"/><text x="259" y="0" fill="#ffb3bd">122</text></g>
-        <g transform="translate(0,104)"><text fill="#ffd7dd">rm-guard</text><rect x="150" y="-10" width="74" height="13" rx="3" fill="#ff5470"/><text x="230" y="0" fill="#ffb3bd">88</text></g>
-        <g transform="translate(0,130)"><text fill="#ffd7dd">plan-html-reminder</text><rect x="150" y="-10" width="56" height="13" rx="3" fill="#f0a35a"/><text x="212" y="0" fill="#f0c79a">66</text></g>
-        <g transform="translate(0,156)"><text fill="#ffd7dd">artifacts-conf.</text><rect x="150" y="-10" width="30" height="13" rx="3" fill="#ff5470"/><text x="186" y="0" fill="#ffb3bd">35</text></g>
-        <g transform="translate(0,182)"><text fill="#ffd7dd">large-file-add</text><rect x="150" y="-10" width="24" height="13" rx="3" fill="#ff5470"/><text x="180" y="0" fill="#ffb3bd">55</text></g>
-        <g transform="translate(0,208)"><text fill="#ffd7dd">clean-tree</text><rect x="150" y="-10" width="20" height="13" rx="3" fill="#ff5470"/><text x="176" y="0" fill="#ffb3bd">46</text></g>
-        <g transform="translate(0,234)"><text fill="#ffd7dd">user-msg-guard</text><rect x="150" y="-10" width="18" height="13" rx="3" fill="#ff5470"/><text x="174" y="0" fill="#ffb3bd">42</text></g>
-        <g transform="translate(0,260)"><text fill="#ffd7dd">secrets-guard</text><rect x="150" y="-10" width="18" height="13" rx="3" fill="#ff5470"/><text x="174" y="0" fill="#ffb3bd">41</text></g>
-        <g transform="translate(0,286)"><text fill="#ffd7dd">teams-roster</text><rect x="150" y="-10" width="16" height="13" rx="3" fill="#ff5470"/><text x="172" y="0" fill="#ffb3bd">37</text></g>
+        <g transform="translate(0,0)"><text fill="#ffd7dd">git-guard</text><rect x="150" y="-10" width="200" height="13" rx="3" fill="#ff5470"/><text x="356" y="0" fill="#ffb3bd">245</text></g>
+        <g transform="translate(0,26)"><text fill="#ffd7dd">merge-guard</text><rect x="150" y="-10" width="196" height="13" rx="3" fill="#ff5470"/><text x="352" y="0" fill="#ffb3bd">240</text></g>
+        <g transform="translate(0,52)"><text fill="#ffd7dd">pr-desc-reminder</text><rect x="150" y="-10" width="142" height="13" rx="3" fill="#f0a35a"/><text x="298" y="0" fill="#f0c79a">174</text></g>
+        <g transform="translate(0,78)"><text fill="#ffd7dd">main-branch-guard</text><rect x="150" y="-10" width="107" height="13" rx="3" fill="#ff5470"/><text x="263" y="0" fill="#ffb3bd">131</text></g>
+        <g transform="translate(0,104)"><text fill="#ffd7dd">rm-guard</text><rect x="150" y="-10" width="73" height="13" rx="3" fill="#ff5470"/><text x="229" y="0" fill="#ffb3bd">90</text></g>
+        <g transform="translate(0,130)"><text fill="#ffd7dd">plan-html-reminder</text><rect x="150" y="-10" width="62" height="13" rx="3" fill="#f0a35a"/><text x="218" y="0" fill="#f0c79a">76</text></g>
+        <g transform="translate(0,156)"><text fill="#ffd7dd">large-file-add</text><rect x="150" y="-10" width="31" height="13" rx="3" fill="#ff5470"/><text x="187" y="0" fill="#ffb3bd">38</text></g>
+        <g transform="translate(0,182)"><text fill="#ffd7dd">clean-tree</text><rect x="150" y="-10" width="31" height="13" rx="3" fill="#ff5470"/><text x="187" y="0" fill="#ffb3bd">38</text></g>
+        <g transform="translate(0,208)"><text fill="#ffd7dd">artifacts-conf.</text><rect x="150" y="-10" width="29" height="13" rx="3" fill="#ff5470"/><text x="185" y="0" fill="#ffb3bd">35</text></g>
+        <g transform="translate(0,234)"><text fill="#ffd7dd">teams-roster</text><rect x="150" y="-10" width="27" height="13" rx="3" fill="#ff5470"/><text x="183" y="0" fill="#ffb3bd">33</text></g>
+        <g transform="translate(0,260)"><text fill="#ffd7dd">user-msg-guard</text><rect x="150" y="-10" width="17" height="13" rx="3" fill="#ff5470"/><text x="173" y="0" fill="#ffb3bd">21</text></g>
+        <g transform="translate(0,286)"><text fill="#ffd7dd">secrets-guard</text><rect x="150" y="-10" width="11" height="13" rx="3" fill="#ff5470"/><text x="167" y="0" fill="#ffb3bd">14</text></g>
         <g transform="translate(0,312)"><text fill="#8a8a8a">footer-guard</text><rect x="150" y="-10" width="4" height="13" rx="3" fill="#3a5a3a"/><text x="160" y="0" fill="#7fae5f">0 · never fires</text></g>
       </g>
     </g>
@@ -231,12 +233,12 @@ Now the counts — every name below is defined in the table above.
     <circle cx="987" cy="52" r="7" fill="#ff5470"/>
     <text x="987" y="92" text-anchor="middle" fill="#ff8a9c" font-size="15" font-weight="700">Stop</text>
     <text x="987" y="112" text-anchor="middle" fill="#d97a86" font-size="11">the "done?" gate</text>
-    <text x="987" y="132" text-anchor="middle" fill="#d97a86" font-size="11">524 fires</text>
+    <text x="987" y="132" text-anchor="middle" fill="#d97a86" font-size="11">561 fires</text>
     <g font-size="11">
       <text x="987" y="176" text-anchor="middle" fill="#ffd7dd">verify-work-</text>
       <text x="987" y="192" text-anchor="middle" fill="#ffd7dd">complete</text>
       <rect x="927" y="206" width="120" height="12" rx="3" fill="#ff5470"/>
-      <text x="987" y="238" text-anchor="middle" fill="#ffb3bd" font-size="11">524 · 47 sess</text>
+      <text x="987" y="238" text-anchor="middle" fill="#ffb3bd" font-size="11">561 · 51 sess</text>
       <text x="987" y="286" text-anchor="middle" fill="#ffd7dd">no-permission-</text>
       <text x="987" y="302" text-anchor="middle" fill="#ffd7dd">stop-guard</text>
       <text x="987" y="330" text-anchor="middle" fill="#d97a86" font-size="10">blocks premature</text>
@@ -269,24 +271,24 @@ Now the counts — every name below is defined in the table above.
   <!-- groups: claude, codex, grok, kimi. two bars each -->
   <!-- claude hardblock 189 -> 52px ; denials 511 -> 140px -->
   <g>
-    <rect x="180" y="218" width="40" height="52" fill="#ff5470"><title>claude hard blocks: 199 sessions</title></rect>
-    <rect x="224" y="130" width="40" height="140" fill="#f0a35a"><title>claude permission denials: 526</title></rect>
+    <rect x="180" y="218" width="40" height="52" fill="#ff5470"><title>claude hard blocks: 269 sessions</title></rect>
+    <rect x="224" y="130" width="40" height="140" fill="#f0a35a"><title>claude permission denials: 542</title></rect>
     <text x="222" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">claude</text>
     <text x="200" y="212" text-anchor="middle" fill="#ffb3bd" font-size="11">199</text>
     <text x="244" y="124" text-anchor="middle" fill="#f0c79a" font-size="11">526</text>
   </g>
   <!-- codex hardblock 20 -> 6 ; denials 450 -> 123 -->
   <g>
-    <rect x="360" y="264" width="40" height="6" fill="#ff5470"><title>codex hard blocks: 20 sessions</title></rect>
-    <rect x="404" y="147" width="40" height="123" fill="#f0a35a"><title>codex permission denials: 454</title></rect>
+    <rect x="360" y="264" width="40" height="6" fill="#ff5470"><title>codex hard blocks: 39 sessions</title></rect>
+    <rect x="404" y="147" width="40" height="123" fill="#f0a35a"><title>codex permission denials: 481</title></rect>
     <text x="402" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">codex</text>
     <text x="380" y="258" text-anchor="middle" fill="#ffb3bd" font-size="11">20</text>
     <text x="424" y="141" text-anchor="middle" fill="#f0c79a" font-size="11">454</text>
   </g>
   <!-- grok hardblock 35 -> 10 ; denials 419 -> 115 -->
   <g>
-    <rect x="540" y="260" width="40" height="10" fill="#ff5470"><title>grok hard blocks: 35 sessions</title></rect>
-    <rect x="584" y="155" width="40" height="115" fill="#f0a35a"><title>grok permission denials: 419</title></rect>
+    <rect x="540" y="260" width="40" height="10" fill="#ff5470"><title>grok hard blocks: 38 sessions</title></rect>
+    <rect x="584" y="155" width="40" height="115" fill="#f0a35a"><title>grok permission denials: 420</title></rect>
     <text x="582" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">grok</text>
     <text x="560" y="254" text-anchor="middle" fill="#ffb3bd" font-size="11">35</text>
     <text x="604" y="149" text-anchor="middle" fill="#f0c79a" font-size="11">419</text>
@@ -310,20 +312,20 @@ Now the counts — every name below is defined in the table above.
 </figure>
 
 <figure>
-<figcaption><strong>Figure 3 — Anatomy of the biggest fight: git-guard.</strong> What agents actually try that git-guard vetoes. `reset --hard` and `git checkout` (stranding the user's tree) lead — the exact history-destroying moves the worktree law exists to stop. 235 fires total.</figcaption>
+<figcaption><strong>Figure 3 — Anatomy of the biggest fight: git-guard.</strong> What agents actually try that git-guard vetoes. `reset --hard` and `git checkout` (stranding the user's tree) lead — the exact history-destroying moves the worktree law exists to stop. 243 of git-guard's 245 fires carry a parseable verb.</figcaption>
 
 <svg viewBox="0 0 1000 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="git-guard blocked operations" width="100%" font-family="JetBrains Mono, ui-monospace, monospace">
   <!-- horizontal bars, max 92 -> 620px, 6.7 px/unit, x0=260 -->
   <g font-size="13">
     <g transform="translate(0,40)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.reset --hard</text><rect x="260" y="-11" width="617" height="22" rx="3" fill="#ff5470"/><text x="885" y="4" fill="#ffb3bd">53</text></g>
-    <g transform="translate(0,72)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.checkout</text><rect x="260" y="-11" width="570" height="22" rx="3" fill="#ff5470"/><text x="838" y="4" fill="#ffb3bd">49</text></g>
-    <g transform="translate(0,104)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.branch-delete</text><rect x="260" y="-11" width="396" height="22" rx="3" fill="#ff6f86"/><text x="664" y="4" fill="#ffb3bd">34</text></g>
-    <g transform="translate(0,136)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.stash</text><rect x="260" y="-11" width="279" height="22" rx="3" fill="#ff6f86"/><text x="547" y="4" fill="#ffb3bd">24</text></g>
-    <g transform="translate(0,168)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.worktree-rm-dirty</text><rect x="260" y="-11" width="256" height="22" rx="3" fill="#ff8a9c"/><text x="524" y="4" fill="#ffb3bd">22</text></g>
+    <g transform="translate(0,72)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.checkout</text><rect x="260" y="-11" width="605" height="22" rx="3" fill="#ff5470"/><text x="873" y="4" fill="#ffb3bd">52</text></g>
+    <g transform="translate(0,104)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.branch-delete</text><rect x="260" y="-11" width="419" height="22" rx="3" fill="#ff6f86"/><text x="687" y="4" fill="#ffb3bd">36</text></g>
+    <g transform="translate(0,136)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.stash</text><rect x="260" y="-11" width="291" height="22" rx="3" fill="#ff6f86"/><text x="559" y="4" fill="#ffb3bd">25</text></g>
+    <g transform="translate(0,168)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.worktree-rm-dirty</text><rect x="260" y="-11" width="268" height="22" rx="3" fill="#ff8a9c"/><text x="536" y="4" fill="#ffb3bd">23</text></g>
     <g transform="translate(0,200)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.config-write</text><rect x="260" y="-11" width="140" height="22" rx="3" fill="#ffa3b2"/><text x="408" y="4" fill="#ffb3bd">12</text></g>
     <g transform="translate(0,232)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.worktree-rm-unpushed</text><rect x="260" y="-11" width="128" height="22" rx="3" fill="#ffa3b2"/><text x="396" y="4" fill="#ffb3bd">11</text></g>
     <g transform="translate(0,264)"><text x="248" y="4" text-anchor="end" fill="#cfcfcf">git.push-delete</text><rect x="260" y="-11" width="116" height="22" rx="3" fill="#ffa3b2"/><text x="384" y="4" fill="#ffb3bd">10</text></g>
-    <g transform="translate(0,296)"><text x="260" y="4" text-anchor="start" fill="#8a8a8a">+ worktree-rm-force 7 · rebase-outside-wt 4 · reflog 3 · cherry-pick, push-force, revert, switch 1 each</text></g>
+    <g transform="translate(0,296)"><text x="260" y="4" text-anchor="start" fill="#8a8a8a">+ 21 more across 9 rarer verbs</text></g>
   </g>
 </svg>
 </figure>
@@ -401,7 +403,7 @@ mostly sessions that changed direction entirely, not agents left stuck.
 
 **The Stop gate's 97% is not a real number.** For a gate whose demand is "keep
 working," the only measurable compliance is "did any tool call follow," which is
-true almost by construction. What *is* real: 524 fires across 47 sessions, **11
+true almost by construction. What *is* real: 561 fires across 51 sessions, **11
 per session**. Whatever it is teaching, it is teaching it eleven times.
 
 ## Duplicates, tuning, and the Linear-pollution source
@@ -464,11 +466,65 @@ The `verify-work-complete` Stop gate reinforces it at session end. The result is
 redundant tickets + misclassification (each agent guesses project/labels). `linear-inject`
 only *reads* your board. Fixing this is a rules edit, not a hook edit.
 
+## Proposal — 14 guards down to 8
+
+The criterion is not "does the agent obey." It is **does the hook push the agent to
+finish the work end to end, without excuses.** Scored that way — what the session
+actually did in the 40 messages after each fire — the portfolio splits cleanly.
+
+| | hook | fires | **delivered after** | why |
+|---|---|---:|---:|---|
+| **merge → 1** | git-guard | 245 | 39% | all four parse git commands on `Bash` |
+| | main-branch-guard | 131 | 59% | matcher is a superset of git-guard's |
+| | git-require-clean-tree | 38 | 59% | same parser again |
+| | large-file-add-guard | 38 | — | inspects `git add` — same parser again |
+| **keep** | pr-description-reminder | 174 | **89%** | the evidence gate; blocks without derailing |
+| | merge-guard | 240 | **85%** | blocks the bypass, agent still ships |
+| | artifacts-confidential-guard | 35 | **91%** | prevents a leak at near-zero drag |
+| | verify-work-complete + verify-work-state | 561 | 21% | the *only* anti-excuse mechanism |
+| | rm-guard · secrets-guard | 90 · 14 | 39% · 54% | data loss, credentials |
+| | teams-roster-guard | 33 | 60% | cheap, rarely fires |
+| **cut** | **plan-html-reminder** | 76 | **11%** | worst in the system |
+| | footer-guard | **0** | — | never fired once in 7,493 transcripts |
+| | user-message-guard | 21 | 30% | marginal at any volume |
+
+**Merge the four git guards into one.** `main-branch-guard`'s matcher
+(`Bash|Write|Edit|MultiEdit|NotebookEdit`) is a **superset** of `git-guard`'s (`Bash`),
+so every Bash tool call today spawns both scripts and parses the same command string
+twice with near-identical code — that is where the ~200 duplicated lines live. Two
+axes (*what operation* vs *where*) are two **functions**, not two hooks. Folding
+`git-require-clean-tree` and `large-file-add-guard` in costs nothing: both already
+parse git commands. One spawn, one parser, one place to fix.
+
+**`plan-html-reminder` is the least helpful hook you have.** 11% delivery — the lowest
+of anything measured — and it interrupts at exactly the moment the agent is about to
+hand over a plan. 60% of the time the agent does not even attempt the render it asks
+for. It is ceremony charged at the delivery moment.
+
+**`footer-guard` has never fired — and its first fire was a false positive.** Zero
+blocks across 7,493 transcripts; the rule text alone fully internalized the behavior.
+Then, while this page was being written, it fired for the first time — on an edit that
+merely *quoted the banned string inside documentation about the guard itself*. It
+matches the literal text anywhere in a `Bash` command, so writing about it trips it.
+A guard whose only recorded fire is a false positive is not a deterrent, it is a tax.
+
+**What actually forces delivery is thin.** Eleven of thirteen guards prevent *damage*;
+essentially one hook — the Stop gate, plus the `verify-work-state` record that gives it
+a goal boundary — prevents *quitting*. If the goal is agents that finish without
+excuses, the leverage is not in tuning guards. It is that the entire anti-excuse job
+rests on one hook firing 11 times per session.
+
+**Compact the messages.** `rules/README.md:57` already states the principle — *"Every
+line costs context on every agent, on every machine, forever."* The guard refusals and
+these very descriptions violate it. `main-branch-guard`'s refusal is the model worth
+copying, though: it pastes the four-line worktree recipe with `$REPO` filled in, and
+it recovers 72%. Short, and it hands over the fix.
+
 ## Insight
 
 
 - **The map has two hot lanes, not five.** SessionStart (6 hooks) and UserPromptSubmit (5 hooks) never block — they inject Linear/topology/inflight context and expand promptcuts/bangcuts. All the friction is PreToolUse + Stop. If you are auditing "where agents fight hooks," you can ignore 60% of the hook surface.
 - **The Stop gate is the heaviest hook in the system** — 524 fires, 11 per session it touches, more than git-guard and merge-guard put together. Among PreToolUse guards those two lead (237 and 227): git-guard's top vetoes are `reset --hard`, `checkout`, `branch-delete`, `stash` — exactly the history-destroying moves the agentic-git workflow forbids; merge-guard's are admin-bypass and merging with no non-author verdict.
-- **The loudest antagonist is not a hook.** The auto-mode permission classifier denied 1,401 tool calls — nearly as many as all 13 guards combined (1,599). For grok it is almost the *entire* experience of "being stopped".
+- **The loudest antagonist is not a hook.** The auto-mode permission classifier denied 1,450 tool calls — nearly as many as all 13 guards combined (1,696). For grok it is almost the *entire* experience of "being stopped".
 - **codex fights hardest per session (6.6%), grok softest (1.1%).** claude sits at 5.1% but spreads across all 13 guards; grok concentrates on the classifier + merge-guard.
 - **A guard firing zero times is a rule that won.** footer-guard: 0 fires. Nobody tries the banned footer anymore — the guard is pure standing deterrent. The inverse also holds: a hook that fires three times a session and is ignored 58% of the time is a rule nobody internalized, and the fix is the message, not more volume.
