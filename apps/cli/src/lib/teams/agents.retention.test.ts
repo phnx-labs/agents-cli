@@ -270,3 +270,25 @@ describe('isWorktreeClaimed distinguishes an orphan worktree from a live teammat
   // every test in it passed. The per-record ENOENT branch IS covered, by the
   // no-meta.json case in the test above.
 });
+
+describe('constructor init failure is observed, never an unhandled rejection (RUSH-3036)', () => {
+  it('a manager whose base dir cannot be created fails at the AWAITED call, not the process', async () => {
+    // The measured flake: afterEach removed the temp base while a constructed
+    // manager's fire-and-forget doInitialize() was still queued — the mkdir
+    // ENOENT became an unhandled rejection that failed a fully-green suite
+    // (exit 1, 12k tests passed) and blocked release attestation twice.
+    // A file inode where a directory is needed makes mkdir fail deterministically.
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-retention-'));
+    const asFile = path.join(base, 'not-a-dir');
+    fs.writeFileSync(asFile, '');
+    const mgr = new AgentManager(50, path.join(asFile, 'agents'));
+    // Give the fire-and-forget init a beat to reject; with the constructor's
+    // catch-marker this must NOT crash the suite as an unhandled rejection.
+    await new Promise((r) => setTimeout(r, 50));
+    // The error still surfaces where a caller actually awaits init.
+    // (rescanFromDisk awaits this.initialize(), which returns the same
+    // rejected promise the constructor fired.)
+    await expect(mgr.rescanFromDisk()).rejects.toThrow();
+    fs.rmSync(base, { recursive: true, force: true });
+  });
+});

@@ -1674,6 +1674,15 @@ export class AgentManager {
     this.defaultMode = resolvedDefaultMode;
 
     this.initPromise = this.doInitialize();
+    // Mark the deferred rejection as observed. Construction fires init
+    // fire-and-forget; every public method still surfaces a failed init at its
+    // own `await this.initialize()` (the same promise rejects for each new
+    // awaiter). Without this, an init that loses a race with its directory
+    // being removed — measured twice as an unhandled
+    // `ENOENT mkdir /tmp/agents-retention-*` that failed a fully-green suite
+    // (exit 1 with 12k tests passed) and blocked release attestation — crashes
+    // the process instead of failing the caller that actually cares.
+    this.initPromise.catch(() => {});
   }
 
   private async initialize(): Promise<void> {
