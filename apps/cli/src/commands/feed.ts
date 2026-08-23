@@ -73,7 +73,7 @@ import { gatherRemoteAgentsJson } from '../lib/remote-agents-json.js';
 import { loadPolicy, applyPolicyToBlock, isPhoneUrgent } from '../lib/feed-policy.js';
 import { notifyUrgentBlock } from '../lib/notify.js';
 import { registerFeedWatchCommand } from './feed-watch.js';
-import { claimAndRouteAttentionAnswer } from '../lib/feed/answer.js';
+import { claimAndRouteAttentionAnswer, forwardFeedAnswer } from '../lib/feed/answer.js';
 import { gcMailbox } from '../lib/mailbox-gc.js';
 import { isValidMailboxId } from '../lib/mailbox.js';
 import { getActiveSessions } from '../lib/session/active.js';
@@ -453,10 +453,13 @@ export function registerFeedCommand(program: Command): void {
     .option('--json', 'Emit the delivery result as JSON')
     .action(async (attentionKey: string, opts: { choice?: string; text?: string; as?: string; json?: boolean }, invoked: Command) => {
       try {
-        const result = await claimAndRouteAttentionAnswer({
-          attentionKey, choiceId: opts.choice, text: opts.text,
-          operator: { id: opts.as, verified: Boolean(opts.as), label: opts.as },
-        });
+        const ownerHost = attentionKey.slice(0, attentionKey.indexOf('/'));
+        const result = ownerHost && ownerHost !== machineId()
+          ? await forwardFeedAnswer({ host: ownerHost, attentionKey, choiceId: opts.choice, text: opts.text, operatorId: opts.as })
+          : await claimAndRouteAttentionAnswer({
+            attentionKey, choiceId: opts.choice, text: opts.text,
+            operator: { id: opts.as, verified: Boolean(opts.as), label: opts.as },
+          });
         if (opts.json || (invoked.parent?.opts() as { json?: boolean } | undefined)?.json) console.log(JSON.stringify(result));
         else console.log(result.status === 'delivered' ? `Delivered ${result.receipt.msgId}.` : `Already answered (${result.receipt.at}).`);
       } catch (error) {

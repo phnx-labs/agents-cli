@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
-import { publishBlock, blockIdForSession, type OpenBlock } from './feed.js';
+import { publishBlock, blockIdForSession, getAnswerRecord, readBlock, type OpenBlock } from './feed.js';
 import { reconcileAttention } from './attention.js';
 import { claimAndRouteAttentionAnswer } from './answer.js';
 
@@ -43,5 +43,25 @@ describe('feed answer claim-before-route', () => {
       attentionKey: key, choiceId: '0', operator: { verified: false }, feedRoot: root, mailboxRoot, sessions: [session],
     })).rejects.toThrow('requires a verified, authorized operator');
     expect(fs.existsSync(path.join(mailboxRoot, 'release'))).toBe(false);
+  });
+
+  it('recognizes lifecycle-only attention and rolls the claim back when its rail refuses delivery', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-lifecycle-'));
+    const mailboxRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-answer-lifecycle-mailbox-'));
+    const session = {
+      context: 'terminal', kind: 'kimi', host: 'worker', sessionId: 'hookless', status: 'input_required', tty: true,
+      activity: 'waiting_input', awaitingReason: 'question', lastActivityMs: 100,
+      question: { text: 'Choose?', reason: 'question', options: [{ label: 'Continue' }] },
+    } as ActiveSession;
+    const key = reconcileAttention({ session, nowMs: 200 })!.key;
+    await expect(claimAndRouteAttentionAnswer({
+      attentionKey: key, choiceId: '0', operator: { verified: false }, feedRoot: root, mailboxRoot, sessions: [session],
+    })).rejects.toThrow('no addressable terminal');
+    const blockId = blockIdForSession('hookless');
+    expect(readBlock(blockId, root)).toMatchObject({ source: 'lifecycle', state: 'open' });
+    expect(getAnswerRecord(blockId, root)).toBeUndefined();
+    await expect(claimAndRouteAttentionAnswer({
+      attentionKey: key, choiceId: '0', operator: { verified: false }, feedRoot: root, mailboxRoot, sessions: [session],
+    })).rejects.toThrow('no addressable terminal');
   });
 });

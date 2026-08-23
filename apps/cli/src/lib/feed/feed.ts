@@ -454,6 +454,35 @@ export function getAnswerRecord(blockId: string, root?: string): AnswerRecord | 
   return safeReadJson<AnswerRecord>(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
 }
 
+/**
+ * Release one specific answer claim after its reply rail failed. The compare on
+ * `answeredAt` makes this a conditional rollback: it can never erase a newer
+ * claimant. The caller supplies the exact pre-claim block/resolution snapshots,
+ * restoring the attention lifecycle to the state another surface observed.
+ */
+export function rollbackAnswerClaim(
+  blockId: string,
+  answeredAt: string,
+  previousBlock: OpenBlock,
+  previousResolution: AttentionResolution | undefined,
+  root?: string,
+): boolean {
+  const dir = root ?? getFeedDir();
+  const marker = path.join(answeredDir(dir), `${blockId}.json`);
+  const current = safeReadJson<AnswerRecord>(marker);
+  if (!current || current.answeredAt !== answeredAt) return false;
+  fs.unlinkSync(marker);
+  publishBlock(previousBlock, dir);
+  const resolutionFile = path.join(resolutionDir(dir), `${blockId}.json`);
+  if (previousResolution) recordResolution(previousResolution, dir);
+  else {
+    try { fs.unlinkSync(resolutionFile); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+  return true;
+}
+
 /** True when the block has already been answered. */
 export function isBlockAnswered(blockId: string, root?: string): boolean {
   return fs.existsSync(path.join(answeredDir(root ?? getFeedDir()), `${blockId}.json`));
