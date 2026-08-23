@@ -890,6 +890,49 @@ agents feed --pause <id>   # SIGSTOP a local process; cloud tasks are cancelled
 agents feed --kill <id>    # SIGTERM a local process; cloud tasks are cancelled
 ```
 
+### Attention lifecycle & reconciliation (`lib/feed/attention.ts`)
+
+A block file that appears and disappears is not enough to drive a single "Needs
+you" surface: the feed's open-block ledger and the session state engine can each
+be right while the other is stale, and a cleared ask can silently resurrect from a
+stale lifecycle re-read (the RUSH-1522 stale-flag class). So attention is modeled
+as an explicit **lifecycle**, reconciled in the CLI.
+
+- **`OpenBlock` carries lifecycle fields** (`lib/feed/feed.ts`): `generation` (a
+  key that changes when a new question replaces the old one — derived from the
+  publish `ts` when unstamped, `blockGeneration`), `source`
+  (`hook`/`declared`/`lifecycle`/`heuristic`/`system`, derived from `kind` via
+  `blockSource`), `state`
+  (`open`/`answered`/`consumed`/`continued`/`resolved`, derived from the answer /
+  continue markers via `deriveBlockState`), and `sourceCursor` (a transcript
+  cursor). Existing hook-written blocks omit these; the derivers compute the
+  canonical value, so the fields are additive and back-compatible.
+- **A resolution tombstone (`AttentionResolution`) is recorded BEFORE the
+  open-block view is cleared** — one per block id, latest-wins, under
+  `.history/feed/resolutions/` (`recordResolution` / `readResolution` /
+  `listResolutions`). The answer path (`recordAnswer`), the continue path
+  (`recordContinued`), and the clear path (`removeBlock`) each write one with the
+  reason (`answered` / `continued` / `session_advanced` / `tool_completed` /
+  `expired`). The tombstone deliberately outlives the block — that is what
+  prevents resurrection.
+- **`reconcileAttention` is a pure merge** (`lib/feed/attention.ts`) over an open
+  block, a session row, a CLI-supplied `PullRequestAttentionSignal`, and the
+  latest tombstone. Order: an **open block wins**; else the **session lifecycle
+  candidate** (structural plan/permission handoff = `lifecycle`, a bare inferred
+  prose question = `heuristic`); else a **PR review** item (`system`). A candidate
+  a tombstone already covers returns `undefined` — the tombstone suppresses the
+  same generation until the session cursor advances strictly past the tombstone's
+  fence, so a genuinely newer turn is a new generation and is allowed through. The
+  reconciler never re-detects; it models the output the existing hook / lifecycle
+  paths already produce, and the extension never chooses authority itself.
+- **`AttentionItem` is the canonical operator-facing envelope** (`key`,
+  `sessionId`, `mailboxId`, `host`, `project?`, `kind`, `source`, `state`,
+  `openedAt`, `question?`, `choices?`, `replyCapability`, `safeDefault?`,
+  `fingerprint`, `sourceCursor?`). `fingerprint` hashes the RAW ask intent (kind +
+  verbatim text + option labels — not the UI-normalized display text) so identical
+  asks across different agents cluster for batch triage. This is the contract the
+  feed stream (`agents feed watch`) and the AGI EXT projection consume.
+
 ### Status posts (`agents feed post`) — agent progress, not “needs you”
 
 Agents can deliberately announce progress without opening a feed block. Every

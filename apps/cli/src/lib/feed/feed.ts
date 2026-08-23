@@ -66,12 +66,57 @@ export interface AnswerRecord {
   verified?: boolean;
 }
 
+/**
+ * Where an attention record came from, strongest evidence first.
+ *   hook      — a harness event (AskUserQuestion / permission / notification).
+ *   declared  — the agent said it is stuck (`agents feed post --blocked`).
+ *   lifecycle — a structural session signal (plan handoff / permission wait).
+ *   heuristic — an inferred prose question that decays.
+ *   system    — a synthetic card the feed computed (runaway / needy / PR review).
+ */
+export type AttentionSource = 'hook' | 'declared' | 'lifecycle' | 'heuristic' | 'system';
+
+/**
+ * The lifecycle state of an attention record. A block is `open` until it is
+ * answered from some surface, `answered` once a surface claimed it, `consumed`
+ * once the agent read the reply, `continued` once the agent moved on, and
+ * `resolved` for a terminal clear (the block file is being removed). This is the
+ * axis the operator projection ranks on — only `open` needs a human.
+ */
+export type AttentionState = 'open' | 'answered' | 'consumed' | 'continued' | 'resolved';
+
+/**
+ * A cursor into the source that produced a block — the transcript's last write
+ * (`lastActivityMs`) or a specific transcript `eventId`. It is what lets a
+ * resolution tombstone say "this generation was resolved at THIS point" so a
+ * stale lifecycle re-read cannot resurrect it while the session sits still, yet
+ * a genuinely newer turn (a strictly later cursor) is allowed through as a new
+ * generation. See {@link AttentionResolution} and `reconcileAttention`.
+ */
+export interface SourceCursor {
+  lastActivityMs?: number;
+  eventId?: string;
+}
+
 export interface OpenBlock {
   blockId: string;
   sessionId: string;
   mailboxId: string;
   host: string;
   runtime: string;
+  /**
+   * Generation key for this block's CURRENT question. A new AskUserQuestion (or a
+   * new `--blocked` post) in the same session mints a new generation, so a
+   * resolution tombstone for the previous generation cannot suppress the fresh
+   * ask. Derived from `ts` when a writer did not stamp it — see {@link blockGeneration}.
+   */
+  generation?: string;
+  /** How this block came to exist. Derived from {@link kind} when absent — see {@link blockSource}. */
+  source?: AttentionSource;
+  /** Lifecycle state. Derived from the answer/continue markers when absent — see {@link deriveBlockState}. */
+  state?: AttentionState;
+  /** Where in the source this block's generation sits — carried onto its resolution tombstone. */
+  sourceCursor?: SourceCursor;
   /** Indexed launch origin, added at read time when the live session is known. */
   origin?: 'cli' | 'routine';
   /** Routine definition name when origin is `routine`. */
@@ -157,6 +202,115 @@ export interface FeedAskStats {
   lastAskAt: string;
   totalAskCount: number;
   recentAskTimestamps: string[];
+}
+
+/**
+ * Why an attention generation stopped needing a human — a resolution tombstone.
+ *   answered        — a surface recorded an answer.
+ *   continued       — the agent consumed the answer and moved on.
+ *   tool_completed  — the tool an approval gated finished (permission cleared).
+ *   expired         — a decaying heuristic ask aged out.
+ *   session_advanced— the transcript moved past the block (Stop/PostToolUse clear).
+ */
+export type ResolutionReason =
+  | 'answered'
+  | 'continued'
+  | 'tool_completed'
+  | 'expired'
+  | 'session_advanced';
+
+/**
+ * A resolution tombstone. It is recorded BEFORE the open-block view is cleared so
+ * a resolved generation can never silently resurrect from a stale lifecycle
+ * re-read (the RUSH-1522 stale-flag class): the reconciler suppresses a
+ * lifecycle candidate whose generation the tombstone already covers, until the
+ * session advances strictly past `sourceCursor`. One tombstone per block id,
+ * latest-wins — the block id is stable per session, so this never grows unbounded.
+ */
+export interface AttentionResolution {
+  blockId: string;
+  /** The generation this tombstone resolved — matched against a fresh candidate's generation. */
+  generation: string;
+  /** ISO-8601 timestamp of the resolution. */
+  resolvedAt: string;
+  /** Where in the source the resolved generation sat; the reconciler compares a candidate's cursor against it. */
+  sourceCursor?: SourceCursor;
+  reason: ResolutionReason;
+}
+
+function resolutionDir(root: string): string { return path.join(root, 'resolutions'); }
+
+/**
+ * Canonical generation for a block. A writer that stamped `generation` wins;
+ * otherwise the publish timestamp `ts` is the generation, because the feed
+ * rewrites `ts` only when a NEW question replaces the old one (an answer/continue
+ * update to the same block keeps `ts`). So `ts` changes exactly when the ask
+ * changes — which is what a generation must track.
+ */
+export function blockGeneration(block: OpenBlock): string {
+  return block.generation ?? block.ts;
+}
+
+/**
+ * Canonical source for a block. A writer that stamped `source` wins; otherwise it
+ * is derived from `kind`: a declared block is `declared`, a synthetic control card
+ * is `system`, everything else (question / notification, written by a harness hook)
+ * is `hook`.
+ */
+export function blockSource(block: OpenBlock): AttentionSource {
+  if (block.source) return block.source;
+  switch (block.kind) {
+    case 'declared': return 'declared';
+    case 'control': return 'system';
+    default: return 'hook';
+  }
+}
+
+/**
+ * Canonical lifecycle state for a block. A writer that stamped `state` wins;
+ * otherwise it is derived from the markers already on the block: `continuedAt`
+ * means `continued`, a recorded `answer` means `answered`, and anything else is
+ * still `open`. This is the ONE place that turns the historical marker fields into
+ * the lifecycle axis, so no consumer re-derives it and drifts.
+ */
+export function deriveBlockState(block: OpenBlock): AttentionState {
+  if (block.state) return block.state;
+  if (block.continuedAt) return 'continued';
+  if (block.answer) return 'answered';
+  return 'open';
+}
+
+/**
+ * Record a resolution tombstone (latest-wins per block id). Called from the
+ * answer / continue / clear paths BEFORE the open-block view is removed, so the
+ * reconciler always has the tombstone by the time the block file is gone.
+ */
+export function recordResolution(resolution: AttentionResolution, root?: string): void {
+  const dir = resolutionDir(root ?? getFeedDir());
+  ensureDir(dir);
+  atomicWriteJsonSync(path.join(dir, `${resolution.blockId}.json`), resolution);
+}
+
+/** Read the latest resolution tombstone for a block, if one exists. */
+export function readResolution(blockId: string, root?: string): AttentionResolution | undefined {
+  return safeReadJson<AttentionResolution>(path.join(resolutionDir(root ?? getFeedDir()), `${blockId}.json`));
+}
+
+/** Read every resolution tombstone. Returns them sorted by stable block filename. */
+export function listResolutions(root?: string): AttentionResolution[] {
+  const dir = resolutionDir(root ?? getFeedDir());
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const out: AttentionResolution[] = [];
+  for (const name of names.filter(n => n.endsWith('.json')).sort()) {
+    const parsed = safeReadJson<Partial<AttentionResolution>>(path.join(dir, name));
+    if (parsed?.blockId && parsed.generation && parsed.reason) out.push(parsed as AttentionResolution);
+  }
+  return out;
 }
 
 /**
@@ -276,9 +430,20 @@ export function recordAnswer(
     throw err;
   }
 
-  // Marker created successfully -- mirror the answer into the block file.
+  // Marker created successfully -- mirror the answer into the block file and
+  // advance the lifecycle to `answered`. The resolution tombstone is written
+  // first, so if a stale lifecycle re-read races the block-file update the
+  // reconciler already refuses to resurrect this generation.
   if (block) {
+    recordResolution({
+      blockId,
+      generation: blockGeneration(block),
+      resolvedAt: record.answeredAt,
+      sourceCursor: block.sourceCursor,
+      reason: 'answered',
+    }, dir);
     block.answer = record;
+    block.state = 'answered';
     publishBlock(block, dir);
   }
   return { ok: true };
@@ -342,7 +507,16 @@ export function recordContinued(blockId: string, root?: string): void {
   const dir = root ?? getFeedDir();
   const block = readBlock(blockId, dir);
   if (!block) return;
-  block.continuedAt = new Date().toISOString();
+  const now = new Date().toISOString();
+  block.continuedAt = now;
+  block.state = 'continued';
+  recordResolution({
+    blockId,
+    generation: blockGeneration(block),
+    resolvedAt: now,
+    sourceCursor: block.sourceCursor,
+    reason: 'continued',
+  }, dir);
   publishBlock(block, dir);
 }
 
@@ -436,13 +610,20 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     .map((label) => ({ label }));
 
   const project = projectKeyFromCwd(agent.cwd);
+  const ts = input.ts ?? new Date().toISOString();
   return {
     blockId: blockIdForSession(agent.sessionId),
     sessionId: agent.sessionId,
     mailboxId: agent.mailboxId,
     host: agent.host,
     runtime: agent.runtime,
-    ts: input.ts ?? new Date().toISOString(),
+    ts,
+    // A declared block is an explicit, agent-raised attention record: it opens the
+    // lifecycle here, sourced `declared`, with `ts` as its generation so a later
+    // `--blocked` in the same session mints a fresh generation past any tombstone.
+    generation: ts,
+    source: 'declared',
+    state: 'open',
     kind: 'declared',
     questions: [{ text, header: 'Needs you', ...(options.length ? { options } : {}) }],
     blockClass: input.safeDefault ? 'approval' : 'decision',
@@ -513,6 +694,25 @@ export function listAskStats(root?: string): FeedAskStats[] {
 /** Remove a block record and its lifecycle sidecars. Returns true if the file was deleted. */
 export function removeBlock(blockId: string, root?: string): boolean {
   const dir = root ?? getFeedDir();
+  // Record a resolution tombstone BEFORE the block file and answered marker are
+  // gone, so a stale lifecycle re-read of the same session cannot resurrect this
+  // cleared generation. The reason names how it closed: an answered marker means
+  // the operator answered, `continuedAt` means the agent moved on, otherwise the
+  // transcript advanced past it (a Stop/PostToolUse clear). The tombstone itself
+  // is deliberately NOT cleared — it must outlive the block to do its job.
+  const block = readBlock(blockId, dir);
+  if (block) {
+    const reason: ResolutionReason = isBlockAnswered(blockId, dir)
+      ? 'answered'
+      : block.continuedAt ? 'continued' : 'session_advanced';
+    recordResolution({
+      blockId,
+      generation: blockGeneration(block),
+      resolvedAt: new Date().toISOString(),
+      sourceCursor: block.sourceCursor,
+      reason,
+    }, dir);
+  }
   clearBlockLifecycle(blockId, dir);
   try {
     fs.unlinkSync(blockPath(dir, blockId));
