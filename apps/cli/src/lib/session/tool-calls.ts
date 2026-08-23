@@ -208,7 +208,7 @@ function canonicalInput(tool: string, args?: Record<string, unknown>, command?: 
 }
 
 /** Extract literal shell commands from the Codex orchestration tool without evaluating transcript code. */
-function commandsFromCodexExec(source: string): string[] {
+export function commandsFromCodexExec(source: string): string[] {
   const commands: string[] = [];
   let root: JavaScriptNode;
   try {

@@ -130,8 +130,10 @@ const INLINE_TASK_TOOLS = new Set(['Task', 'Agent']);
 /**
  * Shell tools whose command is worth resolving to an effective program — every
  * harness's shell-exec tool, kept in lockstep with the canonical set in
- * `state.ts` (`['Bash', 'exec_command', 'run_shell_command', 'shell', 'Execute']`)
- * so Codex's `exec_command` and the rest are covered, not just Claude's `Bash`.
+ * `state.ts` (`['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute']`)
+ * so Codex's `exec_command`/`exec` and the rest are covered, not just Claude's `Bash`.
+ * `exec` is newer Codex (gpt-5.6-sol) whose real command the parser unwraps from a
+ * JS cell into the event's `command` before this runs.
  */
 const SHELL_TOOLS = new Set(['Bash', 'exec_command', 'exec', 'run_shell_command', 'shell', 'Execute']);
 
