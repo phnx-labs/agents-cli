@@ -26,6 +26,15 @@ const ignoreUnhandledPoolErrors = isWin || shouldEnableCiTestProfile(process.env
 // enough to attest. Only the producer is affected (a signing-Mac full-suite run);
 // normal CI on dedicated crabboxes (CI=true, not AGENTS_ATTEST_PRODUCER) keeps
 // full parallelism and its 90s budget.
+//
+// RUSH-3015 follow-up: maxWorkers:4 still flaked (2 different files per run out of
+// ~13k, plus transient `npm 404` when the real-CLI install tests hammer the
+// registry under load), which blocked the 1.22.48 release. Drop the producer to
+// maxWorkers:2 (less shared-state contention + memory pressure) AND retry:2 so a
+// transient failure (registry hiccup, worker teardown) re-runs and passes instead
+// of poisoning the attestation. A real regression still fails all attempts and
+// blocks the release, so this narrows only the flaky window, not correctness.
+// Scoped to the producer alone — normal CI keeps 0 retries and full parallelism.
 const isAttestProducer = process.env.AGENTS_ATTEST_PRODUCER === '1';
 
 export default defineConfig({
@@ -34,7 +43,7 @@ export default defineConfig({
     environment: 'node',
     pool: 'forks',
     ...(isWin ? { maxWorkers: 2, minWorkers: 1 } : {}),
-    ...(isAttestProducer && !isWin ? { maxWorkers: 4, minWorkers: 1 } : {}),
+    ...(isAttestProducer && !isWin ? { maxWorkers: 2, minWorkers: 1, retry: 2 } : {}),
     // Hermeticity (#910): every fork gets a temp-pinned broker socket, events
     // sink, and broker-off defaults BEFORE the test file's imports run.
     setupFiles: ['./tests/setup.ts'],
