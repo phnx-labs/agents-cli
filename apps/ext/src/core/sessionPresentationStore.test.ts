@@ -14,6 +14,9 @@ describe('SessionPresentationStore', () => {
       source: undefined, fingerprint: 'fp', state: 'answered', resolvedAt: 2,
       resolution: { key: 'a1', state: 'answered' },
     }]);
+    store.apply({ v: 1, type: 'reset', streamId: 's', sequence: 3, capturedAt: 3, scope: 'local', agents: [], attention: [] });
+    expect(store.sessions()).toEqual([]);
+    expect(store.activityEvents()).toHaveLength(1);
   });
   test('projects reset/upsert/remove without deriving lifecycle state', () => {
     const store = new SessionPresentationStore();

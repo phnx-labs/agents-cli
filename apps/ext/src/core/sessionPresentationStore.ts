@@ -5,6 +5,7 @@ import type { ProjectRule } from './settings';
 /** Window-local projection of the canonical CLI stream; contains no lifecycle logic. */
 export class SessionPresentationStore {
   private rows = new Map<string, unknown>();
+  private rowScopes = new Map<string, string>();
   private attention = new Map<string, unknown>();
   private attentionScopes = new Map<string, string>();
   private activity: unknown[] = [];
@@ -16,12 +17,18 @@ export class SessionPresentationStore {
     if (event.sequence <= previous) return false;
     this.sequences.set(event.streamId, event.sequence);
     if (event.type === 'reset') {
-      for (const [rowKey, value] of this.rows) {
-        if (this.scopeOf(value) === event.scope) this.rows.delete(rowKey);
+      for (const [rowKey, scope] of this.rowScopes) {
+        if (scope === event.scope) {
+          this.rows.delete(rowKey);
+          this.rowScopes.delete(rowKey);
+        }
       }
       for (const row of event.agents ?? []) {
         const rowKey = this.rowKeyOf(row);
-        if (rowKey) this.rows.set(rowKey, row);
+        if (rowKey) {
+          this.rows.set(rowKey, row);
+          this.rowScopes.set(rowKey, event.scope);
+        }
       }
       for (const [key, scope] of this.attentionScopes) {
         if (scope === event.scope) {
@@ -38,7 +45,10 @@ export class SessionPresentationStore {
       }
     } else if (event.type === 'agent.upsert') {
       const rowKey = event.rowKey || this.rowKeyOf(event.agent);
-      if (rowKey && event.agent) this.rows.set(rowKey, event.agent);
+      if (rowKey && event.agent) {
+        this.rows.set(rowKey, event.agent);
+        this.rowScopes.set(rowKey, event.scope);
+      }
     } else if (event.type === 'attention.upsert' && event.attention && !Array.isArray(event.attention)) {
       const key = event.rowKey || this.attentionKeyOf(event.attention);
       if (key) {
@@ -89,7 +99,7 @@ export class SessionPresentationStore {
   scope(scope: string): { status: 'available' | 'unavailable'; reason?: string } | undefined {
     return this.scopes.get(scope);
   }
-  clear(): void { this.rows.clear(); this.attention.clear(); this.attentionScopes.clear(); this.activity = []; this.sequences.clear(); this.scopes.clear(); }
+  clear(): void { this.rows.clear(); this.rowScopes.clear(); this.attention.clear(); this.attentionScopes.clear(); this.activity = []; this.sequences.clear(); this.scopes.clear(); }
 
   /** Normalize the CLI stream rows for UI rendering without starting another query. */
   presentedSessions(
@@ -186,11 +196,6 @@ export class SessionPresentationStore {
     return typeof key === 'string' && key ? key : undefined;
   }
 
-  private scopeOf(value: unknown): string | undefined {
-    if (!value || typeof value !== 'object') return undefined;
-    const scope = (value as { sourceDevice?: unknown }).sourceDevice;
-    return typeof scope === 'string' ? scope : undefined;
-  }
 }
 
 /** Exactly one presentation store per extension host process. */
