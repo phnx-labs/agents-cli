@@ -11,11 +11,59 @@
  */
 
 import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import { runTmux, TmuxCommandError } from './binary.js';
 import { ensureTmuxDir, getDefaultSocketPath, getSessionMetaPath } from './paths.js';
 
 /** Tmux session names must not contain `.` or `:` — those are reserved for window/pane addressing. */
 const VALID_NAME = /^[A-Za-z0-9_-]{1,64}$/;
+
+/**
+ * Ten times tmux's 2,000-line default, while keeping per-pane memory bounded:
+ * history storage scales with pane width, so a 200-column pane retains at most
+ * four million grid cells rather than an unbounded agent transcript.
+ */
+export const AGENTS_TMUX_HISTORY_LIMIT = 20_000;
+
+let startupConfigSequence = 0;
+
+function tmuxConfigArgument(value: string): string {
+  return `"${value.replace(/([\\"$])/g, '\\$1')}"`;
+}
+
+/**
+ * tmux loads `-f` instead of its normal user config, so put agents-cli's
+ * defaults first and explicitly source the first user config tmux would have
+ * selected afterward. Configuration files execute in order; this makes these
+ * settings defaults while preserving every option or binding the user sets.
+ */
+function writeStartupConfig(env: NodeJS.ProcessEnv | undefined): string {
+  const effectiveEnv = env ?? process.env;
+  const home = effectiveEnv.HOME ?? os.homedir();
+  const candidates = [
+    path.join(home, '.tmux.conf'),
+    ...(effectiveEnv.XDG_CONFIG_HOME
+      ? [path.join(effectiveEnv.XDG_CONFIG_HOME, 'tmux', 'tmux.conf')]
+      : []),
+    path.join(home, '.config', 'tmux', 'tmux.conf'),
+  ];
+  const userConfig = candidates.find((candidate) => fs.existsSync(candidate));
+  const startupConfig = path.join(
+    ensureTmuxDir(),
+    `startup-${process.pid}-${startupConfigSequence++}.conf`,
+  );
+  const lines = [
+    'set-option -g mouse on',
+    'set-option -s set-clipboard on',
+    `set-option -g history-limit ${AGENTS_TMUX_HISTORY_LIMIT}`,
+    'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
+    'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X copy-selection-no-clear',
+  ];
+  if (userConfig) lines.push(`source-file -q ${tmuxConfigArgument(userConfig)}`);
+  fs.writeFileSync(startupConfig, `${lines.join('\n')}\n`, { mode: 0o600 });
+  return startupConfig;
+}
 
 /** Provenance written alongside each live tmux session. */
 export interface SessionMeta {
@@ -71,6 +119,24 @@ export interface ListedSession {
   windows: number;
   attached: boolean;
   meta?: SessionMeta;
+}
+
+/** Build the atomic server-configuration + session-creation command. */
+export function buildCreateSessionArgs(opts: CreateSessionOptions, startupConfig: string): string[] {
+  const args = [
+    '-f', startupConfig,
+    'set-option', '-g', 'remain-on-exit', 'on', ';',
+    'new-session', '-d', '-s', opts.name, '-P', '-F', '#{pane_id}',
+  ];
+  if (opts.width)  args.push('-x', String(opts.width));
+  if (opts.height) args.push('-y', String(opts.height));
+  if (opts.cwd)    args.push('-c', opts.cwd);
+  // Separator + child command. tmux passes the rest verbatim to exec, so no
+  // shell escaping is required — array args end-to-end.
+  if (opts.cmd) {
+    args.push('--', 'sh', '-c', opts.cmd);
+  }
+  return args;
 }
 
 export class TmuxSessionError extends Error {
@@ -139,24 +205,21 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
     await killSession(opts.name, socket);
   }
 
-  // Set remain-on-exit BEFORE the child command can finish — a fast-exiting
+  // Configure the agents-cli tmux server BEFORE the child command can finish — a fast-exiting
   // cmd (e.g. `echo BRIEF && true`) would otherwise collapse the only session,
   // exit the server, and the follow-up `set-option` would race with "no
   // server running". Server-wide (`-g`) is applied in the same tmux
   // invocation as new-session so they share one server lifetime.
   // `-P -F '#{pane_id}'` prints the new session's first pane id on stdout so we
   // can record the exact `%N` handle without a follow-up `list-panes`.
-  const args = ['set-option', '-g', 'remain-on-exit', 'on', ';', 'new-session', '-d', '-s', opts.name, '-P', '-F', '#{pane_id}'];
-  if (opts.width)  args.push('-x', String(opts.width));
-  if (opts.height) args.push('-y', String(opts.height));
-  if (opts.cwd)    args.push('-c', opts.cwd);
-  // Separator + child command. tmux passes the rest verbatim to exec, so no
-  // shell escaping is required — array args end-to-end.
-  if (opts.cmd) {
-    args.push('--', 'sh', '-c', opts.cmd);
+  const startupConfig = writeStartupConfig(opts.env);
+  const args = buildCreateSessionArgs(opts, startupConfig);
+  let res: Awaited<ReturnType<typeof runTmux>>;
+  try {
+    res = await runTmux({ socket, args, env: opts.env });
+  } finally {
+    fs.rmSync(startupConfig, { force: true });
   }
-
-  const res = await runTmux({ socket, args, env: opts.env });
   // Only the new-session command in the `;`-chained invocation emits output.
   const pane = /^%\d+$/.test(res.stdout.trim()) ? res.stdout.trim() : undefined;
 

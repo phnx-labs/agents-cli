@@ -32,6 +32,8 @@ import {
   splitPane,
   AGENT_HOOK_SCHEMA,
   agentPaneDiedHook,
+  AGENTS_TMUX_HISTORY_LIMIT,
+  buildCreateSessionArgs,
   TmuxSessionError,
 } from './session.js';
 
@@ -66,6 +68,69 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(slugifyName('hello world')).toBe('hello-world');
     expect(slugifyName('agent:claude.task')).toBe('agent-claude-task');
     expect(slugifyName('---trim---')).toBe('trim');
+  });
+
+  it('builds session creation with agents-cli server ergonomics before new-session', () => {
+    const args = buildCreateSessionArgs({ name: 'ergonomic', cmd: 'sleep 30' }, '/agents/tmux-defaults.conf');
+    expect(args).toEqual([
+      '-f', '/agents/tmux-defaults.conf',
+      'set-option', '-g', 'remain-on-exit', 'on', ';',
+      'new-session', '-d', '-s', 'ergonomic', '-P', '-F', '#{pane_id}',
+      '--', 'sh', '-c', 'sleep 30',
+    ]);
+  });
+
+  it('keeps explicit user tmux options and mouse-copy bindings', async () => {
+    const userHome = path.join(tempDir, 'home');
+    fs.mkdirSync(userHome);
+    fs.writeFileSync(path.join(userHome, '.tmux.conf'), [
+      'set-option -g mouse off',
+      'set-option -s set-clipboard external',
+      'set-option -g history-limit 50000',
+      'bind-key -T copy-mode MouseDragEnd1Pane send-keys -X cancel',
+      'bind-key -T copy-mode-vi MouseDragEnd1Pane send-keys -X cancel',
+    ].join('\n'));
+
+    await createSession({
+      name: 'user-config',
+      cmd: 'sleep 30',
+      socket,
+      env: { ...process.env, HOME: userHome, XDG_CONFIG_HOME: path.join(userHome, '.config') },
+    });
+
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'mouse'] })).stdout.trim()).toBe('off');
+    expect((await runTmux({ socket, args: ['show-options', '-sv', 'set-clipboard'] })).stdout.trim()).toBe('external');
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'history-limit'] })).stdout.trim()).toBe('50000');
+    for (const table of ['copy-mode', 'copy-mode-vi']) {
+      const binding = (await runTmux({ socket, args: ['list-keys', '-T', table, 'MouseDragEnd1Pane'] })).stdout;
+      expect(binding).toContain('cancel');
+      expect(binding).not.toContain('copy-selection-no-clear');
+    }
+  });
+
+  it('configures mouse, OSC 52 clipboard, scrollback, and non-clearing mouse copy on its socket', async () => {
+    const unconfiguredHome = path.join(tempDir, 'unconfigured-home');
+    fs.mkdirSync(unconfiguredHome);
+    await createSession({
+      name: 'ergonomic',
+      cmd: 'sleep 30',
+      socket,
+      env: {
+        ...process.env,
+        HOME: unconfiguredHome,
+        XDG_CONFIG_HOME: path.join(unconfiguredHome, '.config'),
+      },
+    });
+
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'mouse'] })).stdout.trim()).toBe('on');
+    expect((await runTmux({ socket, args: ['show-options', '-sv', 'set-clipboard'] })).stdout.trim()).toBe('on');
+    expect((await runTmux({ socket, args: ['show-options', '-gv', 'history-limit'] })).stdout.trim())
+      .toBe(String(AGENTS_TMUX_HISTORY_LIMIT));
+
+    for (const table of ['copy-mode', 'copy-mode-vi']) {
+      const binding = (await runTmux({ socket, args: ['list-keys', '-T', table, 'MouseDragEnd1Pane'] })).stdout;
+      expect(binding).toContain('copy-selection-no-clear');
+    }
   });
 
   it('creates a detached session and reports it via hasSession + listSessions', async () => {
