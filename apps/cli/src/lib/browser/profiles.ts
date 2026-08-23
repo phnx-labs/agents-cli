@@ -1,4 +1,5 @@
 import * as path from 'path';
+import * as fs from 'fs';
 import {
   getBrowserRuntimeDir as getBrowserRuntimeDirRoot,
   readMeta,
@@ -7,7 +8,7 @@ import {
 } from '../state.js';
 import { getConfigValue } from '../device-config.js';
 import type { BrowserProfileConfig } from '../types.js';
-import type { BrowserProfile } from './types.js';
+import type { BrowserProfile, ProfileName } from './types.js';
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import { DEFAULT_VIEWPORT } from './devices.js';
 
@@ -691,6 +692,114 @@ export async function editProfile(
  * Deliberately not automatic. Rewriting the user's synced `agents.yaml` from a
  * heuristic is the rewrite loop RUSH-2161 fixed; this is an explicit verb.
  */
+/** Profile names an agent has to be able to type and an fs path can hold. */
+const PROFILE_NAME_RE = /^[a-z][a-z0-9-]*$/;
+
+/**
+ * Throw if `name` cannot be used for a NEW profile.
+ *
+ * Shared by `profiles create` and {@link renameProfile} so the two cannot drift
+ * — the shape rule used to live inline in the command, which is how `rename`
+ * would have accepted a name `create` rejects.
+ *
+ * `default` is refused because it is the reserved ALIAS meaning "whatever
+ * profile this machine is configured to use" (RUSH-2709). A literal profile by
+ * that name makes `--profile default` mean two different things.
+ */
+export function assertRegistrableProfileName(name: string): void {
+  if (!PROFILE_NAME_RE.test(name)) {
+    throw new Error(
+      `Invalid profile name ${JSON.stringify(name)}. Use lowercase letters, digits and hyphens, ` +
+        `starting with a letter — e.g. 'agents'.`,
+    );
+  }
+  if (name === DEFAULT_PROFILE_ALIAS) {
+    throw new Error(
+      `"${DEFAULT_PROFILE_ALIAS}" is the reserved alias for this machine's configured profile, ` +
+        `not a profile name. Pick another name.`,
+    );
+  }
+}
+
+/**
+ * Rename a profile, taking its on-disk state with it.
+ *
+ * `editProfile` deliberately refuses a name change, and this is why: the name
+ * keys the runtime dir ({@link getProfileRuntimeDir}), every fork/endpoint dir
+ * derived from it, and the `browser.profile` pointer. Delete-and-recreate — the
+ * only route before this — silently abandons the browser's `--user-data-dir`,
+ * which is where a profile's logins live. On a real agent browser that is
+ * gigabytes of session state and every account it has ever signed into.
+ *
+ * Refuses when the profile is in use: moving a `--user-data-dir` out from under
+ * a running browser corrupts it.
+ */
+export async function renameProfile(
+  from: ProfileName,
+  to: ProfileName,
+): Promise<{ scope: ProfileScope; movedDirs: string[]; repointedDefault: boolean }> {
+  if (from === to) throw new Error(`"${from}" is already its own name.`);
+
+  const meta = readMeta();
+  const local = meta.deviceBrowser?.[from];
+  const fleet = meta.browser?.[from];
+  if (!local && !fleet) throw new Error(`Profile "${from}" does not exist`);
+  if (allProfileConfigs()[to]) throw new Error(`Profile "${to}" already exists`);
+
+  assertRegistrableProfileName(to);
+
+  const { isProfileInUse, listProfileCacheDirs } = await import('./runtime-state.js');
+  if (isProfileInUse(from)) {
+    throw new Error(
+      `"${from}" is in use (live browser, tunnel, or open task). Renaming would move its ` +
+        `user-data-dir out from under the running browser. Stop it first: agents browser stop --profile ${from}`,
+    );
+  }
+
+  const config = (local ?? fleet)!;
+  const scope: ProfileScope = local ? 'local' : 'fleet';
+
+  // Move the on-disk state BEFORE the config, so a crash between the two leaves
+  // a profile whose dirs are already where the new name expects them rather than
+  // a config pointing at dirs that no longer exist.
+  const movedDirs: string[] = [];
+  for (const dir of listProfileCacheDirs(from)) {
+    const base = path.basename(dir);
+    const suffix = base.slice(from.length);
+    const dest = path.join(path.dirname(dir), `${to}${suffix}`);
+    if (fs.existsSync(dest)) {
+      throw new Error(`Cannot rename: ${dest} already exists. Move or remove it first.`);
+    }
+    fs.renameSync(dir, dest);
+    movedDirs.push(dest);
+  }
+
+  if (scope === 'local') {
+    updateMeta((m) => {
+      const next = { ...m.deviceBrowser };
+      delete next[from];
+      return { ...m, deviceBrowser: { ...next, [to]: config } };
+    });
+  } else {
+    updateMeta((m) => {
+      const next = { ...m.browser };
+      delete next[from];
+      return { ...m, browser: { ...next, [to]: config } };
+    });
+  }
+
+  // The pointer is a separate key; leaving it behind would silently fall back to
+  // auto-detect on the next `browser start`.
+  let repointedDefault = false;
+  if (getConfiguredDefaultProfileName() === from) {
+    const { setConfigValue } = await import('../device-config.js');
+    setConfigValue('browser.profile', to);
+    repointedDefault = true;
+  }
+
+  return { scope, movedDirs, repointedDefault };
+}
+
 export async function moveProfileScope(
   name: string,
   to: ProfileScope

@@ -19,6 +19,8 @@ import {
   type BrowserProfile,
   editProfile,
   moveProfileScope,
+  renameProfile,
+  assertRegistrableProfileName,
   misfiledFleetProfile,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
@@ -418,8 +420,10 @@ function registerProfilesCommands(browser: Command): void {
       'Pick the visible CDP page target when the app exposes more than one. Format: url:<substring> or title:<substring>'
     )
     .action(async (name: string, opts) => {
-      if (!/^[a-z][a-z0-9-]*$/.test(name)) {
-        console.error('Profile name must be lowercase alphanumeric with hyphens');
+      try {
+        assertRegistrableProfileName(name);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
         process.exit(1);
       }
 
@@ -626,6 +630,31 @@ function registerProfilesCommands(browser: Command): void {
         console.error(
           `warning: secrets bundle "${patch.secrets}" does not exist yet. Create it with: agents secrets create ${patch.secrets}`,
         );
+      }
+    });
+
+  profiles
+    .command('rename <from> <to>')
+    .description("Rename a profile, moving its browser data with it (logins survive)")
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (from: string, to: string, opts: { json?: boolean }) => {
+      let res;
+      try {
+        res = await renameProfile(from, to);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+      if (opts.json) {
+        console.log(JSON.stringify({ from, to, ...res }, null, 2));
+        return;
+      }
+      console.log(`Renamed ${from} -> ${to} (${res.scope})`);
+      if (res.movedDirs.length > 0) {
+        console.log(`  moved ${res.movedDirs.length} browser data dir${res.movedDirs.length === 1 ? '' : 's'} — logins preserved`);
+      }
+      if (res.repointedDefault) {
+        console.log(`  browser.profile now points at ${to}`);
       }
     });
 

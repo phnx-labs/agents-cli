@@ -45,6 +45,8 @@ import {
   padColumn,
   editProfile,
   moveProfileScope,
+  renameProfile,
+  assertRegistrableProfileName,
   assertLocalPortFree,
   misfiledFleetProfile,
 } from './profiles.js';
@@ -1396,5 +1398,103 @@ describe('misfiledFleetProfile', () => {
   it('does not flag a fleet profile pointed at a real remote host over http', () => {
     const remote = { name: 'grid', browser: 'chrome' as const, endpoints: ['http://10.0.0.5:9222'] };
     expect(misfiledFleetProfile(remote, 'fleet').misfiled).toBe(false);
+  });
+});
+
+describe('renameProfile', () => {
+  beforeEach(() => {
+    vi.mocked(updateMeta).mockImplementation((updates: any) => {
+      const meta = vi.mocked(readMeta)() as any;
+      const next = typeof updates === 'function' ? updates(meta) : { ...meta, ...updates };
+      vi.mocked(writeMeta)(next);
+      return next;
+    });
+    vi.clearAllMocks();
+  });
+
+  function wire(store: ProfileStore) {
+    vi.mocked(readMeta).mockImplementation(() => store as any);
+    vi.mocked(writeMeta).mockImplementation((meta: any) => {
+      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
+      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
+    });
+  }
+
+  it('carries the browser data dir across, so logins survive', async () => {
+    // The whole reason this exists. Delete-and-recreate — the only route before
+    // — abandons the --user-data-dir, which on a real agent browser is every
+    // account it has ever signed into.
+    const store: ProfileStore = {
+      browser: { 'comet-local': { browser: 'comet', endpoints: ['cdp://localhost:9333'] } },
+    };
+    wire(store);
+
+    const { getBrowserRuntimeDir } = await import('./profiles.js');
+    const root = getBrowserRuntimeDir();
+    const oldDir = path.join(root, 'comet-local@endpoint-0');
+    fs.mkdirSync(oldDir, { recursive: true });
+    fs.writeFileSync(path.join(oldDir, 'Cookies'), 'pretend-session');
+
+    const res = await renameProfile('comet-local', 'agents');
+
+    expect(res.scope).toBe('fleet');
+    expect(fs.existsSync(oldDir)).toBe(false);
+    const newDir = path.join(root, 'agents@endpoint-0');
+    expect(fs.readFileSync(path.join(newDir, 'Cookies'), 'utf8')).toBe('pretend-session');
+    expect(store.browser!.agents).toBeDefined();
+    expect(store.browser!['comet-local']).toBeUndefined();
+  });
+
+  it('keeps a local profile local', async () => {
+    const store: ProfileStore = {
+      browser: {},
+      deviceBrowser: { mine: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9501'] } },
+    };
+    wire(store);
+
+    const res = await renameProfile('mine', 'yours');
+
+    expect(res.scope).toBe('local');
+    expect(store.deviceBrowser!.yours).toBeDefined();
+    expect(store.browser?.yours).toBeUndefined();
+  });
+
+  it('refuses a name that already exists', async () => {
+    const store: ProfileStore = {
+      browser: {
+        a: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9502'] },
+        b: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9503'] },
+      },
+    };
+    wire(store);
+    await expect(renameProfile('a', 'b')).rejects.toThrow(/already exists/);
+  });
+
+  it('refuses an unknown profile, and a no-op rename', async () => {
+    const store: ProfileStore = {
+      browser: { a: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9504'] } },
+    };
+    wire(store);
+    await expect(renameProfile('ghost', 'x')).rejects.toThrow(/does not exist/);
+    await expect(renameProfile('a', 'a')).rejects.toThrow(/already its own name/);
+  });
+
+  it('refuses the reserved `default` alias as a target', async () => {
+    const store: ProfileStore = {
+      browser: { a: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9505'] } },
+    };
+    wire(store);
+    await expect(renameProfile('a', 'default')).rejects.toThrow(/reserved alias/);
+  });
+});
+
+describe('assertRegistrableProfileName', () => {
+  it('accepts the shape profiles create accepts, and rejects the rest', () => {
+    for (const ok of ['agents', 'comet-local', 'a1', 'x-y-z']) {
+      expect(() => assertRegistrableProfileName(ok), ok).not.toThrow();
+    }
+    for (const bad of ['Agents', '1agent', 'my profile', 'agent_x', '-lead', '']) {
+      expect(() => assertRegistrableProfileName(bad), bad).toThrow(/Invalid profile name/);
+    }
   });
 });
