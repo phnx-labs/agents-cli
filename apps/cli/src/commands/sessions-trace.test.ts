@@ -5,12 +5,14 @@ import {
   decideTraceLayout,
   buildTraceEnvelope,
   buildCompareTraceEnvelope,
+  buildLineageTraceEnvelope,
   registerSessionsTraceCommand,
   registerTraceCommand,
   SESSIONS_TRACE_SCHEMA_VERSION,
 } from './sessions-trace.js';
 import { buildTrajectory } from '../lib/session/trajectory.js';
 import { diffTrajectories } from '../lib/session/trajectory-compare.js';
+import { buildLineage } from '../lib/session/trajectory-lineage.js';
 import type { SessionEvent, SessionMeta } from '../lib/session/types.js';
 
 function meta(overrides: Partial<SessionMeta> = {}): SessionMeta {
@@ -37,8 +39,17 @@ describe('decideTraceLayout — keyed on selector count, not resolved count', ()
     expect(() => decideTraceLayout({}, 2, 3)).toThrow(/must match exactly one session/);
     expect(() => decideTraceLayout({}, 2, 1)).toThrow(/must match exactly one session/);
   });
-  it('--tree (lineage) fails loud until PR3', () => {
-    expect(() => decideTraceLayout({ tree: true }, 1, 1)).toThrow(/--tree.*not implemented yet/);
+  it('--tree with one selector resolving to one session → lineage (PR3)', () => {
+    expect(decideTraceLayout({ tree: true }, 1, 1)).toBe('lineage');
+  });
+  it('--tree roots at ONE session — more selectors fail loud', () => {
+    expect(() => decideTraceLayout({ tree: true }, 2, 2)).toThrow(/Lineage roots at ONE session/);
+  });
+  it('--tree with an ambiguous selector fails loud rather than guessing a root', () => {
+    expect(() => decideTraceLayout({ tree: true }, 1, 3)).toThrow(/must match exactly one session to root a lineage/);
+  });
+  it('--tree and --compare together fail loud — they are different layouts', () => {
+    expect(() => decideTraceLayout({ tree: true, compare: true }, 1, 1)).toThrow(/different layouts/);
   });
 });
 
@@ -97,6 +108,41 @@ describe('buildCompareTraceEnvelope — the --json compare contract', () => {
     expect(envelope.diff!.divergence).toBeDefined();
     expect(envelope.diff!.summaryA.session.id).toBe('a');
     expect(envelope.diff!.summaryB.session.id).toBe('b');
+  });
+});
+
+describe('buildLineageTraceEnvelope — the --json lineage contract', () => {
+  it('emits the versioned lineage-layout envelope with nodes, edges, and the root trajectory', () => {
+    const events: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Task', callId: 'c1', args: { description: 'spawn' } },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Task', callId: 'c1', outcome: 'ok' },
+    ];
+    const root = meta({ id: 'orch-0001', shortId: 'orch0001', toolCallCount: 22 });
+    const kid = meta({
+      id: 'mate-0001',
+      shortId: 'mate0001',
+      agent: 'codex',
+      toolCallCount: 31,
+      isTeamOrigin: true,
+      teamOrigin: { handle: 'auth', team: 'fleet-resume', parentSessionId: 'orch-0001', startedAt: '2026-08-01T00:00:00Z', source: 'meta' },
+    });
+    const lineage = buildLineage([root, kid], { rootId: root.id, now: Date.parse('2026-08-01T00:10:00Z') });
+    const envelope = buildLineageTraceEnvelope(lineage, buildTrajectory(events, root));
+
+    expect(envelope.schemaVersion).toBe(SESSIONS_TRACE_SCHEMA_VERSION);
+    expect(envelope.kind).toBe('sessions-trace');
+    expect(envelope.layout).toBe('lineage');
+    expect(envelope.sessions).toHaveLength(1);
+    expect(envelope.sessions[0].session.id).toBe('orch-0001');
+    expect(envelope.lineage).toBeDefined();
+    expect(envelope.lineage!.rootId).toBe('orch-0001');
+    expect(envelope.lineage!.nodes.map((n) => n.id)).toEqual(['orch-0001', 'mate-0001']);
+    expect(envelope.lineage!.nodes[1].toolCount).toBe(31);
+    expect(envelope.lineage!.edges).toEqual([{ parent: 'orch-0001', child: 'mate-0001', source: 'parentSessionId' }]);
+    expect(envelope.lineage!.teams).toEqual(['fleet-resume']);
+    // An inline Task tool_use in the root transcript is a STEP, never a node.
+    expect(envelope.sessions[0].steps[0].delegation).toBe('inline-task');
+    expect(envelope.lineage!.nodes).toHaveLength(2);
   });
 });
 

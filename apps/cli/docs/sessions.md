@@ -946,8 +946,8 @@ One model renders three ways, **auto-selected by audience**:
   token-bounded trajectory an agent reads in-context. `--errors-only` collapses it to
   the failures and their neighbours.
 - **`--json`**: the versioned envelope `{ schemaVersion, kind: 'sessions-trace',
-  layout: 'single' | 'compare', sessions: [SessionTrajectory], diff? }` — the stable
-  contract consumers read so nothing re-parses a transcript.
+  layout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?,
+  lineage? }` — the stable contract consumers read so nothing re-parses a transcript.
 
 ```bash
 agents sessions trace a1b2c3d4                       # open the HTML (a person at a terminal)
@@ -958,6 +958,9 @@ agents sessions trace a1b2c3d4 --html -o trace.html --no-open
 
 agents sessions trace a1b2c3d4 e5f6a7b8               # two selectors -> compare
 agents sessions trace a1b2c3d4 e5f6a7b8 --text        # the compare, as compact text
+
+agents sessions trace a1b2c3d4 --tree                 # one selector + --tree -> lineage
+agents sessions trace a1b2c3d4 --tree --text          # the lineage, as an indented tree
 ```
 
 #### Compare (two selectors)
@@ -980,11 +983,52 @@ passing run vs. a failing retry — what did the failing one do extra?"
   { divergence?, added, removed, summaryA, summaryB, truncatedA, truncatedB }`.
 
 `--compare` forces the compare layout (and fails loud if fewer than two selectors
-resolved); it is otherwise implicit for exactly two. **Three or more selectors, or
-`--tree`, fail loud** in this release: lineage (a parent + its team) lands in a
-follow-up PR — never a silent single-session or first-two-of-N fallback. Everything is
+resolved); it is otherwise implicit for exactly two. **Three or more selectors fail
+loud** — never a silent single-session or first-two-of-N fallback. Everything is
 derived from the event stream; nothing is persisted onto `SessionEvent` or the
 `tool_calls` index.
+
+#### Lineage (`--tree`)
+
+Pass **one** selector with `--tree` and the same command renders a **lineage**: the
+session and every session it spawned, drawn as a delegation graph
+(`buildLineage()` in `apps/cli/src/lib/session/trajectory-lineage.ts`). It answers
+"what did this orchestrator fan out to, and where did the fan-out go?" — the shape
+of a team run, not one run's steps.
+
+**The edges are read, not inferred.** A teammate's `meta.json` records the
+orchestrator that spawned it as `parent_session_id`, which the session index
+carries as `teamOrigin.parentSessionId`; a teammate whose own record names none
+inherits its team's agreed-on spawner (`groupSessionsByTeam().spawnerSessionId`).
+Both appear on the edge as its `source`, so you can always tell which record
+established a link.
+
+**A node is a session, never an inline sub-agent.** A `Task` / `Agent` tool call is a
+step inside one transcript (it shows in the single-session layout as
+`delegation: 'inline-task'`) and produces no session of its own, so it can never be a
+node here. Only real teammate/`agents run` sessions the index returned are drawn.
+
+Per node: its handle and short id, harness, role (`orchestrator` when it spawned
+others, else `teammate` / `subagent` / `session`), indexed tool count, span, PR
+number when it opened one, and a **recency** class — `active` / `idle` / `stale` from
+`lastActivity`. Recency is deliberately not a verdict: nothing on a session row
+records whether the work succeeded, so the graph never claims "merged" or "crashed".
+
+- **HTML**: an inline-SVG node graph, the root on top and each level below it, colored
+  by recency; click a node for its summary card. Self-contained and shareable — local
+  transcript paths are never rendered.
+- **Text**: an indented tree, one line per session, ANSI-free.
+- **`--json`**: `layout: 'lineage'`, `lineage: { rootId, nodes, edges, teams,
+  unresolvedParentIds }`, and `sessions: [<the root's trajectory>]` — the graph's own
+  numbers come from the indexed rows, so a consumer pays one transcript parse instead
+  of one per teammate. Trace a child directly for its full trajectory.
+
+Two boundaries worth knowing. **Children resolve from the scanned pool**, so `--tree`
+scans wider by default (500 rows vs 100) and an old team may still need `--limit` or
+`--since`; a parent a node points at that is not in the pool is reported in
+`unresolvedParentIds` rather than dropped silently. And selecting a **child** roots the
+graph at its topmost ancestor, so `--tree` always shows the whole team. `--tree` with
+more than one selector, or together with `--compare`, fails loud.
 
 ## Live sessions (`--active`) and the interactive browser
 

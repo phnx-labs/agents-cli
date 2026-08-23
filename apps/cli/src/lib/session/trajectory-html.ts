@@ -16,6 +16,7 @@ import { formatDuration, formatTokenCount } from './render.js';
 import { escapeHtml } from './share-html.js';
 import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
 import type { TrajectoryComparison } from './trajectory-compare.js';
+import type { LineageNode, SessionLineage } from './trajectory-lineage.js';
 
 /** Color a tool bar by family; an error outcome overrides to red. */
 function toolColor(step: TrajectoryStep): string {
@@ -480,6 +481,233 @@ export function renderTrajectoryCompareHtml(cmp: TrajectoryComparison): string {
   Secret-redacted compare rendered by agents-cli &middot; <code>agents sessions trace</code>
 </footer>
 <script>${THEME_SCRIPT}</script>
+</body>
+</html>
+`;
+}
+
+/** Lineage-only rules layered on top of {@link BASE_STYLE} — the node graph and its cards. */
+const LINEAGE_STYLE = `
+  .lineage-wrap { overflow-x: auto; }
+  svg .lnode { cursor: pointer; }
+  svg .lnode rect { fill: var(--panel); stroke-width: 1.3; }
+  svg .lnode.selected rect { stroke-width: 2.4; }
+  svg .lnode .n-id { font-size: 11px; }
+  svg .lnode .n-sub { fill: var(--dim); font-size: 9px; }
+  svg .ledge { stroke: #4a6b3a; stroke-width: 1.4; fill: none; }
+  .lcards { margin-top: 4px; }
+  .lcard { display: none; border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px; background: var(--panel); }
+  .lcard.shown { display: block; }
+  .lcard h3 { margin: 0 0 8px; font-size: 13px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; }
+  .lcard dl { display: grid; grid-template-columns: 110px 1fr; gap: 3px 12px; margin: 0; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; font-size: 12px; }
+  .lcard dt { color: var(--dim); }
+  .lcard dd { margin: 0; word-break: break-word; }
+  .legend { color: var(--dim); font-size: 11.5px; font-family: ui-monospace, "JetBrains Mono", Menlo, monospace; margin: 8px 0 0; }
+`;
+
+/** Node stroke by recency — never a success/failure claim (see LineageActivity). */
+function lineageColor(node: LineageNode): string {
+  if (node.activity === 'active') return '#a3e635';
+  if (node.activity === 'idle') return '#e0b341';
+  return '#6e7681';
+}
+
+const LNODE = { w: 210, h: 68, gapX: 22, levelH: 124, top: 30, marginX: 20 };
+
+/**
+ * Characters that fit one node line at the given font size. The box is a fixed
+ * 210px and the face is monospace (~0.6em per glyph), so a line longer than this
+ * runs out past the border — clip it here rather than letting the SVG overflow.
+ */
+function fitNodeLine(text: string, fontSizePx: number): string {
+  const max = Math.floor((LNODE.w - 24) / (fontSizePx * 0.62));
+  const oneLine = text.replace(/\s+/g, ' ').trim();
+  return oneLine.length <= max ? oneLine : `${oneLine.slice(0, max - 1)}…`;
+}
+
+/** Lay the graph out level by level: depth 0 on top, each level centered below it. */
+function lineageLayout(lineage: SessionLineage): {
+  width: number;
+  height: number;
+  at: Map<string, { x: number; y: number }>;
+} {
+  const levels = new Map<number, LineageNode[]>();
+  for (const node of lineage.nodes) {
+    (levels.get(node.depth) ?? levels.set(node.depth, []).get(node.depth)!).push(node);
+  }
+  const widest = Math.max(1, ...[...levels.values()].map((l) => l.length));
+  const width = Math.max(920, LNODE.marginX * 2 + widest * LNODE.w + (widest - 1) * LNODE.gapX);
+  const depth = Math.max(...lineage.nodes.map((n) => n.depth));
+  const height = LNODE.top + (depth + 1) * LNODE.levelH;
+
+  const at = new Map<string, { x: number; y: number }>();
+  for (const [level, row] of levels) {
+    const rowWidth = row.length * LNODE.w + (row.length - 1) * LNODE.gapX;
+    const startX = (width - rowWidth) / 2;
+    row.forEach((node, i) => {
+      at.set(node.id, { x: startX + i * (LNODE.w + LNODE.gapX), y: LNODE.top + level * LNODE.levelH });
+    });
+  }
+  return { width, height, at };
+}
+
+/** The inline-SVG delegation graph: one box per session, edges parent → child. */
+function renderLineageSvg(lineage: SessionLineage): string {
+  const { width, height, at } = lineageLayout(lineage);
+  const byId = new Map(lineage.nodes.map((n) => [n.id, n]));
+  const parts: string[] = [];
+
+  parts.push('<defs><marker id="lg" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#4a6b3a"/></marker></defs>');
+
+  for (const edge of lineage.edges) {
+    const from = at.get(edge.parent);
+    const to = at.get(edge.child);
+    if (!from || !to) continue;
+    const x1 = from.x + LNODE.w / 2;
+    const y1 = from.y + LNODE.h;
+    const x2 = to.x + LNODE.w / 2;
+    const y2 = to.y - 8;
+    const mid = (y1 + y2) / 2;
+    parts.push(`<path d="M${x1.toFixed(1)} ${y1} C ${x1.toFixed(1)} ${mid.toFixed(1)}, ${x2.toFixed(1)} ${mid.toFixed(1)}, ${x2.toFixed(1)} ${y2.toFixed(1)}" class="ledge" marker-end="url(#lg)"><title>${escapeHtml(edge.source)}</title></path>`);
+  }
+
+  for (const node of byId.values()) {
+    const pos = at.get(node.id)!;
+    const color = lineageColor(node);
+    const name = node.handle && node.handle !== node.shortId ? `${node.handle} · ${node.shortId}` : node.shortId;
+    // Three lines, because one 210px row cannot hold a handle, an id, a harness,
+    // a role, a PR, and the counts without clipping the end off every node.
+    const who = [node.agent, node.role];
+    if (node.prNumber) who.push(`PR #${node.prNumber}`);
+    const counts = [`${node.toolCount} tools`];
+    if (node.durationMs > 0) counts.push(formatDuration(node.durationMs));
+    counts.push(node.activity);
+    parts.push(
+      `<g class="lnode" data-id="${escapeHtml(node.id)}" tabindex="0">` +
+      `<rect x="${pos.x.toFixed(1)}" y="${pos.y}" width="${LNODE.w}" height="${LNODE.h}" rx="8" stroke="${color}"><title>${escapeHtml(`${name} · ${who.join(' · ')} · ${counts.join(' · ')}`)}</title></rect>` +
+      `<text x="${(pos.x + 12).toFixed(1)}" y="${pos.y + 22}" class="n-id" fill="${color}">${escapeHtml(fitNodeLine(name, 11))}</text>` +
+      `<text x="${(pos.x + 12).toFixed(1)}" y="${pos.y + 40}" class="n-sub">${escapeHtml(fitNodeLine(who.join(' · '), 9))}</text>` +
+      `<text x="${(pos.x + 12).toFixed(1)}" y="${pos.y + 56}" class="n-sub">${escapeHtml(fitNodeLine(counts.join(' · '), 9))}</text>` +
+      '</g>',
+    );
+  }
+
+  // Scale to the container and no further: a wide fan-out shrinks to fit rather
+  // than pushing the page into a horizontal scroll, and a narrow one is not blown up.
+  return `<div class="lineage-wrap"><svg viewBox="0 0 ${width} ${height}" style="width:100%;max-width:${width}px;height:auto" role="img" aria-label="Session lineage graph">${parts.join('')}</svg></div>`;
+}
+
+/** One detail card per node, revealed by clicking that node. */
+function renderLineageCards(lineage: SessionLineage): string {
+  return lineage.nodes
+    .map((node) => {
+      const s = node.session;
+      const rows: Array<[string, string]> = [
+        ['session', node.id],
+        ['agent', node.agent],
+        ['role', node.role],
+        ['tools', String(node.toolCount)],
+      ];
+      if (node.durationMs > 0) rows.push(['span', formatDuration(node.durationMs)]);
+      rows.push(['activity', node.activity]);
+      if (node.team) rows.push(['team', node.team]);
+      if (node.mode) rows.push(['mode', node.mode]);
+      if (node.prNumber) rows.push(['pr', `#${node.prNumber}`]);
+      if (s.project) rows.push(['project', s.project]);
+      if (s.gitBranch) rows.push(['branch', s.gitBranch]);
+      if (s.ticketId) rows.push(['ticket', s.ticketId]);
+      if (s.outputTokens) rows.push(['out tokens', formatTokenCount(s.outputTokens)]);
+      const date = (s.timestamp || '').slice(0, 10);
+      if (date) rows.push(['started', date]);
+      const dl = rows
+        .map(([k, v]) => `<dt>${escapeHtml(k)}</dt><dd>${escapeHtml(v)}</dd>`)
+        .join('\n        ');
+      const heading = node.handle && node.handle !== node.shortId ? `${node.handle} · ${node.shortId}` : node.shortId;
+      return `<div class="lcard${node.depth === 0 ? ' shown' : ''}" id="lcard-${escapeHtml(node.id)}">
+      <h3>${escapeHtml(heading)}</h3>
+      <dl>
+        ${dl}
+      </dl>
+      <p class="muted" style="margin:8px 0 0;font-size:11.5px">Full trajectory: <code>agents sessions trace ${escapeHtml(node.shortId)}</code></p>
+    </div>`;
+    })
+    .join('\n    ');
+}
+
+/** Wire node clicks to their cards. Self-contained, no CDN, no framework. */
+const LINEAGE_SCRIPT = `
+  (function () {
+    var nodes = document.querySelectorAll('.lnode');
+    function select(id) {
+      document.querySelectorAll('.lcard').forEach(function (c) { c.classList.remove('shown'); });
+      var card = document.getElementById('lcard-' + id);
+      if (card) card.classList.add('shown');
+      nodes.forEach(function (n) { n.classList.toggle('selected', n.getAttribute('data-id') === id); });
+    }
+    nodes.forEach(function (n) {
+      var id = n.getAttribute('data-id');
+      n.addEventListener('click', function () { select(id); });
+      n.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(id); } });
+    });
+    if (nodes.length) select(nodes[0].getAttribute('data-id'));
+  })();
+`;
+
+/**
+ * Render a {@link SessionLineage} as ONE self-contained HTML page: the inline-SVG
+ * delegation graph (orchestrator on top, the sessions it spawned below, edges
+ * auto-discovered from the team records) plus a per-node summary card revealed
+ * by clicking a node. Same shell, redaction, and no-CDN rule as the other two
+ * layouts; local paths (`filePath`/`cwd`) are deliberately never rendered.
+ */
+export function renderLineageHtml(lineage: SessionLineage): string {
+  const root = lineage.nodes[0];
+  const title = root ? `${root.agent} · ${root.shortId}` : 'lineage';
+  const spawned = Math.max(0, lineage.nodes.length - 1);
+  const teamPart = lineage.teams.length > 0 ? ` · team ${lineage.teams.join(', ')}` : '';
+  const empty = !root
+    ? '<p class="muted">No lineage — the selected session spawned nothing that is indexed.</p>'
+    : spawned === 0
+      ? '<p class="muted">This session spawned no indexed teammate. Only the orchestrator is drawn.</p>'
+      : '';
+  const unresolved = lineage.unresolvedParentIds.length > 0
+    ? `<p class="stall">${lineage.unresolvedParentIds.length} parent session${lineage.unresolvedParentIds.length === 1 ? '' : 's'} referenced but not in the scanned pool — widen with --all or --since.</p>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="en" data-theme="auto">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="robots" content="noindex" />
+<title>${escapeHtml(title)} — lineage</title>
+<style>${BASE_STYLE}${LINEAGE_STYLE}</style>
+</head>
+<body>
+<header>
+  <div class="inner">
+    <button class="toggle" id="theme" title="Toggle light and dark">&#9689;</button>
+    <div class="mark">agents session trace · lineage</div>
+    <h1>${escapeHtml(title)}</h1>
+    <div class="metrics">${escapeHtml(`${spawned} spawned session${spawned === 1 ? '' : 's'}${teamPart}`)}</div>
+  </div>
+</header>
+<main>
+  <h2>Lineage</h2>
+  ${empty}
+  ${unresolved}
+  ${root ? renderLineageSvg(lineage) : ''}
+  <p class="legend">node color = recency (lime active · amber idle · grey stale) · click a node for its summary · edges from teamOrigin.parentSessionId</p>
+  <h2>Session</h2>
+  <div class="lcards">
+    ${root ? renderLineageCards(lineage) : ''}
+  </div>
+</main>
+<footer>
+  Secret-redacted lineage rendered by agents-cli &middot; <code>agents sessions trace --tree</code>
+</footer>
+<script>${THEME_SCRIPT}</script>
+<script>${LINEAGE_SCRIPT}</script>
 </body>
 </html>
 `;

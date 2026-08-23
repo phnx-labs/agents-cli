@@ -10,8 +10,9 @@
  *
  * Exactly two resolved selectors turn the single trajectory into a **compare**
  * (`diffTrajectories`, PR2/3) — the same three renderings, laid on a shared axis
- * with a divergence marker. Three or more selectors, or `--tree`, fail loud:
- * lineage (a parent + its team) lands in a follow-up PR — never a silent no-op.
+ * with a divergence marker. `--tree` turns one selector into a **lineage**
+ * (`buildLineage`, PR3/3): the orchestrator and every session it spawned, edges
+ * read from the team records. Three or more selectors still fail loud.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -25,8 +26,9 @@ import { discoverSessions } from '../lib/session/discover.js';
 import { parseSession } from '../lib/session/parse.js';
 import { buildTrajectory } from '../lib/session/trajectory.js';
 import { diffTrajectories } from '../lib/session/trajectory-compare.js';
-import { renderTrajectoryHtml, renderTrajectoryCompareHtml } from '../lib/session/trajectory-html.js';
-import { renderTrajectoryText, renderTrajectoryCompareText } from '../lib/session/trajectory-text.js';
+import { buildLineage } from '../lib/session/trajectory-lineage.js';
+import { renderTrajectoryHtml, renderTrajectoryCompareHtml, renderLineageHtml } from '../lib/session/trajectory-html.js';
+import { renderTrajectoryText, renderTrajectoryCompareText, renderLineageText } from '../lib/session/trajectory-text.js';
 import type { SessionTrajectory } from '../lib/session/trajectory.js';
 import type {
   TrajectoryComparison,
@@ -34,6 +36,7 @@ import type {
   TrajectorySummary,
 } from '../lib/session/trajectory-compare.js';
 import type { TrajectoryStep } from '../lib/session/trajectory.js';
+import type { LineageEdge, LineageNode, SessionLineage } from '../lib/session/trajectory-lineage.js';
 import { parseAgentFilter } from './sessions.js';
 import { selectSessions } from './sessions-export.js';
 
@@ -51,13 +54,23 @@ export interface SessionsTraceDiffEnvelope {
   truncatedB: number;
 }
 
+/** The `lineage` block of a `layout: 'lineage'` envelope — the delegation graph. */
+export interface SessionsTraceLineageEnvelope {
+  rootId: string;
+  nodes: LineageNode[];
+  edges: LineageEdge[];
+  teams: string[];
+  unresolvedParentIds: string[];
+}
+
 /** The `--json` envelope: the versioned contract for the ext / triaging agents. */
 export interface SessionsTraceEnvelope {
   schemaVersion: typeof SESSIONS_TRACE_SCHEMA_VERSION;
   kind: 'sessions-trace';
-  layout: 'single' | 'compare';
+  layout: 'single' | 'compare' | 'lineage';
   sessions: SessionTrajectory[];
   diff?: SessionsTraceDiffEnvelope;
+  lineage?: SessionsTraceLineageEnvelope;
 }
 
 /** Build the versioned `--json` envelope for a single-session trajectory. */
@@ -85,6 +98,31 @@ export function buildCompareTraceEnvelope(cmp: TrajectoryComparison): SessionsTr
       summaryB: cmp.summaryB,
       truncatedA: cmp.truncatedA,
       truncatedB: cmp.truncatedB,
+    },
+  };
+}
+
+/**
+ * Build the versioned `--json` envelope for a lineage. `sessions` carries the
+ * ROOT's trajectory only: the graph's own numbers come from the indexed session
+ * rows, so a consumer pays one transcript parse instead of one per teammate —
+ * `agents sessions trace <child>` is how you get a child's full trajectory.
+ */
+export function buildLineageTraceEnvelope(
+  lineage: SessionLineage,
+  rootTrajectory: SessionTrajectory,
+): SessionsTraceEnvelope {
+  return {
+    schemaVersion: SESSIONS_TRACE_SCHEMA_VERSION,
+    kind: 'sessions-trace',
+    layout: 'lineage',
+    sessions: [rootTrajectory],
+    lineage: {
+      rootId: lineage.rootId,
+      nodes: lineage.nodes,
+      edges: lineage.edges,
+      teams: lineage.teams,
+      unresolvedParentIds: lineage.unresolvedParentIds,
     },
   };
 }
@@ -130,12 +168,24 @@ export function decideTraceLayout(
   options: Pick<TraceOptions, 'tree' | 'compare'>,
   selectorCount: number,
   resolvedCount: number,
-): 'single' | 'compare' {
+): 'single' | 'compare' | 'lineage' {
   if (options.tree) {
-    throw new Error(
-      '`--tree` (lineage: a parent + its team) is not implemented yet — it lands in a follow-up PR. ' +
-      'Pass one selector for a single trajectory, or exactly two to compare.',
-    );
+    if (options.compare) {
+      throw new Error('`--tree` (lineage) and `--compare` are different layouts — pass one or the other.');
+    }
+    if (selectorCount !== 1) {
+      throw new Error(
+        `Lineage roots at ONE session; you passed ${selectorCount} selectors. ` +
+        'Pass the orchestrator session whose team you want to see.',
+      );
+    }
+    if (resolvedCount !== 1) {
+      throw new Error(
+        `The selector must match exactly one session to root a lineage; it matched ${resolvedCount}. ` +
+        'Use a more specific selector (e.g. the full session id).',
+      );
+    }
+    return 'lineage';
   }
   const wantCompare = options.compare === true || selectorCount >= 2;
   if (wantCompare) {
@@ -173,7 +223,7 @@ export function configureTraceCommand(cmd: Command): Command {
     .option('--no-open', 'Do not open the HTML; print its path instead')
     .option('--errors-only', 'Collapse the text trajectory to error steps and their neighbours')
     .option('--compare', 'Force the compare layout for exactly two selectors (this is also the default for two)')
-    .option('--tree', 'Force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up PR')
+    .option('--tree', 'Render the lineage of one session — it and every session it spawned')
     .option('--no-redact', 'Local-only: skip secret redaction of derived labels (never for a shared file)')
     .option('--all', 'Search every directory and all time, not just this project')
     .option('--since <time>', 'Only sessions newer than this (7d, 4w, an ISO date)')
@@ -200,18 +250,27 @@ agents sessions trace a1b2c3d4 --html -o trace.html --no-open
 agents sessions trace a1b2c3d4 e5f6a7b8
 
 # The compare, as text — for a triaging agent comparing harnesses
-agents sessions trace a1b2c3d4 e5f6a7b8 --text`,
+agents sessions trace a1b2c3d4 e5f6a7b8 --text
+
+# The team an orchestrator spawned, as a graph (one selector + --tree)
+agents sessions trace a1b2c3d4 --tree
+
+# The same lineage as an indented tree an agent can read
+agents sessions trace a1b2c3d4 --tree --text`,
     notes: `Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and
 the compact text trajectory prints when piped or headless (an agent). The HTML is self-contained
 (no CDN, no external asset) and redacted by default, as safe to share as an 'agents sessions share' page.
 
 One selector renders the single trajectory; exactly two selectors compare them (a shared time axis,
-the first divergence point, and the step-level diff). --json emits { schemaVersion, kind: 'sessions-trace',
-layout: 'single' | 'compare', sessions: [SessionTrajectory], diff? } — the contract consumers read so
-nothing re-parses a transcript.
+the first divergence point, and the step-level diff); one selector with --tree renders its lineage —
+the session and every session it spawned, with the edges read from the teams records
+(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript
+and has no session of its own. --json emits { schemaVersion, kind: 'sessions-trace',
+layout: 'single' | 'compare' | 'lineage', sessions: [SessionTrajectory], diff?, lineage? } — the contract
+consumers read so nothing re-parses a transcript.
 
-Three or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that
-layout lands in a follow-up PR.`,
+Lineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.
+Three or more selectors, and --tree with more than one selector, fail loud.`,
   });
 
   cmd.action(async (selectors: string[], _options: TraceOptions, command: Command) => {
@@ -220,7 +279,11 @@ layout lands in a follow-up PR.`,
     // read the merged view (as `render`/`insights` do) — the top-level `agents
     // trace` alias has no such parent and its own options fill the same fields.
     const options = command.optsWithGlobals() as TraceOptions;
-    const limit = Math.max(1, Number.parseInt(options.limit || '100', 10) || 100);
+    // Lineage resolves its children FROM the scanned pool, and a teammate can sit
+    // well below the orchestrator in recency order, so --tree scans wider by
+    // default than the single/compare layouts. An explicit --limit still wins.
+    const defaultLimit = options.tree ? 500 : 100;
+    const limit = Math.max(1, Number.parseInt(options.limit || String(defaultLimit), 10) || defaultLimit);
     const agent = parseAgentFilter(options.agent).agent;
     const pool = await discoverSessions({
       // Default to every directory so an id from any project resolves, matching
@@ -252,6 +315,62 @@ layout lands in a follow-up PR.`,
       const events = parseSession(session.filePath, session.agent);
       return buildTrajectory(events, session, { redact, knownSecrets });
     };
+
+    if (layout === 'lineage') {
+      // The pool must keep team-origin rows: they are hidden from the ordinary
+      // listing by default (AGENTS.md invariant 7), and they ARE the children.
+      // discoverSessions does not apply that presentation filter, so `pool` is
+      // already the teams-included set the graph needs.
+      const root = sessions[0];
+      // An id-shaped selector resolves through the session INDEX, which reaches
+      // rows the scanned pool does not hold (selectSessions -> findSessionsById,
+      // sessions-export.ts:386). Seed the pool with the resolved root so the
+      // graph always roots where the user pointed.
+      const pooled = pool.some((s) => s.id === root.id) ? pool : [root, ...pool];
+      const lineage = buildLineage(pooled, { rootId: root.id });
+      const idPart = root.shortId || root.id;
+
+      if (format === 'json') {
+        const out = JSON.stringify(buildLineageTraceEnvelope(lineage, buildOne(root)), null, 2) + '\n';
+        if (options.output) {
+          fs.writeFileSync(options.output, out, { mode: 0o600 });
+          process.stderr.write(chalk.green(`Wrote lineage JSON to ${options.output}\n`));
+        } else {
+          process.stdout.write(out);
+        }
+        return;
+      }
+
+      if (format === 'text') {
+        const out = renderLineageText(lineage);
+        if (options.output) {
+          fs.writeFileSync(options.output, out, { mode: 0o600 });
+          process.stderr.write(chalk.green(`Wrote lineage text to ${options.output}\n`));
+        } else {
+          process.stdout.write(out);
+        }
+        return;
+      }
+
+      // HTML.
+      const html = renderLineageHtml(lineage);
+      if (options.output) {
+        fs.writeFileSync(options.output, html, { mode: 0o600 });
+        process.stdout.write(`${path.resolve(options.output)}\n`);
+        return;
+      }
+      const dir = path.join(getCacheDir(), 'traces');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `${idPart}-lineage-${Date.now()}.html`);
+      fs.writeFileSync(file, html, { mode: 0o600 });
+      if (options.open === false) {
+        process.stdout.write(`${file}\n`);
+      } else {
+        openUrl(file);
+        process.stderr.write(chalk.green(`Opened lineage for ${idPart}: ${file}\n`));
+      }
+      return;
+    }
 
     if (layout === 'compare') {
       const cmp = diffTrajectories(buildOne(sessions[0]), buildOne(sessions[1]));

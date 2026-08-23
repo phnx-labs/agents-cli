@@ -12,6 +12,7 @@
 import { formatTokenCount } from './render.js';
 import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
 import type { TrajectoryComparison, TrajectorySummary } from './trajectory-compare.js';
+import type { SessionLineage } from './trajectory-lineage.js';
 import type { SessionMeta } from './types.js';
 
 export interface RenderTrajectoryTextOptions {
@@ -203,6 +204,48 @@ export function renderTrajectoryCompareText(
 
   lines.push(...diffColumn(`only in ${labelA}`, cmp.removed, maxDiffLines));
   lines.push(...diffColumn(`only in ${labelB}`, cmp.added, maxDiffLines));
+
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Render a {@link SessionLineage} as an indented, ANSI-free tree — the `--tree`
+ * text rendering an agent reads when it asks "what did this orchestrator spawn,
+ * and where did the fan-out go?".
+ *
+ * One line per session: its handle/short id, harness, role, indexed tool count,
+ * span, recency and PR when it opened one. No per-step detail — lineage answers
+ * the shape of the fan-out; `agents sessions trace <child>` answers one child.
+ */
+export function renderLineageText(lineage: SessionLineage): string {
+  const lines: string[] = [];
+  const root = lineage.nodes[0];
+  if (!root) {
+    lines.push('(no lineage — the selected session spawned nothing indexed)');
+    return lines.join('\n') + '\n';
+  }
+
+  const teamPart = lineage.teams.length > 0 ? ` · team ${lineage.teams.map((t) => `"${t}"`).join(', ')}` : '';
+  const spawned = lineage.nodes.length - 1;
+  lines.push(`lineage: ${root.agent} ${root.shortId}${teamPart} · ${spawned} spawned session${spawned === 1 ? '' : 's'}`);
+
+  for (const node of lineage.nodes) {
+    const indent = node.depth === 0 ? '' : '  '.repeat(node.depth - 1) + '└─ ';
+    const name = node.handle && node.handle !== node.shortId ? `${node.handle} · ${node.shortId}` : node.shortId;
+    const bits = [node.agent, node.role, `${node.toolCount} tools`];
+    if (node.durationMs > 0) bits.push(dur(node.durationMs, false));
+    bits.push(node.activity);
+    if (node.mode) bits.push(node.mode);
+    if (node.prNumber) bits.push(`PR #${node.prNumber}`);
+    lines.push(`${indent}${name} · ${bits.join(' · ')}`);
+  }
+
+  if (lineage.unresolvedParentIds.length > 0) {
+    lines.push(
+      `unresolved parent${lineage.unresolvedParentIds.length === 1 ? '' : 's'} (not in the scanned pool): ` +
+      lineage.unresolvedParentIds.join(', '),
+    );
+  }
 
   return lines.join('\n') + '\n';
 }

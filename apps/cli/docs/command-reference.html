@@ -3628,7 +3628,7 @@ Manage published sessions with &#39;agents artifacts share list&#39; and
       agents sessions tail --latest --json | jq &#39;select(.type == &quot;user&quot;)&#39;</code></pre><h4>Notes</h4><p class="notes">- Only Claude and Codex sessions are tailable — they append JSONL one event per line.
       - Live tail is compact by default; pass --json for the raw JSONL stream.
       - Gemini, OpenCode, and OpenClaw use formats that rewrite the file or store state elsewhere.</p></article>
-<article id="sessions-trace" data-search="trace sessions trace  visualize a session as a trajectory — a tool-call timeline you can read at a glance. opens a visual for a person; prints a compact trajectory for an agent. selectors  --html force the html rendering (opens in a browser) --text force the compact text trajectory --json emit the versioned sessions-trace json envelope -o, --output &lt;path&gt; write the rendering to a path instead of opening/printing --no-open do not open the html; print its path instead --errors-only collapse the text trajectory to error steps and their neighbours --compare force the compare layout for exactly two selectors (this is also the default for two) --tree force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up pr --no-redact local-only: skip secret redaction of derived labels (never for a shared file) --all search every directory and all time, not just this project --since &lt;time&gt; only sessions newer than this (7d, 4w, an iso date) --limit &lt;n&gt; max sessions to scan when resolving the selector (default 100) -a, --agent &lt;agent&gt; filter by agent type (e.g. claude, codex) -h, --help show help # open one session&#39;s trajectory in a browser (a person at a terminal)
+<article id="sessions-trace" data-search="trace sessions trace  visualize a session as a trajectory — a tool-call timeline you can read at a glance. opens a visual for a person; prints a compact trajectory for an agent. selectors  --html force the html rendering (opens in a browser) --text force the compact text trajectory --json emit the versioned sessions-trace json envelope -o, --output &lt;path&gt; write the rendering to a path instead of opening/printing --no-open do not open the html; print its path instead --errors-only collapse the text trajectory to error steps and their neighbours --compare force the compare layout for exactly two selectors (this is also the default for two) --tree render the lineage of one session — it and every session it spawned --no-redact local-only: skip secret redaction of derived labels (never for a shared file) --all search every directory and all time, not just this project --since &lt;time&gt; only sessions newer than this (7d, 4w, an iso date) --limit &lt;n&gt; max sessions to scan when resolving the selector (default 100) -a, --agent &lt;agent&gt; filter by agent type (e.g. claude, codex) -h, --help show help # open one session&#39;s trajectory in a browser (a person at a terminal)
 agents sessions trace a1b2c3d4
 
 # the compact text trajectory an agent reads in-context
@@ -3647,17 +3647,26 @@ agents sessions trace a1b2c3d4 --html -o trace.html --no-open
 agents sessions trace a1b2c3d4 e5f6a7b8
 
 # the compare, as text — for a triaging agent comparing harnesses
-agents sessions trace a1b2c3d4 e5f6a7b8 --text audience auto-select: with no --html/--text/--json, html opens on a tty (a person) and
+agents sessions trace a1b2c3d4 e5f6a7b8 --text
+
+# the team an orchestrator spawned, as a graph (one selector + --tree)
+agents sessions trace a1b2c3d4 --tree
+
+# the same lineage as an indented tree an agent can read
+agents sessions trace a1b2c3d4 --tree --text audience auto-select: with no --html/--text/--json, html opens on a tty (a person) and
 the compact text trajectory prints when piped or headless (an agent). the html is self-contained
 (no cdn, no external asset) and redacted by default, as safe to share as an &#39;agents sessions share&#39; page.
 
 one selector renders the single trajectory; exactly two selectors compare them (a shared time axis,
-the first divergence point, and the step-level diff). --json emits { schemaversion, kind: &#39;sessions-trace&#39;,
-layout: &#39;single&#39; | &#39;compare&#39;, sessions: [sessiontrajectory], diff? } — the contract consumers read so
-nothing re-parses a transcript.
+the first divergence point, and the step-level diff); one selector with --tree renders its lineage —
+the session and every session it spawned, with the edges read from the teams records
+(teamorigin.parentsessionid), never from an inline task sub-agent, which is a step inside one transcript
+and has no session of its own. --json emits { schemaversion, kind: &#39;sessions-trace&#39;,
+layout: &#39;single&#39; | &#39;compare&#39; | &#39;lineage&#39;, sessions: [sessiontrajectory], diff?, lineage? } — the contract
+consumers read so nothing re-parses a transcript.
 
-three or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that
-layout lands in a follow-up pr."><div class="command-head"><h3><code>agents sessions trace &lt;selectors...&gt;</code></h3></div><p>Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;selectors...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--html</code></td><td>Force the HTML rendering (opens in a browser)</td><td></td><td></td></tr><tr><td><code>--text</code></td><td>Force the compact text trajectory</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Emit the versioned sessions-trace JSON envelope</td><td></td><td></td></tr><tr><td><code>-o, --output &lt;path&gt;</code></td><td>Write the rendering to a path instead of opening/printing</td><td></td><td></td></tr><tr><td><code>--no-open</code></td><td>Do not open the HTML; print its path instead</td><td></td><td></td></tr><tr><td><code>--errors-only</code></td><td>Collapse the text trajectory to error steps and their neighbours</td><td></td><td></td></tr><tr><td><code>--compare</code></td><td>Force the compare layout for exactly two selectors (this is also the default for two)</td><td></td><td></td></tr><tr><td><code>--tree</code></td><td>Force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up PR</td><td></td><td></td></tr><tr><td><code>--no-redact</code></td><td>Local-only: skip secret redaction of derived labels (never for a shared file)</td><td></td><td></td></tr><tr><td><code>--all</code></td><td>Search every directory and all time, not just this project</td><td></td><td></td></tr><tr><td><code>--since &lt;time&gt;</code></td><td>Only sessions newer than this (7d, 4w, an ISO date)</td><td></td><td></td></tr><tr><td><code>--limit &lt;n&gt;</code></td><td>Max sessions to scan when resolving the selector (default 100)</td><td></td><td></td></tr><tr><td><code>-a, --agent &lt;agent&gt;</code></td><td>Filter by agent type (e.g. claude, codex)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Open one session&#39;s trajectory in a browser (a person at a terminal)
+lineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.
+three or more selectors, and --tree with more than one selector, fail loud."><div class="command-head"><h3><code>agents sessions trace &lt;selectors...&gt;</code></h3></div><p>Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;selectors...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--html</code></td><td>Force the HTML rendering (opens in a browser)</td><td></td><td></td></tr><tr><td><code>--text</code></td><td>Force the compact text trajectory</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Emit the versioned sessions-trace JSON envelope</td><td></td><td></td></tr><tr><td><code>-o, --output &lt;path&gt;</code></td><td>Write the rendering to a path instead of opening/printing</td><td></td><td></td></tr><tr><td><code>--no-open</code></td><td>Do not open the HTML; print its path instead</td><td></td><td></td></tr><tr><td><code>--errors-only</code></td><td>Collapse the text trajectory to error steps and their neighbours</td><td></td><td></td></tr><tr><td><code>--compare</code></td><td>Force the compare layout for exactly two selectors (this is also the default for two)</td><td></td><td></td></tr><tr><td><code>--tree</code></td><td>Render the lineage of one session — it and every session it spawned</td><td></td><td></td></tr><tr><td><code>--no-redact</code></td><td>Local-only: skip secret redaction of derived labels (never for a shared file)</td><td></td><td></td></tr><tr><td><code>--all</code></td><td>Search every directory and all time, not just this project</td><td></td><td></td></tr><tr><td><code>--since &lt;time&gt;</code></td><td>Only sessions newer than this (7d, 4w, an ISO date)</td><td></td><td></td></tr><tr><td><code>--limit &lt;n&gt;</code></td><td>Max sessions to scan when resolving the selector (default 100)</td><td></td><td></td></tr><tr><td><code>-a, --agent &lt;agent&gt;</code></td><td>Filter by agent type (e.g. claude, codex)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Open one session&#39;s trajectory in a browser (a person at a terminal)
 agents sessions trace a1b2c3d4
 
 # The compact text trajectory an agent reads in-context
@@ -3676,17 +3685,26 @@ agents sessions trace a1b2c3d4 --html -o trace.html --no-open
 agents sessions trace a1b2c3d4 e5f6a7b8
 
 # The compare, as text — for a triaging agent comparing harnesses
-agents sessions trace a1b2c3d4 e5f6a7b8 --text</code></pre><h4>Notes</h4><p class="notes">Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and
+agents sessions trace a1b2c3d4 e5f6a7b8 --text
+
+# The team an orchestrator spawned, as a graph (one selector + --tree)
+agents sessions trace a1b2c3d4 --tree
+
+# The same lineage as an indented tree an agent can read
+agents sessions trace a1b2c3d4 --tree --text</code></pre><h4>Notes</h4><p class="notes">Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and
 the compact text trajectory prints when piped or headless (an agent). The HTML is self-contained
 (no CDN, no external asset) and redacted by default, as safe to share as an &#39;agents sessions share&#39; page.
 
 One selector renders the single trajectory; exactly two selectors compare them (a shared time axis,
-the first divergence point, and the step-level diff). --json emits { schemaVersion, kind: &#39;sessions-trace&#39;,
-layout: &#39;single&#39; | &#39;compare&#39;, sessions: [SessionTrajectory], diff? } — the contract consumers read so
-nothing re-parses a transcript.
+the first divergence point, and the step-level diff); one selector with --tree renders its lineage —
+the session and every session it spawned, with the edges read from the teams records
+(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript
+and has no session of its own. --json emits { schemaVersion, kind: &#39;sessions-trace&#39;,
+layout: &#39;single&#39; | &#39;compare&#39; | &#39;lineage&#39;, sessions: [SessionTrajectory], diff?, lineage? } — the contract
+consumers read so nothing re-parses a transcript.
 
-Three or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that
-layout lands in a follow-up PR.</p></article>
+Lineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.
+Three or more selectors, and --tree with more than one selector, fail loud.</p></article>
 <article id="sessions-watch" data-search="watch sessions watch  stream canonical live and recoverable session row changes as ndjson --json emit versioned ndjson envelopes --local watch only this machine -h, --help show help # subscribe to session changes for a long-lived ui consumer
       agents sessions watch --json
 
@@ -4066,7 +4084,7 @@ layout lands in a follow-up PR.</p></article>
 
       # Split vertically (panes stacked) — empty shell
       agents tmux split team v</code></pre></article>
-<article id="trace" data-search="trace trace  visualize a session as a trajectory — a tool-call timeline you can read at a glance. opens a visual for a person; prints a compact trajectory for an agent. selectors  --html force the html rendering (opens in a browser) --text force the compact text trajectory --json emit the versioned sessions-trace json envelope -o, --output &lt;path&gt; write the rendering to a path instead of opening/printing --no-open do not open the html; print its path instead --errors-only collapse the text trajectory to error steps and their neighbours --compare force the compare layout for exactly two selectors (this is also the default for two) --tree force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up pr --no-redact local-only: skip secret redaction of derived labels (never for a shared file) --all search every directory and all time, not just this project --since &lt;time&gt; only sessions newer than this (7d, 4w, an iso date) --limit &lt;n&gt; max sessions to scan when resolving the selector (default 100) -a, --agent &lt;agent&gt; filter by agent type (e.g. claude, codex) -h, --help show help # open one session&#39;s trajectory in a browser (a person at a terminal)
+<article id="trace" data-search="trace trace  visualize a session as a trajectory — a tool-call timeline you can read at a glance. opens a visual for a person; prints a compact trajectory for an agent. selectors  --html force the html rendering (opens in a browser) --text force the compact text trajectory --json emit the versioned sessions-trace json envelope -o, --output &lt;path&gt; write the rendering to a path instead of opening/printing --no-open do not open the html; print its path instead --errors-only collapse the text trajectory to error steps and their neighbours --compare force the compare layout for exactly two selectors (this is also the default for two) --tree render the lineage of one session — it and every session it spawned --no-redact local-only: skip secret redaction of derived labels (never for a shared file) --all search every directory and all time, not just this project --since &lt;time&gt; only sessions newer than this (7d, 4w, an iso date) --limit &lt;n&gt; max sessions to scan when resolving the selector (default 100) -a, --agent &lt;agent&gt; filter by agent type (e.g. claude, codex) -h, --help show help # open one session&#39;s trajectory in a browser (a person at a terminal)
 agents sessions trace a1b2c3d4
 
 # the compact text trajectory an agent reads in-context
@@ -4085,17 +4103,26 @@ agents sessions trace a1b2c3d4 --html -o trace.html --no-open
 agents sessions trace a1b2c3d4 e5f6a7b8
 
 # the compare, as text — for a triaging agent comparing harnesses
-agents sessions trace a1b2c3d4 e5f6a7b8 --text audience auto-select: with no --html/--text/--json, html opens on a tty (a person) and
+agents sessions trace a1b2c3d4 e5f6a7b8 --text
+
+# the team an orchestrator spawned, as a graph (one selector + --tree)
+agents sessions trace a1b2c3d4 --tree
+
+# the same lineage as an indented tree an agent can read
+agents sessions trace a1b2c3d4 --tree --text audience auto-select: with no --html/--text/--json, html opens on a tty (a person) and
 the compact text trajectory prints when piped or headless (an agent). the html is self-contained
 (no cdn, no external asset) and redacted by default, as safe to share as an &#39;agents sessions share&#39; page.
 
 one selector renders the single trajectory; exactly two selectors compare them (a shared time axis,
-the first divergence point, and the step-level diff). --json emits { schemaversion, kind: &#39;sessions-trace&#39;,
-layout: &#39;single&#39; | &#39;compare&#39;, sessions: [sessiontrajectory], diff? } — the contract consumers read so
-nothing re-parses a transcript.
+the first divergence point, and the step-level diff); one selector with --tree renders its lineage —
+the session and every session it spawned, with the edges read from the teams records
+(teamorigin.parentsessionid), never from an inline task sub-agent, which is a step inside one transcript
+and has no session of its own. --json emits { schemaversion, kind: &#39;sessions-trace&#39;,
+layout: &#39;single&#39; | &#39;compare&#39; | &#39;lineage&#39;, sessions: [sessiontrajectory], diff?, lineage? } — the contract
+consumers read so nothing re-parses a transcript.
 
-three or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that
-layout lands in a follow-up pr."><div class="command-head"><h3><code>agents trace &lt;selectors...&gt;</code></h3></div><p>Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;selectors...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--html</code></td><td>Force the HTML rendering (opens in a browser)</td><td></td><td></td></tr><tr><td><code>--text</code></td><td>Force the compact text trajectory</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Emit the versioned sessions-trace JSON envelope</td><td></td><td></td></tr><tr><td><code>-o, --output &lt;path&gt;</code></td><td>Write the rendering to a path instead of opening/printing</td><td></td><td></td></tr><tr><td><code>--no-open</code></td><td>Do not open the HTML; print its path instead</td><td></td><td></td></tr><tr><td><code>--errors-only</code></td><td>Collapse the text trajectory to error steps and their neighbours</td><td></td><td></td></tr><tr><td><code>--compare</code></td><td>Force the compare layout for exactly two selectors (this is also the default for two)</td><td></td><td></td></tr><tr><td><code>--tree</code></td><td>Force the lineage layout (parent + teammates) — not implemented yet, lands in a follow-up PR</td><td></td><td></td></tr><tr><td><code>--no-redact</code></td><td>Local-only: skip secret redaction of derived labels (never for a shared file)</td><td></td><td></td></tr><tr><td><code>--all</code></td><td>Search every directory and all time, not just this project</td><td></td><td></td></tr><tr><td><code>--since &lt;time&gt;</code></td><td>Only sessions newer than this (7d, 4w, an ISO date)</td><td></td><td></td></tr><tr><td><code>--limit &lt;n&gt;</code></td><td>Max sessions to scan when resolving the selector (default 100)</td><td></td><td></td></tr><tr><td><code>-a, --agent &lt;agent&gt;</code></td><td>Filter by agent type (e.g. claude, codex)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Open one session&#39;s trajectory in a browser (a person at a terminal)
+lineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.
+three or more selectors, and --tree with more than one selector, fail loud."><div class="command-head"><h3><code>agents trace &lt;selectors...&gt;</code></h3></div><p>Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;selectors...&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--html</code></td><td>Force the HTML rendering (opens in a browser)</td><td></td><td></td></tr><tr><td><code>--text</code></td><td>Force the compact text trajectory</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>Emit the versioned sessions-trace JSON envelope</td><td></td><td></td></tr><tr><td><code>-o, --output &lt;path&gt;</code></td><td>Write the rendering to a path instead of opening/printing</td><td></td><td></td></tr><tr><td><code>--no-open</code></td><td>Do not open the HTML; print its path instead</td><td></td><td></td></tr><tr><td><code>--errors-only</code></td><td>Collapse the text trajectory to error steps and their neighbours</td><td></td><td></td></tr><tr><td><code>--compare</code></td><td>Force the compare layout for exactly two selectors (this is also the default for two)</td><td></td><td></td></tr><tr><td><code>--tree</code></td><td>Render the lineage of one session — it and every session it spawned</td><td></td><td></td></tr><tr><td><code>--no-redact</code></td><td>Local-only: skip secret redaction of derived labels (never for a shared file)</td><td></td><td></td></tr><tr><td><code>--all</code></td><td>Search every directory and all time, not just this project</td><td></td><td></td></tr><tr><td><code>--since &lt;time&gt;</code></td><td>Only sessions newer than this (7d, 4w, an ISO date)</td><td></td><td></td></tr><tr><td><code>--limit &lt;n&gt;</code></td><td>Max sessions to scan when resolving the selector (default 100)</td><td></td><td></td></tr><tr><td><code>-a, --agent &lt;agent&gt;</code></td><td>Filter by agent type (e.g. claude, codex)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Open one session&#39;s trajectory in a browser (a person at a terminal)
 agents sessions trace a1b2c3d4
 
 # The compact text trajectory an agent reads in-context
@@ -4114,17 +4141,26 @@ agents sessions trace a1b2c3d4 --html -o trace.html --no-open
 agents sessions trace a1b2c3d4 e5f6a7b8
 
 # The compare, as text — for a triaging agent comparing harnesses
-agents sessions trace a1b2c3d4 e5f6a7b8 --text</code></pre><h4>Notes</h4><p class="notes">Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and
+agents sessions trace a1b2c3d4 e5f6a7b8 --text
+
+# The team an orchestrator spawned, as a graph (one selector + --tree)
+agents sessions trace a1b2c3d4 --tree
+
+# The same lineage as an indented tree an agent can read
+agents sessions trace a1b2c3d4 --tree --text</code></pre><h4>Notes</h4><p class="notes">Audience auto-select: with no --html/--text/--json, HTML opens on a TTY (a person) and
 the compact text trajectory prints when piped or headless (an agent). The HTML is self-contained
 (no CDN, no external asset) and redacted by default, as safe to share as an &#39;agents sessions share&#39; page.
 
 One selector renders the single trajectory; exactly two selectors compare them (a shared time axis,
-the first divergence point, and the step-level diff). --json emits { schemaVersion, kind: &#39;sessions-trace&#39;,
-layout: &#39;single&#39; | &#39;compare&#39;, sessions: [SessionTrajectory], diff? } — the contract consumers read so
-nothing re-parses a transcript.
+the first divergence point, and the step-level diff); one selector with --tree renders its lineage —
+the session and every session it spawned, with the edges read from the teams records
+(teamOrigin.parentSessionId), never from an inline Task sub-agent, which is a step inside one transcript
+and has no session of its own. --json emits { schemaVersion, kind: &#39;sessions-trace&#39;,
+layout: &#39;single&#39; | &#39;compare&#39; | &#39;lineage&#39;, sessions: [SessionTrajectory], diff?, lineage? } — the contract
+consumers read so nothing re-parses a transcript.
 
-Three or more selectors, or --tree (lineage: a parent + its team), fail loud in this release — that
-layout lands in a follow-up PR.</p></article>
+Lineage resolves children from the scanned pool, so a very old team may need a wider --limit or --since.
+Three or more selectors, and --tree with more than one selector, fail loud.</p></article>
 <article id="trash" data-search="trash trash  inspect and restore soft-deleted agent version directories -h, --help show help  "><div class="command-head"><h3><code>agents trash</code></h3></div><p>Inspect and restore soft-deleted agent version directories</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="trash-list" data-search="list trash list  list soft-deleted version directories (optionally filtered to one agent) agent  -h, --help show help  "><div class="command-head"><h3><code>agents trash list [agent]</code></h3></div><p>List soft-deleted version directories (optionally filtered to one agent)</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[agent]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="trash-restore" data-search="restore trash restore  restore a soft-deleted version (e.g. &quot;claude@2.1.110&quot;) back to ~/.agents/.history/versions/ target  -h, --help show help  "><div class="command-head"><h3><code>agents trash restore &lt;target&gt;</code></h3></div><p>Restore a soft-deleted version (e.g. &quot;claude@2.1.110&quot;) back to ~/.agents/.history/versions/</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;target&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
