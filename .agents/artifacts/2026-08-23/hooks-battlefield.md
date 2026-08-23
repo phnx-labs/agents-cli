@@ -79,7 +79,7 @@ that only ever add context.
 | Hook | Kind | Purpose | Verdict |
 |---|---|---|---|
 | git-guard | block · **WHAT** | Vetoes destructive git verbs anywhere: `reset --hard`, force-push, `checkout`/`switch`, `stash`, `clean`, `branch -d`. Worktree-aware | **MERGE** with main-branch-guard |
-| main-branch-guard | block · **WHERE** | Vetoes any write or commit to the PRIMARY worktree, on any branch | **MERGE** into git-guard |
+| main-branch-guard | block · **WHERE** | Vetoes the file **tools** (Write/Edit/…) and `git add`/`commit` in the PRIMARY worktree. **Not raw shell writes** — see below | **MERGE** into git-guard |
 | artifacts-confidential-guard | block | Stops publishing a confidential artifact to a public share. **91% delivery** | KEEP |
 | merge-guard | block | Stops admin-bypass merges and merges with no non-author verdict. **85% delivery** | KEEP |
 | rm-guard | block | Stops destructive `rm` on protected paths | KEEP |
@@ -163,7 +163,7 @@ then edit under $REPO/.agents/worktrees/<slug>/, commit there, push, and open a 
 
 ```
 [concise-message-guard] This update is 1 lines / 770 chars — too long for a phone text.
-Muqsit reads these like texts from a worker, not a report. Rewrite as 1-4 short lines:
+The owner reads these like texts from a worker, not a report. Rewrite as 1-4 short lines:
 lead with the one thing you need him to do (or 'FYI, no action'), plainest language, and
 put any detail behind a link (PR/ticket) or a file path he can open — the text is the
 pointer, not the payload. Then resend with agents notify --text "…".
@@ -190,9 +190,9 @@ Open PRs:
 
 ```
 ## Host & Fleet
-You are running on **yosemite-s1** (linux).
-- mac-mini — macos — offline
-- yosemite-s0 — linux — online — 6% load / 66% mem / busy
+You are running on **worker-a** (linux).
+- builder-1 — macos — offline
+- worker-b — linux — online — 6% load / 66% mem / busy
 …
 Fleet capacity: 190 cores · 418G free / 602G RAM (70% free) across 12 reachable devices.
 ```
@@ -370,45 +370,40 @@ Now the counts — every name below is defined in the table above.
   <!-- axes -->
   <line x1="120" y1="30" x2="120" y2="270" stroke="#3a3a3a"/>
   <line x1="120" y1="270" x2="960" y2="270" stroke="#3a3a3a"/>
-  <!-- scale: max 511 -> 800px. px per unit = 1.37 -->
+  <!-- scale: max 542 -> 240px -->
   <g font-size="12" fill="#8a8a8a">
     <text x="112" y="274" text-anchor="end">0</text>
-    <line x1="120" y1="215" x2="960" y2="215" stroke="#242424"/><text x="112" y="219" text-anchor="end">200</text>
-    <line x1="120" y1="160" x2="960" y2="160" stroke="#242424"/><text x="112" y="164" text-anchor="end">400</text>
-    <line x1="120" y1="105" x2="960" y2="105" stroke="#242424"/><text x="112" y="109" text-anchor="end">600</text>
+    <line x1="120" y1="181" x2="960" y2="181" stroke="#242424"/><text x="112" y="185" text-anchor="end">200</text>
+    <line x1="120" y1="93" x2="960" y2="93" stroke="#242424"/><text x="112" y="97" text-anchor="end">400</text>
+    <line x1="120" y1="4" x2="960" y2="4" stroke="#242424"/><text x="112" y="8" text-anchor="end">600</text>
   </g>
-  <!-- groups: claude, codex, grok, kimi. two bars each -->
-  <!-- claude hardblock 189 -> 52px ; denials 511 -> 140px -->
   <g>
-    <rect x="180" y="218" width="40" height="52" fill="#ff5470"><title>claude hard blocks: 269 sessions</title></rect>
-    <rect x="224" y="130" width="40" height="140" fill="#f0a35a"><title>claude permission denials: 542</title></rect>
+    <rect x="180" y="151" width="40" height="119" fill="#ff5470"><title>claude hard blocks: 269 sessions</title></rect>
+    <rect x="224" y="30" width="40" height="240" fill="#f0a35a"><title>claude permission denials: 542</title></rect>
     <text x="222" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">claude</text>
-    <text x="200" y="212" text-anchor="middle" fill="#ffb3bd" font-size="11">199</text>
-    <text x="244" y="124" text-anchor="middle" fill="#f0c79a" font-size="11">526</text>
+    <text x="200" y="145" text-anchor="middle" fill="#ffb3bd" font-size="11">269</text>
+    <text x="244" y="24" text-anchor="middle" fill="#f0c79a" font-size="11">542</text>
   </g>
-  <!-- codex hardblock 20 -> 6 ; denials 450 -> 123 -->
   <g>
-    <rect x="360" y="264" width="40" height="6" fill="#ff5470"><title>codex hard blocks: 39 sessions</title></rect>
-    <rect x="404" y="147" width="40" height="123" fill="#f0a35a"><title>codex permission denials: 481</title></rect>
+    <rect x="360" y="253" width="40" height="17" fill="#ff5470"><title>codex hard blocks: 39 sessions</title></rect>
+    <rect x="404" y="57" width="40" height="213" fill="#f0a35a"><title>codex permission denials: 481</title></rect>
     <text x="402" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">codex</text>
-    <text x="380" y="258" text-anchor="middle" fill="#ffb3bd" font-size="11">20</text>
-    <text x="424" y="141" text-anchor="middle" fill="#f0c79a" font-size="11">454</text>
+    <text x="380" y="247" text-anchor="middle" fill="#ffb3bd" font-size="11">39</text>
+    <text x="424" y="51" text-anchor="middle" fill="#f0c79a" font-size="11">481</text>
   </g>
-  <!-- grok hardblock 35 -> 10 ; denials 419 -> 115 -->
   <g>
-    <rect x="540" y="260" width="40" height="10" fill="#ff5470"><title>grok hard blocks: 38 sessions</title></rect>
-    <rect x="584" y="155" width="40" height="115" fill="#f0a35a"><title>grok permission denials: 420</title></rect>
+    <rect x="540" y="253" width="40" height="17" fill="#ff5470"><title>grok hard blocks: 38 sessions</title></rect>
+    <rect x="584" y="84" width="40" height="186" fill="#f0a35a"><title>grok permission denials: 420</title></rect>
     <text x="582" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">grok</text>
-    <text x="560" y="254" text-anchor="middle" fill="#ffb3bd" font-size="11">35</text>
-    <text x="604" y="149" text-anchor="middle" fill="#f0c79a" font-size="11">419</text>
+    <text x="560" y="247" text-anchor="middle" fill="#ffb3bd" font-size="11">38</text>
+    <text x="604" y="78" text-anchor="middle" fill="#f0c79a" font-size="11">420</text>
   </g>
-  <!-- kimi hardblock 0 ; denials 6 -->
   <g>
-    <rect x="720" y="268" width="40" height="2" fill="#ff5470"><title>kimi hard blocks: 0</title></rect>
-    <rect x="764" y="268" width="40" height="2" fill="#f0a35a"><title>kimi permission denials: 7</title></rect>
+    <rect x="720" y="268" width="40" height="2" fill="#ff5470"><title>kimi hard blocks: 0 sessions</title></rect>
+    <rect x="764" y="267" width="40" height="3" fill="#f0a35a"><title>kimi permission denials: 7</title></rect>
     <text x="762" y="288" text-anchor="middle" fill="#cfcfcf" font-size="13">kimi</text>
-    <text x="742" y="262" text-anchor="middle" fill="#8a8a8a" font-size="11">0</text>
-    <text x="786" y="262" text-anchor="middle" fill="#8a8a8a" font-size="11">6</text>
+    <text x="740" y="262" text-anchor="middle" fill="#8a8a8a" font-size="11">0</text>
+    <text x="784" y="261" text-anchor="middle" fill="#8a8a8a" font-size="11">7</text>
   </g>
   <text x="850" y="288" text-anchor="middle" fill="#5f5f5f" font-size="11">cursor/droid/</text>
   <text x="850" y="304" text-anchor="middle" fill="#5f5f5f" font-size="11">antigravity: 0</text>
@@ -501,6 +496,22 @@ of them are ignored. Worse, the 42% that *are* obeyed are obeyed by running
 important post to iMessage. So the reminder's only successful outcome is a phone
 buzz, fired without regard to whether the session shipped anything worth one. It
 hardcodes the escalation level instead of letting the outcome pick it.
+
+**The primary tree is not actually protected from writes — only from commits.**
+Probed against a real repo, all four file tools are vetoed and all eleven raw-shell
+writes are not:
+
+| probe | result |
+|---|---|
+| `Write` · `Edit` · `MultiEdit` · `NotebookEdit` | **blocked** (4/4) |
+| `echo >` · `>>` · `sed -i` · `tee` · `cp` · `mv` · `: >` · `touch` · `mkdir` · `rm` · `python3 -c open(...,'w')` | **allowed (11/11)** |
+| `git add` · `git commit` | blocked |
+
+So the real guarantee is *"an agent cannot **commit** to your checkout"*, not *"an
+agent cannot modify it"*. These are not evasions — `echo x > file` and `sed -i` are
+ordinary commands an agent writes without any intent to circumvent. The commit choke
+point still prevents anything from landing, but a dirtied working tree is a real cost
+the earlier wording hid.
 
 **main-branch-guard is healthy, and its refusal is the model to copy.** 72% of
 blocked agents recover within 40 messages — 25 open a fresh worktree, 36 re-aim
@@ -714,7 +725,7 @@ to record exit codes; nothing reads them.
 
 
 - **The map has two hot lanes, not five.** SessionStart (6 hooks) and UserPromptSubmit (5 hooks) never block — they inject Linear/topology/inflight context and expand promptcuts/bangcuts. All the friction is PreToolUse + Stop. If you are auditing "where agents fight hooks," you can ignore 60% of the hook surface.
-- **The Stop gate is the heaviest hook in the system** — 524 fires, 11 per session it touches, more than git-guard and merge-guard put together. Among PreToolUse guards those two lead (237 and 227): git-guard's top vetoes are `reset --hard`, `checkout`, `branch-delete`, `stash` — exactly the history-destroying moves the agentic-git workflow forbids; merge-guard's are admin-bypass and merging with no non-author verdict.
+- **The Stop gate is the heaviest hook in the system** — 561 fires, 11 per session it touches, more than git-guard and merge-guard put together. Among PreToolUse guards those two lead (245 and 240): git-guard's top vetoes are `reset --hard`, `checkout`, `branch-delete`, `stash` — exactly the history-destroying moves the agentic-git workflow forbids; merge-guard's are admin-bypass and merging with no non-author verdict.
 - **The loudest antagonist is not a hook.** The auto-mode permission classifier denied 1,450 tool calls — nearly as many as all 13 guards combined (1,696). For grok it is almost the *entire* experience of "being stopped".
-- **codex fights hardest per session (6.6%), grok softest (1.1%).** claude sits at 5.1% but spreads across all 13 guards; grok concentrates on the classifier + merge-guard.
+- **codex fights hardest per session (12.4%), grok softest (1.2%).** claude sits at 6.9% but spreads across all 13 guards; grok concentrates on the classifier + merge-guard.
 - **A guard firing zero times is a rule that won.** footer-guard: 0 fires. Nobody tries the banned footer anymore — the guard is pure standing deterrent. The inverse also holds: a hook that fires three times a session and is ignored 58% of the time is a rule nobody internalized, and the fix is the message, not more volume.
