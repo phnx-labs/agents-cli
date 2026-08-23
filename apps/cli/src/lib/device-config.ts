@@ -743,15 +743,6 @@ export function setConfiguredDeviceRole(name: string, role: ConfiguredDeviceRole
 }
 
 /**
- * Every device with an effective role, keyed by device name. Layers like every
- * other device-scope key: the fleet default (central fleet.defaults.config)
- * applies fleet-wide and the per-device doc wins on conflict. `roster` (the
- * registered device names) lets a fleet default reach devices that have no doc
- * of their own; without it only devices with docs are considered — so a
- * fleet-wide `role` default would silently miss a doc-less device and drop it
- * from the worker allowlist. Mirrors {@link loadAutoLaunchPreferences}.
- */
-/**
  * Devices whose OWN config pins one of the browser profile keys to `profile`.
  *
  * Used by `profiles rename` to warn rather than silently leave a peer pointing at
@@ -787,6 +778,15 @@ export function devicesPinningBrowserProfile(
   return hits;
 }
 
+/**
+ * Every device with an effective role, keyed by device name. Layers like every
+ * other device-scope key: the fleet default (central fleet.defaults.config)
+ * applies fleet-wide and the per-device doc wins on conflict. `roster` (the
+ * registered device names) lets a fleet default reach devices that have no doc
+ * of their own; without it only devices with docs are considered — so a
+ * fleet-wide `role` default would silently miss a doc-less device and drop it
+ * from the worker allowlist. Mirrors {@link loadAutoLaunchPreferences}.
+ */
 export function listConfiguredDeviceRoles(roster?: string[]): Record<string, ConfiguredDeviceRole> {
   ensureDeviceConfigMigrated();
   const out: Record<string, ConfiguredDeviceRole> = {};

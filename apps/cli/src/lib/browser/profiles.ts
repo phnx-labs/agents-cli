@@ -779,11 +779,17 @@ export async function renameProfile(
   // success. Refuse instead: which copy the user means is genuinely ambiguous,
   // and `profiles scope` is the tool for collapsing the duplicate first.
   if (local && fleet) {
+    // `scope <name> fleet`, NOT local: moveProfileScope computes `from` as
+    // 'local' whenever a local entry exists, so asking for local is a no-op that
+    // reports success and leaves the duplicate. Sending the user there and then
+    // to `profiles delete` — which drops the cached runtime dirs by default —
+    // walked a data-preservation command into a data-destroying one.
     throw new Error(
       `"${from}" exists in BOTH this machine's store and the fleet-synced one. ` +
-        `Renaming would move its browser data while leaving one copy behind under the old name. ` +
-        `Collapse the duplicate first: agents browser profiles scope ${from} local  ` +
-        `(or delete the copy you do not want).`,
+        `Renaming would move its browser data while leaving one copy behind under the old name.\n` +
+        `  Collapse the duplicate first:  agents browser profiles scope ${from} fleet\n` +
+        `  Then rename.  (To drop a copy instead, agents browser profiles delete ${from} --keep-cache ` +
+        `keeps the browser data.)`,
     );
   }
 

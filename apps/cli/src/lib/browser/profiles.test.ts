@@ -1559,6 +1559,28 @@ describe('renameProfile', () => {
     expect(store.deviceBrowser!.dup).toBeDefined();
   });
 
+  it('the escape command the dual-store error names actually works', async () => {
+    // The error used to say `scope <name> local`, which is a NO-OP in exactly
+    // this state: moveProfileScope computes from='local' whenever a local entry
+    // exists, so from === to short-circuits and reports success. A user whose
+    // first instruction silently does nothing takes the second one — and
+    // `profiles delete` drops the cached runtime dirs by default. This asserts
+    // the advice, not just the refusal.
+    const store: ProfileStore = {
+      browser: { dup2: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9535'] } },
+      deviceBrowser: { dup2: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9536'] } },
+    };
+    wire(store);
+
+    const err = await renameProfile('dup2', 'fresh2').catch((e) => e as Error);
+    expect(err.message).toContain('profiles scope dup2 fleet');
+
+    // Follow it literally, then retry.
+    await moveProfileScope('dup2', 'fleet');
+    expect(store.deviceBrowser?.dup2).toBeUndefined();
+    await expect(renameProfile('dup2', 'fresh2')).resolves.toMatchObject({ scope: 'fleet' });
+  });
+
   it('refuses `os`, the reserved browser.viewer value', async () => {
     const store: ProfileStore = {
       browser: { a: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9533'] } },
