@@ -431,7 +431,8 @@ describe('extractTodoProgress (RUSH-1380)', () => {
     const a = path.join(root, 'a');
     const b = path.join(root, 'b');
     const c = path.join(root, 'c');
-    // 'run_command' (Grok) and case-variant 'EXEC' were NOT in the old hardcoded array —
+    // 'run_command' (Grok) and the 'EXEC' casing were NOT matched by the old hardcoded
+    // array (which had exact-case 'Execute' but no 'run_command' and no case-folding) —
     // isShellExecTool now recognizes them, so their working dir is a touched directory.
     expect(extractRecentDirectoriesTouched([
       tool('run_command', { workdir: a }),

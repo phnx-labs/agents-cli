@@ -107,7 +107,10 @@ describe('renderTrajectoryHtml — self-contained and safe', () => {
     ];
     // The per-step badge carries the color as `style="background:#e0b341"` — distinct
     // from the static CSS that also mentions `color: #e0b341`, so this is a real marker.
-    for (const tool of ['exec', 'Execute', 'run_command']) {
+    // `run_shell_command` is the genuine delta for THIS site: the old toolColor heuristic
+    // (`bash || shell || .includes('exec') || run_command`) missed it, so reverting to it
+    // makes this case fail — exec/Execute/run_command all matched the old check too.
+    for (const tool of ['exec', 'Execute', 'run_command', 'run_shell_command']) {
       expect(renderTrajectoryHtml(buildTrajectory(shellStep(tool), meta({ agent: 'codex' }))))
         .toContain('style="background:#e0b341"');
     }
