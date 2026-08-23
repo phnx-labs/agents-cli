@@ -383,19 +383,29 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     // session bug. The session_attached-aware hook kill-sessions it the instant the
     // agent pane dies. This is the exact scenario a closed terminal / a `/exit`
     // after detaching produces: no attach client, agent exits, session must be GONE.
-    const meta = await createSession({ name: 'ag-shutdown', cmd: 'sh -c "sleep 0.3; exit 0"', socket });
+    //
+    // Keep the agent ALIVE while we arm the hook, then kill its process on demand.
+    // A fast-exiting command could race the hook install under CI load (the pane
+    // would die before the hook is armed, so it would never fire). runInTmux has
+    // its own before-attach dead-pane check for exactly that window; here we just
+    // guarantee the hook is armed before the pane dies.
+    const meta = await createSession({ name: 'ag-shutdown', cmd: 'sh -c "sleep 300"', socket });
     const agentPane = meta.pane!;
     expect(agentPane).toMatch(/^%\d+$/);
-    // Install the hook while the agent is still alive (the 0.3s sleep window), so it
-    // is armed before the pane dies — mirrors runInTmux installing it post-create.
     await setSessionHook(
       'ag-shutdown',
       'pane-died',
       agentPaneDiedHook('ag-shutdown', agentPane),
       socket,
     );
-    // No client is attached (headless), so session_attached=0 → the hook's
-    // agent-pane branch kill-sessions on pane death.
+    // Make the agent exit deterministically: read the pane's real leaf pid and
+    // SIGKILL it, rather than racing send-keys against shell readiness under load.
+    // The pane dies with the hook armed and NO client attached (headless), so the
+    // hook's agent-pane branch kill-sessions — exactly what an unattended `/exit`
+    // does — instead of leaving a dead `remain-on-exit` husk.
+    const panePid = await waitForPanePid(agentPane, socket);
+    expect(panePid).toBeGreaterThan(0);
+    process.kill(panePid, 'SIGKILL');
     const gone = await waitForSessionGone('ag-shutdown', socket);
     expect(gone).toBe(true);
     expect(await hasSession('ag-shutdown', socket)).toBe(false);
@@ -528,6 +538,26 @@ describe.skipIf(skipReason)('reapDeadTmuxPanes', () => {
 
 function wait(ms: number): Promise<void> {
   return new Promise(r => setTimeout(r, ms));
+}
+
+/**
+ * Poll a pane's `#{pane_pid}` until it resolves to a running process (a real,
+ * non-zero pid whose process actually exists), or the timeout elapses. The pane
+ * command starts asynchronously after `new-session` returns, so a bare read can
+ * observe pid 0 / a not-yet-running process under CI load. Returns 0 on timeout
+ * (a genuine miss still fails the caller's `> 0` assertion).
+ */
+async function waitForPanePid(pane: string, socket: string, timeoutMs = 5000): Promise<number> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const r = await runTmux({ socket, args: ['display-message', '-pt', pane, '-p', '#{pane_pid}'], throwOnError: false });
+    const pid = parseInt(r.stdout.trim(), 10);
+    if (Number.isFinite(pid) && pid > 0) {
+      try { process.kill(pid, 0); return pid; } catch { /* not running yet */ }
+    }
+    if (Date.now() >= deadline) return 0;
+    await wait(50);
+  }
 }
 
 /**
