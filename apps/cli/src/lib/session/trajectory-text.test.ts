@@ -42,8 +42,8 @@ describe('renderTrajectoryText', () => {
 
   it('errorsOnly collapses to the error step and its neighbours', () => {
     const text = renderTrajectoryText(buildTrajectory(events, meta()), { errorsOnly: true });
-    // Read (step 1) is not a neighbour of the error (step 2) — wait, it IS: step 2 is the error, step 1 and 3 are neighbours.
-    expect(text).toContain('Bash'); // the error
+    // Step 2 is the error (a `bun test`, tagged by its program); steps 1 and 3 are neighbours.
+    expect(text).toContain('bun'); // the error step, read by its effective program
     expect(text).toContain('Edit'); // neighbour after
     // With only 3 of 3 tool steps kept here, assert the collapse mechanism on a longer run below.
   });
@@ -72,6 +72,24 @@ describe('renderTrajectoryText', () => {
     const text = renderTrajectoryText(buildTrajectory(many, meta()), { maxSteps: 50 });
     expect(text.split('\n').length).toBeLessThan(70); // bounded, not 300 lines
     expect(text).toMatch(/… \d+ more steps/);
+  });
+
+  it('"where the time went" is keyed BY PROGRAM, never a single opaque "Bash"', () => {
+    // A Bash-heavy run of three distinct programs — git 56%, gh 33%, agents 11%.
+    const shell: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'g1', command: 'git fetch origin && git worktree add wt' },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:50Z', tool: 'Bash', callId: 'g1', outcome: 'ok' },
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:50Z', tool: 'Bash', callId: 'h1', command: 'gh pr checks 2971 --watch' },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:01:20Z', tool: 'Bash', callId: 'h1', outcome: 'ok' },
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:01:20Z', tool: 'Bash', callId: 'a1', command: 'agents sessions --active' },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:01:30Z', tool: 'Bash', callId: 'a1', outcome: 'ok' },
+    ];
+    const text = renderTrajectoryText(buildTrajectory(shell, meta()));
+    const line = text.split('\n').find((l) => l.startsWith('where the time went:'))!;
+    expect(line).toContain('git 56%');
+    expect(line).toContain('gh 33%');
+    expect(line).toContain('agents 11%');
+    expect(line).not.toContain('Bash'); // the bug: the whole run collapsing to one tool
   });
 
   it('redacts a secret in a step label', () => {

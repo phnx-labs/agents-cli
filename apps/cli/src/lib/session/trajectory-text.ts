@@ -54,11 +54,13 @@ function clipLabel(label: string): string {
 }
 
 function shareLine(model: SessionTrajectory): string | undefined {
-  const entries = Object.entries(model.toolTimeShare)
+  // Program-keyed, mirroring the HTML panel — a Bash-heavy run reads as
+  // `git 56%  gh 33%  agents 11%`, never a single opaque `Bash 100%`.
+  const entries = Object.entries(model.programTimeShare)
     .sort((a, b) => b[1] - a[1])
     .filter(([, share]) => share >= 0.02)
     .slice(0, 5)
-    .map(([tool, share]) => `${tool} ${Math.round(share * 100)}%`);
+    .map(([program, share]) => `${program} ${Math.round(share * 100)}%`);
   return entries.length > 0 ? `where the time went: ${entries.join('  ')}` : undefined;
 }
 

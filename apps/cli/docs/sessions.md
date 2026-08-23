@@ -957,15 +957,18 @@ normalized `SessionEvent[]` model and computes one thing nothing else does: a
 **per-step duration**, by pairing each `tool_use` with its `tool_result` on `callId` (a
 step falls back to the next-event delta and is marked `durationEstimated` when a
 harness omits the result, so measured and inferred are never conflated). It also flags
-idle gaps (stalls), a per-tool "where the time went" share, and tags inline
-`Task`/`Agent` sub-agents.
+idle gaps (stalls), a per-program "where the time went" share (a shell call reads by
+its effective program — `git`, `bun`, `gh` — never a single opaque `Bash`), and tags
+inline `Task`/`Agent` sub-agents.
 
 One model renders three ways, **auto-selected by audience**:
 
 - **HTML** (default on a TTY — a person): a self-contained page (inline CSS/SVG, no
   CDN, no external asset, redacted by default — as safe to share as a `sessions share`
-  page) with a tool-call waterfall over a time axis, a "where the time went" bar list,
-  and a per-step detail panel. Opens in your browser; `--no-open` prints the path.
+  page) led by an **analysis hero** — where the time went (by program), the slowest
+  steps, the command mix, and error/idle KPIs — above a step-ordered detail list with
+  program badges, exit codes, and idle-gap dividers. Opens in your browser; `--no-open`
+  prints the path.
 - **Text** (default when piped/headless — an agent): a compact, ANSI-free,
   token-bounded trajectory an agent reads in-context. `--errors-only` collapses it to
   the failures and their neighbours.

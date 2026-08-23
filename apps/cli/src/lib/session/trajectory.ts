@@ -85,8 +85,14 @@ export interface SessionTrajectory {
   spanMs: number;
   steps: TrajectoryStep[];
   gaps: TrajectoryGap[];
-  /** Fraction of measured tool time per tool, summing to ~1 (empty if no time). */
-  toolTimeShare: Record<string, number>;
+  /**
+   * Fraction of measured tool time per effective program, summing to ~1 (empty if
+   * no time). Keyed by the same tag the step list and badges use — a shell call's
+   * effective program (`git`, `bun`, `gh`), else the raw tool — so a Bash-heavy
+   * session reads as `git / bun / gh`, never a single opaque `Bash`. The single
+   * source both the HTML and text "where the time went" panels read.
+   */
+  programTimeShare: Record<string, number>;
   /**
    * Failed steps — steps whose paired result carried `outcome: 'error'`. Distinct
    * from `stats.errorCount`, which counts only standalone `type: 'error'` events;
@@ -412,21 +418,26 @@ export function buildTrajectory(
   }
 
   // Where the time went — measured tool duration share per tool.
-  const perTool: Record<string, number> = {};
+  // Sum tool time by the EFFECTIVE PROGRAM (a shell call's `git`/`bun`/`gh`, else
+  // the raw tool) — the same tag the step list and badges show — so both renderers
+  // read one program-keyed source instead of each re-bucketing the steps.
+  const perProgram: Record<string, number> = {};
   let totalToolMs = 0;
   for (const step of steps) {
-    if (step.kind !== 'tool' || !step.tool) continue;
-    perTool[step.tool] = (perTool[step.tool] ?? 0) + step.durationMs;
+    if (step.kind !== 'tool') continue;
+    const tag = step.program ?? step.tool;
+    if (!tag) continue;
+    perProgram[tag] = (perProgram[tag] ?? 0) + step.durationMs;
     totalToolMs += step.durationMs;
   }
-  const toolTimeShare: Record<string, number> = {};
+  const programTimeShare: Record<string, number> = {};
   if (totalToolMs > 0) {
-    for (const [tool, ms] of Object.entries(perTool)) {
-      if (ms > 0) toolTimeShare[tool] = ms / totalToolMs;
+    for (const [tag, ms] of Object.entries(perProgram)) {
+      if (ms > 0) programTimeShare[tag] = ms / totalToolMs;
     }
   }
 
   const errorCount = steps.reduce((n, s) => (s.outcome === 'error' ? n + 1 : n), 0);
 
-  return { session: meta, spanMs, steps, gaps, toolTimeShare, errorCount, redacted: redact, stats, truncatedSteps };
+  return { session: meta, spanMs, steps, gaps, programTimeShare, errorCount, redacted: redact, stats, truncatedSteps };
 }

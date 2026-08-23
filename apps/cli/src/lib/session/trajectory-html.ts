@@ -61,19 +61,12 @@ function clipLabel(label: string): string {
 }
 
 function renderTimeShare(model: SessionTrajectory): string {
-  // Time summed BY PROGRAM (a Bash-heavy session reads as git/agents/gh, not "Bash").
-  const byProgram = new Map<string, number>();
-  let total = 0;
-  for (const step of model.steps) {
-    if (step.kind !== 'tool' || step.durationMs <= 0) continue;
-    const tag = stepBadge(step);
-    byProgram.set(tag, (byProgram.get(tag) ?? 0) + step.durationMs);
-    total += step.durationMs;
-  }
-  const entries = [...byProgram.entries()].sort((a, b) => b[1] - a[1]).slice(0, 8);
-  if (entries.length === 0 || total === 0) return '<p class="muted">No measured tool time.</p>';
-  return entries.map(([tag, ms]) => {
-    const pct = Math.round((ms / total) * 100);
+  // Program-keyed share straight off the model — the one source the text panel
+  // reads too (a Bash-heavy session reads as git/agents/gh, not "Bash").
+  const entries = Object.entries(model.programTimeShare).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  if (entries.length === 0) return '<p class="muted">No measured tool time.</p>';
+  return entries.map(([tag, share]) => {
+    const pct = Math.round(share * 100);
     const color = toolColor({ ordinal: 0, kind: 'tool', tool: tag, program: tag, lane: tag, startMs: 0, durationMs: 0, durationEstimated: false, label: tag });
     return `<div class="share-row"><span class="share-name">${escapeHtml(tag)}</span>` +
       `<span class="share-bar"><span class="share-fill" style="width:${pct}%;background:${color}"></span></span>` +

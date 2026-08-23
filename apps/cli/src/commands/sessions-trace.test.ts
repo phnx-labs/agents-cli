@@ -80,7 +80,7 @@ describe('buildTraceEnvelope — the --json contract', () => {
     expect(model.session.id).toBe('sess-0001');
     expect(model.steps[0].tool).toBe('Bash');
     expect(model).toHaveProperty('gaps');
-    expect(model).toHaveProperty('toolTimeShare');
+    expect(model).toHaveProperty('programTimeShare');
     expect(model).toHaveProperty('stats');
   });
 });

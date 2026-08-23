@@ -154,9 +154,9 @@ describe('buildTrajectory — gaps, tokens, delegation, shares', () => {
     expect(step.outputTokens).toBe(18_400);
   });
 
-  it('tags an inline Task tool_use as delegation and computes tool time share', () => {
+  it('tags an inline Task tool_use as delegation and shares time BY PROGRAM (not raw tool)', () => {
     const events: SessionEvent[] = [
-      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'c1', command: 'x' },
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'c1', command: 'git push origin head' },
       { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:30Z', tool: 'Bash', callId: 'c1', outcome: 'ok' },
       { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:30Z', tool: 'Task', callId: 't1', args: { subagent_type: 'code-reviewer', description: 'review' } },
       { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:40Z', tool: 'Task', callId: 't1', outcome: 'ok' },
@@ -165,9 +165,11 @@ describe('buildTrajectory — gaps, tokens, delegation, shares', () => {
     const task = traj.steps.find((s) => s.tool === 'Task')!;
     expect(task.delegation).toBe('inline-task');
     expect(task.label).toContain('code-reviewer');
-    // Bash 30s, Task 10s → shares 0.75 / 0.25.
-    expect(traj.toolTimeShare.Bash).toBeCloseTo(0.75, 5);
-    expect(traj.toolTimeShare.Task).toBeCloseTo(0.25, 5);
+    // Bash `git push` 30s, Task 10s → shares 0.75 / 0.25, keyed by the PROGRAM
+    // (`git`) not the tool (`Bash`), so a shell-heavy run never reads as one "Bash".
+    expect(traj.programTimeShare.git).toBeCloseTo(0.75, 5);
+    expect(traj.programTimeShare.Bash).toBeUndefined();
+    expect(traj.programTimeShare.Task).toBeCloseTo(0.25, 5);
   });
 });
 
@@ -191,7 +193,7 @@ describe('buildTrajectory — redaction and safety', () => {
     expect(traj.steps).toHaveLength(0);
     expect(traj.gaps).toHaveLength(0);
     expect(traj.spanMs).toBe(0);
-    expect(traj.toolTimeShare).toEqual({});
+    expect(traj.programTimeShare).toEqual({});
   });
 
   it('caps drawn steps and counts the dropped tail (no silent truncation)', () => {
