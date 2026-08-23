@@ -28,6 +28,7 @@
  */
 import type { AgentId, Mode } from '../types.js';
 import type { JobConfig } from '../scheduling/routines.js';
+import type { ConfiguredDeviceRole } from '../device-config.js';
 
 /**
  * Context for the exec-time config-env pin (mapping A, exec.ts side). The caller
@@ -43,6 +44,16 @@ export interface ExecConfigEnvCtx {
   versionHome: string | null;
   /** resolveInteractive(options) — computed once by the caller. */
   interactive: boolean;
+  /**
+   * The role marked on THIS machine (worker | personal | undefined), resolved
+   * once by the caller from selfConfiguredDeviceRole(). A `personal` device is
+   * the user's own interactive box: it holds a real per-version login and the
+   * credential decision MUST defer to it for EVERY run — interactive OR headless
+   * — never the worker-only setup-token (RUSH-2395). Injected as a plain value
+   * (not imported) to keep the adapter import-leaf. Absent/undefined is treated
+   * as non-personal (worker-equivalent).
+   */
+  deviceRole?: ConfiguredDeviceRole;
   /**
    * claude-account-token's resolveClaudeSetupToken, injected. The adapters MUST
    * stay import-leaf: claude-account-token pulls in the secrets stack, which

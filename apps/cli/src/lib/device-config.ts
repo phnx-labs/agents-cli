@@ -688,6 +688,21 @@ export function configuredDeviceRole(name: string): ConfiguredDeviceRole | undef
   return getConfigValue('role', { device: name }).value as ConfiguredDeviceRole | undefined;
 }
 
+/**
+ * The role marked on THIS machine — the one running the CLI — or undefined when
+ * it was never marked. Keyed off {@link machineId} (overridable via
+ * AGENTS_SYNC_MACHINE_ID), so it matches the device's own config-folder key.
+ *
+ * The auth strategy reads this: a `personal` device (the user's own interactive
+ * box) holds a real per-version login and MUST authenticate from it for EVERY
+ * run, interactive or headless; only a `worker` uses the file-based setup-token
+ * (RUSH-2395). `undefined` is treated as non-personal (worker-equivalent) by
+ * that gate — an unmarked box has no login to defer to.
+ */
+export function selfConfiguredDeviceRole(): ConfiguredDeviceRole | undefined {
+  return configuredDeviceRole(machineId());
+}
+
 /** Mark a device's role fleet-wide; `undefined` clears the mark. */
 export function setConfiguredDeviceRole(name: string, role: ConfiguredDeviceRole | undefined): void {
   assertValidDeviceName(name);

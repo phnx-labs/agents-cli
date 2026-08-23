@@ -2054,33 +2054,44 @@ schema (`--json` passes through each agent's native stream format).
   `COPILOT_HOME` / `KIMI_CODE_HOME`) and MUST delete the other three agents'
   vars on every branch, so a config pointer from a different agent's shell
   never leaks into this invocation (`buildExecEnv`'s per-agent branch, `lib/exec.ts:407-564`).
-- **EXEC-2a (MUST).** For claude, `buildExecEnv` MUST inject the reserved `auth`
-  bundle's per-account setup-token into `CLAUDE_CODE_OAUTH_TOKEN` ONLY when the
-  run resolves **headless** (`resolveInteractive(options) === false`,
-  `lib/exec.ts:425-455`). That token exists so an unattended run authenticates
-  without the Touch-ID-gated login item (`lib/claude-account-token.ts:9-16`); an
-  interactive run MUST be left on its per-version login, which is also the only
-  credential carrying the `user:profile` scope usage reads require (RUSH-2392).
-  **`resolveInteractive` means "this run opens a TUI", NOT "a human is present"**
-  — do not read the requirement as the latter. `watchdog/rotate.ts:195` builds
-  `agents run auto --interactive` and `watchdog/runner.ts:901-903` injects it
-  into a tab unattended, so the watchdog's rotate-relaunch resolves interactive
-  and is deliberately NOT given the setup-token. That is the pre-existing
-  contract, not a new gap: the injection dates only to #1719 (2026-08-02), and
-  every interactive run — the watchdog's included — authenticated from its
-  per-version login before it. Where that relaunch lands on a home whose login
-  has gone dead, the defect is rotation treating "email present" as `authValid`
-  (`agents.ts:1871-1872`), which the token merely masked. Making the credential
-  a function of DEVICE ROLE rather than run mode is tracked in RUSH-2395.
-  An interactive run MUST additionally delete an INHERITED
-  `CLAUDE_CODE_OAUTH_TOKEN` whose value equals that same resolved setup-token
-  (`lib/exec.ts:448-449`), so an interactive launch from inside a headless
-  agent's shell does not keep authenticating as it; a value the caller set
-  itself MUST survive, and `options.env` still overrides last (EXEC-5).
-  Note this MUST NOT be read as "an interactive run never carries a token" — no
-  requirement yet strips an ambient value when NO per-account token resolves,
-  which is the routines path's behavior (`lib/daemon/runner.ts:1018-1021`) and is
-  tracked as RUSH-2360.
+- **EXEC-2a (MUST).** For claude, `buildExecEnv` injects the reserved `auth`
+  bundle's per-account setup-token into `CLAUDE_CODE_OAUTH_TOKEN` as a function of
+  **DEVICE ROLE and run mode**, resolved in `claudeAdapter.applyExecConfigEnv`
+  from `ctx.deviceRole` (`selfConfiguredDeviceRole()`, exec.ts) and
+  `ctx.interactive` (`resolveInteractive(options)`). The token is a WORKER
+  credential — it exists so an unattended box with no keychain login authenticates
+  without the Touch-ID-gated login item (`lib/claude-account-token.ts:9-16`).
+  Two run classes MUST instead be left on the per-version login (also the only
+  credential carrying the `user:profile` scope usage reads require, RUSH-2392):
+  - **any run on a `personal` device** — the user's own interactive box
+    (`config.role: personal`, e.g. zion) — interactive TUI OR headless one-shot
+    (`agents run claude "<prompt>"`) alike. That box is the single origin of the
+    login, so it MUST authenticate from it for every run (RUSH-2395). Before this,
+    gating on run mode alone routed a headless run on the laptop onto the
+    setup-token and hijacked the login.
+  - **an interactive run on any device.** **`resolveInteractive` means "this run
+    opens a TUI", NOT "a human is present"** — do not read it as the latter.
+    `watchdog/rotate.ts` builds `agents run auto --interactive` unattended, so the
+    watchdog's rotate-relaunch resolves interactive and is deliberately NOT given
+    the setup-token.
+
+  So the setup-token is injected ONLY on a **headless run on a non-personal
+  device** (worker / dispatched / provisioned; `ctx.deviceRole !== 'personal' &&
+  ctx.interactive === false`). On that path it replaces any ambient inherited
+  value, and when NO per-account token resolves it STRIPS the ambient
+  `CLAUDE_CODE_OAUTH_TOKEN` (RUSH-2360 / RUSH-1822 fleet-logout hazard). On the
+  login-deferring path (personal OR interactive) `buildExecEnv` MUST additionally
+  delete an INHERITED `CLAUDE_CODE_OAUTH_TOKEN` whose value equals this account's
+  resolved setup-token, so a launch from inside a headless agent's shell does not
+  keep authenticating as it; a value the caller set itself MUST survive, and
+  `options.env` still overrides last (EXEC-5). The routines path
+  (`buildRoutineSpawnEnv`, `lib/daemon/runner.ts`) applies the SAME role gate: a
+  routine on a personal device defers to the login, a worker routine keeps the
+  setup-token. `undefined`/unmarked role is treated as non-personal
+  (worker-equivalent) — an unmarked box has no login to defer to.
+  Note this MUST NOT be read as "a login-deferring run never carries a token": no
+  requirement yet strips an ambient value on that path when NO per-account token
+  resolves, tracked as RUSH-2360.
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:572-575`), `AGENTS_RUNTIME` to `terminal`/`headless` from

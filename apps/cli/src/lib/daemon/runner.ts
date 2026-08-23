@@ -80,6 +80,7 @@ import {
 } from '../accounting/rotate.js';
 import { readAuthHealth, isDeadVerdict } from '../auth-health.js';
 import { machineId } from '../machine-id.js';
+import { selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { isCustomHarnessName, readProfile } from '../profiles.js';
 
@@ -1287,8 +1288,19 @@ export function buildRoutineSpawnEnv(
   const setupToken = agent === 'claude' && version
     ? resolveClaudeSetupToken(getVersionHomePath('claude', version))
     : null;
-  if (setupToken) out.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
-  else delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  // A `personal` device (the user's own interactive box) uses the per-version
+  // login for EVERY run, routines included — the setup-token is a worker-only
+  // credential (RUSH-2395, mirrors the claude adapter's personal-device branch).
+  // On a personal box, only strip an inherited copy of the account's OWN
+  // setup-token by value so a leaked ambient value can't override the login; a
+  // token the user set deliberately is a different string and survives.
+  if (selfConfiguredDeviceRole() === 'personal') {
+    if (setupToken && out.CLAUDE_CODE_OAUTH_TOKEN === setupToken) delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  } else if (setupToken) {
+    out.CLAUDE_CODE_OAUTH_TOKEN = setupToken;
+  } else {
+    delete out.CLAUDE_CODE_OAUTH_TOKEN;
+  }
   if (agent === 'cursor' && overlayHome) {
     // prepareJobHome links this host's Cursor auth file here. Pin XDG_CONFIG_HOME
     // to the overlay so an ambient value cannot bypass the routine sandbox.

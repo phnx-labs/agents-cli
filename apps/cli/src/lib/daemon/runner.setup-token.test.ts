@@ -23,6 +23,7 @@ let versionDirs: string[] = [];
 let prevNoAgent: string | undefined;
 let prevPassphrase: string | undefined;
 let prevClaudeToken: string | undefined;
+let prevMachineId: string | undefined;
 
 beforeEach(() => {
   fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-setup-token-store-'));
@@ -30,8 +31,14 @@ beforeEach(() => {
   prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
   prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
   prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+  prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
   process.env.AGENTS_SECRETS_NO_AGENT = '1';
   process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+  // These cases assert the WORKER routine credential rule (keep the setup-token,
+  // strip an inherited ambient one). Pin the self device id to a role-less name so
+  // selfConfiguredDeviceRole() resolves undefined; on a machine marked personal
+  // (e.g. zion) a routine defers to the login instead (RUSH-2395), flipping them.
+  process.env.AGENTS_SYNC_MACHINE_ID = 'runner-setup-token-worker-fixture';
   _resetFileStoreForTest({ fileDir, passphrase: PASS });
 });
 
@@ -43,6 +50,8 @@ afterEach(() => {
   else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
   if (prevClaudeToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
   else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevClaudeToken;
+  if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+  else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
   for (const dir of versionDirs) fs.rmSync(dir, { recursive: true, force: true });
   fs.rmSync(fileDir, { recursive: true, force: true });
 });

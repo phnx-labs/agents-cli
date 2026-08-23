@@ -29,7 +29,7 @@ import { recordRunName } from './session/run-names.js';
 import { mailboxDir, isValidMailboxId } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 import { isTmuxInstalled } from './tmux/binary.js';
-import { isTmuxEnabled } from './device-config.js';
+import { isTmuxEnabled, selfConfiguredDeviceRole } from './device-config.js';
 import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
@@ -435,6 +435,7 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
       version,
       versionHome,
       interactive: resolveInteractive(options),
+      deviceRole: selfConfiguredDeviceRole(),
       resolveClaudeSetupToken,
     });
   } else {

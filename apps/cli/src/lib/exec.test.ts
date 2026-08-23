@@ -1063,6 +1063,7 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
   let prevNoAgent: string | undefined;
   let prevPassphrase: string | undefined;
   let prevClaudeToken: string | undefined;
+  let prevMachineId: string | undefined;
 
   beforeEach(() => {
     fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-oauth-token-store-'));
@@ -1070,8 +1071,15 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
     prevNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
     prevPassphrase = process.env.AGENTS_SECRETS_PASSPHRASE;
     prevClaudeToken = process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
     process.env.AGENTS_SECRETS_NO_AGENT = '1';
     process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+    // These cases assert WORKER (headless) credential semantics. Pin the self
+    // device id to a name that carries no role mark so selfConfiguredDeviceRole()
+    // resolves undefined (worker-equivalent) — otherwise, run on a machine marked
+    // `config.role: personal` (e.g. zion), the personal-device gate would defer to
+    // the login and these assertions would flip (RUSH-2395).
+    process.env.AGENTS_SYNC_MACHINE_ID = 'rush-2360-worker-fixture';
     _resetFileStoreForTest({ fileDir, passphrase: PASS });
   });
 
@@ -1083,6 +1091,8 @@ describe('buildExecEnv — Claude ambient CLAUDE_CODE_OAUTH_TOKEN handling (RUSH
     else process.env.AGENTS_SECRETS_PASSPHRASE = prevPassphrase;
     if (prevClaudeToken === undefined) delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
     else process.env.CLAUDE_CODE_OAUTH_TOKEN = prevClaudeToken;
+    if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
     for (const dir of versionDirs) fs.rmSync(dir, { recursive: true, force: true });
     fs.rmSync(fileDir, { recursive: true, force: true });
   });
