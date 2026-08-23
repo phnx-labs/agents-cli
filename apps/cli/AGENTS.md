@@ -67,9 +67,14 @@ migrator is the single source of truth for legacy handling.
 
 System + user `hooks.yaml` merged, user wins on same name. Per-entry `matches:`
 predicates (`prompt_contains`, `prompt_matches`, `tool_name`, `tool_args_match`,
-`cwd_includes`, `project_has`, `git_dirty`, `permission_mode`) AND together at
-fire time — `permission_mode` alone is fail-open on absence, since only some
-harnesses report the live mode in hook input. Per-entry
+`cwd_includes`, `project_has`, `git_dirty`, `permission_mode`,
+`permission_mode_not`) AND together at fire time — the two mode predicates are
+fail-open on absence, since only some harnesses report the live mode in hook
+input. Use `permission_mode_not` to gate a hook **off** in one mode:
+`permission_mode` is an allowlist, so expressing "everywhere except plan" through
+it means enumerating every other mode, and that enumeration silently stops
+matching when a harness adds or renames one — which for a guard means it quietly
+stops guarding. Per-entry
 `enabled: false` disables a system-shipped hook from the user side. The `agents:`
 field in `ManifestHook` is `@deprecated` — the capability table decides which
 agents register a hook.
