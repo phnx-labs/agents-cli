@@ -357,7 +357,6 @@ describe('remote-control consent gate over IPC', () => {
       await server.stop();
     }
   }, 20_000);
-});
 
   it('refuses a fleet-remote START — the gate at BrowserService.start, not the task one', async () => {
     // `start` is NOT in PAGE_CREATE_VERBS/PAGE_RESOLVE_VERBS: ipc.ts routes it
