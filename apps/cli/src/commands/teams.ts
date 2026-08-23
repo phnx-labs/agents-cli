@@ -1630,7 +1630,22 @@ export function registerTeamsCommands(program: Command): void {
         // trim, drop blanks, dedupe (preserving first-seen order).
         const rawPool = [opts.devices, opts.hosts].filter(Boolean).join(',');
         const devices: string[] = [];
-        for (const d of rawPool.split(',').map((s) => s.trim()).filter(Boolean)) {
+        for (const raw of rawPool.split(',').map((s) => s.trim()).filter(Boolean)) {
+          // Resolve `interactive` to the concrete device HERE, the same way the
+          // single `--device` pin does. A pool is a set of specific machines the
+          // scheduler picks between, so persisting the sentinel would let the
+          // pool's membership change silently the next time `interactive.host`
+          // is re-pinned — and every later friction message would quote
+          // "interactive" instead of a box the user can act on.
+          let d = raw;
+          if (isDeviceInteractive(d)) {
+            const pinned = resolveInteractiveDevice();
+            if (!pinned) {
+              dieFriction('teams', 'device-interactive-unset', interactiveUnsetError());
+            }
+            process.stderr.write(chalk.gray(`[teams] pool device=interactive → ${pinned}\n`));
+            d = pinned!;
+          }
           if (!devices.includes(d)) devices.push(d);
         }
 
