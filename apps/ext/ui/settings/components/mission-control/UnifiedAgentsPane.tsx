@@ -38,7 +38,7 @@ import type { FlatTask } from '../bench/TaskCard'
 import { TicketDetail } from './TicketDetail'
 import { HostDetail } from './HostDetail'
 import { ProjectsPane } from './ProjectsPane'
-import { FeedItem, FollowUpBox } from './FeedItem'
+import { AttentionReceipt, FeedItem, FollowUpBox } from './FeedItem'
 import { SessionsPane } from './SessionsPane'
 import { NeedsYouClusters } from './NeedsYouClusters'
 import { AgentDecision } from './AgentDecision'
@@ -736,6 +736,13 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
   }, [])
 
   const [remoteSessions, setRemoteSessions] = useState<RemoteSessionLike[]>([])
+  const [feedActivity, setFeedActivity] = useState<Array<{
+    type?: string
+    key?: string
+    state?: string
+    source?: string
+    question?: string | { text?: string }
+  }>>([])
   const [offlineHosts, setOfflineHosts] = useState<string[]>([])
   // Per-agent reply failures (host 'replyResult' with ok=false, or a 'none' channel),
   // shown inline near the reply control instead of a toast. Cleared on the next send.
@@ -818,6 +825,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           return
         }
         setRemoteSessions(Array.isArray(msg.sessions) ? (msg.sessions as RemoteSessionLike[]) : [])
+        if (Array.isArray(msg.activity)) setFeedActivity(msg.activity)
         const roster = Array.isArray(msg.hosts)
           ? (msg.hosts as Array<{ name: string; online: boolean }>)
               .filter((h) => h && typeof h.name === 'string')
@@ -852,6 +860,7 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
           return
         }
         setRemoteSessions((prev) => [...prev.filter((s) => s.host !== 'this-mac'), ...local])
+        if (Array.isArray(msg.activity)) setFeedActivity(msg.activity)
         setLastLocalSync(typeof msg.fetchedAt === 'number' ? msg.fetchedAt : Date.now())
         if (typeof msg.cliAvailable === 'boolean') setCliUnavailable(!msg.cliAvailable)
       } else if (msg?.type === 'recentSessions') {
@@ -2232,6 +2241,21 @@ export function UnifiedAgentsPane({ terminals, tasks, tasksLoading, unifiedTasks
               onOpenAttachment={openAttachmentPreview}
               onOpenTerminal={openTerminalForAgent}
             />
+          ))}
+        </>
+      )}
+
+      {feedActivity.some((event) => event.type === 'attention.receipt') && (
+        <>
+          <div className="feed-sec">ACTIVITY<span className="ln" /></div>
+          {feedActivity.filter((event) => event.type === 'attention.receipt').map((event, index) => (
+            <div className="fitem" key={event.key ?? `attention-receipt-${index}`}>
+              <AttentionReceipt
+                state={event.state ?? 'resolved'}
+                source={event.source}
+                question={typeof event.question === 'string' ? event.question : event.question?.text}
+              />
+            </div>
           ))}
         </>
       )}

@@ -2204,6 +2204,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
             fetchedAt,
             hostFreshness,
             fromCache: false,
+            activity: sessionPresentationStore.activityEvents(),
           });
         } catch (err) {
           console.error('[SETTINGS] Error fetching host sessions:', err);
@@ -2233,6 +2234,7 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
             sessions: localSessions,
             fetchedAt,
             fromCache: false,
+            activity: sessionPresentationStore.activityEvents(),
           });
         } catch (err) {
           console.error('[SETTINGS] Error fetching local sessions:', err);

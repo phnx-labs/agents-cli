@@ -6,6 +6,7 @@ import type { ProjectRule } from './settings';
 export class SessionPresentationStore {
   private rows = new Map<string, unknown>();
   private attention = new Map<string, unknown>();
+  private attentionScopes = new Map<string, string>();
   private activity: unknown[] = [];
   private sequences = new Map<string, number>();
   private scopes = new Map<string, { status: 'available' | 'unavailable'; reason?: string }>();
@@ -22,24 +23,49 @@ export class SessionPresentationStore {
         const rowKey = this.rowKeyOf(row);
         if (rowKey) this.rows.set(rowKey, row);
       }
-      this.attention.clear();
+      for (const [key, scope] of this.attentionScopes) {
+        if (scope === event.scope) {
+          this.attention.delete(key);
+          this.attentionScopes.delete(key);
+        }
+      }
       for (const item of Array.isArray(event.attention) ? event.attention : []) {
         const key = this.attentionKeyOf(item);
-        if (key) this.attention.set(key, item);
+        if (key) {
+          this.attention.set(key, item);
+          this.attentionScopes.set(key, event.scope);
+        }
       }
     } else if (event.type === 'agent.upsert') {
       const rowKey = event.rowKey || this.rowKeyOf(event.agent);
       if (rowKey && event.agent) this.rows.set(rowKey, event.agent);
     } else if (event.type === 'attention.upsert' && event.attention && !Array.isArray(event.attention)) {
       const key = event.rowKey || this.attentionKeyOf(event.attention);
-      if (key) this.attention.set(key, event.attention);
+      if (key) {
+        this.attention.set(key, event.attention);
+        this.attentionScopes.set(key, event.scope);
+      }
     } else if (event.type === 'attention.remove' && event.rowKey) {
       const previous = this.attention.get(event.rowKey);
       if (previous && typeof previous === 'object') {
         const resolution = event.resolution && typeof event.resolution === 'object' ? event.resolution as { state?: unknown } : {};
         this.attention.set(event.rowKey, { ...previous, state: typeof resolution.state === 'string' ? resolution.state : 'resolved' });
       }
-      if (event.resolution) this.activity.push(event.resolution);
+      if (event.resolution) {
+        const attention = previous && typeof previous === 'object' ? previous as Record<string, unknown> : {};
+        const resolution = event.resolution as Record<string, unknown>;
+        this.activity.push({
+          type: 'attention.receipt',
+          key: event.rowKey,
+          sessionId: attention.sessionId,
+          question: attention.question,
+          source: attention.source,
+          fingerprint: attention.fingerprint,
+          state: typeof resolution.state === 'string' ? resolution.state : 'resolved',
+          resolvedAt: resolution.resolvedAt ?? event.capturedAt,
+          resolution,
+        });
+      }
     } else if (event.type === 'activity.append' && event.event) {
       this.activity.push(event.event);
     } else if (event.type === 'scope' && event.status) {
@@ -63,7 +89,7 @@ export class SessionPresentationStore {
   scope(scope: string): { status: 'available' | 'unavailable'; reason?: string } | undefined {
     return this.scopes.get(scope);
   }
-  clear(): void { this.rows.clear(); this.attention.clear(); this.activity = []; this.sequences.clear(); this.scopes.clear(); }
+  clear(): void { this.rows.clear(); this.attention.clear(); this.attentionScopes.clear(); this.activity = []; this.sequences.clear(); this.scopes.clear(); }
 
   /** Normalize the CLI stream rows for UI rendering without starting another query. */
   presentedSessions(

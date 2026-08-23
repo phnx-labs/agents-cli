@@ -9,7 +9,11 @@ describe('SessionPresentationStore', () => {
     expect(store.sessions()).toEqual([{ rowKey: 'r1', sessionId: 's1', attention }]);
     store.apply({ v: 1, type: 'attention.remove', streamId: 's', sequence: 2, capturedAt: 2, scope: 'local', rowKey: 'a1', resolution: { key: 'a1', state: 'answered' } });
     expect(store.sessions()).toEqual([{ rowKey: 'r1', sessionId: 's1', attention: { ...attention, state: 'answered' } }]);
-    expect(store.activityEvents()).toEqual([{ key: 'a1', state: 'answered' }]);
+    expect(store.activityEvents()).toEqual([{
+      type: 'attention.receipt', key: 'a1', sessionId: 's1', question: undefined,
+      source: undefined, fingerprint: 'fp', state: 'answered', resolvedAt: 2,
+      resolution: { key: 'a1', state: 'answered' },
+    }]);
   });
   test('projects reset/upsert/remove without deriving lifecycle state', () => {
     const store = new SessionPresentationStore();
@@ -59,6 +63,14 @@ describe('SessionPresentationStore', () => {
     store.apply({ v: 1, type: 'reset', streamId: 'b', sequence: 1, capturedAt: 1, scope: 'yosemite-s1', agents: [{ rowKey: 'y', sourceDevice: 'yosemite-s1' }], attention: [] });
     expect(store.apply({ v: 1, type: 'attention.remove', streamId: 'a', sequence: 4, capturedAt: 2, scope: 'zion', rowKey: 'z' })).toBe(false);
     expect(store.sessions()).toEqual([{ rowKey: 'z', sourceDevice: 'zion' }, { rowKey: 'y', sourceDevice: 'yosemite-s1' }]);
+  });
+
+  test('a reset retains projected attention owned by another scope', () => {
+    const store = new SessionPresentationStore();
+    const remoteAttention = { key: 'remote-attention', sessionId: 'remote-session', state: 'open' };
+    store.apply({ v: 1, type: 'reset', streamId: 'remote', sequence: 1, capturedAt: 1, scope: 'remote', agents: [{ rowKey: 'remote-row', sessionId: 'remote-session', sourceDevice: 'remote' }], attention: [remoteAttention] });
+    store.apply({ v: 1, type: 'reset', streamId: 'local', sequence: 1, capturedAt: 2, scope: 'local', agents: [{ rowKey: 'local-row', sessionId: 'local-session', sourceDevice: 'local' }], attention: [] });
+    expect(store.sessions()).toContainEqual({ rowKey: 'remote-row', sessionId: 'remote-session', sourceDevice: 'remote', attention: remoteAttention });
   });
 
   test('liveSession returns machine + topic for a --device auto tab that never recorded its host', () => {

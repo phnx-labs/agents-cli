@@ -43,6 +43,23 @@ function TicketArtifact({ ticket, className }: { ticket: string; className: stri
     : <span className={className} title={`Created ticket ${label}`}><Icon name="plus" size={10} /> {label}</span>
 }
 
+export interface AttentionReceiptProps {
+  state: string
+  source?: string
+  question?: string
+}
+
+/** Compact chronological proof that an attention item was resolved. */
+export function AttentionReceipt({ state, source, question }: AttentionReceiptProps) {
+  return (
+    <div className="receipt" data-testid="attention-receipt">
+      <span>{state}</span>
+      {source && <span className="pill" data-testid="attention-source">{source}</span>}
+      {question && <span className="summary">{firstLine(question)}</span>}
+    </div>
+  )
+}
+
 // Reply callbacks are agent-scoped (they take the FloorAgent, not a pre-bound closure)
 // so the caller can pass the SAME stable function reference to every row. That is what
 // lets React.memo(FeedItem) skip re-rendering unchanged rows — an inline `(o) => f(a, o)`
@@ -312,7 +329,7 @@ function FeedItemImpl({ agent: a, selected, plain, error, onSelect, onOption, on
         </div>
       )}
       {!a.needs && a.attentionState && a.attentionState !== 'open' && (
-        <div className="receipt" data-testid="attention-receipt">{a.attentionState}</div>
+        <AttentionReceipt state={a.attentionState} source={a.attentionSource} />
       )}
       {/* Contextual follow-up: an agent that isn't working (idle or done) and isn't
           already asking for you is ready for the next task. Queue one right on its row,
