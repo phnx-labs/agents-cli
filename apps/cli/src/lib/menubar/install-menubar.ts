@@ -1100,9 +1100,22 @@ export interface PidStaleness {
  * PREVIOUS binary — the exact condition `restartMenubarHelperAfterSwap` exists
  * to fix. Millisecond epoch timestamps in, so the truth table is unit-testable
  * without a live process or filesystem.
+ *
+ * The two timestamps do not have the same resolution. `pidStartTimeMs` parses
+ * `ps -o lstart`, which prints whole SECONDS, while the bundle mtime carries
+ * sub-second precision — and the restart this check exists to detect happens
+ * within a second of the swap that triggered it. A raw `<` therefore called a
+ * healthy just-restarted helper stale on essentially every upgrade: measured on
+ * zion at 1.22.46, pid start 1787441353000 vs bundle mtime 1787441353700, 700ms
+ * apart inside one second, reported as "running the OLD binary" and surfaced as
+ * `accessibilityHintNeeded` — telling the user to re-grant Accessibility after
+ * an upgrade that had already restarted the helper correctly. So the bundle
+ * mtime is truncated to the same whole second `ps` reports before comparing: a
+ * pid that started in the swap's own second is fresh, and a genuinely stale pid
+ * (a full second or more older) is still caught.
  */
 export function isMenubarProcessStaleAgainstBundle(pidStartedAtMs: number, bundleMtimeMs: number): boolean {
-  return pidStartedAtMs < bundleMtimeMs;
+  return pidStartedAtMs < Math.floor(bundleMtimeMs / 1000) * 1000;
 }
 
 /** Wall-clock start time of a live pid via `ps`, or null if it can't be read. */

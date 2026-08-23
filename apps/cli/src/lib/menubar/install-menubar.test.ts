@@ -691,4 +691,17 @@ describe('isMenubarProcessStaleAgainstBundle', () => {
   it('is not stale on an exact tie', () => {
     expect(isMenubarProcessStaleAgainstBundle(1_000, 1_000)).toBe(false);
   });
+
+  // The false positive that made `doctor` demand a re-grant after every healthy
+  // upgrade. `ps -o lstart` reports whole seconds, the bundle mtime does not, and
+  // the post-swap restart lands inside the swap's own second — so the two
+  // timestamps below are the SAME second, 700ms apart. Real values read off zion
+  // at 1.22.46, where the helper had already restarted onto the new binary.
+  it('is not stale when the pid started in the same second the bundle was written', () => {
+    expect(isMenubarProcessStaleAgainstBundle(1_787_441_353_000, 1_787_441_353_700)).toBe(false);
+  });
+
+  it('is still stale when the pid predates the bundle by a full second', () => {
+    expect(isMenubarProcessStaleAgainstBundle(1_787_441_352_000, 1_787_441_353_700)).toBe(true);
+  });
 });
