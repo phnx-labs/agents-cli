@@ -33,13 +33,14 @@ the `swarm-ext://` endpoint. It does not own fleet or agent policy.
   is registered and assembled by `harnessLaunchRegistrations` and
   `buildNewAgentLaunchCommand` (`src/core/launchTarget.ts`), which delegate flag
   construction to `buildAgentLaunchCommand` (`src/core/agents.ts`). The two
-  launch paths (`launchAgent` and `openSingleAgent`) register their tab through the shared
-  `registerAgentTerminal`; other creation sites still call `terminals.register`
-  directly. An automatic launch registers against the `shell` def until adoption
+  launch paths (`launchAgent` and `openSingleAgent`) and every session resume,
+  Fleet focus, attach, and crash restore register their editor tab through the
+  shared `registerAgentTerminal`. An automatic launch registers against the `shell` def until adoption
   re-keys it to the harness the CLI picked — the `sh` prefix is load-bearing,
   since `armShellAdoptionForTerminal` only arms for it. An unregistered tab is
   invisible to Copy Session ID / Resume / Fork and is not restored after a
-  window reload.
+  window reload. Crash restore reopens only mappings still returned by the CLI's
+  canonical session list, so reaped stale transcripts are not resurrected.
 - Other reads use their CLI noun: `devices list/status/accounts`, `teams ...
   --json`, `watchdog status/history`, and `routines ... --json`. Ticket reads
   use `linear tasks --json` and `gh issue list` (the former `agents tickets`

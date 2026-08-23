@@ -322,18 +322,12 @@ async function attachAgentFromBackground(): Promise<void> {
     { placeHolder: 'Bring which agent to the foreground?' },
   );
   if (!pick?.sessionId) return;
-  const term = vscode.window.createTerminal({ name: `attach ${pick.sessionId.slice(0, 8)}`, env: agentsSpawnEnv() });
-  term.show();
-  term.sendText(`agents sessions attach ${pick.sessionId}`);
-}
-
-export function focusSessionInTerminal(sessionId: string): void {
-  const child = spawn('agents', ['sessions', 'focus', sessionId], {
-    detached: true,
-    stdio: 'ignore',
-    env: agentsSpawnEnv(),
+  if (!extensionContext) return;
+  await openAgentSessionTerminal(extensionContext, {
+    id: pick.sessionId,
+    shortId: pick.sessionId.slice(0, 8),
+    agent: backgrounded.find((session) => session.sessionId === pick.sessionId)?.agentType || '',
   });
-  child.unref();
 }
 
 // Back-compat shim: keeps the old name used elsewhere in this file. The
@@ -425,6 +419,14 @@ async function registerAgentTerminal(
   }
   if (sessionId) {
     terminals.setSessionId(terminal, sessionId);
+    if (resumeKey && supportsPrewarming(resumeKey)) {
+      const opts = terminal.creationOptions as vscode.TerminalOptions;
+      const cwd = typeof opts.cwd === 'string'
+        ? opts.cwd
+        : vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
+      const { recordTerminalSession } = await import('./prewarm.vscode');
+      await recordTerminalSession(context, terminalId, sessionId, resumeKey, cwd);
+    }
     if (resumeKey) {
       startAutoLabelPollerForTerminal(terminal, context);
     }
@@ -972,6 +974,10 @@ export async function activate(context: vscode.ExtensionContext) {
     (terminal) => startAutoLabelPollerForTerminal(terminal, context)
   )
     .then(() => restoreAgentTerminals(context))
+    .then(async () => {
+      const { restoreTerminals } = await import('./prewarm.vscode');
+      await restoreTerminals(context, { listRestorableSessionIds, openAgentSessionTerminal });
+    })
     .then(() => {
       // Adopt any SH terminals that are already running an agent CLI
       // (e.g. user launched claude before reload).
@@ -1700,6 +1706,10 @@ export async function activate(context: vscode.ExtensionContext) {
           });
         }
 
+        if (entry?.id) {
+          const { removeTerminalSession } = await import('./prewarm.vscode');
+          await removeTerminalSession(context, entry.id);
+        }
         terminals.unregister(terminal);
         updateActiveAgentContextKey(vscode.window.activeTerminal, context.extensionPath);
       })();
@@ -2572,9 +2582,9 @@ function agentKeyFromSession(agent: string): SessionAgentType | null {
 }
 
 /** One resumed session, opened as its own editor tab wearing that agent's icon. */
-async function openResumedSessionTerminal(
+export async function openAgentSessionTerminal(
   context: vscode.ExtensionContext,
-  session: { id: string; shortId: string; agent: string; version?: string; account?: string; cwd?: string; host?: string },
+  session: { id: string; shortId: string; agent: string; version?: string; account?: string; cwd?: string; host?: string; terminalId?: string },
 ): Promise<boolean> {
   const agentKey = agentKeyFromSession(session.agent);
   if (!agentKey) {
@@ -2601,7 +2611,7 @@ async function openResumedSessionTerminal(
   const workspacePath = session.cwd || vscode.workspace.workspaceFolders?.[0]?.uri.fsPath || process.cwd();
   const resumeCmd = buildVersionedResumeCommand(agentKey, session.id, session.version, session.host);
 
-  const terminalId = terminals.nextId(builtIn.prefix);
+  const terminalId = session.terminalId || terminals.nextId(builtIn.prefix);
   const title = buildTerminalTitle(agentConfig.title, undefined, context, session.id);
   const terminal = vscode.window.createTerminal({
     iconPath: agentConfig.iconPath,
@@ -2612,24 +2622,19 @@ async function openResumedSessionTerminal(
     isTransient: true,
   });
 
-  const pid = await terminal.processId;
-  terminals.register(terminal, terminalId, agentConfig, pid, context);
-  readiness.registerTerminal(terminal);
-  terminals.setSessionId(terminal, session.id);
-  terminals.setAgentType(terminal, agentKey);
-  if (session.version) {
-    terminals.setVersion(terminal, session.version);
-  }
+  await registerAgentTerminal(terminal, context, {
+    terminalId,
+    agentConfig,
+    agentKey,
+    sessionId: session.id,
+    host: session.host,
+    pinnedVersion: session.version,
+  });
   if (session.account) {
     terminals.setAccount(terminal, session.account);
   }
   // Stamp the device so everything that later reads this session (label poller,
   // rotate, resume) follows it to the machine the transcript actually lives on.
-  if (session.host) {
-    terminals.setHost(terminal, session.host);
-  }
-  startAutoLabelPollerForTerminal(terminal, context);
-
   try {
     await readiness.waitFor(terminal, 'promptReady');
   } catch (err) {
@@ -2657,6 +2662,20 @@ async function openResumedSessionTerminal(
   }
 }
 
+export async function openAgentSessionById(
+  context: vscode.ExtensionContext,
+  sessionId: string,
+  host?: string,
+): Promise<boolean> {
+  const candidates = await fetchResumeCandidates();
+  const session = candidates.find((candidate) => candidate.id === sessionId);
+  if (!session) {
+    void vscode.window.showInformationMessage(`Session ${sessionId.slice(0, 8)} is no longer resumable.`);
+    return false;
+  }
+  return openAgentSessionTerminal(context, { ...session, host: host || session.host });
+}
+
 async function resumeSession(context: vscode.ExtensionContext) {
   const activeTerminal = vscode.window.activeTerminal;
   const terminalEntry = activeTerminal ? terminals.getByTerminal(activeTerminal) : null;
@@ -2671,7 +2690,7 @@ async function resumeSession(context: vscode.ExtensionContext) {
   });
   if (!session) return;
 
-  const opened = await openResumedSessionTerminal(context, session);
+  const opened = await openAgentSessionTerminal(context, session);
   if (opened) {
     vscode.window.setStatusBarMessage(
       `Resuming ${session.agent}${session.version ? `@${session.version}` : ''} · ${session.shortId}`,
@@ -2733,6 +2752,12 @@ async function fetchResumeCandidates(): Promise<ResumeCandidate[]> {
     lastActivityMs: row.lastActivityMs || Date.parse(row.timestamp || '') || 0,
     pid: row.pid || 0,
   }));
+}
+
+/** Session ids the CLI still exposes after applying its canonical stale-session reaping. */
+export async function listRestorableSessionIds(): Promise<Set<string>> {
+  const rows = await listSessionsViaCli(200);
+  return new Set(rows.map((row) => row.id).filter(Boolean));
 }
 
 /**
@@ -2832,7 +2857,7 @@ async function resumeSessionsBatch(
   for (const c of chosen) {
     // Sequential, not Promise.all: each open awaits its terminal's promptReady
     // before typing the resume command, and racing them interleaves the sends.
-    if (await openResumedSessionTerminal(context, c)) opened++;
+    if (await openAgentSessionTerminal(context, c)) opened++;
   }
   vscode.window.setStatusBarMessage(
     `Resumed ${opened} session${opened === 1 ? '' : 's'}`,
@@ -2932,7 +2957,7 @@ async function resumeCurrentPickHost(context: vscode.ExtensionContext) {
   const pick = await pickLaunchHost(context, `Resume ${agentKey} on… (currently: ${currentHost})`, agentKey);
   if (pick.cancelled) return;
   const sessionId = entry.sessionId!;
-  const opened = await openResumedSessionTerminal(context, {
+  const opened = await openAgentSessionTerminal(context, {
     id: sessionId,
     shortId: sessionId.slice(0, 8),
     agent: agentKey,
@@ -5349,6 +5374,8 @@ export async function deactivate(): Promise<void> {
   if (extensionContext) {
     // Persist open agent terminals for restore on next launch (immediate, not debounced)
     terminals.persistNow();
+    const { markCleanShutdown } = await import('./prewarm.vscode');
+    await markCleanShutdown(extensionContext);
   }
 
   // Release the monitor lease so another window can take over immediately.

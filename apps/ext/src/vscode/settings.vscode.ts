@@ -16,7 +16,7 @@ import * as swarm from './swarm.vscode';
 import { notifyNewlyWaiting } from './waitingNotifier.vscode';
 import { fetchAllTasks, detectAvailableSources } from './tasks.vscode';
 import { getBuiltInByTitle, configFromDef } from './agents.vscode';
-import { openSingleAgentWithQueue, runHeadlessAgent, focusSessionInTerminal } from './extension';
+import { openSingleAgentWithQueue, runHeadlessAgent, openAgentSessionById } from './extension';
 import { generateClaudeSessionId } from '../core/prewarm.simple';
 import { cachedInFlight, createTimedCache } from '../core/cachedInFlight';
 import { nudgeSession } from '../mcp/watchdog-bridge';
@@ -68,7 +68,7 @@ import {
   type Device,
 } from './deviceHealth.vscode';
 import { inferProjectCandidates } from '../core/projectIndex';
-import { normalizeHost, buildRemoteFocusCommand, groupByHost, type HostInfo } from '../core/remoteSessions';
+import { normalizeHost, groupByHost, type HostInfo } from '../core/remoteSessions';
 import { sessionPresentationStore } from '../core/sessionPresentationStore';
 import { LOCAL_LABEL, LOCAL_MACHINE_ID } from './remoteSessions.vscode';
 import { rankRepos } from '../core/repoIndex';
@@ -3051,20 +3051,12 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
         break;
       }
       case 'focusRemoteSession': {
-        // Open a terminal attached to a remote (or local-but-tabless) agent's tmux
-        // session, so a cross-host card can be "focused in a new terminal" the same
-        // way a local tab can. Reuses the tmux socket the reply channel already knows
-        // (ReplyTarget.muxSocket); ssh -t for a remote host, direct tmux locally.
+        // Resume the agent session through the same registered editor-tab path used
+        // by local Fleet focus and the command-palette resume flows.
         const host = typeof message.host === 'string' && message.host !== 'this-mac' ? message.host : '';
-        const socket = typeof message.muxSocket === 'string' ? message.muxSocket : '';
-        const label = typeof message.label === 'string' && message.label ? message.label : 'session';
-        if (!socket) { break; }
-        const shq = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`;
-        const attach = `tmux -S ${shq(socket)} attach`;
-        const cmd = host ? `ssh -t ${shq(host)} ${shq(attach)}` : attach;
-        const term = vscode.window.createTerminal({ name: `attach ${label}` });
-        term.sendText(cmd, true);
-        term.show(false);
+        const sessionId = typeof message.sessionId === 'string' ? message.sessionId.trim() : '';
+        if (!sessionId) { break; }
+        await openAgentSessionById(context, sessionId, host);
         break;
       }
       case 'revealWorktree': {
@@ -3172,21 +3164,13 @@ function wirePanel(panel: vscode.WebviewPanel, context: vscode.ExtensionContext)
           openExternalUrl(message.url);
         }
         break;
-      // Focus a session — open/attach a real terminal on it (handles the headless
-      // "open it and step in" case). Local delegates to `agents sessions focus <id>`
-      // detached (native terminal tab); a session on a REMOTE device gets a VS Code
-      // terminal that ssh's in and focuses it there (mirrors focusRemoteSession).
+      // Focus a session by resuming it in a registered editor-tab terminal. The
+      // canonical helper preserves terminal identity for every host.
       case 'focusSession': {
         const sessionId = typeof message.sessionId === 'string' ? message.sessionId.trim() : '';
         if (!sessionId) break;
         const host = typeof message.host === 'string' ? message.host : '';
-        if (isLocalDeviceHost(host)) {
-          focusSessionInTerminal(sessionId);
-          break;
-        }
-        const term = vscode.window.createTerminal({ name: `attach ${sessionId.slice(0, 8)}` });
-        term.sendText(buildRemoteFocusCommand(sessionId, host), true);
-        term.show(false);
+        await openAgentSessionById(context, sessionId, isLocalDeviceHost(host) ? undefined : host);
         break;
       }
       // Stop a background (headless) run by killing its pid — sends it back to parked

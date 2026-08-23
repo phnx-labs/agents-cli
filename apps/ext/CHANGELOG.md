@@ -26,6 +26,13 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
   posting the same resume action. Source: `ui/settings/components/mission-control/{SessionsPane.tsx,recapModel.ts}`.
   Spec: `.agents/artifacts/2026-08-23/mockup-session-row.html`.
 
+- **Fleet resume and crash recovery reopen agent sessions as full editor tabs.**
+  Fleet Focus, background Attach, remote tmux focus, command-palette Resume,
+  and unclean-shutdown recovery now share one registered editor-terminal path.
+  Restored tabs keep `AGENT_TERMINAL_ID` and session identity, while mappings
+  absent from the CLI's reaped session list are folded away. Source:
+  `src/vscode/{extension,settings,prewarm}.vscode.ts`.
+
 - **`Agents: New <Harness>` opens an agent again instead of asking which account
   (RUSH-3057).** 0.9.329 put the account picker on the bare command, so the
   keybinding everyone presses dozens of times a day emitted

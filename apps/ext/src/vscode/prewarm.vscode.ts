@@ -318,8 +318,21 @@ export function wasCleanShutdown(context: vscode.ExtensionContext): boolean {
  * Restore terminals from previous crash
  * Returns number of terminals restored
  */
-export async function restoreTerminals(context: vscode.ExtensionContext): Promise<number> {
-  if (wasCleanShutdown(context)) {
+export interface TerminalRestoreActions {
+  listRestorableSessionIds(): Promise<Set<string>>;
+  openAgentSessionTerminal(
+    context: vscode.ExtensionContext,
+    session: { id: string; shortId: string; agent: string; cwd?: string; terminalId?: string },
+  ): Promise<boolean>;
+}
+
+export async function restoreTerminals(
+  context: vscode.ExtensionContext,
+  actions: TerminalRestoreActions,
+): Promise<number> {
+  const cleanShutdown = wasCleanShutdown(context);
+  await context.globalState.update(CLEAN_SHUTDOWN_KEY, false);
+  if (cleanShutdown) {
     // Clean shutdown - clear mappings, don't restore
     await context.globalState.update(MAPPINGS_KEY, []);
     return 0;
@@ -329,23 +342,21 @@ export async function restoreTerminals(context: vscode.ExtensionContext): Promis
   if (mappings.length === 0) return 0;
 
   console.log(`[PREWARM] Detected crash - ${mappings.length} terminals to restore`);
-
-  // TODO: Implement terminal restoration
-  // For now, just clear the mappings and let user know
-  const action = await vscode.window.showInformationMessage(
-    `Found ${mappings.length} agent session(s) from previous crash. Restore them?`,
-    'Restore',
-    'Dismiss'
-  );
-
-  if (action === 'Restore') {
-    // Return count, actual restoration handled elsewhere
-    return mappings.length;
+  const restorableIds = await actions.listRestorableSessionIds();
+  let restored = 0;
+  for (const mapping of mappings) {
+    if (!restorableIds.has(mapping.sessionId)) continue;
+    const opened = await actions.openAgentSessionTerminal(context, {
+      id: mapping.sessionId,
+      shortId: mapping.sessionId.slice(0, 8),
+      agent: mapping.agentType,
+      cwd: mapping.workingDirectory,
+      terminalId: mapping.terminalId,
+    });
+    if (opened) restored++;
   }
-
-  // Clear mappings if dismissed
   await context.globalState.update(MAPPINGS_KEY, []);
-  return 0;
+  return restored;
 }
 
 // === Webview Data ===
