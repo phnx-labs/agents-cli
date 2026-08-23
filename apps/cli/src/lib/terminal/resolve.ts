@@ -32,25 +32,6 @@ export type InjectResolution =
   | { addressable: true; rail: InjectRail; target: InjectTarget; note?: string }
   | { addressable: false; reason: string };
 
-/**
- * Describe the control-plane features lost by a bare interactive launch only
- * when the canonical resolver finds no precise rail. The launcher prints this
- * once before spawning; addressable bare sessions stay quiet.
- */
-export function bareLaunchAddressabilityNotice(
-  session: Omit<ActiveSession, 'sessionId'>,
-  sessionId: string | undefined,
-  device: string,
-): string | undefined {
-  // sessionId is a SEPARATE required parameter rather than a field on the
-  // session object on purpose: it is optional on ActiveSession, so a caller
-  // that simply omitted it still type-checked — and an IDE-hosted terminal is
-  // addressed BY that id (the vscodium rail below), so omitting it made every
-  // VS Code / Cursor / Codium launch resolve un-addressable and warn on a
-  // session that was perfectly reachable. Now the caller cannot forget.
-  if (resolveInjectTargetForSession({ ...session, sessionId } as ActiveSession).addressable) return undefined;
-  return `agents: this direct session is not addressable; agents message, injection, and agents focus will not work. Restore them with: agents config set devices.${device}.tmux on`;
-}
 
 export interface ResolveOptions {
   /**

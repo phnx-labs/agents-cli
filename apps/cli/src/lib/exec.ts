@@ -42,7 +42,6 @@ import { getAccountInfo } from './agents.js';
 import { getUsageLookupKey, noteClaudeSessionLimit, noteClaudeOutOfCredits, clearClaudeAccountRefusal, parseClaudeSessionLimitReset } from './accounting/usage.js';
 import { deriveProvenance } from './session/provenance.js';
 import { hostFromPid } from './session/active.js';
-import { bareLaunchAddressabilityNotice } from './terminal/resolve.js';
 
 /**
  * Agent execution modes. Canonical name `skip` (dangerously skip permissions);
@@ -1869,16 +1868,6 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     }
   }
 
-  if (interactive) {
-    const notice = bareLaunchAddressabilityNotice({
-      context: 'terminal',
-      kind: options.agent,
-      host: await hostFromPid(process.pid),
-      status: 'running',
-      provenance: deriveProvenance(process.env as Record<string, string>, machineId()),
-    }, options.sessionId, machineId());
-    if (notice) process.stderr.write(`${notice}\n`);
-  }
 
   return new Promise((resolve, reject) => {
     // Interactive mode inherits all stdio so the CLI owns the TTY (TUI

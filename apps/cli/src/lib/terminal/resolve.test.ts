@@ -10,7 +10,7 @@
 import { describe, it, expect } from 'vitest';
 import type { ActiveSession } from '../session/active.js';
 import type { SessionProvenance, ReplyRail, MuxLocation } from '../session/provenance.js';
-import { bareLaunchAddressabilityNotice, resolveInjectTargetForSession } from './resolve.js';
+import { resolveInjectTargetForSession } from './resolve.js';
 
 /** Minimal ActiveSession with the fields the resolver reads. */
 function session(over: {
@@ -128,31 +128,3 @@ describe('resolveInjectTargetForSession — pty + refusals', () => {
   });
 });
 
-describe('bare interactive launch degradation', () => {
-  it('prints one recovery line when no precise rail exists', () => {
-    expect(bareLaunchAddressabilityNotice(session({ host: 'ghostty', sessionId: 's' }), 's', 'zion')).toBe(
-      'agents: this direct session is not addressable; agents message, injection, and agents focus will not work. Restore them with: agents config set devices.zion.tmux on',
-    );
-  });
-
-  it('stays quiet when the canonical resolver finds an addressable rail', () => {
-    expect(bareLaunchAddressabilityNotice(
-      session({ host: 'iterm', reply: { rail: 'iterm', session: 'UUID-1' } }),
-      undefined,
-      'zion',
-    )).toBeUndefined();
-  });
-
-  // An IDE-hosted terminal is addressed by its session id. A caller that builds
-  // the ActiveSession without threading sessionId through makes EVERY VS Code /
-  // Cursor / Codium launch resolve un-addressable, so the notice fires on a
-  // session that is perfectly reachable — which is exactly how AGI EXT spawns
-  // its agent tabs. Pin both halves so that regression cannot come back.
-  it.each(['code', 'cursor', 'codium'])('stays quiet for an IDE-hosted session with an id (%s)', (host) => {
-    expect(bareLaunchAddressabilityNotice(session({ host }), 'sess-1', 'zion')).toBeUndefined();
-  });
-
-  it.each(['code', 'cursor', 'codium'])('warns for an IDE-hosted session with no id (%s)', (host) => {
-    expect(bareLaunchAddressabilityNotice(session({ host }), undefined, 'zion')).toContain('not addressable');
-  });
-});
