@@ -180,14 +180,13 @@ enum Clip {
     // terminals wrapped in Electron/webview accept the event.
     private static func inject(_ text: String) {
         guard ensureAccessibility() else {
-            // Paste NEVER depends on the grant: the clip is already persisted, so
-            // hand the reference over on the clipboard and let the user press
-            // Cmd-V. Auto-type is a convenience gated on Accessibility; the paste
-            // itself is not. Framed as a plain "copied" confirmation, not an error
-            // — the hotkey did its job — with an OPTIONAL hint about enabling
-            // auto-type. Crucially, ensureAccessibility() no longer pops a modal
-            // to reach this path, so a machine that hasn't granted (or whose grant
-            // lapsed) still pastes with no interruption.
+            // Accessibility isn't granted (and we've already prompted once this
+            // launch, so we won't nag again). The clip is already persisted, so we
+            // still deliver it — on the clipboard, for the user to press Cmd-V —
+            // rather than losing the paste. This is the two-keystroke fallback;
+            // the one-keystroke auto-type above is what runs once the grant is in
+            // place. Framed as a plain "copied" confirmation with a one-click link
+            // to the Accessibility pane so enabling auto-type is easy.
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
             let appName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "AGI Menu"
@@ -220,18 +219,28 @@ enum Clip {
         }
     }
 
+    // Set once we've shown the Accessibility prompt this launch, so a denied
+    // machine is asked at most once — not on every hotkey press.
+    private static var didPromptForAccessibility = false
+
     // Whether this process may synthesize keystrokes (Accessibility granted).
     //
-    // Probe WITHOUT kAXTrustedCheckOptionPrompt on purpose. That option re-shows
-    // the system "…would like to control this computer" modal on EVERY paste while
-    // untrusted, which turned an OPTIONAL convenience (auto-type) into an
-    // inescapable nag: any grant lapse — a re-signed dev build sharing the bundle
-    // id, a TCC reset — left it firing on every hotkey press, dozens of times a
-    // week. The paste does not need the grant (inject falls back to the clipboard),
-    // so a bare AXIsProcessTrusted() read is correct: auto-type stays on where the
-    // user has already granted, and nobody is ever prompted just to paste. A user
-    // who WANTS auto-type enables it from the notification's deep link, on demand.
+    // The WHOLE point of Cmd-Shift-V is a ONE-keystroke paste: auto-type the
+    // reference straight into the terminal. That needs Accessibility. So when the
+    // grant is missing we DO ask for it — but exactly ONCE per launch, via
+    // kAXTrustedCheckOptionPrompt. After that we fall back to the clipboard
+    // silently rather than re-nagging on every paste (the original bug was the
+    // modal firing on EVERY hotkey press — but that was caused by the grant being
+    // repeatedly REVOKED by ad-hoc dev builds sharing the bundle id, which the
+    // `.dev`-id split + the designated-requirement pin now prevent; once granted,
+    // the grant sticks, so a single prompt is enough to restore one-keystroke
+    // paste for good). Granted → true → auto-type; genuinely refused → clipboard
+    // fallback in inject().
     private static func ensureAccessibility() -> Bool {
-        return AXIsProcessTrusted()
+        if AXIsProcessTrusted() { return true }
+        if didPromptForAccessibility { return false }
+        didPromptForAccessibility = true
+        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        return AXIsProcessTrustedWithOptions(opts)
     }
 }
