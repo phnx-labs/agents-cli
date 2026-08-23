@@ -721,6 +721,94 @@ cost, with the agent none the wiser. A hook that cannot execute should fail loud
 install or sync time. The only reason this is visible at all is that the shim happens
 to record exit codes; nothing reads them.
 
+## The same duplication, one layer up: skills and commands
+
+The guards duplicate a command parser. The **skills** duplicate a pipeline — and
+the numbers are worse, because prose has no compiler to catch it.
+
+<figure>
+<figcaption><strong>Figure 6 — One pipeline, three skills teaching it.</strong> Every skill that produces an HTML artifact re-teaches the same five mechanics. Counts are occurrences of each concept inside each SKILL.md.</figcaption>
+
+<svg viewBox="0 0 1000 330" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Skill overlap" width="100%" font-family="JetBrains Mono, ui-monospace, monospace">
+  <g font-size="12" fill="#8a8a8a">
+    <text x="300" y="34" text-anchor="middle">artifacts render</text>
+    <text x="440" y="34" text-anchor="middle">frontmatter</text>
+    <text x="580" y="34" text-anchor="middle">light/dark</text>
+    <text x="710" y="34" text-anchor="middle">inline-SVG</text>
+    <text x="860" y="34" text-anchor="middle">headless inspect</text>
+  </g>
+  <g font-size="13">
+    <g transform="translate(0,80)">
+      <text x="210" y="5" text-anchor="end" fill="#cfcfcf">artifacts · 131 ln</text>
+      <circle cx="300" cy="0" r="14" fill="#7fae5f"/><text x="300" y="5" text-anchor="middle" fill="#0e1f16">2</text>
+      <circle cx="440" cy="0" r="18" fill="#7fae5f"/><text x="440" y="5" text-anchor="middle" fill="#0e1f16">4</text>
+      <circle cx="580" cy="0" r="16" fill="#7fae5f"/><text x="580" y="5" text-anchor="middle" fill="#0e1f16">3</text>
+      <circle cx="710" cy="0" r="14" fill="#7fae5f"/><text x="710" y="5" text-anchor="middle" fill="#0e1f16">2</text>
+      <circle cx="860" cy="0" r="14" fill="#7fae5f"/><text x="860" y="5" text-anchor="middle" fill="#0e1f16">2</text>
+    </g>
+    <g transform="translate(0,150)">
+      <text x="210" y="5" text-anchor="end" fill="#ffd7dd">plan-render · 208 ln</text>
+      <circle cx="300" cy="0" r="18" fill="#ff5470"/><text x="300" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="440" cy="0" r="14" fill="#ff5470"/><text x="440" y="5" text-anchor="middle" fill="#2a0e12">2</text>
+      <circle cx="580" cy="0" r="18" fill="#ff5470"/><text x="580" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="710" cy="0" r="16" fill="#ff5470"/><text x="710" y="5" text-anchor="middle" fill="#2a0e12">3</text>
+      <circle cx="860" cy="0" r="18" fill="#ff5470"/><text x="860" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+    </g>
+    <g transform="translate(0,220)">
+      <text x="210" y="5" text-anchor="end" fill="#ffd7dd">visualize · 166 ln</text>
+      <circle cx="300" cy="0" r="14" fill="#ff5470"/><text x="300" y="5" text-anchor="middle" fill="#2a0e12">2</text>
+      <circle cx="440" cy="0" r="11" fill="#ff5470"/><text x="440" y="5" text-anchor="middle" fill="#2a0e12">1</text>
+      <circle cx="580" cy="0" r="18" fill="#ff5470"/><text x="580" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="710" cy="0" r="18" fill="#ff5470"/><text x="710" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+      <circle cx="860" cy="0" r="18" fill="#ff5470"/><text x="860" y="5" text-anchor="middle" fill="#2a0e12">4</text>
+    </g>
+  </g>
+  <line x1="230" y1="265" x2="920" y2="265" stroke="#3a3a3a"/>
+  <text x="230" y="292" fill="#ff8a9c" font-size="14" font-weight="700">505 lines across 3 skills — one pipeline</text>
+  <text x="920" y="292" text-anchor="end" fill="#7fae5f" font-size="13">keep 1 · delete 2</text>
+</svg>
+</figure>
+
+**`plan-render` and `visualize` are `artifacts` with a different noun in front.**
+All three teach: author Markdown → `artifacts render` → branded light/dark HTML with
+inline-SVG figures → inspect it headlessly. The *policies* genuinely differ — a plan
+owes a current-vs-proposed figure and a declared `surface:`, a visual owes one
+striking hero — but that is a **section**, not a skill. The pipeline underneath is
+identical, and a pipeline written out three times is a pipeline that drifts three
+ways.
+
+The consolidation follows the artifact CLI's own model: the noun is already a
+`kind:` in frontmatter (`kind: visual` renders this page; plans use `kind: plan`).
+The skills should mirror what the tool already does rather than re-partition it.
+
+### `/share:public` and `/share:private` are two flags wearing two commands
+
+16 and 18 lines. Masking the words *public* / *private* / *unlisted* and diffing them,
+the entire functional difference is:
+
+```
+public    agents artifacts share <file>
+private   agents artifacts share <file> --no-cover --expire 7d
+```
+
+Resolving the file, checking `share status`, reporting the link — duplicated in both.
+`private.md` step 1 gives it away in writing: *"(same as `/share:public`)"*. A file
+that documents its own duplication is the clearest possible signal.
+
+The CLI already takes the flags and a `share` skill already exists, so the surface
+should be **one** command where public is the default and private is a modifier.
+
+| | today | proposed |
+|---|---|---|
+| pipeline skills | `artifacts` 131 · `plan-render` 208 · `visualize` 166 | **`artifacts`** (~200), with `kind: plan` and `kind: visual` sections |
+| share surface | `share` skill 67 · `/share:public` 16 · `/share:private` 18 | **`share`** skill + one `/share` |
+| total | **606 lines** | **~270** |
+
+**One caveat before cutting.** `plan-html-reminder` greps rendered plans for a
+declared `surface:` and specific figure markup, so any consolidation has to preserve
+those exact contracts or the guard starts false-blocking the very plans it is meant
+to enforce. Its test suite is the check.
+
 ## Insight
 
 
