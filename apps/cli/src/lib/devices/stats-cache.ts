@@ -42,9 +42,18 @@ const CACHE_FILE = '.fleet-stats.json';
  */
 export const STATS_STALE_MS = 3 * 60_000;
 
+/** Static hardware totals are valid for seven days. */
+export const SPECS_STALE_MS = 7 * 24 * 60 * 60_000;
+
 /** True when a cached row is still within {@link STATS_STALE_MS}. */
 export function isFreshDeviceStats(stats: DeviceStats, now: number = Date.now()): boolean {
   return now - stats.fetchedAt <= STATS_STALE_MS;
+}
+
+/** True when cached core, RAM-total, and disk-total facts remain current. */
+export function isFreshDeviceSpecs(stats: DeviceStats, now: number = Date.now()): boolean {
+  const fetchedAt = stats.specsFetchedAt ?? stats.fetchedAt;
+  return now - fetchedAt <= SPECS_STALE_MS;
 }
 
 interface StatsCacheFile {
@@ -99,6 +108,8 @@ export interface FleetStatsResult {
 export interface LoadFleetStatsOptions {
   /** Skip the cache and live-probe every device (the `--refresh`/`--live` path). */
   forceRefresh?: boolean;
+  /** Read only static hardware facts, whose cache lifetime is seven days. */
+  specsOnly?: boolean;
   /** Device name of THIS machine — always probed locally (no ssh), never cached-served. */
   selfName?: string;
   /** Injectable probes + cache IO for tests (default to the real ssh/local/disk ones). */
@@ -132,13 +143,14 @@ export async function loadFleetStats(
   let servedFromCache = false;
 
   for (const d of devices) {
-    if (d.name === self) {
+    if (d.name === self && !opts.specsOnly) {
       // This machine is always probed locally — cheap, no ssh, always live.
       toProbe.push(d);
       continue;
     }
     const cached = cache[d.name];
-    if (cached && isFreshDeviceStats(cached, now)) {
+    const cacheFresh = cached && (opts.specsOnly ? isFreshDeviceSpecs(cached, now) : isFreshDeviceStats(cached, now));
+    if (cached && cacheFresh) {
       stats.set(d.name, cached);
       servedFromCache = true;
     } else {

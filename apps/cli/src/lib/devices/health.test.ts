@@ -1,16 +1,23 @@
+import { readFileSync } from 'fs';
+import { fileURLToPath } from 'url';
 import { describe, it, expect } from 'vitest';
 import {
   parseUptime,
   parseVmStat,
   parseLinuxMemInfo,
   parseNcpu,
+  parseDf,
   parseProbeOutput,
   parseWinProbeOutput,
   headroom,
   fmtBytes,
   fleetCapacity,
+  localProbeInvocation,
+  PROBE_SNIPPET,
   type DeviceStats,
 } from './health.js';
+
+const fixture = (name: string) => readFileSync(fileURLToPath(new URL(`testdata/${name}`, import.meta.url)), 'utf-8');
 
 describe('parseUptime', () => {
   it('reads the macOS "load averages:" form', () => {
@@ -86,6 +93,34 @@ describe('parseNcpu', () => {
   });
 });
 
+describe('parseDf', () => {
+  it('parses captured Linux df output and derives usage from total/free blocks', () => {
+    const disk = parseDf(fixture('df-linux.txt'));
+    expect(disk.diskTotalBytes).toBe(1967215868 * 1024);
+    expect(disk.diskFreeBytes).toBe(1725239864 * 1024);
+    expect(disk.diskUsedPercent).toBeCloseTo(((1967215868 - 1725239864) / 1967215868) * 100);
+  });
+
+  it('parses captured macOS df output without reading the rounded Capacity column', () => {
+    const disk = parseDf(fixture('df-macos.txt'));
+    expect(disk.diskTotalBytes).toBe(1942700368 * 1024);
+    expect(disk.diskFreeBytes).toBe(1151328936 * 1024);
+    expect(disk.diskUsedPercent).toBeCloseTo(((1942700368 - 1151328936) / 1942700368) * 100);
+  });
+
+  it('returns no disk signal for an unparseable row', () => {
+    expect(parseDf('Filesystem blocks used available')).toEqual({});
+  });
+});
+
+describe('probe invocation', () => {
+  it('keeps all four POSIX segments in one sh -c invocation', () => {
+    expect(PROBE_SNIPPET.split('---AGSTAT---')).toHaveLength(4);
+    expect(localProbeInvocation('linux')).toEqual({ file: 'sh', args: ['-c', PROBE_SNIPPET] });
+    expect(localProbeInvocation('darwin')).toEqual({ file: 'sh', args: ['-c', PROBE_SNIPPET] });
+  });
+});
+
 describe('parseProbeOutput', () => {
   it('assembles load, ncpu, normalized load%, and mem% (linux)', () => {
     const stdout = [
@@ -94,12 +129,15 @@ describe('parseProbeOutput', () => {
       'MemTotal:       10000 kB\nMemAvailable:    2000 kB',
       '---AGSTAT---',
       '16',
+      '---AGSTAT---',
+      fixture('df-linux.txt').trim(),
     ].join('\n');
     const s = parseProbeOutput('box', stdout, 111);
     expect(s.loadAvg1).toBe(4);
     expect(s.ncpu).toBe(16);
     expect(s.loadPercent).toBeCloseTo(25); // 4/16
     expect(Math.round(s.memPercent!)).toBe(80);
+    expect(s.diskTotalBytes).toBe(1967215868 * 1024);
     expect(s.reachable).toBe(true);
     expect(s.fetchedAt).toBe(111);
   });
@@ -110,6 +148,13 @@ describe('parseProbeOutput', () => {
 });
 
 describe('parseWinProbeOutput', () => {
+  it('reads captured Win32_LogicalDisk output', () => {
+    const s = parseWinProbeOutput('win-mini', fixture('win32-logical-disk.txt'), 111);
+    expect(s.diskFreeBytes).toBe(592998400 * 1024);
+    expect(s.diskTotalBytes).toBe(999480320 * 1024);
+    expect(s.diskUsedPercent).toBeCloseTo(((999480320 - 592998400) / 999480320) * 100);
+  });
+
   it('reads cpu%, memory, and core count from the labeled line', () => {
     const s = parseWinProbeOutput('uranus', 'AGWINSTAT load=12.5 freeKb=44447908 totalKb=66875660 ncpu=32\n', 111);
     expect(s.loadPercent).toBe(12.5);
@@ -120,6 +165,7 @@ describe('parseWinProbeOutput', () => {
     expect(s.loadAvg1).toBeUndefined();
     expect(s.reachable).toBe(true);
     expect(s.fetchedAt).toBe(111);
+    expect(s.diskTotalBytes).toBeUndefined();
   });
   it('tolerates a $null LoadPercentage (empty load field) — mem still counts', () => {
     const s = parseWinProbeOutput('uranus', 'AGWINSTAT load= freeKb=1000 totalKb=2000 ncpu=8\n', 0);

@@ -1,0 +1,1 @@
+AGWINSTAT load=6 freeKb=488170432 totalKb=999480320 ncpu=16 diskFreeKb=592998400 diskTotalKb=999480320

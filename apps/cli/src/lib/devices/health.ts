@@ -1,7 +1,7 @@
 /**
  * Device resource probing for `agents devices list`.
  *
- * One SSH round-trip per device gathers load average, memory pressure, and core
+ * One SSH round-trip per device gathers load average, memory pressure, disk, and core
  * count (mac + linux via a POSIX snippet, windows via a CIM one-liner), parsed
  * into a {@link DeviceStats}. Probes run in parallel with a bounded timeout so
  * the list stays responsive — a slow or hung box degrades to "no stats" instead
@@ -26,9 +26,8 @@ export const PROBE_TIMEOUT_MS = 2_500;
 export const WIN_PROBE_TIMEOUT_MS = 6_000;
 
 const SEP = '---AGSTAT---';
-/** One-shot remote snapshot: load, then memory (mac vm_stat else linux
- * meminfo), then core count (linux nproc else mac hw.ncpu). */
-const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null)`;
+/** One-shot remote snapshot: load, memory, core count, then root filesystem. */
+export const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/meminfo 2>/dev/null); echo ${SEP}; (nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null); echo ${SEP}; df -k / 2>/dev/null | tail -1`;
 
 /** Windows equivalent, one labeled line via CIM. PowerShell 5.1-safe: no `||`
  * chaining, plain string concatenation. `LoadPercentage` is $null on some
@@ -36,7 +35,13 @@ const PROBE_SNIPPET = `uptime; echo ${SEP}; (vm_stat 2>/dev/null || cat /proc/me
  * "no load signal" and headroom falls back to memory pressure alone.
  * wrapRemoteCommand base64-encodes this for powershell-shell devices, so the
  * quoting survives ssh intact. */
-const WIN_PROBE_SNIPPET = `$os = Get-CimInstance Win32_OperatingSystem; $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; Write-Output ('AGWINSTAT load=' + $cpu + ' freeKb=' + $os.FreePhysicalMemory + ' totalKb=' + $os.TotalVisibleMemorySize + ' ncpu=' + $env:NUMBER_OF_PROCESSORS)`;
+export const WIN_PROBE_SNIPPET = `$os = Get-CimInstance Win32_OperatingSystem; $cpu = (Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; $disk = Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='C:'"; Write-Output ('AGWINSTAT load=' + $cpu + ' freeKb=' + $os.FreePhysicalMemory + ' totalKb=' + $os.TotalVisibleMemorySize + ' ncpu=' + $env:NUMBER_OF_PROCESSORS + ' diskFreeKb=' + ($disk.FreeSpace / 1KB) + ' diskTotalKb=' + ($disk.Size / 1KB))`;
+
+export function localProbeInvocation(platform: NodeJS.Platform): { file: string; args: string[] } {
+  return platform === 'win32'
+    ? { file: 'powershell', args: ['-NoProfile', '-Command', WIN_PROBE_SNIPPET] }
+    : { file: 'sh', args: ['-c', PROBE_SNIPPET] };
+}
 
 export interface DeviceStats {
   host: string;
@@ -49,6 +54,11 @@ export interface DeviceStats {
   memPercent?: number;
   memTotalBytes?: number;
   memFreeBytes?: number;
+  diskTotalBytes?: number;
+  diskFreeBytes?: number;
+  diskUsedPercent?: number;
+  /** When the static ncpu/RAM/disk totals were last observed. */
+  specsFetchedAt?: number;
   fetchedAt: number;
 }
 
@@ -125,12 +135,33 @@ export function parseNcpu(out: string): { ncpu?: number } {
   return Number.isFinite(n) && n > 0 ? { ncpu: n } : {};
 }
 
-/** Assemble a DeviceStats from the three snippet sections. */
+interface DiskStats {
+  diskTotalBytes?: number;
+  diskFreeBytes?: number;
+  diskUsedPercent?: number;
+}
+
+/** Parse the final data row from `df -k /`, deriving usage from block counts. */
+export function parseDf(out: string): DiskStats {
+  const columns = out.trim().split(/\s+/);
+  if (columns.length < 4) return {};
+  const totalKb = Number(columns[1]);
+  const freeKb = Number(columns[3]);
+  if (!Number.isFinite(totalKb) || totalKb <= 0 || !Number.isFinite(freeKb) || freeKb < 0) return {};
+  return {
+    diskTotalBytes: totalKb * 1024,
+    diskFreeBytes: freeKb * 1024,
+    diskUsedPercent: Math.max(0, Math.min(100, ((totalKb - freeKb) / totalKb) * 100)),
+  };
+}
+
+/** Assemble a DeviceStats from the four snippet sections. */
 export function parseProbeOutput(host: string, stdout: string, fetchedAt: number): DeviceStats {
-  const [uptimePart = '', memPart = '', ncpuPart = ''] = stdout.split(SEP);
+  const [uptimePart = '', memPart = '', ncpuPart = '', diskPart = ''] = stdout.split(SEP);
   const { loadAvg1 } = parseUptime(uptimePart);
   const mem = memPart.includes('MemTotal') ? parseLinuxMemInfo(memPart) : parseVmStat(memPart);
   const { ncpu } = parseNcpu(ncpuPart);
+  const disk = parseDf(diskPart);
   const loadPercent =
     loadAvg1 !== undefined && ncpu ? (loadAvg1 / ncpu) * 100 : undefined;
   return {
@@ -142,6 +173,8 @@ export function parseProbeOutput(host: string, stdout: string, fetchedAt: number
     memPercent: mem.memPercent,
     memTotalBytes: mem.memTotalBytes,
     memFreeBytes: mem.memFreeBytes,
+    ...disk,
+    specsFetchedAt: fetchedAt,
     fetchedAt,
   };
 }
@@ -150,12 +183,15 @@ export function parseProbeOutput(host: string, stdout: string, fetchedAt: number
  * (e.g. CIM unavailable) keeps `reachable: true` — ssh answered — with no
  * numbers, mirroring how garbage POSIX output degrades. */
 export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: number): DeviceStats {
-  const m = stdout.match(/AGWINSTAT load=([0-9.]*) freeKb=([0-9]+) totalKb=([0-9]+) ncpu=([0-9]+)/);
+  const m = stdout.match(/AGWINSTAT load=([0-9.]*) freeKb=([0-9]+) totalKb=([0-9]+) ncpu=([0-9]+)(?: diskFreeKb=([0-9.]+) diskTotalKb=([0-9.]+))?/);
   if (!m) return { host, reachable: true, fetchedAt };
   const loadPercent = m[1] === '' ? undefined : parseFloat(m[1]);
   const freeKb = parseInt(m[2], 10);
   const totalKb = parseInt(m[3], 10);
   const ncpu = parseInt(m[4], 10);
+  const diskFreeKb = m[5] === undefined ? undefined : Number(m[5]);
+  const diskTotalKb = m[6] === undefined ? undefined : Number(m[6]);
+  const hasDisk = diskTotalKb !== undefined && diskTotalKb > 0 && diskFreeKb !== undefined && diskFreeKb >= 0;
   return {
     host,
     reachable: true,
@@ -164,6 +200,10 @@ export function parseWinProbeOutput(host: string, stdout: string, fetchedAt: num
     memPercent: totalKb > 0 ? Math.max(0, Math.min(100, ((totalKb - freeKb) / totalKb) * 100)) : undefined,
     memTotalBytes: totalKb > 0 ? totalKb * 1024 : undefined,
     memFreeBytes: totalKb > 0 ? freeKb * 1024 : undefined,
+    diskTotalBytes: hasDisk ? diskTotalKb * 1024 : undefined,
+    diskFreeBytes: hasDisk ? diskFreeKb * 1024 : undefined,
+    diskUsedPercent: hasDisk ? Math.max(0, Math.min(100, ((diskTotalKb - diskFreeKb) / diskTotalKb) * 100)) : undefined,
+    specsFetchedAt: fetchedAt,
     fetchedAt,
   };
 }
@@ -254,10 +294,11 @@ export function probeLocalStats(
 ): Promise<DeviceStats> {
   const fetchedAt = opts.now ?? Date.now();
   const isWin = process.platform === 'win32';
+  const invocation = localProbeInvocation(process.platform);
   return new Promise<DeviceStats>((resolve) => {
     execFile(
-      isWin ? 'powershell' : 'sh',
-      isWin ? ['-NoProfile', '-Command', WIN_PROBE_SNIPPET] : ['-c', PROBE_SNIPPET],
+      invocation.file,
+      invocation.args,
       { encoding: 'utf-8', timeout: opts.timeoutMs ?? (isWin ? WIN_PROBE_TIMEOUT_MS : PROBE_TIMEOUT_MS) },
       (err, stdout) => {
         if (err || !stdout) return resolve({ host, reachable: false, fetchedAt });
