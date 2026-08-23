@@ -234,7 +234,7 @@ reads the effective value back, `key value` sets it with validation,
 fleet-wide defaults layer. `--json` reports each key's `source` (`device` |
 `fleet` | `default`). Device-scope keys: `role` (`worker` \| `personal`; also
 `agents devices role`), `description` (one line saying what the box is for —
-synced fleet-wide, rendered in tables; capped at 80 chars, single line only),
+synced fleet-wide; capped at 80 chars, single line only),
 `agents.max-concurrent`, `scheduler.enabled`,
 `daemon.enabled`, `watchdog.enabled`, `tmux.enabled`,
 `browser.remote-control`, `browser.profile`, `notes` (an appended list of

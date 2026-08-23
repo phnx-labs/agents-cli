@@ -421,10 +421,11 @@ of `role`: one line saying what the box is FOR — "gpu box — cuda 12.4", "rel
 runner" — where `role` is the two-value placement switch. Like `role` it is
 **shared**: it lives in the device's tracked `devices/<name>/agents.yaml`
 `config.description` and syncs with `agents repo push/pull`, and any box may set
-it for any device. It renders in device tables, so it is validated as a single
+it for any device. The device-list renderer will show it (RUSH-3062, `surface`
+track), so it is validated as a single
 line capped at 80 characters — a newline or an over-long value is rejected
 loudly, never truncated. It is NOT `notes`: `notes` stays an appended list of
-long-form operator scratch that never renders in tables.
+long-form operator scratch that is never shown in device listings.
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
