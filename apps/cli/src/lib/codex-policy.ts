@@ -3,10 +3,11 @@ import { getUserAgentsDir } from './state.js';
 import { codexDefaultWritableRoots } from './permissions.js';
 import { repoAgentsDirForCwd } from './project-key.js';
 
-export type CodexPolicyMode = 'plan' | 'edit' | 'skip';
+export type CodexPolicyMode = 'plan' | 'edit' | 'auto' | 'skip';
 
 export const CODEX_PLAN_PROFILE = 'agents-plan';
 export const CODEX_EDIT_PROFILE = 'agents-edit';
+export const CODEX_AUTO_PROFILE = 'agents-auto';
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
@@ -38,11 +39,17 @@ export function codexPermissionProfileConfig(
   writableRoots: string[] = codexEditWritableRoots(),
 ): string {
   const parent = mode === 'plan' ? ':read-only' : ':workspace';
-  const roots = mode === 'edit'
-    ? `, workspace_roots = { ${inlineWorkspaceRoots(unique(writableRoots))} }`
-    : '';
+  const roots = mode === 'plan'
+    ? ''
+    : `, workspace_roots = { ${inlineWorkspaceRoots(unique(writableRoots))} }`;
   return `{ extends = ${JSON.stringify(parent)}${roots}, network = { enabled = true, allow_local_binding = true } }`;
 }
+
+const CODEX_PROFILES: Record<Exclude<CodexPolicyMode, 'skip'>, string> = {
+  plan: CODEX_PLAN_PROFILE,
+  edit: CODEX_EDIT_PROFILE,
+  auto: CODEX_AUTO_PROFILE,
+};
 
 /**
  * Canonical Codex safety policy used by every native launch path.
@@ -50,6 +57,15 @@ export function codexPermissionProfileConfig(
  * Config overrides are deliberately used instead of the legacy `--sandbox`
  * flags: named permission profiles are the only Codex surface that can keep a
  * plan run filesystem-read-only while independently enabling network access.
+ *
+ * `auto` and `edit` share one sandbox (`:workspace` plus the writable roots) and
+ * differ only in `approval_policy`. `edit` is `on-request`: a command the sandbox
+ * denies comes back as an approval prompt, which is right when someone is sitting
+ * at the terminal. `auto` is `never`: nothing prompts, and a denied command
+ * surfaces to the model as a plain command failure — the only behavior that works
+ * for an unattended run, where a prompt nobody answers is an agent that has
+ * stopped. Autonomy is the approval axis only; neither widens the sandbox, and
+ * `skip` remains the sole mode that removes it.
  */
 export function codexPolicyArgs(
   mode: CodexPolicyMode,
@@ -57,10 +73,10 @@ export function codexPolicyArgs(
 ): string[] {
   if (mode === 'skip') return ['--dangerously-bypass-approvals-and-sandbox'];
 
-  const profile = mode === 'plan' ? CODEX_PLAN_PROFILE : CODEX_EDIT_PROFILE;
+  const profile = CODEX_PROFILES[mode];
   return [
     '-c',
-    'approval_policy="on-request"',
+    `approval_policy=${mode === 'auto' ? '"never"' : '"on-request"'}`,
     '-c',
     `default_permissions=${JSON.stringify(profile)}`,
     '-c',

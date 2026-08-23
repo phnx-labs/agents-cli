@@ -92,10 +92,13 @@ describe('buildJobCommand', () => {
       expect(cmd.join(' ')).toContain('extends = ":read-only"');
     });
 
-    it('auto mode gets the same networked writable profile as edit', () => {
+    // A routine runs with nobody watching, so `on-request` there is not a safety
+    // net — it is a job that hangs on a dialog until the timeout kills it.
+    it('auto mode keeps edit\'s sandbox but never prompts', () => {
       const cmd = buildJobCommand(makeConfig({ agent: 'codex', mode: 'auto' }), 'hello');
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
-      expect(cmd).toContain('default_permissions="agents-edit"');
+      expect(cmd).toContain('default_permissions="agents-auto"');
+      expect(cmd).toContain('approval_policy="never"');
       expect(cmd.join(' ')).toContain('extends = ":workspace"');
       expect(cmd.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
     });

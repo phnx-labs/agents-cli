@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Why &quot;Agents: New Codex&quot; kept asking for permission</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-fixed">fixed</span></div>
+<h1>Why &quot;Agents: New Codex&quot; kept asking for permission</h1>
+<p class="summary">Codex had no auto mode, so the extension's --mode auto silently became edit — and edit hardcodes the approval policy that asks. Four links, one hardcoded string, and a permission system that structurally cannot reach Codex.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">4 links from button to dialog<span class="meta-sep" aria-hidden="true">·</span>1 line was the actual cause<span class="meta-sep" aria-hidden="true">·</span>0 of your permission rules reach Codex</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">codex-auto-mode</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">codex-auto-mode</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-22</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#recommendations"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommendations</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<p>You pressed <strong>Agents: New Codex</strong> and Codex stopped to ask before running <code>scp</code>.
+It should not have: the extension launches every agent with <code>--mode auto</code>, which
+means "do not ask me".</p>
+<p>It asked because <strong>Codex had no <code>auto</code> mode</strong>. The mode resolver silently
+degraded <code>auto</code> to <code>edit</code>, and <code>edit</code> hardcodes Codex's <em>asking</em> approval policy.
+Nothing in the chain was broken enough to throw an error — each link did
+something defensible, and the defensible things composed into a dialog box in
+front of an agent nobody was watching.</p>
+<p>The second half of your question — why your <code>~/.agents</code> permission groups did not
+apply — has a different and more permanent answer: <strong>they cannot</strong>. Codex has no
+per-command allowlist to write them into.</p>
+<h2 id="findings">Findings</h2>
+<h3>The chain, end to end</h3>
+<p>Four hops, each verified in the source:</p>
+<div class="artifact-figure artifact-figure-wide">
+<svg viewBox="0 0 880 272" role="img" aria-label="Four-stage chain from the extension button to the approval dialog, with the failure at stage 3">
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto">
+      <path d="M0,1 L8,4.5 L0,8 z" fill="currentColor" opacity="0.55"></path>
+    </marker>
+  </defs>
+
+  <g>
+    
+    <rect x="8" y="60" width="196" height="86" rx="8" fill="#3b82f6" fill-opacity="0.12" stroke="#3b82f6" stroke-opacity="0.5"></rect>
+    <text x="20" y="82" font-size="11" font-weight="700" fill="currentColor">1 · AGI EXT</text>
+    <text x="20" y="102" font-size="10.5" fill="currentColor">agents.ts:243</text>
+    <text x="20" y="122" font-size="11" fill="currentColor">--mode auto</text>
+    <text x="20" y="138" font-size="10" fill="currentColor">"don't ask me"</text>
+
+    
+    <rect x="228" y="60" width="196" height="86" rx="8" fill="#3b82f6" fill-opacity="0.12" stroke="#3b82f6" stroke-opacity="0.5"></rect>
+    <text x="240" y="82" font-size="11" font-weight="700" fill="currentColor">2 · resolveMode</text>
+    <text x="240" y="102" font-size="10.5" fill="currentColor">exec.ts:119</text>
+    <text x="240" y="122" font-size="11" fill="currentColor">auto → edit</text>
+    <text x="240" y="138" font-size="10" fill="currentColor">silent, by design</text>
+
+    
+    <rect x="448" y="52" width="196" height="102" rx="8" fill="#ef4444" fill-opacity="0.14" stroke="#ef4444" stroke-opacity="0.65" stroke-width="1.5"></rect>
+    <text x="460" y="74" font-size="11" font-weight="700" fill="currentColor">3 · codexPolicyArgs</text>
+    <text x="460" y="94" font-size="10.5" fill="currentColor">codex-policy.ts:58</text>
+    <text x="460" y="116" font-size="11" fill="currentColor">approval_policy=</text>
+    <text x="460" y="131" font-size="11" fill="currentColor">"on-request"</text>
+    <text x="460" y="147" font-size="10" fill="currentColor">hardcoded for edit</text>
+
+    
+    <rect x="668" y="60" width="196" height="86" rx="8" fill="#f59e0b" fill-opacity="0.13" stroke="#f59e0b" stroke-opacity="0.55"></rect>
+    <text x="680" y="82" font-size="11" font-weight="700" fill="currentColor">4 · Codex</text>
+    <text x="680" y="102" font-size="10.5" fill="currentColor">sandbox denies scp</text>
+    <text x="680" y="122" font-size="11" fill="currentColor">asks you</text>
+    <text x="680" y="138" font-size="10" fill="currentColor">agent stops</text>
+
+    <g>
+      <line x1="206" y1="103" x2="224" y2="103" stroke="currentColor" stroke-opacity="0.55" marker-end="url(#ar)"></line>
+      <line x1="426" y1="103" x2="444" y2="103" stroke="currentColor" stroke-opacity="0.55" marker-end="url(#ar)"></line>
+      <line x1="646" y1="103" x2="664" y2="103" stroke="currentColor" stroke-opacity="0.55" marker-end="url(#ar)"></line>
+    </g>
+
+    <text x="448" y="185" font-size="11" font-weight="700" fill="#ef4444">the one line that caused it</text>
+    <text x="448" y="203" font-size="10.5" fill="currentColor">every non-plan, non-skip mode collapsed into edit</text>
+
+    <text x="8" y="240" font-size="10.5" fill="currentColor">The request said "never ask". By stage 3 that intent no longer existed —</text>
+    <text x="8" y="257" font-size="10.5" fill="currentColor">edit cannot distinguish "the user chose edit" from "auto had nowhere to go".</text>
+  </g>
+</svg>
+<p class="artifact-legend">Read left to right. Stages 1, 2 and 4 each behaved as designed; the defect is that stage 2's fallback landed in a mode whose approval policy stage 3 hardcodes.</p>
+</div><h3>Why your permission groups never applied</h3>
+<p>This is not a sync bug and no amount of configuration fixes it. The codebase
+says so in its own words:</p>
+<pre><code>lossyBecause: 'Codex has no rule list — its sandbox mode is widened
+               into representative blanket grants'
+                    — permissions-registry.ts:361
+</code></pre>
+<p>Every harness gets a translation from your canonical rules. For Claude, a rule
+survives as a rule. For Codex, the entire allowlist collapses into <strong>two
+scalars</strong>:</p>
+<div class="artifact-figure artifact-figure-wide">
+<svg viewBox="0 0 880 260" role="img" aria-label="Canonical permission rules collapsing into two Codex scalars">
+  <g>
+    <text x="8" y="26" font-size="11.5" font-weight="700" fill="currentColor">your rules (~/.agents + ~/.agents/.system)</text>
+
+    <g fill="currentColor" opacity="0.85">
+      <rect x="8" y="42" width="150" height="22" rx="4" fill="#22c55e" fill-opacity="0.14" stroke="#22c55e" stroke-opacity="0.4"></rect>
+      <text x="18" y="57">Bash(git:*)</text>
+      <rect x="8" y="72" width="150" height="22" rx="4" fill="#22c55e" fill-opacity="0.14" stroke="#22c55e" stroke-opacity="0.4"></rect>
+      <text x="18" y="87">Bash(rg:*)</text>
+      <rect x="8" y="102" width="150" height="22" rx="4" fill="#22c55e" fill-opacity="0.14" stroke="#22c55e" stroke-opacity="0.4"></rect>
+      <text x="18" y="117">Bash(ls:*)</text>
+      <rect x="8" y="132" width="150" height="22" rx="4" fill="#22c55e" fill-opacity="0.14" stroke="#22c55e" stroke-opacity="0.4"></rect>
+      <text x="18" y="147">WebFetch(...)</text>
+      <text x="18" y="177">…hundreds more</text>
+    </g>
+
+    
+    <path d="M166,80 C230,80 230,50 300,50" fill="none" stroke="#22c55e" stroke-opacity="0.5" stroke-width="1.5"></path>
+    <rect x="304" y="30" width="230" height="44" rx="6" fill="#22c55e" fill-opacity="0.12" stroke="#22c55e" stroke-opacity="0.45"></rect>
+    <text x="316" y="49" font-size="11" font-weight="700" fill="currentColor">Claude · settings.json</text>
+    <text x="316" y="65" font-size="10.5" fill="currentColor">every rule survives as a rule</text>
+
+    
+    <path d="M166,120 C230,120 230,150 300,150" fill="none" stroke="#ef4444" stroke-opacity="0.5" stroke-width="1.5"></path>
+    <rect x="304" y="118" width="230" height="72" rx="6" fill="#ef4444" fill-opacity="0.12" stroke="#ef4444" stroke-opacity="0.5"></rect>
+    <text x="316" y="137" font-size="11" font-weight="700" fill="currentColor">Codex · config.toml</text>
+    <text x="316" y="156" font-size="10.5" fill="currentColor">approval_policy = "on-request"</text>
+    <text x="316" y="173" font-size="10.5" fill="currentColor">sandbox_mode = "workspace-write"</text>
+
+    <text x="556" y="140" font-size="10.5" fill="currentColor">only a blanket Bash(*) reaches</text>
+    <text x="556" y="157" font-size="10.5" fill="currentColor">approval_policy: never. Your rules</text>
+    <text x="556" y="174" font-size="10.5" fill="currentColor">are per-command, so it wrote the</text>
+    <text x="556" y="191" font-size="10.5" fill="currentColor">weaker branch — the asking one.</text>
+
+    <text x="8" y="222" font-size="10.5" fill="currentColor">Codex exposes no per-command allowlist at all. There is nothing on the right-hand side</text>
+    <text x="8" y="239" font-size="10.5" fill="currentColor">for Bash(git:*) to become — so the translator widens the whole set into two scalars.</text>
+  </g>
+</svg>
+<p class="artifact-legend">The same canonical rule set, translated for two harnesses. The Codex side is lossy by construction, not by omission.</p>
+</div><p>Confirmed in the Codex version home on the Linux worker the session was actually running on:</p>
+<pre><code>~/.agents/.history/versions/codex/0.145.0/home/.codex/config.toml:1
+approval_policy = "on-request"
+</code></pre>
+<h3>The second discovery: the sandbox has a network proxy</h3>
+<p>Look again at the two lines above the dialog in your screenshot —
+<code>Could not resolve hostname &lt;host&gt;: Temporary failure in name resolution</code>. The
+<code>scp</code> did not politely wait for permission. It <strong>ran, failed, and then Codex
+escalated</strong> it into an approval request.</p>
+<p>I reproduced it with a live Codex run on that worker:</p>
+<pre><code>getent hosts example.com   →  DNSFAIL
+curl https://example.com   →  curl: (56) CONNECT tunnel failed, response 403
+</code></pre>
+<p>Codex 0.146 routes sandboxed traffic through <strong>its own filtering proxy</strong>
+(<code>network_proxy = true</code>), which 403s anything not allowlisted — even though the
+launch profile sets <code>network = { enabled = true }</code>. So inside the sandbox,
+<code>ssh</code>, <code>scp</code>, and tailnet access do not work at all.</p>
+<p>This matters for what you should expect after the fix: those commands will now
+<strong>fail silently instead of prompting you</strong>. That is the correct behavior for an
+unattended agent, but it is not the same as "it works now".</p>
+<h2 id="evidence">Evidence</h2>
+<table>
+<thead>
+<tr>
+<th>Link</th>
+<th>Location</th>
+<th>What it does</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Extension launch</td>
+<td><code>apps/ext/src/core/agents.ts:243</code></td>
+<td><code>const effectiveMode = mode ?? 'auto'</code> — always appends <code>--mode auto</code></td>
+</tr>
+<tr>
+<td>Mode resolution</td>
+<td><code>apps/cli/src/lib/exec.ts:119</code></td>
+<td><code>auto</code> not in Codex's modes → silently returns <code>edit</code></td>
+</tr>
+<tr>
+<td>Capability table</td>
+<td><code>apps/cli/src/lib/agent-spec/agents.ts:381</code></td>
+<td><code>modes: ['plan', 'edit', 'skip']</code> — no <code>auto</code></td>
+</tr>
+<tr>
+<td>Policy builder</td>
+<td><code>apps/cli/src/lib/codex-policy.ts:58</code></td>
+<td><code>edit</code> → <code>-c approval_policy="on-request"</code></td>
+</tr>
+<tr>
+<td>Adapter</td>
+<td><code>apps/cli/src/lib/harness/adapters/codex.ts:77</code></td>
+<td>anything not <code>plan</code>/<code>skip</code> → <code>'edit'</code></td>
+</tr>
+<tr>
+<td>Permission translator</td>
+<td><code>apps/cli/src/lib/permissions.ts:1079-1099</code></td>
+<td>only a blanket <code>Bash(*)</code> reaches <code>approval_policy: 'never'</code></td>
+</tr>
+<tr>
+<td>Registry note</td>
+<td><code>apps/cli/src/lib/permissions-registry.ts:361</code></td>
+<td><em>"Codex has no rule list"</em></td>
+</tr>
+</tbody></table>
+<h2 id="recommendations">Recommendations</h2>
+<h3>What was fixed</h3>
+<p>Codex now has a real <code>auto</code> mode. Verified against the actual command builder,
+not a description of it:</p>
+<pre><code>edit -&gt; approval_policy="on-request" | default_permissions="agents-edit"
+auto -&gt; approval_policy="never"      | default_permissions="agents-auto"
+skip -&gt; --dangerously-bypass-approvals-and-sandbox
+</code></pre>
+<p>The <code>agents-auto</code> profile has the <strong>identical sandbox</strong> to <code>agents-edit</code> —
+workspace, <code>~/.agents</code>, the regenerable toolchain cache roots, network on. Only
+the approval axis changes.</p>
+<div class="artifact-callout">
+<strong>Autonomy is the approval axis only.</strong> `auto` does not widen the
+sandbox by a single path, and <code>--mode skip</code> remains the one mode that
+removes it. A sandbox-denied command under `auto` surfaces to the model as an
+ordinary command failure it can work around — instead of a dialog that stops an
+agent nobody is watching.
+</div><p>Interactive shim launches — a bare <code>codex</code> typed at your own terminal — still
+pin <code>edit</code>, because there a prompt is the useful outcome.</p>
+<p>Nine files: the policy builder, the adapter, the capability table, the command
+template, four test files, plus the spec (<code>EXEC-22a</code>), <code>resource-sync.md</code>, and a
+<code>.changelog/next/</code> fragment.</p>
+<h3>What to do for fleet work</h3>
+<p>For anything that reaches another machine — <code>scp</code>, <code>ssh</code>, <code>gh</code>, the tailnet —
+the sandbox's proxy makes <code>auto</code> useless, and only <code>--mode skip</code> works. You can
+have that today without waiting for a CLI release: add a <strong>Command Alias</strong> in the
+extension settings with agent <code>codex</code> and flags <code>--mode skip</code>. An explicit
+<code>--mode</code> in the alias flags suppresses the injected default
+(<code>apps/ext/src/core/agents.ts:245</code>).</p>
+<p>I did not make <code>skip</code> the extension's default for Codex — that would drop the
+sandbox on every Codex launch across every box, which is your call to make, not
+a fix to slip into a bug PR.</p>
+<h3>Reaching you</h3>
+<p>This fix lives in the CLI, so it arrives on your machines only after
+<code>merged → published → tagged → fleet-upgraded</code>. Until that lands, the Command
+Alias above is the unblock.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogJ1doeSAiQWdlbnRzOiBOZXcgQ29kZXgiIGtlcHQgYXNraW5nIGZvciBwZXJtaXNzaW9uJwpzdW1tYXJ5OiAiQ29kZXggaGFkIG5vIGF1dG8gbW9kZSwgc28gdGhlIGV4dGVuc2lvbidzIC0tbW9kZSBhdXRvIHNpbGVudGx5IGJlY2FtZSBlZGl0IOKAlCBhbmQgZWRpdCBoYXJkY29kZXMgdGhlIGFwcHJvdmFsIHBvbGljeSB0aGF0IGFza3MuIEZvdXIgbGlua3MsIG9uZSBoYXJkY29kZWQgc3RyaW5nLCBhbmQgYSBwZXJtaXNzaW9uIHN5c3RlbSB0aGF0IHN0cnVjdHVyYWxseSBjYW5ub3QgcmVhY2ggQ29kZXguIgpzdGF0dXM6IGZpeGVkCnRyYWNraW5nOiBjb2RleC1hdXRvLW1vZGUKZmFjdHM6CiAgLSAnNCBsaW5rcyBmcm9tIGJ1dHRvbiB0byBkaWFsb2cnCiAgLSAnMSBsaW5lIHdhcyB0aGUgYWN0dWFsIGNhdXNlJwogIC0gJzAgb2YgeW91ciBwZXJtaXNzaW9uIHJ1bGVzIHJlYWNoIENvZGV4JwpsaW5rczogW10KLS0tCgojIyBTdW1tYXJ5CgpZb3UgcHJlc3NlZCAqKkFnZW50czogTmV3IENvZGV4KiogYW5kIENvZGV4IHN0b3BwZWQgdG8gYXNrIGJlZm9yZSBydW5uaW5nIGBzY3BgLgpJdCBzaG91bGQgbm90IGhhdmU6IHRoZSBleHRlbnNpb24gbGF1bmNoZXMgZXZlcnkgYWdlbnQgd2l0aCBgLS1tb2RlIGF1dG9gLCB3aGljaAptZWFucyAiZG8gbm90IGFzayBtZSIuCgpJdCBhc2tlZCBiZWNhdXNlICoqQ29kZXggaGFkIG5vIGBhdXRvYCBtb2RlKiouIFRoZSBtb2RlIHJlc29sdmVyIHNpbGVudGx5CmRlZ3JhZGVkIGBhdXRvYCB0byBgZWRpdGAsIGFuZCBgZWRpdGAgaGFyZGNvZGVzIENvZGV4J3MgKmFza2luZyogYXBwcm92YWwgcG9saWN5LgpOb3RoaW5nIGluIHRoZSBjaGFpbiB3YXMgYnJva2VuIGVub3VnaCB0byB0aHJvdyBhbiBlcnJvciDigJQgZWFjaCBsaW5rIGRpZApzb21ldGhpbmcgZGVmZW5zaWJsZSwgYW5kIHRoZSBkZWZlbnNpYmxlIHRoaW5ncyBjb21wb3NlZCBpbnRvIGEgZGlhbG9nIGJveCBpbgpmcm9udCBvZiBhbiBhZ2VudCBub2JvZHkgd2FzIHdhdGNoaW5nLgoKVGhlIHNlY29uZCBoYWxmIG9mIHlvdXIgcXVlc3Rpb24g4oCUIHdoeSB5b3VyIGB+Ly5hZ2VudHNgIHBlcm1pc3Npb24gZ3JvdXBzIGRpZCBub3QKYXBwbHkg4oCUIGhhcyBhIGRpZmZlcmVudCBhbmQgbW9yZSBwZXJtYW5lbnQgYW5zd2VyOiAqKnRoZXkgY2Fubm90KiouIENvZGV4IGhhcyBubwpwZXItY29tbWFuZCBhbGxvd2xpc3QgdG8gd3JpdGUgdGhlbSBpbnRvLgoKIyMgRmluZGluZ3MKCiMjIyBUaGUgY2hhaW4sIGVuZCB0byBlbmQKCkZvdXIgaG9wcywgZWFjaCB2ZXJpZmllZCBpbiB0aGUgc291cmNlOgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS13aWRlIj4KPHN2ZyB2aWV3Qm94PSIwIDAgODgwIDI3MiIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJGb3VyLXN0YWdlIGNoYWluIGZyb20gdGhlIGV4dGVuc2lvbiBidXR0b24gdG8gdGhlIGFwcHJvdmFsIGRpYWxvZywgd2l0aCB0aGUgZmFpbHVyZSBhdCBzdGFnZSAzIj4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFyIiBtYXJrZXJXaWR0aD0iOSIgbWFya2VySGVpZ2h0PSI5IiByZWZYPSI4IiByZWZZPSI0LjUiIG9yaWVudD0iYXV0byI+CiAgICAgIDxwYXRoIGQ9Ik0wLDEgTDgsNC41IEwwLDggeiIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjU1Ii8+CiAgICA8L21hcmtlcj4KICA8L2RlZnM+CgogIDxnIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIFNGTW9uby1SZWd1bGFyLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPgogICAgPCEtLSBzdGFnZSAxIC0tPgogICAgPHJlY3QgeD0iOCIgeT0iNjAiIHdpZHRoPSIxOTYiIGhlaWdodD0iODYiIHJ4PSI4IiBmaWxsPSIjM2I4MmY2IiBmaWxsLW9wYWNpdHk9IjAuMTIiIHN0cm9rZT0iIzNiODJmNiIgc3Ryb2tlLW9wYWNpdHk9IjAuNSIvPgogICAgPHRleHQgeD0iMjAiIHk9IjgyIiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPjEgwrcgQUdJIEVYVDwvdGV4dD4KICAgIDx0ZXh0IHg9IjIwIiB5PSIxMDIiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjg1Ij5hZ2VudHMudHM6MjQzPC90ZXh0PgogICAgPHRleHQgeD0iMjAiIHk9IjEyMiIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIj4tLW1vZGUgYXV0bzwvdGV4dD4KICAgIDx0ZXh0IHg9IjIwIiB5PSIxMzgiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC43Ij4iZG9uJ3QgYXNrIG1lIjwvdGV4dD4KCiAgICA8IS0tIHN0YWdlIDIgLS0+CiAgICA8cmVjdCB4PSIyMjgiIHk9IjYwIiB3aWR0aD0iMTk2IiBoZWlnaHQ9Ijg2IiByeD0iOCIgZmlsbD0iIzNiODJmNiIgZmlsbC1vcGFjaXR5PSIwLjEyIiBzdHJva2U9IiMzYjgyZjYiIHN0cm9rZS1vcGFjaXR5PSIwLjUiLz4KICAgIDx0ZXh0IHg9IjI0MCIgeT0iODIiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+MiDCtyByZXNvbHZlTW9kZTwvdGV4dD4KICAgIDx0ZXh0IHg9IjI0MCIgeT0iMTAyIiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC44NSI+ZXhlYy50czoxMTk8L3RleHQ+CiAgICA8dGV4dCB4PSIyNDAiIHk9IjEyMiIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIj5hdXRvIOKGkiBlZGl0PC90ZXh0PgogICAgPHRleHQgeD0iMjQwIiB5PSIxMzgiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC43Ij5zaWxlbnQsIGJ5IGRlc2lnbjwvdGV4dD4KCiAgICA8IS0tIHN0YWdlIDM6IHRoZSBjdWxwcml0IC0tPgogICAgPHJlY3QgeD0iNDQ4IiB5PSI1MiIgd2lkdGg9IjE5NiIgaGVpZ2h0PSIxMDIiIHJ4PSI4IiBmaWxsPSIjZWY0NDQ0IiBmaWxsLW9wYWNpdHk9IjAuMTQiIHN0cm9rZT0iI2VmNDQ0NCIgc3Ryb2tlLW9wYWNpdHk9IjAuNjUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgICA8dGV4dCB4PSI0NjAiIHk9Ijc0IiBmb250LXNpemU9IjExIiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPjMgwrcgY29kZXhQb2xpY3lBcmdzPC90ZXh0PgogICAgPHRleHQgeD0iNDYwIiB5PSI5NCIgZm9udC1zaXplPSIxMC41IiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuODUiPmNvZGV4LXBvbGljeS50czo1ODwvdGV4dD4KICAgIDx0ZXh0IHg9IjQ2MCIgeT0iMTE2IiBmb250LXNpemU9IjExIiBmaWxsPSJjdXJyZW50Q29sb3IiPmFwcHJvdmFsX3BvbGljeT08L3RleHQ+CiAgICA8dGV4dCB4PSI0NjAiIHk9IjEzMSIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIj4ib24tcmVxdWVzdCI8L3RleHQ+CiAgICA8dGV4dCB4PSI0NjAiIHk9IjE0NyIgZm9udC1zaXplPSIxMCIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjc1Ij5oYXJkY29kZWQgZm9yIGVkaXQ8L3RleHQ+CgogICAgPCEtLSBzdGFnZSA0IC0tPgogICAgPHJlY3QgeD0iNjY4IiB5PSI2MCIgd2lkdGg9IjE5NiIgaGVpZ2h0PSI4NiIgcng9IjgiIGZpbGw9IiNmNTllMGIiIGZpbGwtb3BhY2l0eT0iMC4xMyIgc3Ryb2tlPSIjZjU5ZTBiIiBzdHJva2Utb3BhY2l0eT0iMC41NSIvPgogICAgPHRleHQgeD0iNjgwIiB5PSI4MiIgZm9udC1zaXplPSIxMSIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iY3VycmVudENvbG9yIj40IMK3IENvZGV4PC90ZXh0PgogICAgPHRleHQgeD0iNjgwIiB5PSIxMDIiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjg1Ij5zYW5kYm94IGRlbmllcyBzY3A8L3RleHQ+CiAgICA8dGV4dCB4PSI2ODAiIHk9IjEyMiIgZm9udC1zaXplPSIxMSIgZmlsbD0iY3VycmVudENvbG9yIj5hc2tzIHlvdTwvdGV4dD4KICAgIDx0ZXh0IHg9IjY4MCIgeT0iMTM4IiBmb250LXNpemU9IjEwIiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuNyI+YWdlbnQgc3RvcHM8L3RleHQ+CgogICAgPGcgY29sb3I9ImN1cnJlbnRDb2xvciI+CiAgICAgIDxsaW5lIHgxPSIyMDYiIHkxPSIxMDMiIHgyPSIyMjQiIHkyPSIxMDMiIHN0cm9rZT0iY3VycmVudENvbG9yIiBzdHJva2Utb3BhY2l0eT0iMC41NSIgbWFya2VyLWVuZD0idXJsKCNhcikiLz4KICAgICAgPGxpbmUgeDE9IjQyNiIgeTE9IjEwMyIgeDI9IjQ0NCIgeTI9IjEwMyIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIHN0cm9rZS1vcGFjaXR5PSIwLjU1IiBtYXJrZXItZW5kPSJ1cmwoI2FyKSIvPgogICAgICA8bGluZSB4MT0iNjQ2IiB5MT0iMTAzIiB4Mj0iNjY0IiB5Mj0iMTAzIiBzdHJva2U9ImN1cnJlbnRDb2xvciIgc3Ryb2tlLW9wYWNpdHk9IjAuNTUiIG1hcmtlci1lbmQ9InVybCgjYXIpIi8+CiAgICA8L2c+CgogICAgPHRleHQgeD0iNDQ4IiB5PSIxODUiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNlZjQ0NDQiPnRoZSBvbmUgbGluZSB0aGF0IGNhdXNlZCBpdDwvdGV4dD4KICAgIDx0ZXh0IHg9IjQ0OCIgeT0iMjAzIiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC44Ij5ldmVyeSBub24tcGxhbiwgbm9uLXNraXAgbW9kZSBjb2xsYXBzZWQgaW50byBlZGl0PC90ZXh0PgoKICAgIDx0ZXh0IHg9IjgiIHk9IjI0MCIgZm9udC1zaXplPSIxMC41IiBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuNyI+VGhlIHJlcXVlc3Qgc2FpZCAibmV2ZXIgYXNrIi4gQnkgc3RhZ2UgMyB0aGF0IGludGVudCBubyBsb25nZXIgZXhpc3RlZCDigJQ8L3RleHQ+CiAgICA8dGV4dCB4PSI4IiB5PSIyNTciIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjciPmVkaXQgY2Fubm90IGRpc3Rpbmd1aXNoICJ0aGUgdXNlciBjaG9zZSBlZGl0IiBmcm9tICJhdXRvIGhhZCBub3doZXJlIHRvIGdvIi48L3RleHQ+CiAgPC9nPgo8L3N2Zz4KPHAgY2xhc3M9ImFydGlmYWN0LWxlZ2VuZCI+UmVhZCBsZWZ0IHRvIHJpZ2h0LiBTdGFnZXMgMSwgMiBhbmQgNCBlYWNoIGJlaGF2ZWQgYXMgZGVzaWduZWQ7IHRoZSBkZWZlY3QgaXMgdGhhdCBzdGFnZSAyJ3MgZmFsbGJhY2sgbGFuZGVkIGluIGEgbW9kZSB3aG9zZSBhcHByb3ZhbCBwb2xpY3kgc3RhZ2UgMyBoYXJkY29kZXMuPC9wPgo8L2Rpdj4KCiMjIyBXaHkgeW91ciBwZXJtaXNzaW9uIGdyb3VwcyBuZXZlciBhcHBsaWVkCgpUaGlzIGlzIG5vdCBhIHN5bmMgYnVnIGFuZCBubyBhbW91bnQgb2YgY29uZmlndXJhdGlvbiBmaXhlcyBpdC4gVGhlIGNvZGViYXNlCnNheXMgc28gaW4gaXRzIG93biB3b3JkczoKCmBgYApsb3NzeUJlY2F1c2U6ICdDb2RleCBoYXMgbm8gcnVsZSBsaXN0IOKAlCBpdHMgc2FuZGJveCBtb2RlIGlzIHdpZGVuZWQKICAgICAgICAgICAgICAgaW50byByZXByZXNlbnRhdGl2ZSBibGFua2V0IGdyYW50cycKICAgICAgICAgICAgICAgICAgICDigJQgcGVybWlzc2lvbnMtcmVnaXN0cnkudHM6MzYxCmBgYAoKRXZlcnkgaGFybmVzcyBnZXRzIGEgdHJhbnNsYXRpb24gZnJvbSB5b3VyIGNhbm9uaWNhbCBydWxlcy4gRm9yIENsYXVkZSwgYSBydWxlCnN1cnZpdmVzIGFzIGEgcnVsZS4gRm9yIENvZGV4LCB0aGUgZW50aXJlIGFsbG93bGlzdCBjb2xsYXBzZXMgaW50byAqKnR3bwpzY2FsYXJzKio6Cgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1maWd1cmUgYXJ0aWZhY3QtZmlndXJlLXdpZGUiPgo8c3ZnIHZpZXdCb3g9IjAgMCA4ODAgMjYwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IkNhbm9uaWNhbCBwZXJtaXNzaW9uIHJ1bGVzIGNvbGxhcHNpbmcgaW50byB0d28gQ29kZXggc2NhbGFycyI+CiAgPGcgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgU0ZNb25vLVJlZ3VsYXIsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+CiAgICA8dGV4dCB4PSI4IiB5PSIyNiIgZm9udC1zaXplPSIxMS41IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSJjdXJyZW50Q29sb3IiPnlvdXIgcnVsZXMgKH4vLmFnZW50cyArIH4vLmFnZW50cy8uc3lzdGVtKTwvdGV4dD4KCiAgICA8ZyBmaWxsPSJjdXJyZW50Q29sb3IiIG9wYWNpdHk9IjAuODUiPgogICAgICA8cmVjdCB4PSI4IiB5PSI0MiIgd2lkdGg9IjE1MCIgaGVpZ2h0PSIyMiIgcng9IjQiIGZpbGw9IiMyMmM1NWUiIGZpbGwtb3BhY2l0eT0iMC4xNCIgc3Ryb2tlPSIjMjJjNTVlIiBzdHJva2Utb3BhY2l0eT0iMC40Ii8+CiAgICAgIDx0ZXh0IHg9IjE4IiB5PSI1NyI+QmFzaChnaXQ6Kik8L3RleHQ+CiAgICAgIDxyZWN0IHg9IjgiIHk9IjcyIiB3aWR0aD0iMTUwIiBoZWlnaHQ9IjIyIiByeD0iNCIgZmlsbD0iIzIyYzU1ZSIgZmlsbC1vcGFjaXR5PSIwLjE0IiBzdHJva2U9IiMyMmM1NWUiIHN0cm9rZS1vcGFjaXR5PSIwLjQiLz4KICAgICAgPHRleHQgeD0iMTgiIHk9Ijg3Ij5CYXNoKHJnOiopPC90ZXh0PgogICAgICA8cmVjdCB4PSI4IiB5PSIxMDIiIHdpZHRoPSIxNTAiIGhlaWdodD0iMjIiIHJ4PSI0IiBmaWxsPSIjMjJjNTVlIiBmaWxsLW9wYWNpdHk9IjAuMTQiIHN0cm9rZT0iIzIyYzU1ZSIgc3Ryb2tlLW9wYWNpdHk9IjAuNCIvPgogICAgICA8dGV4dCB4PSIxOCIgeT0iMTE3Ij5CYXNoKGxzOiopPC90ZXh0PgogICAgICA8cmVjdCB4PSI4IiB5PSIxMzIiIHdpZHRoPSIxNTAiIGhlaWdodD0iMjIiIHJ4PSI0IiBmaWxsPSIjMjJjNTVlIiBmaWxsLW9wYWNpdHk9IjAuMTQiIHN0cm9rZT0iIzIyYzU1ZSIgc3Ryb2tlLW9wYWNpdHk9IjAuNCIvPgogICAgICA8dGV4dCB4PSIxOCIgeT0iMTQ3Ij5XZWJGZXRjaCguLi4pPC90ZXh0PgogICAgICA8dGV4dCB4PSIxOCIgeT0iMTc3IiBvcGFjaXR5PSIwLjYiPuKApmh1bmRyZWRzIG1vcmU8L3RleHQ+CiAgICA8L2c+CgogICAgPCEtLSBjbGF1ZGUgYnJhbmNoIC0tPgogICAgPHBhdGggZD0iTTE2Niw4MCBDMjMwLDgwIDIzMCw1MCAzMDAsNTAiIGZpbGw9Im5vbmUiIHN0cm9rZT0iIzIyYzU1ZSIgc3Ryb2tlLW9wYWNpdHk9IjAuNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICAgIDxyZWN0IHg9IjMwNCIgeT0iMzAiIHdpZHRoPSIyMzAiIGhlaWdodD0iNDQiIHJ4PSI2IiBmaWxsPSIjMjJjNTVlIiBmaWxsLW9wYWNpdHk9IjAuMTIiIHN0cm9rZT0iIzIyYzU1ZSIgc3Ryb2tlLW9wYWNpdHk9IjAuNDUiLz4KICAgIDx0ZXh0IHg9IjMxNiIgeT0iNDkiIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+Q2xhdWRlIMK3IHNldHRpbmdzLmpzb248L3RleHQ+CiAgICA8dGV4dCB4PSIzMTYiIHk9IjY1IiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC44Ij5ldmVyeSBydWxlIHN1cnZpdmVzIGFzIGEgcnVsZTwvdGV4dD4KCiAgICA8IS0tIGNvZGV4IGJyYW5jaCAtLT4KICAgIDxwYXRoIGQ9Ik0xNjYsMTIwIEMyMzAsMTIwIDIzMCwxNTAgMzAwLDE1MCIgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZWY0NDQ0IiBzdHJva2Utb3BhY2l0eT0iMC41IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogICAgPHJlY3QgeD0iMzA0IiB5PSIxMTgiIHdpZHRoPSIyMzAiIGhlaWdodD0iNzIiIHJ4PSI2IiBmaWxsPSIjZWY0NDQ0IiBmaWxsLW9wYWNpdHk9IjAuMTIiIHN0cm9rZT0iI2VmNDQ0NCIgc3Ryb2tlLW9wYWNpdHk9IjAuNSIvPgogICAgPHRleHQgeD0iMzE2IiB5PSIxMzciIGZvbnQtc2l6ZT0iMTEiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9ImN1cnJlbnRDb2xvciI+Q29kZXggwrcgY29uZmlnLnRvbWw8L3RleHQ+CiAgICA8dGV4dCB4PSIzMTYiIHk9IjE1NiIgZm9udC1zaXplPSIxMC41IiBmaWxsPSJjdXJyZW50Q29sb3IiPmFwcHJvdmFsX3BvbGljeSA9ICJvbi1yZXF1ZXN0IjwvdGV4dD4KICAgIDx0ZXh0IHg9IjMxNiIgeT0iMTczIiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciI+c2FuZGJveF9tb2RlID0gIndvcmtzcGFjZS13cml0ZSI8L3RleHQ+CgogICAgPHRleHQgeD0iNTU2IiB5PSIxNDAiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjgiPm9ubHkgYSBibGFua2V0IEJhc2goKikgcmVhY2hlczwvdGV4dD4KICAgIDx0ZXh0IHg9IjU1NiIgeT0iMTU3IiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC44Ij5hcHByb3ZhbF9wb2xpY3k6IG5ldmVyLiBZb3VyIHJ1bGVzPC90ZXh0PgogICAgPHRleHQgeD0iNTU2IiB5PSIxNzQiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjgiPmFyZSBwZXItY29tbWFuZCwgc28gaXQgd3JvdGUgdGhlPC90ZXh0PgogICAgPHRleHQgeD0iNTU2IiB5PSIxOTEiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjgiPndlYWtlciBicmFuY2gg4oCUIHRoZSBhc2tpbmcgb25lLjwvdGV4dD4KCiAgICA8dGV4dCB4PSI4IiB5PSIyMjIiIGZvbnQtc2l6ZT0iMTAuNSIgZmlsbD0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjciPkNvZGV4IGV4cG9zZXMgbm8gcGVyLWNvbW1hbmQgYWxsb3dsaXN0IGF0IGFsbC4gVGhlcmUgaXMgbm90aGluZyBvbiB0aGUgcmlnaHQtaGFuZCBzaWRlPC90ZXh0PgogICAgPHRleHQgeD0iOCIgeT0iMjM5IiBmb250LXNpemU9IjEwLjUiIGZpbGw9ImN1cnJlbnRDb2xvciIgb3BhY2l0eT0iMC43Ij5mb3IgQmFzaChnaXQ6KikgdG8gYmVjb21lIOKAlCBzbyB0aGUgdHJhbnNsYXRvciB3aWRlbnMgdGhlIHdob2xlIHNldCBpbnRvIHR3byBzY2FsYXJzLjwvdGV4dD4KICA8L2c+Cjwvc3ZnPgo8cCBjbGFzcz0iYXJ0aWZhY3QtbGVnZW5kIj5UaGUgc2FtZSBjYW5vbmljYWwgcnVsZSBzZXQsIHRyYW5zbGF0ZWQgZm9yIHR3byBoYXJuZXNzZXMuIFRoZSBDb2RleCBzaWRlIGlzIGxvc3N5IGJ5IGNvbnN0cnVjdGlvbiwgbm90IGJ5IG9taXNzaW9uLjwvcD4KPC9kaXY+CgpDb25maXJtZWQgaW4gdGhlIENvZGV4IHZlcnNpb24gaG9tZSBvbiB0aGUgTGludXggd29ya2VyIHRoZSBzZXNzaW9uIHdhcyBhY3R1YWxseSBydW5uaW5nIG9uOgoKYGBgCn4vLmFnZW50cy8uaGlzdG9yeS92ZXJzaW9ucy9jb2RleC8wLjE0NS4wL2hvbWUvLmNvZGV4L2NvbmZpZy50b21sOjEKYXBwcm92YWxfcG9saWN5ID0gIm9uLXJlcXVlc3QiCmBgYAoKIyMjIFRoZSBzZWNvbmQgZGlzY292ZXJ5OiB0aGUgc2FuZGJveCBoYXMgYSBuZXR3b3JrIHByb3h5CgpMb29rIGFnYWluIGF0IHRoZSB0d28gbGluZXMgYWJvdmUgdGhlIGRpYWxvZyBpbiB5b3VyIHNjcmVlbnNob3Qg4oCUCmBDb3VsZCBub3QgcmVzb2x2ZSBob3N0bmFtZSA8aG9zdD46IFRlbXBvcmFyeSBmYWlsdXJlIGluIG5hbWUgcmVzb2x1dGlvbmAuIFRoZQpgc2NwYCBkaWQgbm90IHBvbGl0ZWx5IHdhaXQgZm9yIHBlcm1pc3Npb24uIEl0ICoqcmFuLCBmYWlsZWQsIGFuZCB0aGVuIENvZGV4CmVzY2FsYXRlZCoqIGl0IGludG8gYW4gYXBwcm92YWwgcmVxdWVzdC4KCkkgcmVwcm9kdWNlZCBpdCB3aXRoIGEgbGl2ZSBDb2RleCBydW4gb24gdGhhdCB3b3JrZXI6CgpgYGAKZ2V0ZW50IGhvc3RzIGV4YW1wbGUuY29tICAg4oaSICBETlNGQUlMCmN1cmwgaHR0cHM6Ly9leGFtcGxlLmNvbSAgIOKGkiAgY3VybDogKDU2KSBDT05ORUNUIHR1bm5lbCBmYWlsZWQsIHJlc3BvbnNlIDQwMwpgYGAKCkNvZGV4IDAuMTQ2IHJvdXRlcyBzYW5kYm94ZWQgdHJhZmZpYyB0aHJvdWdoICoqaXRzIG93biBmaWx0ZXJpbmcgcHJveHkqKgooYG5ldHdvcmtfcHJveHkgPSB0cnVlYCksIHdoaWNoIDQwM3MgYW55dGhpbmcgbm90IGFsbG93bGlzdGVkIOKAlCBldmVuIHRob3VnaCB0aGUKbGF1bmNoIHByb2ZpbGUgc2V0cyBgbmV0d29yayA9IHsgZW5hYmxlZCA9IHRydWUgfWAuIFNvIGluc2lkZSB0aGUgc2FuZGJveCwKYHNzaGAsIGBzY3BgLCBhbmQgdGFpbG5ldCBhY2Nlc3MgZG8gbm90IHdvcmsgYXQgYWxsLgoKVGhpcyBtYXR0ZXJzIGZvciB3aGF0IHlvdSBzaG91bGQgZXhwZWN0IGFmdGVyIHRoZSBmaXg6IHRob3NlIGNvbW1hbmRzIHdpbGwgbm93CioqZmFpbCBzaWxlbnRseSBpbnN0ZWFkIG9mIHByb21wdGluZyB5b3UqKi4gVGhhdCBpcyB0aGUgY29ycmVjdCBiZWhhdmlvciBmb3IgYW4KdW5hdHRlbmRlZCBhZ2VudCwgYnV0IGl0IGlzIG5vdCB0aGUgc2FtZSBhcyAiaXQgd29ya3Mgbm93Ii4KCiMjIEV2aWRlbmNlCgp8IExpbmsgfCBMb2NhdGlvbiB8IFdoYXQgaXQgZG9lcyB8CnwtLS18LS0tfC0tLXwKfCBFeHRlbnNpb24gbGF1bmNoIHwgYGFwcHMvZXh0L3NyYy9jb3JlL2FnZW50cy50czoyNDNgIHwgYGNvbnN0IGVmZmVjdGl2ZU1vZGUgPSBtb2RlID8/ICdhdXRvJ2Ag4oCUIGFsd2F5cyBhcHBlbmRzIGAtLW1vZGUgYXV0b2AgfAp8IE1vZGUgcmVzb2x1dGlvbiB8IGBhcHBzL2NsaS9zcmMvbGliL2V4ZWMudHM6MTE5YCB8IGBhdXRvYCBub3QgaW4gQ29kZXgncyBtb2RlcyDihpIgc2lsZW50bHkgcmV0dXJucyBgZWRpdGAgfAp8IENhcGFiaWxpdHkgdGFibGUgfCBgYXBwcy9jbGkvc3JjL2xpYi9hZ2VudC1zcGVjL2FnZW50cy50czozODFgIHwgYG1vZGVzOiBbJ3BsYW4nLCAnZWRpdCcsICdza2lwJ11gIOKAlCBubyBgYXV0b2AgfAp8IFBvbGljeSBidWlsZGVyIHwgYGFwcHMvY2xpL3NyYy9saWIvY29kZXgtcG9saWN5LnRzOjU4YCB8IGBlZGl0YCDihpIgYC1jIGFwcHJvdmFsX3BvbGljeT0ib24tcmVxdWVzdCJgIHwKfCBBZGFwdGVyIHwgYGFwcHMvY2xpL3NyYy9saWIvaGFybmVzcy9hZGFwdGVycy9jb2RleC50czo3N2AgfCBhbnl0aGluZyBub3QgYHBsYW5gL2Bza2lwYCDihpIgYCdlZGl0J2AgfAp8IFBlcm1pc3Npb24gdHJhbnNsYXRvciB8IGBhcHBzL2NsaS9zcmMvbGliL3Blcm1pc3Npb25zLnRzOjEwNzktMTA5OWAgfCBvbmx5IGEgYmxhbmtldCBgQmFzaCgqKWAgcmVhY2hlcyBgYXBwcm92YWxfcG9saWN5OiAnbmV2ZXInYCB8CnwgUmVnaXN0cnkgbm90ZSB8IGBhcHBzL2NsaS9zcmMvbGliL3Blcm1pc3Npb25zLXJlZ2lzdHJ5LnRzOjM2MWAgfCAqIkNvZGV4IGhhcyBubyBydWxlIGxpc3QiKiB8CgojIyBSZWNvbW1lbmRhdGlvbnMKCiMjIyBXaGF0IHdhcyBmaXhlZAoKQ29kZXggbm93IGhhcyBhIHJlYWwgYGF1dG9gIG1vZGUuIFZlcmlmaWVkIGFnYWluc3QgdGhlIGFjdHVhbCBjb21tYW5kIGJ1aWxkZXIsCm5vdCBhIGRlc2NyaXB0aW9uIG9mIGl0OgoKYGBgCmVkaXQgLT4gYXBwcm92YWxfcG9saWN5PSJvbi1yZXF1ZXN0IiB8IGRlZmF1bHRfcGVybWlzc2lvbnM9ImFnZW50cy1lZGl0IgphdXRvIC0+IGFwcHJvdmFsX3BvbGljeT0ibmV2ZXIiICAgICAgfCBkZWZhdWx0X3Blcm1pc3Npb25zPSJhZ2VudHMtYXV0byIKc2tpcCAtPiAtLWRhbmdlcm91c2x5LWJ5cGFzcy1hcHByb3ZhbHMtYW5kLXNhbmRib3gKYGBgCgpUaGUgYGFnZW50cy1hdXRvYCBwcm9maWxlIGhhcyB0aGUgKippZGVudGljYWwgc2FuZGJveCoqIHRvIGBhZ2VudHMtZWRpdGAg4oCUCndvcmtzcGFjZSwgYH4vLmFnZW50c2AsIHRoZSByZWdlbmVyYWJsZSB0b29sY2hhaW4gY2FjaGUgcm9vdHMsIG5ldHdvcmsgb24uIE9ubHkKdGhlIGFwcHJvdmFsIGF4aXMgY2hhbmdlcy4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQiPgo8c3Ryb25nPkF1dG9ub215IGlzIHRoZSBhcHByb3ZhbCBheGlzIG9ubHkuPC9zdHJvbmc+IGBhdXRvYCBkb2VzIG5vdCB3aWRlbiB0aGUKc2FuZGJveCBieSBhIHNpbmdsZSBwYXRoLCBhbmQgPGNvZGU+LS1tb2RlIHNraXA8L2NvZGU+IHJlbWFpbnMgdGhlIG9uZSBtb2RlIHRoYXQKcmVtb3ZlcyBpdC4gQSBzYW5kYm94LWRlbmllZCBjb21tYW5kIHVuZGVyIGBhdXRvYCBzdXJmYWNlcyB0byB0aGUgbW9kZWwgYXMgYW4Kb3JkaW5hcnkgY29tbWFuZCBmYWlsdXJlIGl0IGNhbiB3b3JrIGFyb3VuZCDigJQgaW5zdGVhZCBvZiBhIGRpYWxvZyB0aGF0IHN0b3BzIGFuCmFnZW50IG5vYm9keSBpcyB3YXRjaGluZy4KPC9kaXY+CgpJbnRlcmFjdGl2ZSBzaGltIGxhdW5jaGVzIOKAlCBhIGJhcmUgYGNvZGV4YCB0eXBlZCBhdCB5b3VyIG93biB0ZXJtaW5hbCDigJQgc3RpbGwKcGluIGBlZGl0YCwgYmVjYXVzZSB0aGVyZSBhIHByb21wdCBpcyB0aGUgdXNlZnVsIG91dGNvbWUuCgpOaW5lIGZpbGVzOiB0aGUgcG9saWN5IGJ1aWxkZXIsIHRoZSBhZGFwdGVyLCB0aGUgY2FwYWJpbGl0eSB0YWJsZSwgdGhlIGNvbW1hbmQKdGVtcGxhdGUsIGZvdXIgdGVzdCBmaWxlcywgcGx1cyB0aGUgc3BlYyAoYEVYRUMtMjJhYCksIGByZXNvdXJjZS1zeW5jLm1kYCwgYW5kIGEKYC5jaGFuZ2Vsb2cvbmV4dC9gIGZyYWdtZW50LgoKIyMjIFdoYXQgdG8gZG8gZm9yIGZsZWV0IHdvcmsKCkZvciBhbnl0aGluZyB0aGF0IHJlYWNoZXMgYW5vdGhlciBtYWNoaW5lIOKAlCBgc2NwYCwgYHNzaGAsIGBnaGAsIHRoZSB0YWlsbmV0IOKAlAp0aGUgc2FuZGJveCdzIHByb3h5IG1ha2VzIGBhdXRvYCB1c2VsZXNzLCBhbmQgb25seSBgLS1tb2RlIHNraXBgIHdvcmtzLiBZb3UgY2FuCmhhdmUgdGhhdCB0b2RheSB3aXRob3V0IHdhaXRpbmcgZm9yIGEgQ0xJIHJlbGVhc2U6IGFkZCBhICoqQ29tbWFuZCBBbGlhcyoqIGluIHRoZQpleHRlbnNpb24gc2V0dGluZ3Mgd2l0aCBhZ2VudCBgY29kZXhgIGFuZCBmbGFncyBgLS1tb2RlIHNraXBgLiBBbiBleHBsaWNpdApgLS1tb2RlYCBpbiB0aGUgYWxpYXMgZmxhZ3Mgc3VwcHJlc3NlcyB0aGUgaW5qZWN0ZWQgZGVmYXVsdAooYGFwcHMvZXh0L3NyYy9jb3JlL2FnZW50cy50czoyNDVgKS4KCkkgZGlkIG5vdCBtYWtlIGBza2lwYCB0aGUgZXh0ZW5zaW9uJ3MgZGVmYXVsdCBmb3IgQ29kZXgg4oCUIHRoYXQgd291bGQgZHJvcCB0aGUKc2FuZGJveCBvbiBldmVyeSBDb2RleCBsYXVuY2ggYWNyb3NzIGV2ZXJ5IGJveCwgd2hpY2ggaXMgeW91ciBjYWxsIHRvIG1ha2UsIG5vdAphIGZpeCB0byBzbGlwIGludG8gYSBidWcgUFIuCgojIyMgUmVhY2hpbmcgeW91CgpUaGlzIGZpeCBsaXZlcyBpbiB0aGUgQ0xJLCBzbyBpdCBhcnJpdmVzIG9uIHlvdXIgbWFjaGluZXMgb25seSBhZnRlcgpgbWVyZ2VkIOKGkiBwdWJsaXNoZWQg4oaSIHRhZ2dlZCDihpIgZmxlZXQtdXBncmFkZWRgLiBVbnRpbCB0aGF0IGxhbmRzLCB0aGUgQ29tbWFuZApBbGlhcyBhYm92ZSBpcyB0aGUgdW5ibG9jay4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>

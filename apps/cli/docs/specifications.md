@@ -2235,13 +2235,20 @@ schema (`--json` passes through each agent's native stream format).
   `skip` on an unsupported agent throws naming the agent's real modes.
 - **EXEC-22a (MUST).** Every native Codex launch MUST use the canonical named
   permission profiles from `lib/codex-policy.ts`. `agents-plan` extends
-  `:read-only` and enables network access; `agents-edit` extends `:workspace`,
-  enables network access, and grants `~/.agents`, regenerable toolchain caches,
-  and caller-supplied `--add-dir` roots through `workspace_roots`. Both profiles
-  MUST set `approval_policy="on-request"`. Only explicit `skip` may emit
+  `:read-only` and enables network access; `agents-edit` and `agents-auto` extend
+  `:workspace`, enable network access, and grant `~/.agents`, regenerable
+  toolchain caches, and caller-supplied `--add-dir` roots through
+  `workspace_roots`. `agents-plan` and `agents-edit` MUST set
+  `approval_policy="on-request"`; `agents-auto` MUST set
+  `approval_policy="never"`, so a sandbox-denied command surfaces to the model as
+  a command failure instead of an approval prompt no unattended caller can
+  answer. Autonomy is the approval axis only: `auto` MUST NOT widen the sandbox
+  beyond `edit`, and only explicit `skip` may emit
   `--dangerously-bypass-approvals-and-sandbox`. Fresh runs, native resumes,
   routines, POSIX shims, versioned aliases, and the Windows shim delegate MUST
-  consume the same policy builder.
+  consume the same policy builder. The shims and the direct-binary launch
+  (`lib/exec.ts` `runShimmedBinary`) deliberately pin `edit`: a human is at that
+  terminal, so an approval prompt is the useful outcome there.
 - **EXEC-22b (MUST).** When `--mode` is omitted and the selected or fallback
   harness is Codex, the mode MUST resolve to `edit`. Explicit `plan` MUST remain
   filesystem-read-only with network enabled; explicit/configured modes MUST not

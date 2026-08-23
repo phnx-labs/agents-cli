@@ -564,6 +564,7 @@ export const AGENT_COMMANDS: Record<AgentId, AgentCommandTemplate> = {
       // independent; legacy --sandbox flags cannot express that combination.
       plan: [],
       edit: [],
+      auto: [],
       // skip = codex --yolo: drops the sandbox entirely and approves anything.
       skip: ['--dangerously-bypass-approvals-and-sandbox'],
     },

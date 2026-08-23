@@ -74,22 +74,20 @@ exec "$BINARY"${launchArgs} "$@"`;
   },
 
   execModeArgs(ctx) {
-    const policyMode = ctx.resolvedMode === 'plan' || ctx.resolvedMode === 'skip' ? ctx.resolvedMode : 'edit';
     const writableRoots = [
       ...codexEditWritableRoots(ctx.cwd),
       ...ctx.addDirs,
     ];
-    return codexPolicyArgs(policyMode, writableRoots);
+    return codexPolicyArgs(ctx.resolvedMode, writableRoots);
   },
 
   routineModeArgs(cmd, ctx) {
-    const policyMode = ctx.mode === 'plan' || ctx.mode === 'skip' ? ctx.mode : 'edit';
     const routineRoots = (ctx.config.allow?.dirs ?? []).map((dir) => {
       if (dir.startsWith('-')) {
         throw new Error(`allow.dirs entries must not start with '-': ${JSON.stringify(dir)}`);
       }
       return dir.replace(/^~/, os.homedir());
     });
-    cmd.push(...codexPolicyArgs(policyMode, [...codexEditWritableRoots(), ...routineRoots]));
+    cmd.push(...codexPolicyArgs(ctx.mode, [...codexEditWritableRoots(), ...routineRoots]));
   },
 };

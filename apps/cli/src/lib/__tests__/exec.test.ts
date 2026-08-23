@@ -103,6 +103,18 @@ describeExec('buildExecCommand', () => {
       expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
     });
 
+    // Regression: codex had no `auto`, so resolveMode silently degraded it to
+    // `edit` — and `edit` is `on-request`, which is exactly the approval prompt
+    // an --mode auto caller (AGI EXT, teams, routines) asked not to get.
+    it('codex auto keeps the workspace sandbox but never prompts', () => {
+      const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'auto' }));
+      expect(cmd).toContain('approval_policy="never"');
+      expect(cmd).toContain('default_permissions="agents-auto"');
+      expect(cmd.join(' ')).toContain('extends = ":workspace"');
+      expect(cmd).not.toContain('approval_policy="on-request"');
+      expect(cmd).not.toContain('--dangerously-bypass-approvals-and-sandbox');
+    });
+
     it('codex skip produces --dangerously-bypass-approvals-and-sandbox without --sandbox', () => {
       const cmd = buildExecCommand(opts({ agent: 'codex', mode: 'skip' }));
       expect(cmd).toContain('--dangerously-bypass-approvals-and-sandbox');
@@ -1391,14 +1403,17 @@ describeExec('resolveMode', () => {
   });
 
   it("degrades 'auto' to 'edit' for agents without smart-classifier support", () => {
-    // codex has no auto in its capabilities.modes — should silently degrade.
-    expect(AGENTS.codex.capabilities.modes).not.toContain('auto');
-    expect(resolveMode('codex', 'auto')).toBe('edit');
+    // cursor has no auto in its capabilities.modes — should silently degrade.
+    expect(AGENTS.cursor.capabilities.modes).not.toContain('auto');
+    expect(resolveMode('cursor', 'auto')).toBe('edit');
   });
 
-  it("keeps 'auto' for agents that natively support it (claude, copilot)", () => {
+  it("keeps 'auto' for agents that natively support it (claude, copilot, codex)", () => {
     expect(resolveMode('claude', 'auto')).toBe('auto');
     expect(resolveMode('copilot', 'auto')).toBe('auto');
+    // codex's auto is approval_policy=never over the same sandbox as edit; it
+    // must not fall back to edit, which prompts.
+    expect(resolveMode('codex', 'auto')).toBe('auto');
   });
 
   it("throws on 'skip' for agents without skip support, naming supported modes", () => {
@@ -1473,10 +1488,17 @@ describeExec('resolveHeadlessMode (RUSH-1810)', () => {
     write.mockRestore();
   });
 
-  it('warns when codex auto resolves to edit', () => {
+  it('warns when cursor auto resolves to edit', () => {
     const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
-    expect(resolveHeadlessMode('codex', 'auto', false)).toBe('edit');
-    expect(write).toHaveBeenCalledWith("[agents] codex has no 'auto' mode; using 'edit'.\n");
+    expect(resolveHeadlessMode('cursor', 'auto', false)).toBe('edit');
+    expect(write).toHaveBeenCalledWith("[agents] cursor has no 'auto' mode; using 'edit'.\n");
+    write.mockRestore();
+  });
+
+  it('does not warn or degrade codex auto — it is a native mode now', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    expect(resolveHeadlessMode('codex', 'auto', false)).toBe('auto');
+    expect(write).not.toHaveBeenCalled();
     write.mockRestore();
   });
 

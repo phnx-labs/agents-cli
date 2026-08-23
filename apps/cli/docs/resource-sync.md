@@ -384,12 +384,16 @@ were written, and each target names its own loss in a `lossyBecause` line:
   danger-full-access; credential dirs (`~/.ssh`, `~/.aws`, `~/.config`) are
   excluded, and any roots the user set are unioned in, not clobbered
   (`permissions.ts`: `codexDefaultWritableRoots`, `mergeCodexSandboxWrite`).
-  Native launches then apply the managed `agents-plan` or `agents-edit` named
-  permission profile at runtime. This keeps network independent from filesystem
-  access: plan is read-only with network, while edit adds the workspace,
-  `~/.agents`, the cache baseline above, and caller-supplied writable roots. The
-  runtime profile uses `approval_policy="on-request"`; only explicit `skip`
-  bypasses approvals and sandboxing.
+  Native launches then apply the managed `agents-plan`, `agents-edit`, or
+  `agents-auto` named permission profile at runtime. This keeps network
+  independent from filesystem access: plan is read-only with network, while edit
+  and auto add the workspace, `~/.agents`, the cache baseline above, and
+  caller-supplied writable roots. Plan and edit use
+  `approval_policy="on-request"` — a sandbox-denied command comes back as an
+  approval prompt, which is what you want at a terminal. `--mode auto` uses
+  `approval_policy="never"` over the identical sandbox, so an unattended run
+  never stops on a prompt; a denied command just fails and the agent works
+  around it. Only explicit `skip` bypasses approvals and sandboxing.
   Deny rules are emitted as Starlark to a generated `agents-deny.rules` file
   (`permissions.ts:38-56`).
 - Kiro 2.8.0+ maps canonical shell, filesystem, and web rules into v3

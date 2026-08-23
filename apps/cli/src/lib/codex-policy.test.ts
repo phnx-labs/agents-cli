@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import {
+  CODEX_AUTO_PROFILE,
   CODEX_EDIT_PROFILE,
   CODEX_PLAN_PROFILE,
   codexEditWritableRoots,
@@ -28,6 +29,20 @@ describe('codexPolicyArgs', () => {
     expect(args.join(' ')).toContain('extends = ":workspace"');
     expect(args.join(' ')).toContain('workspace_roots = { "/tmp/cache" = true, "/tmp/agents" = true }');
     expect(args.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
+  });
+
+  // The prompt in an unattended run is the failure this mode exists to remove:
+  // `on-request` turns a sandbox-denied command into an approval dialog nobody
+  // is there to answer, so the agent stops. `never` lets it fail and continue.
+  it('gives auto the same sandbox as edit but never prompts', () => {
+    const auto = codexPolicyArgs('auto', ['/tmp/agents']);
+    expect(auto).toContain('approval_policy="never"');
+    expect(auto).toContain(`default_permissions="${CODEX_AUTO_PROFILE}"`);
+    expect(auto.join(' ')).toContain('extends = ":workspace"');
+    expect(auto.join(' ')).toContain('workspace_roots = { "/tmp/agents" = true }');
+    expect(auto.join(' ')).toContain('network = { enabled = true, allow_local_binding = true }');
+    // Autonomy is the approval axis only — auto must not widen the sandbox.
+    expect(auto).not.toContain('--dangerously-bypass-approvals-and-sandbox');
   });
 
   it('keeps skip as the only sandbox and approval bypass', () => {
@@ -77,7 +92,7 @@ describe('mode provenance', () => {
     expect(modeForRemoteDispatch('edit', 'config')).toBe('edit');
   });
 
-  it.each(['plan', 'edit', 'skip'])('does not replace an inherited %s resume mode', (mode) => {
+  it.each(['plan', 'edit', 'auto', 'skip'])('does not replace an inherited %s resume mode', (mode) => {
     expect(modeForRemoteDispatch(mode, 'implied')).toBe(mode);
     expect(modeWasImplicit('implied', false)).toBe(false);
   });
