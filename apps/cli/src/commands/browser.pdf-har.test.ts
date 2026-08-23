@@ -100,8 +100,8 @@ describe('an absent --profile stays absent on the filter commands (RUSH-2709)', 
   it.each([
     ['status', ['status']],
     ['tasks', ['tasks']],
-    ['navigate', ['navigate', 'https://example.com', '--task', 't1']],
-    ['tab add', ['tab', 'add', '--url', 'https://example.com', '--task', 't1']],
+    ['navigate', ['navigate', 'https://example.com']],
+    ['tab add', ['tab', 'add', '--url', 'https://example.com']],
   ])('%s sends profile: undefined when no -p is passed', async (_label, argv) => {
     const request = await runBrowser(argv);
     expect(request).toBeDefined();
