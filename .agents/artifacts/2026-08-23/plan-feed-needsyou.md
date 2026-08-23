@@ -4,6 +4,11 @@ surface: native
 title: Feed-driven Needs You for AGI EXT
 summary: Make the CLI feed the canonical attention ledger and stream one reconciled operator projection to AGI EXT, while preserving session lifecycle as a fallback signal rather than a second UI authority.
 status: draft
+links:
+  - url: https://github.com/phnx-labs/agi-cli/pull/2954
+    label: PR #2954
+  - url: https://share.agents-cli.sh/muqsitnawaz/muqsit-feed-needsyou-2de76088855de3e8
+    label: Rendered plan
 facts:
   - Current main already publishes structured questions and permission prompts into the feed block ledger.
   - AGI EXT still computes Needs You from session-watch lifecycle fields and does not ingest feed blocks.
@@ -552,5 +557,8 @@ bun run compile:ext
 | Two surfaces answer at once | All UI answers call the CLI claim-before-route operation; an unsuccessful claim never reaches the reply rail. |
 
 ## Tracking
+
+- [Plan-only PR #2954](https://github.com/phnx-labs/agi-cli/pull/2954)
+- [Shareable rendered plan](https://share.agents-cli.sh/muqsitnawaz/muqsit-feed-needsyou-2de76088855de3e8)
 
 No implementation ticket or feature PR was created in this plan-only task. After design approval, dispatch one team with explicit ownership across: feed model/reconciler, feed watch protocol, AGI EXT host adapter, AGI EXT presentation/tests, and composed real-harness verification.
