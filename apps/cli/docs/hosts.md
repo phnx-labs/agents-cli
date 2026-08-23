@@ -540,11 +540,15 @@ merges three directories **per-field**, it does not let one shadow another:
   bare name, so ssh applies the stanza).
 
 One grammar for every caller: `name`, `user@name` (login user overridden, same
-box), a tailnet FQDN, an ssh_config alias, an ad-hoc `user@host`, and the `auto`
-affinity sentinel (RUSH-2185: `matchHost` resolves it via the same
-`resolveDeviceAffinity` engine `agents run --device auto` uses, so `agents ssh
-auto` and `agents teams add --device auto` pick a device the same way `run`
-does) all resolve identically. `dispatchable` follows the device's auth method,
+box), a tailnet FQDN, an ssh_config alias, an ad-hoc `user@host`, and two reserved
+sentinels — all resolve identically. The sentinels are `auto` (RUSH-2185:
+`matchHost` resolves it via the same `resolveDeviceAffinity` engine `agents run
+--device auto` uses, so `agents ssh auto` and `agents teams add --device auto`
+pick a device the same way `run` does) and `interactive`, which resolves to the
+device pinned as `interactive.host` — the box a human is sitting at, as opposed
+to `auto`'s pick-by-load. `interactive` refuses rather than falling back to the
+local machine when no host is pinned. Both names are reserved: a device cannot
+be registered under either, and `interactive.host` cannot be pinned to one. `dispatchable` follows the device's auth method,
 so a password-auth device can't be made dispatchable by shadowing it with an
 inline entry. A bare unknown name resolves to nothing, which keeps
 capability-tag routing (`--device gpu`) and the `agents ssh` "Unknown device"

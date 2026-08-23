@@ -69,20 +69,31 @@ describe('resolveInteractiveDevice', () => {
     const { resolveInteractiveDevice } = await fresh();
     expect(resolveInteractiveDevice()).toBeNull();
   });
-});
-
-  it('treats a self-referential or `auto` pin as unset, not as a host to dial', async () => {
-    // Verified live before adding this: it does NOT recurse (resolution happens
-    // once at the dispatch site), but it DID resolve to a literal host named
-    // "interactive" and print `device=interactive → interactive` before failing
-    // as unreachable. Refusing with the actionable message is clearer.
-    for (const bad of ['interactive', 'INTERACTIVE', 'auto']) {
-      const { setConfigValue } = await fresh();
-      setConfigValue('interactive.host', bad);
-      const { resolveInteractiveDevice } = await fresh();
-      expect(resolveInteractiveDevice(), bad).toBeNull();
+  it('cannot be pinned to a reserved sentinel — rejected at write time', async () => {
+    // Fixed at the source rather than on read. Refusing on read could only ever
+    // report "none is set", which tells the user to run the command they just
+    // ran. assertValidDeviceName rejects the whole reserved set, so a bad pin
+    // never lands.
+    const { setConfigValue } = await fresh();
+    for (const bad of ['interactive', 'auto', 'all']) {
+      expect(() => setConfigValue('interactive.host', bad), bad).toThrow(/reserved/i);
     }
   });
+
+  it('ignores a reserved pin written by an older version', async () => {
+    // The read-side check is defensive only, for a config that predates the
+    // write-time guard. Written straight to the store to bypass validation.
+    const { getUserAgentsDir } = await import('../state.js');
+    const fsMod = await import('fs');
+    const pathMod = await import('path');
+    const dir = getUserAgentsDir();
+    fsMod.mkdirSync(dir, { recursive: true });
+    fsMod.writeFileSync(pathMod.join(dir, 'agents.yaml'), 'config:\n  interactiveHost: auto\n');
+
+    const { resolveInteractiveDevice } = await fresh();
+    expect(resolveInteractiveDevice()).toBeNull();
+  });
+});
 
 describe('interactiveUnsetError', () => {
   it('names the command that fixes it', async () => {

@@ -328,3 +328,47 @@ describe('listAllHosts — merge same-name rows (RUSH-1967)', () => {
     expect(sshTargetFor(await resolveHostByCap('gpu'))).toBe('muqsit@mac-mini.NEW.ts.net');
   });
 });
+
+describe('matchHost — `interactive` sentinel', () => {
+  // The call-site coverage the sentinel's own unit tests do not give: that
+  // matchHost actually resolves the token, which is what makes `run`, `sessions`
+  // and `secrets` inherit it without per-command wiring.
+  it('resolves `interactive` to the device pinned as interactive.host', async () => {
+    await upsertDevice('mac-mini', {
+      platform: 'macos',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+      auth: { method: 'key' },
+    });
+    const { setConfigValue } = await import('../device-config.js');
+    setConfigValue('interactive.host', 'mac-mini');
+
+    const { matchHost } = await import('./registry.js');
+    const host = await matchHost('interactive', {});
+    expect(host?.name).toBe('mac-mini');
+    expect(sshTargetFor(host!)).toBe('muqsit@mac-mini.tail1a85a1.ts.net');
+  });
+
+  it('is case-insensitive, like `auto`', async () => {
+    await upsertDevice('mac-mini', {
+      platform: 'macos',
+      user: 'muqsit',
+      address: { via: 'tailscale', dnsName: 'mac-mini.tail1a85a1.ts.net' },
+      auth: { method: 'key' },
+    });
+    const { setConfigValue } = await import('../device-config.js');
+    setConfigValue('interactive.host', 'mac-mini');
+
+    const { matchHost } = await import('./registry.js');
+    expect((await matchHost('INTERACTIVE', {}))?.name).toBe('mac-mini');
+  });
+
+  it('throws with the fix command when no host is pinned', async () => {
+    // Never falls back to the local machine: acting on a box nobody is watching
+    // is the exact failure the sentinel prevents, and it would fail invisibly.
+    const { matchHost } = await import('./registry.js');
+    await expect(matchHost('interactive', {})).rejects.toThrow(
+      /agents config set interactive\.host/,
+    );
+  });
+});

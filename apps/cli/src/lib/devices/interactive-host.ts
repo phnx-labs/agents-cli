@@ -17,6 +17,7 @@
  * from recursing.
  */
 import { getConfigValue } from '../device-config.js';
+import { RESERVED_DEVICE_NAMES } from './registry.js';
 
 /** The reserved `--device` value meaning the box the human is at. */
 export const INTERACTIVE_DEVICE_SENTINEL = 'interactive';
@@ -38,14 +39,12 @@ export function resolveInteractiveDevice(): string | null {
   const pinned = getConfigValue('interactive.host').value;
   if (typeof pinned !== 'string' || !pinned.trim()) return null;
   const host = pinned.trim();
-  // A self-referential pin does NOT recurse — resolution happens once at the
-  // dispatch site — but it does resolve to a literal host named "interactive",
-  // which then fails as an unreachable device and reads as a confusing
-  // `device=interactive → interactive`. Treat it as unset so the caller prints
-  // the actionable "pin a host" message instead. `auto` is rejected for the same
-  // reason: the two sentinels mean opposite things and chaining them is a
-  // mistake, not a request.
-  if (isDeviceInteractive(host) || host.toLowerCase() === 'auto') return null;
+  // Defensive only. `interactive.host` rejects every reserved sentinel at WRITE
+  // time (assertValidDeviceName), so a pin of "interactive" or "auto" cannot be
+  // stored in the first place — which is the right layer, because refusing on
+  // read could only ever say "none is set" and send the user back to the command
+  // they just ran. This catches a config written by an older version.
+  if (RESERVED_DEVICE_NAMES.has(host.toLowerCase())) return null;
   return host;
 }
 

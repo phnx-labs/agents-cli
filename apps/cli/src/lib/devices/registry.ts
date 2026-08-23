@@ -154,11 +154,26 @@ function registryPath(): string {
  * unambiguous `Host` stanza and is safe as an ssh target. */
 const DEVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/;
 
+/**
+ * `--device` values that mean "resolve me", not "connect to a box with this
+ * name". A real device registered under one of these would be unreachable,
+ * and pinning `interactive.host` to one is a misconfiguration that has to fail
+ * at WRITE time — otherwise the read side can only report "none is set", which
+ * tells the user to run the command they just ran.
+ */
+export const RESERVED_DEVICE_NAMES = new Set(['auto', 'interactive', 'all']);
+
 /** Throw if `name` is not usable as an ssh alias (no spaces, quotes, etc.). */
 export function assertValidDeviceName(name: string): void {
   if (!DEVICE_NAME_RE.test(name)) {
     throw new Error(
       `Invalid device name ${JSON.stringify(name)}. Use letters, digits, '.', '_', '-' (no spaces) — e.g. 'win-mini'.`,
+    );
+  }
+  if (RESERVED_DEVICE_NAMES.has(name.trim().toLowerCase())) {
+    throw new Error(
+      `${JSON.stringify(name)} is a reserved --device value, not a device name. ` +
+        `Reserved: ${[...RESERVED_DEVICE_NAMES].join(', ')}.`,
     );
   }
 }
