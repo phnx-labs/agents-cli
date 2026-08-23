@@ -26,6 +26,7 @@ import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../vers
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
 import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
+import { downloadMenubarHelperApp } from './download-menubar.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -244,9 +245,14 @@ export function hasDeveloperIdSignature(appPath: string): boolean {
  * When the shipped source is Developer ID and the installed copy is only
  * ad-hoc, replace it — even without forceReinstall.
  */
-export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean } = {}): string | null {
+export function ensureMenubarAppInstalled(opts: { forceReinstall?: boolean; sourceAppPath?: string } = {}): string | null {
   if (!onDarwin()) return null;
-  const src = sourceAppPath();
+  // An explicit `sourceAppPath` (a pre-downloaded cache path from the explicit
+  // enable/setup path) overrides local discovery. This function itself does NO
+  // network — the download happens in the async callers before they hand a path
+  // here, so the sync startup self-heal that calls it with no override stays
+  // network-free and simply no-ops when `sourceAppPath()` finds nothing.
+  const src = opts.sourceAppPath ?? sourceAppPath();
   if (!src) return null;
   const dest = installedAppPath();
   // Heal an older install that was ad-hoc re-signed over a Developer ID source:
@@ -410,14 +416,17 @@ export function restartMenubarHelperAfterSwap(
 }
 
 /**
- * Install + start the menu-bar helper as a launchd user service (idempotent).
- * Clears the sticky opt-out, installs the .app, writes the plist, and
- * bootstraps it into the GUI domain. Returns false on non-darwin or when no
- * helper bundle ships with this install.
+ * Sync install + start core: install the given (already-on-disk) source `.app`
+ * and start the launchd service. NO network — the source `.app` must already be
+ * local (a bundled/local copy for the sync startup self-heal, or a pre-downloaded
+ * cache path for the explicit async enable/setup path). Returns false on
+ * non-darwin, when no source resolves, or when the bundle fails the Gatekeeper
+ * check. Shared by the sync self-heal (`installMenubarLaunchAgentOnUpgrade`) and
+ * the async `enableMenubarService`.
  */
-export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): boolean {
+function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppPath?: string } = {}): boolean {
   if (!onDarwin()) return false;
-  const exec = ensureMenubarAppInstalled({ forceReinstall: true });
+  const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: opts.sourceAppPath });
   if (!exec) return false;
 
   // Never bootstrap a helper macOS will reject at launch: an invalid signature
@@ -437,6 +446,28 @@ export function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOp
   if (opts.clearOptOut) clearMenubarOptOut();
   installAndStartService(exec);
   return true;
+}
+
+/**
+ * Install + start the menu-bar helper as a launchd user service (idempotent).
+ * Clears the sticky opt-out, installs the .app, writes the plist, and
+ * bootstraps it into the GUI domain. Returns false on non-darwin or when no
+ * helper bundle can be resolved for this install.
+ *
+ * ASYNC and download-capable: this is the EXPLICIT user-initiated path
+ * (`agents menubar enable`). When no bundled/local `.app` ships (a fresh
+ * `npm i -g` machine whose tarball lacks the bundle), it fetches the signed +
+ * notarized release asset for the running CLI version — verified (sha256 +
+ * codesign + Team + designated-requirement pin + notarization) before install
+ * — and starts the service from that cached copy. The startup self-heal never
+ * routes here: it calls `startMenubarServiceFromSource` and stays sync +
+ * network-free, no-opping when no local source exists.
+ */
+export async function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): Promise<boolean> {
+  if (!onDarwin()) return false;
+  let src = sourceAppPath();
+  if (!src) src = await downloadMenubarHelperApp(getCliVersion());
+  return startMenubarServiceFromSource({ ...opts, sourceAppPath: src });
 }
 
 /** Drop the sticky `agents menubar disable` sentinel. */
@@ -744,7 +775,7 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     if (menubarDisabledByUser()) return;
     if (!sourceAppPath()) return;
     if (!menubarServiceInstalled()) {
-      enableMenubarService({ clearOptOut: false });
+      startMenubarServiceFromSource({ clearOptOut: false });
       return;
     }
     // Re-enable (recopy helper + rewrite plist) when the version drifted OR the
@@ -763,7 +794,7 @@ export function installMenubarLaunchAgentOnUpgrade(): void {
     // false without installing when the bundle fails the Gatekeeper check, and
     // stamping first would spend the shared cooldown on a no-op — locking every
     // non-owner out for another hour while nothing had been fixed.
-    if (enableMenubarService({ clearOptOut: false })) {
+    if (startMenubarServiceFromSource({ clearOptOut: false })) {
       stampMenubarHeal();
       // One-time: the ad-hoc -> Developer ID transition leaves a dead TCC row
       // under the old identity (tccutil on zion reset it 11 times across
@@ -889,7 +920,7 @@ function endProcess(pid: number): void {
  *   4. login item  — write the plist (RunAtLoad + KeepAlive) and bootstrap it
  *   5. single      — verify exactly one helper came back up
  */
-export function runMenubarSetup(): SetupResult {
+export async function runMenubarSetup(): Promise<SetupResult> {
   const steps: SetupStep[] = [];
   const step = (name: string, outcome: SetupStep['outcome'], detail: string) => {
     steps.push({ name, outcome, detail });
@@ -902,9 +933,19 @@ export function runMenubarSetup(): SetupResult {
 
   const before = getMenubarStatus();
 
-  if (!sourceAppPath()) {
-    step('bundle', 'failed', 'no AGI Menu bundle ships with this install');
-    return { steps, configured: false, status: before };
+  // Explicit user-initiated path: when no bundled/local `.app` ships (a fresh
+  // `npm i -g` machine whose tarball lacks the bundle), fetch the signed +
+  // notarized release asset for this CLI version. Verified (sha256 + codesign +
+  // Team + designated-requirement pin + notarization) before install; the
+  // cached copy is the source for `ensureMenubarAppInstalled` below.
+  let src = sourceAppPath();
+  if (!src) {
+    try {
+      src = await downloadMenubarHelperApp(getCliVersion());
+    } catch (e) {
+      step('bundle', 'failed', `no AGI Menu bundle ships with this install, and the release-asset download failed: ${(e as Error).message}`);
+      return { steps, configured: false, status: before };
+    }
   }
 
   // 3 before 1: end the running copies BEFORE swapping the bundle underneath
@@ -921,7 +962,7 @@ export function runMenubarSetup(): SetupResult {
     step('duplicates', 'ok', 'no helper was running');
   }
 
-  const exec = ensureMenubarAppInstalled({ forceReinstall: true });
+  const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
   if (!exec) {
     step('bundle', 'failed', 'could not install the helper bundle');
     return { steps, configured: false, status: getMenubarStatus() };

@@ -626,9 +626,9 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
 | Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) | `src/lib/secrets/` |
-| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) | `src/lib/menubar/install-menubar.ts` |
+| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) — **AND** a `MenubarHelper.app.zip` GitHub **release asset**, fetched on demand when the tarball's copy is absent (RUSH-3100 Stage N; the `.app` still ships this stage) | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **No** — dropped from the tarball (RUSH-3026); macOS installs fall back to the JS entrypoint until it returns as a per-release GitHub asset | `scripts/postinstall.js` |
-| computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` |
+| computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/computer/ssh-tunnel.ts` |
 
 Path math: compiled resolvers run from `apps/cli/dist/lib/…`. Files still in `dist/lib/`

@@ -132,7 +132,7 @@ export function registerMenubarCommands(program: Command): void {
     .description('Configure AGI Menu end-to-end: one instance, started at login')
     .option('--check', 'Report the current state, change nothing')
     .option('--json', 'Emit machine-readable JSON')
-    .action((options: { check?: boolean; json?: boolean }) => {
+    .action(async (options: { check?: boolean; json?: boolean }) => {
       if (options.check) {
         const s = getMenubarStatus();
         if (options.json) {
@@ -144,7 +144,7 @@ export function registerMenubarCommands(program: Command): void {
         return;
       }
       if (!options.json && notMac()) return;
-      const r = runMenubarSetup();
+      const r = await runMenubarSetup();
       if (options.json) {
         process.stdout.write(JSON.stringify(r) + '\n');
       } else {
@@ -190,9 +190,15 @@ export function registerMenubarCommands(program: Command): void {
   menubar
     .command('enable')
     .description('Install and start AGI Menu (launches at login)')
-    .action(() => {
+    .action(async () => {
       if (notMac()) return;
-      const ok = enableMenubarService({ clearOptOut: true });
+      let ok = false;
+      try {
+        ok = await enableMenubarService({ clearOptOut: true });
+      } catch (e) {
+        console.log(chalk.red(`Could not enable AGI Menu: ${(e as Error).message}`));
+        return;
+      }
       if (!ok) {
         console.log(chalk.red('Could not enable: no AGI Menu bundle ships with this install.'));
         console.log(chalk.gray('  This build may predate the helper, or be a non-macOS package.'));
