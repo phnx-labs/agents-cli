@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
+import { spawnSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import {
@@ -22,7 +23,7 @@ import {
   isProfileLaunchableHere,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
-import { migrateCentralBrowserProfiles } from '../lib/browser/registry.js';
+import { declaringDevices, migrateCentralBrowserProfiles } from '../lib/browser/registry.js';
 import type { BrowserProfileConfig } from '../lib/types.js';
 import { resolveActor } from '../lib/actor.js';
 import {
@@ -53,10 +54,36 @@ import { parseTargetFilter } from '../lib/browser/service.js';
 import {
   BrowserDaemonNotRunningError,
   formatBrowserDaemonNotRunningError,
-  sendIPCRequest,
+  sendIPCRequest as sendRawIPCRequest,
 } from '../lib/browser/ipc.js';
+import type { IPCRequest, IPCResponse } from '../lib/browser/types.js';
+import {
+  bindTask,
+  getTaskBinding,
+  honorScreenshotOutput,
+  REJECT_DEVICE_MESSAGE,
+  resolveTaskRoute,
+  unbindTask,
+  updateTaskBinding,
+} from '../lib/browser/task-index.js';
+import { isSelfHost } from '../lib/devices/self-host.js';
+import { resolveHost } from '../lib/hosts/registry.js';
+import { sshTargetFor } from '../lib/hosts/types.js';
+import { withActorEnv } from '../lib/hosts/dispatch.js';
+import {
+  streamAgentsOnHost,
+  passthroughSshOptions,
+} from '../lib/hosts/passthrough.js';
+import {
+  buildRemoteAgentsInvocation,
+  HOST_ROUTING_SPECS,
+  stripRoutingFlags,
+} from '../lib/hosts/remote-cmd.js';
+import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
+import { sshExec } from '../lib/ssh-exec.js';
+import { flagValue } from '../lib/hosts/routing-flag.js';
 import { browserTaskPicker, type BrowserTask } from './browser-picker.js';
-import { assertRemoteControlAllowed } from '../lib/browser/remote-control.js';
+import { assertRemoteControlAllowed, isFleetRemoteInvocation } from '../lib/browser/remote-control.js';
 import { getConfigValue, setConfigValue, unsetConfigValue } from '../lib/device-config.js';
 import { isInteractiveTerminal } from './utils.js';
 import { registerCommandGroups, setHelpSections } from '../lib/help.js';
@@ -66,21 +93,36 @@ import { runBrowserIPCStream } from '../lib/browser/stream.js';
 import { machineId } from '../lib/machine-id.js';
 
 /**
+ * Task name inferred from the local task→device index when `--task` was
+ * omitted and this session owns exactly one open task. Set by the page-verb
+ * preAction hook; consumed by {@link resolveTaskName}.
+ */
+let inferredTaskName: string | undefined;
+
+/**
  * Resolve which browser task a command targets. Order:
  *   1. `--task <name>` flag (explicit per-command override)
  *   2. `$AGENTS_BROWSER_TASK` (optional shell default)
- *   3. `undefined` — the daemon resolves from the caller's identity
- *      (session / launch id stamped in sendIPCRequest)
+ *   3. the local task-index match for this session (exactly one)
+ *   4. `undefined` — the daemon resolves from the caller's identity
+ *
+ * `--device` on a page verb is rejected here so commander-parsed flags cannot
+ * silently re-route a later verb. Bind the device at `start`.
  *
  * `undefined` is valid: page verbs create a task when none resolves, and
  * done/stop report "nothing to close". Agents no longer need to type a handle
  * in the common case.
  */
-function resolveTaskName(opts: { task?: string }): string | undefined {
+function resolveTaskName(opts: { task?: string; device?: string }): string | undefined {
+  if (opts.device) {
+    const route = resolveTaskRoute({ device: opts.device });
+    console.error(route.kind === 'reject-device' ? route.message : REJECT_DEVICE_MESSAGE);
+    process.exit(1);
+  }
   if (opts.task) return opts.task;
   const fromEnv = process.env.AGENTS_BROWSER_TASK;
   if (fromEnv) return fromEnv;
-  return undefined;
+  return inferredTaskName;
 }
 
 // `-t` is taken by `--tab` on most commands, so `--task` is long-form only.
@@ -88,6 +130,193 @@ function resolveTaskName(opts: { task?: string }): string | undefined {
 const TASK_OPTION_FLAG = '--task <name>';
 const TASK_OPTION_DESC =
   'Task name (defaults to $AGENTS_BROWSER_TASK, else the caller\'s live task)';
+const DEVICE_ON_PAGE_VERB_FLAG = '--device <name>';
+const DEVICE_ON_PAGE_VERB_DESC =
+  'Not valid here — bind the device at `agents browser start --device`';
+
+const TASK_ROUTED_COMMANDS = new Set([
+  'stream',
+  'done',
+  'stop',
+  'navigate',
+  'goto',
+  'tab',
+  'tabs',
+  'screenshot',
+  'pdf',
+  'evaluate',
+  'refs',
+  'click',
+  'type',
+  'press',
+  'hover',
+  'scroll',
+  'upload',
+  'set',
+  'console',
+  'errors',
+  'requests',
+  'logs',
+  'responsebody',
+  'wait',
+  'download',
+  'record',
+  'waitdownload',
+]);
+
+function commandPath(actionCommand: Command): string[] {
+  const parts: string[] = [];
+  let current: Command | null = actionCommand;
+  while (current) {
+    const name = current.name();
+    if (name === 'agents' || name === 'browser') break;
+    parts.unshift(name);
+    current = current.parent ?? null;
+  }
+  return parts;
+}
+
+function callerSessionId(): string | undefined {
+  return process.env.AGENT_SESSION_ID || process.env.AGENTS_SESSION_ID;
+}
+
+function callerLaunchId(): string | undefined {
+  return process.env.AGENT_LAUNCH_ID;
+}
+
+function browserForwardedArgv(): string[] {
+  const raw = process.argv.slice(2);
+  const withCommand = raw[0] === 'browser' ? raw : ['browser', ...raw];
+  return stripRoutingFlags(withCommand, HOST_ROUTING_SPECS);
+}
+
+async function dispatchBrowserToDevice(
+  device: string,
+  forwardedArgs: string[],
+  mode: 'stream' | 'capture',
+): Promise<{ code: number; stdout: string; stderr: string }> {
+  const host = await resolveHost(device);
+  if (!host) {
+    throw new Error(
+      `Unknown device "${device}". Next: agents devices list`,
+    );
+  }
+  const target = sshTargetFor(host);
+  const remoteOs = resolveRemoteOsSync(host.name);
+  const env = withActorEnv({ AGENTS_FLEET_REMOTE: '1' });
+  const remoteCmd = buildRemoteAgentsInvocation(forwardedArgs, undefined, remoteOs, env);
+  if (mode === 'stream') {
+    const code = streamAgentsOnHost(host, forwardedArgs, {
+      interactive: !!process.stdout.isTTY && !process.argv.includes('--no-tty'),
+      extraEnv: { AGENTS_FLEET_REMOTE: '1' },
+      remoteOs,
+      target,
+    });
+    return { code, stdout: '', stderr: '' };
+  }
+  const sshOpts = passthroughSshOptions(host, false);
+  const result = sshExec(target, remoteCmd, {
+    multiplex: sshOpts.multiplex,
+    extraSshArgs: sshOpts.extraSshArgs,
+  });
+  return {
+    code: result.code ?? 1,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
+}
+
+async function pullRemoteFile(device: string, remotePath: string, localPath: string): Promise<void> {
+  const host = await resolveHost(device);
+  if (!host) {
+    throw new Error(`Unknown device "${device}". Next: agents devices list`);
+  }
+  const target = sshTargetFor(host);
+  fs.mkdirSync(path.dirname(path.resolve(localPath)), { recursive: true });
+  const sshOpts = passthroughSshOptions(host, false);
+  const copied = spawnSync(
+    'scp',
+    [...sshOpts.extraSshArgs, '--', `${target}:${remotePath}`, path.resolve(localPath)],
+    { encoding: 'utf8' },
+  );
+  if (copied.status !== 0) {
+    throw new Error(
+      `Failed to copy screenshot from ${device}:${remotePath}: ${(copied.stderr || copied.stdout || '').trim()}`,
+    );
+  }
+}
+
+function syncTaskIndex(request: IPCRequest, response: IPCResponse): void {
+  const name = response.task ?? request.task ?? request.taskName;
+  if (!response.ok || !name) return;
+  if (request.action === 'done' || (request.action === 'stop' && request.task)) {
+    unbindTask(name);
+    return;
+  }
+  if (request.action === 'start') {
+    const existing = getTaskBinding(name);
+    if (!existing) {
+      bindTask(name, {
+        device: machineId(),
+        profile: request.profile,
+        url: request.url,
+        sessionId: request.sessionId ?? callerSessionId(),
+        launchId: request.launchId ?? callerLaunchId(),
+        createdAt: Date.now(),
+      });
+    } else if (request.url) {
+      updateTaskBinding(name, { url: request.url });
+    }
+    return;
+  }
+  if (request.url) {
+    const existing = getTaskBinding(name);
+    if (existing) {
+      updateTaskBinding(name, { url: request.url });
+    } else {
+      bindTask(name, {
+        device: machineId(),
+        profile: request.profile,
+        url: request.url,
+        sessionId: request.sessionId ?? callerSessionId(),
+        launchId: request.launchId ?? callerLaunchId(),
+        createdAt: Date.now(),
+      });
+    }
+    return;
+  }
+  if (!getTaskBinding(name)) {
+    bindTask(name, {
+      device: machineId(),
+      profile: request.profile,
+      sessionId: request.sessionId ?? callerSessionId(),
+      launchId: request.launchId ?? callerLaunchId(),
+      createdAt: Date.now(),
+    });
+  }
+}
+
+async function sendIPCRequest(
+  request: IPCRequest,
+  opts?: { autoStartDaemon?: boolean },
+): Promise<IPCResponse> {
+  const response = await sendRawIPCRequest(request, opts);
+  syncTaskIndex(request, response);
+  return response;
+}
+
+function assertDeviceDeclaresProfile(device: string, profileName: string): void {
+  const declared = declaringDevices(profileName);
+  if (declared.includes(device)) return;
+  const where =
+    declared.length > 0
+      ? `Declared on: ${declared.join(', ')}.`
+      : 'No device declares that profile.';
+  throw new Error(
+    `Device "${device}" does not declare browser profile "${profileName}". ${where}\n` +
+      `Next: run \`agents browser profiles add ${profileName}\` on ${device}.`,
+  );
+}
 
 // Help groups — surfaces the actual mental model an agent follows
 // ("open a session / drive the page / capture evidence / rare extras")
@@ -133,8 +362,10 @@ export function registerBrowserCommand(program: Command): void {
       # Keep one process and daemon socket warm for repeated actions
       agents browser stream --task "$AGENTS_BROWSER_TASK"
 
-      # Drive another machine's browser (needs its consent — see remote-control)
-      agents browser start --device zion
+      # Bind a device at start; later verbs resolve it from the task
+      agents browser start --task post --device zion --url https://x.com/
+      agents browser type --task post --ref @e3 "hello"
+      agents browser screenshot --task post
 
       # Browse a task-heavy profile's captures: one row per task, not per file
       agents browser sessions
@@ -1086,6 +1317,84 @@ function registerProfilesCommands(browser: Command): void {
 }
 
 function registerTaskCommands(browser: Command): void {
+  browser.hook('preAction', async (_thisCommand, actionCommand) => {
+    inferredTaskName = undefined;
+    if (isFleetRemoteInvocation()) return;
+
+    const pathNames = commandPath(actionCommand);
+    const top = pathNames[0];
+    if (!top || !TASK_ROUTED_COMMANDS.has(top)) return;
+    if (pathNames.length === 1 && top === 'start') return;
+    if (top === 'stop' && actionCommand.opts().profile && !actionCommand.opts().task) return;
+
+    const opts = actionCommand.opts() as { task?: string; device?: string };
+    const deviceFlag = opts.device ?? flagValue(process.argv.slice(2), 'device', 'D');
+    const taskFlag = opts.task ?? flagValue(process.argv.slice(2), 'task');
+    const route = resolveTaskRoute({
+      task: taskFlag ?? process.env.AGENTS_BROWSER_TASK,
+      device: deviceFlag,
+      sessionId: callerSessionId(),
+      launchId: callerLaunchId(),
+    });
+
+    if (route.kind === 'reject-device') {
+      console.error(route.message);
+      process.exit(1);
+    }
+    if (route.kind === 'unknown' || route.kind === 'ambiguous') {
+      console.error(route.message);
+      process.exit(1);
+    }
+
+    inferredTaskName = route.task;
+    if (isSelfHost(route.device) || !route.task) return;
+
+    const forwarded = browserForwardedArgv();
+    if (route.task && !forwarded.includes('--task')) {
+      forwarded.push('--task', route.task);
+    }
+
+    const outputPath =
+      top === 'screenshot'
+        ? (actionCommand.opts() as { output?: string }).output ??
+          flagValue(process.argv.slice(2), 'output', 'o')
+        : undefined;
+
+    if (top === 'screenshot' && outputPath) {
+      const withoutOutput = stripRoutingFlags(forwarded, [
+        { long: 'output', short: 'o', takesValue: true },
+      ]);
+      const captured = await dispatchBrowserToDevice(route.device, withoutOutput, 'capture');
+      if (captured.code !== 0) {
+        process.stderr.write(captured.stderr);
+        process.exit(captured.code);
+      }
+      const remotePath = captured.stdout
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line.length > 0);
+      if (!remotePath) {
+        console.error(`Remote screenshot on ${route.device} produced no path.`);
+        process.exit(1);
+      }
+      try {
+        await pullRemoteFile(route.device, remotePath, outputPath);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
+      const saved = path.resolve(outputPath);
+      console.log(saved);
+      process.exit(0);
+    }
+
+    const result = await dispatchBrowserToDevice(route.device, forwarded, 'stream');
+    if (result.code === 0 && (top === 'done' || top === 'stop') && route.task) {
+      unbindTask(route.task);
+    }
+    process.exit(result.code);
+  });
+
   browser
     .command('remote-control [state]')
     .description(
@@ -1130,7 +1439,8 @@ function registerTaskCommands(browser: Command): void {
     .command('stream')
     .description('Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses')
     .option(TASK_OPTION_FLAG, 'Default task for requests that omit `task` (defaults to $AGENTS_BROWSER_TASK)')
-    .action(async (opts: { task?: string }) => {
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
+    .action(async (opts: { task?: string; device?: string }) => {
       await runBrowserIPCStream({
         input: process.stdin,
         output: process.stdout,
@@ -1167,6 +1477,7 @@ function registerTaskCommands(browser: Command): void {
     .option('--title <label>', 'Human label shown in `browser status` (defaults to first navigated host)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
+    .option('--device <name>', 'Device that hosts this task; later verbs resolve it from --task (not valid on page verbs)')
     .option('--fresh', 'Always open a new tab, skipping the reclaim of a tab an abandoned task is holding on that URL')
     .option('--no-skills', 'Skip auto-discovery of site-specific SKILL.md from ~/.agents/skills/browser/domain-skills/')
     .option('--record', 'Start recording right after the tab opens (shorthand for `agents browser record start` as a follow-up)')
@@ -1228,6 +1539,52 @@ function registerTaskCommands(browser: Command): void {
         }
       }
 
+      const deviceName: string | undefined = opts.device;
+      if (deviceName) {
+        const lowered = deviceName.toLowerCase();
+        if (lowered === 'all' || lowered === 'auto') {
+          console.error(
+            `--device ${deviceName} is not valid on \`agents browser start\`: a task lives on one device.\n` +
+              `Next: agents browser start --task <name> --device <device>`,
+          );
+          process.exit(1);
+        }
+        try {
+          assertDeviceDeclaresProfile(deviceName, profileName);
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          process.exit(1);
+        }
+        if (!isSelfHost(deviceName) && !isFleetRemoteInvocation()) {
+          try {
+            const result = await dispatchBrowserToDevice(deviceName, browserForwardedArgv(), 'capture');
+            process.stdout.write(result.stdout);
+            process.stderr.write(result.stderr);
+            if (result.code !== 0) process.exit(result.code);
+            const taskName = opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
+            if (!taskName) {
+              console.error(`Remote start on ${deviceName} produced no task name.`);
+              process.exit(1);
+            }
+            bindTask(taskName, {
+              device: deviceName,
+              profile: profileName,
+              url: opts.url,
+              sessionId: callerSessionId(),
+              launchId: callerLaunchId(),
+              createdAt: Date.now(),
+            });
+            if (!result.stderr.includes(`started on ${deviceName}`)) {
+              console.error(`Task "${taskName}" started on ${deviceName} (profile: ${profileName}).`);
+            }
+          } catch (err) {
+            console.error(err instanceof Error ? err.message : String(err));
+            process.exit(1);
+          }
+          return;
+        }
+      }
+
       // Grounded login guardrail: if the opening URL is a known login-gated
       // service and the resolved profile has no session for it, say so on stderr
       // and name a profile that IS logged in. Reads the profile's real cookie DB
@@ -1265,18 +1622,29 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
+      const boundDevice = deviceName && isSelfHost(deviceName) ? deviceName : machineId();
+      if (response.task) {
+        bindTask(response.task, {
+          device: boundDevice,
+          profile: profileName,
+          url: opts.url,
+          sessionId: callerSessionId(),
+          launchId: callerLaunchId(),
+          createdAt: Date.now(),
+        });
+      }
+
       // stdout: just the resolved name, one line, no decoration. Lets callers do:
       //   export AGENTS_BROWSER_TASK=$(agents browser start --profile work)
       console.log(response.task);
 
       // stderr: human-friendly commentary so a TTY user still sees what happened.
       // Shell substitution captures stdout only, so $(...) stays clean.
+      console.error(`Task "${response.task}" started on ${boundDevice} (profile: ${profileName}).`);
       if (opts.url && response.tabId) {
-        console.error(`Started task "${response.task}" with tab ${response.tabId}`);
-      } else {
-        console.error(`Started task "${response.task}"`);
+        console.error(`Tab ${response.tabId}`);
       }
-      console.error('Tip: page verbs resolve this task from your session — --task only when running two at once.');
+      console.error('Tip: page verbs resolve this task from --task; --device is only valid on start.');
       console.error('Try: agents browser screenshot | agents browser console --level error');
 
       // Surface the matched domain-skill (if any) so an agent driving the
@@ -1317,6 +1685,7 @@ function registerTaskCommands(browser: Command): void {
     .command('done')
     .description('Complete a task and close its tabs (resolves from caller identity when --task is omitted)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .action(async (opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
@@ -1340,6 +1709,7 @@ function registerTaskCommands(browser: Command): void {
     .command('stop')
     .description('Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-p, --profile <name>', 'Detach the whole profile (incl. composite "name@endpoint") instead of stopping a single task')
     .action(async (opts) => {
       if (opts.profile) {
@@ -1457,6 +1827,7 @@ function registerTaskCommands(browser: Command): void {
     .alias('goto')
     .description('Navigate current tab to URL (creates a task and tab when none exist)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-u, --url <url>', 'URL to navigate to (or pass it positionally)')
     .option('-p, --profile <name>', 'Browser profile (optional if task is unique)')
     .action(async (urlPos: string | undefined, opts: { task?: string; url?: string; profile?: string }) => {
@@ -1491,6 +1862,7 @@ function registerTaskCommands(browser: Command): void {
     .command('add')
     .description('Open URL in new tab (becomes current)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .requiredOption('--url <url>', 'URL to open in the new tab')
     .option('-p, --profile <name>', 'Browser profile')
     .action(async (opts) => {
@@ -1514,6 +1886,7 @@ function registerTaskCommands(browser: Command): void {
     .command('focus <tabId>')
     .description('Switch to tab (by ID, prefix, or URL substring)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .action(async (tabId: string, opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
@@ -1534,6 +1907,7 @@ function registerTaskCommands(browser: Command): void {
     .command('close [tabId]')
     .description('Close tab(s) — omit tabId to close all')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .action(async (tabId: string | undefined, opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({
@@ -1554,6 +1928,7 @@ function registerTaskCommands(browser: Command): void {
     .command('tabs')
     .description('List tabs open for the current task')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('--json', 'Output machine-readable JSON')
     .action(async (opts) => {
       const task = resolveTaskName(opts);
@@ -1594,6 +1969,7 @@ function registerTaskCommands(browser: Command): void {
     .command('screenshot')
     .description('Take a screenshot — auto-saved per task; --output only needed when you want a specific path')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-o, --output <path>', 'Specific output path (otherwise auto-saved under sessions/<task>/)')
     .option(
@@ -1620,19 +1996,25 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
+      // RUSH-3086: the daemon sandboxes writes to the runtime dir and silently
+      // ignores `-o` outside it. Honor the requested path here.
+      const savedPath = response.path
+        ? honorScreenshotOutput(opts.output, response.path)
+        : response.path;
+
       // stdout: just the path, so `P=$(agents browser screenshot)` works.
-      console.log(response.path);
+      console.log(savedPath);
 
       // stderr: human commentary with size + dimensions, so an agent can
       // see at a glance what was captured without `ls -l && file` round-trips.
       const size = humanizeBytes(response.bytes);
       const dims = response.width && response.height ? `${response.width}×${response.height}` : 'unknown size';
-      console.error(`Saved screenshot to ${response.path} (${size}, ${dims})`);
+      console.error(`Saved screenshot to ${savedPath} (${size}, ${dims})`);
 
       // When auto-saving (no --output), surface the directory once so the
       // agent doesn't have to dirname() the path or guess where files land.
-      if (!opts.output && response.path) {
-        const dir = path.dirname(response.path);
+      if (!opts.output && savedPath) {
+        const dir = path.dirname(savedPath);
         console.error(`Tip: auto-saving to ${dir}. Pass --output <path> to choose a path.`);
       }
     });
@@ -1641,6 +2023,7 @@ function registerTaskCommands(browser: Command): void {
     .command('pdf [output]')
     .description('Export the current tab as PDF via CDP Page.printToPDF — auto-saved under sessions/<task>/ when [output] is omitted')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .action(async (output: string | undefined, opts) => {
       const task = resolveTaskName(opts);
@@ -1671,6 +2054,7 @@ function registerTaskCommands(browser: Command): void {
     .alias('eval')
     .description('Evaluate JavaScript in current tab')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-e, --expression <js>', 'JavaScript expression to evaluate (or pass it positionally)')
     .option('-f, --file <path>', 'Path to a .js file whose contents will be evaluated')
@@ -2048,6 +2432,7 @@ function registerTaskCommands(browser: Command): void {
     .command('refs')
     .description('Get DOM refs for interactive elements')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--all', 'Include non-interactive elements')
     .option('-l, --limit <n>', 'Max elements (default 500)', '500')
@@ -2096,6 +2481,7 @@ function registerTaskCommands(browser: Command): void {
     .command('click [ref]')
     .description('Click an element by ref, or raw coordinates with --at X,Y')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--at <x,y>', 'Click viewport coordinates (e.g. --at 320,540), bypassing ref resolution')
     .action(async (ref: string | undefined, opts) => {
@@ -2141,6 +2527,7 @@ function registerTaskCommands(browser: Command): void {
     .command('type <ref>')
     .description('Type text into an element by ref')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--text <text>', 'Text to type (use quotes for spaces/special chars)')
     .option('--secret <ref>', 'Resolve <bundle>/<KEY> from `agents secrets` and type the value. The secret is resolved in-process and never printed to stdout or the transcript. Alternative to --text.')
@@ -2209,6 +2596,7 @@ function registerTaskCommands(browser: Command): void {
     .command('press <key>')
     .description('Press a key (Enter, Tab, Escape, etc)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .action(async (key: string, opts) => {
       const task = resolveTaskName(opts);
@@ -2231,6 +2619,7 @@ function registerTaskCommands(browser: Command): void {
     .command('hover <ref>')
     .description('Hover over an element by ref')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .action(async (ref: string, opts) => {
       const task = resolveTaskName(opts);
@@ -2253,6 +2642,7 @@ function registerTaskCommands(browser: Command): void {
     .command('scroll')
     .description('Scroll the page by pixel amount (negatives scroll up/left)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--dx <n>', 'Horizontal pixels (negative = left)', (v) => parseInt(v, 10), 0)
     .option('--dy <n>', 'Vertical pixels (negative = up)', (v) => parseInt(v, 10), 0)
@@ -2290,6 +2680,7 @@ function registerTaskCommands(browser: Command): void {
     .command('upload')
     .description('Upload file(s) — supports hidden file inputs, drag-drop targets, and OS chooser interception')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-r, --ref <n>', 'Ref of the upload target element (file input or drop zone)', (v) => parseInt(v, 10))
     .option('--trigger <n>', 'Ref of a button that opens the OS file chooser (Pattern C)', (v) => parseInt(v, 10))
@@ -2345,6 +2736,7 @@ function registerTaskCommands(browser: Command): void {
     .command('viewport <width> <height>')
     .description('Set viewport size')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-m, --mobile', 'Enable mobile emulation')
     .option('-s, --scale <factor>', 'Device scale factor', parseFloat)
@@ -2372,6 +2764,7 @@ function registerTaskCommands(browser: Command): void {
     .command('device <device-name>')
     .description('Emulate a device (iPhone 14, iPad, MacBook Pro)')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .action(async (deviceName: string, opts) => {
       const task = resolveTaskName(opts);
@@ -2407,6 +2800,7 @@ function registerTaskCommands(browser: Command): void {
     .command('console')
     .description('Read console logs from a tab')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-l, --level <level>', 'Filter by level (log, info, warn, error)')
     .option('--clear', 'Clear logs after reading')
@@ -2441,6 +2835,7 @@ function registerTaskCommands(browser: Command): void {
     .command('errors')
     .description('Read page errors from a tab')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--clear', 'Clear errors after reading')
     .action(async (opts) => {
@@ -2476,6 +2871,7 @@ function registerTaskCommands(browser: Command): void {
     .command('requests')
     .description('Read captured network requests. --format har emits a HAR 1.2 JSON document.')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-f, --filter <text>', 'Filter URLs containing text')
     .option('--clear', 'Clear requests after reading')
@@ -2527,6 +2923,7 @@ function registerTaskCommands(browser: Command): void {
     .command('logs')
     .description('Read merged rush-app + rush-cli JSONL logs for a task')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('--source <name>', 'Source to scope to: rush-app or rush-cli (default both)')
     .option('--lines <n>', 'Tail N entries (default 200; ignored when --since)', (v) => parseInt(v, 10))
     .option('--since <when>', 'Absolute timestamp or relative offset (e.g. 5m, 2h, 1d)')
@@ -2578,6 +2975,7 @@ function registerTaskCommands(browser: Command): void {
     .command('responsebody <url-pattern>')
     .description('Wait for and read a response body by URL pattern')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--timeout <ms>', 'Timeout in milliseconds', parseInt)
     .option('--max-chars <n>', 'Max characters to return', parseInt)
@@ -2606,6 +3004,7 @@ function registerTaskCommands(browser: Command): void {
     .command('wait')
     .description('Wait for a condition')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--time <ms>', 'Wait for milliseconds')
     .option('--selector <css>', 'Wait for CSS selector to appear')
@@ -2661,6 +3060,7 @@ function registerTaskCommands(browser: Command): void {
     .command('download')
     .description("Set the download directory for a task (defaults to the profile's downloads dir)")
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('-p, --path <dir>', "Download directory path (default: the profile's downloads dir)")
     .action(async (opts) => {
@@ -2699,6 +3099,7 @@ function registerTaskCommands(browser: Command): void {
     .command('start')
     .description('Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-t, --tab <tabId>', 'Tab ID (defaults to current)')
     .option('--fps <n>', 'Frames per second (1–30, default 5)', (v) => parseInt(v, 10))
     .option('--duration <sec>', 'Hard duration cap in seconds (default 60)', (v) => parseInt(v, 10))
@@ -2729,6 +3130,7 @@ function registerTaskCommands(browser: Command): void {
     .command('stop')
     .description('Stop an in-progress recording')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .action(async (opts) => {
       const task = resolveTaskName(opts);
       const response = await sendIPCRequest({ action: 'record-stop', task });
@@ -2746,6 +3148,7 @@ function registerTaskCommands(browser: Command): void {
     .command('waitdownload')
     .description('Wait for a download to complete')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
+    .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('--timeout <ms>', 'Timeout in milliseconds', parseInt)
     .action(async (opts) => {
       const task = resolveTaskName(opts);

@@ -183,6 +183,13 @@ describe('maybeRunOnHost — local short-circuits (no SSH attempted)', () => {
     expect(process.exitCode ?? 0).toBe(0);
   });
 
+  it('falls through for browser — --device is bound at start, not routed here', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    expect(await maybeRunOnHost('browser', ['browser', 'start', '--device', 'zion'])).toBe(false);
+    expect(await maybeRunOnHost('browser', ['browser', 'screenshot', '--device', 'zion'])).toBe(false);
+    expect(process.exitCode ?? 0).toBe(0);
+  });
+
   it('routes routines --device to a non-self target (rejected by assertValidSshTarget)', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
     // --evil starts with '-' so assertValidSshTarget rejects it before any
@@ -515,10 +522,10 @@ describe('runFleetPassthrough — direct unit tests', () => {
   });
 });
 
-// The standalone `browser` binary (dist/browser.js) never enters index.ts, so it
-// wires --device routing itself via maybeRunStandaloneOnHost. These prove it routes
-// exactly like `agents browser … --device <box>` while leaving pure-local runs alone.
-describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-2214)', () => {
+// The standalone `browser` binary (dist/browser.js) never enters index.ts.
+// Browser owns `--device` (start binds the task; later verbs reject it), so
+// maybeRunStandaloneOnHost must leave the flag on argv except for --help.
+describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-2214 / T3)', () => {
   const originalArgv = process.argv.slice();
 
   afterEach(() => {
@@ -535,32 +542,18 @@ describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-
     expect(process.argv).toEqual(['node', 'browser', 'screenshot', '--json']);
   });
 
-  it('routes --device to a non-self target (rejected by assertValidSshTarget before SSH)', async () => {
+  it('leaves --device on argv for start so the command can bind the task', async () => {
     process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    // `--evil` starts with '-', so assertValidSshTarget rejects it before any SSH
-    // connection. Returning true with exitCode > 0 proves the remote route was
-    // entered — i.e. `browser` reached REMOTE_PASSTHROUGH via the synthesized
-    // command token, the exact path the standalone binary previously lacked.
-    process.argv = ['node', 'browser', 'start', '--device', '--evil'];
-    expect(await maybeRunStandaloneOnHost('browser')).toBe(true);
-    expect(process.exitCode).toBeGreaterThan(0);
-  });
-
-  it('routes --device to a non-self target (the `get-text` subcommand)', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    process.argv = ['node', 'browser', 'get-text', '--device', '--evil'];
-    expect(await maybeRunStandaloneOnHost('browser')).toBe(true);
-    expect(process.exitCode).toBeGreaterThan(0);
-  });
-
-  it('runs locally and strips routing flags (no synthetic token) when --device names this machine', async () => {
-    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
-    expect(machineId()).toBe('mybox');
-    process.argv = ['node', 'browser', 'screenshot', '--device', 'mybox'];
+    process.argv = ['node', 'browser', 'start', '--device', 'zion'];
     expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
-    // Argv is the ORIGINAL args minus routing flags — never the synthetic
-    // 'browser' token maybeRunOnHost prepends for its remote build.
-    expect(process.argv).toEqual(['node', 'browser', 'screenshot']);
+    expect(process.argv).toEqual(['node', 'browser', 'start', '--device', 'zion']);
+  });
+
+  it('leaves --device on argv for a page verb so the command can reject it', async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'mybox';
+    process.argv = ['node', 'browser', 'screenshot', '--device', 'zion'];
+    expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
+    expect(process.argv).toEqual(['node', 'browser', 'screenshot', '--device', 'zion']);
   });
 
   it('keeps --help local but strips the routing flags so commander parses', async () => {
@@ -568,30 +561,6 @@ describe('maybeRunStandaloneOnHost — standalone binary --device routing (RUSH-
     process.argv = ['node', 'browser', '--device', 'otherbox', '--help'];
     expect(await maybeRunStandaloneOnHost('browser')).toBe(false);
     expect(process.argv).toEqual(['node', 'browser', '--help']);
-  });
-
-  it('builds the remote invocation as `agents browser <sub> …` for the fleet `all` sentinel', async () => {
-    const registry = fakeRegistry([fakeDevice('zion', 'macos'), fakeDevice('mac-mini', 'macos')]);
-    const remoteCmds: string[][] = [];
-    const originalLog = console.log;
-    console.log = () => {};
-    process.argv = ['node', 'browser', 'start', '--device', 'all'];
-    const handled = await maybeRunStandaloneOnHost('browser', {
-      self: 'zion',
-      loadDevices: async () => registry,
-      runner: (_d: DeviceProfile, cmd: string[]) => {
-        remoteCmds.push(cmd);
-        return { code: 0, stdout: '{}', stderr: '' };
-      },
-      localRunner: () => ({ code: 0, stdout: '{}', stderr: '' }),
-    });
-    console.log = originalLog;
-    expect(handled).toBe(true);
-    // The remote (mac-mini) target runs `agents browser start …`, proving the
-    // implicit command token is synthesized into the forwarded argv.
-    expect(remoteCmds).toHaveLength(1);
-    expect(remoteCmds[0]).toContain('browser');
-    expect(remoteCmds[0]).toContain('start');
   });
 });
 

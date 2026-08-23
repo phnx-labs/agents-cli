@@ -1746,7 +1746,7 @@
           "negate": false
         }
       ],
-      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session — auto-picks the first installed Chromium-family browser\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page (no start / --task needed — identity resolves the task)\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Drive another machine's browser (needs its consent — see remote-control)\n      agents browser start --device zion\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done\n\n      # Close tabs the daemon's own reaper would have caught on its next 5-min tick\n      agents browser gc --dry-run",
+      "examples": "# List configured browser profiles\n      agents browser profiles list\n\n      # Create a Chrome profile pointed at a CDP endpoint\n      agents browser profiles create work --browser chrome --endpoint http://localhost:9222\n\n      # Start a session — auto-picks the first installed Chromium-family browser\n      agents browser start\n\n      # Or pin to a specific profile\n      agents browser start --profile work\n\n      # Drive the page (no start / --task needed — identity resolves the task)\n      agents browser navigate https://example.com\n      agents browser screenshot\n\n      # Keep one process and daemon socket warm for repeated actions\n      agents browser stream --task \"$AGENTS_BROWSER_TASK\"\n\n      # Bind a device at start; later verbs resolve it from the task\n      agents browser start --task post --device zion --url https://x.com/\n      agents browser type --task post --ref @e3 \"hello\"\n      agents browser screenshot --task post\n\n      # Browse a task-heavy profile's captures: one row per task, not per file\n      agents browser sessions\n\n      # Allow / deny other fleet machines driving THIS machine's browser\n      agents browser remote-control on\n\n      # End the session when done\n      agents browser done\n\n      # Close tabs the daemon's own reaper would have caught on its next 5-min tick\n      agents browser gc --dry-run",
       "notes": "Most agent workflows should use the 'browser' skill instead of raw subcommands.\n      The skill wraps profile selection, snapshotting, and tunneling.\n\n      Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge, Arc).\n      Safari and Firefox are not supported — they don't speak the Chrome DevTools\n      Protocol the way agents browser expects. On Windows, Edge is the default\n      because it's preinstalled. On macOS and Linux, Chrome is preferred when\n      installed; otherwise the first Chromium-family binary on disk wins.",
       "subcommands": [
         {
@@ -1767,6 +1767,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -1815,6 +1824,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -1899,6 +1917,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -1922,6 +1949,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -1971,6 +2007,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -2028,6 +2073,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -2187,6 +2241,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-t, --tab <tabId>",
               "description": "Tab ID (defaults to current)",
               "short": "-t",
@@ -2220,6 +2283,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -2337,6 +2409,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-u, --url <url>",
               "description": "URL to navigate to (or pass it positionally)",
               "short": "-u",
@@ -2393,6 +2474,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-t, --tab <tabId>",
               "description": "Tab ID (defaults to current)",
               "short": "-t",
@@ -2433,6 +2523,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -3143,6 +3242,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-t, --tab <tabId>",
                   "description": "Tab ID (defaults to current)",
                   "short": "-t",
@@ -3209,6 +3317,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-h, --help",
                   "description": "Show help",
                   "short": "-h",
@@ -3234,6 +3351,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -3344,6 +3470,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-t, --tab <tabId>",
               "description": "Tab ID (defaults to current)",
               "short": "-t",
@@ -3419,6 +3554,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-t, --tab <tabId>",
               "description": "Tab ID (defaults to current)",
               "short": "-t",
@@ -3470,6 +3614,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -3530,6 +3683,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -3697,6 +3859,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-t, --tab <tabId>",
                   "description": "Tab ID (defaults to current)",
                   "short": "-t",
@@ -3743,6 +3914,15 @@
                   "flags": "--task <name>",
                   "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
                   "long": "--task",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
                   "required": true,
                   "optional": false,
                   "variadic": false,
@@ -3894,6 +4074,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Device that hosts this task; later verbs resolve it from --task (not valid on page verbs)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "--fresh",
               "description": "Always open a new tab, skipping the reclaim of a tab an abandoned task is holding on that URL",
               "long": "--fresh",
@@ -4016,6 +4205,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-p, --profile <name>",
               "description": "Detach the whole profile (incl. composite \"name@endpoint\") instead of stopping a single task",
               "short": "-p",
@@ -4049,6 +4247,15 @@
               "flags": "--task <name>",
               "description": "Default task for requests that omit `task` (defaults to $AGENTS_BROWSER_TASK)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -4099,6 +4306,15 @@
                   "flags": "--task <name>",
                   "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
                   "long": "--task",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
                   "required": true,
                   "optional": false,
                   "variadic": false,
@@ -4160,6 +4376,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-h, --help",
                   "description": "Show help",
                   "short": "-h",
@@ -4196,6 +4421,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--device <name>",
+                  "description": "Not valid here — bind the device at `agents browser start --device`",
+                  "long": "--device",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "-h, --help",
                   "description": "Show help",
                   "short": "-h",
@@ -4221,6 +4455,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -4311,6 +4554,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-t, --tab <tabId>",
               "description": "Tab ID (defaults to current)",
               "short": "-t",
@@ -4371,6 +4623,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,
@@ -4508,6 +4769,15 @@
               "negate": false
             },
             {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
               "flags": "-t, --tab <tabId>",
               "description": "Tab ID (defaults to current)",
               "short": "-t",
@@ -4595,6 +4865,15 @@
               "flags": "--task <name>",
               "description": "Task name (defaults to $AGENTS_BROWSER_TASK, else the caller's live task)",
               "long": "--task",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Not valid here — bind the device at `agents browser start --device`",
+              "long": "--device",
               "required": true,
               "optional": false,
               "variadic": false,

@@ -11,7 +11,7 @@
  * supervisor outlives a dropped connection.
  *
  * Commands with their own richer `--device` handling (`run`/`sessions`/`feed`/
- * `computer`/`secrets`/`logs`/…) are listed in {@link OWN_HOST_COMMANDS} and
+ * `computer`/`browser`/`secrets`/`logs`/…) are listed in {@link OWN_HOST_COMMANDS} and
  * fall through to their local actions. Everything else either routes via this
  * table or, when `--device` is present, exits with a clear
  * "not supported" message — never commander's raw `unknown option`.
@@ -127,7 +127,6 @@ export const REMOTE_PASSTHROUGH: Record<string, RemoteSpec> = {
   tmux: {},
   watchdog: {},
   factory: {},
-  browser: {},
 };
 
 /**
@@ -143,6 +142,7 @@ export const OWN_HOST_COMMANDS = new Set([
   'sessions',
   'feed',
   'computer',
+  'browser', // `--device` on start binds the task; later verbs resolve it from the task
   'secrets',
   'accounts', // `accounts sync --device` names the destination, not remote routing
   'logs',
@@ -701,20 +701,13 @@ export async function maybeRunOnHost(
  * the binary itself (the `browser`/`computer` bins, `dist/browser.js` etc.) rather
  * than being the first argv token.
  *
- * `agents browser … --device <box>` routes through {@link maybeRunOnHost} in
- * index.ts, but the standalone `browser` binary never enters index.ts — so without
- * this it dropped `--device` entirely (commander errored with `unknown option
- * '--device'`). This wires the identical routing: it synthesizes the implicit command
- * token (`browser`) at the front of the argv so the remote invocation builds as
- * `agents browser …`, delegates to {@link maybeRunOnHost}, and returns `true` when
- * it dispatched the run to a remote (the local program must then NOT parse).
- *
- * On a local / self-host fall-through it rewrites `process.argv` to the ORIGINAL
- * args minus the routing flags — never the synthetic command token — so the
- * standalone commander program parses cleanly and never sees an unknown `--device`.
- * When no routing flag is present it leaves `process.argv` untouched (the common
- * case), so an unrelated flag like `--no-tty` is never stripped from a purely local
- * run.
+ * `agents computer … --device <box>` still routes through {@link maybeRunOnHost}
+ * in index.ts, but the standalone `browser` / `computer` binaries never enter
+ * index.ts. Browser now owns `--device` (start binds the task; later verbs
+ * reject it), so this function leaves argv intact for OWN_HOST commands and
+ * only strips routing flags on `--help`/`--version`. Other standalone commands
+ * still synthesize the implicit command token and delegate to
+ * {@link maybeRunOnHost}.
  *
  * @param command the fixed command name the binary stands for (`'browser'`).
  */
@@ -726,6 +719,19 @@ export async function maybeRunStandaloneOnHost(
   // No routing flag → nothing to route or strip. Leave argv alone so a purely
   // local run keeps every flag it passed.
   if (!hasHostRoutingFlag(rawArgs)) return false;
+
+  // Commands that interpret `--device` themselves (browser start binds the
+  // task→device index; later browser verbs reject the flag) must see it.
+  // Help/version still strip so `browser --device x --help` parses.
+  if (OWN_HOST_COMMANDS.has(command)) {
+    const helpOrVersion = rawArgs.some(
+      (a) => a === '--help' || a === '-h' || a === '--version' || a === '-V',
+    );
+    if (helpOrVersion) {
+      process.argv = [process.argv[0], process.argv[1], ...stripRoutingFlags(rawArgs, STRIP_SPECS)];
+    }
+    return false;
+  }
 
   // Keep --help/--version local (docs must work without a reachable host), mirroring
   // index.ts's `helpOrVersionRequested` guard, but still strip the routing flags
