@@ -20,6 +20,7 @@ facts:
 
 ## Story
 
+
 You asked where the agents fight with the hooks. Here is the map,
 mined from **~7,290 real session transcripts** across 7 harnesses (claude, codex,
 grok, kimi, cursor, droid, antigravity).
@@ -39,9 +40,69 @@ One guard is worth naming for its silence: **footer-guard has fired zero times.*
 "no Generated-with-Claude-Code footer" rule is so internalized that no agent ever tries
 it — the perfect guard is the one that never has to act.
 
+## What each hook is for
+
+
+Read this first — every table after it refers to these names.
+
+Each hook is listed with its **event** (when it fires), its **kind** (what it does when it
+fires), a one-line **purpose**, and a **verdict**. Kind is the thing to read first: `inject`
+and `remind`/`nudge` never stop you; `block` and `gate` do. They are grouped by lifecycle
+moment, so the two lanes that can actually stop an agent stand apart from the eleven hooks
+that only ever add context.
+
+**SessionStart — all `inject` / `side-effect`, never blocks**
+
+| Hook | Purpose | Verdict |
+|---|---|---|
+| session-identity | Writes who-am-I (session id, transcript path, pid) so `sessions` / `--active` can join pid→session | KEEP |
+| **linear-inject-tasks** | **READS Linear and shows your projects/milestones/tickets in context. It only displays — it does not create tickets** | KEEP |
+| device-topology | Injects the fleet host list + live load | KEEP |
+| repo-inflight | Injects open PRs + agents active on this repo | KEEP |
+| autosync | Brings config / secrets / sessions current | KEEP |
+| git-pull-forward | Fast-forwards the cwd repo when clean (ff-only) | KEEP |
+
+**UserPromptSubmit — all `expand` / `remind`, never blocks**
+
+| Hook | Purpose | Verdict |
+|---|---|---|
+| promptcuts | Expands `#name` shortcuts into full instructions | KEEP |
+| bangcuts | Runs `` `!cmd` `` inline and injects the output | KEEP |
+| vacation-recap | On a long gap, nudges a back-from-vacation recap | KEEP |
+| verify-work-state (record) | Records a goal boundary the Stop gate reads later | KEEP |
+| worktree-law-reminder | Injects the "every write via a worktree" line each prompt | KEEP |
+
+**PreToolUse — the block lane**
+
+| Hook | Kind | Purpose | Verdict |
+|---|---|---|---|
+| git-guard | block · **WHAT** | Vetoes destructive/irreversible git *verbs* (reset --hard, force-push, checkout/switch, stash, clean, branch -d, rewrite). Worktree-aware: allows rebase/force-with-lease inside a worktree | KEEP · share code w/ main-branch-guard |
+| main-branch-guard | block · **WHERE** | Vetoes any write/commit to the PRIMARY worktree, on any branch | KEEP · share code w/ git-guard |
+| artifacts-confidential-guard | block | Stops publishing a confidential artifact to a public share — 35 fires across only 4 sessions, so it is one repeated fight, not a broad one | KEEP |
+| merge-guard | block | Stops admin-bypass merges and merges with no non-author verdict | KEEP |
+| rm-guard | block | Stops destructive `rm` on protected paths | KEEP |
+| secrets-guard | block | Stops secret-materializing one-liners (plaintext export, reveal) | KEEP |
+| large-file-add-guard | block | Stops `git add` of a file > 5 MiB | KEEP |
+| git-require-clean-tree | block | Stops pull/rebase on a dirty tree | KEEP |
+| teams-roster-guard | block | Forces mixed rosters (blocks a 3rd same-harness teammate) | KEEP |
+| user-message-guard | block | Bounces an over-long owner notification | KEEP |
+| footer-guard | block | Stops the "Generated with Claude Code" footer — 0 fires, pure deterrent | KEEP |
+| **pr-description-reminder** | nudge | **On `gh pr create/edit` with no run-proof → demands a screenshot/recording/test-output + ticket link. This IS the "attach mockups + test results" gate you wanted** | KEEP |
+| **plan-html-reminder** | nudge | Render the plan as HTML before presenting. **Only fires on the formal plan-exit tool — an agent that presents a plan as a plain message bypasses it entirely** | TUNE |
+
+**Stop — the `gate` lane**
+
+| Hook | Purpose | Verdict |
+|---|---|---|
+| verify-work-complete | Blocks a premature "done" without verification / handoff; also reinforces closing Linear + posting one update | KEEP · but see ticketing note |
+| no-permission-stop-guard | Blocks stopping on an unanswered permission prompt | KEEP |
+
 ## Data
 
-**Guards ranked by block events (all harnesses, `.jsonl` transcripts only)**
+
+Now the counts — every name below is defined in the table above.
+
+**Guards ranked by fires (all harnesses, `.jsonl` transcripts only)**
 
 | Guard | Event | Kind | Fires | Sessions | Per session |
 |---|---|---|---:|---:|---:|
@@ -81,6 +142,7 @@ it — the perfect guard is the one that never has to act.
 | antigravity | 29 | 0 | 0% | 0 |
 
 ## Figure
+
 
 <figure>
 <figcaption><strong>Figure 1 — The lifecycle battlefield.</strong> Every hook, placed at the moment it fires. Green = peaceful (injects context or nudges, never blocks). Red = combat (can veto a tool call or a stop). The fighting lives in two lanes only.</figcaption>
@@ -266,92 +328,8 @@ it — the perfect guard is the one that never has to act.
 </svg>
 </figure>
 
-## What each hook is for
-
-Every hook, its **event** (when it fires), its **kind** (what it does when it fires), its
-one-line **purpose**, and a **verdict**. Kind is the thing to read first: `inject` and
-`remind`/`nudge` never stop you; `block` and `gate` do.
-
-**SessionStart — all `inject` / `side-effect`, never blocks**
-
-| Hook | Purpose | Verdict |
-|---|---|---|
-| session-identity | Writes who-am-I (session id, transcript path, pid) so `sessions` / `--active` can join pid→session | KEEP |
-| **linear-inject-tasks** | **READS Linear and shows your projects/milestones/tickets in context. It only displays — it does not create tickets** | KEEP |
-| device-topology | Injects the fleet host list + live load | KEEP |
-| repo-inflight | Injects open PRs + agents active on this repo | KEEP |
-| autosync | Brings config / secrets / sessions current | KEEP |
-| git-pull-forward | Fast-forwards the cwd repo when clean (ff-only) | KEEP |
-
-**UserPromptSubmit — all `expand` / `remind`, never blocks**
-
-| Hook | Purpose | Verdict |
-|---|---|---|
-| promptcuts | Expands `#name` shortcuts into full instructions | KEEP |
-| bangcuts | Runs `` `!cmd` `` inline and injects the output | KEEP |
-| vacation-recap | On a long gap, nudges a back-from-vacation recap | KEEP |
-| verify-work-state (record) | Records a goal boundary the Stop gate reads later | KEEP |
-| worktree-law-reminder | Injects the "every write via a worktree" line each prompt | KEEP |
-
-**PreToolUse — the block lane**
-
-| Hook | Kind | Purpose | Verdict |
-|---|---|---|---|
-| git-guard | block · **WHAT** | Vetoes destructive/irreversible git *verbs* (reset --hard, force-push, checkout/switch, stash, clean, branch -d, rewrite). Worktree-aware: allows rebase/force-with-lease inside a worktree | KEEP · share code w/ main-branch-guard |
-| main-branch-guard | block · **WHERE** | Vetoes any write/commit to the PRIMARY worktree, on any branch | KEEP · share code w/ git-guard |
-| artifacts-confidential-guard | block | Stops publishing a confidential artifact to a public share — 35 fires across only 4 sessions, so it is one repeated fight, not a broad one | KEEP |
-| merge-guard | block | Stops admin-bypass merges and merges with no non-author verdict | KEEP |
-| rm-guard | block | Stops destructive `rm` on protected paths | KEEP |
-| secrets-guard | block | Stops secret-materializing one-liners (plaintext export, reveal) | KEEP |
-| large-file-add-guard | block | Stops `git add` of a file > 5 MiB | KEEP |
-| git-require-clean-tree | block | Stops pull/rebase on a dirty tree | KEEP |
-| teams-roster-guard | block | Forces mixed rosters (blocks a 3rd same-harness teammate) | KEEP |
-| user-message-guard | block | Bounces an over-long owner notification | KEEP |
-| footer-guard | block | Stops the "Generated with Claude Code" footer — 0 fires, pure deterrent | KEEP |
-| **pr-description-reminder** | nudge | **On `gh pr create/edit` with no run-proof → demands a screenshot/recording/test-output + ticket link. This IS the "attach mockups + test results" gate you wanted** | KEEP |
-| **plan-html-reminder** | nudge | Render the plan as HTML before presenting. **Only fires on the formal plan-exit tool — an agent that presents a plan as a plain message bypasses it entirely** | TUNE |
-
-**Stop — the `gate` lane**
-
-| Hook | Purpose | Verdict |
-|---|---|---|
-| verify-work-complete | Blocks a premature "done" without verification / handoff; also reinforces closing Linear + posting one update | KEEP · but see ticketing note |
-| no-permission-stop-guard | Blocks stopping on an unanswered permission prompt | KEEP |
-
-## Duplicates, tuning, and the Linear-pollution source
-
-**git-guard vs main-branch-guard are NOT duplicates — they're two axes.** git-guard polices
-*what operation* (destructive git verbs, anywhere); main-branch-guard polices *where* (never
-the primary tree). `git commit` in your checkout → main-branch-guard. `reset --hard` in a
-worktree → git-guard. Merging the policies would be wrong. **But they share ~200 lines of
-identical command-parsing shell** (`extract_sh_c_inner`, `check_segment`,
-`check_command_string`, `-C` resolution), and the `_json_field` JSON extractor is
-copy-pasted into **10** guard scripts. That is the real consolidation win: lift one shared
-git-command-parser into `hooks/lib/` (they already share `git-facts.sh`) — same behavior,
-one place to fix.
-
-**pr-description-reminder already does what you described** — it's the run-proof gate, not a
-vague "write a description" nudge. Keep it. Only blind spot: a `--fill`/`--template`/editor
-body it can't read (fails open there).
-
-**plan-html-reminder leaks because it only fires on the formal plan-exit tool.** If an agent
-writes the plan as an ordinary message (never entering/exiting Claude's plan mode), the hook
-never sees it — which is why you still have to ask. Its render bar is also strict (specific
-figure classes), so an agent that renders a non-matching plan gets re-blocked and falls back
-to presenting inline. Fix: loosen the gate so any rendered plan HTML clears it, and let the
-skill drive quality.
-
-**Linear pollution is NOT caused by a hook — no hook creates tickets.** Agents create them
-because two *rules* tell them to, and 100+ agents obey with no cross-session dedup:
-
-- `conventions.md`: *"open one if missing (one per unit of delivery)"*
-- your global close-session rule: *"File every follow-up you were about to suggest as a real ticket."*
-
-The `verify-work-complete` Stop gate reinforces it at session end. The result is volume +
-redundant tickets + misclassification (each agent guesses project/labels). `linear-inject`
-only *reads* your board. Fixing this is a rules edit, not a hook edit.
-
 ## Did the hook actually work?
+
 
 A block count says a hook fired. It does not say the agent then did the right
 thing. So for every fire that could be located in the message stream, the next
@@ -426,7 +404,68 @@ working," the only measurable compliance is "did any tool call follow," which is
 true almost by construction. What *is* real: 524 fires across 47 sessions, **11
 per session**. Whatever it is teaching, it is teaching it eleven times.
 
+## Duplicates, tuning, and the Linear-pollution source
+
+
+> Source claims in this section were re-verified against `.agents-system` at
+> `origin/main` (`011b7e0`) with a clean tree — not a stale local checkout. That
+> commit already includes PR #362, which changed this very hook set today.
+
+
+**git-guard vs main-branch-guard are NOT duplicates — they're two axes.** git-guard polices
+*what operation* (destructive git verbs, anywhere); main-branch-guard polices *where* (never
+the primary tree). `git commit` in your checkout → main-branch-guard. `reset --hard` in a
+worktree → git-guard. Merging the policies would be wrong. **But they share ~200 lines of
+identical command-parsing shell** (`extract_sh_c_inner`, `check_segment`,
+`check_command_string`, `-C` resolution), and the `_json_field` JSON extractor is
+copy-pasted into **11** scripts — `git-guard`, `main-branch-guard`, `merge-guard`,
+`rm-guard`, `secrets-guard`, `footer-guard`, `large-file-add-guard`,
+`teams-roster-guard`, `pr-description-reminder`, `01-git-require-clean-tree`, and
+`09-git-pull-forward` (counted with `git grep -l _json_field origin/main`, so it is
+the shipped tree, not a working copy). That is the real consolidation win: lift one
+shared git-command-parser into `hooks/lib/` (they already share `git-facts.sh`) —
+same behavior, one place to fix.
+
+**pr-description-reminder already does what you described** — it's the run-proof gate, not a
+vague "write a description" nudge. Keep it. Only blind spot: a `--fill`/`--template`/editor
+body it can't read (fails open there).
+
+**plan-html-reminder — the earlier diagnosis here was wrong, and the measurement says so.**
+It is *not* true that the hook only fires on the formal plan-exit tool: `hooks.yaml` registers
+the same script twice, once on `PreToolUse`/`ExitPlanMode` and once on `Stop`, precisely to
+cover harnesses (Codex, Grok) whose plan mode is collaboration state rather than a tool call.
+
+The measured failure mode is different. Of 57 blocks:
+
+| what the agent did next | count |
+|---|---:|
+| never attempted a render — ignored the block | **34 (60%)** |
+| rendered, and cleared | 19 |
+| rendered, and was re-blocked anyway | **4 (7%)** |
+
+So "the render bar is too strict" explains **4 cases**, not the bulk. Loosening it — the fix
+an earlier revision of this page recommended — would address 7% of the problem. The bulk is
+agents that read the block and simply did not render.
+
+The remaining true gap is narrower: a plan presented as an ordinary message in **default**
+mode is invisible to both entries. `PreToolUse` needs an `ExitPlanMode` call, and the `Stop`
+backstop exits early when `permission_mode` is present and not `plan` — which is exactly what
+PR #362 landed today, deliberately, to stop false-positives on answers that merely *discuss*
+a plan. Widening it back re-breaks what #362 just fixed. That is a genuine tradeoff (missed
+plans vs. false blocks), not an obvious fix, so it is flagged rather than patched.
+
+**Linear pollution is NOT caused by a hook — no hook creates tickets.** Agents create them
+because two *rules* tell them to, and 100+ agents obey with no cross-session dedup:
+
+- `conventions.md`: *"open one if missing (one per unit of delivery)"*
+- your global close-session rule: *"File every follow-up you were about to suggest as a real ticket."*
+
+The `verify-work-complete` Stop gate reinforces it at session end. The result is volume +
+redundant tickets + misclassification (each agent guesses project/labels). `linear-inject`
+only *reads* your board. Fixing this is a rules edit, not a hook edit.
+
 ## Insight
+
 
 - **The map has two hot lanes, not five.** SessionStart (6 hooks) and UserPromptSubmit (5 hooks) never block — they inject Linear/topology/inflight context and expand promptcuts/bangcuts. All the friction is PreToolUse + Stop. If you are auditing "where agents fight hooks," you can ignore 60% of the hook surface.
 - **The Stop gate is the heaviest hook in the system** — 524 fires, 11 per session it touches, more than git-guard and merge-guard put together. Among PreToolUse guards those two lead (237 and 227): git-guard's top vetoes are `reset --hard`, `checkout`, `branch-delete`, `stash` — exactly the history-destroying moves the agentic-git workflow forbids; merge-guard's are admin-bypass and merging with no non-author verdict.
