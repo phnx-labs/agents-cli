@@ -22,3 +22,9 @@
   `navigate`. Screenshots, PDFs and recordings still go to the OS app, where
   Preview and QuickTime are the better viewer.
   Source: `src/lib/browser/service.ts`, `src/lib/browser/ipc.ts`.
+- **New `agents browser show <url|file>`** — the CLI entry point to that seam, so
+  external tools (a renderer's `--open`, a script) can show a page in the
+  configured profile instead of shelling to `open`. Use it instead of `navigate`
+  for anything a person will read: `navigate` binds a task and the reaper closes
+  a task's tabs. `--os-browser` forces the OS handler; `--json` reports where it
+  landed. Source: `src/commands/browser.ts`.

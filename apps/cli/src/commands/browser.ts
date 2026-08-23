@@ -1376,6 +1376,33 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
+    .command('show <url>')
+    .description('Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task')
+    .option('--os-browser', 'Use the OS default handler instead of the configured viewer')
+    .option('--json', 'Output machine-readable JSON')
+    .action(async (url: string, opts: { osBrowser?: boolean; json?: boolean }) => {
+      // The entry point external tools need. `navigate` binds a task, which the
+      // abandoned-task reaper closes when the calling session ends — wrong for a
+      // page a person is reading. This does not.
+      const { showUrl, showFile } = await import('../lib/open-url.js');
+      const isLocalFile = !/^[a-z][a-z0-9+.-]*:/i.test(url);
+      const outcome = isLocalFile
+        ? await showFile(path.resolve(url), { osBrowser: opts.osBrowser })
+        : await showUrl(url, { osBrowser: opts.osBrowser });
+
+      if (opts.json) {
+        console.log(JSON.stringify(outcome, null, 2));
+      } else if (outcome.via === 'none') {
+        console.error(`Could not open a browser — open this yourself:\n  ${url}`);
+      } else if (outcome.via === 'profile') {
+        console.log(`Shown in ${outcome.profile}: ${url}`);
+      } else {
+        console.log(`Opened in the OS default browser: ${url}`);
+      }
+      if (outcome.via === 'none') process.exit(1);
+    });
+
+  browser
     .command('navigate [url]')
     .alias('goto')
     .description('Navigate current tab to URL (creates a task and tab when none exist)')

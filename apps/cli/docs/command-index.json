@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 550,
+  "commands": 551,
   "root": {
     "name": "agents",
     "path": "",
@@ -3732,6 +3732,51 @@
               "subcommands": []
             }
           ]
+        },
+        {
+          "name": "show",
+          "path": "browser show",
+          "aliases": [],
+          "description": "Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task",
+          "args": [
+            {
+              "name": "url",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--os-browser",
+              "description": "Use the OS default handler instead of the configured viewer",
+              "long": "--os-browser",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
         },
         {
           "name": "start",

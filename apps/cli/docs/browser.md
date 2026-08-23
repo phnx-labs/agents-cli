@@ -251,6 +251,12 @@ the viewer once:
 Set it with `agents config set browser.viewer <name>`, or `agents config set
 browser.viewer os` to keep the OS default handler.
 
+External tools reach the same seam through `agents browser show <url|file>`,
+which is the entry point to use instead of `navigate` for anything a person is
+going to read — `navigate` binds a task, and the abandoned-task reaper closes a
+task's tabs. `--os-browser` forces the OS handler for one call; `--json` reports
+where it landed (`profile`, `os`, or `none`).
+
 Two deliberate carve-outs. Screenshots, PDFs and recordings go to the OS default
 **app** regardless — Preview and QuickTime are the better viewer and a CDP tab is
 a downgrade. And the viewer tab is bound to **no task**, so the abandoned-task
