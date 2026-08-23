@@ -180,21 +180,22 @@ enum Clip {
     // terminals wrapped in Electron/webview accept the event.
     private static func inject(_ text: String) {
         guard ensureAccessibility() else {
-            // The clip IS persisted at this point — only the keystroke failed.
-            // Returning silently made a denied grant indistinguishable from a
-            // dead hotkey, so hand the reference over in the one place the user
-            // is looking, and say what to grant.
+            // Paste NEVER depends on the grant: the clip is already persisted, so
+            // hand the reference over on the clipboard and let the user press
+            // Cmd-V. Auto-type is a convenience gated on Accessibility; the paste
+            // itself is not. Framed as a plain "copied" confirmation, not an error
+            // — the hotkey did its job — with an OPTIONAL hint about enabling
+            // auto-type. Crucially, ensureAccessibility() no longer pops a modal
+            // to reach this path, so a machine that hasn't granted (or whose grant
+            // lapsed) still pastes with no interruption.
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(text, forType: .string)
-            // Name the actual install path so the user knows which app to grant —
-            // Bundle.main.bundlePath is the real running bundle, not a guess, so a
-            // dev build or a relocated install still points at the right entry.
+            let appName = (Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String) ?? "AGI Menu"
             Notifier.post(
-                title: "Paste needs Accessibility",
-                body: "Copied \(text) to the clipboard instead — press Cmd-V to paste it. "
-                    + "Grant \"\(Bundle.main.bundlePath)\" access in System Settings > "
-                    + "Privacy & Security > Accessibility to have the hotkey type it for you.",
-                subtitle: "System Settings > Privacy & Security > Accessibility",
+                title: "Clip reference copied",
+                body: "Press Cmd-V to paste \(text). Optional: enable Accessibility for "
+                    + "\"\(appName)\" in System Settings to have the hotkey type it for you.",
+                subtitle: "Optional: System Settings > Privacy & Security > Accessibility",
                 // Click opens the Accessibility pane directly — one less place the
                 // user has to hunt for the right settings row.
                 url: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")
@@ -219,10 +220,18 @@ enum Clip {
         }
     }
 
-    // Posting synthesized keystrokes needs Accessibility. Prompt once if missing.
+    // Whether this process may synthesize keystrokes (Accessibility granted).
+    //
+    // Probe WITHOUT kAXTrustedCheckOptionPrompt on purpose. That option re-shows
+    // the system "…would like to control this computer" modal on EVERY paste while
+    // untrusted, which turned an OPTIONAL convenience (auto-type) into an
+    // inescapable nag: any grant lapse — a re-signed dev build sharing the bundle
+    // id, a TCC reset — left it firing on every hotkey press, dozens of times a
+    // week. The paste does not need the grant (inject falls back to the clipboard),
+    // so a bare AXIsProcessTrusted() read is correct: auto-type stays on where the
+    // user has already granted, and nobody is ever prompted just to paste. A user
+    // who WANTS auto-type enables it from the notification's deep link, on demand.
     private static func ensureAccessibility() -> Bool {
-        if AXIsProcessTrusted() { return true }
-        let opts = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-        return AXIsProcessTrustedWithOptions(opts)
+        return AXIsProcessTrusted()
     }
 }
