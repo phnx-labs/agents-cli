@@ -92,8 +92,10 @@ accounts switch <agent>` (picker) / `agents accounts set-default <agent> <name>`
 in the root README.
 
 `--mode plan` is read-only (safe to run against anything); `edit` lets the
-agent write files, `auto` auto-approves safe operations and prompts for risky
-ones, `skip` bypasses all permission prompts. Omit the prompt argument for an
+agent write files, `auto` is more autonomous than `edit` in a per-harness way
+(Claude/Copilot auto-approve safe operations and still prompt for risky ones;
+Codex never prompts, running over the same sandbox as `edit`), `skip` bypasses
+all permission prompts. Omit the prompt argument for an
 interactive session instead of a headless one.
 
 ## 4. Smoke-test teams

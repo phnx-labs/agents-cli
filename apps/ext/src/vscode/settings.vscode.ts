@@ -307,8 +307,10 @@ function classifyDispatchHost(runOn: string): DispatchHostResolution {
 }
 
 // Cloud CLI (`agents cloud run --mode`) accepts plan|edit|full. The panel's
-// Auto ("asks before risky") has no cloud analog — cloud runs are
-// non-interactive — so it maps to full autonomy.
+// Auto has no cloud analog — cloud runs are non-interactive — so it maps to
+// full autonomy. Note Auto is not uniformly "asks before risky": that holds on
+// Claude/Copilot, whose classifier still prompts, but Codex's auto never
+// prompts at all (approval_policy=never over the same sandbox as edit).
 function cloudModeForDispatch(mode: DispatchModeMsg): 'plan' | 'edit' | 'full' {
   return mode === 'plan' ? 'plan' : mode === 'edit' ? 'edit' : 'full';
 }

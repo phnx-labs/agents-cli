@@ -17,8 +17,22 @@ import { resolveRunDefaults } from './run-defaults.js';
 export const MODE_DESCRIPTIONS: Record<Mode, string> = {
   plan: 'read-only investigation; no writes, no shell side-effects',
   edit: 'may edit files; prompts for shell / risky operations',
-  auto: 'smart classifier auto-approves safe ops, prompts for risky',
+  auto: 'more autonomy than edit; the exact policy is per-harness (see notes)',
   skip: 'bypass every permission prompt (dangerously-skip-permissions)',
+};
+
+/**
+ * What `auto` actually does, per harness. Two genuinely different mechanisms
+ * wear the same mode name, and conflating them is a safety error in both
+ * directions: telling a claude operator that auto never prompts invites an
+ * unattended run that stalls on a risky-operation gate, and telling a codex
+ * operator that auto prompts for risky work asserts a gate codex does not have.
+ * Absent entry = no extra note; the row's own text suffices.
+ */
+const AUTO_SEMANTICS: Partial<Record<AgentId, string>> = {
+  claude: 'a smart classifier auto-approves safe operations and still prompts for risky ones.',
+  copilot: 'a smart classifier auto-approves safe operations and still prompts for risky ones.',
+  codex: 'approval_policy=never over the same sandbox as edit — it never prompts, and a sandbox-denied command fails instead of raising an approval request.',
 };
 
 export interface AgentModeEntry {
@@ -86,14 +100,14 @@ export function getAgentModesCatalog(
   if (unsupported.includes('auto')) {
     notes.push(`--mode auto degrades to edit on ${agent} (no native auto classifier).`);
   }
-  // MODE_DESCRIPTIONS is one flat Record<Mode, string>, so `auto` renders the
-  // smart-classifier wording for every agent. Codex's auto has no classifier and
-  // never prompts -- without this note the catalog an orchestrating agent reads
-  // before `agents run codex --mode auto` asserts a gate that does not exist.
-  if (agent === 'codex' && supported.includes('auto')) {
-    notes.push(
-      `codex --mode auto is approval_policy=never over the same sandbox as edit: it never prompts, and a sandbox-denied command fails instead of raising an approval request.`,
-    );
+  // MODE_DESCRIPTIONS is one flat Record<Mode, string> rendered for every agent,
+  // so it cannot name any single harness's mechanism without lying about the
+  // others: claude/copilot auto STILL PROMPTS for risky operations, while codex
+  // auto never prompts at all. The row states only what is true everywhere; the
+  // mechanism rides here, per harness.
+  const autoSemantics = AUTO_SEMANTICS[agent];
+  if (autoSemantics && supported.includes('auto')) {
+    notes.push(`${agent} --mode auto: ${autoSemantics}`);
   }
   if (unsupported.includes('plan')) {
     notes.push(`--mode plan degrades to ${defaultMode} on ${agent} (no native read-only mode).`);
