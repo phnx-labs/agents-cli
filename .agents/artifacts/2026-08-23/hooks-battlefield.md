@@ -99,6 +99,115 @@ that only ever add context.
 | verify-work-complete | Blocks a premature "done" without verification / handoff; also reinforces closing Linear + posting one update | KEEP · but see ticketing note |
 | no-permission-stop-guard | Blocks stopping on an unanswered permission prompt | KEEP |
 
+## What each hook actually prints
+
+Not paraphrased — these are real outputs, either captured from fleet transcripts or
+produced by running the hook against a crafted payload. Two shapes dominate.
+
+**Shape 1 — the `blocked_op:` triple.** The Bash guards emit three machine-parseable
+lines: what was blocked, why, and the alternative. This is the format worth copying,
+because the third line is the one that makes an agent recover.
+
+```
+blocked_op: git.reset
+reason: git reset is denied (rewrites history or destroys work).
+do_this_instead: reconcile with `git rebase origin/<default>` (or `git pull --rebase`);
+  never `reset --hard`. Commit instead of stashing; resolve obstacles at the source.
+```
+
+```
+blocked_op: rm.protected-path
+reason: rm -r on protected path denied: ~/.agents. Protected paths: /, $HOME, ~/.agents,
+  ~/.ssh, ~/.config, … Variable-expansion targets ($VAR) are also denied because their
+  value is unknown at hook time.
+do_this_instead: use `trash` (or move to /tmp), or scope the path to a non-protected dir.
+```
+
+```
+blocked_op: secrets.export-plaintext
+reason: secrets export --plaintext prints a whole bundle to stdout — inside an agent
+  session that lands in the model context and the session transcript (RUSH-2774).
+do_this_instead: run the consuming command under `agents secrets exec <bundle> -- …`.
+```
+
+**Shape 2 — prose block, prefixed by the harness.** The rule-bundled guards return a
+paragraph. The harness wraps it with the hook's own path, which is how you tell which
+file to go edit:
+
+```
+PreToolUse:Bash hook error: [~/.agents/.cache/shims/hooks/gh-merge-guard__merge-guard.sh]:
+Blocked: no non-author review verdict found ON this PR (phnx-labs/agents-cli#2921).
+A GitHub APPROVED review or an APPROVE verdict comment must be posted on the PR being
+merged — a verdict 'carried from' another PR satisfies nothing (the #2736 laundering
+pattern). Get the automated reviewer's verdict or spawn a non-author subagent review…
+```
+
+**`main-branch-guard` — the one that hands over the fix.** This is why it recovers 72%
+while others don't: `$REPO` is already filled in, so the agent can paste and continue.
+
+```
+Blocked: editing '/…/agents-cli/README.md' in the PRIMARY working tree of
+/…/agents-cli (branch 'main').
+
+No agent may modify the user's primary working tree — on ANY branch. …
+
+Create a worktree off the freshly-fetched default branch, then work there:
+  REPO=/…/agents-cli
+  git -C "$REPO" fetch origin
+  BASE=$(git -C "$REPO" symbolic-ref --short refs/remotes/origin/HEAD | sed 's#^origin/##')
+  git -C "$REPO" worktree add -b <slug> "$REPO/.agents/worktrees/<slug>" "origin/$BASE"
+then edit under $REPO/.agents/worktrees/<slug>/, commit there, push, and open a PR.
+```
+
+**`user-message-guard` — 770 chars of message, 380 chars of scolding about it.**
+
+```
+[concise-message-guard] This update is 1 lines / 770 chars — too long for a phone text.
+Muqsit reads these like texts from a worker, not a report. Rewrite as 1-4 short lines:
+lead with the one thing you need him to do (or 'FYI, no action'), plainest language, and
+put any detail behind a link (PR/ticket) or a file path he can open — the text is the
+pointer, not the payload. Then resend with agents notify --text "…".
+```
+
+**The silent majority print nothing at all.** A guard that allows exits `0` with empty
+output — 284,387 of 285,667 fires looked exactly like this:
+
+```
+$ echo '{"tool_name":"Bash","tool_input":{"command":"git status"}}' | git-guard.sh
+$ echo $?
+0
+```
+
+**SessionStart hooks inject markdown into the context instead.** They never block; their
+entire product is text prepended to the session. Real injections from this session:
+
+```
+## In-flight in this repo (auto-injected)
+Open PRs:
+- #2914 fix: sync remote editor tab titles (RUSH-3011) (fix-session-tab-title-sync…)
+- #2909 fix(session): sync remote editor tab titles (fix-session-tab-title-sync-current)
+```
+
+```
+## Host & Fleet
+You are running on **yosemite-s1** (linux).
+- mac-mini — macos — offline
+- yosemite-s0 — linux — online — 6% load / 66% mem / busy
+…
+Fleet capacity: 190 cores · 418G free / 602G RAM (70% free) across 12 reachable devices.
+```
+
+`linear-inject-tasks` uses the same shape but is by far the largest — roughly **90 lines**
+of board state per session, which is the real SessionStart context cost. `autosync`, by
+contrast, deliberately prints **nothing**: its own header says stdout stays empty because
+SessionStart stdout is injected into the model context.
+
+**The verdict this section supports:** the `blocked_op:` triple is the right format —
+short, parseable, and it names the alternative. The prose guards should adopt it. And
+the length of a refusal is not what makes it work: `main-branch-guard` is long but
+recovers 72% because it ends in a runnable command, while `user-message-guard` spends
+380 characters and changes almost nothing.
+
 ## Data
 
 
@@ -519,6 +628,71 @@ line costs context on every agent, on every machine, forever."* The guard refusa
 these very descriptions violate it. `main-branch-guard`'s refusal is the model worth
 copying, though: it pastes the four-line worktree recipe with `$REPO` filled in, and
 it recovers 72%. Short, and it hands over the fix.
+
+## The latency bill, and what to gate off in plan mode
+
+The hook shims write timings to `~/.agents/.cache/perf/perf.db`. **285,667 recorded
+fires. 284 of them changed the outcome.**
+
+<figure>
+<figcaption><strong>Figure 5 — What every Bash call pays.</strong> Nine guards fire on every single <code>Bash</code> tool call, serially, before the command runs. Bar width is measured average latency; the number on the right is how often that guard actually blocked anything.</figcaption>
+
+<svg viewBox="0 0 1000 360" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Per-Bash-call guard latency" width="100%" font-family="JetBrains Mono, ui-monospace, monospace">
+  <g font-size="13">
+    <g transform="translate(0,40)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">git-guard</text><rect x="240" y="-11" width="520" height="22" rx="3" fill="#ff5470"/><text x="770" y="4" fill="#ffb3bd">63 ms</text><text x="850" y="4" fill="#8a8a8a">0.89%</text></g>
+    <g transform="translate(0,72)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">rm-guard</text><rect x="240" y="-11" width="495" height="22" rx="3" fill="#ff5470"/><text x="745" y="4" fill="#ffb3bd">60 ms</text><text x="850" y="4" fill="#8a8a8a">0.33%</text></g>
+    <g transform="translate(0,104)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">main-branch-guard</text><rect x="240" y="-11" width="446" height="22" rx="3" fill="#ff6f86"/><text x="696" y="4" fill="#ffb3bd">54 ms</text><text x="850" y="4" fill="#8a8a8a">0.44%</text></g>
+    <g transform="translate(0,136)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">large-file-add-guard</text><rect x="240" y="-11" width="206" height="22" rx="3" fill="#ff8a9c"/><text x="456" y="4" fill="#ffb3bd">25 ms</text><text x="850" y="4" fill="#8a8a8a">0.14%</text></g>
+    <g transform="translate(0,168)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">merge-guard</text><rect x="240" y="-11" width="157" height="22" rx="3" fill="#ffa3b2"/><text x="407" y="4" fill="#ffb3bd">19 ms</text><text x="850" y="4" fill="#8a8a8a">0.87%</text></g>
+    <g transform="translate(0,200)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">pr-description-reminder</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#ffa3b2"/><text x="399" y="4" fill="#ffb3bd">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.63%</text></g>
+    <g transform="translate(0,232)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">git-require-clean-tree</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#ffa3b2"/><text x="399" y="4" fill="#ffb3bd">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.14%</text></g>
+    <g transform="translate(0,264)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">user-message-guard</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#ffa3b2"/><text x="399" y="4" fill="#ffb3bd">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.08%</text></g>
+    <g transform="translate(0,296)"><text x="228" y="4" text-anchor="end" fill="#cfcfcf">footer-guard</text><rect x="240" y="-11" width="149" height="22" rx="3" fill="#6a6a6a"/><text x="399" y="4" fill="#8a8a8a">18 ms</text><text x="850" y="4" fill="#8a8a8a">0.00%</text></g>
+  </g>
+  <line x1="240" y1="318" x2="760" y2="318" stroke="#3a3a3a"/>
+  <text x="240" y="340" fill="#ff8a9c" font-size="14" font-weight="700">292 ms added to every Bash call</text>
+  <text x="850" y="340" fill="#8a8a8a" font-size="12">hit rate</text>
+</svg>
+</figure>
+
+**Every `Bash` tool call pays 292 ms** before the command starts, across nine guards.
+Total recorded hook wall-clock: **2.66 hours**. The hit rate that buys is **0.099%**.
+
+That is not an argument for deleting the guards — `git-guard`'s 131 blocks are 131
+prevented `reset --hard`es, and its cost is worth paying. It *is* an argument for not
+running a guard in a mode where it cannot possibly fire.
+
+### The mode matrix
+
+`matches.permission_mode` already exists and is merged
+(`apps/cli/src/lib/hooks/match.ts:145`), so this is a **config change in `hooks.yaml`,
+not new code**.
+
+| Hook | plan | edit / auto | why |
+|---|:--:|:--:|---|
+| git-guard | **on** | **on** | Bash still runs in plan mode; `reset --hard` is still reachable |
+| rm-guard | **on** | **on** | same — data loss is mode-independent |
+| secrets-guard | **on** | **on** | a credential can leak from a read-only session |
+| main-branch-guard | *bash only* | **on** | its Write/Edit arm is already dead in plan mode |
+| merge-guard | **off** | **on** | nothing merges from a planning turn |
+| pr-description-reminder | **off** | **on** | nothing opens a PR from a planning turn |
+| large-file-add-guard | **off** | **on** | no `git add` in plan mode |
+| git-require-clean-tree | **off** | **on** | no pull/rebase in plan mode |
+| footer-guard | **off** | **off** | cut entirely — 0 real blocks |
+| user-message-guard | **off** | **off** | cut entirely — 0.08% |
+| verify-work-complete | **plan-aware** | **on** | "done" in plan mode means *the plan is delivered*, not *the PR is merged* — it should audit against the plan, not the delivery chain |
+
+Gating those five off in plan mode drops the per-Bash tax from **292 ms → 176 ms**.
+Combined with merging the four git guards into one script, a planning turn pays
+**~123 ms** instead of 292 — a **2.4x** cut on every command the agent runs while
+thinking.
+
+### One hook is simply broken
+
+`activity-log-result` exits **127 — command not found — on 983 of its fires**, while
+still costing 40 ms each (1,114 s total). It is not doing the job it was installed
+for, and nothing surfaced that. A hook that cannot run should fail loudly at install
+time, not burn latency invisibly for a thousand invocations.
 
 ## Insight
 
