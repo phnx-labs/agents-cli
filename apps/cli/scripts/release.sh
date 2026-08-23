@@ -986,7 +986,7 @@ attestation_store_dir() {
 # Stage N). Reuse the prior release's zip when it exists (the common case -- the
 # helper rarely changes); else re-zip the EXACT signed bundle out of the attested
 # tarball with `ditto -c -k --keepParent` (matching how the download side extracts
-# with `ditto -x -k`, and how publish-computer-helper-mac.sh zips its asset).
+# with `ditto -x -k`, and how the computer-helper asset is zipped).
 # `ditto` is macOS-only, so on a Linux trigger box with no prior asset this is a
 # no-op with a warning -- SAFE because the .app still ships in the tarball this
 # release, so no install is broken; a later Mac-run release seeds the asset and
