@@ -38,7 +38,10 @@ export class FeedWatchState {
 async function attentionFor(agent: SessionWatchRow): Promise<AttentionItem | undefined> {
   if (!agent.sessionId) return undefined;
   const blockId = blockIdForSession(agent.sessionId);
-  const session = { ...agent, viewingIn: undefined };
+  // ActiveSession.host names the terminal app; the feed contract's host is the
+  // device scope. Normalize only the reconciler input so lifecycle/PR keys are
+  // routable across the fleet while the projected agent row stays compatible.
+  const session = { ...agent, host: agent.sourceDevice, viewingIn: undefined };
   return reconcileAttention({
     block: readBlock(blockId), session,
     resolution: readResolution(blockId),

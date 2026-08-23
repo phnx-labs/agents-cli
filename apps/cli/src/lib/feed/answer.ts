@@ -40,16 +40,18 @@ function blockFromAttention(attention: AttentionItem, session: ActiveSession): O
 }
 
 async function resolveBlock(attentionKey: string, sessions: ActiveSession[], root?: string): Promise<{ block: OpenBlock; attention: AttentionItem }> {
+  const ownerHost = attentionKey.slice(0, attentionKey.indexOf('/'));
   for (const session of sessions) {
     if (!session.sessionId) continue;
     let block = readBlock(blockIdForSession(session.sessionId), root);
-    const attention = reconcileAttention({ block, session, pullRequest: await readPullRequestStatus(session), resolution: readResolution(blockIdForSession(session.sessionId), root), nowMs: Date.now() });
+    const projectedSession = { ...session, host: ownerHost };
+    const attention = reconcileAttention({ block, session: projectedSession, pullRequest: await readPullRequestStatus(session), resolution: readResolution(blockIdForSession(session.sessionId), root), nowMs: Date.now() });
     if (attention?.key === attentionKey && block) return { block, attention };
     // The winning caller advances the block to answered before a concurrent
     // loser resolves it. Reconstruct only this block's original generation so
     // the loser can return already_answered without routing a second reply.
     if (block) {
-      const original = reconcileAttention({ block: { ...block, state: 'open', answer: undefined }, session, nowMs: Date.now() });
+      const original = reconcileAttention({ block: { ...block, state: 'open', answer: undefined }, session: projectedSession, nowMs: Date.now() });
       if (original?.key === attentionKey && getAnswerRecord(block.blockId, root)) return { block, attention: original };
     }
     if (attention?.key === attentionKey) {
