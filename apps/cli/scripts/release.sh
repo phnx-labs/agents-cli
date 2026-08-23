@@ -839,9 +839,10 @@ if ! $APPLY; then
   yellow "  2. [this box] require exact-tree attestation (tree/toolchain/lock/policy) for origin/$DEFAULT_BRANCH"
   yellow "  3. [this box] push branch $RELEASE_BRANCH (chore(release): $TARGET); open a PR"
   yellow "  4. [this box] require attestation + pretested tgz for the release commit tree (90s), fail-closed"
-  yellow "  5. [this box] squash-merge only if final tree == attested candidate; tag v$TARGET"
+  yellow "  5. [this box] tag v$TARGET at the ATTESTED release commit (publish is decoupled from live main)"
   yellow "  6. [$RELEASE_HOME_BASE] promote exact tgz + reuse helpers + install smoke + npm publish"
-  gray   "  (steps already done in a prior run are skipped: published / merged / PR-open / tag-exists)"
+  yellow "  7. [this box] merge the version-bump PR into $DEFAULT_BRANCH -- ASYNC, after publish, never gates it"
+  gray   "  (steps already done in a prior run are skipped: published / tagged / PR-open)"
   exit 0
 fi
 
@@ -1051,7 +1052,7 @@ fi
 
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
 if ! $MAIN_AT_TARGET; then
-  phase "Open release PR, wait for release-tree attestation, merge" "$THIS_HOST"
+  phase "Open release PR, wait for release-tree attestation" "$THIS_HOST"
   # Collapse the release queue: fold every .changelog/next/<slug>.md fragment into
   # .changelog/$TARGET.md, then regenerate the released-only aggregate CHANGELOG.md.
   # Fails closed if the queue is empty (a release must document itself). The folded
@@ -1121,43 +1122,48 @@ if ! $MAIN_AT_TARGET; then
   [[ -n "$RELEASE_CI_HEAD" ]] || die "could not resolve attested head for PR #$PR_NUMBER"
   wait_for_attestation "$(git rev-parse "$RELEASE_CI_HEAD^{tree}")" >/dev/null
 
-  # Squash-merge. Never --admin. Attestation of the exact release tree is the
-  # functional gate -- not a full-suite matrix wait. Re-prove the lease before
-  # the first irreversible act.
-  require_lease "merging PR #$PR_NUMBER"
-  bold "Merging PR #$PR_NUMBER (squash)..."
-  gh pr merge "$PR_NUMBER" --squash --delete-branch || die "merge failed for PR #$PR_NUMBER (left open)"
-  green "Merged PR #$PR_NUMBER"
-  phase_ok "PR #$PR_NUMBER: attested tree squash-merged"
+  # Publishing is DECOUPLED from landing the commit on main. We tag + publish the
+  # attested release commit itself (phase 4/5), then merge the version-bump PR
+  # asynchronously AFTER publish (end of script). This removes the old requirement
+  # that origin/$DEFAULT_BRANCH reproduce the attested tree through a squash into
+  # LIVE main -- which killed a release on any concurrent commit or CHANGELOG merge
+  # conflict (RUSH-2395 audit, .agents/artifacts/2026-08-23/release-architecture-audit.md).
+  # The published bytes ARE the attested tree by construction, so main can move
+  # freely and the merge can be deferred/queued without wedging the release.
+  phase_ok "PR #$PR_NUMBER: release tree attested (merge deferred until after publish)"
 fi
 
-# Phase 4 (both paths): resolve the CI-tested release commit + create/push the tag.
-phase "Verify attested tree + tag v$TARGET" "$THIS_HOST"
+# Phase 4: resolve the commit to tag + publish. The two paths differ:
+phase "Tag v$TARGET at the attested release commit" "$THIS_HOST"
 
-# The published tarball MUST be the exact attested candidate tree. Final
-# default-branch tree digest must equal that candidate; parent/nearby SHAs
-# never count.
-git fetch --quiet origin "$DEFAULT_BRANCH"
 if $HISTORICAL_CATCHUP; then
-  MERGED_SHA="$MERGED_RELEASE_SHA"
-  CI_COMMIT="$CI_TESTED_HEAD"
+  # Catch-up recovery: main ALREADY carries this version (its release PR merged in a
+  # prior run) but npm never received it. main is at target, so there is nothing to
+  # decouple -- keep the original behavior: tag the on-main merged commit and keep
+  # verifying its tree equals the CI-tested head the attestation is bound to.
+  git fetch --quiet origin "$DEFAULT_BRANCH"
+  [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    || die "catch-up: $DEFAULT_BRANCH ${MERGED_RELEASE_SHA:0:9} is not version $TARGET -- refusing to tag/publish"
+  MERGED_TREE="$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")"
+  ATTESTED_TREE="$(git rev-parse "$CI_TESTED_HEAD^{tree}")"
+  [[ "$MERGED_TREE" == "$ATTESTED_TREE" ]] \
+    || die "catch-up: $DEFAULT_BRANCH tree $MERGED_TREE != attested candidate $ATTESTED_TREE -- refusing parent/nearby evidence"
+  wait_for_attestation "$ATTESTED_TREE" >/dev/null
+  PUBLISH_SHA="$MERGED_RELEASE_SHA"
 else
-  MERGED_SHA="$(git rev-parse "origin/$DEFAULT_BRANCH")"
+  # Primary path: publish is DECOUPLED from live main. Tag + publish the ATTESTED
+  # release commit itself; never fetch or diff live main, because the published
+  # bytes ARE this commit's tree and the attestation proves it was tested. A
+  # concurrent commit on main can neither block nor contaminate the release; the
+  # version bump lands on main asynchronously after publish (RUSH-2395 audit).
   CI_COMMIT="$RELEASE_COMMIT"
+  [[ -n "${CI_COMMIT:-}" ]] || die "internal: no attested release commit resolved -- refusing to publish"
+  [[ "$(git show "$CI_COMMIT:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    || die "attested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
+  ATTESTED_TREE="$(git rev-parse "$CI_COMMIT^{tree}")"
+  wait_for_attestation "$ATTESTED_TREE" >/dev/null
+  PUBLISH_SHA="$CI_COMMIT"
 fi
-MERGED_VER="$(git show "$MERGED_SHA:apps/cli/package.json" | jq -r .version)"
-[[ "$MERGED_VER" == "$TARGET" ]] || die "merged $DEFAULT_BRANCH is at $MERGED_VER, not $TARGET -- refusing to tag/publish"
-
-[[ -n "${CI_COMMIT:-}" ]] || die "internal: no attested release commit resolved -- refusing to publish"
-[[ "$(git show "$CI_COMMIT:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
-  || die "attested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
-
-MERGED_TREE="$(git rev-parse "$MERGED_SHA^{tree}")"
-ATTESTED_TREE="$(git rev-parse "$CI_COMMIT^{tree}")"
-[[ "$MERGED_TREE" == "$ATTESTED_TREE" ]] \
-  || die "final $DEFAULT_BRANCH tree $MERGED_TREE != attested candidate $ATTESTED_TREE -- refusing parent/nearby evidence"
-wait_for_attestation "$MERGED_TREE" >/dev/null
-PUBLISH_SHA="$MERGED_SHA"
 
 # The published tarball is built on the home base from a fresh checkout of the
 # tag (below), so the trigger box's working tree is not the publish source and is
@@ -1195,7 +1201,7 @@ fi
 # and falls straight through to here.
 require_lease "pushing tag v$TARGET"
 git push origin "v$TARGET"
-upload_release_proof "$MERGED_TREE"
+upload_release_proof "$ATTESTED_TREE"
 phase_ok "attested tree verified; tag v$TARGET at ${PUBLISH_SHA:0:9} pushed; proof uploaded"
 
 # Restore the working tree to clean now that the tag is durable; the privileged
@@ -1212,7 +1218,7 @@ restore_release_tree
 phase "Promote attested tgz + reuse helpers + install smoke" "$RELEASE_HOME_BASE"
 require_lease "publishing $PHNX_PKG@$TARGET"
 route_home_base_phase \
-  || phase_fail "privileged phase failed on the home base ($RELEASE_HOME_BASE) -- PR merged + tag v$TARGET pushed; rerun to retry: $0 $TARGET --apply"
+  || phase_fail "privileged phase failed on the home base ($RELEASE_HOME_BASE) -- tag v$TARGET pushed; rerun to retry: $0 $TARGET --apply"
 phase_ok "published $PHNX_PKG@$TARGET from $RELEASE_HOME_BASE (token resolved there; no Touch ID)"
 
 # ----- Verify the published version live (from the trigger box) -----
@@ -1222,6 +1228,29 @@ if [[ "$PUBLISHED_NOW" == "$TARGET" ]]; then
   phase_ok "npm registry reports $PHNX_PKG@$TARGET; tag v$TARGET pushed"
 else
   phase_fail "npm registry does not yet report $PHNX_PKG@$TARGET (saw '${PUBLISHED_NOW:-none}') -- check the home-base publish output"
+fi
+
+# ----- Land the version bump on main -- AFTER publish, non-gating -----
+# The published artifact is the attested tag; this merge only carries the
+# package.json bump + folded CHANGELOG onto main for history and the next
+# release's base. It runs AFTER the publish succeeded and NEVER gates it: a
+# concurrent commit or a CHANGELOG merge conflict here leaves the release fully
+# published and just prints how to land the bump later. npm's published version
+# is the source of truth for the next bump (stuck-release + catch-up guards), so
+# a deferred or manually-resolved merge cannot wedge a future release. No
+# require_lease here on purpose -- the irreversible act (publish) is already done,
+# and failing this best-effort merge must not error out a finished release.
+if [[ -n "${PR_NUMBER:-}" ]] && ! $HISTORICAL_CATCHUP; then
+  # Soft lease verify (never fatal -- the release is already published): skip the
+  # merge rather than error out if we somehow no longer hold the lease.
+  if scripts/release-lease.sh verify >/dev/null 2>&1 \
+    && gh pr merge "$PR_NUMBER" --squash --delete-branch; then
+    green "Merged release PR #$PR_NUMBER into $DEFAULT_BRANCH"
+  else
+    yellow "$PHNX_PKG@$TARGET is PUBLISHED. Release PR #$PR_NUMBER did not auto-merge"
+    yellow "  (main moved or a CHANGELOG conflict) -- this does NOT block anything."
+    yellow "  Land the bump when convenient: gh pr merge $PR_NUMBER --squash --delete-branch"
+  fi
 fi
 
 green "Released $TARGET"

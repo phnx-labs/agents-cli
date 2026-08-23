@@ -159,13 +159,30 @@ describe('release.sh: every irreversible act is gated by the lease', () => {
     expect(ungated.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`)).toEqual([]);
   });
 
-  it('the squash-merge is preceded by require_lease', () => {
+  it('any PRE-publish PR merge is lease-gated; the async bump-merge runs after publish', () => {
+    // Publish is decoupled from live main (RUSH-2395): the only `gh pr merge` in
+    // the primary flow is the version-bump merge that runs AFTER route_home_base_phase
+    // (the publish). It is best-effort and soft-guarded by a lease `verify` rather
+    // than a fatal require_lease, because the irreversible act (publish) is already
+    // done. The truly irreversible acts -- the tag push and the publish routing --
+    // stay require_lease-gated (asserted by the sibling tests below).
+    const publishIdx = LINES.findIndex((l) =>
+      /^\s*route_home_base_phase\s*\\?$/.test(l),
+    );
+    expect(publishIdx).toBeGreaterThan(-1);
     const merges = LINES.map((l, i) => ({ l, i })).filter(({ l }) =>
-      /^\s*gh pr merge /.test(l),
+      /gh pr merge "\$PR_NUMBER"/.test(l),
     );
     expect(merges.length).toBeGreaterThan(0);
-    const ungated = merges.filter(({ i }) => !precededByLeaseGate(i, 8));
-    expect(ungated.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`)).toEqual([]);
+    // No merge before publish may be ungated.
+    const ungatedPrePublish = merges
+      .filter(({ i }) => i < publishIdx)
+      .filter(({ i }) => !precededByLeaseGate(i, 8));
+    expect(
+      ungatedPrePublish.map(({ i, l }) => `line ${i + 1}: ${l.trim()}`),
+    ).toEqual([]);
+    // The decoupled bump-merge exists and runs after publish.
+    expect(merges.some(({ i }) => i > publishIdx)).toBe(true);
   });
 
   it('the publish routing is preceded by require_lease', () => {

@@ -54,6 +54,46 @@ describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
   });
 });
 
+describeRelease('release.sh: publish is decoupled from live main (RUSH-2395 audit)', () => {
+  it('tags + publishes the ATTESTED release commit, never a fresh-main squash result', () => {
+    // The publish source is the attested commit itself...
+    expect(RELEASE_SH).toContain('PUBLISH_SHA="$CI_COMMIT"');
+    // ...never whatever origin/main squashed to after the merge.
+    expect(RELEASE_SH).not.toContain('PUBLISH_SHA="$MERGED_SHA"');
+    // The PRIMARY path (CI_COMMIT="$RELEASE_COMMIT" ... PUBLISH_SHA="$CI_COMMIT")
+    // has NO "does live main reproduce the attested tree" equality gate -- that
+    // gate forced main to stay quiet for the whole release. (The catch-up recovery
+    // path keeps it, since there main already carries the bump.)
+    const primaryStart = RELEASE_SH.indexOf('CI_COMMIT="$RELEASE_COMMIT"');
+    const primaryEnd = RELEASE_SH.indexOf('PUBLISH_SHA="$CI_COMMIT"');
+    expect(primaryStart).toBeGreaterThan(0);
+    expect(primaryEnd).toBeGreaterThan(primaryStart);
+    const primaryPath = RELEASE_SH.slice(primaryStart, primaryEnd);
+    expect(primaryPath).not.toContain('MERGED_TREE');
+    expect(primaryPath).not.toContain('git fetch --quiet origin "$DEFAULT_BRANCH"');
+    expect(RELEASE_SH).toContain('wait_for_attestation "$ATTESTED_TREE"');
+    expect(RELEASE_SH).toContain('merge deferred until after publish');
+  });
+
+  it('merges the version-bump PR AFTER publish, non-gating (never dies on it)', () => {
+    // The old flow squash-merged BEFORE publish and died on a merge failure,
+    // coupling the release to a quiet main. That gating merge is gone.
+    expect(RELEASE_SH).not.toContain(
+      'gh pr merge "$PR_NUMBER" --squash --delete-branch || die',
+    );
+    // The async bump-merge lives after the "Verify live" phase and is best-effort.
+    const verifyIdx = RELEASE_SH.indexOf('phase "Verify live"');
+    const asyncMergeIdx = RELEASE_SH.indexOf(
+      'Land the version bump on main -- AFTER publish, non-gating',
+    );
+    expect(verifyIdx).toBeGreaterThan(0);
+    expect(asyncMergeIdx).toBeGreaterThan(verifyIdx);
+    // It is skipped for the historical-catchup path (its PR merged in a prior run).
+    const block = RELEASE_SH.slice(asyncMergeIdx);
+    expect(block).toContain('&& ! $HISTORICAL_CATCHUP');
+  });
+});
+
 describeRelease('release.sh --device flag', () => {
   it('advertises --device <name> in --help', () => {
     const { status, out } = runRelease('--help');

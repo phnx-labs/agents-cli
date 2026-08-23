@@ -174,7 +174,9 @@ describe('release.sh: the preflight gates the mutating phases', () => {
     const call = lines.findIndex((l) => l.trim() === 'assert_signing_home_base');
     expect(call, 'ordinary release must not preflight signing/notarization').toBe(-1);
     expect(lines.some((l) => /wait_for_attestation/.test(l))).toBe(true);
-    expect(lines.some((l) => /^\s*gh pr merge "\$PR_NUMBER" --squash/.test(l))).toBe(true);
+    // The version-bump PR is still merged with --squash (now inside the async,
+    // post-publish, best-effort `if gh pr merge ...` — RUSH-2395 decouple).
+    expect(lines.some((l) => /gh pr merge "\$PR_NUMBER" --squash/.test(l))).toBe(true);
     expect(lines.some((l) => /^git push origin "v\$TARGET"$/.test(l))).toBe(true);
   });
 });
