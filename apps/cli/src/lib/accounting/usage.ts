@@ -2660,7 +2660,7 @@ async function getMuseUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // No live snapshot and no local log — every source came up empty. Only
     // now does the probe's own outcome become the reported error, mirroring
     // Cursor's "surface the last resort's failure" pattern above.
-    if (!probe.hasKey) return { snapshot: null, error: usageNoCredentialError('Muse') };
+    if (!probe.hasKey) return { snapshot: null, error: null };
     if (probe.noHeaders) return { snapshot: null, error: usageNoRecentUsageError('Muse') };
     return {
       snapshot: null,
@@ -3515,7 +3515,7 @@ export function normalizeAntigravityWindows(buckets: AntigravityQuotaBucket[]): 
 async function getAntigravityUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
   try {
     const token = await loadAntigravityOauth(options?.home);
-    if (!token) return { snapshot: null, error: usageNoCredentialError('Antigravity') };
+    if (!token) return { snapshot: null, error: null };
 
     let accessToken = normalizeString(token.access_token);
     if ((!accessToken || antigravityTokenNeedsRefresh(token.expiry)) && token.refresh_token) {
