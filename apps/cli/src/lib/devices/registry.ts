@@ -429,7 +429,7 @@ export function withIgnoredAdded(meta: Meta, names: string[], ignoredAt: string)
   const have = new Set(entries.map((e) => e.name));
   const fresh = names.filter((n) => !have.has(n));
   if (fresh.length === 0) return meta;
-  const fleet = (meta.fleet ?? { devices: {} }) ;
+  const fleet = (meta.fleet ?? { devices: {} });
   const ignored: IgnoredDeviceEntry[] = [
     ...entries,
     ...fresh.map((name) => ({ name, ignoredAt, ignoredOn: machineId() })),

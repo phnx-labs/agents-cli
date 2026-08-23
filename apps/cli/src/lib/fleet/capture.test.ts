@@ -103,4 +103,18 @@ describe('captureFleet', () => {
 
     expect(m.discovery).toEqual({ 'mac-mini': 'approved', 'old-laptop': 'ignored' });
   });
+
+  it('never wipes fleet.ignored — dismissals are operator state, not live state', () => {
+    const prev: FleetManifest = {
+      devices: {},
+      ignored: [{ name: 'old-laptop', ignoredAt: '2026-08-20T10:00:00.000Z', ignoredOn: 'zion' }],
+    };
+
+    const m = captureFleet(prev, { devices: ['yosemite-s0'] });
+
+    expect(m.ignored).toEqual([{ name: 'old-laptop', ignoredAt: '2026-08-20T10:00:00.000Z', ignoredOn: 'zion' }]);
+    // Carried by value — mutating the old manifest must not leak into the new one.
+    prev.ignored![0].name = 'mutated';
+    expect(m.ignored![0].name).toBe('old-laptop');
+  });
 });
