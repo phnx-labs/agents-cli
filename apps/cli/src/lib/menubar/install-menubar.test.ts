@@ -14,6 +14,7 @@ import {
   menubarHealReplacedBundle,
   menubarPlistNeedsRepoint,
   mayInstallMenubarHelper,
+  MENUBAR_HELPER_EXECUTABLE_NAME,
   processesToEnd,
   resetMenubarAccessibilityTcc,
   restartMenubarHelperAfterSwap,
@@ -466,10 +467,45 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
     const app = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
     // A real Mach-O so codesign has something to sign; /bin/echo is stable.
-    fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', 'AGI Menu'));
+    // Read the basename from the shipped constant, never a literal: RUSH-3101
+    // renamed it and this fixture's hardcoded copy silently went stale.
+    fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', MENUBAR_HELPER_EXECUTABLE_NAME));
+    // The real bundle declares CFBundleExecutable (menubar/scripts/build.sh:122).
+    // Without an Info.plist codesign INFERS the main executable from the bundle
+    // name -- MenubarHelper.app -> Contents/MacOS/MenubarHelper -- which stopped
+    // existing at the rename, so codesign rejected the whole bundle with
+    // "bundle format unrecognized, invalid, or unsuitable" and this fixture
+    // handed the assertions an UNSIGNED bundle. Declare it like the real build.
+    fs.writeFileSync(
+      path.join(app, 'Contents', 'Info.plist'),
+      [
+        '<?xml version="1.0" encoding="UTF-8"?>',
+        '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">',
+        '<plist version="1.0">',
+        '<dict>',
+        '    <key>CFBundleExecutable</key>',
+        `    <string>${MENUBAR_HELPER_EXECUTABLE_NAME}</string>`,
+        '    <key>CFBundleIdentifier</key>',
+        '    <string>com.phnx-labs.agents-menubar</string>',
+        '    <key>CFBundlePackageType</key>',
+        '    <string>APPL</string>',
+        '</dict>',
+        '</plist>',
+        '',
+      ].join('\n'),
+    );
     // Ad-hoc sign it: the signature is valid, but it is NOT notarized — the exact
     // state a non-Developer-ID / un-notarized cut leaves the bundle in.
-    spawnSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.phnx-labs.agents-menubar', app], { stdio: 'ignore' });
+    const signed = spawnSync(
+      'codesign',
+      ['--force', '--sign', '-', '--identifier', 'com.phnx-labs.agents-menubar', app],
+      { encoding: 'utf8' },
+    );
+    // Fail loud. The previous `stdio: 'ignore'` swallowed the packaging error and
+    // turned it into a confusing "expected false to be true" three lines later.
+    if (signed.status !== 0) {
+      throw new Error(`ad-hoc codesign failed (status ${signed.status}): ${(signed.stderr || '').trim()}`);
+    }
     return app;
   }
 
