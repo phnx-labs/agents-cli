@@ -1,7 +1,7 @@
 /**
  * `agents devices lease` — manage the disposable cloud boxes used by `agents run --lease`.
  *
- * Today: `agents devices lease gc`, which stops expired + idle "orphan" boxes that are
+ * Today: `agents devices lease prune`, which stops expired + idle "orphan" boxes that are
  * holding a provider's server quota (the cause of the `server_limit` 403 a new
  * lease hits). Reaping is conservative: only boxes whose lease has expired AND
  * that have been untouched for a safety window are eligible (see `isReapSafe`),

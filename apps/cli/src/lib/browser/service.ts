@@ -861,7 +861,7 @@ export class BrowserService {
   /**
    * Close tasks whose owning agent session is gone, or that have sat untouched
    * past the idle window. The entry point the daemon's periodic tick and
-   * `agents browser gc` both call; the policy lives in `hygiene.ts`.
+   * `agents browser prune` both call; the policy lives in `hygiene.ts`.
    */
   async reapAbandoned(opts: ReapOptions = {}): Promise<ReapResult> {
     return reapAbandonedTasks(this, opts);

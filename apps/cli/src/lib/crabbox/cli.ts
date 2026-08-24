@@ -688,7 +688,7 @@ export function reapSafeOrphans(boxes: CrabboxBox[], nowSecs: number): CrabboxBo
 /**
  * List reap-safe orphans and (unless `dryRun`) stop them. Returns the candidates
  * considered and the slugs actually stopped. Best-effort per box — a stop failure
- * is skipped, never thrown. Backs `agents devices lease gc` and the 403 auto-reap opt-in.
+ * is skipped, never thrown. Backs `agents devices lease prune` and the 403 auto-reap opt-in.
  */
 export function reapOrphans(
   opts: CrabboxOptions & { nowSecs?: number; dryRun?: boolean } = {},

@@ -1380,7 +1380,7 @@ describe('BrowserService.reapAbandoned — abandoned-task reaper (RUSH-2622)', (
 
     expect(result.closed).toEqual([
       // The reaper reports the BARE profile — its output is a user-facing
-      // `agents browser gc` line, not a runtime key (RUSH-2709).
+      // `agents browser prune` line, not a runtime key (RUSH-2709).
       { task: dead.name, profile: 'reap1', reason: 'session-dead' },
     ]);
     expect(result.skipped).toBe(1);

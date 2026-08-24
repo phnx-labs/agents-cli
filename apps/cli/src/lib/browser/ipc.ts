@@ -511,7 +511,7 @@ export class BrowserIPCServer {
       }
 
       // The out-of-process seam onto the abandoned-task reaper: the daemon
-      // owns the live BrowserService, so a CLI verb (`agents browser gc`) can
+      // owns the live BrowserService, so a CLI verb (`agents browser prune`) can
       // only reach `reapAbandoned` through IPC. The daemon's own periodic tick
       // calls the service method directly.
       case 'gc': {

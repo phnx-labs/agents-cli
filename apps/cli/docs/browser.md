@@ -338,7 +338,7 @@ Four guards, each because removing that profile would be wrong rather than untid
 another device is left alone (and reported if it is misfiled).
 
 Removing a profile drops its config entry and wipes its cache dirs, exactly like
-`profiles delete`.
+`profiles remove`.
 
 > A profile config records no creation time, so one you created seconds ago and
 > have not started yet is indistinguishable from an abandoned one and reports
