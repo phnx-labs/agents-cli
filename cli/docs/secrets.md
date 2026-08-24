@@ -35,6 +35,16 @@ on the keychain or vault backend fails loud. The daemon's `auth-sync` service pu
 local file-backed `auth` bundle to pinned fleet devices that lack it, always with the
 file backend so each destination auto-provisions its own machine-local key.
 
+**No credential populates a live Claude usage bar today.** A usage read resolves only
+this file-based setup-token, never the interactive login (RUSH-1822), and the
+setup-token itself lacks the `user:profile` scope a usage read requires (RUSH-2392) —
+the two constraints close on each other, so an account that is signed in interactively
+and nothing else stays `usage unavailable (no usage credential)` permanently, a state
+neither `/login` nor minting another setup-token changes. `agents view` names this
+state precisely instead of folding it into the generic `usage unavailable` bucket,
+which used to send operators back to `claude setup-token` for a remedy that cannot
+work (#2987); a cache that has not been read yet reports the distinct `usage pending`.
+
 Actors, audit events, and usage counters contain metadata only. Redaction is defense in
 depth, not permission to publish raw transcripts.
 

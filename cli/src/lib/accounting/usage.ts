@@ -112,6 +112,36 @@ export function isUsageHeadlessScopeError(error: string | null | undefined): boo
 }
 
 /**
+ * Canonical phrase for a Claude account the usage reader holds no usable
+ * credential for. Distinct from {@link USAGE_HEADLESS_SCOPE_MARKER}, which
+ * means a setup-token WAS read and the endpoint refused its scope.
+ */
+export const USAGE_NO_USAGE_CREDENTIAL_MARKER = 'usage unavailable (no usage credential)';
+
+/**
+ * Claude's own no-credential message. The shared
+ * {@link usageNoCredentialError} offers "sign in" as the remedy, which holds
+ * for Kimi/Droid/Cursor — their CLIs rotate a readable token on the next launch
+ * — and is false for Claude: the usage read deliberately never touches the
+ * interactive login (RUSH-1822), so an account that IS signed in reads as
+ * unreadable here and signing in again changes nothing. Naming only the second
+ * remedy would send the operator to `claude setup-token`, whose token then hits
+ * the `user:profile` scope gap (RUSH-2392) — the loop reported in #2987 — so
+ * this message states both constraints and that the account still runs.
+ */
+export function usageNoClaudeUsageCredentialError(): string {
+  return (
+    `Claude ${USAGE_NO_USAGE_CREDENTIAL_MARKER} — a usage read never uses your login ` +
+    '(RUSH-1822); a setup-token cannot read usage (RUSH-2392). The account still runs.'
+  );
+}
+
+/** True when an error string is the Claude no-usage-credential state (#2987). */
+export function isUsageNoUsageCredentialError(error: string | null | undefined): boolean {
+  return typeof error === 'string' && error.includes(USAGE_NO_USAGE_CREDENTIAL_MARKER);
+}
+
+/**
  * Detect Anthropic's usage-endpoint scope denial: HTTP 403 whose body names
  * `user:profile` (or "scope requirement"). A bare 403 without that body stays
  * classified as a real rejection — only the known setup-token shape is special
@@ -163,6 +193,17 @@ export const USAGE_BENIGN_STATE: unique symbol = Symbol('usageBenignState');
 export type UsageBenignState = 'no-recent-usage';
 
 /**
+ * Sentinel `UsageInfo.error` for a read-only lookup whose cache held nothing
+ * (`getUsageInfoForIdentity`). No request was made and nothing failed — the
+ * daemon simply has not collected this account yet. It was an unclassified
+ * literal, so `classifyUsageErrorKind` fell through to `'rejected'` and
+ * `agents view` printed the generic "usage unavailable" for a cold cache,
+ * which reads as a failure the operator should chase (#2987). The string value
+ * is unchanged; callers that already compare against `'stale'` keep working.
+ */
+export const USAGE_NOT_COLLECTED_MARKER = 'stale';
+
+/**
  * Shared error-classification + 429 backoff for a networked usage fetch whose
  * only signal is an HTTP status (or none at all, on a network failure) —
  * Antigravity's :retrieveUserQuota and Muse's Meta Model API probe are both
@@ -197,16 +238,20 @@ export function classifyUsageFetchFailure(
  */
 export type UsageErrorKind =
   | 'no-credential'
+  | 'no-usage-credential'
   | 'expired-credential'
   | 'rate-limited'
   | 'rejected'
   | 'headless-scope'
-  | 'unreachable';
+  | 'unreachable'
+  | 'not-collected';
 
 /** Classify a `UsageInfo.error` string into its {@link UsageErrorKind}, or null when there is no error. */
 export function classifyUsageErrorKind(error: string | null | undefined): UsageErrorKind | null {
   if (!error) return null;
+  if (error === USAGE_NOT_COLLECTED_MARKER) return 'not-collected';
   if (isUsageHeadlessScopeError(error)) return 'headless-scope';
+  if (isUsageNoUsageCredentialError(error)) return 'no-usage-credential';
   if (error.startsWith('No readable ')) return 'no-credential';
   if (error.includes('credential expired')) return 'expired-credential';
   if (error.includes('rate-limited this machine') || error.includes('is rate-limiting the usage endpoint')) {
@@ -610,7 +655,7 @@ export async function getUsageInfoForIdentity(
   // `kimi:user=…`, `droid:org=…`, `cursor:user=…`, `antigravity:sub=…`), so one
   // cache file holds every account without collision.
   if (!usageKey) {
-    if (readOnly) return { snapshot: null, error: 'stale' };
+    if (readOnly) return { snapshot: null, error: USAGE_NOT_COLLECTED_MARKER };
     return getUsageInfo(input.agentId, {
       home: input.home,
       cliVersion: input.cliVersion,
@@ -630,10 +675,11 @@ export async function getUsageInfoForIdentity(
   // it. A stale-or-absent snapshot is handled downstream by the router's own
   // freshness guard (`isUsageVerified` in rotate.ts), which routes around a
   // number it can't confirm rather than trusting an old one — so returning a
-  // stale snapshot here is safe, and an absent one reports `'stale'`.
+  // stale snapshot here is safe, and an absent one reports
+  // {@link USAGE_NOT_COLLECTED_MARKER}.
   if (readOnly) {
     if (cached) return { snapshot: cached, error: null };
-    return { snapshot: null, error: 'stale' };
+    return { snapshot: null, error: USAGE_NOT_COLLECTED_MARKER };
   }
 
   // Explicit refresh: block on the shared device collector.
@@ -787,18 +833,27 @@ function formatUsageErrorKindLabel(
   switch (kind) {
     case 'no-credential':
       return 'sign in / provision token';
+    // Both of these are permanent for the account as configured, and both used
+    // to render as the generic bucket — which reads as a transient failure and
+    // sends operators back to `claude setup-token` for a remedy that cannot
+    // work (#2987). Name the state instead.
+    case 'no-usage-credential':
+      return USAGE_NO_USAGE_CREDENTIAL_MARKER;
+    case 'headless-scope':
+      return USAGE_HEADLESS_SCOPE_MARKER;
     case 'expired-credential':
       // Kimi refreshes its own credential on a normal launch; the recovery hint
       // is embedded in the error string so the label matches the exact action.
       if (detail?.includes('run Kimi once')) return 'run Kimi once';
       return 're-auth for usage';
+    case 'not-collected':
+      return 'usage pending';
     case 'rate-limited': {
       const retryHint = detail?.match(/not retrying for (.+)\.$/)?.[1] ?? null;
       return retryHint ? `rate-limited (retry ~${retryHint})` : 'rate-limited';
     }
     case 'rejected':
     case 'unreachable':
-    case 'headless-scope':
     case null:
     case undefined:
     default:
@@ -1156,7 +1211,11 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
       fileOnly: options?.fileOnly === true,
     });
     if (!oauth?.accessToken) {
-      return { snapshot: null, error: usageNoCredentialError('Claude') };
+      // NOT the shared no-credential message: "sign in" is not a remedy here.
+      // The account this reads for is usually signed in already — the reader is
+      // forbidden from touching that login (RUSH-1822) — so the shared wording
+      // asked the operator to redo the one thing they had already done (#2987).
+      return { snapshot: null, error: usageNoClaudeUsageCredentialError() };
     }
 
     const requestedOrgId = normalizeString(options?.organizationId);

@@ -26,6 +26,7 @@ import {
   classifyUsageFetchFailure,
   getUsageBenignState,
   usageNoCredentialError,
+  usageNoClaudeUsageCredentialError,
   usageExpiredCredentialError,
   usageExpiredKimiCredentialError,
   usageRejectedError,
@@ -35,6 +36,8 @@ import {
   isUsageHeadlessScopeError,
   isClaudeUsageScopeDenied,
   USAGE_HEADLESS_SCOPE_MARKER,
+  USAGE_NO_USAGE_CREDENTIAL_MARKER,
+  USAGE_NOT_COLLECTED_MARKER,
   probeClaudeStatus,
   probeKimiStatus,
   type UsageSnapshot,
@@ -672,7 +675,7 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     const usage = await getUsageInfo('claude', { home });
 
     expect(usage.snapshot).toBeNull();
-    expect(usage.error).toBe(usageNoCredentialError('Claude'));
+    expect(usage.error).toBe(usageNoClaudeUsageCredentialError());
   });
 
   it('reports unprovisioned even when an interactive login is present — the probe never reads it', async () => {
@@ -691,7 +694,13 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     const usage = await getUsageInfo('claude', { home });
 
     expect(usage.snapshot).toBeNull();
-    expect(usage.error).toBe(usageNoCredentialError('Claude'));
+    expect(usage.error).toBe(usageNoClaudeUsageCredentialError());
+    // The message must not send this operator back to a login they already
+    // have: this account IS signed in and the reader still cannot use it
+    // (#2987). The shared wording ("sign in, or provision a long-lived token")
+    // is why the reported remedy loop existed.
+    expect(usage.error).not.toContain('sign in');
+    expect(classifyUsageErrorKind(usage.error)).toBe('no-usage-credential');
   });
 });
 
@@ -1018,7 +1027,7 @@ describe('a recorded Retry-After actually suppresses the read', () => {
     const usage = await getUsageInfo('claude', { home });
 
     // Falls through to the ordinary credential check for this empty home.
-    expect(usage.error).toBe(usageNoCredentialError('Claude'));
+    expect(usage.error).toBe(usageNoClaudeUsageCredentialError());
   });
 });
 
@@ -1320,6 +1329,19 @@ describe('classifyUsageErrorKind — the interface for view.ts (RUSH-3040)', () 
     expect(classifyUsageErrorKind(usageHeadlessScopeError('Claude'))).toBe('headless-scope');
   });
 
+  it('classifies the read-only cache miss as not-collected, not a rejection (#2987)', () => {
+    // `getUsageInfoForIdentity` returns this sentinel when the read served the
+    // cache and the cache was empty — no request was made, so nothing was
+    // rejected. It had no arm here and fell through to 'rejected', which is
+    // how a cold cache rendered as "usage unavailable".
+    expect(classifyUsageErrorKind(USAGE_NOT_COLLECTED_MARKER)).toBe('not-collected');
+    expect(classifyUsageErrorKind(USAGE_NOT_COLLECTED_MARKER)).not.toBe('rejected');
+  });
+
+  it('classifies the Claude no-usage-credential message distinctly from a generic missing credential', () => {
+    expect(classifyUsageErrorKind(usageNoClaudeUsageCredentialError())).toBe('no-usage-credential');
+    expect(classifyUsageErrorKind(usageNoCredentialError('Kimi'))).toBe('no-credential');
+  });
 });
 
 describe('formatUsageSummary renders the SPECIFIC error kind, not a generic bucket', () => {
@@ -1348,6 +1370,43 @@ describe('formatUsageSummary renders the SPECIFIC error kind, not a generic buck
 
   it('falls back to the generic label when no errorKind is supplied (unchanged old behavior)', () => {
     expect(formatUsageSummary(null, null, 3, { unavailable: true })).toContain('usage unavailable');
+  });
+
+  it('names the scope gap from errorKind alone, without the headless flag (RUSH-2392, #2987)', () => {
+    // view.ts sets `headless` from the error string, but every other caller
+    // passes only the classified kind. That kind shared the generic bucket, so
+    // the same account read as "usage unavailable" on one surface and
+    // "usage unavailable (headless)" on another.
+    const out = formatUsageSummary(null, null, 3, {
+      unavailable: true,
+      errorKind: 'headless-scope',
+    });
+
+    expect(out).toContain(USAGE_HEADLESS_SCOPE_MARKER);
+    expect(out).not.toMatch(/usage unavailable(?! \(headless\))/);
+  });
+
+  it('renders a cold cache as pending rather than unavailable (#2987)', () => {
+    const out = formatUsageSummary(null, null, 3, {
+      unavailable: true,
+      errorKind: classifyUsageErrorKind(USAGE_NOT_COLLECTED_MARKER),
+      errorDetail: USAGE_NOT_COLLECTED_MARKER,
+    });
+
+    expect(out).toContain('usage pending');
+    expect(out).not.toContain('usage unavailable');
+  });
+
+  it('renders the Claude no-usage-credential state without a remedy that cannot work (#2987)', () => {
+    const error = usageNoClaudeUsageCredentialError();
+    const out = formatUsageSummary(null, null, 3, {
+      unavailable: true,
+      errorKind: classifyUsageErrorKind(error),
+      errorDetail: error,
+    });
+
+    expect(out).toContain(USAGE_NO_USAGE_CREDENTIAL_MARKER);
+    expect(out).not.toContain('sign in / provision token');
   });
 });
 
