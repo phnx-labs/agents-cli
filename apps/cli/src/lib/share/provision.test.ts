@@ -11,8 +11,10 @@ import {
   SHARE_LIFECYCLE_RULE_ID,
   buildShareLifecycleRule,
   mergeShareLifecycleRule,
+  putWorkerSecret,
   setWorkerSecret,
   updateWorker,
+  WORKER_PHOENIX_ID_BASE_SECRET,
   type CloudflareRequest,
   type CloudflareRequester,
 } from './provision.js';
@@ -162,6 +164,25 @@ describe('share Cloudflare provisioning request shape', () => {
         method: 'PUT',
         pathname: '/accounts/acct_1/workers/scripts/worker-one/secrets',
         body: { name: 'WRITE_TOKEN', text: 'write-token', type: 'secret_text' },
+      },
+    ]);
+  });
+
+  it('puts an arbitrary secret_text binding (PHOENIX_ID_BASE uses this)', async () => {
+    const seen: CloudflareRequest[] = [];
+    await putWorkerSecret('cf-token', 'acct_1', 'worker-one', WORKER_PHOENIX_ID_BASE_SECRET, 'https://phoenix.test', {
+      request: async (req) => {
+        seen.push(req);
+        return {};
+      },
+    });
+
+    expect(seen).toEqual([
+      {
+        apiToken: 'cf-token',
+        method: 'PUT',
+        pathname: '/accounts/acct_1/workers/scripts/worker-one/secrets',
+        body: { name: 'PHOENIX_ID_BASE', text: 'https://phoenix.test', type: 'secret_text' },
       },
     ]);
   });
@@ -355,6 +376,117 @@ describe('updateWorker', () => {
 
     expect(result).toEqual({ templateHash: currentHash, skipped: false });
     expect(seen).toHaveLength(2);
+  });
+
+  it('a managed re-deploy sets PHOENIX_ID_BASE after WRITE_TOKEN — the script upload would have wiped it (RUSH-3138)', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker(
+      'cf-token',
+      'acct_1',
+      'worker-one',
+      'bucket-one',
+      script,
+      'tok',
+      undefined,
+      {
+        phoenixIdBase: 'https://phoenix-id.example.test/',
+        request: async (req) => { seen.push(req); return {}; },
+      },
+    );
+
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_1/workers/scripts/worker-one',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+    ]);
+    expect(seen[1].body).toEqual({ name: 'WRITE_TOKEN', text: 'tok', type: 'secret_text' });
+    expect(seen[2].body).toEqual({
+      name: 'PHOENIX_ID_BASE',
+      text: 'https://phoenix-id.example.test',
+      type: 'secret_text',
+    });
+  });
+
+  it('a second managed deploy re-applies PHOENIX_ID_BASE after the script upload', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', 'stale-hash', {
+      phoenixIdBase: 'https://phoenix-id.example.test',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    const phoenix = seen.filter((r) => r.pathname.endsWith('/secrets') && (r.body as { name?: string })?.name === 'PHOENIX_ID_BASE');
+    expect(phoenix).toHaveLength(1);
+    expect(phoenix[0].body).toEqual({
+      name: 'PHOENIX_ID_BASE',
+      text: 'https://phoenix-id.example.test',
+      type: 'secret_text',
+    });
+  });
+
+  it('a BYO deploy does not require or send PHOENIX_ID_BASE', async () => {
+    const seen: CloudflareRequest[] = [];
+    await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', undefined, {
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1].body).toEqual({ name: 'WRITE_TOKEN', text: 'tok', type: 'secret_text' });
+    expect(seen.some((r) => (r.body as { name?: string } | undefined)?.name === 'PHOENIX_ID_BASE')).toBe(false);
+  });
+
+  it('a matching-hash managed update still puts PHOENIX_ID_BASE (heals a wiped secret without --force)', async () => {
+    const seen: CloudflareRequest[] = [];
+    const currentHash = hashWorkerScript(script);
+    const result = await updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', currentHash, {
+      phoenixIdBase: 'https://phoenix-id.example.test',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(result.skipped).toBe(true);
+    expect(seen).toEqual([
+      {
+        apiToken: 'cf-token',
+        method: 'PUT',
+        pathname: '/accounts/acct_1/workers/scripts/worker-one/secrets',
+        body: { name: 'PHOENIX_ID_BASE', text: 'https://phoenix-id.example.test', type: 'secret_text' },
+      },
+    ]);
+  });
+
+  it('empty PHOENIX_ID_BASE on a managed deploy fails loud — not a skipped secret', async () => {
+    const seen: CloudflareRequest[] = [];
+    await expect(
+      updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', undefined, {
+        phoenixIdBase: '   ',
+        request: async (req) => { seen.push(req); return {}; },
+      }),
+    ).rejects.toThrow(/Managed share deploy requires a non-empty PHOENIX_ID_BASE/);
+    // Script + WRITE_TOKEN landed; the empty base is rejected before the second secret PUT.
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_1/workers/scripts/worker-one',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+    ]);
+  });
+
+  it('when PHOENIX_ID_BASE re-apply fails after a successful deploy, fails loud with a re-run hint', async () => {
+    const seen: CloudflareRequest[] = [];
+    await expect(
+      updateWorker('cf-token', 'acct_1', 'worker-one', 'bucket-one', script, 'tok', undefined, {
+        phoenixIdBase: 'https://phoenix-id.example.test',
+        request: async (req) => {
+          seen.push(req);
+          if (req.pathname.endsWith('/secrets') && (req.body as { name?: string })?.name === 'PHOENIX_ID_BASE') {
+            throw new Error('Cloudflare API 429: rate limited');
+          }
+          return {};
+        },
+      }),
+    ).rejects.toThrow(/Worker deployed but PHOENIX_ID_BASE failed to re-apply — Phoenix-bearer publishes will 401/);
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_1/workers/scripts/worker-one',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+    ]);
   });
 
   it('when the secret re-apply fails after a successful deploy, fails loud with a re-run hint (RUSH-2453)', async () => {

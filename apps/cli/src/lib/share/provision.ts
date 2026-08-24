@@ -189,6 +189,20 @@ export interface UpdateWorkerResult {
   skipped: boolean;
 }
 
+/** Cloudflare `secret_text` name the Worker reads as `env.PHOENIX_ID_BASE`. */
+export const WORKER_PHOENIX_ID_BASE_SECRET = 'PHOENIX_ID_BASE';
+
+export type UpdateWorkerOpts = ProvisionOptions & {
+  force?: boolean;
+  /**
+   * Phoenix ID base URL to bind as `PHOENIX_ID_BASE` after the script upload.
+   * Pass this for a managed deployment; omit it for a pure-BYO Worker (which
+   * authenticates only via WRITE_TOKEN). An empty string is a caller bug and
+   * fails loud — do not pass a blank to "skip".
+   */
+  phoenixIdBase?: string;
+};
+
 /**
  * Re-deploy the Worker script against an ALREADY-provisioned endpoint (same
  * account/worker/bucket `deployWorker` was first called with) and idempotently
@@ -206,7 +220,9 @@ export interface UpdateWorkerResult {
  * API right after the upload — the same two-call sequence first-time
  * provisioning already uses (`deployWorker` then `setWorkerSecret`), except
  * `writeToken` here is the caller's EXISTING token, never a freshly generated
- * one. Cloudflare's own docs describe exactly this "secrets survive a
+ * one. A managed deploy also re-applies `PHOENIX_ID_BASE` the same way (the
+ * Worker reads it to verify Phoenix bearers); a pure-BYO deploy omits it.
+ * Cloudflare's own docs describe exactly this "secrets survive a
  * subsequent write" contract for the sibling `wrangler versions upload
  * --secrets-file` flow ("Secrets not included in the file are preserved from
  * the previous version" —
@@ -222,10 +238,17 @@ export async function updateWorker(
   script: string,
   writeToken: string,
   previousHash: string | undefined,
-  opts: ProvisionOptions & { force?: boolean } = {},
+  opts: UpdateWorkerOpts = {},
 ): Promise<UpdateWorkerResult> {
   const templateHash = hashWorkerScript(script);
   if (!opts.force && previousHash === templateHash) {
+    // Script is current so we skip the upload (which would wipe secrets). A
+    // managed Worker still needs PHOENIX_ID_BASE present — a prior upload from
+    // a CLI that never set it left the secret missing, and this is the heal
+    // that does not require --force or a dummy template bump.
+    if (opts.phoenixIdBase !== undefined) {
+      await applyPhoenixIdBaseSecret(apiToken, accountId, workerName, opts.phoenixIdBase, opts);
+    }
     return { templateHash, skipped: true };
   }
   await deployWorker(apiToken, accountId, workerName, script, bucketName, opts);
@@ -241,7 +264,35 @@ export async function updateWorker(
       `Worker deployed but the write token failed to re-apply — re-run \`agents artifacts share update\` to fix this before publishing/deleting anything. (${detail})`,
     );
   }
+  if (opts.phoenixIdBase !== undefined) {
+    try {
+      await applyPhoenixIdBaseSecret(apiToken, accountId, workerName, opts.phoenixIdBase, opts);
+    } catch (e) {
+      const detail = e instanceof Error ? e.message : String(e);
+      throw new Error(
+        `Worker deployed but PHOENIX_ID_BASE failed to re-apply — Phoenix-bearer publishes will 401 until you re-run \`agents artifacts share update\`. (${detail})`,
+      );
+    }
+  }
   return { templateHash, skipped: false };
+}
+
+/** Add/update a secret_text binding using Cloudflare's Workers Secrets API. */
+export async function putWorkerSecret(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  name: string,
+  text: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  const request = opts.request ?? defaultCloudflareRequester;
+  await request({
+    apiToken,
+    method: 'PUT',
+    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/secrets`,
+    body: { name, text, type: 'secret_text' },
+  });
 }
 
 /** Add/update the WRITE_TOKEN binding using Cloudflare's Workers Secrets API. */
@@ -252,13 +303,34 @@ export async function setWorkerSecret(
   writeToken: string,
   opts: ProvisionOptions = {},
 ): Promise<void> {
-  const request = opts.request ?? defaultCloudflareRequester;
-  await request({
+  await putWorkerSecret(apiToken, accountId, workerName, 'WRITE_TOKEN', writeToken, opts);
+}
+
+function normalizePhoenixIdBase(phoenixIdBase: string): string {
+  const base = phoenixIdBase.replace(/\/+$/, '').trim();
+  if (!base) {
+    throw new Error(
+      'Managed share deploy requires a non-empty PHOENIX_ID_BASE so the Worker can verify Phoenix bearers. Set the PHOENIX_ID_BASE env var.',
+    );
+  }
+  return base;
+}
+
+async function applyPhoenixIdBaseSecret(
+  apiToken: string,
+  accountId: string,
+  workerName: string,
+  phoenixIdBase: string,
+  opts: ProvisionOptions = {},
+): Promise<void> {
+  await putWorkerSecret(
     apiToken,
-    method: 'PUT',
-    pathname: `/accounts/${accountId}/workers/scripts/${workerName}/secrets`,
-    body: { name: 'WRITE_TOKEN', text: writeToken, type: 'secret_text' },
-  });
+    accountId,
+    workerName,
+    WORKER_PHOENIX_ID_BASE_SECRET,
+    normalizePhoenixIdBase(phoenixIdBase),
+    opts,
+  );
 }
 
 /** Enable the free `*.workers.dev` route for the script, and return the account subdomain. */
