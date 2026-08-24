@@ -1056,7 +1056,9 @@ export function generateVersionedAliasScript(agent: AgentId, version: string): s
 # .oauth_token fallback, so interactive runs on a keychain-less worker could not
 # authenticate from the attached setup-token — the main shim (generateShimScript)
 # already sources this same adapter block, so sharing it keeps the two in sync.
-export VERSION_DIR="$HOME/.agents/.history/versions/${agent}/${version}"
+# plain (not exported) so it feeds shimConfigEnvBash below but never leaks into the
+# launched agent process — matching the main shim's convention.
+VERSION_DIR="$HOME/.agents/.history/versions/${agent}/${version}"
 ${resolveHarnessAdapter(agent).shimConfigEnvBash?.({ configDirName }) ?? ''}`
     : agent === 'codex'
       ? codexHomeShimBash(

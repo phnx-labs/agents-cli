@@ -85,9 +85,16 @@ export function classifyAttachTarget(target: string): AttachTarget {
 export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId): void {
   if (process.platform !== 'linux' || targetAgent !== 'claude' || target.kind !== 'installation') return;
   const versionHome = getVersionHomePath('claude', target.version);
-  const token = resolveClaudeSetupToken(versionHome);
-  if (!token) return;
   const tokenPath = path.join(versionHome, '.claude', '.oauth_token');
+  const token = resolveClaudeSetupToken(versionHome);
+  // A re-point (attach B over A, or a detach) can leave no setup-token resolving for
+  // this version — B's may not be minted yet. A leftover file from the previous binding
+  // would silently authenticate interactive runs as the OLD account (the shim's Linux
+  // fallback reads it), so clear it rather than leave it stale.
+  if (!token) {
+    fs.rmSync(tokenPath, { force: true });
+    return;
+  }
   fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
   fs.writeFileSync(tokenPath, token, { mode: 0o600 });
 }
@@ -421,6 +428,13 @@ export function registerAccountsCommand(program: Command): void {
     .description('Remove one account attachment')
     .action((name: string, target: string) => {
       unbindAccount(name, target);
+      // With the binding gone, no setup-token resolves for this version home, so this
+      // clears any .oauth_token the attach left behind (else interactive runs would keep
+      // authenticating as the just-detached account).
+      try {
+        const t = classifyAttachTarget(target);
+        writeClaudeInteractiveOauthToken(t, t.kind === 'profile' ? t.profile.host.agent : t.agent);
+      } catch { /* an unresolvable target has no version home to clean */ }
       console.log(chalk.green(`Detached ${name} from ${target}.`));
     });
 

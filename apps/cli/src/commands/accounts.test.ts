@@ -4,13 +4,15 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
 import { Command } from 'commander';
-import { classifyAttachTarget, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount } from './accounts.js';
+import { classifyAttachTarget, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
+import { claudeAccountTokenKey } from '../lib/claude-account-token.js';
+import { getVersionHomePath } from '../lib/installations/versions.js';
 import { addAccount, addNativeAccount } from '../lib/account-registry.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
 import { secretsKeychainItem, setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
 import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
-import { keychainRef, writeBundleWithItems } from '../lib/secrets/bundles.js';
+import { bundleItemStore, keychainRef, writeBundle, writeBundleWithItems, type SecretsBundle } from '../lib/secrets/bundles.js';
 
 class MemoryKeychain implements KeychainBackend {
   values = new Map<string, string>();
@@ -161,5 +163,77 @@ describe('accounts switch + native naming honesty-gate', () => {
     expect(result.agent).toBe('claude');
     expect(result.account.id).toBe(native.id);
     expect(readMeta().accounts?.defaults?.claude).toBe(native.id);
+  });
+});
+
+describe('writeClaudeInteractiveOauthToken', () => {
+  // The .oauth_token fallback is the Linux keychain-less path; the write is a no-op
+  // off Linux, so exercise the write/clear behavior only there.
+  const linuxOnly = process.platform === 'linux' ? it : it.skip;
+  const PASS = 'oauth-write-test-pass';
+  const VERSION = '2.1.0';
+  const EMAIL = 'social@swarmify.co';
+  const TOKEN = 'sk-ant-oat01-interactive-write-test';
+  let home: string;
+  let fileDir: string;
+  let prev: Record<string, string | undefined>;
+
+  beforeEach(() => {
+    home = fs.mkdtempSync(path.join(os.tmpdir(), 'oauth-write-home-'));
+    fileDir = fs.mkdtempSync(path.join(os.tmpdir(), 'oauth-write-store-'));
+    prev = {
+      HOME: process.env.HOME,
+      noAgent: process.env.AGENTS_SECRETS_NO_AGENT,
+      pass: process.env.AGENTS_SECRETS_PASSPHRASE,
+      tok: process.env.CLAUDE_CODE_OAUTH_TOKEN,
+    };
+    process.env.HOME = home;
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    process.env.AGENTS_SECRETS_PASSPHRASE = PASS;
+    delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
+    _resetFileStoreForTest({ fileDir, passphrase: PASS });
+    // A version home whose .claude.json names the account, so resolveClaudeSetupToken
+    // can key the per-account token in the auth bundle.
+    const configDir = path.join(getVersionHomePath('claude', VERSION), '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, '.claude.json'), JSON.stringify({ oauthAccount: { emailAddress: EMAIL } }));
+  });
+
+  afterEach(() => {
+    _resetFileStoreForTest({});
+    for (const [k, v] of [['HOME', prev.HOME], ['AGENTS_SECRETS_NO_AGENT', prev.noAgent], ['AGENTS_SECRETS_PASSPHRASE', prev.pass], ['CLAUDE_CODE_OAUTH_TOKEN', prev.tok]] as const) {
+      if (v === undefined) delete process.env[k]; else process.env[k] = v;
+    }
+    fs.rmSync(home, { recursive: true, force: true });
+    fs.rmSync(fileDir, { recursive: true, force: true });
+  });
+
+  function oauthTokenPath(): string {
+    return path.join(getVersionHomePath('claude', VERSION), '.claude', '.oauth_token');
+  }
+  function writeAuthToken(email: string, token: string): void {
+    const bundle: SecretsBundle = { name: 'auth', backend: 'file', vars: {} };
+    bundleItemStore('file').set(secretsKeychainItem('auth', claudeAccountTokenKey(email)), token);
+    bundle.vars[claudeAccountTokenKey(email)] = keychainRef(claudeAccountTokenKey(email));
+    writeBundle(bundle);
+  }
+
+  linuxOnly('writes the resolved setup-token mode 0600 for a claude@version attach', () => {
+    writeAuthToken(EMAIL, TOKEN);
+    writeClaudeInteractiveOauthToken({ kind: 'installation', agent: 'claude', version: VERSION }, 'claude');
+    expect(fs.readFileSync(oauthTokenPath(), 'utf8')).toBe(TOKEN);
+    expect(fs.statSync(oauthTokenPath()).mode & 0o777).toBe(0o600);
+  });
+
+  linuxOnly('clears a stale .oauth_token when no token resolves (re-point / detach)', () => {
+    fs.writeFileSync(oauthTokenPath(), 'stale-token-from-a-previous-account');
+    // No auth-bundle key for this account -> resolveClaudeSetupToken returns null.
+    writeClaudeInteractiveOauthToken({ kind: 'installation', agent: 'claude', version: VERSION }, 'claude');
+    expect(fs.existsSync(oauthTokenPath())).toBe(false);
+  });
+
+  it('no-ops for a non-installation target (device-scoped attach)', () => {
+    writeClaudeInteractiveOauthToken({ kind: 'device-agent', agent: 'claude' }, 'claude');
+    expect(fs.existsSync(oauthTokenPath())).toBe(false);
   });
 });
