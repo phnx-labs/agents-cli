@@ -31,13 +31,22 @@ describe('vscodeDouble', () => {
   });
 
   test('every vscode module mock in the tree is built by vscodeDouble', () => {
+    // Counted, not substring-matched: a registration is compliant only when it
+    // matches the canonical factory EXACTLY. A looser "does this text contain
+    // vscodeDouble(" check passes on a registration that merely mentions it in
+    // a comment, and a quote-agnostic search is needed because `"vscode"` is
+    // just as valid a specifier as `'vscode'`. Any registration the strict
+    // pattern misses makes the counts differ, which flags the file.
+    const ANY_REGISTRATION = /mock\.module\(\s*['"]vscode['"]/g;
+    const CANONICAL_REGISTRATION = /mock\.module\(\s*['"]vscode['"]\s*,\s*\(\)\s*=>\s*vscodeDouble\(/g;
+
     const offenders = sourceFiles(SRC)
       .filter((file) => file !== path.join(__dirname, 'vscodeDouble.test.ts'))
       .filter((file) => {
         const text = fs.readFileSync(file, 'utf8');
-        const registrations = text.match(/mock\.module\(\s*'vscode'\s*,[\s\S]{0,40}/g) ?? [];
-        // `() => vscodeDouble(...)` is the only accepted factory.
-        return registrations.some((r) => !r.includes('vscodeDouble('));
+        const all = text.match(ANY_REGISTRATION)?.length ?? 0;
+        const canonical = text.match(CANONICAL_REGISTRATION)?.length ?? 0;
+        return all !== canonical;
       })
       .map((file) => path.relative(SRC, file));
 
