@@ -449,15 +449,20 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
   });
 
   /** Render plain-text rows keyed by device name (plus a 'head'/'footer' view). */
-  function render(width: number, full = false, ignoredCount = 0): { rows: Record<string, string>; all: string[] } {
-    const { reg, names, statsMap } = fleet();
-    const lines = renderDeviceTable(reg, names, 'zion', statsMap, full, 'zion', { width, ignoredCount }).map(stripAnsi);
+  /** Index the rendered lines by device name (ansi already stripped). */
+  function rowsFrom(lines: string[], names: string[]): Record<string, string> {
     const rows: Record<string, string> = {};
     for (const line of lines) {
       const m = line.match(/^\s*(?:▸\s+)?([a-z0-9-]+)\s/);
       if (m && names.includes(m[1])) rows[m[1]] = line;
     }
-    return { rows, all: lines };
+    return rows;
+  }
+
+  function render(width: number, full = false, ignoredCount = 0): { rows: Record<string, string>; all: string[] } {
+    const { reg, names, statsMap } = fleet();
+    const lines = renderDeviceTable(reg, names, 'zion', statsMap, full, 'zion', { width, ignoredCount }).map(stripAnsi);
+    return { rows: rowsFrom(lines, names), all: lines };
   }
 
   it('renders spec, disk, role, and description columns at a wide (200) terminal', () => {
@@ -485,6 +490,58 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     expect(rows['ci-runner']).not.toContain('%'); // no phantom numbers for a dead box
     expect(rows['ci-runner']).toContain('worker');
     expect(rows['ci-runner']).toContain('hetzner CI runner');
+  });
+
+  // RUSH-3096: an offline row rendered as a bare `ci-runner  linux  offline`,
+  // dropping cores/RAM/disk the last successful probe had already recorded.
+  // Hardware is what the box IS, so it stays legible while the box is down.
+  it('renders the retained spec on an offline row, with no live numbers', () => {
+    const { rows } = render(200);
+    expect(rows['ci-runner']).toContain('12c 64G 1T'); // retained by retainHardwareFacts
+    expect(rows['ci-runner']).toContain('offline');
+    // Only the STATIC facts appear. The volatile columns are absent, not stale:
+    // '%' would mean a load/mem/disk reading for a box that never answered.
+    expect(rows['ci-runner']).not.toContain('%');
+    // The spec sits in the same column as every online row, which is the whole
+    // point of the cell — a fleet inventory you can scan down. Both fixtures
+    // carry the default `12c 64G 1T`, so the start index must match exactly.
+    expect(rows['ci-runner'].indexOf('12c')).toBe(rows['mac-mini'].indexOf('12c'));
+  });
+
+  // Caught only by running the real command: `specCell` pads to the MEASURED
+  // column width, so the fleet's WIDEST spec pads to nothing and the marker
+  // collided with it — `16c 27.3G 455Goffline`. The shared fixture's specs are
+  // all narrower than the floor, so they cannot reach this case.
+  it('separates the spec from the offline marker even when the spec sets the column width', () => {
+    const { reg, names, statsMap } = fleet();
+    // 14 chars — the widest real spec shape, and wider than SPEC_WIDTH_MIN.
+    statsMap.set('ci-runner', stats('ci-runner', {
+      reachable: false,
+      ncpu: 16,
+      memTotalBytes: Math.round(27.3 * 1024 ** 3),
+      diskTotalBytes: 455 * 1024 ** 3,
+      loadPercent: undefined,
+      memPercent: undefined,
+      diskUsedPercent: undefined,
+    }));
+    const lines = renderDeviceTable(reg, names, 'zion', statsMap, false, 'zion', { width: 200, ignoredCount: 0 }).map(stripAnsi);
+    const rows = rowsFrom(lines, names);
+    expect(rows['ci-runner']).toContain('16c 27.3G 455G');
+    expect(rows['ci-runner']).not.toContain('455Goffline');
+    expect(rows['ci-runner']).toMatch(/455G\s+offline/);
+  });
+
+  it('leaves the spec cell blank for an offline box no probe has ever seen', () => {
+    const { reg, names, statsMap } = fleet();
+    // No retained facts: a box added to the registry and never successfully probed.
+    statsMap.set('ci-runner', { host: 'ci-runner', reachable: false, fetchedAt: NOW });
+    const rows = rowsFrom(
+      renderDeviceTable(reg, names, 'zion', statsMap, false, 'zion', { width: 200, ignoredCount: 0 }).map(stripAnsi),
+      names,
+    );
+    expect(rows['ci-runner']).toContain('offline');
+    expect(rows['ci-runner']).toContain('—'); // honestly unknown, not invented
+    expect(rows['ci-runner']).not.toContain('12c');
   });
 
   it('truncates the description first at 120 columns; role and numerics intact', () => {

@@ -56,6 +56,49 @@ export function isFreshDeviceSpecs(stats: DeviceStats, now: number = Date.now())
   return now - fetchedAt <= SPECS_STALE_MS;
 }
 
+/**
+ * Carry a device's last successfully-probed hardware facts onto a row whose
+ * probe just came back unreachable (RUSH-3096).
+ *
+ * A failed probe knows nothing about the box — `probeDeviceStats` resolves
+ * `{ host, reachable: false, fetchedAt }` — and that bare row then replaced the
+ * cached one, so `agents devices list` rendered an offline device with an empty
+ * `spec` cell and forgot its cores/RAM/disk until it came back up. Cores, total
+ * RAM, and root-disk capacity do not change while a machine is down, so they
+ * survive the failure; `loadPercent`, `memPercent`, and the free-byte counts are
+ * current-state readings and stay absent rather than render a stale number as
+ * live.
+ *
+ * `specsFetchedAt` keeps the moment the facts were actually observed while
+ * `fetchedAt` advances to this attempt, so the row reads "this hardware, seen
+ * then; unreachable, as of now" instead of backdating a reading that never
+ * happened. A reachable probe is returned untouched — its own reading is the
+ * truth, including a fact the box has stopped reporting.
+ */
+export function retainHardwareFacts(
+  probed: DeviceStats,
+  prior: DeviceStats | undefined,
+): DeviceStats {
+  if (probed.reachable || !prior) return probed;
+  const ncpu = probed.ncpu ?? prior.ncpu;
+  const memTotalBytes = probed.memTotalBytes ?? prior.memTotalBytes;
+  const diskTotalBytes = probed.diskTotalBytes ?? prior.diskTotalBytes;
+  if (
+    ncpu === probed.ncpu &&
+    memTotalBytes === probed.memTotalBytes &&
+    diskTotalBytes === probed.diskTotalBytes
+  ) {
+    return probed;
+  }
+  return {
+    ...probed,
+    ncpu,
+    memTotalBytes,
+    diskTotalBytes,
+    specsFetchedAt: prior.specsFetchedAt ?? prior.fetchedAt,
+  };
+}
+
 interface StatsCacheFile {
   version: 1;
   entries: Record<string, DeviceStats>;
@@ -136,7 +179,10 @@ export async function loadFleetStats(
   const writeCache = opts.writeCache ?? writeStatsCache;
   const self = opts.selfName;
   const now = opts.now ?? Date.now();
-  const cache = opts.forceRefresh ? {} : readCache();
+  // Always read the cache, even under --refresh. It is not *served* then, but it
+  // is the only record of each box's hardware, and a failed probe must not erase
+  // it — see {@link retainHardwareFacts}.
+  const cache = readCache();
 
   const stats = new Map<string, DeviceStats>();
   const toProbe: DeviceProfile[] = [];
@@ -148,7 +194,7 @@ export async function loadFleetStats(
       toProbe.push(d);
       continue;
     }
-    const cached = cache[d.name];
+    const cached = opts.forceRefresh ? undefined : cache[d.name];
     const cacheFresh = cached && (opts.specsOnly ? isFreshDeviceSpecs(cached, now) : isFreshDeviceStats(cached, now));
     if (cached && cacheFresh) {
       stats.set(d.name, cached);
@@ -164,8 +210,11 @@ export async function loadFleetStats(
     const probed = await probeFleet(toProbe, { selfName: self });
     const fresh: Record<string, DeviceStats> = {};
     for (const [name, s] of probed) {
-      stats.set(name, s);
-      fresh[name] = s;
+      // A box that just failed to answer keeps the hardware it was last seen
+      // with, so this call and the cache it writes both carry the spec.
+      const row = retainHardwareFacts(s, cache[name]);
+      stats.set(name, row);
+      fresh[name] = row;
     }
     if (Object.keys(fresh).length > 0) writeCache(fresh);
   }
@@ -174,7 +223,7 @@ export async function loadFleetStats(
   // list (e.g. self not registered as an ssh target) — matches the old callers'
   // explicit local fallback.
   if (self && !stats.has(self)) {
-    stats.set(self, await probeLocal(self));
+    stats.set(self, retainHardwareFacts(await probeLocal(self), cache[self]));
   }
 
   let oldest: number | null = null;

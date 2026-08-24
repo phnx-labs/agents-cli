@@ -206,12 +206,25 @@ emits a `~/.ssh/config.d/agents` include so plain `ssh`/`scp`/`rsync` resolve th
 same logical names.
 
 `agents devices list` is the fleet inventory: a `spec` cell per device
-(`12c 64G 1T` — cores, total RAM, total root disk from the long-TTL static
-probe tier), live `load` / `mem` / `disk` used percentages on one severity
-scale, a headroom badge, the `role` mark, and the one-line `description` as the
-tail column (the first thing a narrow terminal truncates, then role — the
-numbers never truncate). The "Fleet capacity" footer sums cores, free RAM, and
-free disk across the reachable fleet. `--json` is additive over the same rows:
+(`12c 64G 1T` — cores, total RAM, total root disk), live `load` / `mem` / `disk`
+used percentages on one severity scale, a headroom badge, the `role` mark, and
+the one-line `description` as the tail column (the first thing a narrow terminal
+truncates, then role — the numbers never truncate). The "Fleet capacity" footer
+sums cores, free RAM, and free disk across the reachable fleet.
+
+**An offline device keeps its `spec` cell.** Hardware is what a box *is*, not
+what it is doing, so cores/RAM/disk-capacity survive a failed probe and render
+beside the `offline` marker (`ci-runner-fsn1  linux  8c 16G 500G  offline`)
+rather than blanking. `retainHardwareFacts`
+([`src/lib/devices/stats-cache.ts`](../src/lib/devices/stats-cache.ts)) carries
+them from the last successful probe as the probe result is written to the cache,
+keeping `specsFetchedAt` at the moment they were observed while `fetchedAt`
+advances to the failed attempt. The volatile columns are deliberately NOT
+retained — `load`, `mem`, `disk` used and the free-byte counts stay absent,
+because a box that did not answer has no current reading, and the "Fleet
+capacity" footer still counts only reachable devices. A device no probe has ever
+reached shows `—`: unknown, never invented. The facts self-correct with no TTL —
+the moment the box answers again, its live probe overwrites them. `--json` is additive over the same rows:
 effective profile, `role` / `description` / `autoPool`, the device-layer
 `config` block, and `health` (which carries `diskTotalBytes`, `diskFreeBytes`,
 `diskUsedPercent` alongside the memory and load fields).

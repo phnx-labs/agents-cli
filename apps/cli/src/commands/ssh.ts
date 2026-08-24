@@ -224,11 +224,18 @@ function pctCell(v: number | undefined, width: number): string {
 const SPEC_WIDTH_MIN = 12;
 
 /** The static hardware as one compact cell — `12c 64G 1T`: cores, total RAM,
- * total root disk via fmtBytes. `—` when the probe never saw the box (specs
- * ride the long-TTL static tier, so a warm cache almost always has them).
+ * total root disk via fmtBytes. `—` only when no probe has ever seen the box.
+ *
+ * Deliberately NOT gated on `reachable`: hardware does not change while a
+ * machine is down, so an offline device keeps rendering the spec from its last
+ * successful probe (`retainHardwareFacts`, RUSH-3096) rather than blanking a
+ * fact that is still true. The volatile columns beside it — load, mem, disk
+ * used — stay `—`, and `fleetCapacity` still counts only reachable boxes, so
+ * a down machine never contributes to usable capacity.
+ *
  * Unpadded; {@link renderDeviceTable} pads to the measured column width. */
 function specText(stats: DeviceStats | undefined): string {
-  if (!stats?.reachable || !stats.ncpu) return '—';
+  if (!stats?.ncpu) return '—';
   return `${stats.ncpu}c ${fmtBytes(stats.memTotalBytes)} ${fmtBytes(stats.diskTotalBytes)}`;
 }
 
@@ -338,7 +345,24 @@ export function renderDeviceTable(
     // "offline" while its live load/mem sit one column over (RUSH-1965).
     const offline = deviceOnlineState(d, stats) === 'offline';
     if (offline) {
-      lines.push(fitDeviceRow(`${marker}${label}${plat} ${chalk.gray('offline')}`, role, desc, width));
+      // The spec cell rides the offline row: hardware is what the box IS, not
+      // what it is doing, so it stays legible while the machine is down
+      // (RUSH-3096). The live columns are omitted rather than dashed — there is
+      // no current load/mem/disk to report for a box that did not answer.
+      //
+      // The explicit gap is load-bearing: `specCell` pads to the MEASURED
+      // column width, so the widest spec on the fleet pads to nothing and the
+      // marker would collide with it ("455Goffline"). An online row gets its
+      // separation for free from `pctCell`'s right-alignment; this one has no
+      // numeric cell to lean on.
+      lines.push(
+        fitDeviceRow(
+          `${marker}${label}${plat} ${specCell(stats, specWidth)}  ${chalk.gray('offline')}`,
+          role,
+          desc,
+          width,
+        ),
+      );
       continue;
     }
     const relay = !isSelf && d.tailscale?.online && !d.tailscale.direct ? chalk.yellow(' relay') : '';
