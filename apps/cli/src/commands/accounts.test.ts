@@ -237,7 +237,6 @@ describe('groupLabelIdentities', () => {
   });
 });
 
-<<<<<<< HEAD
 describe('writeClaudeInteractiveOauthToken', () => {
   // The .oauth_token fallback is the Linux keychain-less path; the write is a no-op
   // off Linux, so exercise the write/clear behavior only there.
@@ -307,7 +306,9 @@ describe('writeClaudeInteractiveOauthToken', () => {
   it('no-ops for a non-installation target (device-scoped attach)', () => {
     writeClaudeInteractiveOauthToken({ kind: 'device-agent', agent: 'claude' }, 'claude');
     expect(fs.existsSync(oauthTokenPath())).toBe(false);
-=======
+  });
+});
+
 describe('accounts label bare-harness selection (injected collector, the resolveRunVersion pattern)', () => {
   const TEST_LABELS = ['label-seam-solo', 'label-seam-picked'];
   const candidate = (version: string, email: string | null, accountKey: string | null): RotateCandidate =>
@@ -367,6 +368,5 @@ describe('accounts label bare-harness selection (injected collector, the resolve
     await expect(resolveLabelIdentity('codex', undefined, async () => [])).rejects.toThrow(
       'No signed-in codex account with a stable identity',
     );
->>>>>>> 00a67eec9 (test(accounts): cover the bare-harness label branch via an injectable collector)
   });
 });
