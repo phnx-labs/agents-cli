@@ -1,9 +1,5 @@
 # Changelog
 
-## 1.22.48
-
-- **`agents sessions trace --no-redact` reads honestly in compare and lineage too (RUSH-3077).** The single-trajectory footer already said `Unredacted (local only)` under `--no-redact`, but the compare (`--compare`) and lineage (`--tree`) renderers hardcoded a `Secret-redacted` footer regardless of the flag — claiming a redaction that never happened. Both now share the single-trajectory labelling logic (`redactionLabel`): compare derives it from the two compared trajectories' own `redacted` state (a mixed pair still reads redacted, never a false safe-to-share claim), and lineage takes the trace's redaction flag. Redacted-by-default output is unchanged. Source: `apps/cli/src/lib/session/trajectory-html.ts`, `apps/cli/src/commands/sessions-trace.ts`.
-
 ## 1.22.46
 
 - **`agents auth` returns, against Phoenix ID instead of a sibling product's backend (RUSH-2581).** 1.22.45 removed the account layer that authenticated against Rush's `api.prix.dev`. It comes back pointed at **Phoenix ID** (`phnx-labs/phoenix-id`), agents-cli's own account service: `agents auth login` runs a device-code flow whose browser page is Phoenix-branded and Google-only, `agents auth whoami` reports the signed-in account, `agents auth logout` clears **this machine** and nothing else, and the team surface nests as `agents auth space` (`list`/`create`/`members`/`invite`/`role`/`remove`). Everything goes through one new seam, `lib/identity/` — one base URL (`PHOENIX_ID_BASE`), one session file, one HTTP funnel, one error type — replacing the shape that had the backend URL hardcoded in five files and the session token re-read by seven separate functions. agents-cli reads no other product's credentials: there is no `~/.rush/user.yaml` fallback. Source: `apps/cli/src/lib/identity/{client,index}.ts`, `apps/cli/src/commands/auth.ts`.
