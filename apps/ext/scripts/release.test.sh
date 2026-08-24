@@ -113,6 +113,84 @@ STUB
     fi
 fi
 
+# --- RUSH-3114: the local publish path must install deps before the gate ---
+#
+# `bun install` (root + ui) used to live ONLY inside the ssh-routing heredoc, so
+# it ran solely when the publish routed to another box. On the local publish path
+# (this box holds the bundle, --here, or the --publish-phase re-entry) a clean
+# checkout reached the test/build gate with no node_modules and died. This drives
+# the real script down the local path with a stubbed `bun` and asserts install is
+# invoked, and that it precedes the "Running tests" gate in the output.
+if [ -z "${RELEASE_VERSION:-}" ]; then
+    fail "RUSH-3114: could not read a released version out of CHANGELOG.md"
+else
+    STUB_DIR="$(mktemp -d)"
+    STUB_HOME="$(mktemp -d)"
+    BUN_CALLS="$STUB_DIR/bun-calls"
+    RUN_OUT="$STUB_DIR/run-out"
+
+    # `agents secrets list` makes this box the publish host (no routing).
+    cat > "$STUB_DIR/agents" <<'STUB'
+#!/bin/bash
+if [ "${1:-}" = "secrets" ] && [ "${2:-}" = "list" ]; then
+    echo "vs-marketplace       2     never - no prompt"
+    exit 0
+fi
+exit 0
+STUB
+
+    # `bun` records every invocation so we can assert `install` ran. It must not
+    # shadow the collision/PAT pre-flight: it is only present on the script's PATH.
+    cat > "$STUB_DIR/bun" <<'STUB'
+#!/bin/bash
+printf '%s\n' "$*" >> "$BUN_CALLS_PATH"
+exit 0
+STUB
+
+    # `show`/`get` report the version as NOT yet published so a real publish is
+    # planned (PUBLISH_VSCE/OVSX=1) — the path a genuine release takes; verify-pat
+    # clears offline.
+    cat > "$STUB_DIR/vsce" <<'STUB'
+#!/bin/bash
+case "${1:-}" in
+    show)        echo '{"versions":[]}' ;;
+    verify-pat)  exit 0 ;;
+esac
+exit 0
+STUB
+    cat > "$STUB_DIR/ovsx" <<'STUB'
+#!/bin/bash
+echo '{}'
+exit 0
+STUB
+    chmod +x "$STUB_DIR/agents" "$STUB_DIR/bun" "$STUB_DIR/vsce" "$STUB_DIR/ovsx"
+
+    # PATs in env so the secrets re-exec is skipped and the script reaches the
+    # install block directly. Dry-run (no --confirm) so nothing is published; the
+    # install runs regardless of --confirm, which is exactly what we assert.
+    (
+        cd "$EXT_ROOT"
+        PATH="$STUB_DIR:$PATH" HOME="$STUB_HOME" \
+            BUN_CALLS_PATH="$BUN_CALLS" VSCE_PAT="tok" OVSX_PAT="tok" \
+            bash "$RELEASE_SH" "$RELEASE_VERSION"
+    ) > "$RUN_OUT" 2>&1 || true
+
+    if [ ! -f "$BUN_CALLS" ] || ! grep -qE '^install( |$)' "$BUN_CALLS"; then
+        fail "RUSH-3114: local publish path never ran 'bun install' (calls: $( [ -f "$BUN_CALLS" ] && tr '\n' ',' < "$BUN_CALLS" || echo none ))"
+    else
+        pass "local publish path runs 'bun install' before the gate"
+    fi
+
+    # Ordering: the install must land before the test gate in the output.
+    INSTALL_LINE="$(grep -nE 'Installing dependencies' "$RUN_OUT" | head -1 | cut -d: -f1)"
+    TESTS_LINE="$(grep -nE 'Running tests' "$RUN_OUT" | head -1 | cut -d: -f1)"
+    if [ -n "$INSTALL_LINE" ] && [ -n "$TESTS_LINE" ] && [ "$INSTALL_LINE" -lt "$TESTS_LINE" ]; then
+        pass "install precedes the Tests/Build gate on the local publish path"
+    else
+        fail "RUSH-3114: install did not precede the test gate (install line: ${INSTALL_LINE:-none}, tests line: ${TESTS_LINE:-none})"
+    fi
+fi
+
 echo
 if [ "$FAIL" -eq 0 ]; then
     echo "All tests passed."
