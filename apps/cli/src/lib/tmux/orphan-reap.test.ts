@@ -139,6 +139,18 @@ describe('selectOrphanProcesses', () => {
     expect(isProtectedAgentsService('node dist/index.js __daemon-run')).toBe(true);
   });
 
+  it('NEVER reaps the menu-bar helper or the keychain broker (space in the executable name)', () => {
+    expect(isProtectedAgentsService(
+      '/Users/x/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/AGI Menu',
+    )).toBe(true);
+    expect(isProtectedAgentsService(
+      '/Users/x/Library/Application Support/agents-cli/Agents CLI.app/Contents/MacOS/Agents CLI',
+    )).toBe(true);
+    // A shell that merely mentions one by name is not a match for the other —
+    // this is a substring regex, not a full-service allowlist.
+    expect(isProtectedAgentsService('/bin/zsh -c echo hello')).toBe(false);
+  });
+
   it('NEVER reaps the reaping process itself or its ancestors', () => {
     const table = [proc(700, 699, 'node dist/index.js sessions reap', 'ag-claude-gone')];
     expect(selectOrphanProcesses(table, owners([]), { protectedPids: new Set([700]) })).toEqual([]);
