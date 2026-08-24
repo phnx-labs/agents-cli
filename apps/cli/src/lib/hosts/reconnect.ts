@@ -85,6 +85,7 @@
  */
 import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
+import { RUN_AUTO_KEYWORD } from '../types.js';
 
 /** ssh's connection-layer failure code — the signal that the link dropped rather
  *  than the remote command exiting on its own. Mirrors ssh-exec.ts `sshStream`. */
@@ -177,17 +178,17 @@ export function reconnectStep(state: ReconnectState, outcome: ReconnectOutcome):
 }
 
 /** Human-readable notice shown before each reconnect wait. "13 seconds", not "12.8s". */
-export function reconnectNotice(sessionId: string, host: string, attempt: number, waitMs: number): string {
+export function reconnectNotice(target: ReconnectTarget, host: string, attempt: number, waitMs: number): string {
   const secs = Math.round(waitMs / 1000);
   const when = secs <= 1 ? 'now' : `in ${secs} seconds`;
-  return `\nConnection to ${host} dropped — the agent is still running there. Reconnecting to ${sessionId.slice(0, 8)} ${when} (attempt ${attempt}/${MAX_ATTEMPTS})…\n`;
+  return `\nConnection to ${host} dropped — the agent is still running there. Reconnecting to ${targetLabel(target)} ${when} (attempt ${attempt}/${MAX_ATTEMPTS})…\n`;
 }
 
 /** Notice shown once the retry budget is spent on a host that stayed UNREACHABLE.
  *  Hands back the one verb that re-enters the terminal — attach the live pane if it
  *  survived, else resume. */
-export function exhaustedNotice(sessionId: string, host: string): string {
-  return `\nCouldn't reconnect to ${host} after ${MAX_ATTEMPTS} attempts. The agent may still be running — get back in when the network is back:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
+export function exhaustedNotice(target: ReconnectTarget, host: string): string {
+  return `\nCouldn't reconnect to ${host} after ${MAX_ATTEMPTS} attempts. The agent may still be running — get back in when the network is back:\n${recoveryHint(target, host)}`;
 }
 
 /** Notice shown when the budget is spent the OTHER way: the last reattach reached
@@ -196,9 +197,9 @@ export function exhaustedNotice(sessionId: string, host: string): string {
  *  — and the user needs to know the link, not the host, is the problem. It claims
  *  no count of successful reconnections: the budget can also be spent by a run of
  *  unreachable attempts followed by one that reconnected and dropped straight out. */
-export function unstableNotice(sessionId: string, host: string): string {
+export function unstableNotice(target: ReconnectTarget, host: string): string {
   const secs = Math.round(MIN_HOLD_MS / 1000);
-  return `\nGave up reconnecting to ${host} after ${MAX_ATTEMPTS} attempts — it kept dropping again within ${secs} seconds of getting back in. The agent may still be running there; reconnect once the link is stable:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
+  return `\nGave up reconnecting to ${host} after ${MAX_ATTEMPTS} attempts — it kept dropping again within ${secs} seconds of getting back in. The agent may still be running there; reconnect once the link is stable:\n${recoveryHint(target, host)}`;
 }
 
 /** Notice shown when a reattach stops on a remapped remote-side exit
@@ -206,8 +207,8 @@ export function unstableNotice(sessionId: string, host: string): string {
  *  on for its own reasons, not the ssh transport dropping; see
  *  {@link wrapRemoteExitCode}). Distinct from {@link exhaustedNotice}, which is
  *  only for a genuinely spent retry budget. */
-export function remoteExitNotice(sessionId: string, host: string): string {
-  return `\nReattach to ${sessionId.slice(0, 8)} on ${host} ended (not a network drop) — get back in, or check whether it's still live:\n  agents reconnect ${sessionId.slice(0, 8)}\n`;
+export function remoteExitNotice(target: ReconnectTarget, host: string): string {
+  return `\nReattach to ${targetLabel(target)} on ${host} ended (not a network drop) — get back in, or check whether it's still live:\n${recoveryHint(target, host)}`;
 }
 
 /**
@@ -233,17 +234,112 @@ export function wrapRemoteExitCode(cmd: string): string {
 }
 
 /**
+ * How a dropped run is named when we go back for it.
+ *
+ * `session` is the direct case: the id was known before the link died — Claude
+ * is handed one up front, and a resumed run already has one.
+ *
+ * `launch` is what makes reconnect work for every OTHER harness (RUSH-3125).
+ * Their real session id is coined on the peer, and the launcher used to read it
+ * back over SSH *after* the stream returned — i.e. over the link that had just
+ * dropped. That read fails exactly when it matters, leaving `reconnectId`
+ * undefined and the process exiting straight to a shell, which is why a Grok tab
+ * got no reconnect at all while a Claude tab beside it got a countdown. The
+ * launch id is minted locally before the connection exists, so it survives the
+ * drop; the peer maps it to the real session with a purely local lookup.
+ */
+export type ReconnectTarget =
+  | { kind: 'session'; id: string }
+  | { kind: 'launch'; id: string };
+
+/** The short form shown to a human. Both kinds are uuid-shaped, so 8 chars reads the same. */
+export function targetLabel(target: ReconnectTarget): string {
+  return target.id.slice(0, 8);
+}
+
+/**
+ * The command to hand a user whose reconnect gave up.
+ *
+ * A `session` target has a real id, so `agents sessions resume <id>` does the
+ * same attach-else-recover the loop was attempting. (It used to say `agents
+ * reconnect`, which is deprecated and hidden — `commands/reconnect.ts` — so the
+ * advice printed at the worst possible moment was itself stale; RUSH-3125.)
+ *
+ * A `launch` target has no id a user-facing verb accepts: the mapping lives in
+ * the peer's hook records, which is exactly why reconnect uses it. So point at
+ * the peer's own resolver rather than inventing a launch-id selector on every
+ * local command for a string no human ever types.
+ */
+export function recoveryHint(target: ReconnectTarget, host: string): string {
+  return target.kind === 'session'
+    ? `  agents sessions resume ${target.id}\n`
+    : `  agents ssh ${host} 'agents sessions focus --launch-id ${target.id} --local'\n`
+      + `  or pick it:  agents sessions --active\n`;
+}
+
+/** What the launcher knows about a run once its interactive stream has returned. */
+export interface ReconnectTargetInputs {
+  /** The harness (or {@link RUN_AUTO_KEYWORD}) that was dispatched. */
+  agent: string;
+  /** An id forced by the launcher up front — Claude's `--session-id`. */
+  sessionId?: string;
+  /** An id read back off the peer AFTER the stream returned. Absent on a drop. */
+  resolvedId?: string;
+  /** The id of a run that was resuming an existing session. */
+  resumeId?: string;
+  /** The launcher-minted AGENT_LAUNCH_ID, known before the connection existed. */
+  launchId?: string;
+}
+
+/**
+ * Choose how to name the dropped run when going back for it.
+ *
+ * Order matters, and the last clause is the fix (RUSH-3125):
+ *
+ *  1. `run auto` prefers `resolvedId` — the harness the remote ACTUALLY picked,
+ *     which the launcher's own `--session-id` (adopted only by Claude) may not
+ *     name. Every other agent prefers the id the launcher forced.
+ *  2. `resumeId` covers a run that was continuing a known session.
+ *  3. **`launchId` last, and it is what makes this work at all off-Claude.**
+ *     Every id above either came from the launcher or was read back over SSH —
+ *     and that read happens after the stream returned, i.e. over the link that
+ *     just died, so on a real drop it yields nothing. Falling through to the
+ *     launch id means the reconnect no longer depends on reaching the host to
+ *     learn what to reconnect to; the peer resolves it locally instead.
+ *
+ * Returns undefined only when the launcher has no handle at all (a hookless
+ * harness with no forced id), which is the one case reconnect genuinely cannot
+ * serve. Pure, so the precedence is unit-tested without SSH.
+ */
+export function pickReconnectTarget(inputs: ReconnectTargetInputs): ReconnectTarget | undefined {
+  const { agent, sessionId, resolvedId, resumeId, launchId } = inputs;
+  const preferred = agent === RUN_AUTO_KEYWORD
+    ? resolvedId ?? sessionId
+    : sessionId ?? resolvedId;
+  const id = preferred ?? resumeId;
+  if (id) return { kind: 'session', id };
+  return launchId ? { kind: 'launch', id: launchId } : undefined;
+}
+
+/**
  * The remote command a reattach runs — the peer's own recovery verb
- * (`agents sessions focus <id> --local`), wrapped by {@link wrapRemoteExitCode}
+ * (`agents sessions focus … --local`), wrapped by {@link wrapRemoteExitCode}
  * so a stray remote-origin 255 (from this command, whatever produces it — see the
  * file header) can never masquerade as a network drop. No `--attach-only`: focus
  * joins the live pane when it survived, else RESUMES the session in place, so a
  * reattach landing after the pane died recovers the agent instead of dead-ending
  * (RUSH-2085). Split out from {@link reattachRemoteSession} so it is unit-tested
  * without SSH — mirrors `remoteAgentsJsonCommand` in lib/remote-agents-json.ts.
+ *
+ * A `launch` target passes `--launch-id`, which focus resolves against the hook
+ * records on the peer itself — no network read from this side, which is the
+ * whole point (see {@link ReconnectTarget}).
  */
-export function reattachRemoteCommand(sessionId: string): string {
-  const inner = ['agents', 'sessions', 'focus', sessionId, '--local']
+export function reattachRemoteCommand(target: ReconnectTarget): string {
+  const selector = target.kind === 'launch'
+    ? ['--launch-id', target.id]
+    : [target.id];
+  const inner = ['agents', 'sessions', 'focus', ...selector, '--local']
     .map(shellQuote)
     .join(' ');
   return wrapRemoteExitCode(inner);
@@ -260,18 +356,18 @@ export function reattachRemoteCommand(sessionId: string): string {
  * clean detach; other = session ended), whether this attempt connected, and how
  * long the attach held — the two inputs {@link refillsBudget} decides on.
  */
-export function reattachRemoteSession(host: Host, sessionId: string): ReconnectOutcome {
-  const target = sshTargetFor(host);
+export function reattachRemoteSession(host: Host, target: ReconnectTarget): ReconnectOutcome {
+  const sshTarget = sshTargetFor(host);
   const extraSshArgs = hostIdentityArgs(host);
   // Fresh (non-multiplexed) reachability probe: code 0 means the handshake actually
   // completed, so a hung/failed connect is never mistaken for a live reconnection.
   // RUSH-2265: pass host identity on every hop (probe + stream), not only the first.
-  const probe = sshExec(target, 'true', { multiplex: false, extraSshArgs });
+  const probe = sshExec(sshTarget, 'true', { multiplex: false, extraSshArgs });
   if (probe.code !== 0) return { code: SSH_CONN_FAILURE, connected: false, heldMs: 0 };
   // Timed from AFTER the probe returned, so this is the attach's own duration and
   // carries none of the connect phase the file header rules out as a signal.
   const startedAt = Date.now();
-  const code = sshStream(target, reattachRemoteCommand(sessionId), { tty: true, extraSshArgs });
+  const code = sshStream(sshTarget, reattachRemoteCommand(target), { tty: true, extraSshArgs });
   return { code, connected: true, heldMs: Date.now() - startedAt };
 }
 
@@ -279,14 +375,14 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
 
 export interface ReconnectLoopOpts {
   host: Host;
-  sessionId: string;
+  target: ReconnectTarget;
   /** The exit code from the initial interactive run (which, having run the agent,
    *  is treated as a connected attempt). */
   initialExit: number;
   /** Injected for tests: the real re-attach and wait are swapped for deterministic
    *  fakes so the loop's control flow is exercised without SSH. Production uses the
    *  real {@link reattachRemoteSession} + `sleep`. */
-  reattach?: (host: Host, sessionId: string) => ReconnectOutcome;
+  reattach?: (host: Host, target: ReconnectTarget) => ReconnectOutcome;
   wait?: (ms: number) => Promise<void>;
   write?: (s: string) => void;
 }
@@ -315,16 +411,16 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
       // and a link that reconnected but kept dropping reads as exactly that.
       if (decision.code === SSH_CONN_FAILURE) {
         write(outcome.connected
-          ? unstableNotice(opts.sessionId, opts.host.name)
-          : exhaustedNotice(opts.sessionId, opts.host.name));
+          ? unstableNotice(opts.target, opts.host.name)
+          : exhaustedNotice(opts.target, opts.host.name));
       } else if (decision.code === REMOTE_EXIT_255_REMAPPED) {
-        write(remoteExitNotice(opts.sessionId, opts.host.name));
+        write(remoteExitNotice(opts.target, opts.host.name));
       }
       return decision.code;
     }
-    write(reconnectNotice(opts.sessionId, opts.host.name, decision.state.attempt, decision.waitMs));
+    write(reconnectNotice(opts.target, opts.host.name, decision.state.attempt, decision.waitMs));
     await wait(decision.waitMs);
     state = decision.state;
-    outcome = reattach(opts.host, opts.sessionId);
+    outcome = reattach(opts.host, opts.target);
   }
 }

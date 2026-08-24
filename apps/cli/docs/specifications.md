@@ -2527,8 +2527,48 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   for shim dispatch by `resolveShimSpawn`, `lib/exec.ts:1319-1338`).
 - **EXEC-42 (MUST).** The interactive tmux spawn-wrap MUST be POSIX-only —
   Windows always uses the bare/shell spawn path
-  (`shouldWrapInTmux`, `lib/exec.ts:1502-1510`, `platform === 'win32'`
-  excluded outright).
+  (`resolveTmuxWrap`, `lib/exec.ts`, `platform === 'win32'` excluded
+  outright — it returns `bare`, never `undurable`, so a Windows peer is
+  not refused, it is simply unwrapped).
+- **EXEC-48 (MUST).** An INTERACTIVE run dispatched onto this box over
+  `--device` MUST be detached from the ssh session that carries it — the
+  tmux spawn-wrap is required, independent of the peer's `tmux.enabled`
+  (`resolveTmuxWrap`, `lib/exec.ts`, keyed on `REMOTE_INTERACTIVE_ENV`
+  which `runInteractiveOnHost` exports via `remoteRunShellPrelude`,
+  `lib/hosts/dispatch.ts`). `tmux.enabled` governs LOCAL addressability
+  only. The explicit per-run opt-outs (`--raw`, `--no-tmux`,
+  `AGENTS_NO_TMUX=1`) still win, and Windows is excluded by EXEC-42.
+  *Given* a peer with `tmux.enabled` unset; *When* an interactive
+  `--device` run lands there and the link then drops; *Then* the agent
+  process survives in a detached pane and the reattach in
+  `lib/hosts/reconnect.ts` rejoins it rather than resuming a copy.
+  Rationale: that file's whole design assumes the agent outlived the
+  client, and before RUSH-3125 the assumption was false on every
+  default-configured box.
+- **EXEC-49 (MUST).** When EXEC-48 requires the wrap and tmux is absent
+  on the box, the run MUST be refused with a clear, actionable error
+  (`resolveTmuxWrap` → `undurable`) rather than spawned bare. A bare
+  remote spawn looks successful until the link blinks, at which point the
+  work is unrecoverable — failing loud at the boundary is the repo rule.
+- **EXEC-50 (MUST).** An interactive `--device` stream MUST NOT share the
+  ssh `ControlMaster` (`runInteractiveOnHost` passes `multiplex: false`,
+  `lib/hosts/dispatch.ts`). `ControlPath=cm-%C` (`lib/ssh-exec.ts`) hashes
+  only local host / remote host / port / user, so every agent tab aimed at
+  one peer would otherwise ride a single master, and OpenSSH closes every
+  channel on it when that master dies. *Given* six agent tabs on one peer;
+  *When* the link blinks; *Then* each tab fails and recovers
+  independently, not all six at once. Short probes and fan-outs keep
+  multiplexing, where the saved handshake is worth it.
+- **EXEC-51 (MUST).** Auto-reconnect MUST NOT depend on a value that can
+  only be learned over the link that dropped. The target is chosen by
+  `pickReconnectTarget` (`lib/hosts/reconnect.ts`), which falls back to
+  the launcher-minted `AGENT_LAUNCH_ID` — known before the connection
+  existed — and the peer resolves it locally via
+  `agents sessions focus --launch-id <id> --local`. *Given* a non-Claude
+  harness whose real session id is coined remotely; *When* the link drops
+  before `resolveRemoteSessionId` can read it back; *Then* the run still
+  reconnects. Before this, only Claude (handed `--session-id` up front)
+  ever reconnected, and every other harness exited straight to a shell.
 - **EXEC-43 (MUST).** A persisted tmux `SessionMeta.cmd`
   (`buildTmuxAgentCommand`) MUST redact env VALUES (`<redacted>`) while the
   live launched command keeps the real values, so a resolved secret never

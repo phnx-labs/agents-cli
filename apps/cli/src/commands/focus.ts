@@ -55,6 +55,19 @@ import { setHelpSections } from '../lib/help.js';
 
 /** Options for `sessions focus` — device scope + the `--active` live-state filters. */
 export interface FocusOptions {
+  /**
+   * Resolve the target from the launcher's AGENT_LAUNCH_ID instead of a session
+   * id (RUSH-3125).
+   *
+   * A `--device` launcher mints this id BEFORE it opens the connection and
+   * forwards it, so it is the one handle that is still known after the link
+   * dies. A session id is not: only Claude is handed one up front, and every
+   * other harness's real id had to be read back off the peer — over the very
+   * link that just dropped — which is why a blink left a Grok or Codex tab with
+   * nothing to reconnect to. The lookup runs HERE, on the box that owns the hook
+   * records, so it needs no network at the moment it is needed most.
+   */
+  launchId?: string;
   local?: boolean;
   attachOnly?: boolean;
   device?: string[];
@@ -142,6 +155,7 @@ export function registerFocusCommand(program: Command): void {
     // console.warn here without first removing that delegation.
     .command('focus', { hidden: true })
     .argument('[selector]', 'Session id/prefix, agent@version, or topic/path search')
+    .option('--launch-id <id>', 'Target the run by its launcher AGENT_LAUNCH_ID instead of a session id (resolved from this machine\'s hook records)')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
     .option('--attach-only', 'Attach only — never open a new tab / resume a copy (the old `go` behavior)')
     .option('-D, --device <target...>', 'Scope the picker to live sessions on these devices (device alias from `agents devices`, user@host; repeatable)')
@@ -227,6 +241,38 @@ export function selectFallback(attachOnly: boolean | undefined): UnreachableFall
 }
 
 export async function focusAction(id: string | undefined, opts: FocusOptions): Promise<void> {
+  // RUSH-3125: `--launch-id` names the run by the handle its launcher minted,
+  // and this box holds the hook record that maps it to the real session id — a
+  // local read, so it still works when the network that started the run is gone.
+  // Resolved up front into the ordinary id path: everything below, including the
+  // attach-else-resume recovery, is identical once we know which session it is.
+  if (opts.launchId) {
+    if (id) {
+      console.error(chalk.red('Pass a session id or --launch-id, not both — they name the same thing two ways.'));
+      process.exitCode = 1;
+      return;
+    }
+    // Read the launch-id index directly rather than through
+    // `resolveHookSessionRecord`: that helper kind-guards every hit, which exists
+    // to stop a REUSED PID crossing harnesses. A launch id is a per-launch uuid
+    // and cannot collide, and the caller here is a reattach that deliberately
+    // does not assume which harness the peer picked (`run auto` chooses it
+    // remotely), so demanding a kind would reject the exact case this serves.
+    const { loadHookSessionIndex } = await import('../lib/session/hook-sessions.js');
+    const resolved = loadHookSessionIndex().byLaunchId.get(opts.launchId)?.session_id;
+    if (!resolved) {
+      // Fail loud: a launch id with no record means the harness never got far
+      // enough to write one (it died at startup, or it has no SessionStart
+      // hook). Silently opening the picker here would strand an automated
+      // reattach in an interactive prompt nobody is watching.
+      console.error(chalk.red(`No session recorded for launch id ${opts.launchId} on ${machineId()}.`));
+      console.error(chalk.gray('  The run may have failed before its SessionStart hook fired.'));
+      console.error(chalk.gray('  Look for it:  agents sessions --active'));
+      process.exitCode = 1;
+      return;
+    }
+    id = resolved;
+  }
   const hosts = mergeFocusHosts(opts);
   const statuses = requestedLiveStatuses(opts);
   // A device scope needs the cross-host sweep; --local only wins when no host is named.

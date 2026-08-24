@@ -399,13 +399,26 @@ The new command is a **facade over the existing YAML storage**
 (`run.defaults`, `model.tiers`, `config.interactiveHost`,
 `defaultBrowserProfile`, and `deviceConfig`). Fleet sync behavior is unchanged.
 
-`devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so interactive
-`agents run` launches spawn the agent directly. Turn it on for a device to wrap
-eligible launches in the shared-socket tmux session and give each agent an exact
-`%pane` address for `agents message`, injection, and `agents focus`. The
-setting is machine-local and cannot be set for a peer; `--no-tmux`, `--raw`, and
-`AGENTS_NO_TMUX=1` remain per-run opt-outs when wrapping is enabled. The gate is `shouldWrapInTmux`
-([`src/lib/exec.ts`](src/lib/exec.ts)), reading `isTmuxEnabled()`.
+`devices.<name>.tmux` (stored as `tmux.enabled`) defaults off, so a LOCAL
+interactive `agents run` launch spawns the agent directly. Turn it on for a
+device to wrap eligible local launches in the shared-socket tmux session and give
+each agent an exact `%pane` address for `agents message`, injection, and
+`agents focus`. The setting is machine-local and cannot be set for a peer.
+
+**It does not govern a run dispatched here over `--device` (RUSH-3125).** That
+run's stdio is an ssh link, so without the wrap a blink SIGHUPs the agent and the
+in-flight turn is lost — and `lib/hosts/reconnect.ts` re-attaches on the premise
+that it survived. Durability is not the local operator's mouse/clipboard/
+scrollback preference, so the two are separate concerns: the interactive
+dispatcher exports `AGENTS_REMOTE_INTERACTIVE=1` (`REMOTE_INTERACTIVE_ENV`,
+[`src/lib/types.ts`](src/lib/types.ts)) and the peer wraps on it regardless of
+`tmux.enabled`. A remote interactive run on a box with **no tmux installed** is
+refused (`undurable`) rather than started as something a blink would kill.
+
+`--no-tmux`, `--raw`, and `AGENTS_NO_TMUX=1` remain per-run opt-outs and beat the
+durability rule too, so the escape hatch keeps working over `--device`. The gate
+is `resolveTmuxWrap` ([`src/lib/exec.ts`](src/lib/exec.ts)) — three outcomes
+(`wrap` / `bare` / `undurable`), reading `isTmuxEnabled()` and the marker.
 
 `devices.<name>.role` (stored as `role`) says what a device is for fleet-wide —
 `worker` (agents run here) or `personal` (a machine you sit at).
