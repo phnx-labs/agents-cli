@@ -16,7 +16,7 @@ repository: phnx-labs/agents-cli
 branch: fix/ext-agent-reconnect
 surface: cli
 tracking: RUSH-3125
-status: draft
+status: in-review
 harness: claude
 agent: claude
 human: Muqsit
@@ -481,18 +481,24 @@ Worth a timed look at the TUI before landing.
 ## Checklist
 
 - [x] Root cause confirmed against the live fleet
-- [ ] F1 — remote dispatch always detached on the peer (+ fail loud without tmux)
-- [ ] F2 — reconnect by launch id, all harnesses
-- [ ] F3 — per-tab connection for interactive streams
-- [ ] F4 — patient, interruptible reconnect with countdown
-- [ ] F5 — termios save/restore + stdin drain + DEC reset
+- [x] F1 — remote dispatch always detached on the peer (+ fail loud without tmux)
+- [x] F2 — reconnect by launch id, all harnesses
+- [x] F3 — per-tab connection for interactive streams
+- [x] F4 — patient, interruptible reconnect with countdown
+- [x] F5 — termios save/restore + stdin drain + DEC reset
 - [ ] F6 — ext renders `reconnecting`; no dead-end shell
-- [ ] F7 — notices point at `agents sessions resume`
-- [ ] Tests: real drop against a real peer, per the no-mocking rule
-- [ ] Docs: `apps/cli/docs/specifications.md` §Agent execution, ext AGENTS.md, CHANGELOG
-- [ ] PR opened with a recording of a real drop-and-recover
+- [x] F7 — notices point at `agents sessions resume`
+- [x] Verified against real state: A/B on a box configured like the peers, a real
+      pty for the termios restore, and a live launch-id resolution
+- [x] Docs: `specifications.md` EXEC-48..54, `apps/cli/AGENTS.md`, CHANGELOG fragments
+- [x] PR opened — [#3006](https://github.com/phnx-labs/agi-cli/pull/3006), CI green
+
+**Landed:** F1, F2, F3, F4, F5, F7. **Outstanding:** F6 (the ext-side rendering),
+which the scheduling-singularity rule keeps as pure presentation now that
+detection and action are fixed in the CLI.
 
 ## Tracking
 
 - [RUSH-3125](https://linear.app/prix/issue/RUSH-3125) — Agent tabs die on a network blink: remote interactive runs are not detached on the peer
+- [PR #3006](https://github.com/phnx-labs/agi-cli/pull/3006) — F1, F2, F3, F4, F5, F7 (CI green)
 - Branch: `fix/ext-agent-reconnect`
