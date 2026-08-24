@@ -11,8 +11,9 @@ import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { hostname as osHostname } from 'node:os';
-import { readShareConfig, readWriteToken, type ShareConfig } from './config.js';
+import { readShareConfig, type ShareConfig } from './config.js';
 import { resolveGitHubUsername } from '../git.js';
+import { resolveShareBackend, sanitizeShareNamespace, type ResolveShareBackendOpts } from './backend.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
 import { injectAnalyticsBeacon } from './analytics.js';
@@ -39,9 +40,17 @@ export interface PublishOptions {
   expire?: string;
   contentType?: string;
   /**
+   * Server-enforced visibility (RUSH-3135). `public` (default) is listed in
+   * the gallery; `unlisted` is a capability URL (GET still 200, X-Robots-Tag:
+   * noindex, hidden from gallery/list). `org` is Phase 2 — the Worker 400s it.
+   */
+  visibility?: ShareVisibility;
+  /**
    * Hide this page from the public `/<user>` gallery and `agents artifacts share list`
    * (metadata `visibility=unlisted`). The direct URL is still world-readable —
-   * unlisted, not secret (RUSH-2443). Alias of `--private` on the CLI.
+   * unlisted, not secret (RUSH-2443). Alias of `--visibility unlisted` /
+   * `--private` on the CLI. Kept so `sessions share` and existing callers do
+   * not break.
    */
   unlisted?: boolean;
   /**
@@ -59,8 +68,12 @@ export interface PublishOptions {
   githubUser?: string;
   /** DI seam for tests — override the persisted share endpoint config. */
   config?: ShareConfig;
-  /** DI seam for tests — override the keychain-backed write token. */
+  /** DI seam for tests — override the keychain-backed write token. Selects BYO. */
   writeToken?: string;
+  /** DI seam for tests — override `readSession()`. `null` means signed out. */
+  session?: import('../identity/client.js').PhoenixSession | null;
+  /** Force the BYO Cloudflare path even when signed in. */
+  byo?: boolean;
   /** DI seam for tests — override the real HTTP PUT. */
   uploader?: PutFn;
   /** DI seam for tests — override cover capture (returns a PNG buffer or null). */
@@ -75,7 +88,8 @@ export interface PublishOptions {
   /**
    * Structured metadata (`--meta key=value`, repeatable). Keys are validated by
    * {@link parseMetaEntries} — lowercase `[a-z0-9-]`, and may not collide with
-   * {@link RESERVED_META_KEYS}, which the CLI sets automatically.
+   * {@link RESERVED_META_KEYS} (Worker-stamped owner/visibility/expires-at,
+   * plus provenance the CLI sets automatically).
    */
   meta?: Record<string, string>;
   /**
@@ -88,16 +102,27 @@ export interface PublishOptions {
   provenance?: ShareProvenance;
 }
 
+export type ShareVisibility = 'public' | 'unlisted';
+
 export interface PublishResult {
   url: string;
   expiresAt?: string;
   coverUrl?: string;
+  /** Server-enforced visibility stamped on the object. */
+  visibility?: ShareVisibility;
   /** True when the page was published with `visibility=unlisted`. */
   unlisted?: boolean;
   /** The label stored with this share — explicit (`--label`) or derived. */
   label?: string;
   /** Whether `label` came from `--label` or was auto-derived. */
   labelSource?: 'explicit' | 'derived';
+}
+
+/** `--unlisted` / `{ unlisted: true }` map to `unlisted`; otherwise `visibility` (default public). */
+export function resolveShareVisibility(opts: { visibility?: ShareVisibility; unlisted?: boolean } = {}): ShareVisibility {
+  if (opts.unlisted === true) return 'unlisted';
+  if (opts.visibility === 'unlisted') return 'unlisted';
+  return 'public';
 }
 
 export interface ShareProvenance {
@@ -114,11 +139,23 @@ export interface ShareProvenance {
 }
 
 /**
- * Reserved `customMetadata` keys the CLI sets automatically from the exec env,
- * git, and the local clock (plus `label`/`label-source`) — a `--meta key=value`
- * may not target any of these (see {@link parseMetaEntries}).
+ * Reserved `customMetadata` keys a `--meta key=value` may not target (see
+ * {@link parseMetaEntries}). Matches the Worker's `RESERVED_METADATA_KEYS`:
+ * provenance the CLI sets automatically, plus `expires-at` / `visibility` /
+ * `owner` which the Worker stamps itself.
  */
-export const RESERVED_META_KEYS = ['agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'] as const;
+export const RESERVED_META_KEYS = [
+  'expires-at',
+  'visibility',
+  'owner',
+  'agent',
+  'session',
+  'host',
+  'repo',
+  'date',
+  'label',
+  'label-source',
+] as const;
 
 const META_KEY_RE = /^[a-z0-9-]{1,64}$/;
 
@@ -146,8 +183,9 @@ export function resolveShareProvenance(
 /**
  * Parse repeated `--meta key=value` CLI args into a validated metadata record.
  * Keys are lowercase `[a-z0-9-]`, up to 64 characters, and may not collide with
- * {@link RESERVED_META_KEYS} (the provenance the CLI sets automatically, plus
- * label/label-source) — throws naming the offending pair on any violation.
+ * {@link RESERVED_META_KEYS} (Worker-stamped owner/visibility/expires-at, plus
+ * the provenance the CLI sets automatically, plus label/label-source) — throws
+ * naming the offending pair on any violation.
  */
 export function parseMetaEntries(pairs: string[]): Record<string, string> {
   const meta: Record<string, string> = {};
@@ -165,7 +203,7 @@ export function parseMetaEntries(pairs: string[]): Record<string, string> {
     }
     if ((RESERVED_META_KEYS as readonly string[]).includes(key)) {
       throw new Error(
-        `--meta ${key}=… is reserved (set automatically from your session/git) — pass a different key.`,
+        `--meta ${key}=… is reserved (Worker-stamped, or set automatically from your session/git) — pass a different key.`,
       );
     }
     meta[key] = value;
@@ -423,7 +461,7 @@ export function slugify(name: string): string {
 }
 
 function sanitizeSlugPart(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+  return sanitizeShareNamespace(s);
 }
 
 /** The current repo's name, or undefined outside a git checkout — never a
@@ -549,16 +587,14 @@ export async function publishFile(
   filePath: string,
   opts: PublishOptions = {},
 ): Promise<PublishResult> {
-  const cfg = opts.config ?? readShareConfig();
-  if (!cfg) {
-    throw new Error(
-      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
-    );
-  }
-  const token = opts.writeToken ?? readWriteToken();
-  const username = await resolveShareUsername(opts);
-  const analyticsToken = opts.analyticsToken ?? cfg.analyticsToken;
-  return publishToEndpoint(filePath, { baseUrl: cfg.baseUrl, token }, {
+  const backend = resolveShareBackend(opts as ResolveShareBackendOpts);
+  const username =
+    backend.kind === 'managed'
+      ? backend.namespace
+      : await resolveShareUsername({ githubUser: opts.githubUser || backend.namespace || undefined });
+  const analyticsToken =
+    opts.analyticsToken ?? (backend.kind === 'byo' ? (opts.config ?? readShareConfig())?.analyticsToken : undefined);
+  return publishToEndpoint(filePath, { baseUrl: backend.baseUrl, token: backend.token }, {
     ...opts,
     githubUser: username,
     analyticsToken,
@@ -574,7 +610,8 @@ export async function publishToEndpoint(
   const slugPart = (opts.slug ?? defaultSlug(filePath)).replace(/^\/+/, '');
   const key = buildShareKey(username, slugPart);
   const expiresAt = resolveExpire(opts.expire);
-  const unlisted = opts.unlisted === true;
+  const visibility = resolveShareVisibility(opts);
+  const unlisted = visibility === 'unlisted';
   const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}`;
   const provenance = opts.provenance ?? resolveShareProvenance();
   const meta = opts.meta ?? {};
@@ -630,7 +667,7 @@ export async function publishToEndpoint(
   const authHeaders = (contentType: string): Record<string, string> => {
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
-    if (unlisted) h['x-share-visibility'] = 'unlisted';
+    h['x-share-visibility'] = visibility;
     // Every free-text header goes through toHeaderValue: a non-latin1 code point
     // anywhere in a label, a repo name, or a --meta value throws inside fetch and
     // crashes the publish outright.
@@ -687,6 +724,7 @@ export async function publishToEndpoint(
     coverUrl,
     label,
     labelSource,
+    visibility,
     ...(unlisted ? { unlisted: true } : {}),
   };
 }

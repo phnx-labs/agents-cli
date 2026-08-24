@@ -332,7 +332,7 @@ A local workspace probe always feeds this footer (cheap, no SSH). The full per-h
 | `agents projects link <name> --linear [query]` | Bind a Linear project into the def (`linear.projectId` + `name` + url). No query → auto-suggests from the def name + repo slug; ambiguous/none lists candidates and exits 1. Powers the `linear` card line. Re-run it to pick up a project renamed on the board — the recorded `name` is refreshed from Linear every time, and the command says which label it replaced. |
 | `agents projects import --from-linear` | Import the workspace's Linear projects (via the `linear` CLI) as definitions. See [Importing](#importing--from-linear). There is no ext import path — `~/.agents/factory/projects.json` is never read. |
 | `agents projects set <name> [--repo\|--root\|--path\|--description\|--goal objective:measure\|--add-dir\|--rm-dir\|--slug]` | Change one field, preserving every other. `--goal` (repeatable) replaces the goals list. `--add-dir` / `--rm-dir` (both repeatable) bind and unbind directories; `--slug` names the remote for a single `--add-dir` whose origin cannot be read. Removals apply before additions, so `--rm-dir old --add-dir new` re-points a directory in one command. Use this rather than `add --force`, which rebuilds the definition from flags alone. |
-| `agents projects rm <name> [--json]` | Delete the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
+| `agents projects remove <name> [--json]` (alias `rm`) | Remove the definition (never touches the repo). `--json` prints `{ ok, name, removed }` (or `{ ok: false, name, error }` on failure). |
 | `agents projects pull <name> [--device name...] [--devices a,b,c] [--json]` | Fast-forward every fleet checkout of a named project to its remote default branch. See [Pulling every reachable checkout](#pulling-every-reachable-checkout). |
 
 `agents teams create <team> --project <name>` binds a whole team to a project.
@@ -433,7 +433,7 @@ Re-importing is safe. An existing def is preserved field-for-field and only
 `integrations` survives. A def that already carries `root`/`repo` is skipped unless `--force`,
 so a re-import never re-points a project you have already bound by hand.
 
-Drop a bad import with `agents projects rm <name>` — it only unlinks the YAML, never the repo.
+Drop a bad import with `agents projects remove <name>` — it only unlinks the YAML, never the repo.
 
 ## Not yet (fast-follow)
 

@@ -497,7 +497,8 @@ export function registerMailboxesCommand(program: Command): void {
     });
 
   const gcCmd = cmd
-    .command('gc')
+    .command('prune')
+    .alias('gc')
     .description('Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.')
     .option('--json', 'Emit the GC result as JSON')
     .action(async (_opts: { json?: boolean }, command) => runGcCommand({ json: command.optsWithGlobals().json === true }));
@@ -505,10 +506,10 @@ export function registerMailboxesCommand(program: Command): void {
   setHelpSections(gcCmd, {
     examples: `
       # One-shot sweep using the live session set as the liveness source
-      agents mailboxes gc
+      agents mailboxes prune
 
       # Machine-readable summary (for scripts / monitors)
-      agents mailboxes gc --json
+      agents mailboxes prune --json
     `,
     notes: `
       A box is considered dead when no live session (the same source

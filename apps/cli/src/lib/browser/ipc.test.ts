@@ -179,7 +179,7 @@ describe('shouldRestartStaleDaemon', () => {
   });
 });
 
-// RUSH-2622: the daemon owns the live BrowserService, so `agents browser gc`
+// RUSH-2622: the daemon owns the live BrowserService, so `agents browser prune`
 // can only reach the abandoned-task reaper across this seam. Driven over a real
 // socket against a real BrowserService — the point is that the request routes
 // and the typed `reaped` payload survives the JSON round-trip.

@@ -8,7 +8,8 @@
 // Every delete here is followed by a status check that must observe 404 before
 // the operation is reported as successful.
 
-import { readShareConfig, readWriteToken, type ShareConfig } from './config.js';
+import { type ShareConfig } from './config.js';
+import { resolveShareBackend, type ResolveShareBackendOpts } from './backend.js';
 import { buildShareKey, resolveShareUsername } from './publish.js';
 
 /** DI seam for tests — override the real HTTP DELETE. */
@@ -151,7 +152,9 @@ export async function deleteObject(
 
   const r = await del(url, { authorization: `Bearer ${endpoint.token}` });
   if (!r.ok) {
-    throw new Error(`Delete failed (${r.status}) for ${url}. Check the write token, or that 'agents artifacts setup' completed.`);
+    throw new Error(
+      `Delete failed (${r.status}) for ${url}. Check the bearer (Phoenix session or WRITE_TOKEN), or that 'agents artifacts setup' completed.`,
+    );
   }
 
   const after = await check(url);
@@ -175,8 +178,12 @@ export interface DeleteShareOptions {
   githubUser?: string;
   /** DI seam for tests — override the persisted share endpoint config. */
   config?: ShareConfig;
-  /** DI seam for tests — override the keychain-backed write token. */
+  /** DI seam for tests — override the keychain-backed write token. Selects BYO. */
   writeToken?: string;
+  /** DI seam for tests — override `readSession()`. `null` means signed out. */
+  session?: import('../identity/client.js').PhoenixSession | null;
+  /** Force the BYO Cloudflare path even when signed in. */
+  byo?: boolean;
   /** DI seam for tests — override the real HTTP DELETE. */
   deleter?: DeleteFn;
   /** DI seam for tests — override the real HTTP existence check. */
@@ -212,15 +219,13 @@ export interface DeleteShareResult {
  * are gone. Throws on an unverified takedown — never reports success for an
  * object that still resolves. */
 export async function deleteShare(target: string, opts: DeleteShareOptions = {}): Promise<DeleteShareResult> {
-  const cfg = opts.config ?? readShareConfig();
-  if (!cfg) {
-    throw new Error(
-      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
-    );
-  }
-  const token = opts.writeToken ?? readWriteToken();
-  const resolved = await resolveDeleteTarget(target, { githubUser: opts.githubUser });
-  const endpoint: DeleteEndpoint = { baseUrl: cfg.baseUrl, token };
+  const backend = resolveShareBackend(opts as ResolveShareBackendOpts);
+  const githubUser =
+    backend.kind === 'managed'
+      ? backend.namespace
+      : opts.githubUser || backend.namespace || undefined;
+  const resolved = await resolveDeleteTarget(target, { githubUser });
+  const endpoint: DeleteEndpoint = { baseUrl: backend.baseUrl, token: backend.token };
 
   const page = await deleteObject(endpoint, resolved.key, { deleter: opts.deleter, checker: opts.checker });
 

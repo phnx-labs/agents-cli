@@ -1,7 +1,7 @@
 /**
  * `agents devices lease` — manage the disposable cloud boxes used by `agents run --lease`.
  *
- * Today: `agents devices lease gc`, which stops expired + idle "orphan" boxes that are
+ * Today: `agents devices lease prune`, which stops expired + idle "orphan" boxes that are
  * holding a provider's server quota (the cause of the `server_limit` 403 a new
  * lease hits). Reaping is conservative: only boxes whose lease has expired AND
  * that have been untouched for a safety window are eligible (see `isReapSafe`),
@@ -280,7 +280,8 @@ export function registerLeaseCommand(devicesCommand: Command): void {
     });
 
   lease
-    .command('gc')
+    .command('prune')
+    .alias('gc')
     .description(
       'Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.',
     )
@@ -295,7 +296,7 @@ export function registerLeaseCommand(devicesCommand: Command): void {
       try {
         candidates = reapSafeOrphans(crabboxList(boxOpts), nowSecs);
       } catch (e) {
-        console.error(chalk.red(`lease gc: ${(e as Error).message}`));
+        console.error(chalk.red(`lease prune: ${(e as Error).message}`));
         process.exit(1);
         return;
       }

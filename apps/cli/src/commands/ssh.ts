@@ -1289,7 +1289,7 @@ function registerDevicesCommands(program: Command): void {
   registerSnapshotCommand(devicesCmd);
 
   registerCommandGroups(devicesCmd, [
-    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'ignored', 'rm'] },
+    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'ignored', 'remove'] },
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'describe', 'render'] },
@@ -2353,8 +2353,8 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     });
 
   devicesCmd
-    .command('rm <name>')
-    .alias('remove')
+    .command('remove <name>')
+    .alias('rm')
     .description('Remove a device from the registry.')
     .action(async (name: string) => {
       const ok = await removeDevice(name);

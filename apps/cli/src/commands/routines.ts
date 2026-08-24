@@ -1442,7 +1442,8 @@ export function registerRoutinesCommands(program: Command): void {
     });
 
   routinesCmd
-    .command('cleanup')
+    .command('prune')
+    .alias('cleanup')
     .description('Remove expired one-shot routines that already fired and still have a user-layer YAML file.')
     .option('--dry-run', 'Show routines that would be removed without deleting files')
     .action((options: { dryRun?: boolean }) => {
@@ -1460,7 +1461,7 @@ export function registerRoutinesCommands(program: Command): void {
         for (const job of jobs) {
           console.log(`  ${chalk.cyan(job.name)} ${chalk.gray(scheduleLabel(job))}`);
         }
-        console.log(chalk.gray(`\nDry run. Remove with: agents routines cleanup`));
+        console.log(chalk.gray(`\nDry run. Remove with: agents routines prune`));
         return;
       }
 

@@ -121,7 +121,7 @@ describe('agents browser profiles edit', () => {
 
     await expect(run(['profiles', 'edit', 'work', '-b', 'chrome'])).rejects.toThrow();
 
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('profiles delete work'));
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('profiles remove work'));
     expect(exit).toHaveBeenCalledWith(1);
   });
 

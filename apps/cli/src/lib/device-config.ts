@@ -254,7 +254,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Minutes a browser task may sit with no IPC action (navigate, click, type, screenshot, …) before the daemon\'s ' +
       'abandoned-task reaper closes its tabs and marks it done (RUSH-2622). 0 disables idle reaping — the reaper still ' +
       "closes a task whose owning agent session has exited, whatever this is set to. Read only on THIS box's own " +
-      'reaper tick and `agents browser gc`, so it never applies to a peer.',
+      'reaper tick and `agents browser prune`, so it never applies to a peer.',
     validate: (v) =>
       (v as number) >= 0 ? null : 'browser.task-idle-minutes must be >= 0 (0 disables idle reaping).',
   },

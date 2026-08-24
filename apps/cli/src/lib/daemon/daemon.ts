@@ -813,7 +813,7 @@ async function runDeadPaneReap(): Promise<void> {
 /**
  * RUSH-2622: close abandoned browser-task tabs — a task whose owning agent
  * session has exited, or one idle past `browser.task-idle-minutes` (default 30,
- * 0 disables idle reaping only). Same policy `agents browser gc` triggers on
+ * 0 disables idle reaping only). Same policy `agents browser prune` triggers on
  * demand; this is the periodic side, and the daemon is the single executor so
  * no UI surface can race it. `service` is the daemon's own long-lived
  * BrowserService — the browser IPC server it started earlier in `runDaemon()`.

@@ -204,7 +204,7 @@ export function clearProfileRuntime(profileName: string): void {
 
 /**
  * Recursively remove the whole profile cache (chrome-data, tasks.json,
- * everything). Used by `profiles delete` so an old profile name doesn't
+ * everything). Used by `profiles remove` so an old profile name doesn't
  * leak its history into a freshly-recreated one.
  */
 export function removeProfileCache(profileName: string): void {
@@ -469,7 +469,7 @@ export function planProfilePrune(
     // browser is absent on whatever box you are standing on — pruning it would
     // delete the declaring device's entry (or throw, for a peer declaration).
     // The repair is to declare it only on the machine that owns the browser;
-    // an intentional delete is still available as `profiles delete`.
+    // an intentional delete is still available as `profiles remove`.
     if (misfiledWhy) {
       keep(`MISFILED — ${misfiledWhy}`, true);
       continue;

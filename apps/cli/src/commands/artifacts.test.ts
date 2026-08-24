@@ -46,6 +46,7 @@ describe('agents artifacts group', () => {
         '--slug',
         '--github-user',
         '--expire',
+        '--visibility',
         '--unlisted',
         '--private',
         '--force',

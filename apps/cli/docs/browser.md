@@ -211,7 +211,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
-| `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
+| `agents browser profiles remove <name>` (alias `delete`) | Remove profile config and chrome-data cache |
 | `agents browser profiles doctor <name>` | Diagnose where it is declared, binary, port, user-data-dir, onboarding state. Fails `where` when an identity-bearing name (exactly one declaring device) is a loopback endpoint on a box that is not the declaring device — the original `comet-local` bug. |
 
 `profiles create` flags:
@@ -338,7 +338,7 @@ Four guards, each because removing that profile would be wrong rather than untid
 another device is left alone (and reported if it is misfiled).
 
 Removing a profile drops its config entry and wipes its cache dirs, exactly like
-`profiles delete`.
+`profiles remove`.
 
 > A profile config records no creation time, so one you created seconds ago and
 > have not started yet is indistinguishable from an abandoned one and reports
@@ -356,7 +356,7 @@ Removing a profile drops its config entry and wipes its cache dirs, exactly like
 | `agents browser ps` | List all tracked browser/electron/tunnel processes, alive or stale |
 | `agents browser history` | Recent task history |
 | `agents browser stream [--task <name>]` | Keep one CLI process and daemon IPC socket open; NDJSON requests in, NDJSON responses out |
-| `agents browser gc [--dry-run]` | Run the abandoned-task reaper now instead of waiting for the daemon's next tick |
+| `agents browser prune [--dry-run]` | Run the abandoned-task reaper now instead of waiting for the daemon's next tick (alias: `gc`) |
 
 `start` flags:
 
@@ -405,9 +405,9 @@ alone, and the shared profile window itself is never closed or killed.
 Run the same pass on demand instead of waiting for the next tick:
 
 ```bash
-agents browser gc --dry-run   # list what would be closed, close nothing
-agents browser gc             # actually close it
-agents browser gc --idle-minutes 5   # override the idle window for this run
+agents browser prune --dry-run   # list what would be closed, close nothing
+agents browser prune             # actually close it (alias: agents browser gc)
+agents browser prune --idle-minutes 5   # override the idle window for this run
 ```
 
 ### Driving another machine's browser (`--device`) and consent
