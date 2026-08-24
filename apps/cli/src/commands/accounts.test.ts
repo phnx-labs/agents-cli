@@ -4,10 +4,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
 import { Command } from 'commander';
-import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
+import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
 import { claudeAccountTokenKey } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
-import { addAccount, addNativeAccount } from '../lib/account-registry.js';
+import { addAccount, addNativeAccount, listNativeAccounts } from '../lib/account-registry.js';
+import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
 import { secretsKeychainItem, setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
@@ -236,6 +237,7 @@ describe('groupLabelIdentities', () => {
   });
 });
 
+<<<<<<< HEAD
 describe('writeClaudeInteractiveOauthToken', () => {
   // The .oauth_token fallback is the Linux keychain-less path; the write is a no-op
   // off Linux, so exercise the write/clear behavior only there.
@@ -305,5 +307,66 @@ describe('writeClaudeInteractiveOauthToken', () => {
   it('no-ops for a non-installation target (device-scoped attach)', () => {
     writeClaudeInteractiveOauthToken({ kind: 'device-agent', agent: 'claude' }, 'claude');
     expect(fs.existsSync(oauthTokenPath())).toBe(false);
+=======
+describe('accounts label bare-harness selection (injected collector, the resolveRunVersion pattern)', () => {
+  const TEST_LABELS = ['label-seam-solo', 'label-seam-picked'];
+  const candidate = (version: string, email: string | null, accountKey: string | null): RotateCandidate =>
+    ({ agent: 'codex', version, email, accountKey, signedIn: true }) as unknown as RotateCandidate;
+  const collectSolo = async () => [
+    candidate('9.9.1', 'solo@example.com', 'codex:acct=solo'),
+    candidate('9.9.2', 'solo@example.com', 'codex:acct=solo'),
+  ];
+  const collectMulti = async () => [
+    candidate('9.9.1', 'a@example.com', 'codex:acct=a'),
+    candidate('9.9.2', 'b@example.com', 'codex:acct=b'),
+  ];
+
+  const removeTestLabels = (): void => updateMeta(meta => {
+    const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
+      !TEST_LABELS.includes(account.name),
+    ));
+    return { ...meta, accounts: { ...meta.accounts, native } };
+  });
+
+  beforeEach(removeTestLabels);
+  afterEach(() => {
+    removeTestLabels();
+    vi.restoreAllMocks();
+  });
+
+  it('one account signed into two versions auto-selects and writes the label — no picker, no selector', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runAccountsLabel('codex', 'label-seam-solo', {}, collectSolo);
+    expect(log.mock.calls.flat().join('\n')).toContain("Labeled codex account solo@example.com as 'label-seam-solo'");
+    const saved = listNativeAccounts(readMeta()).find(account => account.name === 'label-seam-solo');
+    expect(saved).toMatchObject({ agent: 'codex', identityKey: 'codex:acct=solo', identityLabel: 'solo@example.com' });
+  });
+
+  it('--account picks the matching identity among several and writes it', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    await runAccountsLabel('codex', 'label-seam-picked', { account: 'b@example.com' }, collectMulti);
+    const saved = listNativeAccounts(readMeta()).find(account => account.name === 'label-seam-picked');
+    expect(saved).toMatchObject({ agent: 'codex', identityKey: 'codex:acct=b', identityLabel: 'b@example.com' });
+  });
+
+  it('several distinct identities and no selector resolve as ambiguous — the picker/fail-loud branch', async () => {
+    const selection = await resolveLabelIdentity('codex', undefined, collectMulti);
+    expect(selection.kind).toBe('ambiguous');
+    if (selection.kind === 'ambiguous') {
+      expect(selection.identities.map(identity => identity.email)).toEqual(['a@example.com', 'b@example.com']);
+    }
+  });
+
+  it('an unknown --account fails loud instead of writing anything', async () => {
+    await expect(resolveLabelIdentity('codex', 'nobody@example.com', collectMulti)).rejects.toThrow(
+      "Unknown codex account 'nobody@example.com'",
+    );
+  });
+
+  it('zero signed-in identities fail loud with the login hint', async () => {
+    await expect(resolveLabelIdentity('codex', undefined, async () => [])).rejects.toThrow(
+      'No signed-in codex account with a stable identity',
+    );
+>>>>>>> 00a67eec9 (test(accounts): cover the bare-harness label branch via an injectable collector)
   });
 });

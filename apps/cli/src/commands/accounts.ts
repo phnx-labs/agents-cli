@@ -11,7 +11,7 @@ import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.j
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
 import { assertNativeAccountNameable, nativeAccountCapability, nativeIdentityKey } from '../lib/account-capabilities.js';
 import { collectRunCandidates, type RotateCandidate } from '../lib/accounting/rotate.js';
-import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
+import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
 import { buildSwitchAccountChoices, formatAccountLimits, pickSwitchAccount, type SwitchAccountRow } from './run-account-picker.js';
 import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
 import { pushBundleToHost } from '../lib/secrets/push.js';
@@ -227,6 +227,73 @@ export function groupLabelIdentities(
     a.isDefault !== b.isDefault ? (a.isDefault ? -1 : 1) : (a.email ?? a.identityKey).localeCompare(b.email ?? b.identityKey));
 }
 
+export type LabelSelection =
+  | { kind: 'selected'; identity: LabelIdentity }
+  | { kind: 'ambiguous'; identities: LabelIdentity[] };
+
+/**
+ * Resolve which signed-in login a bare-harness `accounts label` call means.
+ * `collect` is injectable (the `resolveRunVersion` pattern) so tests drive the
+ * real selection path against fixture candidates.
+ */
+export async function resolveLabelIdentity(
+  agent: AgentId,
+  accountSelector: string | undefined,
+  collect: typeof collectRunCandidates = collectRunCandidates,
+): Promise<LabelSelection> {
+  const candidates = (await collect(agent)).filter(candidate => candidate.signedIn);
+  const identities = groupLabelIdentities(candidates, getGlobalDefault(agent));
+  if (identities.length === 0) throw new Error(`No signed-in ${agent} account with a stable identity. Run the harness and complete its login first.`);
+  const needle = accountSelector?.toLowerCase();
+  if (needle) {
+    const match = identities.find(identity => identity.email?.toLowerCase() === needle || identity.identityKey.toLowerCase() === needle);
+    if (!match) throw new Error(`Unknown ${agent} account '${accountSelector}'.`);
+    return { kind: 'selected', identity: match };
+  }
+  if (identities.length === 1) return { kind: 'selected', identity: identities[0] };
+  return { kind: 'ambiguous', identities };
+}
+
+/**
+ * Body of `accounts label`, exported with the injectable candidate collector
+ * so tests exercise everything but the TTY prompt itself.
+ */
+export async function runAccountsLabel(
+  source: string,
+  label: string | undefined,
+  opts: { account?: string },
+  collect: typeof collectRunCandidates = collectRunCandidates,
+): Promise<void> {
+  if (source.includes('@')) {
+    // <harness>@<version> pins the login by where it is signed in, so a
+    // second selector can only contradict it.
+    if (opts.account) throw new Error(`'${source}' already selects one login; drop --account.`);
+    const identity = await nativeIdentityFromSource(source);
+    const account = labelNativeAccount(identity.agent, identity.identityKey, identity.identityLabel, label, identity.scope);
+    console.log(chalk.green(`Labeled ${identity.agent} account ${identity.identityLabel ?? identity.identityKey} as '${account.name}'.`));
+    return;
+  }
+  const agent = parseHarness(source);
+  assertNativeAccountNameable(agent);
+  const selection = await resolveLabelIdentity(agent, opts.account, collect);
+  let selected: LabelIdentity;
+  if (selection.kind === 'selected') {
+    selected = selection.identity;
+  } else {
+    if (!isInteractiveTerminal()) {
+      requireInteractiveSelection(`Selecting the ${agent} login to label`, [
+        `agents accounts label ${agent} ${label ?? '<label>'} --account <email|id>`,
+        `agents accounts label ${agent}@<version> ${label ?? '<label>'}`,
+      ]);
+    }
+    const picked = await pickLabelIdentity(agent, selection.identities);
+    if (!picked) return;
+    selected = picked;
+  }
+  const account = labelNativeAccount(agent, selected.identityKey, selected.email ?? undefined, label, nativeAccountCapability(agent).scope as 'version' | 'device');
+  console.log(chalk.green(`Labeled ${agent} account ${selected.email ?? selected.identityKey} as '${account.name}'.`));
+}
+
 /** Prompt for the login a label should bind to. A cancelled picker writes nothing. */
 async function pickLabelIdentity(agent: AgentId, identities: LabelIdentity[]): Promise<LabelIdentity | null> {
   const idW = Math.max(0, ...identities.map(identity => (identity.email ?? identity.identityKey).length));
@@ -426,37 +493,8 @@ export function registerAccountsCommand(program: Command): void {
     .description('Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version')
     .option('--account <email-or-id>', 'Native identity to label when the harness has multiple logins')
     .action(async (source: string, label: string | undefined, o: { account?: string }, command: Command) => {
-      try {
-        if (source.includes('@')) {
-          // <harness>@<version> pins the login by where it is signed in, so a
-          // second selector can only contradict it.
-          if (o.account) throw new Error(`'${source}' already selects one login; drop --account.`);
-          const identity = await nativeIdentityFromSource(source);
-          const account = labelNativeAccount(identity.agent, identity.identityKey, identity.identityLabel, label, identity.scope);
-          console.log(chalk.green(`Labeled ${identity.agent} account ${identity.identityLabel ?? identity.identityKey} as '${account.name}'.`));
-          return;
-        }
-        const agent = parseHarness(source);
-        assertNativeAccountNameable(agent);
-        const candidates = (await collectRunCandidates(agent)).filter(candidate => candidate.signedIn);
-        const identities = groupLabelIdentities(candidates, getGlobalDefault(agent));
-        if (identities.length === 0) throw new Error(`No signed-in ${agent} account with a stable identity. Run the harness and complete its login first.`);
-        const needle = o.account?.toLowerCase();
-        let selected = needle
-          ? identities.find(identity => identity.email?.toLowerCase() === needle || identity.identityKey.toLowerCase() === needle)
-          : identities.length === 1 ? identities[0] : undefined;
-        if (needle && !selected) throw new Error(`Unknown ${agent} account '${o.account}'.`);
-        if (!selected) {
-          if (!isInteractiveTerminal()) {
-            throw new Error(`Multiple ${agent} accounts are connected. Pass --account <email|id>, or pick by version: agents accounts label ${agent}@<version> ${label ?? '<label>'}`);
-          }
-          const picked = await pickLabelIdentity(agent, identities);
-          if (!picked) return;
-          selected = picked;
-        }
-        const account = labelNativeAccount(agent, selected.identityKey, selected.email ?? undefined, label, nativeAccountCapability(agent).scope as 'version' | 'device');
-        console.log(chalk.green(`Labeled ${agent} account ${selected.email ?? selected.identityKey} as '${account.name}'.`));
-      } catch (err) { cleanCommandError(command, err); }
+      try { await runAccountsLabel(source, label, o); }
+      catch (err) { cleanCommandError(command, err); }
     });
   setHelpSections(labelCmd, {
     examples: `agents accounts label codex work
