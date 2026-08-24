@@ -386,14 +386,10 @@ export function relatedTestFiles(
   return [...new Set([...byFile.values()].flat())];
 }
 
-export function relatedTestsBySource(
-  changed: readonly string[],
-  repoRoot: string,
-  files?: readonly string[],
+function invertGraphOntoChanged(
+  graph: Map<string, string[]>,
+  changedSet: Set<string>,
 ): Map<string, string[]> {
-  const universe = files ?? trackedFiles(repoRoot).filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'));
-  const graph = buildImportGraph(repoRoot, universe);
-  const changedSet = new Set(changed.map(posix));
   const out = new Map<string, string[]>();
   for (const file of changedSet) out.set(file, []);
   for (const [from, tos] of graph) {
@@ -404,6 +400,79 @@ export function relatedTestsBySource(
     }
   }
   return out;
+}
+
+export function relatedTestsBySource(
+  changed: readonly string[],
+  repoRoot: string,
+  files?: readonly string[],
+): Map<string, string[]> {
+  const universe = files ?? trackedFiles(repoRoot).filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'));
+  const graph = buildImportGraph(repoRoot, universe);
+  return invertGraphOntoChanged(graph, new Set(changed.map(posix)));
+}
+
+// A test that reads its script-under-test with `readFileSync` at runtime (to
+// assert on its literal source, or via `path.resolve(__dirname, ...)`) has a
+// real dependency edge the static IMPORT_RE graph above can never see — there
+// is no `import "./release.sh"` to find (RUSH-3097). This resolves that one
+// runtime pattern the same way buildImportGraph resolves static imports: a
+// literal filename passed to readFileSync, either inline as
+// `path.resolve(__dirname, 'LIT')` / `path.join(__dirname, 'LIT')`, or via a
+// same-file `const NAME = path.resolve(__dirname, 'LIT')` the read then
+// references by name. It deliberately does not attempt general data-flow
+// analysis beyond that one indirection — a test that hides the path behind
+// anything more dynamic than a same-file constant needs a real import instead.
+const PATH_VARIABLE_RE = /\b(?:const|let|var)\s+(\w+)\s*=\s*(?:path\.)?(?:resolve|join)\(\s*__dirname\s*,\s*(['"])([^'"]+)\2\s*\)/g;
+const RUNTIME_READ_INLINE_RE = /readFileSync\s*\(\s*(?:path\.)?(?:resolve|join)\(\s*__dirname\s*,\s*(['"])([^'"]+)\1\s*\)/g;
+const RUNTIME_READ_VAR_RE = /readFileSync\s*\(\s*(\w+)\s*[,)]/g;
+
+export function extractRuntimeReadLiterals(text: string): string[] {
+  const vars = new Map<string, string>();
+  PATH_VARIABLE_RE.lastIndex = 0;
+  let vm: RegExpExecArray | null;
+  while ((vm = PATH_VARIABLE_RE.exec(text))) vars.set(vm[1], vm[3]);
+
+  const literals = new Set<string>();
+  RUNTIME_READ_INLINE_RE.lastIndex = 0;
+  let im: RegExpExecArray | null;
+  while ((im = RUNTIME_READ_INLINE_RE.exec(text))) literals.add(im[2]);
+
+  RUNTIME_READ_VAR_RE.lastIndex = 0;
+  let am: RegExpExecArray | null;
+  while ((am = RUNTIME_READ_VAR_RE.exec(text))) {
+    const literal = vars.get(am[1]);
+    if (literal) literals.add(literal);
+  }
+  return [...literals];
+}
+
+export function buildRuntimeReadGraph(repoRoot: string, files: readonly string[]): Map<string, string[]> {
+  const graph = new Map<string, string[]>();
+  for (const file of files) {
+    if (!file.endsWith('.ts') && !file.endsWith('.tsx')) continue;
+    const abs = join(repoRoot, file);
+    if (!existsSync(abs)) continue;
+    const text = readFileSync(abs, 'utf8');
+    if (!text.includes('readFileSync')) continue;
+    const targets: string[] = [];
+    for (const literal of extractRuntimeReadLiterals(text)) {
+      const resolved = resolve(repoRoot, dirname(file), literal);
+      if (existsSync(resolved)) targets.push(posix(relative(repoRoot, resolved)));
+    }
+    if (targets.length) graph.set(posix(file), targets);
+  }
+  return graph;
+}
+
+export function runtimeReadTestsBySource(
+  changed: readonly string[],
+  repoRoot: string,
+  files?: readonly string[],
+): Map<string, string[]> {
+  const universe = files ?? trackedFiles(repoRoot).filter((f) => f.endsWith('.ts') || f.endsWith('.tsx'));
+  const graph = buildRuntimeReadGraph(repoRoot, universe);
+  return invertGraphOntoChanged(graph, new Set(changed.map(posix)));
 }
 
 function addTest(
@@ -453,6 +522,9 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
   const relatedBySource = relatedByDefault
     ? relatedTestsBySource(input.files, repoRoot)
     : new Map<string, string[]>();
+  const runtimeReadBySource = relatedByDefault
+    ? runtimeReadTestsBySource(input.files, repoRoot)
+    : new Map<string, string[]>();
 
   for (const raw of input.files) {
     const file = posix(raw);
@@ -482,6 +554,10 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
     if ((area?.related ?? file.startsWith('apps/cli/')) && relatedByDefault) {
       for (const test of relatedBySource.get(file) ?? []) {
         addTest(selected, mapping, file, test, 'static-import');
+        mark();
+      }
+      for (const test of runtimeReadBySource.get(file) ?? []) {
+        addTest(selected, mapping, file, test, 'runtime-read');
         mark();
       }
     }

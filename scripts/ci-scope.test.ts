@@ -26,6 +26,7 @@ import {
   planIsFailing,
   proofFromPlan,
   relatedTestFiles,
+  runtimeReadTestsBySource,
   selectImpact,
   validateOwnershipManifest,
 } from './ci-scope';
@@ -425,6 +426,59 @@ describe('selectImpact policy', () => {
     const result = validateOwnershipManifest(MANIFEST, REPO);
     expect(result.missingTests).toEqual([]);
     expect(result.unmapped).toEqual([]);
+  });
+
+  test('a runtime readFileSync of a literal script path selects the reading test (RUSH-3097)', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-ci-runtime-read-'));
+    try {
+      writeFixture(dir, 'apps/cli/scripts/thing.sh', '#!/bin/sh\necho hi\n');
+      writeFixture(
+        dir,
+        'apps/cli/scripts/thing-var.test.ts',
+        "import * as fs from 'node:fs';\n"
+          + "import * as path from 'node:path';\n"
+          + "const SCRIPT = path.resolve(__dirname, 'thing.sh');\n"
+          + 'const body = fs.readFileSync(SCRIPT, \'utf-8\');\n'
+          + 'export const y = body;\n',
+      );
+      writeFixture(
+        dir,
+        'apps/cli/scripts/thing-inline.test.ts',
+        "import * as fs from 'node:fs';\n"
+          + "import * as path from 'node:path';\n"
+          + 'const body = fs.readFileSync(path.resolve(__dirname, \'thing.sh\'), \'utf-8\');\n'
+          + 'export const y = body;\n',
+      );
+      writeFixture(
+        dir,
+        'apps/cli/scripts/thing-unrelated.test.ts',
+        "export const y = 1;\n",
+      );
+      const files = [
+        'apps/cli/scripts/thing.sh',
+        'apps/cli/scripts/thing-var.test.ts',
+        'apps/cli/scripts/thing-inline.test.ts',
+        'apps/cli/scripts/thing-unrelated.test.ts',
+      ];
+      const related = runtimeReadTestsBySource(['apps/cli/scripts/thing.sh'], dir, files);
+      expect(related.get('apps/cli/scripts/thing.sh')).toEqual(expect.arrayContaining([
+        'apps/cli/scripts/thing-var.test.ts',
+        'apps/cli/scripts/thing-inline.test.ts',
+      ]));
+      expect(related.get('apps/cli/scripts/thing.sh')).not.toContain('apps/cli/scripts/thing-unrelated.test.ts');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('release.sh selects every scripts/*.test.ts that reads it via readFileSync at runtime, not just its companion (RUSH-3097)', () => {
+    const plan = selectImpact({ files: ['apps/cli/scripts/release.sh'], repoRoot: REPO, manifest: MANIFEST });
+    const byFile = new Map(plan.tests.map((t) => [t.file, t.reason]));
+    expect(byFile.get('apps/cli/scripts/release.test.ts')).toBe('companion');
+    expect(byFile.get('apps/cli/scripts/promote-home-base-probe.test.ts')).toBe('runtime-read');
+    expect(byFile.get('apps/cli/scripts/signing-home-base-probe.test.ts')).toBe('runtime-read');
+    expect(byFile.get('apps/cli/scripts/stuck-release.test.ts')).toBe('runtime-read');
+    expect(plan.unmapped).toEqual([]);
   });
 });
 
