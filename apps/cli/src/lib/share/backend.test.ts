@@ -5,13 +5,15 @@ import * as path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import type { KeychainBackend } from '../secrets/index.js';
 import type { PhoenixSession } from '../identity/client.js';
-import { writeSession, clearSession, sessionFilePath } from '../identity/client.js';
+import { PHOENIX_ID_BASE, writeSession, clearSession, sessionFilePath } from '../identity/client.js';
 import { writeShareConfig, storeWriteToken, DEFAULT_SHARE_DOMAIN } from './config.js';
 import {
   resolveShareBackend,
   shouldUseManaged,
   sanitizeShareNamespace,
   managedShareBaseUrl,
+  isManagedShareEndpoint,
+  phoenixIdBaseForDeploy,
   SHARE_BACKEND_ENV,
 } from './backend.js';
 import {
@@ -68,6 +70,25 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
     else process.env[SHARE_BACKEND_ENV] = prevBackendEnv;
     if (prevShareToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
     else process.env.SHARE_WRITE_TOKEN = prevShareToken;
+  });
+
+  it('isManagedShareEndpoint is the deploy seam: hostname, not signed-in state', () => {
+    expect(isManagedShareEndpoint({ baseUrl: managedShareBaseUrl() })).toBe(true);
+    expect(isManagedShareEndpoint({ domain: DEFAULT_SHARE_DOMAIN })).toBe(true);
+    expect(isManagedShareEndpoint({ baseUrl: 'https://share.agents-cli.sh/' })).toBe(true);
+    expect(isManagedShareEndpoint({ baseUrl: 'https://share.test', domain: DEFAULT_SHARE_DOMAIN })).toBe(true);
+    expect(isManagedShareEndpoint({ baseUrl: 'https://share.test' })).toBe(false);
+    expect(isManagedShareEndpoint({ baseUrl: 'https://agents-share.acct.workers.dev' })).toBe(false);
+    expect(isManagedShareEndpoint({ domain: 'share.example.com' })).toBe(false);
+  });
+
+  it('phoenixIdBaseForDeploy returns the CLI Phoenix ID base for a managed endpoint, nothing for BYO', () => {
+    expect(phoenixIdBaseForDeploy({}, { baseUrl: 'https://share.test' })).toBeUndefined();
+    expect(phoenixIdBaseForDeploy({ managed: false }, { baseUrl: 'https://share.test' })).toBeUndefined();
+    expect(phoenixIdBaseForDeploy({}, { baseUrl: managedShareBaseUrl() })).toBe(PHOENIX_ID_BASE.replace(/\/+$/, ''));
+    expect(phoenixIdBaseForDeploy({ managed: true }, { baseUrl: 'https://share.test' })).toBe(
+      PHOENIX_ID_BASE.replace(/\/+$/, ''),
+    );
   });
 
   it('sanitizeShareNamespace matches the Worker: lowercase, [a-z0-9-]+', () => {

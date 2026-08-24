@@ -18,7 +18,7 @@
  *   - `AGENTS_SHARE_BACKEND=byo`
  */
 
-import { readSession, type PhoenixSession } from '../identity/client.js';
+import { PHOENIX_ID_BASE, readSession, type PhoenixSession } from '../identity/client.js';
 import {
   DEFAULT_SHARE_DOMAIN,
   readShareConfig,
@@ -73,6 +73,42 @@ export function sanitizeShareNamespace(s: string): string {
 
 export function managedShareBaseUrl(): string {
   return `https://${DEFAULT_SHARE_DOMAIN}`;
+}
+
+function shareEndpointHost(value: string): string {
+  return value.replace(/^https?:\/\//i, '').replace(/\/+$/, '').toLowerCase();
+}
+
+/**
+ * True when this config is the platform managed endpoint (`share.agents-cli.sh`).
+ * The deploy path uses this — not "the caller is signed in" — to decide whether
+ * to bind `PHOENIX_ID_BASE` on the Worker.
+ */
+export function isManagedShareEndpoint(cfg: { baseUrl?: string; domain?: string }): boolean {
+  const managedHost = DEFAULT_SHARE_DOMAIN.toLowerCase();
+  if (cfg.domain && shareEndpointHost(cfg.domain) === managedHost) return true;
+  if (cfg.baseUrl && shareEndpointHost(cfg.baseUrl) === managedHost) return true;
+  return false;
+}
+
+/**
+ * Phoenix ID URL to bind on a managed Worker deploy. `undefined` for a
+ * pure-BYO Worker (WRITE_TOKEN only). Fail loud if this is a managed deploy
+ * but the base is empty — never skip-set a blank secret.
+ */
+export function phoenixIdBaseForDeploy(
+  opts: { managed?: boolean } = {},
+  cfg?: { baseUrl?: string; domain?: string },
+): string | undefined {
+  const managed = opts.managed === true || (cfg != null && isManagedShareEndpoint(cfg));
+  if (!managed) return undefined;
+  const base = PHOENIX_ID_BASE.replace(/\/+$/, '').trim();
+  if (!base) {
+    throw new Error(
+      'Managed share deploy requires PHOENIX_ID_BASE so the Worker can verify Phoenix bearers. Set the PHOENIX_ID_BASE env var.',
+    );
+  }
+  return base;
 }
 
 /**
