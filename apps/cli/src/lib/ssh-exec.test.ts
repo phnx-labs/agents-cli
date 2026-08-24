@@ -259,7 +259,37 @@ describe('local terminal restore after an interactive stream (RUSH-3125)', () =>
   // Restore runs while recovering from a dropped link. If it could throw it
   // would turn a recoverable blink into a crash, so every branch is guarded.
   it('is a safe no-op with no snapshot and no TTY — recovery must never throw', () => {
-    expect(() => restoreLocalTerminal(undefined)).not.toThrow();
-    expect(() => restoreLocalTerminal('garbage-not-a-stty-string')).not.toThrow();
+    expect(() => restoreLocalTerminal(undefined, { drainStdin: true })).not.toThrow();
+    expect(() => restoreLocalTerminal(undefined, { drainStdin: false })).not.toThrow();
+    expect(() => restoreLocalTerminal('garbage-not-a-stty-string', { drainStdin: true })).not.toThrow();
+  });
+
+  // Review finding on PR #3006. Resetting termios/DEC modes is idempotent, so
+  // doing it on a clean exit costs nothing. Draining stdin is DESTRUCTIVE: on a
+  // successful interactive session those queued bytes are the user's legitimate
+  // type-ahead, and eating them would be a new bug in every sshStream(tty) caller
+  // rather than a fix. Only an abnormal exit produces the answerback storm the
+  // drain exists to clear.
+  it('only drains stdin when asked — the destructive step is opt-in', () => {
+    const reads: unknown[] = [];
+    const stdin = process.stdin as unknown as { isTTY?: boolean; read?: () => unknown };
+    const realIsTTY = stdin.isTTY;
+    const realRead = stdin.read;
+    // Present a real readable-shaped stdin with a byte queued, then assert the
+    // drain is what consumes it — no mocking of the function under test.
+    stdin.isTTY = true;
+    let queued: unknown[] = ['typed-ahead'];
+    stdin.read = () => { const v = queued.shift() ?? null; reads.push(v); return v; };
+    try {
+      restoreLocalTerminal(undefined, { drainStdin: false });
+      expect(queued).toEqual(['typed-ahead']); // a clean exit leaves type-ahead alone
+
+      queued = ['typed-ahead'];
+      restoreLocalTerminal(undefined, { drainStdin: true });
+      expect(queued).toEqual([]); // an abnormal exit clears the answerback burst
+    } finally {
+      stdin.isTTY = realIsTTY;
+      stdin.read = realRead;
+    }
   });
 });

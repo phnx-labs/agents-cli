@@ -85,13 +85,14 @@
  * session this feature exists for, while the hold floor only ever stops a loop that
  * is failing to put the user back into the agent.
  */
-import { sshExec, sshStream, shellQuote } from '../ssh-exec.js';
+import { sshExec, sshStream, shellQuote, SSH_CONN_FAILURE_CODE } from '../ssh-exec.js';
 import { hostIdentityArgs, sshTargetFor, type Host } from './types.js';
 import { RUN_AUTO_KEYWORD } from '../types.js';
 
 /** ssh's connection-layer failure code — the signal that the link dropped rather
- *  than the remote command exiting on its own. Mirrors ssh-exec.ts `sshStream`. */
-export const SSH_CONN_FAILURE = 255;
+ *  than the remote command exiting on its own. Re-exported from ssh-exec.ts, which
+ *  owns the ssh invocation, so the two cannot drift apart. */
+export const SSH_CONN_FAILURE = SSH_CONN_FAILURE_CODE;
 
 /** What a would-be-255 remote-origin exit code is remapped to by
  *  {@link wrapRemoteExitCode} — see the file header. Never produced by the ssh

@@ -20,6 +20,15 @@ import { getCacheDir } from './state.js';
  * smuggled in as part of a remote command, and `sshExec` additionally rejects a
  * leading `-` so it can never be parsed as an ssh argv flag.
  */
+/**
+ * ssh's own connection-layer failure code — the transport dropped or never came
+ * up, as opposed to the remote command choosing an exit status. Defined here,
+ * in the layer that owns the ssh invocation, and re-exported by
+ * `lib/hosts/reconnect.ts` as `SSH_CONN_FAILURE` so there is one constant for
+ * the concept rather than two that can drift apart.
+ */
+export const SSH_CONN_FAILURE_CODE = 255;
+
 export const SSH_TARGET_RE = /^[a-zA-Z0-9._-]+(@[a-zA-Z0-9._-]+)?$/;
 
 export function assertValidSshTarget(host: string): void {
@@ -429,7 +438,7 @@ export const TERMINAL_MODE_RESET =
  * missing `stty`, a non-TTY stdin, or a closed stream must never turn a
  * recoverable drop into a thrown error.
  */
-export function restoreLocalTerminal(saved: string | undefined): void {
+export function restoreLocalTerminal(saved: string | undefined, opts: { drainStdin: boolean }): void {
   try {
     if (saved) spawnSync('stty', [saved], { stdio: ['inherit', 'ignore', 'ignore'] });
   } catch { /* no stty, or stdin is not a tty — nothing to restore */ }
@@ -437,10 +446,15 @@ export function restoreLocalTerminal(saved: string | undefined): void {
     if (process.stdout.isTTY) process.stdout.write(TERMINAL_MODE_RESET);
   } catch { /* stream closed */ }
   try {
+    if (process.stdin.isTTY) process.stdin.setRawMode?.(false);
+  } catch { /* stdin not controllable in this context */ }
+  // The DRAIN is the one destructive step here, so it is opt-in per exit. See
+  // {@link sshStream} for why it must not run on a clean exit.
+  if (!opts.drainStdin) return;
+  try {
     // read() on a paused non-flowing stdin returns the buffered bytes and
     // discards them; the loop clears a burst rather than one chunk.
     if (process.stdin.isTTY) {
-      process.stdin.setRawMode?.(false);
       while (process.stdin.read() !== null) { /* discard */ }
     }
   } catch { /* stdin not readable in this context */ }
@@ -471,6 +485,19 @@ export function saveLocalTerminal(): string | undefined {
  * TUI, which leaves the tty raw and the TUI's DEC modes armed. Doing it HERE
  * rather than in the reconnect loop means every caller that opens an interactive
  * remote stream is covered, not just the one that noticed (RUSH-3125).
+ *
+ * **The stdin drain is gated on an ABNORMAL exit, and the distinction is not
+ * cosmetic.** Resetting termios and the DEC modes is idempotent — on a clean
+ * exit ssh and the remote TUI have already done it, so re-doing it changes
+ * nothing. Draining stdin is destructive: it discards whatever the user has
+ * typed ahead. On a clean exit those bytes are legitimate type-ahead the
+ * resuming shell should receive, and eating them would be a new bug in every
+ * caller of this function (`runInteractiveOnHost`, the remote-tmux attach in
+ * commands/go.ts, the remote secrets browse) rather than a fix. Only an
+ * abnormal exit — ssh killed by a signal (`status === null`) or its own
+ * connection-layer failure (255) — produces the answerback storm the drain
+ * exists to clear, because only then did the TUI die without sending its own
+ * mode resets.
  */
 export function sshStream(target: string, remoteCmd: string, opts: SshStreamOptions = {}): number {
   assertValidSshTarget(target);
@@ -478,13 +505,18 @@ export function sshStream(target: string, remoteCmd: string, opts: SshStreamOpti
   const tty = opts.tty ? ['-tt'] : [];
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), ...tty, target, remoteCmd];
   const saved = opts.tty ? saveLocalTerminal() : undefined;
+  let abnormal = true; // a throw before/inside the spawn is abnormal by definition
   try {
     const res = spawnSync('ssh', args, { stdio: 'inherit' });
-    if (typeof res.status === 'number') return res.status;
-    return 255; // spawn error / signal — treat as a connection-layer failure
+    const code = typeof res.status === 'number' ? res.status : 255;
+    // Killed by a signal (no numeric status) or ssh's own connection-layer
+    // failure — the two shapes in which the remote TUI never got to reset the
+    // terminal. Any other code is ssh exiting normally with the remote's status.
+    abnormal = res.status === null || code === SSH_CONN_FAILURE_CODE;
+    return code;
   } finally {
-    // finally, not the success path: the abnormal exits are precisely the ones
-    // that leave the terminal wrecked.
-    if (opts.tty) restoreLocalTerminal(saved);
+    // `finally`, because the abnormal exits are precisely the ones that leave
+    // the terminal wrecked — but the drain within it is gated (see the doc).
+    if (opts.tty) restoreLocalTerminal(saved, { drainStdin: abnormal });
   }
 }

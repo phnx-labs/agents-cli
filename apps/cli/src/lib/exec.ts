@@ -1912,9 +1912,13 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     tmuxAvailable: isTmuxInstalled(),
   });
   if (tmuxWrap.kind === 'undurable') {
-    // Refuse rather than start work a blink would destroy. The launcher's
-    // readiness probe normally catches this first; this is the peer-side
-    // backstop for a box that lost tmux between the probe and the spawn.
+    // Refuse rather than start work a blink would destroy. This is the ONLY
+    // check — `ensureHostReady` gates a `--device` dispatch on the peer being
+    // reachable and able to run the pinned agent, not on it having tmux, so
+    // there is no launcher-side probe ahead of this one. Failing here still
+    // fails before the agent starts, which is what matters; a pre-dispatch
+    // probe would only move the message earlier, at the cost of a round trip on
+    // every launch.
     const msg = `agents: ${machineId()} has no tmux, so a --device run here could not survive a dropped connection.\n`
       + `  install it:            (apt|dnf|brew) install tmux\n`
       + `  or accept the risk:    agents run … --device ${machineId()} --raw\n`;
