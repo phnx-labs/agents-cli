@@ -229,6 +229,28 @@ describe('scanClaudeSession title resolution', () => {
     expect(scan.label).toBe('Release new version of agents-cli');
   });
 
+  it('collapses an ai-title generated from a skill preamble to the skill', async () => {
+    // Claude derives its ai-title from the first turn, so a session opened with a
+    // skill got named after the injected scaffolding — and label wins on EVERY
+    // surface (picker header, --flat/--tree, the Fleet row) for the whole session.
+    const fp = write([
+      userMsg('Base directory for this skill: /home/u/.claude/skills/continue\n\npick up where I left off'),
+      { type: 'ai-title', aiTitle: 'Base directory for this skill: /home/u/.agents/.history/versions/claude/2.1.207/home/.claude/skills/continue', sessionId: 's' },
+    ]);
+    const scan = await scanClaudeSession(fp);
+    expect(scan.label).toBe('/continue');
+  });
+
+  it('never rewrites a user custom-title, even one naming a skills path', async () => {
+    // `/rename` is the user's own words; only the injected ai-title is scaffolding.
+    const fp = write([
+      userMsg('do the thing'),
+      { type: 'custom-title', customTitle: 'rewrite the skills/continue docs', sessionId: 's' },
+    ]);
+    const scan = await scanClaudeSession(fp);
+    expect(scan.label).toBe('rewrite the skills/continue docs');
+  });
+
   it('falls back to the first-prompt topic when no title events exist', async () => {
     const fp = write([userMsg('investigate the flaky test')]);
     const scan = await scanClaudeSession(fp);

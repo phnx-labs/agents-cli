@@ -30,7 +30,7 @@ import { getConfigSymlinkVersion } from '../installations/shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
-import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput } from './prompt.js';
+import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, classifyUserPrompt } from './prompt.js';
 import { isBackgroundShellStart, isSkillInvocation, extractSkills, extractSlashCommands, isSubAgentTool } from './highlights.js';
 import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
@@ -3872,7 +3872,15 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
   // A topic is the first meaningful prompt. Harness-owned names travel in the
   // separate label field so consumers can replace an early topic once Claude's
   // generated title (or a later `/rename`) arrives.
-  const label = state.customTitle || state.aiTitle;
+  // Claude's generated `ai-title` is derived from the first turn, so a session
+  // opened with a skill gets named after the injected "Base directory for this
+  // skill: …" line instead of its task — and that name then wins on every
+  // surface for the session's whole life. `classifyUserPrompt` reports `skill`
+  // only for that injected line, so collapse it to `/<skill>`. A `/rename`
+  // (`custom-title`) is the user's own words and is never rewritten.
+  const generated = classifyUserPrompt(state.aiTitle ?? '');
+  const label = state.customTitle
+    || (generated.kind === 'skill' ? generated.clean : state.aiTitle);
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
 

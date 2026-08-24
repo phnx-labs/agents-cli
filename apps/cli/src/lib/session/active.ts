@@ -2527,14 +2527,7 @@ export function deriveSessionRecap(
   const lastAgentLine = recapLine(row.tail?.length ? row.tail[row.tail.length - 1] : undefined);
   const { clean: userPromptClean, kind: userPromptKind } = classifyUserPrompt(row.topic ?? '');
 
-  // A harness that auto-names a session from its first turn names it after the
-  // scaffolding when that turn opened with a skill invocation, so the row reads
-  // "Base directory for this skill: /home/…/skills/continue" instead of what the
-  // session is. `classifyUserPrompt` reports `skill` only for that injected line,
-  // so collapsing on it fixes the harness-generated case while leaving a
-  // deliberate `/rename` label verbatim — a manual label still wins.
-  const labelPrompt = classifyUserPrompt(row.label ?? '');
-  const label = recapLine(labelPrompt.kind === 'skill' ? labelPrompt.clean : row.label);
+  const label = recapLine(row.label);
   const prompt = recapLine(userPromptClean || row.topic);
 
   let title: string | undefined;
