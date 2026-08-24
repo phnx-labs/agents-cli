@@ -307,6 +307,22 @@ export function resolveBrowserTarget(
  * Only when exactly one legacy dir exists and the destination does not —
  * several endpoint dirs stay put so a multi-endpoint profile is not merged.
  */
+/**
+ * Adopt a leftover `@endpoint-N` runtime dir onto the new key ONLY for a
+ * local connect. Doing this for a tunnel key would rename this machine's
+ * pre-T2 logged-out chrome-data onto `comet-local@zion`, and connectProfile
+ * would then attach localhost CDP instead of tunnelling.
+ */
+export function adoptLegacyRuntimeIfLocal(
+  local: boolean,
+  profileName: string,
+  newKey: ConnectionKey,
+  runtimeRoot: string,
+): void {
+  if (!local) return;
+  migrateLegacyRuntimeDir(profileName, newKey, runtimeRoot);
+}
+
 export function migrateLegacyRuntimeDir(
   profileName: string,
   newKey: ConnectionKey,

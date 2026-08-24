@@ -247,9 +247,6 @@ export class BrowserIPCServer {
   private connections = new Set<net.Socket>();
   /** In-flight stop, so a second SIGTERM awaits the same close, never skips it. */
   private stopping: Promise<void> | null = null;
-  /** Device pick from an implicit start (`navigate` creating a task). */
-  private pendingPicked?: string;
-
   constructor(service: BrowserService) {
     this.service = service;
   }
@@ -440,7 +437,9 @@ export class BrowserIPCServer {
         };
       }
       request.task = resolved.task.name;
-      if (resolved.created && resolved.picked) this.pendingPicked = resolved.picked;
+      if (resolved.created && resolved.picked) {
+        (request as IPCRequest & { picked?: string }).picked = resolved.picked;
+      }
       return undefined;
     } catch (err) {
       return { ok: false, error: err instanceof Error ? err.message : String(err) };
@@ -456,8 +455,6 @@ export class BrowserIPCServer {
       const result = this.service.stageUpload(source);
       return { ok: true, path: result.path };
     }
-
-    this.pendingPicked = undefined;
 
     // Task-scoped actions: resolve identity / create / refuse once here.
     if (PAGE_RESOLVE_VERBS.has(request.action) || CLOSE_VERBS.has(request.action)) {
@@ -608,8 +605,7 @@ export class BrowserIPCServer {
           request.url,
           request.profile
         );
-        const picked = this.pendingPicked;
-        this.pendingPicked = undefined;
+        const picked = (request as IPCRequest & { picked?: string }).picked;
         return { ok: true, tabId: result.tabId, task: request.task, message: picked };
       }
 

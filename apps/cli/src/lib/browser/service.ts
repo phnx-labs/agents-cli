@@ -23,8 +23,8 @@ import { assertRemoteControlAllowedForRequest } from './remote-control.js';
 import { connectLocal } from './drivers/local.js';
 import { connectSSH, shellQuote } from './drivers/ssh.js';
 import {
+  adoptLegacyRuntimeIfLocal,
   isLegacyEndpointKey,
-  migrateLegacyRuntimeDir,
   resolveBrowserTarget,
   shouldForkProfile,
   type DeviceProbe,
@@ -506,11 +506,13 @@ export class BrowserService {
     }
     const taskLabel = deriveTaskLabel({ title: opts.title, url: opts.url });
 
-    const reused = await this.reuseProfileConnection(profileName, composite);
+    const reused = await this.reuseProfileConnection(profileName, composite, routed.local);
     let conn = reused?.conn;
     let effectiveKey: ConnectionKey = reused?.key ?? composite;
 
-    if (conn && shouldForkProfile(routed.kind, conn)) {
+    // Fork is a local Electron chrome-data mint. Never fork a tunnelled
+    // connection — that would launch a logged-out browser on THIS box.
+    if (conn && routed.local && shouldForkProfile(routed.kind, conn)) {
       if (this.forkingProfiles.has(composite)) {
         while (this.forkingProfiles.has(composite)) {
           await new Promise((r) => setTimeout(r, 50));
@@ -533,7 +535,12 @@ export class BrowserService {
         }
       }
     } else if (!conn) {
-      migrateLegacyRuntimeDir(profileName, composite, getBrowserRuntimeDir());
+      adoptLegacyRuntimeIfLocal(
+        routed.local,
+        profileName,
+        composite,
+        getBrowserRuntimeDir(),
+      );
       conn = await this.openConnection(
         effectiveProfile,
         routed.target,
@@ -2587,8 +2594,18 @@ export class BrowserService {
     opts: { persistRemote?: boolean } = {},
   ): Promise<ProfileConnection> {
     const existingInfo = getRunningChromeInfo(key);
+    const tunnelled = opts.persistRemote || target.startsWith('ssh:');
 
-    if (existingInfo) {
+    if (tunnelled) {
+      // A leftover local chrome-data / pid file under this key is the
+      // pre-T2 logged-out browser on THIS box. Attaching localhost CDP
+      // here is the original bug. Only a recorded SSH tunnel is ours to
+      // reuse, and connectSSH already does that via isOwnTunnel.
+      const meta = readProfileRuntimeMeta(key);
+      if (meta && meta.kind !== 'tunnel') {
+        clearProfileRuntime(key);
+      }
+    } else if (existingInfo) {
       try {
         const { wsUrl, browser } = await discoverBrowserWsUrl(
           existingInfo.port,
@@ -3524,9 +3541,13 @@ export class BrowserService {
   private async reuseProfileConnection(
     profileName: ProfileName,
     preferred: ConnectionKey,
+    local: boolean,
   ): Promise<{ conn: ProfileConnection; key: ConnectionKey } | undefined> {
     const preferredConn = await this.reuseHealthyConnection(preferred);
     if (preferredConn) return { conn: preferredConn, key: preferred };
+    // Leftover `@endpoint-N` connections are THIS machine's pre-T2 local
+    // browser. Reusing them on a tunnelled resolve is the original bug.
+    if (!local) return undefined;
 
     for (const key of [...this.connections.keys()]) {
       if (key === preferred) continue;
@@ -3582,11 +3603,11 @@ export class BrowserService {
     const key = routed.key;
     const effectiveProfile: BrowserProfile = routed.profile;
 
-    const reused = await this.reuseProfileConnection(profileName, key);
+    const reused = await this.reuseProfileConnection(profileName, key, routed.local);
     let conn = reused?.conn;
     const effectiveKey = reused?.key ?? key;
     if (!conn) {
-      migrateLegacyRuntimeDir(profileName, key, getBrowserRuntimeDir());
+      adoptLegacyRuntimeIfLocal(routed.local, profileName, key, getBrowserRuntimeDir());
       conn = await this.openConnection(
         effectiveProfile,
         routed.target,

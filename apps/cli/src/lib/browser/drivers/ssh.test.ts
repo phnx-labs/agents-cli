@@ -37,6 +37,7 @@ import {
   isOwnTunnel,
   ensureRemoteBrowser,
   killRemoteBrowser,
+  persistRemoteLifecycle,
 } from './ssh.js';
 import { getPortOccupant } from '../chrome.js';
 
@@ -51,6 +52,16 @@ function decodeEncoded(cmd: string): string {
   if (!m) throw new Error(`not an EncodedCommand invocation: ${cmd}`);
   return Buffer.from(m[1], 'base64').toString('utf16le');
 }
+
+describe('persistRemoteLifecycle', () => {
+  it('does not launch or kill the remote browser when attaching to a declaring device', () => {
+    expect(persistRemoteLifecycle(true)).toEqual({ launchRemote: false, killOnCleanup: false });
+  });
+
+  it('launches and kills when the daemon owns the remote process', () => {
+    expect(persistRemoteLifecycle(false)).toEqual({ launchRemote: true, killOnCleanup: true });
+  });
+});
 
 describe('ssh driver CDP launch args', () => {
   it('never sets --remote-allow-origins=* (DNS-rebind / cross-origin CDP risk)', () => {

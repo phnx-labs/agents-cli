@@ -41,6 +41,16 @@ export interface SSHConnectOptions {
   persistRemote?: boolean;
 }
 
+/** Lifecycle for a registry-driven tunnel vs a profile the daemon launched. */
+export function persistRemoteLifecycle(persistRemote: boolean): {
+  launchRemote: boolean;
+  killOnCleanup: boolean;
+} {
+  return persistRemote
+    ? { launchRemote: false, killOnCleanup: false }
+    : { launchRemote: true, killOnCleanup: true };
+}
+
 export async function connectSSH(
   endpoint: string,
   profile: BrowserProfile,
@@ -104,7 +114,8 @@ export async function connectSSH(
   // persistRemote skips the launch: launching would mint a logged-out
   // `--user-data-dir=/tmp/agents-browser-N` under a name that means a
   // credentialed browser on the declaring device.
-  if (!opts.persistRemote) {
+  const lifecycle = persistRemoteLifecycle(Boolean(opts.persistRemote));
+  if (lifecycle.launchRemote) {
     await ensureRemoteBrowser(user, host, profile.browser, remotePort, remoteOs, profile.binary);
   }
 
@@ -171,7 +182,7 @@ export async function connectSSH(
       // when we launched it. persistRemote is an attach to someone else's
       // declared browser; killing it would drop the logins the caller came
       // for. Fire-and-forget — cleanup stays synchronous.
-      if (!opts.persistRemote) {
+      if (lifecycle.killOnCleanup) {
         killRemoteBrowser(user, host, remoteOs, remotePort).catch(() => {});
       }
       tunnel.kill();

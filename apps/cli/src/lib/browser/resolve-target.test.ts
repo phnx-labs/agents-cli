@@ -188,6 +188,21 @@ describe('migrateLegacyRuntimeDir', () => {
     );
   });
 
+  it('does not rename a leftover dir onto a remote key', async () => {
+    const { adoptLegacyRuntimeIfLocal, profileConnectionKey } = await import('./resolve-target.js');
+    const runtime = path.join(root, 'browser-runtime');
+    fs.mkdirSync(path.join(runtime, 'comet-local@endpoint-0', 'chrome-data'), { recursive: true });
+    fs.writeFileSync(path.join(runtime, 'comet-local@endpoint-0', 'chrome-data', 'Cookies'), 'local');
+
+    const remoteKey = profileConnectionKey('comet-local', 'zion');
+    adoptLegacyRuntimeIfLocal(false, 'comet-local', remoteKey, runtime);
+
+    expect(fs.existsSync(path.join(runtime, 'comet-local@endpoint-0', 'chrome-data', 'Cookies'))).toBe(
+      true,
+    );
+    expect(fs.existsSync(path.join(runtime, remoteKey))).toBe(false);
+  });
+
   it('does not merge several leftover endpoint dirs', async () => {
     const { migrateLegacyRuntimeDir, profileConnectionKey } = await import('./resolve-target.js');
     const runtime = path.join(root, 'browser-runtime');
