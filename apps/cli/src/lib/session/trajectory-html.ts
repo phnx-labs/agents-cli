@@ -30,12 +30,19 @@ function toolColor(step: TrajectoryStep): string {
   return '#8b98a5';
 }
 
-/** Precise per-step duration for the waterfall: "8m04s", "1.6s", "320ms". */
+/** Precise per-step duration for the waterfall: "2h01m", "8m04s", "1.6s", "320ms". */
 function formatStepDuration(ms: number): string {
   if (ms <= 0) return '0s';
   if (ms < 1000) return `${Math.round(ms)}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
   const totalSec = Math.round(ms / 1000);
+  // Beyond an hour, minutes-only reads as "1441m18s" for an overnight idle gap —
+  // roll into hours so a long stall is legible at a glance.
+  if (totalSec >= 3600) {
+    const h = Math.floor(totalSec / 3600);
+    const m = Math.floor((totalSec % 3600) / 60);
+    return `${h}h${String(m).padStart(2, '0')}m`;
+  }
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return `${m}m${String(s).padStart(2, '0')}s`;

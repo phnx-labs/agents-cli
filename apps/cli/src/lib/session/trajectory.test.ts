@@ -48,6 +48,31 @@ describe('buildTrajectory — durations by callId pairing', () => {
     expect(prog('cat f | grep x')).toBe('cat'); // pipeline: leftmost effective program
   });
 
+  it('labels a shell step by what it DID, stripping the leading cd/export/assignment noise', () => {
+    const cmd = (command: string): SessionEvent[] => [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'x', command },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Bash', callId: 'x', outcome: 'ok' },
+    ];
+    // redact:false isolates the noise-stripping from the home-path masking.
+    const label = (command: string) => buildTrajectory(cmd(command), meta(), { redact: false }).steps[0].label;
+    // The dominant real shape: a `cd <repo> &&` prefix that made every row read identically.
+    expect(label('cd /home/u/src/agents-cli && git fetch origin')).toBe('git fetch origin');
+    // A multi-line script whose first line is the `cd` — firstLine used to keep only that.
+    expect(label('cd /home/u/src/agents-cli\ngit status')).toBe('git status');
+    // Assignments as a statement and as a prefix, and `set -e`, are all skipped.
+    expect(label('export FOO=bar; gh pr create')).toBe('gh pr create');
+    expect(label('set -e; bun test')).toBe('bun test');
+    expect(label('FOO=bar git push')).toBe('git push');
+    // A pipeline stays intact (only leading noise is removed).
+    expect(label('cd apps/cli && cat f | grep x')).toBe('cat f | grep x');
+    // A command that is nothing but `cd` is left as-is, never emptied.
+    expect(label('cd /home/u/src/agents-cli')).toBe('cd /home/u/src/agents-cli');
+    // A non-noise command is untouched, and the label now agrees with the badge.
+    const t = buildTrajectory(cmd('cd apps/cli && bun test'), meta(), { redact: false });
+    expect(t.steps[0].label).toBe('bun test');
+    expect(t.steps[0].program).toBe('bun');
+  });
+
   it('resolves program for every harness shell tool, not just Bash (Codex exec_command)', () => {
     const shellStep = (tool: string): SessionEvent[] => [
       { type: 'tool_use', agent: 'codex', timestamp: '2026-08-01T00:00:00Z', tool, callId: 'c', command: 'npm test' },

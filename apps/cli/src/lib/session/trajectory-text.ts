@@ -25,7 +25,7 @@ export interface RenderTrajectoryTextOptions {
 const DEFAULT_MAX_STEPS = 80;
 const LABEL_COL = 40;
 
-/** Precise, compact per-step duration: "8m04s", "1.6s", "320ms", "—" for zero. */
+/** Precise, compact per-step duration: "2h01m", "8m04s", "1.6s", "320ms", "—" for zero. */
 function dur(ms: number, estimated: boolean): string {
   if (ms <= 0) return estimated ? '~0s' : '0s';
   let s: string;
@@ -33,7 +33,13 @@ function dur(ms: number, estimated: boolean): string {
   else if (ms < 60_000) s = `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
   else {
     const totalSec = Math.round(ms / 1000);
-    s = `${Math.floor(totalSec / 60)}m${String(totalSec % 60).padStart(2, '0')}s`;
+    // Beyond an hour, roll into hours so an overnight stall reads "24h01m", not
+    // "1441m18s" (matches the HTML renderer's formatStepDuration).
+    if (totalSec >= 3600) {
+      s = `${Math.floor(totalSec / 3600)}h${String(Math.floor((totalSec % 3600) / 60)).padStart(2, '0')}m`;
+    } else {
+      s = `${Math.floor(totalSec / 60)}m${String(totalSec % 60).padStart(2, '0')}s`;
+    }
   }
   return estimated ? `~${s}` : s;
 }

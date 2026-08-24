@@ -959,7 +959,11 @@ step falls back to the next-event delta and is marked `durationEstimated` when a
 harness omits the result, so measured and inferred are never conflated). It also flags
 idle gaps (stalls), a per-program "where the time went" share (a shell call reads by
 its effective program — `git`, `bun`, `gh` — never a single opaque `Bash`), and tags
-inline `Task`/`Agent` sub-agents.
+inline `Task`/`Agent` sub-agents. Each step's one-line label reads by what the command
+DID: a leading `cd <repo> &&`, `export X=Y;`, `set -e`, or bare assignment is stripped
+so `cd /long/path && git fetch` shows as `git fetch` (agreeing with the badge) instead
+of an identical `cd …` on every row. Durations roll into hours past 60 minutes
+(`24h01m`, not `1441m18s`).
 
 One model renders three ways, **auto-selected by audience**:
 

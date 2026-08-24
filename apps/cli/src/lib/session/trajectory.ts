@@ -188,6 +188,39 @@ function stringArg(args: Record<string, any> | undefined, ...keys: string[]): st
 }
 
 /**
+ * Strip a shell command's leading throwaway statements so its label reads by what
+ * it DID, not by its setup. Real agent commands overwhelmingly open with a
+ * `cd <repo> &&` (or a multi-line script whose first line is `cd <repo>`), plus the
+ * occasional `export X=Y;`, `set -e`, `source …`, or bare `VAR=val` assignment —
+ * exactly the {@link SHELL_NOISE_PROGRAMS} the badge already skips when resolving
+ * the effective program. Without this, every `cd /long/path && git …` row renders
+ * an identical `cd /long/path` and the trajectory is unreadable; here we drop that
+ * prefix so the label agrees with the badge (`git …`, `gh …`, `bun …`).
+ *
+ * Conservative on purpose: only a LEADING run of noise statements separated by
+ * `&&`, `;`, or a newline is removed (an assignment PREFIX like `VAR=val cmd` too),
+ * pipelines (`|`) are left intact, and a command that is nothing but noise (a lone
+ * `cd dir`) is returned unchanged rather than emptied. Display-only — the value is
+ * still clipped and secret-redacted downstream.
+ */
+function stripLeadingShellNoise(command: string): string {
+  // A leading `cd`/`export`/`set`/`source`/`unset`/`local`/`eval` statement, or an
+  // assignment, terminated by a statement separator (`&&`, `;`, or newline).
+  const noiseStatement = /^\s*(?:cd|export|set|source|unset|local|eval)\b[^\n&;|]*(?:&&|;|\n)+/i;
+  // A bare `VAR=val` — either a full statement (with a separator) or a prefix
+  // (followed by whitespace before the real program: `FOO=bar git push`).
+  const assignment = /^\s*[A-Za-z_][A-Za-z0-9_]*=[^\s&;|]*(?:\s*(?:&&|;|\n)+|\s+)/;
+  let cmd = command;
+  let prev = '';
+  while (cmd !== prev) {
+    prev = cmd;
+    cmd = cmd.replace(noiseStatement, '').replace(assignment, '');
+  }
+  const trimmed = cmd.trim();
+  return trimmed.length > 0 ? trimmed : command.trim();
+}
+
+/**
  * A redacted one-line label for a tool call, derived from the raw arguments.
  *
  * This is the single place unredacted command/argument text enters the model, so
@@ -204,7 +237,8 @@ function toolLabel(
   let raw: string | undefined;
   const lower = tool.toLowerCase();
   if (lower === 'bash' || lower === 'shell' || lower === 'run_command' || lower.includes('exec')) {
-    raw = command ?? stringArg(args, 'command', 'cmd', 'script');
+    const cmd = command ?? stringArg(args, 'command', 'cmd', 'script');
+    raw = cmd ? stripLeadingShellNoise(cmd) : cmd;
   } else if (lower === 'read' || lower === 'edit' || lower === 'write' || lower === 'notebookedit' || lower === 'multiedit') {
     raw = stringArg(args, 'file_path', 'path', 'notebook_path', 'filePath');
   } else if (lower === 'grep' || lower === 'glob' || lower === 'search' || lower === 'codebase_search') {

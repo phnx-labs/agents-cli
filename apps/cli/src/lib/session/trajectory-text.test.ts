@@ -40,6 +40,20 @@ describe('renderTrajectoryText', () => {
     expect(text).toContain('exit 1 · 2 failing'); // error evidence line
   });
 
+  it('renders a multi-hour idle stall in hours, not runaway minutes', () => {
+    // A completed step, then nothing for 2h05m — an overnight stall. Minutes-only
+    // used to print "125m…"; it should read as hours.
+    const overnight: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'b', command: 'git status' },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Bash', callId: 'b', outcome: 'ok' },
+      { type: 'message', agent: 'claude', timestamp: '2026-08-01T02:05:01Z', role: 'user', content: 'back' },
+    ];
+    const idleLine = renderTrajectoryText(buildTrajectory(overnight, meta()))
+      .split('\n').find((l) => l.startsWith('idle'))!;
+    expect(idleLine).toBe('idle 2h05m after step 1 (stall)');
+    expect(idleLine).not.toMatch(/125m/); // not runaway minutes
+  });
+
   it('errorsOnly collapses to the error step and its neighbours', () => {
     const text = renderTrajectoryText(buildTrajectory(events, meta()), { errorsOnly: true });
     // Step 2 is the error (a `bun test`, tagged by its program); steps 1 and 3 are neighbours.
