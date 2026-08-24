@@ -30,6 +30,15 @@ describe('lease command registration', () => {
       'prune',
     ]);
   });
+
+  it('keeps the old `gc` spelling working as a hidden alias of prune', () => {
+    const program = new Command();
+    const devices = program.command('devices');
+    registerLeaseCommand(devices);
+
+    const prune = devices.commands[0].commands.find((command) => command.name() === 'prune');
+    expect(prune?.aliases()).toContain('gc');
+  });
 });
 
 function box(over: Partial<CrabboxBox> = {}): CrabboxBox {

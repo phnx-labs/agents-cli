@@ -211,7 +211,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser profiles show <name>` | Show profile details |
 | `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
-| `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
+| `agents browser profiles remove <name>` (alias `delete`) | Remove profile config and chrome-data cache |
 | `agents browser profiles doctor <name>` | Diagnose where it is declared, binary, port, user-data-dir, onboarding state. Fails `where` when an identity-bearing name (exactly one declaring device) is a loopback endpoint on a box that is not the declaring device — the original `comet-local` bug. |
 
 `profiles create` flags:

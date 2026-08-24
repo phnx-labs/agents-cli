@@ -775,7 +775,7 @@ agents mailboxes <id>            # one box in full, across all three buckets
 agents mailboxes --watch         # live tail of cross-box traffic until Ctrl-C
 agents mailboxes --between a b   # one relationship as a thread, either direction
 agents mailboxes --graph         # who-talks-to-whom adjacency, busiest first
-agents mailboxes gc              # one-shot liveness sweep of pending messages
+agents mailboxes prune           # one-shot liveness sweep of pending messages
 ```
 
 The overview opens with a `fleet comms` masthead (`N live · M boxes`, total
@@ -806,8 +806,8 @@ and stale consumed entries are pruned after 24 hours. You can run the sweep
 manually:
 
 ```bash
-agents mailboxes gc          # human summary
-agents mailboxes gc --json   # machine-readable GcResult
+agents mailboxes prune       # human summary
+agents mailboxes prune --json   # machine-readable GcResult
 ```
 
 ### Bounce receipts

@@ -565,7 +565,7 @@ export function registerProjectsCommands(program: Command): void {
       agents projects list --with-agents   # opt-in local active counts
       agents projects list --json          # machine-readable defs (AGI EXT uses this)
       echo '{...}' | agents projects save --json  # create/update one def from stdin
-      agents projects rm rush --json       # machine-readable delete
+      agents projects remove rush --json   # machine-readable removal
       agents projects status              # every project, across the whole fleet
       agents projects status rush         # one project (same body as view/show)
       agents projects view rush           # alias of status <name>

@@ -487,7 +487,7 @@ export async function crabboxWarmup(opts: WarmupOptions = {}): Promise<CrabboxBo
         if (orphans.length) {
           hint =
             ` ${orphans.length} expired, idle box(es) are holding the quota — free them with ` +
-            `\`agents devices lease gc\` (or \`crabbox stop ${orphans[0].slug}\`).`;
+            `\`agents devices lease prune\` (or \`crabbox stop ${orphans[0].slug}\`).`;
         }
       } catch {
         /* best-effort hint; fall back to the generic guidance above */

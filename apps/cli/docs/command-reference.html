@@ -522,7 +522,7 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
       agents browser done
 
       # close tabs the daemon&#39;s own reaper would have caught on its next 5-min tick
-      agents browser gc --dry-run most agent workflows should use the &#39;browser&#39; skill instead of raw subcommands.
+      agents browser prune --dry-run most agent workflows should use the &#39;browser&#39; skill instead of raw subcommands.
       the skill wraps profile selection, snapshotting, and tunneling.
 
       browser support: chromium-family only (chrome, comet, chromium, brave, edge, arc).
@@ -563,7 +563,7 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
       agents browser done
 
       # Close tabs the daemon&#39;s own reaper would have caught on its next 5-min tick
-      agents browser gc --dry-run</code></pre><h4>Notes</h4><p class="notes">Most agent workflows should use the &#39;browser&#39; skill instead of raw subcommands.
+      agents browser prune --dry-run</code></pre><h4>Notes</h4><p class="notes">Most agent workflows should use the &#39;browser&#39; skill instead of raw subcommands.
       The skill wraps profile selection, snapshotting, and tunneling.
 
       Browser support: Chromium-family only (Chrome, Comet, Chromium, Brave, Edge, Arc).
@@ -1817,7 +1817,7 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
       agents projects list --with-agents   # opt-in local active counts
       agents projects list --json          # machine-readable defs (agi ext uses this)
       echo &#39;{...}&#39; | agents projects save --json  # create/update one def from stdin
-      agents projects rm rush --json       # machine-readable delete
+      agents projects remove rush --json   # machine-readable removal
       agents projects status              # every project, across the whole fleet
       agents projects status rush         # one project (same body as view/show)
       agents projects view rush           # alias of status &lt;name&gt;
@@ -1840,7 +1840,7 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
       agents projects list --with-agents   # opt-in local active counts
       agents projects list --json          # machine-readable defs (AGI EXT uses this)
       echo &#39;{...}&#39; | agents projects save --json  # create/update one def from stdin
-      agents projects rm rush --json       # machine-readable delete
+      agents projects remove rush --json   # machine-readable removal
       agents projects status              # every project, across the whole fleet
       agents projects status rush         # one project (same body as view/show)
       agents projects view rush           # alias of status &lt;name&gt;

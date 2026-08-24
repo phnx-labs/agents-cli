@@ -337,7 +337,7 @@ function assertDeviceDeclaresProfile(device: string, profileName: string): void 
 // instead of an alphabetical dump. Everything not listed falls into a
 // trailing "Other commands" section automatically.
 const BROWSER_HELP_GROUPS = [
-  { title: 'Session lifecycle', names: ['use', 'start', 'done', 'status', 'gc'] },
+  { title: 'Session lifecycle', names: ['use', 'start', 'done', 'status', 'prune'] },
   { title: 'Fast action loop', names: ['stream'] },
   {
     title: 'Drive the page',
@@ -391,7 +391,7 @@ export function registerBrowserCommand(program: Command): void {
       agents browser done
 
       # Close tabs the daemon's own reaper would have caught on its next 5-min tick
-      agents browser gc --dry-run
+      agents browser prune --dry-run
     `,
     notes: `
       Most agent workflows should use the 'browser' skill instead of raw subcommands.
@@ -831,7 +831,7 @@ function registerProfilesCommands(browser: Command): void {
       if (opts.browser) {
         console.error(
           'browser type is not editable — it keys the on-disk profile cache. ' +
-            `Delete and recreate instead: agents browser profiles delete ${name} && agents browser profiles create ${name} -b <type>`
+            `Remove and recreate instead: agents browser profiles remove ${name} && agents browser profiles create ${name} -b <type>`
         );
         process.exit(1);
       }

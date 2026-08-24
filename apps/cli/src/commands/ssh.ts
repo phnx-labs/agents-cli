@@ -1289,7 +1289,7 @@ function registerDevicesCommands(program: Command): void {
   registerSnapshotCommand(devicesCmd);
 
   registerCommandGroups(devicesCmd, [
-    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'ignored', 'rm'] },
+    { title: 'Discover & register', names: ['sync', 'register', 'add', 'ignore', 'unignore', 'ignored', 'remove'] },
     { title: 'Inspect', names: ['list', 'show', 'status', 'ping', 'harnesses', 'accounts', 'snapshot'] },
     { title: 'Disposable devices', names: ['lease'] },
     { title: 'Configure a device', names: ['config', 'describe', 'render'] },

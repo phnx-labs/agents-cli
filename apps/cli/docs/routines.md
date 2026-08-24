@@ -298,8 +298,8 @@ List output marks one-shot routines in the Schedule column. Expired one-shots th
 Remove completed, expired one-shots that still have user-layer YAML:
 
 ```bash
-agents routines cleanup --dry-run
-agents routines cleanup
+agents routines prune --dry-run
+agents routines prune
 ```
 
 ### Webhook Triggers
