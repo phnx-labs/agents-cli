@@ -415,16 +415,17 @@ describe('scheduler gate (scheduler.enabled=false on this device)', () => {
 describe('tmux gate (tmux.enabled on this device)', () => {
   it('defaults to disabled when unset', async () => {
     const { isTmuxEnabled } = await freshModules();
-    const { shouldWrapInTmux } = await import('./exec.js');
-    expect(shouldWrapInTmux({
+    const { resolveTmuxWrap } = await import('./exec.js');
+    expect(resolveTmuxWrap({
       interactive: true,
       platform: 'linux',
       inTmux: false,
       raw: false,
       noTmuxEnv: false,
       configEnabled: isTmuxEnabled(),
+      remoteDispatch: false,
       tmuxAvailable: true,
-    })).toBe(false);
+    }).kind).toBe('bare');
   });
 
   it('isTmuxEnabled reflects the stored value', async () => {

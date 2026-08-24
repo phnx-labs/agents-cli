@@ -657,6 +657,38 @@ describe('remoteRunShellPrelude — the run-auto chain-hop guard crosses the SSH
     expect(buildInteractiveRunForwardedArgs({ agent: 'auto' }).join(' ')).not.toContain('AGENTS_RUN_AUTO_HOST_RESOLVED');
   });
 
+  // RUSH-3125. The interactive dispatch hands the remote agent a TTY that IS an
+  // ssh link, so the remote CLI has to know to detach — otherwise a blink
+  // SIGHUPs the agent and the in-flight turn is lost, while reconnect.ts
+  // re-attaches on the premise that it survived. Like the run-auto guard, this
+  // MUST be a shell export: resolveTmuxWrap reads the remote CLI's own
+  // process.env, which a forwarded `--env` never reaches.
+  it('exports the remote-interactive marker when asked, and the remote shell really sees it', () => {
+    const prelude = remoteRunShellPrelude('claude', { AGENTS_REMOTE_INTERACTIVE: '1' });
+    expect(prelude).toContain('export AGENTS_REMOTE_INTERACTIVE=1');
+    const out = spawnSync('bash', ['-lc', `${prelude}printf %s "$AGENTS_REMOTE_INTERACTIVE"`], { encoding: 'utf-8' });
+    expect(out.stdout).toBe('1');
+  });
+
+  it('leaves the marker unset by default, so a headless dispatch never claims to be interactive', () => {
+    // launchDetached calls the prelude with no extras: its run is already
+    // setsid-detached, so forcing the tmux wrap there would be pure overhead.
+    expect(remoteRunShellPrelude('claude')).not.toContain('AGENTS_REMOTE_INTERACTIVE');
+    const out = spawnSync('bash', ['-lc', `${remoteRunShellPrelude('claude')}printf %s "$AGENTS_REMOTE_INTERACTIVE"`], { encoding: 'utf-8' });
+    expect(out.stdout).toBe('');
+  });
+
+  it('the marker is NOT forwarded as an --env flag by either argv builder (that channel only reaches the spawned agent)', () => {
+    expect(buildRunForwardedArgs({ agent: 'claude', prompt: 'x' }).join(' ')).not.toContain('AGENTS_REMOTE_INTERACTIVE');
+    expect(buildInteractiveRunForwardedArgs({ agent: 'claude' }).join(' ')).not.toContain('AGENTS_REMOTE_INTERACTIVE');
+  });
+
+  it('carries the marker and the run-auto guard together', () => {
+    const prelude = remoteRunShellPrelude('auto', { AGENTS_REMOTE_INTERACTIVE: '1' });
+    const out = spawnSync('bash', ['-lc', `${prelude}printf '%s,%s' "$AGENTS_RUN_AUTO_HOST_RESOLVED" "$AGENTS_REMOTE_INTERACTIVE"`], { encoding: 'utf-8' });
+    expect(out.stdout).toBe('1,1');
+  });
+
   it('keeps the actor provenance exports alongside the guard', () => {
     const savedActor = process.env.AGENTS_ACTOR;
     const savedKind = process.env.AGENTS_ACTOR_KIND;

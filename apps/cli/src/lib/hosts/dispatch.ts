@@ -22,7 +22,7 @@ import { followHostTask } from './progress.js';
 import { wrapHostCommandWithCredentials, type HostCredentials } from './credentials.js';
 import { hostKeyCheckingOpts } from '../devices/known-hosts.js';
 import { deriveMirroredCwd, homeRemainder, remoteCdPrefix } from '../project-root.js';
-import { RUN_AUTO_KEYWORD, RUN_AUTO_HOST_RESOLVED_ENV } from '../types.js';
+import { RUN_AUTO_KEYWORD, RUN_AUTO_HOST_RESOLVED_ENV, REMOTE_INTERACTIVE_ENV } from '../types.js';
 
 // The home-relative portability helpers live in project-root.js (the canonical
 // home-relative conversion home), reused by the interactive `agents ssh` login
@@ -88,10 +88,16 @@ export function withActorEnv(env?: Record<string, string>): Record<string, strin
  * only reach the spawned agent's env and the remote `run auto` would re-pick.
  * Shared by the interactive (runInteractiveOnHost) and detached
  * (launchDetached) paths so both behave identically.
+ *
+ * `extra` carries the markers that are true of ONE path rather than both — the
+ * interactive dispatch adds REMOTE_INTERACTIVE_ENV, which the remote CLI reads
+ * to decide it must detach. It goes through this builder rather than being
+ * concatenated on at the call site so every remote env marker is exported the
+ * same way, in one place.
  */
-export function remoteRunShellPrelude(agent: string): string {
+export function remoteRunShellPrelude(agent: string, extra: Record<string, string> = {}): string {
   const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
-  const exports = posixEnvExports(withActorEnv(guard));
+  const exports = posixEnvExports(withActorEnv({ ...guard, ...extra }));
   return exports ? `${exports}; ` : '';
 }
 
@@ -630,7 +636,13 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   // Forward actor provenance so the interactive remote run inherits it rather
   // than re-resolving from this box's SSH_CONNECTION (RUSH-2028); a `run auto`
   // dispatch also gets the chain-hop guard (remoteRunShellPrelude).
-  const prelude = remoteRunShellPrelude(opts.agent);
+  //
+  // REMOTE_INTERACTIVE_ENV rides the same prelude and is what makes the remote
+  // agent DETACHED: its stdio is this ssh link, so without the tmux wrap a
+  // blink SIGHUPs it and the in-flight turn is gone — while reconnect.ts is
+  // built to re-attach a pane it assumes survived (RUSH-3125). Set here, on the
+  // interactive path only: `launchDetached` already setsids the headless one.
+  const prelude = remoteRunShellPrelude(opts.agent, { [REMOTE_INTERACTIVE_ENV]: '1' });
   let remoteCmd = `${prelude}${cwd}${invocation}`;
   if (opts.copyCreds) {
     remoteCmd = wrapHostCommandWithCredentials(remoteCmd, opts.copyCreds);
@@ -641,7 +653,14 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   const credHostKeyOpts = opts.copyCreds ? hostKeyCheckingOpts(true) : undefined;
   return sshStream(target, remoteCmd, {
     tty: process.stdin.isTTY,
-    multiplex: !opts.copyCreds,
+    // NOT multiplexed. `ControlPath=cm-%C` hashes only local host / remote host
+    // / port / user, so every agent tab pointed at a peer shares ONE master —
+    // and OpenSSH closes every channel on it the instant that master dies. One
+    // blink therefore ejected all six tabs on a box at once, which is what made
+    // a brief outage read as "all my agents exited" (RUSH-3125). The handshake
+    // this gives up is a one-time ~200ms on a session that runs for hours;
+    // probes and fan-outs keep the shared master, where it actually pays.
+    multiplex: false,
     hostKeyOpts: credHostKeyOpts,
     extraSshArgs: hostIdentityArgs(host),
   });

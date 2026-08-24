@@ -9,7 +9,7 @@ import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { AgentId, Mode } from './types.js';
-import { ALL_MODES } from './types.js';
+import { ALL_MODES, REMOTE_INTERACTIVE_ENV } from './types.js';
 import { AGENTS, findInPath } from './agents.js';
 import { parseTimeout } from './scheduling/routines.js';
 import { compareVersions, getBinaryPath, getVersionHomePath, isVersionInstalled, listInstalledVersions, resolveVersion } from './installations/versions.js';
@@ -1401,37 +1401,77 @@ export interface TmuxWrapContext {
   noTmuxEnv: boolean;
   /** This device's `tmux.enabled` config — true opts every eligible launch on this box into the wrap. */
   configEnabled: boolean;
+  /**
+   * True when this run was dispatched onto this box over SSH by `--device`
+   * (the launcher exports {@link REMOTE_INTERACTIVE_ENV}).
+   *
+   * A remote interactive agent is a child of the sshd session and holds its
+   * controlling TTY, so without the wrap a dropped link SIGHUPs it and the work
+   * in flight is gone. Durability is therefore NOT a preference the way
+   * `configEnabled` is — `tmux.enabled` is about whether this box's operator
+   * likes tmux's mouse/clipboard/scrollback at their own keyboard, which says
+   * nothing about whether a run arriving over the network must outlive it.
+   * Conflating the two is what left every `--device` agent unsurvivable
+   * (RUSH-3125), while lib/hosts/reconnect.ts reconnected on the premise that
+   * they were detached.
+   */
+  remoteDispatch: boolean;
   /** Whether a tmux binary is on PATH. */
   tmuxAvailable: boolean;
 }
 
 /**
+ * What to do with an interactive spawn. Three outcomes, not two: a run that
+ * MUST be durable and cannot be is neither "wrap" nor "spawn bare" — it is a
+ * launch that should not happen, because a bare remote spawn looks fine right
+ * up until the link blinks and the agent dies with it.
+ */
+export type TmuxWrapDecision =
+  /** Run the agent in a detached tmux session and attach this TTY. */
+  | { kind: 'wrap' }
+  /** Spawn directly — nothing about this run needs a pane. */
+  | { kind: 'bare' }
+  /** Remote-dispatched and tmux is missing on this box: refuse, don't pretend. */
+  | { kind: 'undurable' };
+
+/**
  * Decide whether to run an interactive agent INSIDE a detached tmux session on
  * the shared socket (then attach the current TTY) instead of a bare spawn.
  *
- * Opting into tmux wrapping gives every interactive agent an exact, unique `%pane` handle so
- * `agents sessions --active` can tell co-located agents apart, and lets `agents
- * focus` re-attach a live session without forking it. Pure so the gate is unit-
- * tested independently of the (side-effecting) spawn.
+ * Wrapping serves two independent purposes, and they are gated differently:
  *
- * All seven guards must pass:
- *   - interactive     — a headless `-p` run has no TTY to attach; keep bare spawn.
- *   - not Windows     — no tmux path on win32.
- *   - not already in tmux — nesting tmux-in-tmux is pointless and confusing.
- *   - not --raw       — explicit opt-out.
- *   - not AGENTS_NO_TMUX=1 — env opt-out (CI, scripts, the shim passthrough path).
- *   - tmux.enabled    — this device explicitly opted into addressable tmux panes.
- *   - tmux installed  — otherwise there is nothing to wrap with.
+ *  - **Addressability** (`configEnabled`): a unique `%pane` handle so
+ *    `agents sessions --active` can tell co-located agents apart and `agents
+ *    focus` re-attaches without forking. That is a local preference — the
+ *    operator turns it on once tmux's mouse/clipboard/scrollback suits them.
+ *  - **Durability** (`remoteDispatch`): a run that arrived over SSH must outlive
+ *    the SSH client, because a bare remote spawn dies of SIGHUP the moment the
+ *    link blinks. That is not a preference, so it does not consult
+ *    `configEnabled` (RUSH-3125 — see {@link TmuxWrapContext.remoteDispatch}).
+ *
+ * The per-run opt-outs bind BOTH: `--raw` / `--no-tmux` / `AGENTS_NO_TMUX=1` are
+ * explicit "I want the bare process" requests, and honouring them over the
+ * durability rule keeps one escape hatch that always works.
+ *
+ * Pure, so the gate is unit-tested independently of the (side-effecting) spawn.
  */
-export function shouldWrapInTmux(ctx: TmuxWrapContext): boolean {
-  if (!ctx.interactive) return false;
-  if (ctx.platform === 'win32') return false;
-  if (ctx.inTmux) return false;
-  if (ctx.raw) return false;
-  if (ctx.noTmuxEnv) return false;
-  if (!ctx.configEnabled) return false;
-  if (!ctx.tmuxAvailable) return false;
-  return true;
+export function resolveTmuxWrap(ctx: TmuxWrapContext): TmuxWrapDecision {
+  // A headless `-p` run has no TTY to attach, Windows has no tmux path, and
+  // nesting tmux-in-tmux is pointless — none of these can wrap, and none of them
+  // is a remote interactive agent whose life depends on it.
+  if (!ctx.interactive) return { kind: 'bare' };
+  if (ctx.platform === 'win32') return { kind: 'bare' };
+  if (ctx.inTmux) return { kind: 'bare' };
+  // Explicit opt-outs win over the durability rule: `--raw` exists precisely to
+  // get the unwrapped process, and a flag that silently stopped working on a
+  // remote box would be worse than an undurable run the user asked for.
+  if (ctx.raw) return { kind: 'bare' };
+  if (ctx.noTmuxEnv) return { kind: 'bare' };
+  if (!ctx.configEnabled && !ctx.remoteDispatch) return { kind: 'bare' };
+  // Fail loud rather than launch a remote agent that a blink would kill: the
+  // caller refuses the run instead of starting work that cannot be recovered.
+  if (!ctx.tmuxAvailable) return ctx.remoteDispatch ? { kind: 'undurable' } : { kind: 'bare' };
+  return { kind: 'wrap' };
 }
 
 /**
@@ -1857,19 +1897,32 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     args: redactArgs(args.slice(0, 10)),
   });
 
-  // Interactive spawn-wrap: when this device opts in on macOS/Linux, run the
-  // agent INSIDE a shared-socket tmux session (then attach this TTY) so it gets
-  // a unique, addressable %pane. Every failed guard keeps the bare spawn below.
-  const wrapInTmux = shouldWrapInTmux({
+  // Interactive spawn-wrap: run the agent INSIDE a shared-socket tmux session
+  // (then attach this TTY) so it gets a unique, addressable %pane — and, when
+  // the run arrived over `--device`, so it survives the SSH link that carries
+  // it. Every failed guard keeps the bare spawn below.
+  const tmuxWrap = resolveTmuxWrap({
     interactive,
     platform: process.platform,
     inTmux: !!process.env.TMUX,
     raw: options.raw === true,
     noTmuxEnv: process.env.AGENTS_NO_TMUX === '1',
     configEnabled: isTmuxEnabled(),
+    remoteDispatch: process.env[REMOTE_INTERACTIVE_ENV] === '1',
     tmuxAvailable: isTmuxInstalled(),
   });
-  if (wrapInTmux) {
+  if (tmuxWrap.kind === 'undurable') {
+    // Refuse rather than start work a blink would destroy. The launcher's
+    // readiness probe normally catches this first; this is the peer-side
+    // backstop for a box that lost tmux between the probe and the spawn.
+    const msg = `agents: ${machineId()} has no tmux, so a --device run here could not survive a dropped connection.\n`
+      + `  install it:            (apt|dnf|brew) install tmux\n`
+      + `  or accept the risk:    agents run … --device ${machineId()} --raw\n`;
+    process.stderr.write(`\x1b[31m${msg}\x1b[0m`);
+    timer.end({ exitCode: 1, status: 'failed', error: 'remote interactive run has no tmux for durability' });
+    return { exitCode: 1, stdout: '', stderr: msg };
+  }
+  if (tmuxWrap.kind === 'wrap') {
     timer.mark('startup');
     try {
       const result = await runInTmux(options, executable, args);

@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, shouldWrapInTmux, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -558,7 +558,7 @@ describe('resolveShimSpawn (Windows .cmd shim exec, #shims)', () => {
   });
 });
 
-describePosix('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
+describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
   /** The wrap-eligible baseline: interactive, macOS, not nested, no opt-out, tmux present. */
   const base: TmuxWrapContext = {
     interactive: true,
@@ -567,40 +567,65 @@ describePosix('shouldWrapInTmux (interactive spawn-wrap gate)', () => {
     raw: false,
     noTmuxEnv: false,
     configEnabled: true,
+    remoteDispatch: false,
     tmuxAvailable: true,
   };
 
   it('wraps an interactive macOS/Linux run when tmux is available and nothing opts out', () => {
-    expect(shouldWrapInTmux(base)).toBe(true);
-    expect(shouldWrapInTmux({ ...base, platform: 'linux' })).toBe(true);
+    expect(resolveTmuxWrap(base).kind).toBe('wrap');
+    expect(resolveTmuxWrap({ ...base, platform: 'linux' }).kind).toBe('wrap');
   });
 
   it('never wraps a headless run (no TTY to attach)', () => {
-    expect(shouldWrapInTmux({ ...base, interactive: false })).toBe(false);
+    expect(resolveTmuxWrap({ ...base, interactive: false }).kind).toBe('bare');
   });
 
   it('never wraps on Windows', () => {
-    expect(shouldWrapInTmux({ ...base, platform: 'win32' })).toBe(false);
+    expect(resolveTmuxWrap({ ...base, platform: 'win32' }).kind).toBe('bare');
   });
 
   it('never double-wraps when already inside tmux', () => {
-    expect(shouldWrapInTmux({ ...base, inTmux: true })).toBe(false);
+    expect(resolveTmuxWrap({ ...base, inTmux: true }).kind).toBe('bare');
   });
 
   it('respects the --raw and AGENTS_NO_TMUX escape hatches', () => {
-    expect(shouldWrapInTmux({ ...base, raw: true })).toBe(false);
-    expect(shouldWrapInTmux({ ...base, noTmuxEnv: true })).toBe(false);
+    expect(resolveTmuxWrap({ ...base, raw: true }).kind).toBe('bare');
+    expect(resolveTmuxWrap({ ...base, noTmuxEnv: true }).kind).toBe('bare');
   });
 
   it('does not wrap when tmux is not installed', () => {
-    expect(shouldWrapInTmux({ ...base, tmuxAvailable: false })).toBe(false);
+    expect(resolveTmuxWrap({ ...base, tmuxAvailable: false }).kind).toBe('bare');
   });
 
-  it('does not wrap when this device set tmux.enabled=false', () => {
-    expect(shouldWrapInTmux({ ...base, configEnabled: false })).toBe(false);
+  it('does not wrap a LOCAL run when this device set tmux.enabled=false', () => {
+    expect(resolveTmuxWrap({ ...base, configEnabled: false }).kind).toBe('bare');
     // The config opt-out is independent of the per-run ones: it holds even when
     // tmux is installed and no flag/env was passed.
-    expect(shouldWrapInTmux({ ...base, configEnabled: false, tmuxAvailable: true, raw: false })).toBe(false);
+    expect(resolveTmuxWrap({ ...base, configEnabled: false, tmuxAvailable: true, raw: false }).kind).toBe('bare');
+  });
+
+  // RUSH-3125: a run dispatched here over --device holds its TTY on an ssh link,
+  // so a blink SIGHUPs a bare spawn. Durability is not the local operator's
+  // mouse/scrollback preference, so it does not consult tmux.enabled.
+  it('wraps a REMOTE-dispatched run even when this device set tmux.enabled=false', () => {
+    expect(resolveTmuxWrap({ ...base, configEnabled: false, remoteDispatch: true }).kind).toBe('wrap');
+  });
+
+  it('refuses a remote-dispatched run when tmux is missing, instead of spawning something a blink would kill', () => {
+    expect(resolveTmuxWrap({ ...base, remoteDispatch: true, tmuxAvailable: false }).kind).toBe('undurable');
+    // A LOCAL run with no tmux is merely unwrapped — nothing about it needs to
+    // outlive a network link, so it must not be refused.
+    expect(resolveTmuxWrap({ ...base, remoteDispatch: false, tmuxAvailable: false }).kind).toBe('bare');
+  });
+
+  it('lets the explicit per-run opt-outs beat the durability rule', () => {
+    // --raw / AGENTS_NO_TMUX must keep working on a remote box: an escape hatch
+    // that silently stops applying over --device is worse than an undurable run
+    // the user explicitly asked for.
+    expect(resolveTmuxWrap({ ...base, remoteDispatch: true, raw: true }).kind).toBe('bare');
+    expect(resolveTmuxWrap({ ...base, remoteDispatch: true, noTmuxEnv: true }).kind).toBe('bare');
+    // …and an opted-out remote run with no tmux is 'bare', never 'undurable'.
+    expect(resolveTmuxWrap({ ...base, remoteDispatch: true, raw: true, tmuxAvailable: false }).kind).toBe('bare');
   });
 });
 

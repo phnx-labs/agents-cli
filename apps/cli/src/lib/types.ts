@@ -36,6 +36,21 @@ export const RUN_AUTO_KEYWORD = 'auto';
  */
 export const RUN_AUTO_HOST_RESOLVED_ENV = 'AGENTS_RUN_AUTO_HOST_RESOLVED';
 
+/**
+ * Env var a host dispatcher exports into the remote SHELL when it opens an
+ * INTERACTIVE `--device` run: tells the remote CLI that this agent's stdio is a
+ * network link, so the run must be detached (tmux-wrapped) to outlive it.
+ *
+ * Rides the same shell-export prelude as {@link RUN_AUTO_HOST_RESOLVED_ENV},
+ * and for the same reason — exec.ts `resolveTmuxWrap` reads the remote CLI's own
+ * `process.env`, which `--env` flags (they reach only the spawned AGENT) never
+ * touch.
+ *
+ * Set ONLY on the interactive path. A headless `--device` dispatch is already
+ * detached with setsid by `launchDetached`, so it neither needs nor gets this.
+ */
+export const REMOTE_INTERACTIVE_ENV = 'AGENTS_REMOTE_INTERACTIVE';
+
 /** Per-agent run strategy config. */
 export interface AgentRunConfig {
   strategy?: RunStrategy;
