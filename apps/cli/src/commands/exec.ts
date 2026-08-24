@@ -2882,7 +2882,18 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           try {
             const { getAccountInfo } = await import('../lib/agents.js');
             const info = await getAccountInfo(agent);
-            if (!info.signedIn) {
+            // Claude authenticates interactively from a per-version setup-token on a
+            // keychain-less worker (the shim's .oauth_token fallback), which the
+            // native-credential probe above can't see — so don't warn "logged out" when
+            // a setup-token resolves for this version. No-op on macOS, where the
+            // credential lives in the keychain and resolveClaudeSetupToken returns null.
+            let authedViaSetupToken = false;
+            if (!info.signedIn && agent === 'claude' && version) {
+              const { resolveClaudeSetupToken } = await import('../lib/claude-account-token.js');
+              const { getVersionHomePath } = await import('../lib/installations/versions.js');
+              authedViaSetupToken = resolveClaudeSetupToken(getVersionHomePath('claude', version)) !== null;
+            }
+            if (!info.signedIn && !authedViaSetupToken) {
               process.stderr.write(
                 chalk.yellow(`⚠  ${agent} looks logged out — log in with: ${loginHint(agent)}. Launching anyway...\n`),
               );
