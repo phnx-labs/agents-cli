@@ -262,14 +262,14 @@ export function registerRouteCommands(program: Command): void {
     });
 
   routeCmd
-    .command('rm <name>')
-    .alias('remove')
-    .description('Delete a router.')
+    .command('remove <name>')
+    .alias('rm')
+    .description('Remove a router.')
     .action((name: string) => {
       const source = routerSource(name);
       if (source === null) die(`Router '${name}' not found.`);
       if (source !== 'user') {
-        die(`Router '${name}' resolves from the '${source}' layer, not 'user' -- agents route rm can only remove a user-layer router.`);
+        die(`Router '${name}' resolves from the '${source}' layer, not 'user' -- agents route remove can only remove a user-layer router.`);
       }
       const existed = deleteRouter(name);
       if (!existed) die(`Router '${name}' not found.`);

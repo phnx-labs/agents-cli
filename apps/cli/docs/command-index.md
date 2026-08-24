@@ -86,7 +86,6 @@ agents browser done                           Complete a task and close its tabs
 agents browser download                       Set the download directory for a task (defaults to the profile's downloads dir)
 agents browser errors                         Read page errors from a tab
 agents browser evaluate [expression]          Evaluate JavaScript in current tab
-agents browser gc                             Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.
 agents browser history                        Show recent browser task history
 agents browser hover <ref>                    Hover over an element by ref
 agents browser logs                           Read merged rush-app + rush-cli JSONL logs for a task
@@ -96,16 +95,17 @@ agents browser press <key>                    Press a key (Enter, Tab, Escape, e
 agents browser profiles                       Manage browser profiles
 agents browser profiles claim [name]          Move leftover central browser: profiles into this device's declaration file. Only profiles this machine can host are claimed; the rest stay central. Run on the machine that actually has the browser.
 agents browser profiles create <name>         Create a new browser profile on this device
-agents browser profiles delete <name>         Delete a browser profile (drops YAML config + all cached runtime dirs)
 agents browser profiles doctor <name>         Diagnose a browser profile: where it is declared, binary, port, user-data-dir, onboarding state
 agents browser profiles edit <name>           Edit an existing profile in place (stays in the store it already lives in)
 agents browser profiles list                  List all browser profiles and the devices declaring each one (WHERE)
 agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
 agents browser profiles prune                 Remove dead profiles this device declares: browser not installed here, or never started
+agents browser profiles remove <name>         Remove a browser profile (drops YAML config + all cached runtime dirs)
 agents browser profiles rename <from> <to>    Rename a profile, moving its browser data with it (logins survive)
 agents browser profiles seed                  Create a machine-local profile for each installed browser (named <browser>-local), so you can pick or use one instead of hand-crafting each. Idempotent — existing profiles are left untouched.
 agents browser profiles show <name>           Show profile details
 agents browser profiles use [name]            Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.
+agents browser prune                          Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.
 agents browser ps                             List every browser/electron/tunnel process agents has tracked (alive or stale) — works without the daemon
 agents browser record                         Record a video of the page
 agents browser record start                   Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.
@@ -242,8 +242,8 @@ agents devices harnesses                       Per device, one row per installed
 agents devices ignore <name>                   Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).
 agents devices ignored                         List dismissed tailscale nodes — what was dismissed, when, and on which machine.
 agents devices lease                           Manage the disposable cloud boxes used by `agents run --lease`.
-agents devices lease gc                        Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.
 agents devices lease list                      List warm crabbox boxes you can reuse with `agents run --box <slug>`.
+agents devices lease prune                     Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.
 agents devices lease setup                     One-time credential setup so `agents run --lease` works with no env var or flag.
 agents devices lease stop <slug>               Stop (release) a leased crabbox box now.
 agents devices list                            List registered devices with platform, spec (cores/RAM/disk), live load/mem/disk headroom, role, and description.
@@ -251,8 +251,8 @@ agents devices login                           Log agent CLIs into fleet boxes o
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
 agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
 agents devices register <name>                 Register a discovered node and sync the approval through agents.yaml fleet.discovery.
+agents devices remove <name>                   Remove a device from the registry.
 agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
-agents devices rm <name>                       Remove a device from the registry.
 agents devices role [name] [role]              Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.
 agents devices run <cmd...>                    Run a command on every online registered device. Offline devices are skipped. Alias surface: agents fleet run …
 agents devices show <name>                     Show the full profile for one device.
@@ -387,8 +387,8 @@ agents logs stats   Show aggregate audit statistics
 _aliases: mailbox_
 
 ```
-agents mailboxes [id]  Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool
-agents mailboxes gc    Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.
+agents mailboxes [id]   Fleet comms — boxes, live cross-box traffic, threads, and routes across the agent mailbox spool
+agents mailboxes prune  Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.
 ```
 
 ## mcp — Connect agents to external tools via Model Context Protocol servers
@@ -528,7 +528,7 @@ agents projects import         Import project definitions from Linear (via the `
 agents projects link <name>    Attach an external tracker to a project definition (writes linear.projectId + name into the YAML; re-run to pick up a Linear rename).
 agents projects list           List defined projects (definitions only by default; no session scan).
 agents projects pull <name>    Fast-forward every fleet checkout of a named project to its remote default branch.
-agents projects rm <name>      Delete a project definition. Never touches the repo.
+agents projects remove <name>  Remove a project definition. Never touches the repo.
 agents projects save           Create or update one project from a complete ProjectDef JSON object on stdin.
 agents projects set <name>     Change one field on a project definition, preserving everything else.
 agents projects status [name]  Progress card for every project across the whole fleet, or one named project (aliases: view, show). Named form also prints every milestone and the stored definition.
@@ -603,7 +603,7 @@ agents route allow <name> <harness> <models...>         Set (replace) a harness'
 agents route create <name>                              Create a named router with an initial harness + tier allowlist.
 agents route link-account <name> <harness> <account>    Link a durable credential account to a harness under a router.
 agents route list                                       List every configured router.
-agents route rm <name>                                  Delete a router.
+agents route remove <name>                              Remove a router.
 agents route show <name>                                Show a router's harness/model/account allowlist, weights, and hijack flag.
 agents route unlink-account <name> <harness> <account>  Unlink a durable credential account from a harness under a router.
 ```
@@ -614,7 +614,6 @@ agents route unlink-account <name> <harness> <account>  Unlink a durable credent
 agents routines                   Schedule agents to run on a cron schedule or at a specific time. The daemon starts at install/upgrade and on setup when daemon.enabled is not false; routines add also ensures it is running.
 agents routines add [nameOrPath]  Create a new routine from a YAML file or inline flags. Starts the scheduler automatically if it is not already running.
 agents routines catchup           Run any routines that missed their last scheduled fire on demand. The daemon already does this every 5 minutes — use this to force a pass now. Detached: runs in the background under the scheduler.
-agents routines cleanup           Remove expired one-shot routines that already fired and still have a user-layer YAML file.
 agents routines devices [name]    View or change the devices where a routine is enabled. Without flags, opens an interactive picker (requires a TTY).
 agents routines disable [name]    Disable a routine. Stops scheduling future runs; turn it back on with: agents routines enable <name>.
 agents routines doctor [name]     Check a routine's execution-context and harness readiness. Bare or --all checks every routine; --fix applies safe activation repairs (activate a now-ready paused routine; pause a broken active one).
@@ -622,6 +621,7 @@ agents routines edit [name]       Edit a prefilled routine transactionally; inva
 agents routines enable [name]     Enable a routine so the daemon schedules it. Also materialises a project routine (from the current project or a registered one) on first enable — one step, no separate opt-in.
 agents routines list              See all scheduled jobs, when they run next, and their last execution status
 agents routines logs [name]       Show a run’s concise summary — status + extracted report. --full for the raw stdout stream; --run for a specific past run.
+agents routines prune             Remove expired one-shot routines that already fired and still have a user-layer YAML file.
 agents routines remove [name]     Delete a routine. Stops scheduling future runs; past execution logs remain on disk.
 agents routines report [name]     Show the extracted report from the most recent execution. Reports are parsed from agent output on completion.
 agents routines run [name]        Execute a routine right now in the foreground. Ignores the schedule; useful for testing before enabling.

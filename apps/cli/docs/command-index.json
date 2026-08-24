@@ -2133,53 +2133,6 @@
           "subcommands": []
         },
         {
-          "name": "gc",
-          "path": "browser gc",
-          "aliases": [],
-          "description": "Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--dry-run",
-              "description": "List what would be closed without closing anything",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--idle-minutes <n>",
-              "description": "Override the idle window in minutes (default: this device's browser.task-idle-minutes, or 30). 0 disables idle-only closing for this run; session-dead tasks are still closed.",
-              "long": "--idle-minutes",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--json",
-              "description": "Output machine-readable JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "history",
           "path": "browser history",
           "aliases": [],
@@ -2744,42 +2697,6 @@
               "subcommands": []
             },
             {
-              "name": "delete",
-              "path": "browser profiles delete",
-              "aliases": [],
-              "description": "Delete a browser profile (drops YAML config + all cached runtime dirs)",
-              "args": [
-                {
-                  "name": "name",
-                  "required": true,
-                  "variadic": false,
-                  "description": ""
-                }
-              ],
-              "options": [
-                {
-                  "flags": "--keep-cache",
-                  "description": "Leave ~/.agents/.cache/browser/<name>* dirs in place (don't wipe chrome-data)",
-                  "long": "--keep-cache",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
               "name": "doctor",
               "path": "browser profiles doctor",
               "aliases": [],
@@ -3046,6 +2963,44 @@
               "subcommands": []
             },
             {
+              "name": "remove",
+              "path": "browser profiles remove",
+              "aliases": [
+                "delete"
+              ],
+              "description": "Remove a browser profile (drops YAML config + all cached runtime dirs)",
+              "args": [
+                {
+                  "name": "name",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--keep-cache",
+                  "description": "Leave ~/.agents/.cache/browser/<name>* dirs in place (don't wipe chrome-data)",
+                  "long": "--keep-cache",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
               "name": "rename",
               "path": "browser profiles rename",
               "aliases": [],
@@ -3180,6 +3135,55 @@
               "subcommands": []
             }
           ]
+        },
+        {
+          "name": "prune",
+          "path": "browser prune",
+          "aliases": [
+            "gc"
+          ],
+          "description": "Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. The same reaper the daemon already runs every 5 minutes; use this to run it now.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--dry-run",
+              "description": "List what would be closed without closing anything",
+              "long": "--dry-run",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--idle-minutes <n>",
+              "description": "Override the idle window in minutes (default: this device's browser.task-idle-minutes, or 30). 0 disables idle-only closing for this run; session-dead tasks are still closed.",
+              "long": "--idle-minutes",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Output machine-readable JSON",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
         },
         {
           "name": "ps",
@@ -8493,32 +8497,14 @@
           ],
           "subcommands": [
             {
-              "name": "gc",
-              "path": "devices lease gc",
-              "aliases": [],
-              "description": "Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.",
+              "name": "list",
+              "path": "devices lease list",
+              "aliases": [
+                "ls"
+              ],
+              "description": "List warm crabbox boxes you can reuse with `agents run --box <slug>`.",
               "args": [],
               "options": [
-                {
-                  "flags": "--dry-run",
-                  "description": "List reap-safe orphan boxes without stopping any",
-                  "long": "--dry-run",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": false
-                },
-                {
-                  "flags": "--yes",
-                  "description": "Stop them without the interactive confirm",
-                  "long": "--yes",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": false
-                },
                 {
                   "flags": "--json",
                   "description": "Output JSON",
@@ -8543,14 +8529,34 @@
               "subcommands": []
             },
             {
-              "name": "list",
-              "path": "devices lease list",
+              "name": "prune",
+              "path": "devices lease prune",
               "aliases": [
-                "ls"
+                "gc"
               ],
-              "description": "List warm crabbox boxes you can reuse with `agents run --box <slug>`.",
+              "description": "Stop expired, idle lease boxes that are holding your provider quota. Safe: never stops a box in active use.",
               "args": [],
               "options": [
+                {
+                  "flags": "--dry-run",
+                  "description": "List reap-safe orphan boxes without stopping any",
+                  "long": "--dry-run",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": false
+                },
+                {
+                  "flags": "--yes",
+                  "description": "Stop them without the interactive confirm",
+                  "long": "--yes",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": false
+                },
                 {
                   "flags": "--json",
                   "description": "Output JSON",
@@ -8888,6 +8894,35 @@
           "subcommands": []
         },
         {
+          "name": "remove",
+          "path": "devices remove",
+          "aliases": [
+            "rm"
+          ],
+          "description": "Remove a device from the registry.",
+          "args": [
+            {
+              "name": "name",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
           "name": "render",
           "path": "devices render",
           "aliases": [],
@@ -8903,35 +8938,6 @@
               "variadic": false,
               "negate": false
             },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "rm",
-          "path": "devices rm",
-          "aliases": [
-            "remove"
-          ],
-          "description": "Remove a device from the registry.",
-          "args": [
-            {
-              "name": "name",
-              "required": true,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
             {
               "flags": "-h, --help",
               "description": "Show help",
@@ -12941,9 +12947,11 @@
       ],
       "subcommands": [
         {
-          "name": "gc",
-          "path": "mailboxes gc",
-          "aliases": [],
+          "name": "prune",
+          "path": "mailboxes prune",
+          "aliases": [
+            "gc"
+          ],
           "description": "Run a liveness sweep: archive pending messages in dead boxes and prune stale consumed mail.",
           "args": [],
           "options": [
@@ -12967,7 +12975,7 @@
               "negate": false
             }
           ],
-          "examples": "# One-shot sweep using the live session set as the liveness source\n      agents mailboxes gc\n\n      # Machine-readable summary (for scripts / monitors)\n      agents mailboxes gc --json",
+          "examples": "# One-shot sweep using the live session set as the liveness source\n      agents mailboxes prune\n\n      # Machine-readable summary (for scripts / monitors)\n      agents mailboxes prune --json",
           "notes": "A box is considered dead when no live session (the same source\n      `agents sessions --active` uses) owns it. Pending messages in dead boxes\n      are archived as `dropped: dead`; expired messages in live boxes are\n      archived as `dropped: expired'. Both surfaces a failure receipt back to\n      the feed store when the message carried a blockId.",
           "subcommands": []
         }
@@ -15828,12 +15836,12 @@
           "subcommands": []
         },
         {
-          "name": "rm",
-          "path": "projects rm",
+          "name": "remove",
+          "path": "projects remove",
           "aliases": [
-            "remove"
+            "rm"
           ],
-          "description": "Delete a project definition. Never touches the repo.",
+          "description": "Remove a project definition. Never touches the repo.",
           "args": [
             {
               "name": "name",
@@ -17605,12 +17613,12 @@
           "subcommands": []
         },
         {
-          "name": "rm",
-          "path": "route rm",
+          "name": "remove",
+          "path": "route remove",
           "aliases": [
-            "remove"
+            "rm"
           ],
-          "description": "Delete a router.",
+          "description": "Remove a router.",
           "args": [
             {
               "name": "name",
@@ -18151,72 +18159,6 @@
             {
               "flags": "--dry-run",
               "description": "Record the misses and list them without running anything",
-              "long": "--dry-run",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-D, --device <name>",
-              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-              "short": "-D",
-              "long": "--device",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--remote-cwd <dir>",
-              "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-              "long": "--remote-cwd",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--no-tty",
-              "description": "Force non-interactive output for --device runs even from a terminal.",
-              "long": "--no-tty",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": true
-            },
-            {
-              "flags": "--any",
-              "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
-              "long": "--any",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "cleanup",
-          "path": "routines cleanup",
-          "aliases": [],
-          "description": "Remove expired one-shot routines that already fired and still have a user-layer YAML file.",
-          "args": [],
-          "options": [
-            {
-              "flags": "--dry-run",
-              "description": "Show routines that would be removed without deleting files",
               "long": "--dry-run",
               "required": false,
               "optional": false,
@@ -18819,6 +18761,74 @@
               "description": "Show the full raw stdout stream instead of the concise summary",
               "short": "-m",
               "long": "--full",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-D, --device <name>",
+              "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
+              "short": "-D",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--remote-cwd <dir>",
+              "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
+              "long": "--remote-cwd",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-tty",
+              "description": "Force non-interactive output for --device runs even from a terminal.",
+              "long": "--no-tty",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--any",
+              "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
+              "long": "--any",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "prune",
+          "path": "routines prune",
+          "aliases": [
+            "cleanup"
+          ],
+          "description": "Remove expired one-shot routines that already fired and still have a user-layer YAML file.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--dry-run",
+              "description": "Show routines that would be removed without deleting files",
+              "long": "--dry-run",
               "required": false,
               "optional": false,
               "variadic": false,

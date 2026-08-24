@@ -27,7 +27,7 @@ describe('lease command registration', () => {
       'setup',
       'list',
       'stop',
-      'gc',
+      'prune',
     ]);
   });
 });

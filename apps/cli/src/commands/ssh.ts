@@ -2353,8 +2353,8 @@ email) into a single row. Use \`agents devices harnesses\` for the per-install v
     });
 
   devicesCmd
-    .command('rm <name>')
-    .alias('remove')
+    .command('remove <name>')
+    .alias('rm')
     .description('Remove a device from the registry.')
     .action(async (name: string) => {
       const ok = await removeDevice(name);

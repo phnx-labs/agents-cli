@@ -1295,9 +1295,9 @@ export function registerProjectsCommands(program: Command): void {
 
   // ---- rm ----
   projects
-    .command('rm <name>')
-    .alias('remove')
-    .description('Delete a project definition. Never touches the repo.')
+    .command('remove <name>')
+    .alias('rm')
+    .description('Remove a project definition. Never touches the repo.')
     .option('--json', 'Machine-readable success / error')
     .action((name: string, opts: { json?: boolean }) => {
       if (!isSafeProjectName(name)) {

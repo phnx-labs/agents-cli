@@ -1030,8 +1030,9 @@ function registerProfilesCommands(browser: Command): void {
     });
 
   profiles
-    .command('delete <name>')
-    .description('Delete a browser profile (drops YAML config + all cached runtime dirs)')
+    .command('remove <name>')
+    .alias('delete')
+    .description('Remove a browser profile (drops YAML config + all cached runtime dirs)')
     .option('--keep-cache', "Leave ~/.agents/.cache/browser/<name>* dirs in place (don't wipe chrome-data)")
     .action(async (name: string, opts: { keepCache?: boolean }) => {
       await deleteProfile(name);
@@ -1787,7 +1788,8 @@ function registerTaskCommands(browser: Command): void {
     });
 
   browser
-    .command('gc')
+    .command('prune')
+    .alias('gc')
     .description(
       'Close tabs for abandoned tasks — owning agent session exited, or idle past the window — and mark them done. ' +
         'The same reaper the daemon already runs every 5 minutes; use this to run it now.'

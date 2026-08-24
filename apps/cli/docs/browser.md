@@ -356,7 +356,7 @@ Removing a profile drops its config entry and wipes its cache dirs, exactly like
 | `agents browser ps` | List all tracked browser/electron/tunnel processes, alive or stale |
 | `agents browser history` | Recent task history |
 | `agents browser stream [--task <name>]` | Keep one CLI process and daemon IPC socket open; NDJSON requests in, NDJSON responses out |
-| `agents browser gc [--dry-run]` | Run the abandoned-task reaper now instead of waiting for the daemon's next tick |
+| `agents browser prune [--dry-run]` | Run the abandoned-task reaper now instead of waiting for the daemon's next tick (alias: `gc`) |
 
 `start` flags:
 
@@ -405,9 +405,9 @@ alone, and the shared profile window itself is never closed or killed.
 Run the same pass on demand instead of waiting for the next tick:
 
 ```bash
-agents browser gc --dry-run   # list what would be closed, close nothing
-agents browser gc             # actually close it
-agents browser gc --idle-minutes 5   # override the idle window for this run
+agents browser prune --dry-run   # list what would be closed, close nothing
+agents browser prune             # actually close it (alias: agents browser gc)
+agents browser prune --idle-minutes 5   # override the idle window for this run
 ```
 
 ### Driving another machine's browser (`--device`) and consent

@@ -292,8 +292,15 @@ describe('agents route show --json (alias view)', () => {
   });
 });
 
-describe('agents route rm (alias remove)', () => {
-  it('deletes the router file', async () => {
+describe('agents route remove (alias rm)', () => {
+  it('removes the router file via the canonical verb', async () => {
+    await runRoute(['create', 'research', '--harness', 'gemini']);
+    const result = await runRoute(['remove', 'research']);
+    expect(result.exitCode).toBeNull();
+    expect(routerExists('research')).toBe(false);
+  });
+
+  it('the rm alias still removes the router file', async () => {
     await runRoute(['create', 'research', '--harness', 'gemini']);
     const result = await runRoute(['rm', 'research']);
     expect(result.exitCode).toBeNull();
