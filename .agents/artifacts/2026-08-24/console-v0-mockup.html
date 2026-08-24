@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phoenix — Trajectories</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --panel:#111112; --panel2:#161618; --line:#242427; --line2:#2e2e32;
+    --ink:#ededed; --mut:#8a8a90; --mut2:#5f5f66; --lime:#a3e635; --lime-dim:#5f7a1f;
+    --red:#f0616d; --amber:#f5a524; --sky:#56b6e6; --violet:#b18aff;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:'Inter',ui-sans-serif,system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14px;-webkit-font-smoothing:antialiased}
+  .app{display:grid;grid-template-columns:212px 1fr;min-height:100vh}
+  /* rail */
+  .rail{border-right:1px solid var(--line);padding:18px 14px;display:flex;flex-direction:column;gap:2px;background:#0c0c0d}
+  .brand{display:flex;align-items:center;gap:9px;padding:4px 8px 20px}
+  .logo{width:22px;height:22px;border-radius:6px;background:var(--lime);display:grid;place-items:center;color:#0a0a0a;font-weight:800;font-family:var(--mono);font-size:13px}
+  .brand b{font-weight:700;letter-spacing:-.01em}
+  .brand span{color:var(--mut2);font-family:var(--mono);font-size:11px;margin-left:2px}
+  .navi{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:var(--mut);cursor:default;font-weight:500}
+  .navi svg{width:16px;height:16px;opacity:.8}
+  .navi.on{background:#17170f;color:var(--lime)}
+  .navi.on svg{opacity:1}
+  .navi .soon{margin-left:auto;font-size:9px;font-family:var(--mono);color:var(--mut2);border:1px solid var(--line2);padding:1px 5px;border-radius:5px}
+  .rail .grp{color:var(--mut2);font-size:10px;letter-spacing:.09em;text-transform:uppercase;padding:16px 10px 6px;font-weight:600}
+  .rail .foot{margin-top:auto;border-top:1px solid var(--line);padding-top:12px;display:flex;align-items:center;gap:9px}
+  .ava{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,#a3e635,#56b6e6);flex:0 0 auto}
+  .foot .who{line-height:1.25}
+  .foot .who b{font-size:12.5px}
+  .foot .who span{color:var(--mut2);font-size:11px;font-family:var(--mono)}
+  /* main */
+  .main{padding:0 26px 40px;overflow:hidden}
+  .top{display:flex;align-items:center;gap:14px;padding:20px 0 18px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5}
+  .top h1{font-size:19px;margin:0;font-weight:700;letter-spacing:-.02em}
+  .synced{display:flex;align-items:center;gap:7px;color:var(--mut);font-family:var(--mono);font-size:12px}
+  .dot{width:7px;height:7px;border-radius:50%;background:var(--lime);box-shadow:0 0 0 3px rgba(163,230,53,.15)}
+  .spacer{flex:1}
+  .pill{border:1px solid var(--line2);background:var(--panel);border-radius:8px;padding:7px 11px;color:var(--mut);font-size:12.5px;font-family:var(--mono);display:flex;gap:8px;align-items:center}
+  .pill b{color:var(--ink);font-weight:600}
+  .btn{background:var(--lime);color:#0a0a0a;border:none;border-radius:8px;padding:8px 13px;font-weight:700;font-size:12.5px;cursor:default;font-family:var(--sans)}
+  /* stat strip */
+  .strip{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin:20px 0 8px}
+  .stat{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:15px 17px}
+  .stat .k{color:var(--mut);font-size:11.5px;font-weight:500;display:flex;align-items:center;gap:7px}
+  .stat .v{font-family:var(--mono);font-size:26px;font-weight:600;margin-top:8px;letter-spacing:-.02em}
+  .stat .v small{font-size:13px;color:var(--mut2);font-weight:400}
+  .stat .d{font-size:11px;margin-top:4px;font-family:var(--mono)}
+  .up{color:var(--lime)} .down{color:var(--red)}
+  /* layout split */
+  .cols{display:grid;grid-template-columns:1.15fr 1fr;gap:18px;margin-top:18px;align-items:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+  .card > .hd{display:flex;align-items:center;gap:10px;padding:14px 17px;border-bottom:1px solid var(--line)}
+  .card > .hd h2{font-size:14px;margin:0;font-weight:650;letter-spacing:-.01em}
+  .card > .hd .sub{color:var(--mut2);font-size:11.5px;font-family:var(--mono);margin-left:auto}
+  .flag{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--red);border:1px solid rgba(240,97,109,.4);background:rgba(240,97,109,.09);padding:2px 7px;border-radius:6px}
+  /* attention list */
+  .row{display:flex;align-items:center;gap:12px;padding:13px 17px;border-bottom:1px solid var(--line);cursor:default}
+  .row:last-child{border-bottom:none}
+  .row.sel{background:#121109;box-shadow:inset 2px 0 0 var(--lime)}
+  .row:hover{background:var(--panel2)}
+  .agent{width:26px;height:26px;border-radius:7px;flex:0 0 auto;display:grid;place-items:center;font-family:var(--mono);font-size:11px;font-weight:700;color:#0a0a0a}
+  .a-claude{background:#d98a5a} .a-codex{background:#9aa7b2} .a-grok{background:#c9c9cf} .a-kimi{background:#8a7ff0}
+  .rmeta{min-width:0;flex:1}
+  .rmeta .t{font-size:13px;font-weight:550;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .rmeta .m{color:var(--mut2);font-size:11px;font-family:var(--mono);margin-top:3px;display:flex;gap:9px}
+  .sig{display:flex;gap:6px;flex:0 0 auto}
+  .chip{font-family:var(--mono);font-size:10.5px;font-weight:600;padding:3px 7px;border-radius:6px;display:flex;align-items:center;gap:4px;white-space:nowrap}
+  .c-err{color:var(--red);background:rgba(240,97,109,.11);border:1px solid rgba(240,97,109,.28)}
+  .c-stall{color:var(--amber);background:rgba(245,165,36,.10);border:1px solid rgba(245,165,36,.26)}
+  .c-loop{color:var(--violet);background:rgba(177,138,255,.10);border:1px solid rgba(177,138,255,.28)}
+  .c-ok{color:var(--lime);background:rgba(163,230,53,.09);border:1px solid rgba(163,230,53,.24)}
+  .sev{width:34px;text-align:right;font-family:var(--mono);font-size:15px;font-weight:700;flex:0 0 auto}
+  .sev.hi{color:var(--red)} .sev.md{color:var(--amber)} .sev.lo{color:var(--mut)}
+  /* trajectory */
+  .traj{padding:16px 17px}
+  .traj .meta{display:flex;gap:14px;flex-wrap:wrap;color:var(--mut);font-family:var(--mono);font-size:11.5px;margin-bottom:16px}
+  .traj .meta b{color:var(--ink)}
+  .lane{display:grid;grid-template-columns:64px 1fr;align-items:center;gap:10px;margin-bottom:9px}
+  .lane .lbl{font-family:var(--mono);font-size:11px;color:var(--mut);text-align:right;white-space:nowrap}
+  .track{position:relative;height:20px;background:var(--panel2);border-radius:5px;border:1px solid var(--line)}
+  .bar{position:absolute;top:2px;height:14px;border-radius:3px}
+  .b-ok{background:var(--lime-dim)} .b-run{background:#3a5a86}
+  .b-err{background:var(--red);box-shadow:0 0 0 1px rgba(240,97,109,.5)}
+  .b-think{background:#4a4a52}
+  .gap{position:absolute;top:0;height:18px;border-left:2px dashed var(--amber);border-right:2px dashed var(--amber);background:rgba(245,165,36,.07)}
+  .axis{display:grid;grid-template-columns:64px 1fr;gap:10px;margin-top:6px}
+  .axis .ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--mut2)}
+  .fail-note{margin-top:15px;padding:11px 13px;border-radius:9px;background:rgba(240,97,109,.07);border:1px solid rgba(240,97,109,.25);display:flex;gap:10px;align-items:flex-start}
+  .fail-note .ic{color:var(--red);font-family:var(--mono);font-weight:700;flex:0 0 auto}
+  .fail-note .tx{font-size:12.5px;line-height:1.5;color:#d8d2d2}
+  .fail-note .tx b{color:var(--red)}
+  .fail-note code{font-family:var(--mono);font-size:11.5px;background:#1c1c1f;padding:1px 5px;border-radius:4px;color:var(--ink)}
+  /* hotspots */
+  .hot{margin-top:18px}
+  .hotgrid{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .barrow{display:flex;align-items:center;gap:11px;padding:9px 17px}
+  .barrow .n{font-family:var(--mono);font-size:12px;width:120px;flex:0 0 auto;color:var(--ink)}
+  .barrow .meter{flex:1;height:9px;background:var(--panel2);border-radius:5px;overflow:hidden}
+  .barrow .fill{height:100%;border-radius:5px}
+  .barrow .val{font-family:var(--mono);font-size:11.5px;color:var(--mut);width:52px;text-align:right;flex:0 0 auto}
+  /* treemap */
+  .tree{display:flex;gap:5px;padding:15px 17px 17px;height:260px}
+  .tcol{display:flex;flex-direction:column;gap:5px}
+  .tile{border-radius:8px;padding:11px 13px;position:relative;overflow:hidden;color:#0a0a0a}
+  .tile .tn{font-weight:650;font-size:13px;line-height:1.15;letter-spacing:-.01em}
+  .tile .tv{font-family:var(--mono);font-size:11px;font-weight:600;opacity:.72;margin-top:3px}
+  .tile.sm .tn{font-size:11.5px} .tile.sm .tv{font-size:10px}
+  .t-code{background:#8bd44f} .t-code2{background:#6fbf3d} .t-code3{background:#5aa832}
+  .t-research{background:#f0a24d} .t-research2{background:#e88c2f}
+  .t-review{background:#5ec8c0} .t-review2{background:#48b0a8}
+  .t-content{background:#5aa9ea} .t-content2{background:#4a92d6}
+  .t-ops{background:#b697f0} .t-ops2{background:#a07fe0}
+  .tlegend{display:flex;gap:16px;padding:0 17px 15px;flex-wrap:wrap;font-family:var(--mono);font-size:11.5px;color:var(--mut)}
+  .tlegend b{color:var(--ink);font-weight:600}
+  .ldot{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
+  /* failure taxonomy rows */
+  .tax{padding:8px 0}
+  .taxrow{display:flex;align-items:center;gap:11px;padding:9px 17px;border-bottom:1px solid #1c1c1f}
+  .taxrow:last-child{border-bottom:none}
+  .tdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto}
+  .ttool{font-family:var(--mono);font-size:12px;color:var(--ink);width:52px;flex:0 0 auto;font-weight:600}
+  .terr{font-family:var(--mono);font-size:11.5px;color:var(--mut);flex:1;min-width:0}
+  .tcause{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 7px;border-radius:5px;flex:0 0 auto}
+  .cause-hook{color:var(--violet);background:rgba(177,138,255,.12)}
+  .cause-guard{color:var(--sky);background:rgba(86,182,230,.12)}
+  .cause-real{color:var(--red);background:rgba(240,97,109,.11)}
+  .tcount{font-family:var(--mono);font-size:12px;color:var(--mut);width:54px;text-align:right;flex:0 0 auto}
+  .foot-note{color:var(--mut2);font-size:11px;font-family:var(--mono);text-align:center;padding:22px 0 4px;border-top:1px solid var(--line);margin-top:26px}
+  .foot-note b{color:var(--mut)}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- LEFT RAIL -->
+  <aside class="rail">
+    <div class="brand"><div class="logo">φ</div><div><b>Phoenix</b><span>evals</span></div></div>
+    <div class="navi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Fleet</div>
+    <div class="navi on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 12h4l3 8 4-16 3 8h4"/></svg>Trajectories</div>
+    <div class="navi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4"/><path d="M12 17h.01"/><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>Failures</div>
+    <div class="grp">Coming</div>
+    <div class="navi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg>Evals<span class="soon">soon</span></div>
+    <div class="navi"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/></svg>Datasets<span class="soon">soon</span></div>
+    <div class="foot">
+      <div class="ava"></div>
+      <div class="who"><b>Muqsit</b><br><span>muqsit@getrush.ai</span></div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <main class="main">
+    <div class="top">
+      <h1>Trajectories</h1>
+      <div class="synced"><span class="dot"></span>synced 2m ago</div>
+      <div class="spacer"></div>
+      <div class="pill">device <b>all&nbsp;12</b> ▾</div>
+      <div class="pill">agent <b>all</b> ▾</div>
+      <div class="pill">last <b>7d</b> ▾</div>
+      <button class="btn">Import sessions</button>
+    </div>
+
+    <!-- STAT STRIP -->
+    <div class="strip">
+      <div class="stat"><div class="k">Sessions imported</div><div class="v">1,284</div><div class="d up">across 12 devices</div></div>
+      <div class="stat"><div class="k">Median session</div><div class="v">8m 40s</div><div class="d" style="color:var(--mut)">p90 &nbsp;41m</div></div>
+      <div class="stat"><div class="k">Need attention</div><div class="v" style="color:var(--red)">37 <small>· 2.9%</small></div><div class="d down">▲ 6 vs last week</div></div>
+      <div class="stat"><div class="k">Tool error rate</div><div class="v">4.1<small>%</small></div><div class="d down">▲ 0.7pt</div></div>
+    </div>
+
+    <div class="cols">
+      <!-- NEEDS ATTENTION -->
+      <section class="card">
+        <div class="hd"><h2>Needs attention</h2><span class="flag">RANKED BY SEVERITY</span><span class="sub">37 of 1,284</span></div>
+
+        <div class="row sel">
+          <div class="agent a-claude">cl</div>
+          <div class="rmeta"><div class="t">Refactor secrets broker keychain flow</div>
+            <div class="m"><span>agents-cli</span><span>yosemite-s1</span><span>opus-4-8</span></div></div>
+          <div class="sig"><span class="chip c-err">⛔ 9 errors</span><span class="chip c-loop">↻ retry loop</span></div>
+          <div class="sev hi">91</div>
+        </div>
+
+        <div class="row">
+          <div class="agent a-codex">co</div>
+          <div class="rmeta"><div class="t">Wire ShareBackend chooser into publish</div>
+            <div class="m"><span>agents-cli</span><span>yosemite-m0</span><span>gpt-5-codex</span></div></div>
+          <div class="sig"><span class="chip c-stall">⏸ stalled 11m</span><span class="chip c-err">⛔ 4</span></div>
+          <div class="sev hi">84</div>
+        </div>
+
+        <div class="row">
+          <div class="agent a-grok">gr</div>
+          <div class="rmeta"><div class="t">prix factory: warm-path metric split</div>
+            <div class="m"><span>prix</span><span>mac-mini</span><span>grok-code</span></div></div>
+          <div class="sig"><span class="chip c-loop">↻ 3× same edit</span><span class="chip c-err">⛔ 6</span></div>
+          <div class="sev md">72</div>
+        </div>
+
+        <div class="row">
+          <div class="agent a-claude">cl</div>
+          <div class="rmeta"><div class="t">Fix drift-sync apply path test on main</div>
+            <div class="m"><span>agents-cli</span><span>yosemite-m2</span><span>opus-4-8</span></div></div>
+          <div class="sig"><span class="chip c-stall">⏸ stalled 6m</span></div>
+          <div class="sev md">61</div>
+        </div>
+
+        <div class="row">
+          <div class="agent a-kimi">ki</div>
+          <div class="rmeta"><div class="t">Blog: agent you can't find</div>
+            <div class="m"><span>prix</span><span>yosemite-s0</span><span>kimi-k2.5</span></div></div>
+          <div class="sig"><span class="chip c-err">⛔ 3 errors</span></div>
+          <div class="sev lo">44</div>
+        </div>
+
+        <div class="row">
+          <div class="agent a-codex">co</div>
+          <div class="rmeta"><div class="t">Hosted infra: access-control scaffolding</div>
+            <div class="m"><span>agents-cli</span><span>yosemite-m4</span><span>gpt-5-codex</span></div></div>
+          <div class="sig"><span class="chip c-loop">↻ retry loop</span></div>
+          <div class="sev lo">39</div>
+        </div>
+      </section>
+
+      <!-- TRAJECTORY DETAIL -->
+      <section class="card">
+        <div class="hd"><h2>Trajectory</h2><span class="sub">claude · agents-cli · s1 · 18m</span></div>
+        <div class="traj">
+          <div class="meta"><span>turns <b>42</b></span><span>tools <b>118</b></span><span>errors <b style="color:var(--red)">9</b></span><span>tokens <b>7.2M</b></span><span>cost <b>$1.14</b></span><span>outcome <b style="color:var(--red)">aborted</b></span></div>
+
+          <div class="lane"><div class="lbl">git</div><div class="track">
+            <div class="bar b-ok" style="left:2%;width:9%"></div>
+            <div class="bar b-ok" style="left:14%;width:6%"></div>
+            <div class="bar b-err" style="left:58%;width:5%"></div>
+            <div class="bar b-err" style="left:66%;width:5%"></div>
+            <div class="bar b-err" style="left:74%;width:5%"></div>
+          </div></div>
+          <div class="lane"><div class="lbl">Read</div><div class="track">
+            <div class="bar b-ok" style="left:4%;width:4%"></div>
+            <div class="bar b-ok" style="left:22%;width:7%"></div>
+            <div class="bar b-ok" style="left:40%;width:5%"></div>
+          </div></div>
+          <div class="lane"><div class="lbl">Edit</div><div class="track">
+            <div class="bar b-ok" style="left:30%;width:6%"></div>
+            <div class="bar b-err" style="left:48%;width:4%"></div>
+          </div></div>
+          <div class="lane"><div class="lbl">Bash</div><div class="track">
+            <div class="bar b-run" style="left:10%;width:5%"></div>
+            <div class="gap" style="left:82%;width:14%"></div>
+            <div class="bar b-err" style="left:96%;width:3%"></div>
+          </div></div>
+          <div class="lane"><div class="lbl">think</div><div class="track">
+            <div class="bar b-think" style="left:0%;width:3%"></div>
+            <div class="bar b-think" style="left:52%;width:4%"></div>
+            <div class="bar b-think" style="left:64%;width:3%"></div>
+          </div></div>
+          <div class="axis"><div></div><div class="ticks"><span>0m</span><span>4m</span><span>8m</span><span>12m</span><span>16m</span><span>18m</span></div></div>
+
+          <div class="fail-note"><div class="ic">⛔</div><div class="tx"><b>Where it went wrong:</b> at 10m30s a <code>git rebase</code> hit a conflict; the agent retried the same <code>git checkout -- .</code> <b>3×</b> (each blocked by git-guard), stalled 2m14s waiting, then aborted. <b>Correction loop + guard denial</b> — the run never recovered.</div></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- SESSION TOPICS TREEMAP -->
+    <section class="card hot">
+      <div class="hd"><h2>What your sessions are</h2><span class="sub">classified from repo · tools · label — 1,284 sessions</span></div>
+      <div class="tree">
+        <div class="tcol" style="flex:44">
+          <div class="tile t-code" style="flex:5"><div class="tn">Feature work</div><div class="tv">312 · 24%</div></div>
+          <div style="display:flex;gap:5px;flex:4">
+            <div class="tile t-code2" style="flex:3"><div class="tn">Bug fixes</div><div class="tv">168</div></div>
+            <div class="tile t-code3 sm" style="flex:2"><div class="tn">Refactor</div><div class="tv">94</div></div>
+          </div>
+        </div>
+        <div class="tcol" style="flex:24">
+          <div class="tile t-research" style="flex:5"><div class="tn">Research &amp; plan</div><div class="tv">204 · 16%</div></div>
+          <div class="tile t-research2 sm" style="flex:3"><div class="tn">Debugging</div><div class="tv">121</div></div>
+        </div>
+        <div class="tcol" style="flex:16">
+          <div class="tile t-review" style="flex:5"><div class="tn">Code review</div><div class="tv">147 · 11%</div></div>
+          <div class="tile t-review2 sm" style="flex:3"><div class="tn">Release</div><div class="tv">62</div></div>
+        </div>
+        <div class="tcol" style="flex:16">
+          <div class="tile t-content" style="flex:5"><div class="tn">Blog &amp; docs</div><div class="tv">98 · 8%</div></div>
+          <div class="tile t-ops sm" style="flex:4"><div class="tn">Fleet / ops</div><div class="tv">86 · 7%</div></div>
+        </div>
+      </div>
+      <div class="tlegend">
+        <span><span class="ldot" style="background:#6fbf3d"></span>Code <b>43%</b></span>
+        <span><span class="ldot" style="background:#e88c2f"></span>Research <b>25%</b></span>
+        <span><span class="ldot" style="background:#48b0a8"></span>Review · release <b>16%</b></span>
+        <span><span class="ldot" style="background:#4a92d6"></span>Content <b>8%</b></span>
+        <span><span class="ldot" style="background:#a07fe0"></span>Ops <b>7%</b></span>
+        <span style="margin-left:auto;color:var(--mut2)">tile size = session count</span>
+      </div>
+    </section>
+
+    <!-- FAILURE TAXONOMY -->
+    <section class="card hot">
+      <div class="hd"><h2>Where your agents fail</h2><span class="flag">TOOL · ERROR · CAUSE</span><span class="sub">last 7 days</span></div>
+      <div class="hotgrid">
+        <div class="tax">
+          <div class="taxrow"><span class="tdot" style="background:var(--lime)"></span><span class="ttool">Bash</span><span class="terr">exit ≠ 0 — command failed (test/build)</span><span class="tcause cause-real">real</span><span class="tcount">612</span></div>
+          <div class="taxrow"><span class="tdot" style="background:var(--sky)"></span><span class="ttool">git</span><span class="terr">checkout / reset / rebase blocked</span><span class="tcause cause-guard">git-guard</span><span class="tcount">412</span></div>
+          <div class="taxrow"><span class="tdot" style="background:var(--amber)"></span><span class="ttool">Edit</span><span class="terr">path not found — stale after edit</span><span class="tcause cause-real">real</span><span class="tcount">238</span></div>
+          <div class="taxrow"><span class="tdot" style="background:var(--violet)"></span><span class="ttool">Write</span><span class="terr">write to primary tree denied</span><span class="tcause cause-guard">main-branch-guard</span><span class="tcount">176</span></div>
+          <div class="taxrow"><span class="tdot" style="background:var(--red)"></span><span class="ttool">Bash</span><span class="terr">permission denied by auto-mode classifier</span><span class="tcause cause-hook">PreToolUse hook</span><span class="tcount">148</span></div>
+          <div class="taxrow"><span class="tdot" style="background:var(--lime)"></span><span class="ttool">Bash</span><span class="terr">timed out ( &gt; 120s )</span><span class="tcause cause-real">real</span><span class="tcount">96</span></div>
+          <div class="taxrow"><span class="tdot" style="background:var(--mut)"></span><span class="ttool">*</span><span class="terr">malformed tool input — parse error</span><span class="tcause cause-real">real</span><span class="tcount">51</span></div>
+        </div>
+        <div style="padding:8px 0;border-left:1px solid var(--line)">
+          <div style="padding:2px 17px 10px;color:var(--mut2);font-size:11px;font-family:var(--mono);letter-spacing:.05em">CAUSE SPLIT · flagged sessions BY REPO·AGENT</div>
+          <div class="barrow"><div class="n">real failures</div><div class="meter"><div class="fill" style="width:58%;background:var(--red)"></div></div><div class="val">997</div></div>
+          <div class="barrow"><div class="n">guard denials</div><div class="meter"><div class="fill" style="width:34%;background:var(--sky)"></div></div><div class="val">588</div></div>
+          <div class="barrow"><div class="n">hook rejections</div><div class="meter"><div class="fill" style="width:9%;background:var(--violet)"></div></div><div class="val">148</div></div>
+          <div style="height:14px"></div>
+          <div class="barrow"><div class="n">agents-cli · claude</div><div class="meter"><div class="fill" style="width:74%;background:var(--lime-dim)"></div></div><div class="val">18</div></div>
+          <div class="barrow"><div class="n">agents-cli · codex</div><div class="meter"><div class="fill" style="width:52%;background:var(--lime-dim)"></div></div><div class="val">12</div></div>
+          <div class="barrow"><div class="n">prix · grok</div><div class="meter"><div class="fill" style="width:30%;background:var(--lime-dim)"></div></div><div class="val">7</div></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="foot-note">Every panel is derived from data already in <b>sessions.db</b> — spans + durations (<b>trajectory.ts</b> · <b>duration_ms</b>), friction / correction / stall facets (<b>session_insights</b>), and per-call <b>exit_code · error_code · parse_error</b> (<b>tool_calls</b>) that separate a real failure from a guard denial or a hook rejection. Topics classified from repo · tools · label. Imported under your Phoenix account, redacted — the signal that had no screen.</div>
+  </main>
+</div>
+</body>
+</html>

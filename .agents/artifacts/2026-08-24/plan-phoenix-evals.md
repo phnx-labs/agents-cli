@@ -1,8 +1,8 @@
 ---
 kind: plan
 template: plan.v1
-title: "Phoenix Evals — the eval-by-replay loop that connects execution to analytics"
-summary: "We have execution and we have analytics as two disjoint subsystems. Phoenix Evals is the bridge: parse a run into a persisted span tree, score it with an LLM-judge, detect a regression vs the last green baseline, dispatch a coding-agent fix, replay the failing case, merge on green. Build local `agents eval` first (dogfood on our fleet), then lift the same judge in-pod for prix (ZDR, per-client)."
+title: "Phoenix Evals v0 — import your fleet's trajectories, see where your agents fail"
+summary: "UI-first wedge (approved): sign in, import your own sessions.db across every device, and see your trajectories + failure hotspots + session-topic treemap — all from signal agents-cli already computes (trajectory.ts, session_insights, tool_calls). Backed by a protected Cloudflare trace store: a sibling agents-traces worker + R2, private-by-construction (Phoenix-bearer on write AND read, owner-namespaced keys, no public GET). The CLI computes, R2 stores, the worker guards, the console renders. Evals grow out of the failures you spot."
 status: draft
 tracking: RUSH-2667
 project: AGI
@@ -12,197 +12,127 @@ date: 2026-08-24
 
 ## Focus for review
 
-Weigh in on these four; everything else I'll decide and state inline.
+The UI shape and the sequencing are approved. Remaining calls that are yours:
 
-1. **Sequencing** — I propose **local `agents eval` first, dogfooded on our own fleet**, then the same engine lifted into prix per-client. That order, or cloud-first?
-2. **The scoreboard shape** — two terminal layouts in §Public Interface. Pick one (I lean B).
-3. **What "regression" means for the auto-fix trigger** — a score drop vs the last green baseline on the *same task*. Agree, or a different bar?
-4. **Scope of milestone 1** — line drawn at "score a run, persist the span tree, show a scoreboard." The auto-fix→replay→merge loop is milestone 3. Right first cut?
+1. **Storage & protection** (this plan's core) — confirm the trace store below: sibling `agents-traces` worker + R2, private-by-construction (no public GET), derived-signal-only. Or move a line.
+2. **Topic classifier** — the one genuinely-new bit of compute. Cheap heuristic (repo · tools-used · label) to start, LLM label later? I lean heuristic-first.
+3. **Home surface** — prix web console (standalone) vs. inside AGI EXT's Fleet panel vs. both. I lean web console first, AGI EXT mirrors it.
 
 ## Purpose
 
-Your words: *"not just the execution and not just analytics but both combined that enables you to iterate and improve your agents."*
+Muqsit: *"we should be able to import all his chats and show him his trajectories and problematic areas where his agents are failing… build the UI part first."* Approved after two mockup rounds.
 
-The Prix Cloud pitch names the same thing as its one defensible claim — **eval-by-replay that proves the work** (§2 scorecard: the fifth leg no competitor holds). Today we have execution and we have analytics, and **nothing between them**. Four parallel file:line-grounded sweeps confirmed both halves are built and solid, and the bridge is absent in *both* repos:
+Every eval tool (Braintrust, Maxim) makes you author datasets, scorers, and experiments before you see anything. This inverts that: agents-cli **already indexes every run** in `sessions.db` across every device, and already derives the trajectory (`trajectory.ts`), the friction/correction/stall facets (`session_insights`), and per-call outcomes (`tool_calls`). The analysis exists — it has no screen. A Phoenix account (`agents auth`) is the unlock: import your own runs, see your trajectories and where your agents fail. **Evals grow out of the failures you spot** (score this run → add to a suite), so the eval engine is downstream, not the wedge.
 
-| Piece | State today | Evidence |
-| --- | --- | --- |
-| jsonl capture | present — harnesses write natively; we discover/index | `discover.ts:1204-1213` |
-| span/trajectory model | derived by `sessions trace`, then **thrown away** | `trajectory.ts:1-20` ("never persisted") |
-| run stats (tokens/cost/tools) | present, rich, on `sessions.db` + `cloud_executions` | `db.ts:76-135`, migration `113` |
-| deterministic pass/fail | present — 4 criteria, no scoring | `bench/schema.ts:20-37` |
-| **span parser (persisted, typed)** | **absent** | no matches, both repos |
-| **LLM-judge / rubric scorer** | **absent** (only human 1–5 stars) | no matches, both repos |
-| **eval store + replay loop** | **absent** | no matches, both repos |
-
-<div class="artifact-callout">
-The R2 transcript is per-line AES-GCM encrypted server-side (migration <code>113</code>) — the server literally cannot decrypt it. So eval <b>must</b> run in-session, before purge. That is not a limitation: it <i>is</i> the pitch's zero-data-retention wedge, forced by the architecture. Keep only the score and the structure; the content never persists.
-</div>
+The approved v0 console (mockup committed alongside: `console-v0-mockup.html`): a stat strip (sessions imported · median length · need-attention · tool-error rate), a severity-ranked **Needs attention** list, a **trajectory waterfall** with failure markers and a plain-language "where it went wrong," a **session-topic treemap** (Code/Research/Review/Content/Ops), and a **failure taxonomy** classified *tool · error · cause* — separating a real command failure from a `git-guard` denial from a `PreToolUse` hook rejection.
 
 ## Proposed Changes
 
-The rule is **no rebuild**: the span parser is `trajectory.ts` made persistent, the scorer is a new criterion on the existing bench engine, the store is one table beside `sessions.db`.
+The build is **UI + a thin, protected sync** — not a new analysis engine. The one load-bearing design is *how the traces are stored and protected*.
 
 <div class="artifact-behavior">
   <div class="artifact-behavior-panel" data-state="current" data-evidence="capture">
-    <strong>Today:</strong> <code>agents sessions trace &lt;id&gt;</code> derives a per-step trajectory (spanMs, paired tool_use/tool_result, idle gaps) and prints it — then <strong>discards it</strong>. Quality is a human 1–5 star rating in the prix console; nothing scores a run automatically, nothing compares a run to a past baseline, nothing acts on a regression.
+    <strong>Today:</strong> every run is indexed only in a per-device local <code>sessions.db</code>. To see a trajectory you run <code>agents sessions trace &lt;id&gt;</code> in a terminal, one session at a time, on the machine that ran it. There is no cross-device view, no failure ranking, no place a human looks. The signal (friction, stalls, tool-error causes) is computed and thrown away.
   </div>
   <div class="artifact-behavior-panel" data-state="proposed" data-evidence="mockup">
-    <strong>Proposed:</strong> <code>agents eval run &lt;task&gt; --agent claude,codex</code> runs the task per harness, persists each run's span tree, scores it with an LLM-judge against the task rubric, and prints a scoreboard (score 0–100, pass/fail, wall, tokens, $). A drop vs the last green baseline is flagged a regression; <code>agents eval fix</code> dispatches a coding-agent fix, replays the failing case, and opens a PR that merges on green.
+    <strong>Proposed:</strong> sign in once, <code>agents traces sync</code> pushes your derived, redacted trajectories from every device into your Phoenix account, and the console shows your whole fleet — ranked by what needs attention, classified by topic, with each failure attributed to its real cause. Private to you: no trace is ever publicly readable.
   </div>
 </div>
 
+### The trace store — reuse Cloudflare, guard it hard
+
+We already run `agents-share` (`share.agents-cli.sh`) — a Cloudflare Worker + R2 bucket, with a Phoenix-bearer auth seam (`verifyPhoenixToken` → `GET /api/v1/auth/me` → `{userId}`) and owner-namespaced keys (`worker-template.ts:4-12,76-124`, from RUSH-3135). Traces reuse that seam but flip one thing: **the share worker's GET is public; a trace's GET must never be.**
+
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-  <svg class="artifact-diagram" viewBox="0 0 900 380" role="img" aria-label="Execution and analytics exist as two disjoint subsystems with the eval bridge missing between them">
-    <text x="30" y="30" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="15" font-weight="700">EXECUTION — exists</text>
-    <rect x="30" y="45" width="220" height="52" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-    <text x="42" y="72" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">harness writes jsonl</text>
-    <text x="42" y="89" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">discover.ts:1204</text>
-    <rect x="30" y="107" width="220" height="52" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-    <text x="42" y="134" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">sessions.db index</text>
-    <text x="42" y="151" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">tokens·cost·tools db.ts:76</text>
-    <rect x="30" y="169" width="220" height="52" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"/>
-    <text x="42" y="196" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">sessions trace → trajectory</text>
-    <text x="42" y="213" fill="#d08a1a" font-family="JetBrains Mono, monospace" font-size="10">derived, NOT persisted</text>
-    <rect x="30" y="231" width="220" height="52" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-    <text x="42" y="258" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">run --broadcast (ex-bench)</text>
-    <text x="42" y="275" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">exit-code only schema.ts:20</text>
+  <svg class="artifact-diagram" viewBox="0 0 900 380" role="img" aria-label="The CLI computes and redacts a trace shard, PUTs it with a Phoenix bearer to the agents-traces worker which enforces owner isolation into R2, and the console reads it back owner-scoped">
+    <text x="30" y="26" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="14" font-weight="700">YOUR DEVICES (source of truth)</text>
+    <rect x="30" y="40" width="200" height="60" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
+    <text x="42" y="64" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12.5">sessions.db (per device)</text>
+    <text x="42" y="82" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">trajectory · insights · tool_calls</text>
+    <rect x="30" y="112" width="200" height="60" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
+    <text x="42" y="136" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12.5">CLI: compute + REDACT</text>
+    <text x="42" y="154" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">agents traces sync → shard</text>
 
-    <text x="650" y="30" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="15" font-weight="700">ANALYTICS — exists</text>
-    <rect x="650" y="45" width="220" height="52" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-    <text x="662" y="72" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">prix console analytics</text>
-    <text x="662" y="89" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">SQL rollups analytics.ts:61</text>
-    <rect x="650" y="107" width="220" height="52" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-    <text x="662" y="134" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">session_analytics table</text>
-    <text x="662" y="151" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">flat summary migration 072</text>
-    <rect x="650" y="169" width="220" height="52" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"/>
-    <text x="662" y="196" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">quality signal =</text>
-    <text x="662" y="213" fill="#d08a1a" font-family="JetBrains Mono, monospace" font-size="10">human 1–5 stars only</text>
-    <rect x="650" y="231" width="220" height="52" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"/>
-    <text x="662" y="258" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="13">run-stats → cloud_executions</text>
-    <text x="662" y="275" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="10">scalar counters mig 113</text>
+    <text x="335" y="26" fill="#f4b942" font-family="Inter, sans-serif" font-size="14" font-weight="700">agents-traces WORKER (the guard)</text>
+    <rect x="335" y="40" width="230" height="132" rx="10" fill="#1a1206" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="450" y="64" text-anchor="middle" fill="#f4b942" font-family="Inter, sans-serif" font-size="11.5" font-weight="600">PUT + GET both require:</text>
+    <rect x="352" y="76" width="196" height="30" rx="6" fill="#0f0f12" stroke="#38bdf8" stroke-width="1.2"/>
+    <text x="450" y="95" text-anchor="middle" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="10.5">① valid Phoenix bearer</text>
+    <rect x="352" y="110" width="196" height="30" rx="6" fill="#0f0f12" stroke="#38bdf8" stroke-width="1.2"/>
+    <text x="450" y="129" text-anchor="middle" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="10.5">② userId == object owner</text>
+    <rect x="352" y="144" width="196" height="22" rx="6" fill="#160a0c" stroke="#f0616d" stroke-width="1.2"/>
+    <text x="450" y="159" text-anchor="middle" fill="#f0616d" font-family="JetBrains Mono, monospace" font-size="10">NO public GET — private only</text>
 
-    <rect x="300" y="55" width="300" height="240" rx="10" fill="#1a1206" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6 4"/>
-    <text x="450" y="80" text-anchor="middle" fill="#f4b942" font-family="Inter, sans-serif" font-size="13" font-weight="700">THE GAP — Phoenix Evals</text>
-    <text x="450" y="99" text-anchor="middle" fill="#b98a2a" font-family="Inter, sans-serif" font-size="11">absent in BOTH repos</text>
-    <rect x="322" y="115" width="256" height="44" rx="8" fill="#0f0f12" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="450" y="142" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">① span parser (jsonl → typed tree)</text>
-    <rect x="322" y="169" width="256" height="44" rx="8" fill="#0f0f12" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="450" y="196" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">② LLM-judge + rubric scorer</text>
-    <rect x="322" y="223" width="256" height="44" rx="8" fill="#0f0f12" stroke="#38bdf8" stroke-width="1.5"/>
-    <text x="450" y="250" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12">③ regression → fix → replay → merge</text>
+    <text x="660" y="26" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="14" font-weight="700">R2 (encrypted at rest)</text>
+    <rect x="660" y="40" width="210" height="132" rx="8" fill="#0f0f12" stroke="#56b6e6" stroke-width="1.5"/>
+    <text x="672" y="64" fill="#8a8a90" font-family="JetBrains Mono, monospace" font-size="10">bucket: agents-traces</text>
+    <text x="672" y="90" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="10.5">&lt;userId&gt;/&lt;device&gt;/</text>
+    <text x="688" y="110" fill="#8a8a90" font-family="JetBrains Mono, monospace" font-size="10">index.json</text>
+    <text x="688" y="128" fill="#8a8a90" font-family="JetBrains Mono, monospace" font-size="10">sessions/&lt;id&gt;.json</text>
+    <text x="672" y="154" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="9.5">derived signal only · no transcripts</text>
 
-    <line x1="250" y1="195" x2="318" y2="185" stroke="#a3e635" stroke-width="2"/>
-    <line x1="582" y1="185" x2="648" y2="195" stroke="#f59e0b" stroke-width="2" stroke-dasharray="4 4"/>
-    <text x="450" y="330" text-anchor="middle" fill="#8a8a8a" font-family="Inter, sans-serif" font-size="11">execution feeds the parser; the scored signal feeds analytics —</text>
-    <text x="450" y="348" text-anchor="middle" fill="#8a8a8a" font-family="Inter, sans-serif" font-size="11">the dashed edge on the right is what's missing today</text>
+    <rect x="335" y="230" width="230" height="60" rx="8" fill="#0f0f12" stroke="#b18aff" stroke-width="1.5"/>
+    <text x="450" y="254" text-anchor="middle" fill="#c8c8c8" font-family="Inter, sans-serif" font-size="12.5">Console (web / AGI EXT)</text>
+    <text x="450" y="272" text-anchor="middle" fill="#9a7fd0" font-family="JetBrains Mono, monospace" font-size="10">GET owner-scoped → render</text>
+
+    <line x1="230" y1="70" x2="230" y2="142" stroke="#3a3a3f" stroke-width="1.2"/>
+    <line x1="230" y1="142" x2="332" y2="120" stroke="#a3e635" stroke-width="2"/>
+    <text x="262" y="112" fill="#7c9a4e" font-family="JetBrains Mono, monospace" font-size="9.5">PUT + bearer</text>
+    <line x1="565" y1="106" x2="658" y2="106" stroke="#f59e0b" stroke-width="2"/>
+    <line x1="658" y1="150" x2="565" y2="260" stroke="#b18aff" stroke-width="1.5" stroke-dasharray="4 3"/>
+    <text x="470" y="222" fill="#8a8a90" font-family="JetBrains Mono, monospace" font-size="9.5">read-back via the same guarded worker</text>
   </svg>
-  <figcaption><b>Figure.</b> Execution (left) and analytics (right) are both built. The three boxes in the middle band exist in neither repo — that is Phoenix Evals.</figcaption>
+  <figcaption><b>Figure.</b> The CLI computes and redacts locally; the worker is a pure guard (bearer + owner check) in front of R2; the console only ever reads its owner's objects. Private-by-construction: no public GET path exists in this worker.</figcaption>
 </figure>
 
-### ① Persist the span tree — lift `trajectory.ts`, don't fork it
+<div class="artifact-callout">
+Why a <b>separate</b> <code>agents-traces</code> worker/bucket and not a <code>traces/</code> prefix on the public share worker: the security boundary becomes a distinct deployment, so no code path in the artifact worker can <i>ever</i> serve a trace. Fail-safe by isolation, not by an <code>if</code>. Traces have no public/unlisted mode — unlike a shared artifact, a trace is private, full stop.
+</div>
 
-`trajectory.ts` already builds the typed tree; its own docblock says it is *"never persisted onto `SessionEvent` or the SQLite `tool_calls` index."* Milestone 1 persists it under a schema-versioned table so a judge and a later replay can read it back. `TrajectoryStep` (`trajectory.ts:28-88`) already carries every column below — this is a straight projection, redaction already applied.
-
-```diff title=apps/cli/src/lib/session/db.ts
-@@ SCHEMA_VERSION 40 → 41 @@
-+  db.exec(`
-+    CREATE TABLE IF NOT EXISTS eval_spans (
-+      session_id   TEXT NOT NULL,
-+      ordinal      INTEGER NOT NULL,
-+      kind         TEXT NOT NULL,          -- 'tool' | 'thinking'
-+      tool         TEXT,
-+      program      TEXT,                   -- effective shell program (git/bun/gh)
-+      start_ms     INTEGER NOT NULL,
-+      duration_ms  INTEGER NOT NULL,
-+      outcome      TEXT,                   -- 'ok' | 'error' | 'unknown'
-+      exit_code    INTEGER,
-+      label        TEXT NOT NULL,          -- already redacted by trajectory.ts
-+      PRIMARY KEY (session_id, ordinal)
-+    );`);
-```
-
-### ② The judge — a new criterion type on the existing engine
-
-Bench criteria today are deterministic only (`bench/schema.ts:20-37`). Add one variant; the deterministic ones still run first and short-circuit, so the judge fires only when structure passes.
-
-```diff title=apps/cli/src/lib/bench/schema.ts
-@@ inside parseTask's pass.map @@
-   if (type === "command_succeeds")
-     return { type, command: string(criterion.command, `…command`) };
-+  if (type === "llm_judge")
-+    return {
-+      type,
-+      rubric: string(criterion.rubric, `task.pass[${index}].rubric`),
-+      // 0–100; below (baseline − drop) on the same task = regression
-+      min_score: typeof criterion.min_score === "number" ? criterion.min_score : 70,
-+    };
-   throw new Error(`task.pass[${index}].type is unsupported: ${type}`);
-```
-
-The judge itself is a headless `agents run` against the run's **span tree + final diff**, returning structured per-dimension scores (Claude as judge by default; model is a flag). No new provider plumbing — it reuses `executeCellViaAgentsRun` (`bench/runner.ts:33`).
+**The four protection rules:**
+1. **Auth on write AND read** — both verify a Phoenix bearer via the existing `verifyPhoenixToken` seam. No anonymous access.
+2. **Owner-namespaced keys** — every object is `<userId>/…`; PUT enforces the path's first segment == the token's `userId` → 403 on mismatch (reuses the share worker's check).
+3. **Private GET** — every GET requires the bearer and verifies `userId == owner`. No public route exists.
+4. **Redaction at source** (`redactSecrets`, the path `trajectory.ts` labels already use) + R2 encryption at rest. Strict tier later: client-side per-user encryption before upload.
 
 ### Milestones
 
-- **M1 — Score & persist.** `eval_spans` table; lift `trajectory.ts` to persist; `llm_judge` criterion; `agents eval run`/`show`/`ls`; scoreboard. Dogfoodable on our fleet. *No cloud.*
-- **M2 — Baselines & regression.** `eval baseline`; regression vs last green on the same task; house rubric-tasks for our own skills (blog, plan, review).
-- **M3 — The loop.** `eval fix`: regression → dispatch coding-agent fix (isolated worktree) → replay failing case → PR → merge on green. The pitch's improvement loop.
-- **M4 — Lift to prix (product).** Same judge, run **in-pod before purge** (ZDR); per-client scoped; scored signal → control plane, content never persisted. Gated on RUSH-2988.
+- **M1 — Store + sync.** `agents-traces` worker + R2; `agents traces sync` computes/redacts the shard and PUTs it; owner-isolation tests. *Depends on RUSH-3135's `verifyPhoenixToken` seam (PR #3008).*
+- **M2 — Console v0.** The approved surface: needs-attention, trajectory waterfall, topic treemap, failure taxonomy. Reads owner-scoped from the worker.
+- **M3 — Classify + attribute.** Topic classifier (repo · tools · label heuristic); failure-cause attribution (real / guard / hook) from `tool_calls` error fields.
+- **M4 — Evals grow in.** "Score this run / add to a suite" from a flagged trajectory — the `soon` nav items light up (the eval engine from the earlier draft, now demand-pulled).
 
 ## Public Interface
 
-`agents bench` was retired into `run --broadcast` (`command-registry.ts:70`). `eval` is the noun that owns scoring; `run --broadcast` stays the matrix primitive underneath. Every subcommand takes `--json`; `run`/`show` carry a `setHelpSections` examples block so help teaches the loop.
-
 ```bash
-agents eval run <task> --agent claude,codex [--model …]   # score a task across cells
-agents eval show <run-id>                                  # scored span trajectory
-agents eval baseline <task>                                # the current green bar
-agents eval ls [--task <t>] [--json]                       # scoreboard history
-agents eval fix <run-id>                                   # M3: dispatch → replay → PR
+agents traces sync                 # push this device's derived, redacted trajectories (incremental)
+agents traces status               # what's synced, last sync per device, owner
+agents traces open                 # open the console for your account
 ```
 
-**Scoreboard — pick one (Focus #2). Variant A, matrix (agent × task):**
+Worker routes (`agents-traces`, all Phoenix-bearer + owner-checked — no public route):
 
-```text
-  agents eval run skill-blog --agent claude,codex
-
-  TASK          claude                    codex
-  ────────────  ────────────────────────  ────────────────────────
-  skill-blog    ● 88  4.2s  12k  $0.14     ● 71  6.1s  22k  $0.19
-                citations ✓  voice ✓       citations ✗ (0 links) ▼
-
-  baseline (green): claude 86 · codex 79        1 regression ▼ codex
 ```
-
-**Variant B, ranked rows (one run per line, sorted by score) — I lean B:**
-
-```text
-  agents eval run skill-blog --agent claude,codex
-
-  #  AGENT   SCORE  Δbase   PASS  WALL   TOK   COST   NOTES
-  1  claude   88    +2 ▲    ✓     4.2s   12k   $0.14  —
-  2  codex    71    −8 ▼    ✗     6.1s   22k   $0.19  citations 0 links
-
-  regression: codex −8 vs green baseline 79 → `agents eval fix <run>`
+PUT  /<userId>/<device>/index.json            # dashboard shard
+PUT  /<userId>/<device>/sessions/<id>.json    # per-session detail
+GET  /<userId>/...                            # 401 without bearer; 403 if userId != owner
 ```
-
-B reads as a leaderboard (better for `eval ls` history and the future public scoreboard, RUSH-2305) and puts the regression + next action last; A reads as a bench matrix (better for one-shot agent comparison).
 
 ## Validation
 
 | Check | Expected result |
 | --- | --- |
-| `eval_spans` persists | After `eval run`, one row per `TrajectoryStep`; re-scan is idempotent (mtime/size-stamped like `tool_calls`) |
-| Judge is real, not mocked | `eval run` on a task with a bad output scores it low and names the failing rubric dimension |
-| Deterministic-first | A structurally-failing run never reaches the judge (exit/file criteria short-circuit) |
-| Regression detection | A run below `baseline − drop` on the same task is flagged, exit non-zero for CI |
-| Redaction | Persisted `label` carries no secrets (reuses `redactSecrets`, same path as `render`/`share`) |
-| Dogfood | `eval run` over our own skills (blog/plan/review) produces a stable scoreboard across two runs |
+| No public trace | `GET /<userId>/index.json` with no bearer → **401**; with another user's bearer → **403** |
+| Owner-namespaced write | PUT to a path whose first segment != token userId → **403** (namespace mismatch) |
+| Derived-only | A stored blob contains spans/facets/counts and **no** raw prompt/output text (grep for secrets → none) |
+| Redaction at source | Secret-shaped values masked before upload (reuses `redactSecrets`) |
+| Incremental sync | A second `traces sync` with no new sessions uploads nothing (mtime-stamped) |
+| Console owner-scope | The console renders only the signed-in user's sessions across their devices |
 
 ## Risks
 
-- **Judge nondeterminism.** LLM scores wobble run-to-run. Mitigate: score the *diff of structure*, fix the judge model+prompt per task, and treat only a drop beyond a margin as a regression (not any delta).
-- **Rubric authoring cost.** Each house task needs a rubric. Mitigate: start with 3 (blog, plan, review) we already have opinions on; deterministic criteria carry the rest.
-- **`trajectory.ts` coupling.** Persisting its output couples the store to its shape. Mitigate: `SCHEMA_VERSION` bump + the table is a projection, not the source of truth — re-derivable from the transcript.
-- **Prix encryption (M4).** In-pod eval is mandatory, not optional (mig 113). Accepted — it is the ZDR design, and M1–M3 don't touch it.
-- **Scope creep into RUSH-2988.** M4 depends on the control plane; M1–M3 deliberately don't, so value lands before that ticket does.
+- **Public-GET regression.** The whole protection story is "no public read." Mitigate: separate worker/bucket (not a prefix), and a test that a bearer-less GET is 401 — in CI.
+- **Cross-device merge.** v0 merges per-device shards client-side; correct but as-of-last-sync. Mitigate: show "synced Nm ago" per device; D1 is the drop-in if server-side query is needed.
+- **Topic classifier accuracy.** The one new compute. Mitigate: heuristic first (repo · tools · label), visible as a facet the user can correct; LLM label only if the heuristic is weak.
+- **RUSH-3135 dependency.** The trace worker reuses `verifyPhoenixToken`. Mitigate: M1 lands after/with PR #3008; coordinate, don't duplicate the auth.
+- **Redaction completeness.** A missed secret ships to R2. Mitigate: redact at source with the proven path, and never store raw transcript text at all — structure only.
