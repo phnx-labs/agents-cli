@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from 'bun:test';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
-mock.module('vscode', () => ({ window: {} }));
+mock.module('vscode', () => vscodeDouble({ window: {} }));
 
 const { restoreTerminals } = await import('./prewarm.vscode');
 

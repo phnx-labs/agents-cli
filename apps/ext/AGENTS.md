@@ -111,5 +111,13 @@ bun test
 Use `scripts/build.sh <version>` and `scripts/release.sh <version>` for packaged
 builds/releases; do not hand-roll `tsc`, `vsce publish`, or `ovsx publish`.
 
+A test that needs the `vscode` module registers the shared double —
+`mock.module('vscode', () => vscodeDouble({ …surface… }))` from
+`src/testing/vscodeDouble.ts`. bun's mock registry is process-global and
+last-registration-wins, so a hand-rolled partial double strips API constants
+(`TerminalExitReason`, `ConfigurationTarget`) from every *other* file in the
+same run — the failure lands somewhere else and passes standalone.
+`src/testing/vscodeDouble.test.ts` fails on the next hand-rolled one.
+
 Tests sit beside source and exercise real command boundaries. User-visible
 changes update this file, `README.md`, and `CHANGELOG.md`.

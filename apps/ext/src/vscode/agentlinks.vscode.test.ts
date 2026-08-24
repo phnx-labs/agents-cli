@@ -2,12 +2,13 @@ import { describe, test, expect, mock } from 'bun:test';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
 // agentlinks.vscode imports 'vscode' at module load. The code paths exercised
 // here (createSymlinksInDirectory + ensureSymlinksOnWorkspaceOpen with an empty
 // mapping set) only touch fs/path, so an empty stub satisfies the import without
 // needing the (cross-file, process-global) ripgrep mock.
-mock.module('vscode', () => ({}));
+mock.module('vscode', () => vscodeDouble());
 
 // hasEffectiveConfig/loadWorkspaceConfig read VS Code workspace config, which is
 // unavailable in the test host. loadWorkspaceConfig is a counting stub so the

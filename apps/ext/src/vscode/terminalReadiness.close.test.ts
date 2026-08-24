@@ -5,22 +5,20 @@
 // pin the decision and the injected-stop wiring without a real extension host.
 
 import { describe, expect, mock, test } from 'bun:test';
+import { VSCODE_API_CONSTANTS, vscodeDouble } from '../testing/vscodeDouble';
 
-// Only the vscode surface these functions touch. TerminalExitReason mirrors the
-// real enum values (stable since API 1.77): Unknown 0, Shutdown 1, Process 2,
-// User 3, Extension 4.
-mock.module('vscode', () => ({
+// Only the vscode surface these functions touch; TerminalExitReason and the
+// other API constants come from the shared double.
+mock.module('vscode', () => vscodeDouble({
   window: {
     onDidChangeTerminalShellIntegration: () => ({ dispose: () => {} }),
     onDidCloseTerminal: () => ({ dispose: () => {} }),
   },
-  TerminalExitReason: { Unknown: 0, Shutdown: 1, Process: 2, User: 3, Extension: 4 },
 }));
 
-const vscode = await import('vscode');
 const { shouldTearDownAgentOnClose, maybeTearDownAgentOnClose } = await import('./terminalReadiness');
 
-const R = (vscode as unknown as { TerminalExitReason: Record<string, number> }).TerminalExitReason;
+const R = VSCODE_API_CONSTANTS.TerminalExitReason;
 
 describe('shouldTearDownAgentOnClose', () => {
   test('true ONLY for a genuine user close', () => {

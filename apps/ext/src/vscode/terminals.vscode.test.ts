@@ -1,8 +1,10 @@
 import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import type * as vscode from 'vscode';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
-// Minimal vscode mock
-mock.module('vscode', () => ({
+// Only the vscode surface these terminals paths touch; API constants come from
+// the shared double so a suite run does not depend on file load order.
+mock.module('vscode', () => vscodeDouble({
   window: {
     terminals: [],
     onDidCloseTerminal: () => ({ dispose: () => {} }),
@@ -12,7 +14,6 @@ mock.module('vscode', () => ({
   },
   workspace: { workspaceFolders: undefined },
   TabInputTerminal: class {},
-  window2: undefined,
 }));
 
 mock.module('./agents.vscode', () => ({

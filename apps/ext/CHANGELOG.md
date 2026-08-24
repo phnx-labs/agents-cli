@@ -4,6 +4,41 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.334] - 2026-08-23
+
+- **A device reset no longer wipes every other device's Needs-You items.** The
+  presentation store handled a `reset` envelope by calling `attention.clear()`,
+  so one device re-sending its scope emptied the attention map for the whole
+  fleet and cards vanished until each of the other devices happened to reset
+  too. Attention (and agent rows) are now tracked by the scope the envelope
+  arrived on, and a reset clears only that scope. Rows previously inferred
+  their scope from the payload's `sourceDevice` field, which meant a row
+  without one was never evicted; the recorded scope replaces that inference.
+  Source: `src/core/sessionPresentationStore.ts`.
+
+- **Resolution receipts survive the session leaving the list, and carry what
+  was resolved.** `attention.remove` used to push the raw resolution object
+  into the activity lane, so once the session's row aged out there was nothing
+  left tying the receipt to a session or a question. The lane now records a
+  typed `attention.receipt` — session id, question, source, fingerprint, state,
+  and resolved-at — built from the attention item being removed. The card's
+  receipt renders the attention source alongside the state. Source:
+  `src/core/sessionPresentationStore.ts`,
+  `ui/settings/components/mission-control/FeedItem.tsx`.
+
+- **Receipts appear as they happen instead of on the next reload.** The floor
+  push sent agent rows but never the activity lane, so a resolution only became
+  visible when the webview was rebuilt. Every floor update now posts
+  `feedActivity` and the Fleet pane applies it. Source:
+  `src/vscode/settings.vscode.ts`,
+  `ui/settings/components/mission-control/UnifiedAgentsPane.tsx`.
+
+- **The watchdog history view no longer drops `undelivered` events.** The CLI
+  watchdog now records a nudge it could not confirm delivery for as
+  `undelivered` rather than booking it as a delivered nudge; the extension's log
+  parser rejected the unknown kind and silently discarded those lines. Source:
+  `src/core/watchdogLog.ts`.
+
 ## [0.9.333] - 2026-08-23
 
 - **Fleet Needs You now projects `agents feed watch --json`.** The elected

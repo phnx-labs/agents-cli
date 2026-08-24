@@ -1,4 +1,5 @@
 import { describe, test, expect, beforeEach, mock } from 'bun:test';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
 // Minimal vscode mock — the palette handlers show status-bar / error messages;
 // the migration receives its VS Code boundary functions explicitly so this
@@ -6,7 +7,7 @@ import { describe, test, expect, beforeEach, mock } from 'bun:test';
 const statusMessages: string[] = [];
 const errorMessages: string[] = [];
 
-mock.module('vscode', () => ({
+mock.module('vscode', () => vscodeDouble({
   window: {
     state: { focused: true },
     setStatusBarMessage: (msg: string) => {
@@ -19,7 +20,6 @@ mock.module('vscode', () => ({
     },
   },
   workspace: {},
-  ConfigurationTarget: { Global: 1, Workspace: 2 },
 }));
 
 const watchdog = await import('./watchdog.vscode');

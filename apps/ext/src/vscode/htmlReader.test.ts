@@ -1,7 +1,8 @@
 import { describe, expect, mock, test } from 'bun:test';
 import * as path from 'path';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
-mock.module('vscode', () => ({
+mock.module('vscode', () => vscodeDouble({
   Uri: {
     file: (fsPath: string) => ({ fsPath, scheme: 'file', toString: () => `file://${fsPath}` }),
   },

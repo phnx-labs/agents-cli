@@ -7,8 +7,9 @@
 
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import type * as vscode from 'vscode';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
-mock.module('vscode', () => ({
+mock.module('vscode', () => vscodeDouble({
   window: {
     onDidChangeTerminalShellIntegration: () => ({ dispose: () => {} }),
     onDidCloseTerminal: () => ({ dispose: () => {} }),

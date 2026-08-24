@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach, mock } from 'bun:test';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
 let tempDir: string;
 let fakeExtensionPath: string;
@@ -42,7 +43,7 @@ function setupMocks() {
     };
   });
 
-  mock.module('vscode', () => ({
+  mock.module('vscode', () => vscodeDouble({
     window: {
       showWarningMessage: () => {},
       showErrorMessage: () => {},

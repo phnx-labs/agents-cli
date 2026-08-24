@@ -1,8 +1,9 @@
 import { describe, test, expect, mock } from 'bun:test';
+import { vscodeDouble } from '../testing/vscodeDouble';
 
 // swarmifyConfig.vscode imports 'vscode' at module load; the scheduler under
 // test does not touch it, so an empty stub is enough to satisfy the import.
-mock.module('vscode', () => ({}));
+mock.module('vscode', () => vscodeDouble());
 
 const { createCoalescingScheduler } = await import('./swarmifyConfig.vscode');
 
