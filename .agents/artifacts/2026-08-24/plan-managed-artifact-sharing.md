@@ -213,6 +213,6 @@ the redeployed worker — quote every HTTP response.
 
 ## Tracking
 
-- File under **AGI**, linked to the Phoenix-ID line and the "Distribution → first converts" milestone.
+- **RUSH-3135** — Managed artifact sharing — Phoenix-authed, zero-Cloudflare (P1: public+unlisted). AGI / Distribution → first converts.
 - P1 dispatched as a 2-track team (worker auth + CLI driver/flag), worktree-isolated, on worker boxes.
-- P2 (org) and P3 (analytics + search) are follow-on tickets; RUSH-2756 (`--meta` filter) folds into P3.
+- P2 (org) and P3 (analytics + search) are follow-on tickets; **RUSH-2756** (`--meta` filter) folds into P3.
