@@ -101,6 +101,7 @@ describe('publishFile with injected uploader', () => {
       coverUrl: undefined,
       label: 'Report',
       labelSource: 'derived',
+      visibility: 'public',
     });
     expect(uploads).toEqual([
       {
@@ -110,6 +111,7 @@ describe('publishFile with injected uploader', () => {
           authorization: 'Bearer write-token-1',
           'content-type': 'text/html; charset=utf-8',
           'x-share-expires-at': new Date('2030-01-01').toISOString(),
+          'x-share-visibility': 'public',
           'x-share-label': 'Report',
           'x-share-label-source': 'derived',
         },
