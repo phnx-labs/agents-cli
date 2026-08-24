@@ -15,7 +15,7 @@ import {
   helperAssetUrls,
   helperCacheDir,
 } from '../helper-download.js';
-import { parseSha256Asset, sha256File } from '../computer/ssh-tunnel.js';
+import { parseSha256Asset, sha256File } from '../sha256-asset.js';
 import { getCacheDir } from '../state.js';
 
 describe('keychain helper release-asset URLs', () => {

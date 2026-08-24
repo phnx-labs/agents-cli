@@ -17,12 +17,10 @@ import {
   clearHelperToken,
   buildUnregisterTaskScript,
   downloadWinHelperExe,
-  parseSha256Asset,
   pickFreePort,
   readRemoteState,
   writeRemoteState,
   clearRemoteState,
-  sha256File,
   winHelperAssetUrls,
   winHelperCacheDir,
   REMOTE_HELPER_PORT,
@@ -30,6 +28,7 @@ import {
   WIN_HELPER_EXE,
   scpRemotePath,
 } from './ssh-tunnel.js';
+import { parseSha256Asset, sha256File } from '../sha256-asset.js';
 import { SSH_OPTS } from '../ssh-exec.js';
 import { encodePowerShell } from '../browser/drivers/ssh.js';
 

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -11,7 +12,7 @@ import {
   parseTeamId,
   type HelperSpec,
 } from './helper-download.js';
-import { parseSha256Asset, sha256File } from './computer/ssh-tunnel.js';
+import { parseSha256Asset, sha256File } from './sha256-asset.js';
 import {
   MENUBAR_HELPER_ASSET,
   MENUBAR_HELPER_APP_NAME,
@@ -137,5 +138,30 @@ describe('download sha256 gate (real hash + parse used in downloadHelperApp)', (
 
   it('a malformed .sha256 asset fails loud (never a silent accept)', () => {
     expect(() => parseSha256Asset('garbage, not a digest')).toThrow(/malformed .sha256/);
+  });
+});
+
+// RUSH-3113 regression. `helper-download.ts` must be importable as the FIRST
+// local module in a fresh process. It used to reach `computer/ssh-tunnel.ts`
+// for two sha256 helpers, and that graph runs
+// browser/drivers/ssh -> browser/chrome -> secrets/* -> secrets/download-keychain,
+// which imports back into this module while it is still evaluating — before
+// `EXPECTED_TEAM_ID` (line 30) is bound. Every entry point that reached
+// helper-download first died with
+// `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before initialization`,
+// taking drift-sync and self-heal's real-subprocess tests down with it.
+//
+// A SUBPROCESS is the only faithful reproduction: inside vitest the module
+// registry is usually already warm, so the cycle does not re-trigger. Fails on
+// the parent commit, passes here.
+describe('module-init cycle (RUSH-3113)', () => {
+  it('imports standalone in a fresh process without a TDZ error', () => {
+    const mod = path.resolve(process.cwd(), 'src/lib/helper-download.ts');
+    const out = execFileSync(
+      'bun',
+      ['-e', `const m = await import(${JSON.stringify(mod)}); console.log(m.EXPECTED_TEAM_ID);`],
+      { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] },
+    );
+    expect(out.trim()).toBe(EXPECTED_TEAM_ID);
   });
 });

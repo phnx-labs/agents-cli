@@ -22,7 +22,8 @@ import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { randomBytes, createHash } from 'crypto';
+import { randomBytes } from 'crypto';
+import { parseSha256Asset, sha256File } from '../sha256-asset.js';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
 import { sshExec, SSH_OPTS, assertValidSshTarget } from '../ssh-exec.js';
@@ -182,22 +183,6 @@ export function winHelperAssetUrls(version: string): { exe: string; sha256: stri
  * Parse the published `.sha256` asset — `sha256sum` format (`<hex>  <name>`) or
  * a bare hex digest. Throws on anything that does not lead with 64 hex chars.
  */
-export function parseSha256Asset(text: string): string {
-  const m = text.trim().match(/^([A-Fa-f0-9]{64})(\s|$)/);
-  if (!m) throw new Error(`malformed .sha256 release asset: ${JSON.stringify(text.slice(0, 80))}`);
-  return m[1].toLowerCase();
-}
-
-/** Stream a file through sha256 — the exe is ~157MB, never read it whole. */
-export function sha256File(file: string): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const hash = createHash('sha256');
-    fs.createReadStream(file)
-      .on('error', reject)
-      .on('data', (d) => hash.update(d))
-      .on('end', () => resolve(hash.digest('hex')));
-  });
-}
 
 /**
  * Download the exe release asset for this CLI version, verify its sha256

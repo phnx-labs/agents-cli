@@ -21,7 +21,7 @@ import * as path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getCacheDir } from './state.js';
-import { parseSha256Asset, sha256File } from './computer/ssh-tunnel.js';
+import { parseSha256Asset, sha256File } from './sha256-asset.js';
 
 /** GitHub repo whose `v<version>` releases carry the helper assets. */
 export const HELPER_RELEASE_REPO = 'phnx-labs/agents-cli';
