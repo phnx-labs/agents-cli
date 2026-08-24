@@ -106,7 +106,7 @@ enum SingleInstance {
             return claim(fd)
         }
 
-        // The lock is held. A LIVE MenubarHelper owner is a genuine incumbent —
+        // The lock is held. A LIVE "AGI Menu" owner is a genuine incumbent —
         // surface it and leave its in-flight children untouched (main.swift's
         // "only the flock winner reaps" invariant).
         if liveHelperOwnsLock(path: path) {
@@ -149,7 +149,7 @@ enum SingleInstance {
     }
 
     /// True only when the pid recorded in the lock file is a LIVE process running
-    /// a MenubarHelper. Everything else — pid 0/unreadable, a dead pid, a live pid
+    /// the helper executable. Everything else — pid 0/unreadable, a dead pid, a live pid
     /// reused by some other program, or a non-helper orphan holding an inherited fd
     /// — is a stale holder we may self-heal past. Mirrors the pid+path reuse guard
     /// the reaper uses (ChildProcess.executablePath): a pid alone can be reused, so
@@ -158,7 +158,7 @@ enum SingleInstance {
         let pid = readPid(path: path)
         guard pid > 0, kill(pid, 0) == 0,
               let exe = ChildProcess.executablePath(pid) else { return false }
-        return (exe as NSString).lastPathComponent == "MenubarHelper"
+        return (exe as NSString).lastPathComponent == HelperIdentity.executableName
     }
 
     private static func readPid(path: String) -> Int32 {
@@ -198,7 +198,7 @@ enum SingleInstance {
                 ? " — automated relaunch (\(trigger.agent ?? trigger.sessionId ?? "agent")), re-homed without stealing focus"
                 : " — surfaced it instead of adding a second status item"
             FileHandle.standardError.write(Data(
-                "MenubarHelper: already running\(who)\(how).\n".utf8
+                "\(HelperIdentity.executableName): already running\(who)\(how).\n".utf8
             ))
             exit(0)
         }

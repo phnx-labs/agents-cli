@@ -166,7 +166,7 @@ describe('release-attestation-produce.sh', () => {
     // Untracked, already-signed apps exist only in the CALLER checkout.
     for (const [app, binName] of [
       ['Agents CLI.app', 'Agents CLI'],
-      ['MenubarHelper.app', 'MenubarHelper'],
+      ['MenubarHelper.app', 'AGI Menu'],
     ] as const) {
       const dir = path.join(fx.caller, 'apps/cli/bin', app, 'Contents/MacOS');
       fs.mkdirSync(dir, { recursive: true });
@@ -183,7 +183,7 @@ describe('release-attestation-produce.sh', () => {
     const kept = out.match(/kept worktree for inspection: (\S+)/);
     expect(kept, out).toBeTruthy();
     expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI'))).toBe(true);
-    expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/MenubarHelper'))).toBe(true);
+    expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'))).toBe(true);
   });
 
   it('does not seed when the caller checkout has no apps (nothing to reuse; gates decide)', () => {
@@ -419,7 +419,7 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
   fs.mkdirSync(path.join(caller, 'apps/cli/bin/Agents CLI.app/Contents/MacOS'), { recursive: true });
   fs.writeFileSync(path.join(caller, "apps/cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI"), 'fake-keychain-binary\n');
   fs.mkdirSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS'), { recursive: true });
-  fs.writeFileSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/MenubarHelper'), 'fake-menubar-binary\n');
+  fs.writeFileSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'), 'fake-menubar-binary\n');
 
   git(caller, 'add', '-A');
   git(caller, 'commit', '-q', '-m', 'add helper manifest fixture');

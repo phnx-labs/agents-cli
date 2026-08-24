@@ -5,7 +5,7 @@ import Foundation
 // exists for the menu-bar helper. Exercises the real predicates Guards uses,
 // then exits nonzero on any failure so a caller can gate on it.
 //
-//   MENUBAR_GUARD_TEST=1 MenubarHelper
+//   MENUBAR_GUARD_TEST=1 "AGI Menu"
 enum GuardsSelfTest {
     private static var failures = 0
 
@@ -51,11 +51,11 @@ enum GuardsSelfTest {
     // `--self-test` is the flag that actually leaked a second status-bar app:
     // unrecognized, so it fell through to app.run() and held Cmd-Shift-V.
     private static func testArgumentRejection() {
-        check(Guards.unrecognizedArguments(["MenubarHelper"]).isEmpty,
+        check(Guards.unrecognizedArguments([HelperIdentity.executableName]).isEmpty,
               "no arguments -> accepted")
-        check(Guards.unrecognizedArguments(["MenubarHelper", "--self-test"]) == ["--self-test"],
+        check(Guards.unrecognizedArguments([HelperIdentity.executableName, "--self-test"]) == ["--self-test"],
               "--self-test -> rejected")
-        check(Guards.unrecognizedArguments(["MenubarHelper", "-x", "y"]) == ["-x", "y"],
+        check(Guards.unrecognizedArguments([HelperIdentity.executableName, "-x", "y"]) == ["-x", "y"],
               "unknown flag + value -> both reported")
     }
 

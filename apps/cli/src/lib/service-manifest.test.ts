@@ -98,7 +98,7 @@ describe('every generated service manifest carries the caller HOME (RUSH-2639)',
   // `agents` call it made bootstrapped that home's ~/.agents.
   it('the menu-bar launchd plist bakes HOME and a namespaced Label', () => {
     withRedirectedHome((home) => {
-      const plist = generateServicePlist('/some/MenubarHelper.app/Contents/MacOS/MenubarHelper');
+      const plist = generateServicePlist('/some/MenubarHelper.app/Contents/MacOS/AGI Menu');
       expect(plist).toContain(`<key>HOME</key>`);
       expect(plist).toContain(`<string>${home}</string>`);
       expect(plist).toContain(`<key>AGENTS_REAL_HOME</key>`);

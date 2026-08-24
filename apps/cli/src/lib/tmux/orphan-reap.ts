@@ -237,7 +237,7 @@ export const DETACHED_HELPER_RULES: DetachedHelperRule[] = [CLAUDE_BG_DAEMON];
 export function isProtectedAgentsService(args: string): boolean {
   return /\b__daemon-run\b/.test(args)
     || /\bsecrets\s+_agent-run\b/.test(args)
-    || /\bMenubarHelper\b/.test(args)
+    || /\bAGI Menu\b/.test(args)
     || /\bAgents CLI\.app\b/.test(args);
 }
 

@@ -35,13 +35,13 @@ if [ "$MODE" = "release" ]; then
     # menu-bar helper (not a silent single-arch fallback that breaks Intel Macs).
     swift build -c release --triple arm64-apple-macosx14.0
     swift build -c release --triple x86_64-apple-macosx14.0
-    SRC=".build/MenubarHelper-universal"
+    SRC=".build/AGI Menu-universal"
     lipo -create -output "$SRC" \
-        ".build/arm64-apple-macosx/release/MenubarHelper" \
-        ".build/x86_64-apple-macosx/release/MenubarHelper"
+        ".build/arm64-apple-macosx/release/AGI Menu" \
+        ".build/x86_64-apple-macosx/release/AGI Menu"
 else
     swift build
-    SRC=".build/debug/MenubarHelper"
+    SRC=".build/debug/AGI Menu"
 fi
 
 # Gate the artifact on the headless self-tests (single-instance flock, bounded
@@ -75,7 +75,11 @@ APP="$DEST_DIR/MenubarHelper.app"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
-cp "$SRC" "$APP/Contents/MacOS/MenubarHelper"
+# The bundle FOLDER keeps its historical name (MenubarHelper.app) — release
+# asset names, download URLs, and the tarball path are unaffected. Only the
+# executable INSIDE it (CFBundleExecutable below) is "AGI Menu": that is the
+# literal launchd execs directly and what TCC shows (RUSH-3101).
+cp "$SRC" "$APP/Contents/MacOS/AGI Menu"
 # Icon source is the current agents-cli mark (assets/app-icon.svg -> app-icon.png):
 # the lime-tile lowercase `a` shared with the agi-cli web favicon and the menu-bar
 # glyph (Icon.swift), NOT the legacy assets/logo.png gradient `A`. This drives the
@@ -116,7 +120,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
     <key>CFBundleExecutable</key>
-    <string>MenubarHelper</string>
+    <string>AGI Menu</string>
     <key>CFBundleIdentifier</key>
     <string>${BUNDLE_ID}</string>
     <key>CFBundleName</key>

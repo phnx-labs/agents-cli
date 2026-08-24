@@ -33,6 +33,21 @@ const INSTALL_DIR_NAME = 'agents-cli';
 const SERVICE_LABEL_BASE = 'com.phnx-labs.agents-menubar';
 
 /**
+ * The bundled executable's basename (RUSH-3101) — what launchd execs directly
+ * inside `Contents/MacOS/`, bypassing LaunchServices name resolution. Before
+ * this it was `MenubarHelper`, so that raw Mach-O basename is exactly what
+ * macOS showed in System Settings > Privacy & Security > Accessibility and in
+ * the "would like to control this computer" prompt. Renaming this constant
+ * alone does NOT touch the bundle id, Team ID, or designated requirement
+ * (`SERVICE_LABEL_BASE`, `MENUBAR_HELPER_BUNDLE_ID` in download-menubar.ts) —
+ * those are what keep the existing Accessibility grant alive across upgrades.
+ * Every basename-matching check reads this constant rather than re-deriving
+ * the string; the Swift side has its own equal in
+ * `menubar/Sources/MenubarHelper/HelperIdentity.swift`.
+ */
+export const MENUBAR_HELPER_EXECUTABLE_NAME = 'AGI Menu';
+
+/**
  * launchd Label for this process's helper — the production identifier for a
  * real invocation, namespaced under a redirected HOME (RUSH-2639). launchd
  * routes bootout/bootstrap/kickstart by identifier alone, so without this a
@@ -93,13 +108,13 @@ function readInstalledMenubarVersion(): string | null {
 
 /** Executable inside the installed bundle. */
 function installedExecutablePath(): string {
-  return path.join(installedAppPath(), 'Contents', 'MacOS', 'MenubarHelper');
+  return path.join(installedAppPath(), 'Contents', 'MacOS', MENUBAR_HELPER_EXECUTABLE_NAME);
 }
 
 /**
- * Absolute path to the installed MenubarHelper executable if it exists on disk,
- * else null. The desktop notifier (notify-desktop.ts) routes daemon
- * notifications through this one-shot (`MenubarHelper --notify ...`) so they
+ * Absolute path to the installed menu-bar helper executable if it exists on
+ * disk, else null. The desktop notifier (notify-desktop.ts) routes daemon
+ * notifications through this one-shot (`"AGI Menu" --notify ...`) so they
  * carry the agents-cli mark rather than the generic osascript icon. Null on
  * non-darwin or when the helper is not installed (menu bar disabled, a Linux
  * package, or a dev checkout without a built bundle).
@@ -1055,7 +1070,7 @@ function parsePsLines(psOutput: string): Map<number, string> {
  *
  * Identity comes from `comm` (the resolved executable), never from a substring
  * of the command line: matching the latter flags any shell that merely mentions
- * MenubarHelper. `command` is consulted only to drop `--notify` one-shots.
+ * the helper's name. `command` is consulted only to drop `--notify` one-shots.
  */
 export function classifyMenubarProcesses(
   commOutput: string,
@@ -1066,7 +1081,7 @@ export function classifyMenubarProcesses(
   const own: MenubarProcess[] = [];
   const foreign: MenubarProcess[] = [];
   for (const [pid, executable] of parsePsLines(commOutput)) {
-    if (path.basename(executable) !== 'MenubarHelper') continue;
+    if (path.basename(executable) !== MENUBAR_HELPER_EXECUTABLE_NAME) continue;
     // `--notify` is a one-shot that posts a notification and exits; it runs the
     // installed binary but never claims the status item or the chords.
     if ((commands.get(pid) || '').includes('--notify')) continue;

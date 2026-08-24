@@ -9,8 +9,8 @@ import Carbon.HIToolbox
 // (see Guards.swift).
 //
 // Usage:
-//   MenubarHelper                 # status item + global hotkeys (launchd-started)
-//   MenubarHelper --notify ...    # one-shot: post a desktop notification, exit
+//   "AGI Menu"                     # status item + global hotkeys (launchd-started)
+//   "AGI Menu" --notify ...        # one-shot: post a desktop notification, exit
 //   AGENTS_BIN=/path/to/agents    # override the `agents` binary location
 
 // One-shot notification delivery for the daemon (RUSH-2030). Posts and exits
@@ -119,7 +119,7 @@ SingleInstance.enforceOrSurface()
 let reaped = ChildProcess.reapOrphansFromPreviousLaunch()
 if reaped > 0 {
     FileHandle.standardError.write(Data(
-        "MenubarHelper: reaped \(reaped) orphaned CLI child process group(s) from a previous launch.\n".utf8
+        "\(HelperIdentity.executableName): reaped \(reaped) orphaned CLI child process group(s) from a previous launch.\n".utf8
     ))
 }
 

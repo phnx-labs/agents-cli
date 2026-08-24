@@ -23,19 +23,22 @@ import {
 } from './install-menubar.js';
 
 // Regression guard for the STOLEN-HOTKEY blind spot. Status used
-// `pgrep -f MenubarHelper`, which matches ANY process with that name — so a
-// stray dev build launched over ssh reported `running: yes` while it, not the
-// installed bundle, held the global Cmd-Shift-V chord (RegisterEventHotKey is
-// first-come). The paste was dead and status said everything was fine. The
-// fixtures below are the real `ps -axo pid=,command=` lines from that incident.
+// `pgrep -f MenubarHelper` (the executable's pre-RUSH-3101 name), which matches
+// ANY process with that name — so a stray dev build launched over ssh reported
+// `running: yes` while it, not the installed bundle, held the global
+// Cmd-Shift-V chord (RegisterEventHotKey is first-come). The paste was dead and
+// status said everything was fine. The fixtures below are the real
+// `ps -axo pid=,command=` lines from that incident, renamed to the current
+// executable ("AGI Menu") — the bundle folder itself is still MenubarHelper.app.
 describe('classifyMenubarProcesses', () => {
-  // Note the space in "Application Support" — the reason pid/field parsing takes
-  // the rest of the line rather than splitting on whitespace.
+  // Note the space in "Application Support" (and in "AGI Menu" itself) — the
+  // reason pid/field parsing takes the rest of the line rather than splitting
+  // on whitespace.
   const INSTALLED =
-    '/Users/muqsit/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/MenubarHelper';
+    '/Users/muqsit/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/AGI Menu';
   // Orphaned SwiftPM debug build from a deleted worktree, started over ssh.
   const ORPHAN =
-    '/Users/muqsit/src/github.com/muqsitnawaz/agents-cli/.agents/worktrees/menubar-verify/apps/cli/menubar/.build/arm64-apple-macosx/debug/MenubarHelper';
+    '/Users/muqsit/src/github.com/muqsitnawaz/agents-cli/.agents/worktrees/menubar-verify/apps/cli/menubar/.build/arm64-apple-macosx/debug/AGI Menu';
 
   it('reports the installed bundle as running', () => {
     const r = classifyMenubarProcesses(`74027 ${INSTALLED}`, `74027 ${INSTALLED}`, INSTALLED);
@@ -44,7 +47,7 @@ describe('classifyMenubarProcesses', () => {
   });
 
   it('flags a stray build as foreign, not as the installed helper running', () => {
-    const r = classifyMenubarProcesses(`58619 ${ORPHAN}`, `58619 .build/debug/MenubarHelper --self-test`, INSTALLED);
+    const r = classifyMenubarProcesses(`58619 ${ORPHAN}`, `58619 .build/debug/AGI Menu --self-test`, INSTALLED);
     expect(r.own).toEqual([]);
     expect(r.foreign).toEqual([{ pid: 58619, executable: ORPHAN }]);
   });
@@ -88,10 +91,10 @@ describe('classifyMenubarProcesses', () => {
 
   // The false positive that a command-line substring match produced: this
   // shell is not a helper, it merely mentions one.
-  it('does not flag a shell whose command line merely mentions MenubarHelper', () => {
+  it('does not flag a shell whose command line merely mentions the helper name', () => {
     const r = classifyMenubarProcesses(
       '18933 /bin/zsh',
-      '18933 /bin/zsh -c cp /bin/sleep .build/debug/MenubarHelper',
+      '18933 /bin/zsh -c cp /bin/sleep .build/debug/AGI Menu',
       INSTALLED,
     );
     expect(r.own).toEqual([]);
@@ -111,9 +114,9 @@ describe('classifyMenubarProcesses', () => {
 // a `ps` listing instead would risk keeping the UNMANAGED copy alive — the
 // duplicate would then come straight back at next login.
 describe('processesToEnd', () => {
-  const A = { pid: 43244, executable: '/Applications/…/MenubarHelper' };
-  const B = { pid: 93684, executable: '/Applications/…/MenubarHelper' };
-  const STRAY = { pid: 58619, executable: '/tmp/.build/debug/MenubarHelper' };
+  const A = { pid: 43244, executable: '/Applications/…/AGI Menu' };
+  const B = { pid: 93684, executable: '/Applications/…/AGI Menu' };
+  const STRAY = { pid: 58619, executable: '/tmp/.build/debug/AGI Menu' };
 
   it('ends both copies of a duplicated installed helper', () => {
     expect(processesToEnd({ instances: [A, B], foreignInstances: [] })).toEqual([A, B]);
@@ -463,7 +466,7 @@ darwinOnly('menubar launch guard requires notarization (real codesign/spctl)', (
     const app = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(path.join(app, 'Contents', 'MacOS'), { recursive: true });
     // A real Mach-O so codesign has something to sign; /bin/echo is stable.
-    fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', 'MenubarHelper'));
+    fs.copyFileSync('/bin/echo', path.join(app, 'Contents', 'MacOS', 'AGI Menu'));
     // Ad-hoc sign it: the signature is valid, but it is NOT notarized — the exact
     // state a non-Developer-ID / un-notarized cut leaves the bundle in.
     spawnSync('codesign', ['--force', '--sign', '-', '--identifier', 'com.phnx-labs.agents-menubar', app], { stdio: 'ignore' });
@@ -525,7 +528,7 @@ darwinOnly('service-manager registration gating (RUSH-2968)', () => {
 // 18 cores, load average 490. The throttle paces the respawn; ChildProcess.swift
 // bounds and reaps the children.
 describe('generateServicePlist — launchd crash-loop throttle', () => {
-  const plist = generateServicePlist('/Users/x/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/MenubarHelper');
+  const plist = generateServicePlist('/Users/x/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/AGI Menu');
 
   it('sets a ThrottleInterval so a startup crash-loop cannot respawn every 10s', () => {
     expect(plist).toContain('<key>ThrottleInterval</key>');
@@ -586,7 +589,7 @@ describe('menubarHealReplacedBundle', () => {
 });
 
 describe('restartMenubarHelperAfterSwap', () => {
-  const OWN = [{ pid: 74027, executable: '/x/MenubarHelper' }];
+  const OWN = [{ pid: 74027, executable: '/x/AGI Menu' }];
 
   it('kickstarts -k the launchd job and does not fall back when it succeeds', () => {
     const savedAllow = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;

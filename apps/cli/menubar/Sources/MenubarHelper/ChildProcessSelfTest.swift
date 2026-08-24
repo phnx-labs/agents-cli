@@ -5,7 +5,7 @@ import Foundation
 // env-gated self-test idiom (see GuardsSelfTest.swift / SingleInstanceSelfTest.swift):
 // no XCTest target exists for the menu-bar helper.
 //
-//   MENUBAR_CHILD_TEST=1 MenubarHelper
+//   MENUBAR_CHILD_TEST=1 "AGI Menu"
 //
 // These spawn REAL processes — no mocking, per the repo convention. Each case is
 // one of the properties whose absence produced the runaway: an unbounded call, a
@@ -110,7 +110,7 @@ enum ChildProcessSelfTest {
     private static func testReapSkipsPidWhoseExecutableChanged() {
         let file = "\(NSTemporaryDirectory())menubar-children-reuse-\(getpid())"
         try? FileManager.default.removeItem(atPath: file)
-        // This very process is alive, but its executable is MenubarHelper, not
+        // This very process is alive, but its executable is the helper, not
         // /bin/sleep — so the guard must refuse to treat it as a stale child.
         let me = getpid()
         ChildProcess.Registry.register(pid: me, path: "/bin/sleep", file: file)
@@ -118,13 +118,14 @@ enum ChildProcessSelfTest {
         let mismatched = recorded.filter { ChildProcess.executablePath($0.pid) != $0.path }
         check(mismatched.count == 1,
               "a live pid whose executable no longer matches is not reapable")
-        // Production builds may name the binary MenubarHelper-universal (lipo
-        // of arm64+x86_64). Match the last path component's prefix, not a hard
-        // suffix of "MenubarHelper" alone — that failed every home-base publish
-        // of 1.22.2 with got …/MenubarHelper-universal.
+        // Production builds may name the binary "AGI Menu-universal" (lipo of
+        // arm64+x86_64). Match the last path component's prefix, not a hard
+        // suffix of the executable name alone — that failed every home-base
+        // publish of 1.22.2 with got …/MenubarHelper-universal (RUSH-3101 renamed
+        // the bundled executable; the same lipo-suffix caveat still applies).
         let exe = ChildProcess.executablePath(me) ?? ""
         let base = (exe as NSString).lastPathComponent
-        check(base.hasPrefix("MenubarHelper"),
+        check(base.hasPrefix(HelperIdentity.executableName),
               "executablePath resolves a live pid (got \(exe.isEmpty ? "nil" : exe))")
         try? FileManager.default.removeItem(atPath: file)
     }

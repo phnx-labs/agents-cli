@@ -18,7 +18,7 @@ import Foundation
 //      launchd-managed bundle that IS trusted, and the paste silently dies.
 //   2. Started with an unrecognized flag. Every mode other than `--notify` is
 //      env-gated, so an unknown flag used to fall straight through to
-//      `app.run()` — a stray `MenubarHelper --self-test` from a verify run left
+//      `app.run()` — a stray `"AGI Menu" --self-test` from a verify run left
 //      a permanent second status-bar app holding Cmd-Shift-V.
 //
 // The supported launch path is `launchctl bootstrap gui/<uid>`
@@ -55,8 +55,8 @@ enum Guards {
             unrecognized argument\(extra.count == 1 ? "" : "s"): \(extra.joined(separator: " "))
 
             usage:
-              MenubarHelper              status item + global hotkeys
-              MenubarHelper --notify …   post one notification and exit
+              "AGI Menu"              status item + global hotkeys
+              "AGI Menu" --notify …   post one notification and exit
 
             every other mode is env-gated:
               MENUBAR_BENCH=1  MENUBAR_CLIP_TEST=1  MENUBAR_ISSUE_TEST=1  MENUBAR_GUARD_TEST=1
@@ -70,7 +70,7 @@ enum Guards {
             // so accordion instrumentation can be exercised without a GUI terminal.
             if ProcessInfo.processInfo.environment["MENUBAR_DEBUG_ALLOW_SSH"] == "1" {
                 FileHandle.standardError.write(Data(
-                    "MenubarHelper: MENUBAR_DEBUG_ALLOW_SSH=1 — allowing remote-shell launch despite \(variable)\n".utf8
+                    "\(HelperIdentity.executableName): MENUBAR_DEBUG_ALLOW_SSH=1 — allowing remote-shell launch despite \(variable)\n".utf8
                 ))
             } else {
             // #endregion
@@ -93,7 +93,7 @@ enum Guards {
     }
 
     private static func fail(_ message: String) -> Never {
-        FileHandle.standardError.write(Data("MenubarHelper: \(message)\n".utf8))
+        FileHandle.standardError.write(Data("\(HelperIdentity.executableName): \(message)\n".utf8))
         exit(2)
     }
 }

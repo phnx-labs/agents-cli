@@ -904,6 +904,19 @@ macOS re-validates each new version against the requirement stored with the gran
 the grant persists. The gate hard-fails a release whose DR drops the pinned bundle
 id or Team ID (a wrong/absent team, an ad-hoc signature, a CDHash-pinned DR), because
 that would silently revoke every user's grant and re-prompt them on the next paste.
+The compiled executable INSIDE the bundle is named **"AGI Menu"**
+(`menubar/Package.swift`'s `products:` entry — RUSH-3101), separately from the
+bundle FOLDER, which keeps its historical name `MenubarHelper.app`. Before this,
+launchd's `ProgramArguments` exec'd the bundle's Mach-O directly
+(`installedExecutablePath()` in `install-menubar.ts`), bypassing LaunchServices
+name resolution, so macOS fell back to `CFBundleExecutable` — which read
+`MenubarHelper` — for both the Accessibility list row and the "would like to
+control this computer" prompt. Renaming ONLY the executable (not the bundle id,
+Team ID, or designated requirement above) fixes the label without touching what
+keeps the existing grant alive. Every basename-matching check moved together:
+`classifyMenubarProcesses` / `installedExecutablePath` (`install-menubar.ts`),
+`SingleInstance.swift`'s `liveHelperOwnsLock`, and the `HelperIdentity.swift`
+constant the Swift side reads it from.
 It is Developer-ID signed
 **and notarized + stapled** ([`menubar/scripts/build.sh`](menubar/scripts/build.sh),
 run inside the release's `agents secrets exec apple.com` context): Gatekeeper on
@@ -1007,7 +1020,7 @@ close-on-exec default), and the bare-`Process` one-shots (`runDetached` /
 `runMonitored`) are meant to *outlive* the helper — so the flag on the fd, not the
 spawn site, is what keeps the lock out of every child. The helper never execs
 itself, so it keeps the fd for life. And when the flock is
-held but **no LIVE `MenubarHelper` owns it** — the lock-file pid is dead, or belongs
+held but **no LIVE `"AGI Menu"` owns it** — the lock-file pid is dead, or belongs
 to some other program by reuse (`liveHelperOwnsLock` checks liveness + `proc_pidpath`
 basename) — `acquire` reaps the leaked orphan and retries the lock once, instead of
 surfacing into the deadlock. Only a genuine live incumbent is ever surfaced, so a
@@ -1059,7 +1072,7 @@ the bug.
 
 Poll intervals must stay well above the call's real cost:
 `StatusItemController.doctorRefreshInterval` is 15 min against a 136s command
-(it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 MenubarHelper` exercises
+(it was 60s — a >100% duty cycle). `MENUBAR_CHILD_TEST=1 "AGI Menu"` exercises
 all of it against real processes, including reaping a real surviving orphan and
 proving a spawned child never inherits the single-instance flock fd.
 Separately, **`doctor --json` taking 136s on an idle machine is its own defect**

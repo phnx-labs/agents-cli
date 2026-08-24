@@ -64,7 +64,7 @@ function runGate(bundle: Bundle): { status: number | null; out: string } {
     fs.writeFileSync(path.join(contents, 'Info.plist'), '<plist/>\n');
     if (bundle !== 'no-executable') {
       const magic = bundle === 'ticketed-thin' ? THIN_MAGIC : UNIVERSAL_MAGIC;
-      fs.writeFileSync(path.join(contents, 'MacOS/MenubarHelper'), magic);
+      fs.writeFileSync(path.join(contents, 'MacOS/AGI Menu'), magic);
     }
     if (bundle === 'ticketed-universal' || bundle === 'ticketed-thin') {
       // The stapled notarization ticket `stapler staple` writes.

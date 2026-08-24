@@ -3,7 +3,7 @@ import Foundation
 // Micro-benchmark for the menu-bar data layer. The whole design claim is that
 // the dropdown populates instantly on click without shelling the CLI, so this
 // times the methods that actually build the menu items against real machine
-// state. Run with: MENUBAR_BENCH=1 MenubarHelper  (optional MENUBAR_BENCH_ITERS).
+// state. Run with: MENUBAR_BENCH=1 "AGI Menu"  (optional MENUBAR_BENCH_ITERS).
 enum Bench {
     static func run() {
         let iters = Int(ProcessInfo.processInfo.environment["MENUBAR_BENCH_ITERS"] ?? "300") ?? 300

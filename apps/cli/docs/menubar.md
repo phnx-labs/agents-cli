@@ -8,6 +8,12 @@ The menu bar helper (`MenubarHelper.app`) is a no-Dock, `.accessory` status-bar
 app. Its icon — the agents-cli `a` mark — sits in the menu bar and answers, at a
 glance, "what are my agents doing right now, and does anything need me?"
 
+The bundle folder keeps its historical name (`MenubarHelper.app`), but the
+compiled executable inside it is **"AGI Menu"** (RUSH-3101) — that is what
+System Settings > Privacy & Security > Accessibility and the "would like to
+control this computer" prompt show, since launchd execs it directly and
+bypasses LaunchServices name resolution.
+
 It keeps menu state warm with one read-only `agents menubar snapshot --json`
 subprocess every three minutes. That command reads indexed/cache state and never
 re-indexes transcripts. Opening the menu uses the warm result; CLI actions remain
@@ -370,7 +376,7 @@ current state without changing anything; `--json` emits the step list.
 whether the install is stale (see [Lifecycle](#lifecycle)). Live helper processes
 are split two ways in `--json`: `instances` are copies of the **installed
 bundle**, identified by resolved executable, and `foreignInstances` is every
-other `MenubarHelper` process. **More than one entry in `instances` is the
+other `"AGI Menu"` process. **More than one entry in `instances` is the
 duplicate menu-bar icon** — see [One instance, always](#one-instance-always).
 `RegisterEventHotKey` is first-come, so a second copy may be the one holding the
 global chords — which of the two won is not answerable from a process list, so
@@ -394,8 +400,8 @@ its whole life; a helper that cannot take the lock posts a distributed
 notification that pops the **running** helper's menu open, then exits 0:
 
 ```
-$ "…/MenubarHelper.app/Contents/MacOS/MenubarHelper"
-MenubarHelper: already running (pid 6815) — surfaced it instead of adding a second status item.
+$ "…/MenubarHelper.app/Contents/MacOS/AGI Menu"
+AGI Menu: already running (pid 6815) — surfaced it instead of adding a second status item.
 ```
 
 Re-launching a menu-bar app means "show me the one I already have", so
@@ -500,8 +506,8 @@ spawning the installed bundle in a one-shot mode:
 The daemon's own overdue check (`notifyOverdue`, `src/lib/overdue.ts`) can only
 ever fire from **inside** `runDaemon()` — so it is structurally blind to the one
 outage that matters most: the daemon itself being down, at which point no
-routine fires and nothing says so. `MenubarHelper` closes that gap because it is
-a **separate** launchd `KeepAlive` service — it stays alive exactly when the
+routine fires and nothing says so. The menu-bar helper closes that gap because it
+is a **separate** launchd `KeepAlive` service — it stays alive exactly when the
 daemon dies.
 
 `StatusItemController.tick()` (the same 10s timer that refreshes the badge)
@@ -534,7 +540,7 @@ complementary — the tick-driven watchdog is what makes the outage visible
 *before* you think to open the menu.
 
 ```bash
-MenubarHelper --notify --title T --body B [--subtitle S] [--action A] [--agent claude]
+"AGI Menu" --notify --title T --body B [--subtitle S] [--action A] [--agent claude]
 ```
 
 Because the poster is the app bundle, macOS attributes the notification to the

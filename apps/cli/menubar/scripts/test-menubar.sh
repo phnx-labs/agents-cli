@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Runs every HEADLESS MenubarHelper self-test and fails on any FAIL.
+# Runs every HEADLESS "AGI Menu" (menubar helper) self-test and fails on any FAIL.
 #
 # The helper's self-tests (SingleInstanceSelfTest, ChildProcessSelfTest,
 # GuardsSelfTest, IssueSelfTest, ActiveSessionSelfTest, RoutineSelfTest) are
@@ -28,7 +28,7 @@ cd "$(dirname "$0")/.."
 BIN="${1:-}"
 if [ -z "$BIN" ]; then
   swift build >/dev/null
-  BIN=".build/debug/MenubarHelper"
+  BIN=".build/debug/AGI Menu"
 fi
 if [ ! -x "$BIN" ]; then
   echo "test-menubar: binary not found or not executable: $BIN" >&2

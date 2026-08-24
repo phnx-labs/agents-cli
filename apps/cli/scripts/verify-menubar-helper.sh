@@ -83,7 +83,7 @@ fi
 # The Mach-O fat header's magic bytes (0xCAFEBABE / 0xCAFEBABF, `lipo -create`
 # always writes them big-endian) are plain bytes on disk — checkable with
 # `od` on any OS, so this hard-fails on a Linux packing box too.
-BIN="$APP/Contents/MacOS/MenubarHelper"
+BIN="$APP/Contents/MacOS/AGI Menu"
 if [ ! -f "$BIN" ]; then
   echo "menubar helper executable missing inside bundle: $BIN" >&2
   exit 1

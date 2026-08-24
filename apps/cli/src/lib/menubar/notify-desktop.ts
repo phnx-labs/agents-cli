@@ -3,7 +3,7 @@
  *
  * The one place the daemon (overdue routines, heal, routine start/finish/output)
  * emits a native desktop notification. On macOS it routes through the installed
- * `MenubarHelper.app` companion — a one-shot `MenubarHelper --notify` invocation —
+ * `MenubarHelper.app` companion — a one-shot `"AGI Menu" --notify` invocation —
  * so the notification is attributed to that bundle and carries the agents-cli
  * mark instead of the generic AppleScript icon. A banner carries two images: the
  * agents-cli app icon on the LEFT (the sender) and, when the event belongs to one
@@ -63,7 +63,7 @@ export interface DesktopNotification {
   agent?: string;
 }
 
-/** Argv for the MenubarHelper one-shot notify mode. Exported for tests. */
+/** Argv for the "AGI Menu" one-shot notify mode. Exported for tests. */
 export function buildMenubarNotifyArgs(n: DesktopNotification): string[] {
   const args = ['--notify', '--title', n.title, '--body', n.body];
   if (n.subtitle) args.push('--subtitle', n.subtitle);
@@ -121,7 +121,7 @@ export function spawnDetachedQuiet(
 }
 
 /**
- * Fire a native desktop notification, branded via the MenubarHelper companion on
+ * Fire a native desktop notification, branded via the "AGI Menu" companion on
  * macOS. Best-effort — any failure is swallowed so a notification hiccup never
  * blocks or crashes the daemon.
  */
@@ -131,9 +131,9 @@ export function notifyDesktop(n: DesktopNotification): void {
     if (platform === 'darwin') {
       const exec = resolveInstalledMenubarExecutable();
       if (exec) {
-        // Branded path: the notification is attributed to MenubarHelper.app, so it
-        // shows the agents-cli mark and its click action is handled by the running
-        // helper's UNUserNotificationCenter delegate.
+        // Branded path: the notification is attributed to MenubarHelper.app
+        // ("AGI Menu" on disk), so it shows the agents-cli mark and its click
+        // action is handled by the running helper's UNUserNotificationCenter delegate.
         spawnDetachedQuiet(exec, buildMenubarNotifyArgs(n));
         return;
       }

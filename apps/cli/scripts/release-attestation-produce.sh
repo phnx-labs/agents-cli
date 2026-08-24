@@ -312,7 +312,7 @@ if [[ -x scripts/release-manifest.sh ]]; then
 
     case "$helper" in
       keychain) asset="bin/Agents CLI.app/Contents/MacOS/Agents CLI" ;;
-      menubar)  asset="bin/MenubarHelper.app/Contents/MacOS/MenubarHelper" ;;
+      menubar)  asset="bin/MenubarHelper.app/Contents/MacOS/AGI Menu" ;;
       computer-mac)
         die "helper computer-mac input changed but this producer never rebuilds it -- run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh' on a macOS signing box, then re-run this producer so the new digest is recorded"
         ;;

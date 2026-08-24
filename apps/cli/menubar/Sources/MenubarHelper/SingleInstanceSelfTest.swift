@@ -6,7 +6,7 @@ import Foundation
 // — the contention this guards against is a kernel behavior, so a fake would
 // prove nothing.
 //
-//   MENUBAR_SINGLE_TEST=1 MenubarHelper
+//   MENUBAR_SINGLE_TEST=1 "AGI Menu"
 enum SingleInstanceSelfTest {
     private static var failures = 0
 
@@ -129,7 +129,7 @@ enum SingleInstanceSelfTest {
         guard let orphan = spawnOrphanHoldingLock(path) else {
             check(false, "could not spawn a lock-holding orphan"); return
         }
-        // The holder is a live process but NOT a MenubarHelper, and the lock file
+        // The holder is a live process but NOT the "AGI Menu" helper, and the lock file
         // carries a dead pid — so it must classify as a stale (self-healable) owner.
         check(!SingleInstance.liveHelperOwnsLock(path: path),
               "leaked orphan is classified as a stale (non-helper) owner")
@@ -156,7 +156,7 @@ enum SingleInstanceSelfTest {
 
     /// A real detached, non-helper process that holds the lock's flock: its own
     /// process-group leader (so the reaper's kill(-pgid) has a group), running
-    /// python3 (executablePath != MenubarHelper), holding LOCK_EX and stamping a
+    /// python3 (executablePath != "AGI Menu"), holding LOCK_EX and stamping a
     /// dead pid into the lock file — exactly a leaked helper child. Returns once
     /// the flock is provably held, so the acquire under test is guaranteed to
     /// contend. Mirrors ChildProcessSelfTest.spawnDetachedGroupLeader.

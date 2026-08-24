@@ -7,7 +7,7 @@ import Foundation
 // clip selection over a fixture dir, ticket-id parsing, and the prompt contract
 // — then exits nonzero on any failure so CI/a caller can gate on it.
 //
-//   MENUBAR_ISSUE_TEST=1 MenubarHelper
+//   MENUBAR_ISSUE_TEST=1 "AGI Menu"
 enum IssueSelfTest {
     private static var failures = 0
 

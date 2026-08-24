@@ -1230,7 +1230,7 @@ enum Notifier {
         NSUserNotificationCenter.default.deliver(note)
     }
 
-    // Daemon notification one-shot: `MenubarHelper --notify --title T --body B
+    // Daemon notification one-shot: `"AGI Menu" --notify --title T --body B
     // [--subtitle S] [--action A] [--agent claude]` (RUSH-2030). The daemon spawns
     // the installed .app in this mode, so the notification is attributed to this
     // bundle and shows its AppIcon (the agents-cli mark) on the left — not the
