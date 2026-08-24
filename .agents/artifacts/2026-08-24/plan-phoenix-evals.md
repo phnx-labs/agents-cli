@@ -41,7 +41,7 @@ The build is **UI + a thin, protected sync** — not a new analysis engine. The 
 
 ### The trace store — reuse Cloudflare, guard it hard
 
-We already run `agents-share` (`share.agents-cli.sh`) — a Cloudflare Worker + R2 bucket, with a Phoenix-bearer auth seam (`verifyPhoenixToken` → `GET /api/v1/auth/me` → `{userId}`) and owner-namespaced keys (`worker-template.ts:4-12,76-124`, from RUSH-3135). Traces reuse that seam but flip one thing: **the share worker's GET is public; a trace's GET must never be.**
+We already run `agents-share` (`share.agents-cli.sh`) — a Cloudflare Worker + R2 bucket, with a Phoenix-bearer auth seam (`authorizeWrite` → `defaultVerifyPhoenixToken` → `GET ${PHOENIX_ID_BASE}/api/v1/auth/me` → `{userId}`, `worker-template.ts:440-473`) and owner-namespaced keys enforced by a namespace-mismatch 403 (`worker-template.ts:78`; docblock `4-13`). This landed with RUSH-3135 (PR #3008, merged 2026-08-24). Traces reuse that seam but flip one thing: **the share worker's GET is public — it even sets `cache-control: public, max-age=60` (`worker-template.ts:204`) — and a trace's GET must never be.**
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
   <svg class="artifact-diagram" viewBox="0 0 900 380" role="img" aria-label="The CLI computes and redacts a trace shard, PUTs it with a Phoenix bearer to the agents-traces worker which enforces owner isolation into R2, and the console reads it back owner-scoped">
@@ -89,11 +89,12 @@ We already run `agents-share` (`share.agents-cli.sh`) — a Cloudflare Worker + 
 Why a <b>separate</b> <code>agents-traces</code> worker/bucket and not a <code>traces/</code> prefix on the public share worker: the security boundary becomes a distinct deployment, so no code path in the artifact worker can <i>ever</i> serve a trace. Fail-safe by isolation, not by an <code>if</code>. Traces have no public/unlisted mode — unlike a shared artifact, a trace is private, full stop.
 </div>
 
-**The four protection rules:**
+**The five protection rules:**
 1. **Auth on write AND read** — both verify a Phoenix bearer via the existing `verifyPhoenixToken` seam. No anonymous access.
 2. **Owner-namespaced keys** — every object is `<userId>/…`; PUT enforces the path's first segment == the token's `userId` → 403 on mismatch (reuses the share worker's check).
 3. **Private GET** — every GET requires the bearer and verifies `userId == owner`. No public route exists.
-4. **Redaction at source** (`redactSecrets`, the path `trajectory.ts` labels already use) + R2 encryption at rest. Strict tier later: client-side per-user encryption before upload.
+4. **No caching** — every trace GET sets `cache-control: private, no-store` (**not** the share worker's `public, max-age=60` at `worker-template.ts:204`). Copying that header verbatim would let an edge cache replay one user's trace to another requester within the TTL, defeating rule 3 — so the header is inverted and asserted in CI.
+5. **Redaction at source** (`redactSecrets`, the path `trajectory.ts` labels already use) + R2 encryption at rest. Strict tier later: client-side per-user encryption before upload.
 
 ### Milestones
 
@@ -123,6 +124,7 @@ GET  /<userId>/...                            # 401 without bearer; 403 if userI
 | Check | Expected result |
 | --- | --- |
 | No public trace | `GET /<userId>/index.json` with no bearer → **401**; with another user's bearer → **403** |
+| No caching | every trace GET response carries `cache-control: private, no-store` — never `public` (asserted in CI) |
 | Owner-namespaced write | PUT to a path whose first segment != token userId → **403** (namespace mismatch) |
 | Derived-only | A stored blob contains spans/facets/counts and **no** raw prompt/output text (grep for secrets → none) |
 | Redaction at source | Secret-shaped values masked before upload (reuses `redactSecrets`) |
@@ -134,5 +136,6 @@ GET  /<userId>/...                            # 401 without bearer; 403 if userI
 - **Public-GET regression.** The whole protection story is "no public read." Mitigate: separate worker/bucket (not a prefix), and a test that a bearer-less GET is 401 — in CI.
 - **Cross-device merge.** v0 merges per-device shards client-side; correct but as-of-last-sync. Mitigate: show "synced Nm ago" per device; D1 is the drop-in if server-side query is needed.
 - **Topic classifier accuracy.** The one new compute. Mitigate: heuristic first (repo · tools · label), visible as a facet the user can correct; LLM label only if the heuristic is weak.
-- **RUSH-3135 dependency.** The trace worker reuses `verifyPhoenixToken`. Mitigate: M1 lands after/with PR #3008; coordinate, don't duplicate the auth.
+- **RUSH-3135 dependency — resolved.** PR #3008 merged 2026-08-24, so `authorizeWrite`/`defaultVerifyPhoenixToken` are on `origin/main` today (`worker-template.ts:440-473`). M1 reuses that seam directly; no duplication, no waiting.
+- **Edge-cache leak (caught in review).** Reusing the share worker's GET verbatim carries `cache-control: public, max-age=60`, which a proxy could replay cross-user. Mitigate: protection rule 4 (`private, no-store`) + the CI assertion in Validation.
 - **Redaction completeness.** A missed secret ships to R2. Mitigate: redact at source with the proven path, and never store raw transcript text at all — structure only.
