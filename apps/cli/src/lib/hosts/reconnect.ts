@@ -4,7 +4,18 @@
  *
  * A remote interactive agent runs in a DETACHED tmux session on the peer (see
  * lib/exec.ts `runInTmux`), so a network blink kills only the local ssh client —
- * the agent keeps running. `sshStream` reports that drop as exit code 255 (ssh's
+ * the agent keeps running.
+ *
+ * **That premise is a guarantee, not a hope, only since RUSH-3125.** It used to
+ * rest on the peer's `tmux.enabled`, an ergonomics preference that defaults OFF
+ * — so on a default box the agent was a child of the sshd session, a blink
+ * SIGHUPed it, and this file reconnected to a corpse while telling the user it
+ * was "still running there." The interactive dispatch now exports
+ * REMOTE_INTERACTIVE_ENV and exec.ts `resolveTmuxWrap` wraps on it regardless of
+ * that toggle, so what is written below actually holds. Anything that would let
+ * a remote interactive run reach the peer unwrapped breaks this whole file.
+ *
+ * `sshStream` reports that drop as exit code 255 (ssh's
  * own connection-layer failure; see ssh-exec.ts). Without this, exec.ts would
  * `process.exit(255)` and the user would have to notice, find the session id, and
  * `agents sessions focus` by hand. Instead we re-attach the live remote pane over
