@@ -33,7 +33,9 @@ import {
   enableWorkersDev,
   findZoneId,
   hashWorkerScript,
+  putWorkerSecret,
   updateWorker,
+  WORKER_PHOENIX_ID_BASE_SECRET,
   type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
@@ -49,6 +51,7 @@ import { deleteShare, resolveDeleteTarget, type DeleteShareResult } from '../lib
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
 import {
+  phoenixIdBaseForDeploy,
   resolveShareBackend,
   type ResolveShareBackendOpts,
   type ShareBackend,
@@ -1008,6 +1011,8 @@ export async function runShareProvision(opts: {
   domain?: string;
   analyticsToken?: string;
   request?: CloudflareRequester;
+  /** Bind PHOENIX_ID_BASE even when the mapped hostname is not the managed domain. */
+  managed?: boolean;
 }): Promise<void> {
   const { default: ora } = await import('ora');
   const { input } = await import('@inquirer/prompts');
@@ -1052,6 +1057,18 @@ export async function runShareProvision(opts: {
         spin.warn(`Zone for ${requestedDomain} not visible to this token — staying on workers.dev`);
       }
     }
+    const phoenixIdBase = phoenixIdBaseForDeploy({ managed: opts.managed }, { baseUrl, domain });
+    if (phoenixIdBase) {
+      await putWorkerSecret(
+        apiToken,
+        accountId,
+        workerName,
+        WORKER_PHOENIX_ID_BASE_SECRET,
+        phoenixIdBase,
+        provisionOpts,
+      );
+      spin.text = `Worker '${workerName}' Phoenix ID base set`;
+    }
     spin.succeed('Provisioned');
 
     const cfg: ShareConfig = {
@@ -1090,15 +1107,18 @@ export interface ShareUpdateResult {
  * current `worker-template.ts`. Reuses the existing account/worker/bucket and
  * write token from `readShareConfig()`/the `share` bundle — never creates a
  * bucket, touches routes/domains, or regenerates the token (see
- * `updateWorker` in `lib/share/provision.ts` for how the token survives the
- * re-upload). Idempotent: no-ops when the deployed hash already matches
- * unless `force`. */
+ * `updateWorker` in `lib/share/provision.ts` for how the token — and, on a
+ * managed endpoint, `PHOENIX_ID_BASE` — survives the re-upload). Idempotent:
+ * no-ops the script upload when the deployed hash already matches unless
+ * `force`; a managed endpoint still re-applies `PHOENIX_ID_BASE`. */
 export async function runShareUpdate(opts: {
   bundle?: string;
   account?: string;
   token?: string;
   force?: boolean;
   request?: CloudflareRequester;
+  /** Bind PHOENIX_ID_BASE even when the configured hostname is not the managed domain. */
+  managed?: boolean;
 } = {}): Promise<ShareUpdateResult> {
   const cfg = readShareConfig();
   if (!cfg) {
@@ -1117,7 +1137,12 @@ export async function runShareUpdate(opts: {
   }
   const writeToken = readWriteToken();
   const script = renderWorkerScript();
-  const provisionOpts = { ...(opts.request ? { request: opts.request } : {}), force: opts.force };
+  const phoenixIdBase = phoenixIdBaseForDeploy({ managed: opts.managed }, cfg);
+  const provisionOpts = {
+    ...(opts.request ? { request: opts.request } : {}),
+    force: opts.force,
+    ...(phoenixIdBase !== undefined ? { phoenixIdBase } : {}),
+  };
 
   const result = await updateWorker(
     apiToken,

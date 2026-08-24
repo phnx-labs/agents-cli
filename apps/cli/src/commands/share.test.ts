@@ -162,12 +162,21 @@ describe('runShareProvision custom domain selection', () => {
       '/zones?name=share.agents-cli.sh',
       '/zones?name=agents-cli.sh',
       '/accounts/acct_1/workers/domains',
+      '/accounts/acct_1/workers/scripts/agents-share/secrets',
     ]);
-    expect(seen.at(-1)?.body).toEqual({
+    expect(seen.find((req) => req.pathname === '/accounts/acct_1/workers/domains')?.body).toEqual({
       zone_id: 'zone_agents',
       hostname: 'share.agents-cli.sh',
       service: 'agents-share',
       environment: 'production',
+    });
+    const secrets = seen.filter((req) => req.pathname.endsWith('/secrets'));
+    expect(secrets[0]?.body).toMatchObject({ name: 'WRITE_TOKEN', type: 'secret_text' });
+    const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
+    expect(secrets[1]?.body).toEqual({
+      name: 'PHOENIX_ID_BASE',
+      text: PHOENIX_ID_BASE.replace(/\/+$/, ''),
+      type: 'secret_text',
     });
   });
 
@@ -199,6 +208,9 @@ describe('runShareProvision custom domain selection', () => {
       templateHash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
     expect(seen.some((req) => req.pathname === '/accounts/acct_1/workers/domains')).toBe(false);
+    const secrets = seen.filter((req) => req.pathname.endsWith('/secrets'));
+    expect(secrets).toHaveLength(1);
+    expect(secrets[0]?.body).toMatchObject({ name: 'WRITE_TOKEN', type: 'secret_text' });
   });
 
   it('uses --domain as the custom-domain candidate instead of the default hostname', async () => {
@@ -233,6 +245,9 @@ describe('runShareProvision custom domain selection', () => {
       zone_id: 'zone_example',
       hostname: 'share.example.com',
     });
+    const secrets = seen.filter((req) => req.pathname.endsWith('/secrets'));
+    expect(secrets).toHaveLength(1);
+    expect(secrets[0]?.body).toMatchObject({ name: 'WRITE_TOKEN', type: 'secret_text' });
   });
 
   it('persists --analytics-token in the share config', async () => {
@@ -371,6 +386,111 @@ describe('runShareUpdate', () => {
     // hash is what makes the next `agents artifacts share update` re-deploy instead of
     // no-op'ing as "already matches".
     expect(config.readShareConfig()?.templateHash).toBe('pre-update-stale-hash');
+  });
+
+  it('a managed endpoint update sets PHOENIX_ID_BASE (RUSH-3138)', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.agents-cli.sh',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+      domain: 'share.agents-cli.sh',
+    });
+    config.storeWriteToken('tok');
+    const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
+
+    const seen: CloudflareRequest[] = [];
+    await share.runShareUpdate({
+      token: 'cf-token',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(seen.map((r) => r.pathname)).toEqual([
+      '/accounts/acct_1/workers/scripts/worker-one',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+      '/accounts/acct_1/workers/scripts/worker-one/secrets',
+    ]);
+    expect(seen[1].body).toEqual({ name: 'WRITE_TOKEN', text: 'tok', type: 'secret_text' });
+    expect(seen[2].body).toEqual({
+      name: 'PHOENIX_ID_BASE',
+      text: PHOENIX_ID_BASE.replace(/\/+$/, ''),
+      type: 'secret_text',
+    });
+  });
+
+  it('a managed re-deploy re-applies PHOENIX_ID_BASE after the script upload', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.agents-cli.sh',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+      domain: 'share.agents-cli.sh',
+      templateHash: 'stale-hash',
+    });
+    config.storeWriteToken('tok');
+    const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
+
+    const seen: CloudflareRequest[] = [];
+    await share.runShareUpdate({
+      token: 'cf-token',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    const phoenix = seen.filter((r) => (r.body as { name?: string } | undefined)?.name === 'PHOENIX_ID_BASE');
+    expect(phoenix).toHaveLength(1);
+    expect(phoenix[0].body).toEqual({
+      name: 'PHOENIX_ID_BASE',
+      text: PHOENIX_ID_BASE.replace(/\/+$/, ''),
+      type: 'secret_text',
+    });
+  });
+
+  it('opts.managed on a non-managed hostname still binds PHOENIX_ID_BASE', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+    const { PHOENIX_ID_BASE } = await import('../lib/identity/client.js');
+
+    const seen: CloudflareRequest[] = [];
+    await share.runShareUpdate({
+      token: 'cf-token',
+      managed: true,
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(seen[2].body).toEqual({
+      name: 'PHOENIX_ID_BASE',
+      text: PHOENIX_ID_BASE.replace(/\/+$/, ''),
+      type: 'secret_text',
+    });
+  });
+
+  it('a BYO endpoint update does not send PHOENIX_ID_BASE', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+
+    const seen: CloudflareRequest[] = [];
+    await share.runShareUpdate({
+      token: 'cf-token',
+      request: async (req) => { seen.push(req); return {}; },
+    });
+
+    expect(seen).toHaveLength(2);
+    expect(seen[1].body).toEqual({ name: 'WRITE_TOKEN', text: 'tok', type: 'secret_text' });
+    expect(seen.some((r) => (r.body as { name?: string } | undefined)?.name === 'PHOENIX_ID_BASE')).toBe(false);
   });
 });
 
