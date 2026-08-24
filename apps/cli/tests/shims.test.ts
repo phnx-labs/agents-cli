@@ -415,7 +415,10 @@ describe('shims - generateShimScript', () => {
 describe('shims - generateVersionedAliasScript', () => {
   test('scopes Claude version aliases to their config dir', () => {
     const script = generateVersionedAliasScript('claude', '2.1.110');
-    expect(script).toContain('export CLAUDE_CONFIG_DIR="$HOME/.agents/.history/versions/claude/2.1.110/home/.claude"');
+    // The alias now reuses the main shim's adapter block, keyed off VERSION_DIR, so
+    // CLAUDE_CONFIG_DIR resolves to the same per-version config dir as before.
+    expect(script).toContain('VERSION_DIR="$HOME/.agents/.history/versions/claude/2.1.110"');
+    expect(script).toContain('export CLAUDE_CONFIG_DIR="$VERSION_DIR/home/.claude"');
   });
 
   test('does not inject Claude keychain scoping for non-Claude aliases', () => {
