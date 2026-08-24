@@ -168,7 +168,14 @@ The device-config help text confirms the framing: *"Turn it on … once the tmux
 clipboard, and scrollback behavior suits this device."*
 
 So a **remote** run's durability is gated on a **local** preference the user set for
-entirely unrelated reasons. That is the design error.
+entirely unrelated reasons. That is the design error. The default itself lives at
+`apps/cli/src/lib/device-config.ts:224`.
+
+There is a second-order bug in the same place: reconnect eligibility is decided **locally**
+from the flags this side requested (`!isRaw`, `commands/exec.ts:1892`). The launcher has no
+idea whether the peer's tmux gate actually passed, so it cannot know whether the agent
+survived — yet it prints "the agent is still running there" regardless. Whether the wrap
+engaged is a fact only the peer holds, and it is never reported back.
 
 ### Defect 2 — reconnect fetches its key over the network that just died
 
@@ -225,6 +232,13 @@ Six tabs, one socket. OpenSSH's documented behaviour is that killing the master 
 every multiplexed session abruptly. This is the mechanism behind *"all of my agents
 basically just all exit"* — it is not six independent failures, it is one.
 
+And it compounds **across** peers, not just within one. Every master shares the same
+keepalive settings — `ServerAliveInterval=15`, `ServerAliveCountMax=3`
+(`lib/ssh-exec.ts:53`) — so during a local Wi-Fi or ISP interruption every peer's master
+gives up on the same ~45-second cadence. Tabs on yosemite-s0, s1 and m6 therefore die
+together even though they share no connection. That is the missing half of why the failure
+reads as *everything at once* rather than a few tabs on one box.
+
 ### Defect 4 — the budget is ~90 seconds
 
 `MAX_ATTEMPTS = 6` with backoff 2s, 4s, 8s, 16s, 30s, 30s (`reconnect.ts:92`) gives a
@@ -252,6 +266,38 @@ The extension has no notion of a dropped agent: a grep of `watchdog.vscode.ts` f
 shell. Meanwhile all three give-up notices (`reconnect.ts:179`, `:190`, `:199`) tell the
 user to run `agents reconnect <id>` — a command that is **deprecated and hidden**
 (`apps/cli/src/commands/reconnect.ts:98`).
+
+## Verification
+
+The plan skill calls for independent agents to plan the same problem blind. Four attempts;
+one produced usable results:
+
+| Verifier | Outcome |
+| --- | --- |
+| `gemini` on yosemite-m3 | Could not run — Google retired the Gemini CLI on 2026-06-18 |
+| `antigravity` on yosemite-m3 | Could not run — no healthy account (`signed_out`) |
+| `codex` on yosemite-m1 | Could not run — read sandbox failed (`bwrap: setting up uid map: Permission denied`) on the Linux peer. It correctly refused to guess rather than produce an ungrounded diagnosis. |
+| **`codex` on zion** | **Completed with full source access.** |
+
+The verifier that ran was given the two screenshots' symptoms and the launch command, and
+was told nothing about the approach here. It independently reached **the same four defects
+in the same priority order** — remote runs not detached because `tmux.enabled` defaults
+off, reconnect skipped for non-Claude because the id is resolved after the drop, one shared
+ControlMaster per peer, and missing TTY cleanup between attach attempts — with its own
+file:line citations. Its top-four fix list matches F1–F3 and F5.
+
+It contributed two things this plan did not have, both folded in above:
+
+- **Reconnect cannot know whether the agent survived.** Eligibility is decided from locally
+  requested flags at `commands/exec.ts:1892`; the peer's tmux gate result never crosses
+  back. The "still running there" claim is therefore structurally unknowable, not merely
+  currently-wrong — so F1 now carries a report-back requirement.
+- **The correlation is cross-peer, not just same-peer.** Shared `ServerAliveInterval=15` /
+  `CountMax=3` (`lib/ssh-exec.ts:53`) makes every host's master time out on the same
+  cadence, so tabs on *different* boxes die together too.
+
+Nothing in the verifier's findings contradicted the diagnosis. Confidence is high on the
+root cause and on F1–F3; F4 and F6 are design choices it did not weigh in on.
 
 ## Proposed Changes
 
@@ -290,6 +336,13 @@ installed on the peer, the run must refuse with a clear message rather than laun
 that cannot survive. `ensureHostReady` already gates every `--device` dispatch on a peer
 probe, so the check belongs there, before a TTY is opened. (`tmux` is present on the peers
 checked: `/usr/bin/tmux` on both s0 and s1.)
+
+**The peer must report whether the wrap engaged.** Reconnect currently infers survivability
+from locally-requested flags and gets it wrong. The remote run should emit its durability
+state (wrapped / not wrapped, plus the pane handle) alongside the session id it already
+emits, so the reconnect loop claims "still running there" only when that is a fact it was
+told, never an assumption. Without this, F1 fixes the behaviour but leaves the message able
+to lie again the next time the gate changes.
 
 ### F2 — reconnect keys off an id the launcher already holds
 
