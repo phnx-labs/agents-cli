@@ -395,18 +395,96 @@ export interface SshStreamOptions {
 }
 
 /**
+ * The DEC private modes a full-screen remote app turns ON and, when it exits
+ * cleanly, turns back off itself. A remote agent TUI killed by a dropped link
+ * never gets to, so they stay enabled on the LOCAL terminal after ssh is gone:
+ * focus reporting (1004) and the mode/colour-scheme reports (996/997) then make
+ * the terminal emit answerback sequences at a shell that is not expecting them,
+ * which is the `^[[?997;1n ^[[I ^[[O` litter seen after a drop (RUSH-3125). Also
+ * resets bracketed paste (2004), the alternate screen (1049), mouse tracking
+ * (1000/1002/1003/1006), and re-shows the cursor (25) — every one of which a TUI
+ * leaves armed the same way.
+ */
+export const TERMINAL_MODE_RESET =
+  '\x1b[?1004l\x1b[?996l\x1b[?997l\x1b[?2004l\x1b[?1049l'
+  + '\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?25h';
+
+/**
+ * Put the local terminal back the way ssh found it.
+ *
+ * Two independent kinds of state survive a hard ssh death, and BOTH have to be
+ * undone or the next thing the user sees is corrupted:
+ *
+ *  - **termios** (kernel side): `-tt` puts the tty in raw mode, so a killed ssh
+ *    leaves it with echo and line-editing off. `saved` is the `stty -g` snapshot
+ *    taken before the spawn; restoring it is exact, unlike guessing at `sane`.
+ *  - **DEC private modes** (terminal side): see {@link TERMINAL_MODE_RESET}.
+ *
+ * Then drain whatever the terminal already answered back into the input buffer.
+ * Without the drain those bytes are not merely cosmetic — they are still queued
+ * on the tty, so the NEXT attach hands them straight to the agent as if the user
+ * had typed them.
+ *
+ * Best-effort by construction: this runs while recovering from a failure, so a
+ * missing `stty`, a non-TTY stdin, or a closed stream must never turn a
+ * recoverable drop into a thrown error.
+ */
+export function restoreLocalTerminal(saved: string | undefined): void {
+  try {
+    if (saved) spawnSync('stty', [saved], { stdio: ['inherit', 'ignore', 'ignore'] });
+  } catch { /* no stty, or stdin is not a tty — nothing to restore */ }
+  try {
+    if (process.stdout.isTTY) process.stdout.write(TERMINAL_MODE_RESET);
+  } catch { /* stream closed */ }
+  try {
+    // read() on a paused non-flowing stdin returns the buffered bytes and
+    // discards them; the loop clears a burst rather than one chunk.
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode?.(false);
+      while (process.stdin.read() !== null) { /* discard */ }
+    }
+  } catch { /* stdin not readable in this context */ }
+}
+
+/** `stty -g` snapshot of the local tty, or undefined when there is nothing to snapshot. */
+export function saveLocalTerminal(): string | undefined {
+  if (!process.stdin.isTTY) return undefined;
+  try {
+    const r = spawnSync('stty', ['-g'], { stdio: ['inherit', 'pipe', 'ignore'], encoding: 'utf-8' });
+    const out = r.status === 0 ? r.stdout?.trim() : '';
+    return out || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Foreground counterpart to `sshExec`: run `remoteCmd` on `target` with the
  * local stdio wired straight through (`stdio: 'inherit'`), so output streams as
  * it is produced and — with `tty` — keystrokes reach a remote picker. Blocks
  * until the remote command exits and returns its exit code (255 is ssh's own
  * connection-layer failure; any other non-zero is the remote command's code).
+ *
+ * On a `tty` stream the local terminal state is snapshotted before the spawn and
+ * restored after it. ssh restores termios itself when it exits cleanly, so this
+ * is for the case that matters here: the link dying under a full-screen agent
+ * TUI, which leaves the tty raw and the TUI's DEC modes armed. Doing it HERE
+ * rather than in the reconnect loop means every caller that opens an interactive
+ * remote stream is covered, not just the one that noticed (RUSH-3125).
  */
 export function sshStream(target: string, remoteCmd: string, opts: SshStreamOptions = {}): number {
   assertValidSshTarget(target);
   const mux = opts.multiplex === false ? [] : controlOpts();
   const tty = opts.tty ? ['-tt'] : [];
   const args = [...sshConnectOpts(mux, opts.hostKeyOpts), ...(opts.extraSshArgs ?? []), ...tty, target, remoteCmd];
-  const res = spawnSync('ssh', args, { stdio: 'inherit' });
-  if (typeof res.status === 'number') return res.status;
-  return 255; // spawn error / signal — treat as a connection-layer failure
+  const saved = opts.tty ? saveLocalTerminal() : undefined;
+  try {
+    const res = spawnSync('ssh', args, { stdio: 'inherit' });
+    if (typeof res.status === 'number') return res.status;
+    return 255; // spawn error / signal — treat as a connection-layer failure
+  } finally {
+    // finally, not the success path: the abnormal exits are precisely the ones
+    // that leave the terminal wrecked.
+    if (opts.tty) restoreLocalTerminal(saved);
+  }
 }

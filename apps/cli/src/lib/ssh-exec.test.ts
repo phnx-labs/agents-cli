@@ -12,6 +12,7 @@ import {
   sshExec,
   sshExecAsync,
   sshExecRawStream,
+  TERMINAL_MODE_RESET, restoreLocalTerminal, saveLocalTerminal,
 } from './ssh-exec.js';
 
 describe('assertValidSshTarget', () => {
@@ -228,5 +229,37 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
     expect(res.stderr.toString('utf8')).toBe('ERR_OK');
     expect(res.code).toBe(4);
     expect(res.timedOut).toBe(false);
+  });
+});
+
+
+describe('local terminal restore after an interactive stream (RUSH-3125)', () => {
+  // A remote agent TUI killed by a dropped link never sends its own exit
+  // sequences, so these modes stay armed on the LOCAL terminal and it starts
+  // answering back at a shell that is not expecting it — the
+  // `^[[?997;1n ^[[I ^[[O` litter in the reported capture.
+  it('disables every DEC mode a full-screen TUI arms, and re-shows the cursor', () => {
+    for (const mode of ['1004', '996', '997', '2004', '1049', '1000', '1002', '1003', '1006']) {
+      expect(TERMINAL_MODE_RESET).toContain(`\x1b[?${mode}l`);
+    }
+    expect(TERMINAL_MODE_RESET).toContain('\x1b[?25h');
+  });
+
+  it('sets no mode it means to clear — every sequence is a reset but the cursor', () => {
+    const set = TERMINAL_MODE_RESET.match(/\x1b\[\?\d+h/g) ?? [];
+    expect(set).toEqual(['\x1b[?25h']);
+  });
+
+  // The suite's stdin is a pipe, so this is the real non-TTY branch, not a mock.
+  it('snapshots nothing when stdin is not a TTY', () => {
+    expect(process.stdin.isTTY).toBeFalsy();
+    expect(saveLocalTerminal()).toBeUndefined();
+  });
+
+  // Restore runs while recovering from a dropped link. If it could throw it
+  // would turn a recoverable blink into a crash, so every branch is guarded.
+  it('is a safe no-op with no snapshot and no TTY — recovery must never throw', () => {
+    expect(() => restoreLocalTerminal(undefined)).not.toThrow();
+    expect(() => restoreLocalTerminal('garbage-not-a-stty-string')).not.toThrow();
   });
 });
