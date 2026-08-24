@@ -20,7 +20,8 @@
  * `process.exit(255)` and the user would have to notice, find the session id, and
  * `agents sessions focus` by hand. Instead we re-attach the live remote pane over
  * SSH automatically, with bounded backoff, until the user detaches cleanly (the
- * remote returns 0) or the agent exits (the tmux session is gone; a non-255 code).
+ * remote returns 0), the agent exits (the tmux session is gone; a non-255 code),
+ * or the user interrupts the wait with Ctrl-C ({@link waitOrInterrupt} → 130).
  *
  * The re-attach reuses the peer's OWN recovery verb — `agents sessions focus <id>
  * --local` — which JOINS the live local tmux pane there (a second client, no fork)
@@ -43,7 +44,8 @@
  * {@link MIN_HOLD_MS} refills the retry budget, so a long session that blinks all
  * day keeps reconnecting. Everything else — never reached the host, or reached it
  * and died right back — counts against the budget, so a sustained outage and a
- * fast-flapping link both give up after {@link MAX_ATTEMPTS}.
+ * fast-flapping link both give up once {@link RECONNECT_WINDOW_MS} of unproductive
+ * retrying has elapsed.
  *
  * The retry policy is a pure state machine (`reconnectStep`) so it is unit-tested
  * without touching SSH; the loop (`reconnectInteractiveSession`) only adds the real
@@ -58,7 +60,7 @@
  * that same 255, `reconnectStep` couldn't tell it apart from a genuine drop, and
  * `connected: true` would refill the retry budget forever — "attempt 1/N" printed
  * on every single cycle, the terminal filling with aborted-TTY escape-code
- * garbage, `MAX_ATTEMPTS` never actually bounding anything.
+ * garbage, the retry window never actually bounding anything.
  *
  * The resume fall-through only widens that surface — the peer's focus now runs a
  * full recovery path (`resumeSessionInPlace` / `runOnPeer`) on a dead pane, any
@@ -74,8 +76,8 @@
  * remap alone did not close it (agents-cli#1884): `connected` was set by the
  * preflight probe and said nothing about whether the attach that followed held, so
  * a fast-flapping link — or an attach that died at the TTY-negotiation stage every
- * single time — refilled the budget on every cycle, printed "attempt 1/N" forever,
- * and left `MAX_ATTEMPTS` bounding nothing. The {@link MIN_HOLD_MS} floor above is
+ * single time — refilled the budget on every cycle, printed "attempt 1" forever,
+ * and left the retry window bounding nothing. The {@link MIN_HOLD_MS} floor above is
  * what closes it: an attach that dies immediately is not a reconnection, so the
  * budget drains and the loop gives up with {@link unstableNotice}. A flat total-
  * attempt or wall-clock ceiling that ignored `connected` was the alternative and is
@@ -96,12 +98,27 @@ export const SSH_CONN_FAILURE = 255;
  *  transport itself, so it can never be confused with {@link SSH_CONN_FAILURE}. */
 export const REMOTE_EXIT_255_REMAPPED = 254;
 
-/** Consecutive unproductive reattaches before giving up. Backoff is capped at
- *  {@link MAX_BACKOFF_MS}. A reattach that reconnected and HELD (then dropped again)
- *  refills the budget, so a long session that blinks all day reconnects every time —
- *  an attempt that never reached the host, or reached it and died back inside
- *  {@link MIN_HOLD_MS}, counts against it. */
-export const MAX_ATTEMPTS = 6;
+/**
+ * How long the loop keeps trying across an UNPRODUCTIVE streak before giving up.
+ *
+ * A wall-clock window, not an attempt count, because what it has to outlast is
+ * measured in minutes: a laptop lid close, a Wi-Fi handoff, a VPN or Tailscale
+ * re-auth, a router reboot. The previous `MAX_ATTEMPTS = 6` over a 2/4/8/16/30/30
+ * backoff gave up after about **90 seconds** — shorter than any of them
+ * (RUSH-3125). Worse, timers are suspended across sleep, so on wake the whole
+ * backoff fired back-to-back before the network was up and the budget was gone in
+ * seconds.
+ *
+ * It bounds the STREAK, not the session: a reattach that reconnects and HOLDS
+ * resets it to zero ({@link refillsBudget}), so a session that blinks all day
+ * still reconnects every time. That is the property the file header insists on,
+ * and a flat total would break it — this changes only how a *streak* is bounded.
+ */
+export const RECONNECT_WINDOW_MS = 15 * 60_000;
+
+/** Backoff curve for a streak: 2s, 4s, 8s, 16s, 30s, then 30s until the window
+ *  closes. Capped so a long outage keeps probing at a useful cadence instead of
+ *  drifting out to multi-minute gaps and missing the moment the link returns. */
 const BASE_BACKOFF_MS = 2_000;
 const MAX_BACKOFF_MS = 30_000;
 
@@ -116,8 +133,13 @@ export const MIN_HOLD_MS = 10_000;
 
 export interface ReconnectState {
   /** Consecutive unproductive reattaches since the last genuine reconnection — one
-   *  that reached the host and held for {@link MIN_HOLD_MS}. */
+   *  that reached the host and held for {@link MIN_HOLD_MS}. Drives the backoff
+   *  curve and the human-facing attempt number; no longer the give-up condition. */
   attempt: number;
+  /** Wall-clock ms burned on the current unproductive streak — the waits plus the
+   *  time each failed attach itself took. Compared against
+   *  {@link RECONNECT_WINDOW_MS}; reset to 0 by a reattach that held. */
+  unproductiveMs: number;
 }
 
 export interface ReconnectOutcome {
@@ -136,10 +158,10 @@ export interface ReconnectOutcome {
 
 export type ReconnectDecision =
   | { action: 'stop'; code: number }
-  | { action: 'retry'; waitMs: number; state: ReconnectState };
+  | { action: 'retry'; waitMs: number; state: ReconnectState; remainingMs: number };
 
 export function initialReconnectState(): ReconnectState {
-  return { attempt: 0 };
+  return { attempt: 0, unproductiveMs: 0 };
 }
 
 /** Exponential backoff capped at {@link MAX_BACKOFF_MS}: 2s, 4s, 8s, 16s, 30s… */
@@ -168,27 +190,56 @@ export function refillsBudget(outcome: ReconnectOutcome): boolean {
  *  - a 255 from an attempt that reconnected AND held ({@link refillsBudget})
  *    refills the budget first; every other 255 counts against it, so a host that
  *    stays unreachable — and a link that keeps dropping the attach immediately —
- *    both give up after MAX_ATTEMPTS.
+ *    both give up once the retry window closes.
  */
 export function reconnectStep(state: ReconnectState, outcome: ReconnectOutcome): ReconnectDecision {
   if (outcome.code !== SSH_CONN_FAILURE) return { action: 'stop', code: outcome.code };
-  const attempts = refillsBudget(outcome) ? 0 : state.attempt;
-  if (attempts >= MAX_ATTEMPTS) return { action: 'stop', code: SSH_CONN_FAILURE };
-  return { action: 'retry', waitMs: backoffMs(attempts), state: { attempt: attempts + 1 } };
+  const productive = refillsBudget(outcome);
+  const attempts = productive ? 0 : state.attempt;
+  // The attach's own duration counts against the window: a 10s connect timeout
+  // burned on every attempt is real elapsed time the user is waiting, and
+  // ignoring it would stretch a "15 minute" window well past fifteen minutes.
+  const burned = productive ? 0 : state.unproductiveMs + outcome.heldMs;
+  if (burned >= RECONNECT_WINDOW_MS) return { action: 'stop', code: SSH_CONN_FAILURE };
+  const waitMs = backoffMs(attempts);
+  return {
+    action: 'retry',
+    waitMs,
+    state: { attempt: attempts + 1, unproductiveMs: burned + waitMs },
+    remainingMs: Math.max(0, RECONNECT_WINDOW_MS - (burned + waitMs)),
+  };
 }
 
-/** Human-readable notice shown before each reconnect wait. "13 seconds", not "12.8s". */
-export function reconnectNotice(target: ReconnectTarget, host: string, attempt: number, waitMs: number): string {
+/** "14m51s", "51s" — a duration a waiting human can read at a glance. */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000));
+  const m = Math.floor(total / 60);
+  const sec = total % 60;
+  return m > 0 ? `${m}m${String(sec).padStart(2, '0')}s` : `${sec}s`;
+}
+
+/**
+ * Notice shown before each reconnect wait.
+ *
+ * Says how long is left in the window rather than "attempt 2/6": with a
+ * wall-clock budget the attempt number no longer tells the user when this stops,
+ * and "how much longer will it keep trying" is the actual question during an
+ * outage. Ctrl-C is advertised because a user who wants their shell back should
+ * not have to guess whether interrupting is safe — it is (the agent keeps
+ * running on the peer, which is the whole point).
+ */
+export function reconnectNotice(target: ReconnectTarget, host: string, attempt: number, waitMs: number, remainingMs: number): string {
   const secs = Math.round(waitMs / 1000);
-  const when = secs <= 1 ? 'now' : `in ${secs} seconds`;
-  return `\nConnection to ${host} dropped — the agent is still running there. Reconnecting to ${targetLabel(target)} ${when} (attempt ${attempt}/${MAX_ATTEMPTS})…\n`;
+  const when = secs <= 1 ? 'now' : `in ${secs}s`;
+  return `\nConnection to ${host} dropped — ${targetLabel(target)} is still running there.`
+    + `\n  Reconnecting ${when} · ${formatDuration(remainingMs)} left · attempt ${attempt} · Ctrl-C to stop\n`;
 }
 
 /** Notice shown once the retry budget is spent on a host that stayed UNREACHABLE.
  *  Hands back the one verb that re-enters the terminal — attach the live pane if it
  *  survived, else resume. */
 export function exhaustedNotice(target: ReconnectTarget, host: string): string {
-  return `\nCouldn't reconnect to ${host} after ${MAX_ATTEMPTS} attempts. The agent may still be running — get back in when the network is back:\n${recoveryHint(target, host)}`;
+  return `\nCouldn't reconnect to ${host} after ${formatDuration(RECONNECT_WINDOW_MS)}. The agent may still be running — get back in when the network is back:\n${recoveryHint(target, host)}`;
 }
 
 /** Notice shown when the budget is spent the OTHER way: the last reattach reached
@@ -199,7 +250,7 @@ export function exhaustedNotice(target: ReconnectTarget, host: string): string {
  *  unreachable attempts followed by one that reconnected and dropped straight out. */
 export function unstableNotice(target: ReconnectTarget, host: string): string {
   const secs = Math.round(MIN_HOLD_MS / 1000);
-  return `\nGave up reconnecting to ${host} after ${MAX_ATTEMPTS} attempts — it kept dropping again within ${secs} seconds of getting back in. The agent may still be running there; reconnect once the link is stable:\n${recoveryHint(target, host)}`;
+  return `\nGave up reconnecting to ${host} after ${formatDuration(RECONNECT_WINDOW_MS)} — it kept dropping again within ${secs} seconds of getting back in. The agent may still be running there; reconnect once the link is stable:\n${recoveryHint(target, host)}`;
 }
 
 /** Notice shown when a reattach stops on a remapped remote-side exit
@@ -209,6 +260,13 @@ export function unstableNotice(target: ReconnectTarget, host: string): string {
  *  only for a genuinely spent retry budget. */
 export function remoteExitNotice(target: ReconnectTarget, host: string): string {
   return `\nReattach to ${targetLabel(target)} on ${host} ended (not a network drop) — get back in, or check whether it's still live:\n${recoveryHint(target, host)}`;
+}
+
+/** Shown when the user Ctrl-Cs out of the wait. The agent is untouched — it is
+ *  detached on the peer — so this says how to get back rather than implying the
+ *  work was lost. */
+export function interruptedNotice(target: ReconnectTarget, host: string): string {
+  return `\nStopped reconnecting. ${targetLabel(target)} is still running on ${host}:\n${recoveryHint(target, host)}`;
 }
 
 /**
@@ -371,7 +429,33 @@ export function reattachRemoteSession(host: Host, target: ReconnectTarget): Reco
   return { code, connected: true, heldMs: Date.now() - startedAt };
 }
 
-const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+/**
+ * Wait `ms`, but return early if the user interrupts.
+ *
+ * Without this, Ctrl-C during the backoff killed the whole `agents` process:
+ * node's default SIGINT handler exits, so the loop never got to say what
+ * happened, the terminal was left mid-notice, and the user was dropped at a bare
+ * shell with no hint that the agent was still alive on the peer — the same
+ * dead-end the reconnect exists to prevent. The handler is installed only for
+ * the duration of the wait and always removed, so it can never swallow a Ctrl-C
+ * meant for the attached agent (during an attach, ssh owns the tty and this
+ * process is not in the foreground group anyway).
+ */
+async function waitOrInterrupt(ms: number): Promise<'elapsed' | 'interrupted'> {
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (how: 'elapsed' | 'interrupted') => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      process.removeListener('SIGINT', onSigint);
+      resolve(how);
+    };
+    const onSigint = () => finish('interrupted');
+    const timer = setTimeout(() => finish('elapsed'), ms);
+    process.on('SIGINT', onSigint);
+  });
+}
 
 export interface ReconnectLoopOpts {
   host: Host;
@@ -381,9 +465,10 @@ export interface ReconnectLoopOpts {
   initialExit: number;
   /** Injected for tests: the real re-attach and wait are swapped for deterministic
    *  fakes so the loop's control flow is exercised without SSH. Production uses the
-   *  real {@link reattachRemoteSession} + `sleep`. */
+   *  real {@link reattachRemoteSession} + {@link waitOrInterrupt}. */
   reattach?: (host: Host, target: ReconnectTarget) => ReconnectOutcome;
-  wait?: (ms: number) => Promise<void>;
+  /** Resolves 'interrupted' when the user Ctrl-Cs out of the backoff. */
+  wait?: (ms: number) => Promise<'elapsed' | 'interrupted'>;
   write?: (s: string) => void;
 }
 
@@ -394,7 +479,7 @@ export interface ReconnectLoopOpts {
  */
 export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Promise<number> {
   const write = opts.write ?? ((s: string) => process.stderr.write(s));
-  const wait = opts.wait ?? sleep;
+  const wait = opts.wait ?? waitOrInterrupt;
   const reattach = opts.reattach ?? reattachRemoteSession;
 
   let state = initialReconnectState();
@@ -418,8 +503,13 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
       }
       return decision.code;
     }
-    write(reconnectNotice(opts.target, opts.host.name, decision.state.attempt, decision.waitMs));
-    await wait(decision.waitMs);
+    write(reconnectNotice(opts.target, opts.host.name, decision.state.attempt, decision.waitMs, decision.remainingMs));
+    if (await wait(decision.waitMs) === 'interrupted') {
+      // The user asked for their shell back. Nothing was lost — say where the
+      // agent is and how to return, then exit as an interrupt (128 + SIGINT).
+      write(interruptedNotice(opts.target, opts.host.name));
+      return 130;
+    }
     state = decision.state;
     outcome = reattach(opts.host, opts.target);
   }

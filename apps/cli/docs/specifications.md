@@ -2530,6 +2530,24 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   (`resolveTmuxWrap`, `lib/exec.ts`, `platform === 'win32'` excluded
   outright — it returns `bare`, never `undurable`, so a Windows peer is
   not refused, it is simply unwrapped).
+- **EXEC-52 (MUST).** The reconnect loop MUST bound an unproductive streak by
+  wall clock ({@link RECONNECT_WINDOW_MS}, `lib/hosts/reconnect.ts`), not by a
+  fixed attempt count, and a reattach that reconnects and holds MUST reset it.
+  *Given* a laptop lid closed for ten minutes; *When* it wakes; *Then* the loop
+  is still retrying. The prior 6-attempt budget expired in ~90s — shorter than
+  every ordinary outage it exists for — and suspended timers meant the whole
+  backoff fired at once on wake.
+- **EXEC-53 (MUST).** `SIGINT` during a reconnect wait MUST end the loop
+  cleanly with 130 and state where the agent is, never kill the process
+  mid-notice. The agent is detached on the peer, so an interrupt loses nothing
+  and the user MUST be told how to return.
+- **EXEC-54 (MUST).** After an interactive (`tty`) remote stream exits, the
+  local terminal MUST be restored — termios from a pre-spawn `stty -g`
+  snapshot, the DEC private modes a full-screen TUI arms reset, and the tty
+  input buffer drained (`sshStream`, `lib/ssh-exec.ts`). ssh restores termios
+  only on a clean exit; an abnormal one leaves the tty raw with the TUI's modes
+  armed, and the terminal's answerback bytes stay queued and are delivered to
+  the NEXT attach as if typed.
 - **EXEC-48 (MUST).** An INTERACTIVE run dispatched onto this box over
   `--device` MUST be detached from the ssh session that carries it — the
   tmux spawn-wrap is required, independent of the peer's `tmux.enabled`
