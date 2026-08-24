@@ -9,7 +9,7 @@ links:
   - 'https://phoenix-id.muqsitnawaz.workers.dev'
 ---
 
-> **Status: NOT landed. This is the plan — nothing has been built or dispatched yet.**
+> **Status: plan approved; P1 (public+unlisted) dispatched and building (RUSH-3135). Nothing merged or shipped yet.**
 > Reshaped 2026-08-24 after grounding research: the platform endpoint already exists,
 > the org tier is a cross-service fast-follow, and view-analytics is greenfield.
 
