@@ -4,7 +4,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
 import { Command } from 'commander';
-import { classifyAttachTarget, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
+import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
 import { claudeAccountTokenKey } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
 import { addAccount, addNativeAccount } from '../lib/account-registry.js';
@@ -163,6 +163,76 @@ describe('accounts switch + native naming honesty-gate', () => {
     expect(result.agent).toBe('claude');
     expect(result.account.id).toBe(native.id);
     expect(readMeta().accounts?.defaults?.claude).toBe(native.id);
+  });
+
+  it('label <harness>@<version> refuses a contradictory --account selector', async () => {
+    await expect(runAccounts(['label', 'claude@2.1.220', 'work', '--account', 'someone@example.com'])).rejects.toThrow(
+      "'claude@2.1.220' already selects one login; drop --account",
+    );
+  });
+
+  it('label <harness>@<version> fails loud for an uninstalled version', async () => {
+    await expect(runAccounts(['label', 'claude@99999.0.0', 'work'])).rejects.toThrow('claude@99999.0.0 is not installed');
+  });
+
+  it('label <harness>@<version> refuses an unsupported harness with the same named reason as name', async () => {
+    await expect(runAccounts(['label', 'antigravity@1.0.0', 'work'])).rejects.toThrow(
+      "antigravity accounts can't be isolated by agents-cli yet (device-scoped login)",
+    );
+  });
+
+  it('label help leads with the selector workflow, not a flag dump', () => {
+    const program = new Command('agents');
+    applyGlobalHelpConventions(program);
+    registerAccountsCommand(program);
+    const help = program
+      .commands.find(command => command.name() === 'accounts')!
+      .commands.find(command => command.name() === 'label')!
+      .helpInformation();
+    expect(help).toContain('agents accounts label codex@0.146.0 personal');
+    expect(help).toContain('agents run codex#work');
+  });
+});
+
+describe('groupLabelIdentities', () => {
+  it('folds one account signed into several versions into a single identity row', () => {
+    const rows = groupLabelIdentities([
+      { version: '0.145.0', email: 'you@example.com', accountKey: 'codex:acct=1' },
+      { version: '0.146.0', email: 'you@example.com', accountKey: 'codex:acct=1' },
+    ], '0.146.0');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toEqual({
+      identityKey: 'codex:acct=1',
+      email: 'you@example.com',
+      versions: ['0.145.0', '0.146.0'],
+      isDefault: true,
+    });
+  });
+
+  it('keeps distinct identities separate and sorts the default-version login first', () => {
+    const rows = groupLabelIdentities([
+      { version: '0.145.0', email: 'a@example.com', accountKey: 'codex:acct=a' },
+      { version: '0.146.0', email: 'b@example.com', accountKey: 'codex:acct=b' },
+    ], '0.146.0');
+    expect(rows.map(row => row.email)).toEqual(['b@example.com', 'a@example.com']);
+    expect(rows[0].isDefault).toBe(true);
+    expect(rows[1].isDefault).toBe(false);
+  });
+
+  it('falls back to the lowercased email when the harness exposes no account key', () => {
+    const rows = groupLabelIdentities([
+      { version: '1.0.0', email: 'You@Example.com', accountKey: null },
+    ], null);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].identityKey).toBe('you@example.com');
+  });
+
+  it('drops candidates with no stable identity — a label has nothing to bind to', () => {
+    const rows = groupLabelIdentities([
+      { version: '1.0.0', email: null, accountKey: null },
+      { version: '1.1.0', email: 'kept@example.com', accountKey: null },
+    ], null);
+    expect(rows.map(row => row.email)).toEqual(['kept@example.com']);
   });
 });
 

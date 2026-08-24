@@ -79,7 +79,7 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
+      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
       "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
@@ -242,10 +242,10 @@
           "name": "label",
           "path": "accounts label",
           "aliases": [],
-          "description": "Label a native login independently of its installed harness version",
+          "description": "Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version",
           "args": [
             {
-              "name": "harness",
+              "name": "source",
               "required": true,
               "variadic": false,
               "description": ""
@@ -278,6 +278,8 @@
               "negate": false
             }
           ],
+          "examples": "agents accounts label codex work\nagents accounts label codex@0.146.0 personal\nagents accounts label codex work --account you@example.com\nagents run codex#work",
+          "notes": "The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.",
           "subcommands": []
         },
         {

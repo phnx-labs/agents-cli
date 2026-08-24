@@ -2,7 +2,7 @@ import type { Command } from 'commander';
 import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
-import { password } from '@inquirer/prompts';
+import { password, select } from '@inquirer/prompts';
 import { resolveClaudeSetupToken } from '../lib/claude-account-token.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
@@ -10,8 +10,8 @@ import type { AgentId } from '../lib/types.js';
 import { ALL_AGENT_IDS, getAccountInfo, resolveAgentName } from '../lib/agents.js';
 import { getGlobalDefault, getVersionHomePath, listInstalledVersions } from '../lib/installations/versions.js';
 import { assertNativeAccountNameable, nativeAccountCapability, nativeIdentityKey } from '../lib/account-capabilities.js';
-import { collectRunCandidates } from '../lib/accounting/rotate.js';
-import { isInteractiveTerminal } from './utils.js';
+import { collectRunCandidates, type RotateCandidate } from '../lib/accounting/rotate.js';
+import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { buildSwitchAccountChoices, formatAccountLimits, pickSwitchAccount, type SwitchAccountRow } from './run-account-picker.js';
 import { profileExists, readProfile, type Profile } from '../lib/profiles.js';
 import { pushBundleToHost } from '../lib/secrets/push.js';
@@ -194,6 +194,59 @@ function parseHarness(agentRaw: string): AgentId {
   return agentRaw as AgentId;
 }
 
+/** One labelable signed-in identity, folded across every version it is signed into. */
+export interface LabelIdentity {
+  identityKey: string;
+  email: string | null;
+  versions: string[];
+  isDefault: boolean;
+}
+
+/**
+ * Fold signed-in run candidates into distinct identities — the unit a label
+ * binds to. The same account signed into several versions is ONE row, so a
+ * multi-version single-account harness never demands a selector. Candidates
+ * with no stable identity (no accountKey, no email) are dropped: there is
+ * nothing durable for a label to bind to. Default-version identity first.
+ */
+export function groupLabelIdentities(
+  candidates: Pick<RotateCandidate, 'version' | 'email' | 'accountKey'>[],
+  defaultVersion: string | null,
+): LabelIdentity[] {
+  const byKey = new Map<string, LabelIdentity>();
+  for (const candidate of candidates) {
+    const key = candidate.accountKey ?? candidate.email?.toLowerCase();
+    if (!key) continue;
+    const row = byKey.get(key) ?? { identityKey: key, email: null, versions: [], isDefault: false };
+    row.email ??= candidate.email;
+    row.versions.push(candidate.version);
+    if (candidate.version === defaultVersion) row.isDefault = true;
+    byKey.set(key, row);
+  }
+  return [...byKey.values()].sort((a, b) =>
+    a.isDefault !== b.isDefault ? (a.isDefault ? -1 : 1) : (a.email ?? a.identityKey).localeCompare(b.email ?? b.identityKey));
+}
+
+/** Prompt for the login a label should bind to. A cancelled picker writes nothing. */
+async function pickLabelIdentity(agent: AgentId, identities: LabelIdentity[]): Promise<LabelIdentity | null> {
+  const idW = Math.max(0, ...identities.map(identity => (identity.email ?? identity.identityKey).length));
+  const choices = identities.map(identity => ({
+    name: [
+      (identity.email ?? identity.identityKey).padEnd(idW),
+      identity.isDefault ? chalk.green('default') : '       ',
+      chalk.gray(identity.versions.join(', ')),
+    ].join('  '),
+    value: identity.identityKey,
+  }));
+  try {
+    const key = await select({ message: `Select the ${agent} login to label:`, choices, loop: false });
+    return identities.find(identity => identity.identityKey === key) ?? null;
+  } catch (err) {
+    if (isPromptCancelled(err)) return null;
+    throw err;
+  }
+}
+
 function providerAuthenticatesHarness(provider: string, auth: AccountAuthKind, agent: AgentId): boolean {
   try {
     getAccountProvider(provider).envFor(agent, auth);
@@ -369,27 +422,49 @@ export function registerAccountsCommand(program: Command): void {
       } catch (err) { cleanCommandError(command, err); }
     });
 
-  accounts.command('label <harness> [label]')
-    .description('Label a native login independently of its installed harness version')
+  const labelCmd = accounts.command('label <source> [label]')
+    .description('Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version')
     .option('--account <email-or-id>', 'Native identity to label when the harness has multiple logins')
-    .action(async (harness: string, label: string | undefined, o: { account?: string }, command: Command) => {
+    .action(async (source: string, label: string | undefined, o: { account?: string }, command: Command) => {
       try {
-        const agent = parseHarness(harness);
+        if (source.includes('@')) {
+          // <harness>@<version> pins the login by where it is signed in, so a
+          // second selector can only contradict it.
+          if (o.account) throw new Error(`'${source}' already selects one login; drop --account.`);
+          const identity = await nativeIdentityFromSource(source);
+          const account = labelNativeAccount(identity.agent, identity.identityKey, identity.identityLabel, label, identity.scope);
+          console.log(chalk.green(`Labeled ${identity.agent} account ${identity.identityLabel ?? identity.identityKey} as '${account.name}'.`));
+          return;
+        }
+        const agent = parseHarness(source);
         assertNativeAccountNameable(agent);
         const candidates = (await collectRunCandidates(agent)).filter(candidate => candidate.signedIn);
+        const identities = groupLabelIdentities(candidates, getGlobalDefault(agent));
+        if (identities.length === 0) throw new Error(`No signed-in ${agent} account with a stable identity. Run the harness and complete its login first.`);
         const needle = o.account?.toLowerCase();
-        const selected = needle
-          ? candidates.find(candidate => candidate.email?.toLowerCase() === needle || candidate.accountKey?.toLowerCase() === needle)
-          : candidates.find(candidate => candidate.version === getGlobalDefault(agent)) ?? (candidates.length === 1 ? candidates[0] : undefined);
-        if (!selected) throw new Error(needle
-          ? `Unknown ${agent} account '${o.account}'.`
-          : `Multiple ${agent} accounts are connected; pass --account <email|id>.`);
-        const identityKey = selected.accountKey ?? selected.email?.toLowerCase();
-        if (!identityKey) throw new Error(`${agent} account '${selected.version}' has no stable identity.`);
-        const account = labelNativeAccount(agent, identityKey, selected.email ?? undefined, label, nativeAccountCapability(agent).scope as 'version' | 'device');
-        console.log(chalk.green(`Labeled ${agent} account ${selected.email ?? identityKey} as '${account.name}'.`));
+        let selected = needle
+          ? identities.find(identity => identity.email?.toLowerCase() === needle || identity.identityKey.toLowerCase() === needle)
+          : identities.length === 1 ? identities[0] : undefined;
+        if (needle && !selected) throw new Error(`Unknown ${agent} account '${o.account}'.`);
+        if (!selected) {
+          if (!isInteractiveTerminal()) {
+            throw new Error(`Multiple ${agent} accounts are connected. Pass --account <email|id>, or pick by version: agents accounts label ${agent}@<version> ${label ?? '<label>'}`);
+          }
+          const picked = await pickLabelIdentity(agent, identities);
+          if (!picked) return;
+          selected = picked;
+        }
+        const account = labelNativeAccount(agent, selected.identityKey, selected.email ?? undefined, label, nativeAccountCapability(agent).scope as 'version' | 'device');
+        console.log(chalk.green(`Labeled ${agent} account ${selected.email ?? selected.identityKey} as '${account.name}'.`));
       } catch (err) { cleanCommandError(command, err); }
     });
+  setHelpSections(labelCmd, {
+    examples: `agents accounts label codex work
+agents accounts label codex@0.146.0 personal
+agents accounts label codex work --account you@example.com
+agents run codex#work`,
+    notes: 'The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.',
+  });
 
   accounts.command('attach <account> <target>')
     .description('Attach a named account to a native installation or custom harness')
@@ -549,6 +624,7 @@ agents run claude`,
 agents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY
 agents accounts set-key work
 agents accounts name claude@2.1.220 work
+agents accounts label codex@0.146.0 personal
 agents accounts attach work claude@2.1.225
 agents accounts view work --json
 agents accounts switch claude

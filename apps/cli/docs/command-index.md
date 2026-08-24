@@ -24,7 +24,7 @@ agents accounts add <name>                  Add a durable API key, setup token, 
 agents accounts attach <account> <target>   Attach a named account to a native installation or custom harness
 agents accounts clear-default <agent>       Return a harness to native login or balanced account selection
 agents accounts detach <account> <target>   Remove one account attachment
-agents accounts label <harness> [label]     Label a native login independently of its installed harness version
+agents accounts label <source> [label]      Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version
 agents accounts list                        List credential accounts
 agents accounts logout <target>             Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.
 agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
