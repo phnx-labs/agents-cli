@@ -1245,7 +1245,11 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 ## Share
 
 ```bash
-# Publish an HTML artifact to a public link on your own Cloudflare R2 (~$0).
+# Signed in? Just publish — no Cloudflare setup.
+agents auth login
+agents artifacts share plan.html --visibility unlisted      # → https://share.agents-cli.sh/<you>/…
+
+# Or provision your own Cloudflare R2 (~$0).
 agents artifacts setup                                      # once: provision bucket + Worker on your CF
 agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>/fleet
 agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # human title + structured metadata
@@ -1257,18 +1261,22 @@ agents artifacts unshare fleet                              # take a published l
 ```
 
 `agents artifacts share` closes the loop: an agent makes work (a plan, a viz, a report),
-publishes it, and you open the link to see it. `setup` reads a Cloudflare API token
-from your `cloudflare.com` secrets bundle (or `--token`), creates an R2 bucket, uploads
-a tiny Worker, and enables the free `*.workers.dev` subdomain (or maps `--domain
-share.example.com` when the token owns the zone). Writes are bearer-gated **through**
-the Worker (its R2 binding does the put, so the client needs no S3 keys); reads are
-**public**, so a link outlives the agent. R2 has zero egress + a 10 GB free tier, so
-this is effectively free.
+publishes it, and you open the link to see it. **Signed-in users** publish to the
+already-live managed endpoint (`share.agents-cli.sh`) with the Phoenix session — no
+Cloudflare account, bucket, or write token. `--visibility unlisted` (hidden aliases
+`--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
+and the Worker sends `X-Robots-Tag: noindex`. **BYO Cloudflare** remains: `setup` reads
+a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates
+an R2 bucket, uploads a tiny Worker, and enables the free `*.workers.dev` subdomain (or
+maps `--domain share.example.com` when the token owns the zone). Writes are bearer-gated
+**through** the Worker (Phoenix bearer or static `WRITE_TOKEN`); reads are **public**, so
+a link outlives the agent. R2 has zero egress + a 10 GB free tier, so BYO is still
+effectively free.
 
 **Fleet mode:** provision one endpoint, then every fleet / cloud / ephemeral agent
 publishes through it with a shared write token — `agents artifacts share join <baseUrl>` uses an
 existing endpoint with no provisioning. `--expire 30d|12h|<date>` auto-expires a link.
-`--json` emits `{ url, coverUrl, expiresAt, label, labelSource }` so plan-render automation can
+`--json` emits `{ url, coverUrl, expiresAt, visibility, unlisted?, label, labelSource }` so plan-render automation can
 publish the rendered HTML and post the returned link without scraping terminal text.
 
 **Every share carries provenance and a title.** Agent/session/host/repo/date are

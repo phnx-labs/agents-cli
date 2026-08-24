@@ -27,6 +27,7 @@ import {
   RESERVED_META_KEYS,
 } from './publish.js';
 import { renderWorkerScript } from './worker-template.js';
+import { DEFAULT_SHARE_DOMAIN } from './config.js';
 
 describe('attachOgCover', () => {
   const ctx = (
@@ -116,6 +117,7 @@ describe('publishFile', () => {
       coverUrl: undefined,
       label: 'Plan',
       labelSource: 'derived',
+      visibility: 'public',
     });
     expect(uploads).toEqual([
       {
@@ -125,11 +127,37 @@ describe('publishFile', () => {
           authorization: 'Bearer token',
           'content-type': 'text/html; charset=utf-8',
           'x-share-expires-at': '2030-01-01T00:00:00.000Z',
+          'x-share-visibility': 'public',
           'x-share-label': 'Plan',
           'x-share-label-source': 'derived',
         },
       },
     ]);
+  });
+
+  it('signed-in (Phoenix session) publishes to the managed endpoint with that bearer (RUSH-3135)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-managed-'));
+    const file = join(dir, 'plan.html');
+    writeFileSync(file, '<!doctype html><title>Plan</title>', 'utf-8');
+    const uploads: Array<{ url: string; headers: Record<string, string> }> = [];
+
+    const result = await publishFile(file, {
+      slug: 'plan',
+      cover: false,
+      provenance: {},
+      expire: 'never',
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.test' },
+      uploader: async (url, _body, headers) => {
+        uploads.push({ url, headers });
+        return { ok: true, status: 200, url };
+      },
+    });
+
+    expect(result.url).toBe(`https://${DEFAULT_SHARE_DOMAIN}/alice/plan`);
+    expect(uploads).toHaveLength(1);
+    expect(uploads[0].url).toBe(`https://${DEFAULT_SHARE_DOMAIN}/alice/plan`);
+    expect(uploads[0].headers.authorization).toBe('Bearer pid_alice');
+    expect(uploads[0].headers['x-share-visibility']).toBe('public');
   });
 });
 
@@ -355,6 +383,54 @@ describe('publishToEndpoint', () => {
       },
     );
     expect(visibility).toBe('unlisted');
+    expect(result.unlisted).toBe(true);
+    expect(result.visibility).toBe('unlisted');
+  });
+
+  it('sends x-share-visibility: public by default (RUSH-3135)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-public-vis-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let visibility = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'shown',
+        githubUser: 'octocat',
+        expire: 'never',
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          visibility = headers['x-share-visibility'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(visibility).toBe('public');
+    expect(result.visibility).toBe('public');
+    expect(result.unlisted).toBeUndefined();
+  });
+
+  it('maps visibility: unlisted the same as the unlisted boolean', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-vis-flag-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let visibility = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'hidden',
+        githubUser: 'octocat',
+        expire: 'never',
+        visibility: 'unlisted',
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          visibility = headers['x-share-visibility'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(visibility).toBe('unlisted');
+    expect(result.visibility).toBe('unlisted');
     expect(result.unlisted).toBe(true);
   });
 
@@ -1120,7 +1196,11 @@ describe('renderWorkerScript', () => {
         body: '<h1>hello</h1>',
       }), env);
       expect(put.status).toBe(200);
-      expect(store.get('page')?.customMetadata).toEqual({ 'expires-at': '2026-07-22T00:00:01.000Z' });
+      expect(store.get('page')?.customMetadata).toMatchObject({
+        'expires-at': '2026-07-22T00:00:01.000Z',
+        visibility: 'public',
+        owner: 'page',
+      });
 
       vi.setSystemTime(new Date('2026-07-22T00:00:02.000Z'));
       const get = await worker.default.fetch(new Request('https://share.test/page'), env);

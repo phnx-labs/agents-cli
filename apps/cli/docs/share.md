@@ -1,9 +1,18 @@
 # Share
 
-Publish an HTML artifact (a plan, a viz, a report, a game) to a public link on **your own**
-Cloudflare R2, behind a tiny Worker — for effectively **$0** (R2 has zero egress and a
-10 GB free tier). The loop `agents artifacts share` closes: an agent makes work, publishes it,
-and you open the link to see if it worked.
+Publish an HTML artifact (a plan, a viz, a report, a game) to a public link.
+
+**Signed in?** `agents auth login` once, then `agents artifacts share plan.html` publishes
+to the managed endpoint at `share.agents-cli.sh` — no Cloudflare account, no bucket, no
+Worker, no write token. The Phoenix session already stored at
+`~/.agents/.cache/state/phoenix-session.json` is the bearer.
+
+**Bring your own Cloudflare** still works: provision an R2 bucket + Worker on your own
+account (`agents artifacts setup`) for a custom domain or self-host. R2 has zero egress
+and a 10 GB free tier, so BYO is still effectively **$0**.
+
+The loop `agents artifacts share` closes: an agent makes work, publishes it, and you open
+the link to see if it worked.
 
 > **Moved in RUSH-2580.** The commands used to be top-level `agents share …`, with
 > provisioning split across `agents share setup` and `agents setup share`. They are now
@@ -14,27 +23,38 @@ and you open the link to see if it worked.
 ## Overview
 
 ```bash
-agents artifacts setup --analytics-token <cf-token>            # once: provision on your Cloudflare
-agents artifacts share plan.html                              # → public link, default 30d expiry
-agents artifacts share plan.html --unlisted --expire 12h      # hidden from gallery; still world-readable by URL
+agents auth login                                             # once: Phoenix session, then share just works
+agents artifacts share plan.html                              # → public link on share.agents-cli.sh
+agents artifacts share plan.html --visibility unlisted --expire 12h  # capability URL; noindex; hidden from gallery
 agents artifacts share plan.html --slug fleet --expire never  # permanent public slug
 agents artifacts share plan.html --json                       # machine-readable URL for hooks
+agents artifacts setup --analytics-token <cf-token>           # optional: provision your own Cloudflare
 agents artifacts share status                                 # show endpoint, namespace, analytics, template
 agents artifacts share analytics                              # link to the Web Analytics dashboard
 agents artifacts share update                                 # re-deploy the Worker to the latest template
 agents artifacts unshare fleet                                # take the link (+ its OG cover) down
 ```
 
-`setup` reads a Cloudflare API token from your `cloudflare` secrets bundle (or pass
-`--token`), creates an R2 bucket, installs the share lifecycle rule, uploads the Worker, sets
-the `WRITE_TOKEN` Worker secret, and enables the free
+**Managed (default when signed in).** The CLI reads `readSession()` from
+`phoenix-session.json` and PUTs to `https://share.agents-cli.sh/<userId>/<slug>` with
+`Authorization: Bearer <access_token>`. The Worker verifies the bearer against Phoenix ID
+(`GET ${PHOENIX_ID_BASE}/api/v1/auth/me`) and namespaces the R2 key by that `userId`, so
+one user cannot write another's prefix. Force the BYO path while signed in with
+`AGENTS_SHARE_BACKEND=byo`.
+
+**BYO Cloudflare.** `setup` reads a Cloudflare API token from your `cloudflare` secrets
+bundle (or pass `--token`), creates an R2 bucket, installs the share lifecycle rule,
+uploads the Worker, sets the `WRITE_TOKEN` Worker secret, and enables the free
 `*.workers.dev` subdomain. It maps `share.agents-cli.sh` when the token owns the
 `agents-cli.sh` zone; otherwise it keeps the `*.workers.dev` endpoint. Pass
 `--domain share.example.com` to use a different visible zone. Then `agents artifacts share <file>`
-does an authed `PUT` and prints the link. Re-running `agents artifacts setup` interactively
-against an already-configured endpoint offers to update the deployed Worker in place
-instead of only "keep" or "reconfigure from scratch" — see
-[Updating the deployed Worker](#updating-the-deployed-worker).
+does an authed `PUT` with the static write token. Re-running `agents artifacts setup`
+interactively against an already-configured endpoint offers to update the deployed Worker
+in place instead of only "keep" or "reconfigure from scratch" — see
+[Updating the deployed Worker](#updating-the-deployed-worker). The Worker template change
+in this release (Phoenix PUT auth + `X-Robots-Tag: noindex` on unlisted GET) marks
+already-provisioned BYO endpoints `outdated` until their owner runs
+`agents artifacts share update`.
 
 ## Sharing a session
 
@@ -79,11 +99,13 @@ Manage published sessions with the ordinary `agents artifacts share list` /
 
 ```
 agent makes plan.html
-        │  agents artifacts share plan.html         (PUT /<user>/<slug>, Authorization: Bearer <token>)
+        │  agents artifacts share plan.html
+        │    managed: Phoenix bearer → share.agents-cli.sh/<userId>/<slug>
+        │    BYO:     WRITE_TOKEN    → your Worker /<github-user>/<slug>
         ▼
-   the Worker  ──(R2 binding).put()──►  R2 bucket (your account)
+   the Worker  ──(R2 binding).put()──►  R2 bucket (managed platform, or your account)
         ▲
-        │  GET /<user>/<slug>   (public, no auth)
+        │  GET /<user>/<slug>   (public; unlisted also sends X-Robots-Tag: noindex)
    any browser  ◄── streams HTML from R2, 410 + lazy-delete once expired
         │
         │  GET /<user>          (public gallery of that user's shares)
@@ -109,10 +131,13 @@ agent makes plan.html
   into the object's metadata; the Worker `410`s and lazily deletes past that instant.
   `setup` also installs an R2 lifecycle rule so old share objects are removed
   automatically even if nobody opens the expired link again.
-- **Unlisted / private.** `--unlisted` (alias `--private`) stores `visibility=unlisted`
-  on the object. The public `/<user>` gallery and `agents artifacts share list` omit it; the
-  direct URL is still world-readable (capability URL — unlisted, not secret). Use with
-  a short `--expire` when bounding blast radius after an accidental sensitive publish.
+- **Visibility.** `--visibility public|unlisted` (default `public`). `unlisted` stores
+  `visibility=unlisted` on the object: the public `/<user>` gallery and
+  `agents artifacts share list` omit it; GET still 200s the direct URL (capability URL —
+  unlisted, not secret) and sends `X-Robots-Tag: noindex`. Hidden aliases `--unlisted` and
+  `--private` map to `--visibility unlisted` (no breakage). `org` is not supported in this
+  release (the Worker 400s it). Use unlisted with a short `--expire` when bounding blast
+  radius after an accidental sensitive publish.
 - **Pre-publish scan.** Before upload, the CLI refuses files that contain email addresses
   or credential-shaped strings (`ghp_…`, `sk-…`, `AKIA…`, `Bearer …`, …) — the exact
   failure mode behind RUSH-2428. Pass `--force` to publish anyway.
@@ -291,7 +316,7 @@ when a write simply omitted the key.
 
 | Command | What it does |
 |---|---|
-| `agents artifacts share <file> [--slug s] [--github-user u] [--expire spec] [--unlisted\|--private] [--force] [--no-cover] [--no-analytics] [--label text] [--meta k=v ...] [--no-revision] [--json]` | Publish `<file>` under your GitHub-username namespace (default expiry **30d**); print the link, or emit `{ url, coverUrl, expiresAt, unlisted?, label, labelSource }` for plan-render hooks with `--json`. `--unlisted`/`--private` hides from the gallery; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. `--label`/`--title` sets a human title (else derived); `--meta` attaches structured metadata; republishing an existing slug keeps the prior version unless `--no-revision` (see [Provenance, labels, and metadata](#provenance-labels-and-metadata) and [Revisions](#revisions)). |
+| `agents artifacts share <file> [--slug s] [--github-user u] [--expire spec] [--visibility public\|unlisted] [--force] [--no-cover] [--no-analytics] [--label text] [--meta k=v ...] [--no-revision] [--json]` | Publish `<file>` (default expiry **30d**). Signed-in → managed `share.agents-cli.sh/<userId>/…` with the Phoenix bearer; otherwise BYO under your GitHub-username namespace. Print the link, or emit `{ url, coverUrl, expiresAt, visibility, unlisted?, label, labelSource }` with `--json`. `--visibility unlisted` (hidden aliases `--unlisted`/`--private`) hides from the gallery and noindexes GET; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. `--label`/`--title` sets a human title (else derived); `--meta` attaches structured metadata; republishing an existing slug keeps the prior version unless `--no-revision` (see [Provenance, labels, and metadata](#provenance-labels-and-metadata) and [Revisions](#revisions)). |
 | `agents sessions share <session> [--public] [--slug s] [--label text] [--expire spec] [--reasoning omit\|fold\|include] [--force] [--no-cover]` | Render one session as a redacted, self-contained page and publish it under `session-<shortId>`; print the link, or the full publish result with `--json`. **Unlisted unless `--public`**, and emails are masked before the scan runs (see [Sharing a session](#sharing-a-session)). |
 | `agents artifacts share list [--for-user u] [--agent name] [--session id] [--label-contains substr] [--list-json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--list-json` (see [Listing your shares](#listing-your-shares) below). `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
 | `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). |
@@ -403,9 +428,9 @@ the link can read the content, and the Worker serves it to them.
   decays. Pass `--expire 12h` (or shorter) for sensitive content, or `--expire never`
   only when the page is intentionally permanent. The Worker `410`s and lazily deletes
   past the expiry instant.
-- **`--unlisted` / `--private` hides from the gallery, not from the URL.** An unlisted
-  page is omitted from `/<user>` and `agents artifacts share list`, but anyone with the link can
-  still read it. Prefer unlisted + short expiry over "hope nobody finds the gallery".
+- **`--visibility unlisted` (aliases `--unlisted` / `--private`) hides from the gallery, not from the URL.** An unlisted
+  page is omitted from `/<user>` and `agents artifacts share list`, GET sends `X-Robots-Tag: noindex`,
+  but anyone with the link can still read it. Prefer unlisted + short expiry over "hope nobody finds the gallery".
 - **Pre-publish scan refuses emails and credential-shaped strings.** The CLI scans the
   file before upload and exits non-zero when it finds them — pass `--force` only when
   you have audited the page. This is the mechanical backstop for the RUSH-2428 incident
@@ -420,10 +445,13 @@ the link can read the content, and the Worker serves it to them.
   just to publish). That is deliberately not implemented today; until it lands, only
   publish here what you're comfortable being world-readable-if-the-URL-leaks.
 
-Writes require the bearer `WRITE_TOKEN` (held by the Worker as an encrypted CF secret; the
-client sends it from the `share` bundle). The Worker's constant-time-ish compare avoids
-leaking the token by timing. The token is a 32-byte random hex; rotate by re-running
-`setup` (mints a new one) — old links keep serving until they expire.
+Writes require a bearer. Two principals, checked in this order: the static `WRITE_TOKEN`
+(BYO / admin) if the presented token equals `env.WRITE_TOKEN`; otherwise a Phoenix
+access_token verified against `${PHOENIX_ID_BASE}/api/v1/auth/me`. 401 when neither
+authenticates. The Worker's constant-time-ish compare avoids leaking `WRITE_TOKEN` by
+timing. Rotate a BYO token by re-running `setup` (mints a new one) — old links keep
+serving until they expire. A managed publish is revoked by signing out / rotating the
+Phoenix session.
 
-Source: `src/commands/share.ts`, `src/lib/share/{worker-template,provision,publish,delete,config,analytics}.ts`,
-`Meta.share` in `src/lib/types.ts`.
+Source: `src/commands/share.ts`, `src/lib/share/{backend,worker-template,provision,publish,delete,config,analytics}.ts`,
+`src/lib/identity/client.ts`, `Meta.share` in `src/lib/types.ts`.

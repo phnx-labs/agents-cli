@@ -23,19 +23,20 @@ import { registerArtifactsSetupCommand } from './artifacts-setup.js';
 export function registerArtifactsCommands(program: Command): void {
   const artifactsCmd = program
     .command('artifacts')
-    .description('Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).');
+    .description('Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.');
 
   registerArtifactsSetupCommand(artifactsCmd);
   registerShareCommands(artifactsCmd);
 
   setHelpSections(artifactsCmd, {
     examples: `
-      # One-time: provision your own endpoint (or join a teammate's)
+      # Signed in? Just publish — no Cloudflare setup
+      agents auth login
+      agents artifacts share ./out/plan.html
+
+      # Or provision your own Cloudflare endpoint (or join a teammate's)
       agents artifacts setup
       agents artifacts share join https://share.agents-cli.sh
-
-      # Publish — auto OG cover, default 30d expiry, shareable link
-      agents artifacts share ./out/plan.html
 
       # What's live in your namespace, and taking one down
       agents artifacts share list

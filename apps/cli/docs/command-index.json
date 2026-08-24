@@ -697,7 +697,7 @@
       "name": "artifacts",
       "path": "artifacts",
       "aliases": [],
-      "description": "Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).",
+      "description": "Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.",
       "args": [],
       "options": [
         {
@@ -711,7 +711,7 @@
           "negate": false
         }
       ],
-      "examples": "# One-time: provision your own endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Publish — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents artifacts unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
+      "examples": "# Signed in? Just publish — no Cloudflare setup\n      agents auth login\n      agents artifacts share ./out/plan.html\n\n      # Or provision your own Cloudflare endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents artifacts unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
       "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning. It runs the interactive wizard only when you\n  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/\n  --account/--token/--domain/--analytics-token, or run non-interactively, and it\n  provisions directly with what you named.\n\n  agents artifacts unshare <targets...> is the nested alias of\n  agents artifacts share delete. Top-level `agents unshare` is gone.\n\n  Full reference: apps/cli/docs/share.md.",
       "subcommands": [
         {
@@ -804,7 +804,7 @@
           "name": "share",
           "path": "artifacts share",
           "aliases": [],
-          "description": "Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).",
+          "description": "Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.",
           "args": [
             {
               "name": "file",
@@ -825,7 +825,7 @@
             },
             {
               "flags": "--github-user <user>",
-              "description": "GitHub username for the share namespace (default: resolved from gh/git config)",
+              "description": "GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)",
               "long": "--github-user",
               "required": true,
               "optional": false,
@@ -842,22 +842,18 @@
               "negate": false
             },
             {
-              "flags": "--unlisted",
-              "description": "hide from the public gallery and `agents artifacts share list` (direct URL still works)",
-              "long": "--unlisted",
-              "required": false,
+              "flags": "--visibility <level>",
+              "description": "public | unlisted (default public). unlisted is a capability URL: GET still works, hidden from the gallery, X-Robots-Tag: noindex",
+              "long": "--visibility",
+              "required": true,
               "optional": false,
               "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "--private",
-              "description": "alias of --unlisted",
-              "long": "--private",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
+              "negate": false,
+              "defaultValue": "public",
+              "choices": [
+                "public",
+                "unlisted"
+              ]
             },
             {
               "flags": "--force",
@@ -943,8 +939,8 @@
               "negate": false
             }
           ],
-          "examples": "# Publish an HTML file — auto OG cover, default 30d expiry, shareable link\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works) and expire sooner\n      agents artifacts share ./out/report.html --unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Human title + structured metadata, shown in the gallery and share list\n      agents artifacts share ./out/plan.html --label \"Q3 fleet plan\" --meta kind=plan --meta ticket=RUSH-2683\n\n      # Republish without keeping the previous version as a revision\n      agents artifacts share ./out/plan.html --slug q3-report --no-revision\n\n      # Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents artifacts unshare my-plan-a1b2\n\n      # Several at once\n      agents artifacts unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents artifacts unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents artifacts unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents artifacts unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
-          "notes": "Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --unlisted / --private hides the page from the public gallery\n  and agents artifacts share list; the direct URL is still world-readable\n  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  Every publish carries provenance auto-captured from the exec env/git/clock\n  (agent, session, host, repo, date) — never invented, only sent when present —\n  plus a label (explicit --label/--title, else derived from the HTML <title>,\n  frontmatter title, or filename; never blocks on a prompt) and any --meta\n  key=value pairs. Republishing an existing slug keeps the prior version as a\n  retained revision by default; see 'agents artifacts share revisions'.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents artifacts unshare (same command, different name).",
+          "examples": "# Signed in? Just publish — no Cloudflare setup (managed endpoint)\n      agents auth login\n      agents artifacts share ./out/plan.html\n\n      # Hide from the public gallery (direct URL still works, noindex) and expire sooner\n      agents artifacts share ./out/report.html --visibility unlisted --expire 12h\n\n      # Permanent public page (opt out of the default 30d expiry)\n      agents artifacts share ./out/landing.html --slug landing --expire never\n\n      # Custom slug, expiring in 7 days\n      agents artifacts share ./out/report.html --slug q3-report --expire 7d\n\n      # Human title + structured metadata, shown in the gallery and share list\n      agents artifacts share ./out/plan.html --label \"Q3 fleet plan\" --meta kind=plan --meta ticket=RUSH-2683\n\n      # Republish without keeping the previous version as a revision\n      agents artifacts share ./out/plan.html --slug q3-report --no-revision\n\n      # Delete by full URL — also takes down the sibling OG cover and any retained revisions\n      agents artifacts share delete https://share.agents-cli.sh/octocat/my-plan-a1b2\n\n      # Delete by <user>/<slug>, or a bare slug in your own namespace\n      agents artifacts share delete octocat/my-plan-a1b2\n      agents artifacts unshare my-plan-a1b2\n\n      # Several at once\n      agents artifacts unshare my-plan-a1b2 old-report-9f3c\n\n      # Keep the cover image up (rare — you usually want both gone)\n      agents artifacts unshare my-plan-a1b2 --keep-cover\n\n      # Keep retained revisions up too (rare — they're world-readable by URL like the page itself)\n      agents artifacts unshare my-plan-a1b2 --keep-revisions\n\n      # Don't error if it's already gone\n      agents artifacts unshare my-plan-a1b2 --if-exists\n\n      # One-time setup (or join an existing endpoint)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # Push a worker-template.ts change out to an already-provisioned endpoint\n      agents artifacts share update",
+          "notes": "Signed-in users publish to the managed endpoint (share.agents-cli.sh) with the\n  Phoenix session — no Cloudflare account, bucket, or write token. Without a\n  session, the existing BYO Cloudflare path still applies (setup / join).\n\n  Default expiry is 30d so an accidental publish decays. Pass --expire never for\n  a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)\n  hides the page from the public gallery and agents artifacts share list; the\n  direct URL is still world-readable (unlisted, not secret) and GET sends\n  X-Robots-Tag: noindex. A pre-publish scan refuses emails and credential-shaped\n  strings unless --force is passed.\n\n  Every publish carries provenance auto-captured from the exec env/git/clock\n  (agent, session, host, repo, date) — never invented, only sent when present —\n  plus a label (explicit --label/--title, else derived from the HTML <title>,\n  frontmatter title, or filename; never blocks on a prompt) and any --meta\n  key=value pairs. Republishing an existing slug keeps the prior version as a\n  retained revision by default; see 'agents artifacts share revisions'.\n\n  A follow-up GET is required to resolve 404 before this reports success — the\n  Worker's DELETE is idempotent and returns {\"ok\":true} even for a key that was\n  never there, so that response alone is never proof of a takedown.\n\n  Also deletes any retained revisions of the target (RUSH-2683) — a share that was\n  republished at least once leaves its prior version(s) live at their own URL until\n  they're purged too, so leaving them up would defeat the point of taking the page\n  down. Pass --keep-revisions to leave them (they still expire via the bucket's\n  lifecycle rule on their own schedule either way).\n\n  agents artifacts share delete === agents artifacts unshare (same command, different name).",
           "subcommands": [
             {
               "name": "analytics",

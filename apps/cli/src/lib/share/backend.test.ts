@@ -1,0 +1,170 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { randomBytes } from 'node:crypto';
+import type { KeychainBackend } from '../secrets/index.js';
+import type { PhoenixSession } from '../identity/client.js';
+import { writeSession, clearSession, sessionFilePath } from '../identity/client.js';
+import { writeShareConfig, storeWriteToken, DEFAULT_SHARE_DOMAIN } from './config.js';
+import {
+  resolveShareBackend,
+  shouldUseManaged,
+  sanitizeShareNamespace,
+  managedShareBaseUrl,
+  SHARE_BACKEND_ENV,
+} from './backend.js';
+import {
+  setKeychainBackendForTest,
+  setKeychainServiceHashingForTest,
+} from '../secrets/index.js';
+import { setKeychainAgentOnlyBypassForTest } from '../secrets/bundles.js';
+
+class MemBackend implements KeychainBackend {
+  store = new Map<string, string>();
+  has(item: string) { return this.store.has(item); }
+  get(item: string) {
+    const v = this.store.get(item);
+    if (v === undefined) throw new Error(`missing ${item}`);
+    return v;
+  }
+  set(item: string, value: string) { this.store.set(item, value); }
+  delete(item: string) { return this.store.delete(item); }
+  list(prefix: string) { return [...this.store.keys()].filter((k) => k.startsWith(prefix)); }
+}
+
+setKeychainAgentOnlyBypassForTest(true);
+
+const ALICE: PhoenixSession = {
+  access_token: 'pid_alice_token',
+  userId: 'alice-user-1',
+  email: 'alice@example.com',
+};
+
+describe('ShareBackend chooser (RUSH-3135)', () => {
+  let mem: MemBackend;
+  let prevBackend: KeychainBackend | null;
+  const prevBackendEnv = process.env[SHARE_BACKEND_ENV];
+  const prevShareToken = process.env.SHARE_WRITE_TOKEN;
+
+  beforeEach(() => {
+    mem = new MemBackend();
+    prevBackend = setKeychainBackendForTest(mem);
+    setKeychainServiceHashingForTest(randomBytes(16).toString('hex'));
+    const home = process.env.HOME ?? os.homedir();
+    fs.rmSync(path.join(home, '.agents'), { recursive: true, force: true });
+    const session = sessionFilePath();
+    fs.rmSync(path.dirname(session), { recursive: true, force: true });
+    delete process.env[SHARE_BACKEND_ENV];
+    delete process.env.SHARE_WRITE_TOKEN;
+    clearSession();
+  });
+
+  afterEach(() => {
+    setKeychainServiceHashingForTest(null);
+    setKeychainBackendForTest(prevBackend);
+    clearSession();
+    if (prevBackendEnv === undefined) delete process.env[SHARE_BACKEND_ENV];
+    else process.env[SHARE_BACKEND_ENV] = prevBackendEnv;
+    if (prevShareToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
+    else process.env.SHARE_WRITE_TOKEN = prevShareToken;
+  });
+
+  it('sanitizeShareNamespace matches the Worker: lowercase, [a-z0-9-]+', () => {
+    expect(sanitizeShareNamespace('Alice_User-1')).toBe('alice-user-1');
+    expect(sanitizeShareNamespace('550e8400-e29b-41d4-a716-446655440000')).toBe(
+      '550e8400-e29b-41d4-a716-446655440000',
+    );
+  });
+
+  it('signed-in with no BYO override selects the managed endpoint and Phoenix token', () => {
+    writeSession(ALICE);
+    expect(shouldUseManaged()).toBe(true);
+    const backend = resolveShareBackend();
+    expect(backend.kind).toBe('managed');
+    expect(backend.token).toBe('pid_alice_token');
+    expect(backend.baseUrl).toBe(`https://${DEFAULT_SHARE_DOMAIN}`);
+    expect(backend.baseUrl).toBe(managedShareBaseUrl());
+    expect(backend.namespace).toBe('alice-user-1');
+  });
+
+  it('signed-in via opts.session (DI) also selects managed', () => {
+    expect(shouldUseManaged({ session: ALICE })).toBe(true);
+    const backend = resolveShareBackend({ session: ALICE });
+    expect(backend.kind).toBe('managed');
+    expect(backend.token).toBe(ALICE.access_token);
+  });
+
+  it('an explicit writeToken is a BYO override even when signed in', () => {
+    writeSession(ALICE);
+    writeShareConfig({
+      baseUrl: 'https://byo.example',
+      accountId: 'acct',
+      workerName: 'w',
+      bucketName: 'b',
+    });
+    expect(shouldUseManaged({ writeToken: 'static-token' })).toBe(false);
+    const backend = resolveShareBackend({ writeToken: 'static-token', githubUser: 'octocat' });
+    expect(backend.kind).toBe('byo');
+    expect(backend.token).toBe('static-token');
+    expect(backend.baseUrl).toBe('https://byo.example');
+    expect(backend.namespace).toBe('octocat');
+  });
+
+  it(`${SHARE_BACKEND_ENV}=byo forces BYO while signed in`, () => {
+    writeSession(ALICE);
+    writeShareConfig({
+      baseUrl: 'https://byo.example',
+      accountId: 'acct',
+      workerName: 'w',
+      bucketName: 'b',
+    });
+    storeWriteToken('bundle-token');
+    process.env[SHARE_BACKEND_ENV] = 'byo';
+    expect(shouldUseManaged()).toBe(false);
+    const backend = resolveShareBackend({ githubUser: 'octocat' });
+    expect(backend.kind).toBe('byo');
+    expect(backend.token).toBe('bundle-token');
+  });
+
+  it('opts.byo forces BYO while signed in', () => {
+    writeSession(ALICE);
+    writeShareConfig({
+      baseUrl: 'https://byo.example',
+      accountId: 'acct',
+      workerName: 'w',
+      bucketName: 'b',
+    });
+    const backend = resolveShareBackend({ byo: true, writeToken: 'tok', githubUser: 'octocat' });
+    expect(backend.kind).toBe('byo');
+  });
+
+  it('signed out with BYO config selects BYO', () => {
+    writeShareConfig({
+      baseUrl: 'https://byo.example/',
+      accountId: 'acct',
+      workerName: 'w',
+      bucketName: 'b',
+    });
+    expect(shouldUseManaged({ session: null })).toBe(false);
+    const backend = resolveShareBackend({
+      session: null,
+      writeToken: 'tok',
+      githubUser: 'octocat',
+    });
+    expect(backend.kind).toBe('byo');
+    expect(backend.baseUrl).toBe('https://byo.example');
+    expect(backend.namespace).toBe('octocat');
+  });
+
+  it('signed out with no BYO config fails loud naming both doors', () => {
+    expect(() => resolveShareBackend({ session: null })).toThrow(/agents auth login/);
+    expect(() => resolveShareBackend({ session: null })).toThrow(/artifacts setup/);
+  });
+
+  it('managed fails loud when the session has no userId', () => {
+    expect(() =>
+      resolveShareBackend({ session: { access_token: 'pid_x' } }),
+    ).toThrow(/no user id/);
+  });
+});

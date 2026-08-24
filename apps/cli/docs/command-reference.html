@@ -94,12 +94,13 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       - &#39;add&#39; does NOT change the default if a default already exists. Use &#39;agents use&#39; to switch.
       - Multi-account: each installed version has separate auth, so you can install the same agent twice for two accounts.
       - --isolated installs a self-contained copy: it never sets the default, never creates the bare &#39;&lt;agent&gt;&#39; shim, and never backs up or symlinks your real ~/.&lt;agent&gt;. Run it with &#39;agents run &lt;agent&gt;@&lt;version&gt;&#39; and remove it with &#39;agents remove &lt;agent&gt;@&lt;version&gt; --isolated&#39;. Mutually exclusive with --project.</p></article>
-<article id="artifacts" data-search="artifacts artifacts  publish agent-made artifacts (plans, reports, visuals) to your own cloudflare r2 and get a shareable link (~$0). -h, --help show help # one-time: provision your own endpoint (or join a teammate&#39;s)
+<article id="artifacts" data-search="artifacts artifacts  publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your cloudflare r2. -h, --help show help # signed in? just publish — no cloudflare setup
+      agents auth login
+      agents artifacts share ./out/plan.html
+
+      # or provision your own cloudflare endpoint (or join a teammate&#39;s)
       agents artifacts setup
       agents artifacts share join https://share.agents-cli.sh
-
-      # publish — auto og cover, default 30d expiry, shareable link
-      agents artifacts share ./out/plan.html
 
       # what&#39;s live in your namespace, and taking one down
       agents artifacts share list
@@ -116,12 +117,13 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   agents artifacts unshare &lt;targets...&gt; is the nested alias of
   agents artifacts share delete. top-level `agents unshare` is gone.
 
-  full reference: apps/cli/docs/share.md."><div class="command-head"><h3><code>agents artifacts</code></h3></div><p>Publish agent-made artifacts (plans, reports, visuals) to your own Cloudflare R2 and get a shareable link (~$0).</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># One-time: provision your own endpoint (or join a teammate&#39;s)
+  full reference: apps/cli/docs/share.md."><div class="command-head"><h3><code>agents artifacts</code></h3></div><p>Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Signed in? Just publish — no Cloudflare setup
+      agents auth login
+      agents artifacts share ./out/plan.html
+
+      # Or provision your own Cloudflare endpoint (or join a teammate&#39;s)
       agents artifacts setup
       agents artifacts share join https://share.agents-cli.sh
-
-      # Publish — auto OG cover, default 30d expiry, shareable link
-      agents artifacts share ./out/plan.html
 
       # What&#39;s live in your namespace, and taking one down
       agents artifacts share list
@@ -140,11 +142,12 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
 
   Full reference: apps/cli/docs/share.md.</p></article>
 <article id="artifacts-setup" data-search="setup artifacts setup  provision (or join) the cloudflare r2 + worker endpoint that backs `agents artifacts share`. --bundle &lt;name&gt; secrets bundle holding the cloudflare api token --worker &lt;name&gt; worker name --bucket &lt;name&gt; r2 bucket name --account &lt;id&gt; cloudflare account id (else read from the bundle / prompt) --token &lt;t&gt; cloudflare api token (else read from the --bundle) --domain &lt;host&gt; custom domain to map (default: share.agents-cli.sh; workers.dev if zone is not visible) --analytics-token &lt;token&gt; cloudflare web analytics token to inject into published html pages -h, --help show help  "><div class="command-head"><h3><code>agents artifacts setup</code></h3></div><p>Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--bundle &lt;name&gt;</code></td><td>secrets bundle holding the Cloudflare API token</td><td></td><td>cloudflare</td></tr><tr><td><code>--worker &lt;name&gt;</code></td><td>Worker name</td><td></td><td>agents-share</td></tr><tr><td><code>--bucket &lt;name&gt;</code></td><td>R2 bucket name</td><td></td><td>agents-share</td></tr><tr><td><code>--account &lt;id&gt;</code></td><td>Cloudflare account id (else read from the bundle / prompt)</td><td></td><td></td></tr><tr><td><code>--token &lt;t&gt;</code></td><td>Cloudflare API token (else read from the --bundle)</td><td></td><td></td></tr><tr><td><code>--domain &lt;host&gt;</code></td><td>custom domain to map (default: share.agents-cli.sh; workers.dev if zone is not visible)</td><td></td><td></td></tr><tr><td><code>--analytics-token &lt;token&gt;</code></td><td>Cloudflare Web Analytics token to inject into published HTML pages</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="artifacts-share" data-search="share artifacts share  publish an html file to your own cloudflare r2 and get a shareable link (~$0). file file to publish (html or any static asset) --slug &lt;slug&gt; custom url slug under your namespace (default: &lt;project&gt;-&lt;feature&gt;-&lt;hash&gt;) --github-user &lt;user&gt; github username for the share namespace (default: resolved from gh/git config) --expire &lt;spec&gt; auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or &#39;never&#39; --unlisted hide from the public gallery and `agents artifacts share list` (direct url still works) --private alias of --unlisted --force publish even when the file contains emails or credential-shaped strings --no-cover skip the og preview image (html pages get one by default) --no-analytics skip injecting the cloudflare web analytics beacon --label &lt;text&gt; human display title, shown in the gallery and `share list` (default: derived from the html &lt;title&gt;, frontmatter title, or filename) --title &lt;text&gt; alias of --label --meta &lt;key=value&gt; structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=rush-2683. recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). reserved (set automatically, not settable): agent, session, host, repo, date, label --no-revision overwrite an existing slug in place — skip keeping the prior version as a &lt;slug&gt;/rev-&lt;ts&gt; backup (default: keep it, see &#39;agents artifacts share revisions&#39;) --json emit machine-readable publish result for plan-render hooks and scripts -h, --help show help # publish an html file — auto og cover, default 30d expiry, shareable link
+<article id="artifacts-share" data-search="share artifacts share  publish an html file to a shareable link — managed if signed in, otherwise your cloudflare r2. file file to publish (html or any static asset) --slug &lt;slug&gt; custom url slug under your namespace (default: &lt;project&gt;-&lt;feature&gt;-&lt;hash&gt;) --github-user &lt;user&gt; github username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint) --expire &lt;spec&gt; auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or &#39;never&#39; --visibility &lt;level&gt; public | unlisted (default public). unlisted is a capability url: get still works, hidden from the gallery, x-robots-tag: noindex --force publish even when the file contains emails or credential-shaped strings --no-cover skip the og preview image (html pages get one by default) --no-analytics skip injecting the cloudflare web analytics beacon --label &lt;text&gt; human display title, shown in the gallery and `share list` (default: derived from the html &lt;title&gt;, frontmatter title, or filename) --title &lt;text&gt; alias of --label --meta &lt;key=value&gt; structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=rush-2683. recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). reserved (set automatically, not settable): agent, session, host, repo, date, label --no-revision overwrite an existing slug in place — skip keeping the prior version as a &lt;slug&gt;/rev-&lt;ts&gt; backup (default: keep it, see &#39;agents artifacts share revisions&#39;) --json emit machine-readable publish result for plan-render hooks and scripts -h, --help show help # signed in? just publish — no cloudflare setup (managed endpoint)
+      agents auth login
       agents artifacts share ./out/plan.html
 
-      # hide from the public gallery (direct url still works) and expire sooner
-      agents artifacts share ./out/report.html --unlisted --expire 12h
+      # hide from the public gallery (direct url still works, noindex) and expire sooner
+      agents artifacts share ./out/report.html --visibility unlisted --expire 12h
 
       # permanent public page (opt out of the default 30d expiry)
       agents artifacts share ./out/landing.html --slug landing --expire never
@@ -182,10 +185,15 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share join https://share.agents-cli.sh
 
       # push a worker-template.ts change out to an already-provisioned endpoint
-      agents artifacts share update default expiry is 30d so an accidental publish decays. pass --expire never for
-  a permanent link. --unlisted / --private hides the page from the public gallery
-  and agents artifacts share list; the direct url is still world-readable
-  (unlisted, not secret). a pre-publish scan refuses emails and credential-shaped
+      agents artifacts share update signed-in users publish to the managed endpoint (share.agents-cli.sh) with the
+  phoenix session — no cloudflare account, bucket, or write token. without a
+  session, the existing byo cloudflare path still applies (setup / join).
+
+  default expiry is 30d so an accidental publish decays. pass --expire never for
+  a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
+  hides the page from the public gallery and agents artifacts share list; the
+  direct url is still world-readable (unlisted, not secret) and get sends
+  x-robots-tag: noindex. a pre-publish scan refuses emails and credential-shaped
   strings unless --force is passed.
 
   every publish carries provenance auto-captured from the exec env/git/clock
@@ -205,11 +213,12 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   down. pass --keep-revisions to leave them (they still expire via the bucket&#39;s
   lifecycle rule on their own schedule either way).
 
-  agents artifacts share delete === agents artifacts unshare (same command, different name)."><div class="command-head"><h3><code>agents artifacts share [file]</code></h3></div><p>Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[file]</code></td><td>file to publish (HTML or any static asset)</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--slug &lt;slug&gt;</code></td><td>custom URL slug under your namespace (default: &lt;project&gt;-&lt;feature&gt;-&lt;hash&gt;)</td><td></td><td></td></tr><tr><td><code>--github-user &lt;user&gt;</code></td><td>GitHub username for the share namespace (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--expire &lt;spec&gt;</code></td><td>auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or &#39;never&#39;</td><td></td><td></td></tr><tr><td><code>--unlisted</code></td><td>hide from the public gallery and `agents artifacts share list` (direct URL still works)</td><td></td><td></td></tr><tr><td><code>--private</code></td><td>alias of --unlisted</td><td></td><td></td></tr><tr><td><code>--force</code></td><td>publish even when the file contains emails or credential-shaped strings</td><td></td><td></td></tr><tr><td><code>--no-cover</code></td><td>skip the OG preview image (HTML pages get one by default)</td><td></td><td></td></tr><tr><td><code>--no-analytics</code></td><td>skip injecting the Cloudflare Web Analytics beacon</td><td></td><td></td></tr><tr><td><code>--label &lt;text&gt;</code></td><td>human display title, shown in the gallery and `share list` (default: derived from the HTML &lt;title&gt;, frontmatter title, or filename)</td><td></td><td></td></tr><tr><td><code>--title &lt;text&gt;</code></td><td>alias of --label</td><td></td><td></td></tr><tr><td><code>--meta &lt;key=value&gt;</code></td><td>structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=RUSH-2683. Recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). Reserved (set automatically, not settable): agent, session, host, repo, date, label</td><td></td><td></td></tr><tr><td><code>--no-revision</code></td><td>overwrite an existing slug in place — skip keeping the prior version as a &lt;slug&gt;/rev-&lt;ts&gt; backup (default: keep it, see &#39;agents artifacts share revisions&#39;)</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>emit machine-readable publish result for plan-render hooks and scripts</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Publish an HTML file — auto OG cover, default 30d expiry, shareable link
+  agents artifacts share delete === agents artifacts unshare (same command, different name)."><div class="command-head"><h3><code>agents artifacts share [file]</code></h3></div><p>Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[file]</code></td><td>file to publish (HTML or any static asset)</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--slug &lt;slug&gt;</code></td><td>custom URL slug under your namespace (default: &lt;project&gt;-&lt;feature&gt;-&lt;hash&gt;)</td><td></td><td></td></tr><tr><td><code>--github-user &lt;user&gt;</code></td><td>GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)</td><td></td><td></td></tr><tr><td><code>--expire &lt;spec&gt;</code></td><td>auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or &#39;never&#39;</td><td></td><td></td></tr><tr><td><code>--visibility &lt;level&gt;</code></td><td>public | unlisted (default public). unlisted is a capability URL: GET still works, hidden from the gallery, X-Robots-Tag: noindex</td><td>public, unlisted</td><td>public</td></tr><tr><td><code>--force</code></td><td>publish even when the file contains emails or credential-shaped strings</td><td></td><td></td></tr><tr><td><code>--no-cover</code></td><td>skip the OG preview image (HTML pages get one by default)</td><td></td><td></td></tr><tr><td><code>--no-analytics</code></td><td>skip injecting the Cloudflare Web Analytics beacon</td><td></td><td></td></tr><tr><td><code>--label &lt;text&gt;</code></td><td>human display title, shown in the gallery and `share list` (default: derived from the HTML &lt;title&gt;, frontmatter title, or filename)</td><td></td><td></td></tr><tr><td><code>--title &lt;text&gt;</code></td><td>alias of --label</td><td></td><td></td></tr><tr><td><code>--meta &lt;key=value&gt;</code></td><td>structured metadata (repeatable), e.g. --meta kind=plan --meta ticket=RUSH-2683. Recommended keys: kind (plan|report|visual|screenshot|recording|deck|doc), project, ticket, status (draft|final). Reserved (set automatically, not settable): agent, session, host, repo, date, label</td><td></td><td></td></tr><tr><td><code>--no-revision</code></td><td>overwrite an existing slug in place — skip keeping the prior version as a &lt;slug&gt;/rev-&lt;ts&gt; backup (default: keep it, see &#39;agents artifacts share revisions&#39;)</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>emit machine-readable publish result for plan-render hooks and scripts</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Signed in? Just publish — no Cloudflare setup (managed endpoint)
+      agents auth login
       agents artifacts share ./out/plan.html
 
-      # Hide from the public gallery (direct URL still works) and expire sooner
-      agents artifacts share ./out/report.html --unlisted --expire 12h
+      # Hide from the public gallery (direct URL still works, noindex) and expire sooner
+      agents artifacts share ./out/report.html --visibility unlisted --expire 12h
 
       # Permanent public page (opt out of the default 30d expiry)
       agents artifacts share ./out/landing.html --slug landing --expire never
@@ -247,10 +256,15 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share join https://share.agents-cli.sh
 
       # Push a worker-template.ts change out to an already-provisioned endpoint
-      agents artifacts share update</code></pre><h4>Notes</h4><p class="notes">Default expiry is 30d so an accidental publish decays. Pass --expire never for
-  a permanent link. --unlisted / --private hides the page from the public gallery
-  and agents artifacts share list; the direct URL is still world-readable
-  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped
+      agents artifacts share update</code></pre><h4>Notes</h4><p class="notes">Signed-in users publish to the managed endpoint (share.agents-cli.sh) with the
+  Phoenix session — no Cloudflare account, bucket, or write token. Without a
+  session, the existing BYO Cloudflare path still applies (setup / join).
+
+  Default expiry is 30d so an accidental publish decays. Pass --expire never for
+  a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
+  hides the page from the public gallery and agents artifacts share list; the
+  direct URL is still world-readable (unlisted, not secret) and GET sends
+  X-Robots-Tag: noindex. A pre-publish scan refuses emails and credential-shaped
   strings unless --force is passed.
 
   Every publish carries provenance auto-captured from the exec env/git/clock

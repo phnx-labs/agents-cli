@@ -310,9 +310,10 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
       'x-share-visibility': 'unlisted',
     });
 
-    // Direct URL still works — unlisted, not secret.
+    // Direct URL still works — unlisted, not secret — and GET is noindex.
     const direct = await worker.default.fetch(new Request('https://share.test/octocat/secret-report'), env);
     expect(direct.status).toBe(200);
+    expect(direct.headers.get('X-Robots-Tag')).toBe('noindex');
     expect(await direct.text()).toContain('secret');
 
     // Listing and gallery hide it.
@@ -465,5 +466,146 @@ describe('revision retention (RUSH-2683 — R2 has no native object versioning)'
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
+  it('accepts a valid Phoenix bearer, stamps owner, and namespaces the key', async () => {
+    const worker = await loadWorker();
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@example.com' });
+    const { env, store } = makeEnv();
+
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/plan', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix-token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'public',
+        },
+        body: '<h1>managed</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const obj = store.get('alice/plan');
+    expect(obj).toBeDefined();
+    expect(obj?.customMetadata.owner).toBe('alice');
+    expect(obj?.customMetadata.visibility).toBe('public');
+  });
+
+  it('401s when the bearer is absent', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/plan', {
+        method: 'PUT',
+        headers: { 'content-type': 'text/html; charset=utf-8' },
+        body: '<h1>no auth</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'unauthorized' });
+  });
+
+  it('401s when the bearer is invalid (Phoenix verify returns nothing, not the WRITE_TOKEN)', async () => {
+    const worker = await loadWorker();
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const { env } = makeEnv();
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/plan', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer not-a-real-token',
+          'content-type': 'text/html; charset=utf-8',
+        },
+        body: '<h1>nope</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('403s a Phoenix PUT whose first path segment is not the verified userId', async () => {
+    const worker = await loadWorker();
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'a@b.com' });
+    const { env, store } = makeEnv();
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/stolen', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix-token',
+          'content-type': 'text/html; charset=utf-8',
+        },
+        body: '<h1>stolen</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: 'namespace mismatch', owner: 'alice' });
+    expect(store.has('octocat/stolen')).toBe(false);
+  });
+
+  it('400s org visibility on PUT (not supported in P1)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/plan', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer secret',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'org',
+        },
+        body: '<h1>org</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'visibility org is not supported yet' });
+  });
+
+  it('BYO WRITE_TOKEN path still publishes and stamps owner from the path namespace', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/byo-page', '<h1>byo</h1>');
+    const obj = store.get('octocat/byo-page');
+    expect(obj?.customMetadata.owner).toBe('octocat');
+    expect(obj?.customMetadata.visibility).toBe('public');
+  });
+
+  it('unlisted GET carries X-Robots-Tag: noindex; public GET does not', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/public-page', '<h1>public</h1>');
+    await put(worker, env, 'octocat/secret-report', '<h1>secret</h1>', {
+      'x-share-visibility': 'unlisted',
+    });
+
+    const unlisted = await worker.default.fetch(new Request('https://share.test/octocat/secret-report'), env);
+    expect(unlisted.status).toBe(200);
+    expect(unlisted.headers.get('X-Robots-Tag')).toBe('noindex');
+
+    const listed = await worker.default.fetch(new Request('https://share.test/octocat/public-page'), env);
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get('X-Robots-Tag')).toBeNull();
+  });
+
+  it('honors WRITE_TOKEN equality first when both principals could apply', async () => {
+    // Platform endpoint may set both WRITE_TOKEN and PHOENIX_ID_BASE. A bearer
+    // that equals WRITE_TOKEN is the BYO/admin principal — it must not be sent
+    // to Phoenix.
+    const worker = await loadWorker();
+    let phoenixCalls = 0;
+    worker.hooks.verifyPhoenixToken = async () => {
+      phoenixCalls++;
+      return { userId: 'alice', email: 'a@b.com' };
+    };
+    const { env, store } = makeEnv();
+    env.PHOENIX_ID_BASE = 'https://phoenix.test';
+    await put(worker, env, 'octocat/admin', '<h1>admin</h1>');
+    expect(phoenixCalls).toBe(0);
+    expect(store.get('octocat/admin')?.customMetadata.owner).toBe('octocat');
   });
 });

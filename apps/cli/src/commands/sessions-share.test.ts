@@ -138,7 +138,7 @@ describe('publishing a rendered session', () => {
     try {
       const result = await harness.run();
       expect(result.unlisted).toBeFalsy();
-      expect(harness.sent[0].headers['x-share-visibility']).toBeUndefined();
+      expect(harness.sent[0].headers['x-share-visibility']).toBe('public');
     } finally {
       harness.cleanup();
     }

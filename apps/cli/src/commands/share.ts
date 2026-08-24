@@ -1,5 +1,6 @@
-// `agents artifacts share` — publish an HTML file to your own Cloudflare R2
-// behind a tiny Worker, and get a shareable link (~$0). See apps/cli/docs/share.md.
+// `agents artifacts share` — publish an HTML file to a shareable link. Signed-in
+// users hit the managed endpoint (share.agents-cli.sh) with the Phoenix bearer;
+// otherwise the existing BYO Cloudflare R2 + Worker path. See apps/cli/docs/share.md.
 //
 // Registered under the `artifacts` group by commands/artifacts.ts; the
 // provisioning door lives beside it at `agents artifacts setup`
@@ -7,7 +8,7 @@
 
 import { existsSync } from 'node:fs';
 import { formatBytes } from '../lib/format.js';
-import type { Command } from 'commander';
+import { Option, type Command } from 'commander';
 import chalk from 'chalk';
 import {
   DEFAULT_BUCKET_NAME,
@@ -36,7 +37,14 @@ import {
   type CloudflareRequester,
   setWorkerSecret,
 } from '../lib/share/provision.js';
-import { publishFile, resolveShareUsername, parseMetaEntries, type PublishResult } from '../lib/share/publish.js';
+import {
+  publishFile,
+  resolveShareUsername,
+  parseMetaEntries,
+  resolveShareVisibility,
+  type PublishResult,
+  type ShareVisibility,
+} from '../lib/share/publish.js';
 import { deleteShare, resolveDeleteTarget, type DeleteShareResult } from '../lib/share/delete.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
@@ -54,7 +62,12 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   if (result.coverUrl) lines.push(chalk.dim(`  cover ${result.coverUrl}`));
   if (result.expiresAt) lines.push(chalk.dim(`  expires ${new Date(result.expiresAt).toLocaleString()}`));
   else lines.push(chalk.dim('  expires never'));
-  if (result.unlisted) lines.push(chalk.dim('  unlisted (hidden from gallery / share list)'));
+  const visibility = result.visibility ?? (result.unlisted ? 'unlisted' : 'public');
+  if (visibility === 'unlisted') {
+    lines.push(chalk.dim('  visibility: unlisted (noindex, hidden from gallery)'));
+  } else {
+    lines.push(chalk.dim(`  visibility: ${visibility}`));
+  }
   return lines.join('\n');
 }
 
@@ -533,13 +546,18 @@ const SHARE_DELETE_NOTES = `
 export function registerShareCommands(artifactsCmd: Command): void {
   const shareCmd = artifactsCmd
     .command('share')
-    .description('Publish an HTML file to your own Cloudflare R2 and get a shareable link (~$0).')
+    .description('Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.')
     .argument('[file]', 'file to publish (HTML or any static asset)')
     .option('--slug <slug>', 'custom URL slug under your namespace (default: <project>-<feature>-<hash>)')
-    .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config)')
+    .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
-    .option('--unlisted', 'hide from the public gallery and `agents artifacts share list` (direct URL still works)')
-    .option('--private', 'alias of --unlisted')
+    .addOption(
+      new Option('--visibility <level>', 'public | unlisted (default public). unlisted is a capability URL: GET still works, hidden from the gallery, X-Robots-Tag: noindex')
+        .choices(['public', 'unlisted'])
+        .default('public'),
+    )
+    .addOption(new Option('--unlisted', 'hidden alias of --visibility unlisted').hideHelp())
+    .addOption(new Option('--private', 'hidden alias of --visibility unlisted').hideHelp())
     .option('--force', 'publish even when the file contains emails or credential-shaped strings')
     .option('--no-cover', 'skip the OG preview image (HTML pages get one by default)')
     .option('--no-analytics', 'skip injecting the Cloudflare Web Analytics beacon')
@@ -557,6 +575,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
       slug?: string;
       githubUser?: string;
       expire?: string;
+      visibility?: ShareVisibility;
       unlisted?: boolean;
       private?: boolean;
       force?: boolean;
@@ -579,11 +598,16 @@ export function registerShareCommands(artifactsCmd: Command): void {
       }
       try {
         const meta = parseMetaEntries(opts.meta);
+        const visibility = resolveShareVisibility({
+          visibility: opts.visibility,
+          unlisted: opts.unlisted === true || opts.private === true,
+        });
         const result = await publishFile(file, {
           slug: opts.slug,
           githubUser: opts.githubUser,
           expire: opts.expire,
-          unlisted: opts.unlisted === true || opts.private === true,
+          visibility,
+          unlisted: visibility === 'unlisted',
           force: opts.force,
           cover: opts.cover,
           analytics: opts.analytics,
@@ -600,11 +624,12 @@ export function registerShareCommands(artifactsCmd: Command): void {
 
   setHelpSections(shareCmd, {
     examples: `
-      # Publish an HTML file — auto OG cover, default 30d expiry, shareable link
+      # Signed in? Just publish — no Cloudflare setup (managed endpoint)
+      agents auth login
       agents artifacts share ./out/plan.html
 
-      # Hide from the public gallery (direct URL still works) and expire sooner
-      agents artifacts share ./out/report.html --unlisted --expire 12h
+      # Hide from the public gallery (direct URL still works, noindex) and expire sooner
+      agents artifacts share ./out/report.html --visibility unlisted --expire 12h
 
       # Permanent public page (opt out of the default 30d expiry)
       agents artifacts share ./out/landing.html --slug landing --expire never
@@ -626,10 +651,15 @@ ${SHARE_DELETE_EXAMPLES}
       agents artifacts share update
     `,
     notes: `
+  Signed-in users publish to the managed endpoint (share.agents-cli.sh) with the
+  Phoenix session — no Cloudflare account, bucket, or write token. Without a
+  session, the existing BYO Cloudflare path still applies (setup / join).
+
   Default expiry is 30d so an accidental publish decays. Pass --expire never for
-  a permanent link. --unlisted / --private hides the page from the public gallery
-  and agents artifacts share list; the direct URL is still world-readable
-  (unlisted, not secret). A pre-publish scan refuses emails and credential-shaped
+  a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
+  hides the page from the public gallery and agents artifacts share list; the
+  direct URL is still world-readable (unlisted, not secret) and GET sends
+  X-Robots-Tag: noindex. A pre-publish scan refuses emails and credential-shaped
   strings unless --force is passed.
 
   Every publish carries provenance auto-captured from the exec env/git/clock

@@ -1118,7 +1118,7 @@ describe('formatSharePublishResult', () => {
   it('keeps the first human output line as the share URL', () => {
     const text = formatSharePublishResult({ url: 'https://share.example/plan' });
 
-    expect(text.split('\n')[0]).toBe('https://share.example/plan');
+    expect(text.split('\n')[0]).toContain('https://share.example/plan');
   });
 
   it('shows an explicit label plainly, with no derived hint', () => {
@@ -1131,6 +1131,98 @@ describe('formatSharePublishResult', () => {
     const text = formatSharePublishResult({ url: 'https://share.example/plan', label: 'plan', labelSource: 'derived' });
     expect(text).toContain('plan');
     expect(text).toMatch(/derived.*--label/);
+  });
+
+  it('prints visibility: unlisted with the noindex hint', () => {
+    const text = formatSharePublishResult({
+      url: 'https://share.example/plan',
+      visibility: 'unlisted',
+      unlisted: true,
+    });
+    expect(text).toContain('visibility: unlisted (noindex, hidden from gallery)');
+  });
+
+  it('JSON includes visibility', () => {
+    const text = formatSharePublishResult(
+      { url: 'https://share.example/plan', visibility: 'unlisted', unlisted: true },
+      true,
+    );
+    expect(JSON.parse(text)).toMatchObject({ visibility: 'unlisted', unlisted: true });
+  });
+});
+
+describe('--visibility flag (RUSH-3135)', () => {
+  it('registers --visibility with public|unlisted choices and default public; --unlisted/--private stay as hidden aliases', async () => {
+    const { artifacts } = await freshShareModules();
+    const program = programWithArtifacts(artifacts);
+    const share = shareGroup(program);
+    expect(share).toBeDefined();
+    const longs = share!.options.map((o) => o.long);
+    expect(longs).toEqual(expect.arrayContaining(['--visibility', '--unlisted', '--private']));
+
+    const vis = share!.options.find((o) => o.long === '--visibility');
+    expect(vis?.argChoices).toEqual(['public', 'unlisted']);
+    expect(vis?.defaultValue).toBe('public');
+    expect(vis?.hidden).toBeFalsy();
+
+    const unlisted = share!.options.find((o) => o.long === '--unlisted');
+    const priv = share!.options.find((o) => o.long === '--private');
+    expect(unlisted?.hidden).toBe(true);
+    expect(priv?.hidden).toBe(true);
+  });
+
+  async function publishWithFlag(args: string[]): Promise<{ visibilityHeader: string; output: string }> {
+    const { artifacts, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct',
+      workerName: 'w',
+      bucketName: 'b',
+    });
+    config.storeWriteToken('tok');
+    installFakeGh('octocat');
+
+    const file = path.join(tmpHome, 'plan.html');
+    fs.writeFileSync(file, '<!doctype html><title>Plan</title><h1>ok</h1>');
+
+    let visibilityHeader = '';
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string, init?: RequestInit) => {
+      const headers = new Headers(init?.headers);
+      if (headers.has('x-share-visibility')) visibilityHeader = headers.get('x-share-visibility') ?? '';
+      return new Response(JSON.stringify({ ok: true }), { status: 200 });
+    }) as typeof fetch;
+
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync(['node', 'agents', 'artifacts', 'share', file, '--no-cover', ...args]);
+      return { visibilityHeader, output: loggedOutput() };
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  }
+
+  it('a real parse of --visibility unlisted sends x-share-visibility: unlisted and prints it', async () => {
+    const { visibilityHeader, output } = await publishWithFlag(['--visibility', 'unlisted', '--expire', 'never']);
+    expect(visibilityHeader).toBe('unlisted');
+    expect(output).toContain('visibility: unlisted');
+  });
+
+  it('the hidden --unlisted alias maps to --visibility unlisted (no breakage)', async () => {
+    const { visibilityHeader, output } = await publishWithFlag(['--unlisted', '--expire', 'never']);
+    expect(visibilityHeader).toBe('unlisted');
+    expect(output).toContain('visibility: unlisted');
+  });
+
+  it('the hidden --private alias maps to --visibility unlisted (no breakage)', async () => {
+    const { visibilityHeader } = await publishWithFlag(['--private', '--expire', 'never']);
+    expect(visibilityHeader).toBe('unlisted');
+  });
+
+  it('default (no flag) sends x-share-visibility: public', async () => {
+    const { visibilityHeader, output } = await publishWithFlag(['--expire', 'never']);
+    expect(visibilityHeader).toBe('public');
+    expect(output).toContain('visibility: public');
   });
 });
 

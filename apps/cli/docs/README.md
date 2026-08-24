@@ -57,7 +57,7 @@ How agi-cli is laid out on disk and how it decides what to load.
 | Tickets | Use `linear` (linear-cli) for Linear, `gh issue` for GitHub. The former top-level `agents tickets` command is gone (RUSH-2932). |
 | [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
 | [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--device`); track with `agents hosts ps` and view/follow with `agents logs`. |
-| [Share](share.md) | Publish an HTML artifact to a public link on your own Cloudflare R2 (`agents share <file>`) — zero-egress, BYO-Cloudflare, expiry + fleet mode. |
+| [Share](share.md) | Publish an HTML artifact to a public link (`agents artifacts share <file>`). Signed-in → managed `share.agents-cli.sh` with zero Cloudflare setup; otherwise BYO R2. `--visibility public\|unlisted`. |
 | [Routines](routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
 | [Monitors](monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
 | [Projects](projects.md) | Named multi-repo projects layered over the `--project` convention, plus the progress rollup — one card per project instead of a per-agent activity line. Beta. |
