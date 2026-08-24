@@ -291,12 +291,22 @@ every upload; `update` re-applies the existing `WRITE_TOKEN` via the Secrets API
 immediately after the script upload so it survives (see `updateWorker` in
 `lib/share/provision.ts` for the full reasoning and links to Cloudflare's docs).
 
+A **managed** endpoint (the Worker serving `share.agents-cli.sh`) also re-applies
+`PHOENIX_ID_BASE` as a `secret_text` after every script upload — the Worker reads
+`env.PHOENIX_ID_BASE` to verify Phoenix bearers at `${PHOENIX_ID_BASE}/api/v1/auth/me`.
+The value is the same base the CLI's identity client uses (`PHOENIX_ID_BASE` env, else
+the deployed Phoenix ID service). A pure-BYO Worker does not get this secret: it
+authenticates only via `WRITE_TOKEN`. Without `PHOENIX_ID_BASE`, every managed
+Phoenix-bearer PUT 401s after an update while BYO keeps working.
+
 If the script upload succeeds but the secret re-apply then fails (network blip, expired
 API token, rate limit), the live Worker has **no write token** — every publish and
-delete 401s until the failure is healed. The error names that state and tells you to
+delete 401s until the failure is healed. A managed endpoint that loses `PHOENIX_ID_BASE`
+the same way 401s Phoenix-bearer publishes; the error names that state and tells you to
 re-run `agents artifacts share update`. Config is only rewritten after *both* steps succeed, so
 a plain re-run does not short-circuit on a matching hash and will re-deploy + re-set
-the secret.
+the secret. A managed update whose script hash already matches still re-applies
+`PHOENIX_ID_BASE` so a previously wiped secret heals without `--force`.
 
 ## Where things live
 
@@ -304,6 +314,8 @@ the secret.
 agents.yaml            share:                         # baseUrl / accountId / worker / bucket / domain / analyticsToken / templateHash
   (Meta.share)                                        # syncs fleet-wide via `agents repo push/pull`
 secrets bundle `share` WRITE_TOKEN                    # the raw write token — keychain-backed, never in config
+Worker secret          WRITE_TOKEN                    # re-applied after every script upload
+Worker secret          PHOENIX_ID_BASE                # managed endpoint only — Phoenix ID URL the Worker uses to verify bearers
 ```
 
 Config is safe to sync (no secret); the write token lives only in the `share` bundle
