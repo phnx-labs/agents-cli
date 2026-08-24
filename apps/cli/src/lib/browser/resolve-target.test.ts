@@ -58,7 +58,7 @@ describe('shouldForkProfile', () => {
 describe('sshEndpointForDeclaration', () => {
   it('rewrites a loopback cdp:// declaration to ssh://<device>?port=N', async () => {
     const { sshEndpointForDeclaration } = await import('./resolve-target.js');
-    expect(sshEndpointForDeclaration('zion', comet)).toBe('ssh://zion?port=9333');
+    expect(sshEndpointForDeclaration('peer-zulu', comet)).toBe('ssh://peer-zulu?port=9333');
   });
 
   it('adds os=windows when the declaring device is Windows', async () => {
@@ -71,7 +71,7 @@ describe('sshEndpointForDeclaration', () => {
   it('leaves an already-ssh:// declaration alone', async () => {
     const { sshEndpointForDeclaration } = await import('./resolve-target.js');
     const config = { browser: 'custom' as const, endpoints: ['ssh://browser-host?port=9344'] };
-    expect(sshEndpointForDeclaration('zion', config)).toBe('ssh://browser-host?port=9344');
+    expect(sshEndpointForDeclaration('peer-zulu', config)).toBe('ssh://browser-host?port=9344');
   });
 });
 
@@ -92,8 +92,8 @@ describe('resolveBrowserTarget', () => {
   });
 
   it('tunnels to a reachable declaring device when this machine does not declare it', async () => {
-    writeYaml(deviceFile('mac-mini'), { browser: { 'comet-local': comet } });
-    writeYaml(deviceFile('zion'), { browser: { 'comet-local': comet } });
+    writeYaml(deviceFile('peer-alpha'), { browser: { 'comet-local': comet } });
+    writeYaml(deviceFile('peer-zulu'), { browser: { 'comet-local': comet } });
 
     const { resolveBrowserTarget } = await import('./resolve-target.js');
     const probed: string[] = [];
@@ -105,12 +105,12 @@ describe('resolveBrowserTarget', () => {
     });
     expect(routed.local).toBe(false);
     expect(routed.kind).toBe('fungible');
-    expect(routed.device).toBe('mac-mini');
-    expect(routed.target).toBe('ssh://mac-mini?port=9333');
-    expect(routed.key).toBe('comet-local@mac-mini');
-    expect(routed.picked).toContain('mac-mini');
-    expect(routed.picked).toContain('zion');
-    expect(probed).toEqual(['mac-mini']);
+    expect(routed.device).toBe('peer-alpha');
+    expect(routed.target).toBe('ssh://peer-alpha?port=9333');
+    expect(routed.key).toBe('comet-local@peer-alpha');
+    expect(routed.picked).toContain('peer-alpha');
+    expect(routed.picked).toContain('peer-zulu');
+    expect(probed).toEqual(['peer-alpha']);
   });
 
   it('skips an unreachable declaring device and picks the next sorted one', async () => {
@@ -130,14 +130,14 @@ describe('resolveBrowserTarget', () => {
   });
 
   it('fails loud when every declaring device is unreachable — does not invent a local target', async () => {
-    writeYaml(deviceFile('zion'), { browser: { 'comet-local': comet } });
+    writeYaml(deviceFile('peer-zulu'), { browser: { 'comet-local': comet } });
 
     const { resolveBrowserTarget } = await import('./resolve-target.js');
     expect(() =>
       resolveBrowserTarget('comet-local', {
         probe: () => ({ reachable: false, reason: 'No route to host' }),
       }),
-    ).toThrow(/zion/);
+    ).toThrow(/peer-zulu/);
     expect(() =>
       resolveBrowserTarget('comet-local', {
         probe: () => ({ reachable: false, reason: 'No route to host' }),
@@ -151,11 +151,11 @@ describe('resolveBrowserTarget', () => {
   });
 
   it('fails loud when nobody declares the name, listing similar names and their devices', async () => {
-    writeYaml(deviceFile('zion'), { browser: { 'comet-local': comet } });
+    writeYaml(deviceFile('peer-zulu'), { browser: { 'comet-local': comet } });
 
     const { resolveBrowserTarget, undeclaredProfileError } = await import('./resolve-target.js');
     expect(() => resolveBrowserTarget('comet-locl')).toThrow(/comet-local/);
-    expect(() => resolveBrowserTarget('comet-locl')).toThrow(/zion/);
+    expect(() => resolveBrowserTarget('comet-locl')).toThrow(/peer-zulu/);
     expect(() => resolveBrowserTarget('comet-locl')).toThrow(/not declared by any device/);
     expect(undeclaredProfileError('ghost').message).toMatch(/No device declares a similar name/);
   });
@@ -179,7 +179,7 @@ describe('migrateLegacyRuntimeDir', () => {
     fs.mkdirSync(legacy, { recursive: true });
     fs.writeFileSync(path.join(legacy, 'Cookies'), 'keep-me');
 
-    const next = profileConnectionKey('comet-local', 'zion');
+    const next = profileConnectionKey('comet-local', 'peer-zulu');
     migrateLegacyRuntimeDir('comet-local', next, runtime);
 
     expect(fs.existsSync(path.join(runtime, 'comet-local@endpoint-0'))).toBe(false);
@@ -194,7 +194,7 @@ describe('migrateLegacyRuntimeDir', () => {
     fs.mkdirSync(path.join(runtime, 'comet-local@endpoint-0', 'chrome-data'), { recursive: true });
     fs.writeFileSync(path.join(runtime, 'comet-local@endpoint-0', 'chrome-data', 'Cookies'), 'local');
 
-    const remoteKey = profileConnectionKey('comet-local', 'zion');
+    const remoteKey = profileConnectionKey('comet-local', 'peer-zulu');
     adoptLegacyRuntimeIfLocal(false, 'comet-local', remoteKey, runtime);
 
     expect(fs.existsSync(path.join(runtime, 'comet-local@endpoint-0', 'chrome-data', 'Cookies'))).toBe(
