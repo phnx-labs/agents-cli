@@ -297,6 +297,17 @@ def should_fire():
             if pm and pm not in allowed:
                 return False
 
+    v = m.get("permission_mode_not")
+    if v is not None:
+        denied = arr(v)
+        if denied:
+            # Negative form: naming the mode to SKIP keeps every unknown mode
+            # firing, so the failure direction is "ran unnecessarily", never
+            # "did not run". Absence of a mode fires, same as permission_mode.
+            pm = inp.get("permission_mode") or inp.get("permissionMode")
+            if pm and pm in denied:
+                return False
+
     v = m.get("tool_args_match")
     if v is not None:
         ta = inp.get("tool_args")

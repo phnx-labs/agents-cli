@@ -178,7 +178,35 @@ echo "call=$count"
       { name: 'mode-array-hit', matches: { permission_mode: ['plan', 'acceptEdits'] }, input: { permission_mode: 'acceptEdits' } },
       { name: 'mode-camel-hit', matches: { permission_mode: 'plan' }, input: { permissionMode: 'plan' } },
       { name: 'mode-camel-miss', matches: { permission_mode: 'plan' }, input: { permissionMode: 'bypassPermissions' } },
+      // permission_mode_not — the negative form. Shipped in match.ts without a
+      // mirror in the shim's Python gate, so `permission_mode_not: plan` fired
+      // anyway and the predicate was silently inert on every hook. These pin it.
+      { name: 'mode-not-hit-skips', matches: { permission_mode_not: 'plan' }, input: { permission_mode: 'plan' } },
+      { name: 'mode-not-miss-fires', matches: { permission_mode_not: 'plan' }, input: { permission_mode: 'default' } },
+      { name: 'mode-not-absent-fires', matches: { permission_mode_not: 'plan' }, input: { prompt: 'no mode field' } },
+      { name: 'mode-not-array-hit', matches: { permission_mode_not: ['plan', 'acceptEdits'] }, input: { permission_mode: 'acceptEdits' } },
+      { name: 'mode-not-camel-hit', matches: { permission_mode_not: 'plan' }, input: { permissionMode: 'plan' } },
+      { name: 'mode-not-unknown-mode-fires', matches: { permission_mode_not: 'plan' }, input: { permission_mode: 'someFutureMode' } },
+      { name: 'git-dirty-clean-repo', matches: { git_dirty: true }, input: { cwd: os.tmpdir() } },
+      { name: 'project-has-missing', matches: { project_has: 'no-such-file.xyz' }, input: { cwd: os.tmpdir() } },
     ];
+
+    // The conformance fixtures above only protect the keys someone remembered to
+    // add. `permission_mode_not` shipped in match.ts with no fixture, so the
+    // suite stayed green while the shim's gate ignored the key entirely. This
+    // pins the fixture list to the HookMatches surface itself: a new predicate
+    // fails here until it is exercised against both implementations.
+    it('every HookMatches predicate has at least one conformance fixture', () => {
+      const typesSrc = fs.readFileSync(new URL('../types.ts', import.meta.url), 'utf-8');
+      const block = typesSrc.match(/export interface HookMatches \{([\s\S]*?)\n\}/);
+      expect(block, 'HookMatches interface not found in types.ts').toBeTruthy();
+      const declared = [...block![1].matchAll(/^\s{2}(\w+)\?:/gm)].map((m) => m[1]);
+      expect(declared.length).toBeGreaterThan(0);
+
+      const exercised = new Set(fixtures.flatMap((fx) => Object.keys(fx.matches)));
+      const uncovered = declared.filter((k) => !exercised.has(k));
+      expect(uncovered, `HookMatches keys with no conformance fixture: ${uncovered.join(', ')}`).toEqual([]);
+    });
 
     for (const fx of fixtures) {
       it(`shim gate matches shouldFire() for ${fx.name}`, () => {

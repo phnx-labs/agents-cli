@@ -275,6 +275,25 @@ All predicates live in `matches:`. They AND together — every declared predicat
 - `permission_mode`: `src/lib/hooks/match.ts:145` — reads `permission_mode` or camelCase `permissionMode` from the input; skips only on an explicit value outside the allowlist. Unlike `tool_name`, absence passes — a harness that never reports a mode keeps firing the hook
 - `permission_mode_not`: `src/lib/hooks/match.ts:156` — the inverse; skips only on an explicit value **inside** the deny list. It exists because the allowlist cannot express "everywhere except plan" without naming every other mode, and such an enumeration silently stops firing the moment a harness adds or renames one — for a guard, that means it quietly stops guarding. Naming the mode to skip keeps unknown modes firing, so the failure direction is "ran unnecessarily", never "did not run". Both forms AND together when declared on the same hook
 
+### Two evaluators, kept in lockstep by test
+
+`shouldFire()` in `match.ts` is the **reference**, not the runtime. A hook fire is
+decided by a hand-mirrored Python copy of that logic embedded in the generated shim
+(`src/lib/hooks/cache.ts`, the `GATE_PY` block), which the shim runs against
+`$MATCHES_JSON` and the event payload before invoking the hook script. Nothing in the
+fire path calls `shouldFire()`.
+
+That means **a predicate added to `match.ts` alone does nothing.** It must land in the
+Python gate in the same change. The gate fails open by design — any evaluation error
+runs the hook — so an unmirrored predicate is silently ignored rather than crashing,
+which is how `permission_mode_not` shipped inert (RUSH-3116).
+
+`cache-matches.test.ts` guards this: it runs the real shim under `bash` for each
+fixture and asserts the decision equals `shouldFire()`, and a completeness test
+derives the predicate list from the `HookMatches` interface in `types.ts` so a new key
+fails the suite until it is exercised against both implementations.
+
+
 ## Script Resolution
 
 `resolveHookScriptPath(script)` in `src/lib/hooks/install.ts` resolves a script filename by checking, in order:
