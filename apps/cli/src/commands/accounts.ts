@@ -1,6 +1,9 @@
 import type { Command } from 'commander';
+import * as fs from 'fs';
+import * as path from 'path';
 import chalk from 'chalk';
 import { password } from '@inquirer/prompts';
+import { resolveClaudeSetupToken } from '../lib/claude-account-token.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
@@ -67,6 +70,26 @@ export function classifyAttachTarget(target: string): AttachTarget {
   const agent = resolveAgentName(target);
   if (agent) return { kind: 'device-agent', agent };
   throw new Error(`Unknown attach target '${target}'. Expected an installed <agent>@<version>, a harness id, or an existing custom harness profile.`);
+}
+
+/**
+ * Persist the attached setup-token to a per-version `.oauth_token` file so an
+ * INTERACTIVE Claude launch on a keychain-less Linux worker can authenticate from it.
+ * Headless runs inject the token via `buildExecEnv`, but an interactive launch defers to
+ * the per-version login (`claudeAdapter.applyExecConfigEnv`), and the shim's Linux fallback
+ * (`claudeAdapter.shimConfigEnvBash`) reads exactly this file. Without writing it, a
+ * freshly-attached setup-token was invisible to interactive runs on a worker. macOS keeps
+ * the credential in the keychain, so `resolveClaudeSetupToken` returns null there and this
+ * is a no-op off Linux.
+ */
+export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId): void {
+  if (process.platform !== 'linux' || targetAgent !== 'claude' || target.kind !== 'installation') return;
+  const versionHome = getVersionHomePath('claude', target.version);
+  const token = resolveClaudeSetupToken(versionHome);
+  if (!token) return;
+  const tokenPath = path.join(versionHome, '.claude', '.oauth_token');
+  fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
+  fs.writeFileSync(tokenPath, token, { mode: 0o600 });
 }
 
 export function parseBundleKey(raw: string): { bundle: string; key: string } {
@@ -390,6 +413,7 @@ export function registerAccountsCommand(program: Command): void {
         getAccountProvider(account.provider).envFor(targetAgent, account.auth);
       }
       bindAccount(name, target);
+      writeClaudeInteractiveOauthToken(t, targetAgent);
       console.log(chalk.green(`Attached ${account.name} to ${target}.`));
     });
 

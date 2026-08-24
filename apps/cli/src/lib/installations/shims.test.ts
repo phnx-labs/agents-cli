@@ -80,6 +80,15 @@ describe('generateVersionedAliasScript', () => {
     expect(script).toContain('export DISABLE_AUTOUPDATER="${DISABLE_AUTOUPDATER:-1}"');
   });
 
+  it('carries the Linux .oauth_token setup-token fallback in a claude@version alias (interactive auth on a keychain-less worker)', () => {
+    // Regression: the alias env was a hand-copied subset of the main shim that had
+    // dropped this fallback, so interactive Claude on a worker could not authenticate
+    // from an attached setup-token. The alias now reuses claudeAdapter.shimConfigEnvBash.
+    const script = generateVersionedAliasScript('claude', '2.1.196');
+    expect(script).toContain('.oauth_token');
+    expect(script).toContain('CLAUDE_CODE_OAUTH_TOKEN');
+  });
+
   it('does not touch DISABLE_AUTOUPDATER for a codex@version alias (codex path unchanged)', () => {
     const script = generateVersionedAliasScript('codex', '0.20.0');
     expect(script).not.toContain('DISABLE_AUTOUPDATER');

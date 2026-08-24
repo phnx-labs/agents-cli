@@ -993,7 +993,10 @@ export function removeShim(agent: AgentId): boolean {
  *        sorted alphabetically before the real self-updated grok binary and
  *        was silently launched instead.
  */
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 16;
+// v17 — the claude alias env now reuses the adapter's shimConfigEnvBash (adds the
+//       Linux .oauth_token setup-token fallback the hand-copied subset had dropped),
+//       so existing alias shims must regenerate to pick it up.
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 17;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -1047,14 +1050,14 @@ export function generateVersionedAliasScript(agent: AgentId, version: string): s
   const configDirName = path.relative(os.homedir(), agentConfig.configDir);
   const managedEnv = agent === 'claude'
     ? `
-# Claude stores OAuth credentials in the macOS keychain. Scope them to this
-# version's config directory so direct aliases also switch the live account.
-export CLAUDE_CONFIG_DIR="$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}"
-# Managed installs are pinned in a per-version dir; Claude Code's background
-# auto-updater would rewrite the pinned binary in place. Disable it so a pin
-# stays a pin. An explicit user value always wins.
-export DISABLE_AUTOUPDATER="\${DISABLE_AUTOUPDATER:-1}"
-`
+# Reuse the main shim's Claude config-env verbatim (CLAUDE_CONFIG_DIR pin,
+# autoupdater off, AND the Linux .oauth_token setup-token fallback), keyed to this
+# version's home via VERSION_DIR. A hand-copied subset here had drifted and lost the
+# .oauth_token fallback, so interactive runs on a keychain-less worker could not
+# authenticate from the attached setup-token — the main shim (generateShimScript)
+# already sources this same adapter block, so sharing it keeps the two in sync.
+export VERSION_DIR="$HOME/.agents/.history/versions/${agent}/${version}"
+${resolveHarnessAdapter(agent).shimConfigEnvBash?.({ configDirName }) ?? ''}`
     : agent === 'codex'
       ? codexHomeShimBash(
           `$HOME/.agents/.history/versions/${agent}/${version}/home/${configDirName}`,
