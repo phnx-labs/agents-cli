@@ -921,15 +921,21 @@ Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims
 
 Give agents access to a real browser — no relay extension, no cloud service, no Playwright getting blocked.
 
+Each device declares its own browsers in its own `devices/<machine>/agents.yaml`.
+The fleet registry is the union of those files: a name declared by one device is
+identity-bearing (the daemon tunnels to that device); a name declared by several
+is fungible (use the local one). `--device` is only valid on `agents browser start`;
+later verbs resolve the device from the task.
+
 ```bash
 # First run: omit --profile and we auto-pick the first installed Chromium-family
 # browser. macOS prefers Chrome > Brave > Edge > Chromium > Comet; Linux prefers
 # Chrome > Chromium > Brave > Edge; Windows prefers Edge (always preinstalled) >
-# Chrome > Brave > Comet. The auto-picked profile is saved as "default" for later runs.
+# Chrome > Brave > Comet. The auto-picked profile is saved as "auto-chrome".
 export AGENTS_BROWSER_TASK=$(agents browser start --url https://app.example.com)
 
 # Or pin a named profile to a specific browser (chrome, comet, brave, chromium,
-# edge, or custom) when you want isolation from "default".
+# edge, or custom) when you want isolation from auto-detect.
 agents browser profiles create work --browser chrome
 # `start` writes the resolved name (e.g. `swift-crab-falcon-a3f92b1c`) to stdout
 # and human-friendly commentary to stderr, so $(...) capture stays clean.
@@ -993,7 +999,10 @@ agents browser profiles create slack \
 
 ### Remote browsers
 
-Connect to browsers running anywhere — local, SSH tunnels, or cloud services:
+Identity-bearing names tunnel automatically: declare `comet-local` only on the
+machine that holds the logins, and every other box reaches it through the
+daemon. `--device` on `start` binds a task to a specific box (fungible names,
+or an explicit pick). Later verbs reject `--device`.
 
 ```bash
 # Local CDP (discovers WebSocket URL automatically)
@@ -1001,7 +1010,11 @@ agents browser profiles create local-debug \
   --browser chrome \
   --endpoint "http://localhost:9222"
 
-# SSH tunnel to a remote machine
+# Bind a task to a fleet device at start; later verbs resolve it from the task
+agents browser start --task post --device zion --url https://x.com/
+agents browser screenshot --task post
+
+# Explicit SSH endpoint, declared on the machine that owns the browser
 agents browser profiles create staging \
   --browser chrome \
   --endpoint "ssh://deploy@staging.example.com?port=9222"

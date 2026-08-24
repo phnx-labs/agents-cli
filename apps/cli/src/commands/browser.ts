@@ -23,7 +23,7 @@ import {
   isProfileLaunchableHere,
   type EditableProfileFields,
 } from '../lib/browser/profiles.js';
-import { declaringDevices, migrateCentralBrowserProfiles } from '../lib/browser/registry.js';
+import { declaringDevices, migrateCentralBrowserProfiles, profileKind } from '../lib/browser/registry.js';
 import type { BrowserProfileConfig } from '../lib/types.js';
 import { resolveActor } from '../lib/actor.js';
 import {
@@ -328,7 +328,7 @@ function assertDeviceDeclaresProfile(device: string, profileName: string): void 
       : 'No device declares that profile.';
   throw new Error(
     `Device "${device}" does not declare browser profile "${profileName}". ${where}\n` +
-      `Next: run \`agents browser profiles add ${profileName}\` on ${device}.`,
+      `Next: run \`agents browser profiles add ${profileName} --browser <b>\` on ${device}.`,
   );
 }
 
@@ -548,8 +548,8 @@ function registerProfilesCommands(browser: Command): void {
   profiles
     .command('list')
     .alias('ls')
-    .description('List all browser profiles and the devices declaring each one')
-    .option('--json', 'Output machine-readable JSON')
+    .description('List all browser profiles and the devices declaring each one (WHERE)')
+    .option('--json', 'Output machine-readable JSON (includes devices + kind)')
     .action(async (opts: { json?: boolean }) => {
       const allProfiles = await listProfiles();
       const configuredDefault = getConfiguredDefaultProfileName();
@@ -558,6 +558,8 @@ function registerProfilesCommands(browser: Command): void {
         console.log(JSON.stringify(
           allProfiles.map((profile) => ({
             ...profile,
+            devices: profile.devices,
+            kind: profileKind(profile.name),
             isConfiguredDefault: profile.name === configuredDefault,
           })),
           null,
@@ -690,6 +692,7 @@ function registerProfilesCommands(browser: Command): void {
 
   profiles
     .command('create <name>')
+    .alias('add')
     .description('Create a new browser profile on this device')
     .requiredOption('-b, --browser <type>', `Browser type: ${VALID_BROWSERS.join(', ')}`)
     .option('-e, --endpoint <url>', 'CDP endpoint URL (repeatable; auto-assigned if omitted)', collect, [])
@@ -787,7 +790,12 @@ function registerProfilesCommands(browser: Command): void {
       };
 
       await createProfile(profile);
-      console.log(`Created profile: ${name} on ${machineId()}`);
+      const port = extractConfiguredPort(profile);
+      console.log(
+        port !== undefined
+          ? `Added "${name}" on ${machineId()} (port ${port}).`
+          : `Added "${name}" on ${machineId()}.`,
+      );
       // Warn (don't fail) if the declared secrets bundle doesn't exist yet — it
       // may be created later, but a typo should surface now.
       if (opts.secrets && !bundleExists(opts.secrets)) {
@@ -1118,10 +1126,11 @@ function registerProfilesCommands(browser: Command): void {
 
   setHelpSections(profiles, {
     examples: `
-      # What exists here, and whether each is this machine's or the whole fleet's
+      # WHERE is the devices whose own file declares the name
       agents browser profiles list
 
       # Create one on this device
+      agents browser profiles add work --browser chrome
       agents browser profiles create work --browser chrome
 
       # Claim leftover central profiles on the machine that hosts the browser
@@ -1154,7 +1163,7 @@ function registerProfilesCommands(browser: Command): void {
 
   profiles
     .command('doctor <name>')
-    .description('Diagnose a browser profile: binary, port, user-data-dir, onboarding state')
+    .description('Diagnose a browser profile: where it is declared, binary, port, user-data-dir, onboarding state')
     .action(async (name: string) => {
       const profile = await getProfile(name);
       if (!profile) {
@@ -1165,14 +1174,31 @@ function registerProfilesCommands(browser: Command): void {
       const checks: Array<{ label: string; ok: boolean; detail: string }> = [];
 
       // 0. Declaration topology. An identity-bearing profile declared by a
-      //    different device cannot be reached through a loopback CDP endpoint
-      //    on this one. Checked first because it invalidates every local check.
+      //    different device cannot be diagnosed through a loopback CDP endpoint
+      //    on this one — that is the original comet-local bug. Checked first
+      //    because it invalidates every local check.
       const misfiled = identityLoopbackMismatch(profile);
+      const kind = profileKind(profile.name);
+      const where = profile.devices.length > 0 ? profile.devices.join(', ') : 'no device';
       checks.push(
         misfiled.misfiled
-          ? { label: 'scope', ok: false, detail: misfiled.why }
-          : { label: 'scope', ok: true, detail: `declared on ${profile.devices.join(', ')}` }
+          ? { label: 'where', ok: false, detail: misfiled.why }
+          : {
+              label: 'where',
+              ok: true,
+              detail: kind
+                ? `${kind}, declared on ${where}`
+                : `declared on ${where}`,
+            }
       );
+
+      if (misfiled.misfiled) {
+        for (const c of checks) {
+          const marker = c.ok ? 'OK  ' : 'FAIL';
+          console.log(`${marker}  ${c.label.padEnd(15)} ${c.detail}`);
+        }
+        process.exit(1);
+      }
 
       // 1. Binary exists for declared browser type, and is a real executable we
       //    can drive — not a distro launcher script. findBrowserPath already

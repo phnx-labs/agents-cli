@@ -14,7 +14,7 @@ import {
   type BrowserProfileWithDeclarations,
 } from './profiles.js';
 import { keyBelongsToProfile, type ProfileName } from './types.js';
-import { profileKind } from './registry.js';
+import { declaringDevices, profileKind } from './registry.js';
 import { machineId } from '../machine-id.js';
 
 /**
@@ -29,15 +29,23 @@ import { machineId } from '../machine-id.js';
 type PruneProfileClass = 'identity' | 'fungible';
 
 /**
- * Detect an identity-bearing profile that resolves to another device's
- * loopback endpoint from this machine.
+ * Detect an identity-bearing profile whose stored endpoint is loopback, viewed
+ * from a machine that is NOT the declaring device.
+ *
+ * That is the original `comet-local` bug: five real logins on the declaring
+ * box, a bare logged-out chromium answering to the same name on a worker
+ * because `cdp://localhost:N` is evaluated on the machine running the command.
+ * The daemon now tunnels that shape (`resolve-target.ts`); doctor still flags
+ * it so a worker does not report a green local binary/port for someone else's
+ * browser. Kind comes from the registry (exactly one declaring device), never
+ * from a stored field.
  */
 export function identityLoopbackMismatch(
   profile: BrowserProfileWithDeclarations,
 ): { misfiled: false } | { misfiled: true; why: string } {
   if (profileKind(profile.name) !== 'identity') return { misfiled: false };
-  const declaringDevice = profile.devices[0];
-  if (declaringDevice === machineId()) return { misfiled: false };
+  const declaringDevice = declaringDevices(profile.name)[0];
+  if (!declaringDevice || declaringDevice === machineId()) return { misfiled: false };
 
   const presets = getEndpointPresets(profile);
   const chosen =
@@ -54,15 +62,17 @@ export function identityLoopbackMismatch(
   } catch {
     return { misfiled: false };
   }
-  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1') {
+  if (host !== 'localhost' && host !== '127.0.0.1' && host !== '::1' && host !== '[::1]') {
     return { misfiled: false };
   }
 
+  const here = machineId();
   return {
     misfiled: true,
     why:
       `identity-bearing profile declared on ${declaringDevice}, but "${target}" is a loopback endpoint — ` +
-      `on ${machineId()} it resolves to this device's own browser, not the declaring device's browser`,
+      `on ${here} that address is this device's own browser, not ${declaringDevice}'s. ` +
+      `Diagnose the real browser on ${declaringDevice}: agents browser profiles doctor ${profile.name}`,
   };
 }
 
@@ -399,10 +409,10 @@ export interface PrunePlan {
     scope: PruneProfileClass;
     why: string;
     /**
-     * True for a fleet profile whose endpoint only makes sense on one machine.
-     * A structured flag, not a substring of `why`: both the CLI's human output
-     * and `--json` consumers branch on it, and sniffing the reason text would
-     * couple them to wording.
+     * True for an identity-bearing profile whose loopback endpoint only makes
+     * sense on the declaring device. A structured flag, not a substring of
+     * `why`: both the CLI's human output and `--json` consumers branch on it,
+     * and sniffing the reason text would couple them to wording.
      */
     misfiled?: boolean;
   }>;
@@ -458,8 +468,8 @@ export function planProfilePrune(
     // Checked FIRST. A misfiled identity profile's defining symptom is that the
     // browser is absent on whatever box you are standing on — pruning it would
     // delete the declaring device's entry (or throw, for a peer declaration).
-    // The repair is to re-declare it on the owning machine; an intentional
-    // delete is still available as `profiles delete`.
+    // The repair is to declare it only on the machine that owns the browser;
+    // an intentional delete is still available as `profiles delete`.
     if (misfiledWhy) {
       keep(`MISFILED — ${misfiledWhy}`, true);
       continue;

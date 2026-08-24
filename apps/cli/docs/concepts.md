@@ -239,7 +239,18 @@ order — built-in default < fleet default < per-device value:
 Per-device docs are conflict-free by construction: each machine writes only
 its own folder, and the churny auto-written agent pins no longer share the
 file (they moved to the untracked pins JSON — the root-cause fix that let
-`devices/` be tracked again). ONE command owns the settings: `agents devices
+`devices/` be tracked again).
+
+**Browser profiles follow the same rule.** Each device declares its own
+browsers in its own `devices/<machine>/agents.yaml` `browser:` map. The fleet
+registry is the read-time union of those files, never stored. Kind is not a
+field: exactly one declaring device means the name is identity-bearing (the
+daemon tunnels to that device); several means fungible (each box uses its
+own). Leftover central `browser:` entries stay undeclared until
+`agents browser profiles claim` on the machine that hosts the browser — nothing
+claims implicitly. `agents browser profiles list` shows this as `WHERE`.
+`--device` is only valid on `agents browser start`; later verbs resolve the
+device from the task. ONE command owns the settings: `agents devices
 config <name> [key] [value] [--unset] [--json]` — bare opens an interactive
 settings menu on a TTY (and prints the resolved config when piped), `key`
 reads the effective value back, `key value` sets it with validation,

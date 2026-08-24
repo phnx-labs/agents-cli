@@ -2578,7 +2578,7 @@
               "negate": false
             }
           ],
-          "examples": "# What exists here, and whether each is this machine's or the whole fleet's\n      agents browser profiles list\n\n      # Create one on this device\n      agents browser profiles create work --browser chrome\n\n      # Claim leftover central profiles on the machine that hosts the browser\n      agents browser profiles claim\n      agents browser profiles claim comet-local\n\n      # Clean up dead ones this device declares: check first, then apply\n      agents browser profiles prune --dry-run\n      agents browser profiles prune\n\n      # Make one the machine's default for a bare `agents browser start`\n      agents browser use work",
+          "examples": "# WHERE is the devices whose own file declares the name\n      agents browser profiles list\n\n      # Create one on this device\n      agents browser profiles add work --browser chrome\n      agents browser profiles create work --browser chrome\n\n      # Claim leftover central profiles on the machine that hosts the browser\n      agents browser profiles claim\n      agents browser profiles claim comet-local\n\n      # Clean up dead ones this device declares: check first, then apply\n      agents browser profiles prune --dry-run\n      agents browser profiles prune\n\n      # Make one the machine's default for a bare `agents browser start`\n      agents browser use work",
           "notes": "A device declares its own browsers in its own `devices/<machine>/agents.yaml`.\n      A name declared by exactly one device is identity-bearing; a name declared\n      by several is fungible. Leftover central `browser:` entries are claimed\n      with `agents browser profiles claim` on the machine that hosts the browser.\n\n      In `list`, the `*` marker means \"this machine's configured default\"\n      (`agents browser start` with no --profile). The auto-detected profile is\n      named `auto-chrome`; `default` is only an ALIAS for whichever profile\n      this machine is configured to use, resolved the same way by every command.\n\n      `prune` only considers profiles this device declares. It never removes a\n      profile that is in use, the configured default, or the auto-detected\n      `auto-chrome`.",
           "subcommands": [
             {
@@ -2620,7 +2620,9 @@
             {
               "name": "create",
               "path": "browser profiles create",
-              "aliases": [],
+              "aliases": [
+                "add"
+              ],
               "description": "Create a new browser profile on this device",
               "args": [
                 {
@@ -2779,7 +2781,7 @@
               "name": "doctor",
               "path": "browser profiles doctor",
               "aliases": [],
-              "description": "Diagnose a browser profile: binary, port, user-data-dir, onboarding state",
+              "description": "Diagnose a browser profile: where it is declared, binary, port, user-data-dir, onboarding state",
               "args": [
                 {
                   "name": "name",
@@ -2957,12 +2959,12 @@
               "aliases": [
                 "ls"
               ],
-              "description": "List all browser profiles and the devices declaring each one",
+              "description": "List all browser profiles and the devices declaring each one (WHERE)",
               "args": [],
               "options": [
                 {
                   "flags": "--json",
-                  "description": "Output machine-readable JSON",
+                  "description": "Output machine-readable JSON (includes devices + kind)",
                   "long": "--json",
                   "required": false,
                   "optional": false,

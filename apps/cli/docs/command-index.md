@@ -97,9 +97,9 @@ agents browser profiles                       Manage browser profiles
 agents browser profiles claim [name]          Move leftover central browser: profiles into this device's declaration file. Only profiles this machine can host are claimed; the rest stay central. Run on the machine that actually has the browser.
 agents browser profiles create <name>         Create a new browser profile on this device
 agents browser profiles delete <name>         Delete a browser profile (drops YAML config + all cached runtime dirs)
-agents browser profiles doctor <name>         Diagnose a browser profile: binary, port, user-data-dir, onboarding state
+agents browser profiles doctor <name>         Diagnose a browser profile: where it is declared, binary, port, user-data-dir, onboarding state
 agents browser profiles edit <name>           Edit an existing profile in place (stays in the store it already lives in)
-agents browser profiles list                  List all browser profiles and the devices declaring each one
+agents browser profiles list                  List all browser profiles and the devices declaring each one (WHERE)
 agents browser profiles logins                Show which login-gated services each profile has a live session for, the account signed in, and whether login creds are available in the profile's secrets bundle (reads cookie/username presence only, never decrypts).
 agents browser profiles prune                 Remove dead profiles this device declares: browser not installed here, or never started
 agents browser profiles rename <from> <to>    Rename a profile, moving its browser data with it (logins survive)

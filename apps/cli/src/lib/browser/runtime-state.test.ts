@@ -369,9 +369,9 @@ describe('planProfilePrune', () => {
     expect(clean.kept[0].misfiled).toBeUndefined();
   });
 
-  it('reports a misfiled fleet profile in the kept reason', () => {
-    // Deleting a fleet entry deletes it on EVERY machine, so a misfiled profile
-    // is a scope-move, not a prune. A dry run still has to surface it.
+  it('reports a misfiled identity profile in the kept reason', () => {
+    // Prune never deletes a peer's declaration. A dry run still has to surface
+    // the mismatch so the operator sees it.
     const name = uniq('misfiled');
     const plan = planProfilePrune([
       { name, scope: 'fungible' as const, launchableHere: true, misfiledWhy: 'loopback endpoint' },

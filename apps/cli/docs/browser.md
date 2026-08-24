@@ -70,7 +70,7 @@ one). Leftover central `browser:` entries are claimed with
 `agents browser profiles claim` on the machine that hosts the browser.
 
 Runtime state — the Chrome `chrome-data` cookie jar — lives separately under
-`~/.agents/.cache/browser/<profile>@<endpoint>/`, which is gitignored and
+`~/.agents/.cache/browser/<profile>@<device>/`, which is gitignored and
 per-machine, so each machine logs in once.
 
 ```bash
@@ -120,19 +120,19 @@ honored the alias — so `--profile default` reached a different profile in
 
 `agents browser profiles list`, `status`, and `--profile` all use the **bare**
 profile name (`comet-local`). A running browser is *stored* under a runtime key
-that also names its endpoint (`comet-local@endpoint-0`), so one profile can run
-at several endpoints at once without colliding on disk — but that key is an
-implementation detail you never have to type or read. `status` renders the two
-separately:
+that also names the device it resolved to (`comet-local@zion`), so the same
+name on two machines does not collide on disk. That key is an implementation
+detail you never have to type or read. Leftover `@endpoint-N` dirs from older
+builds are renamed onto the device key. `status` renders the two separately:
 
 ```
-comet-local (endpoint: endpoint-0, port 9222, pid 4183)
+comet-local (device: zion, port 9222, pid 4183)
 ```
 
 and `status --json` carries them as separate `profile`-side fields:
 
 ```json
-{ "name": "comet-local", "endpoint": "endpoint-0", "key": "comet-local@endpoint-0" }
+{ "name": "comet-local", "device": "zion", "key": "comet-local@zion" }
 ```
 
 Passing a runtime key where a name is expected still works, so a key copied out
@@ -200,8 +200,9 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | Command | Description |
 |---------|-------------|
 | `agents browser use [name]` | Pick this machine's default profile. No name opens a picker on a TTY or prints the current default headlessly; `--unset` or `auto` restores auto-detect. |
-| `agents browser profiles list` | List all configured profiles and the devices declaring each one. A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `devices` + `isConfiguredDefault` |
-| `agents browser profiles create <name>` | Create a new profile on this device |
+| `agents browser profiles list` | List all configured profiles and the devices declaring each one (`WHERE`). A `*` marks this machine's configured default — which is NOT the same thing as the profile named `default`. `--json` adds `devices` + `kind` (`identity` \| `fungible`) + `isConfiguredDefault` |
+| `agents browser profiles create <name>` | Create a new profile on this device (`add` is an alias). Prints `Added "<name>" on <device> (port N).` |
+| `agents browser profiles add <name>` | Alias of `create` |
 | `agents browser profiles seed` | Create a machine-local profile for each installed browser (named `<browser>-local`), so you can `browser use` one instead of hand-crafting each. Idempotent — existing profiles are left untouched |
 | `agents browser profiles prune` | Remove dead profiles this device declares — browser not installed here, or never started (see below) |
 | `agents browser profiles edit <name>` | Edit an existing profile in place — description, endpoints, secrets, viewport, binary. Stays in the store it already lives in. The browser type and the name are NOT editable: both key the on-disk profile cache (and its logins), so changing either orphans it — delete and recreate instead |
@@ -211,7 +212,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `agents browser profiles use <name>` | Compatibility spelling for `agents browser use <name>` |
 | `agents browser profiles logins` | Per profile: `SERVICE \| ACCOUNT \| CREDS` — live session, the signed-in account (plaintext username, never decrypts), and whether login creds are in the profile's secrets bundle |
 | `agents browser profiles delete <name>` | Delete profile config and chrome-data cache |
-| `agents browser profiles doctor <name>` | Diagnose binary, port, user-data-dir, onboarding state |
+| `agents browser profiles doctor <name>` | Diagnose where it is declared, binary, port, user-data-dir, onboarding state. Fails `where` when an identity-bearing name (exactly one declaring device) is a loopback endpoint on a box that is not the declaring device — the original `comet-local` bug. |
 
 `profiles create` flags:
 
@@ -267,37 +268,45 @@ one line saying why. It never silently ignores your configuration.
 
 ### Identity-bearing names vs loopback endpoints
 
-A name declared by exactly one device is identity-bearing. That is only correct
-when the endpoint addresses **one specific machine**:
+A name declared by exactly one device is identity-bearing. The daemon resolves
+it without the caller naming a machine:
 
-- `ssh://muqsit@mac-mini?port=9300` names its host, so it resolves to the same
-  browser from anywhere. Identity-bearing is right.
-- `cdp://localhost:9333` is evaluated **on the machine running the command** —
-  `cdp:` always connects locally. Declared on one device but used from another,
-  that name means "port 9333 on whichever box you happen to be on", so it
-  silently resolves to a different, usually logged-out browser.
+- this device declares it → connect locally
+- only other devices declare it → rewrite `cdp://localhost:N` to
+  `ssh://<device>?port=N` and tunnel; unreachable declaring devices fail loud
+  (never a local logged-out fallback)
+- nobody declares it → loud error. If the name still lives in the central
+  `browser:` map, the error tells you to `profiles claim` it on the machine
+  that hosts the browser; otherwise it lists similar names and who declares them
 
-The second case is the dangerous one for a profile that carries live logins: an
-agent asks for the credentialed browser by name and gets a stranger. `profiles
-doctor` flags it, `profiles prune` notes it in the `kept` reason, and the
-repair is one command on the owning machine:
+A name declared by several devices is fungible: each box uses its own.
+
+`cdp://localhost:9333` on an identity-bearing name is the original
+`comet-local` bug when a worker evaluates it locally — five real logins on
+zion, a bare logged-out chromium on the worker, same name. The daemon now
+tunnels that shape. `profiles doctor` still flags it (`FAIL where`) so a
+worker does not report a green local binary/port for someone else's browser,
+and `profiles prune` notes it in the `kept` reason. Diagnose the real browser
+on the declaring device.
+
+Leftover central `browser:` entries (the pre-registry `comet-local` sitting in
+`~/.agents/agents.yaml`) are not claimed on upgrade. On the machine that owns
+the browser:
 
 ```bash
 agents browser profiles claim comet-local
 ```
 
-Neither surface repairs it for you. Rewriting the synced `agents.yaml` from a
-heuristic is the cross-machine rewrite loop RUSH-2161 fixed.
+Nothing claims implicitly — an implicit claim would race across devices.
 
-To reach another machine's browser, use `--device` (which runs the CLI over
-there, so the target machine picks its own profile) rather than trying to make
-one profile name span machines:
+`--device` is only valid on `agents browser start`. Later verbs (`navigate`,
+`screenshot`, `type`, `stop --profile`, …) resolve the device from the task
+and reject `--device`. `--device all` is rejected: a task lives on one device.
 
 ```bash
-agents browser navigate --device zion --url https://example.com
-
-# or, without naming a box — resolves interactive.host
-agents browser navigate --device interactive --url https://example.com
+agents browser start --task post --device zion --url https://x.com/
+agents browser type --task post --ref @e3 "hello"
+agents browser screenshot --task post
 ```
 
 ### Cleaning up dead profiles (`prune`)
@@ -403,13 +412,16 @@ agents browser gc --idle-minutes 5   # override the idle window for this run
 
 ### Driving another machine's browser (`--device`) and consent
 
-Any `agents browser` command takes the fleet `--device <name>` flag (same as
-`agents sessions`/`teams`/`run`): it runs the command on that device over SSH and
-drives *its* browser, streaming the output back. No hand-built `ssh://` profile
-needed — `agents browser start --device zion` starts a task on `zion`'s own daemon.
+`--device` is only valid on `agents browser start`. It binds the task to that
+device; later verbs resolve the device from `--task` (or caller identity) and
+reject `--device`. Identity-bearing profiles do not need `--device` at all —
+the daemon tunnels to the declaring device from the name.
 
-Because that lets one machine open a browser on another, the **target decides**
-whether it allows it:
+`--device all` is rejected because a task lives on one device. A verb that
+names an unknown task lists the open tasks and exits non-zero.
+
+Because start-with-`--device` lets one machine open a browser on another, the
+**target decides** whether it allows it:
 
 | Command | Description |
 |---------|-------------|
@@ -435,12 +447,13 @@ task, so gating the one command left every one of them ungated. Read-only querie
 request that resolves to a task which already exists — `--task <name>`, or the
 single-match-by-caller-identity path in `resolveOrCreateTask` — returns before
 the gate and can then drive that task's tabs. So on a machine whose browser is
-already running with live tasks, a remote `browser tab-add --device <box> --task
-<name>` can still act in the owner's authenticated profile with consent off, and
-`status` is ungated by design so task names are discoverable. This is
-pre-existing behaviour, not introduced or closed here; closing it means gating
-the attach path (`findTask` and its consumers) as well, which is tracked
-separately. Treat `remote-control off` as "no new browser", not as "no access".
+already running with live tasks, a remote attach that already has a task
+(`--task <name>` after `start --device <box>`) can still act in the owner's
+authenticated profile with consent off, and `status` is ungated by design so
+task names are discoverable. This is pre-existing behaviour, not introduced or
+closed here; closing it means gating the attach path (`findTask` and its
+consumers) as well, which is tracked separately. Treat `remote-control off` as
+"no new browser", not as "no access".
 
 The marker travels **on the request**, not in the daemon's environment. The
 daemon is shared and long-lived, and one auto-started by a fleet-remote CLI
