@@ -371,6 +371,25 @@ describe('deriveSessionRecap (recap ladder — show what the agent DID, not the 
     expect(r).toMatchObject({ title: 'add a widget', recapSource: 'prompt' });
   });
 
+  it('collapses a harness label auto-named from a skill preamble to the skill', () => {
+    // A harness that names a session from its first turn names it after the
+    // injected scaffolding when that turn opened a skill, so the Fleet row read
+    // "Base directory for this skill: /home/…/skills/continue" instead of the task.
+    const r = deriveSessionRecap({
+      label: 'Base directory for this skill: /home/u/.agents/.history/versions/claude/2.1.207/home/.claude/skills/continue',
+      topic: 'pick up where I left off',
+      tail: ['agent last line'],
+    });
+    expect(r).toMatchObject({ title: '/continue', recapSource: 'label' });
+  });
+
+  it('leaves a deliberate /rename label verbatim even when it mentions a skills path', () => {
+    // Only the injected "Base directory for this skill:" line is scaffolding; a
+    // human label that merely names a path keeps its real text.
+    const r = deriveSessionRecap({ label: 'rewrite the skills/continue docs', topic: 'first prompt' });
+    expect(r).toMatchObject({ title: 'rewrite the skills/continue docs', recapSource: 'label' });
+  });
+
   it('cleans an image-path first prompt into the userPrompt fields', () => {
     const r = deriveSessionRecap({ topic: '/Users/muqsit/Screenshots/CleanShot 2026-08-20 at 1.png' });
     expect(r).toMatchObject({ userPromptClean: '[image]', userPromptKind: 'image' });
