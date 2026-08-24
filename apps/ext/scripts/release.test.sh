@@ -182,8 +182,11 @@ STUB
     fi
 
     # Ordering: the install must land before the test gate in the output.
-    INSTALL_LINE="$(grep -nE 'Installing dependencies' "$RUN_OUT" | head -1 | cut -d: -f1)"
-    TESTS_LINE="$(grep -nE 'Running tests' "$RUN_OUT" | head -1 | cut -d: -f1)"
+    # `|| true` so a no-match (the pre-fix path, where "Installing dependencies"
+    # never prints) reports fail() gracefully instead of aborting the whole suite
+    # under `set -e` and silently skipping the assertions below.
+    INSTALL_LINE="$(grep -nE 'Installing dependencies' "$RUN_OUT" | head -1 | cut -d: -f1 || true)"
+    TESTS_LINE="$(grep -nE 'Running tests' "$RUN_OUT" | head -1 | cut -d: -f1 || true)"
     if [ -n "$INSTALL_LINE" ] && [ -n "$TESTS_LINE" ] && [ "$INSTALL_LINE" -lt "$TESTS_LINE" ]; then
         pass "install precedes the Tests/Build gate on the local publish path"
     else
