@@ -85,6 +85,19 @@ describe('renderTrajectoryHtml — self-contained and safe', () => {
     expect(style).toMatch(/\.mix-row\s*\{[^}]*display:\s*grid/);
   });
 
+  it('renders a multi-hour idle gap in hours, not runaway minutes', () => {
+    // A completed step, then a >1h idle gap — the HTML gap divider (and the KPI)
+    // must read "2h05m", not "125m…".
+    const overnight: SessionEvent[] = [
+      { type: 'tool_use', agent: 'claude', timestamp: '2026-08-01T00:00:00Z', tool: 'Bash', callId: 'b', command: 'git status' },
+      { type: 'tool_result', agent: 'claude', timestamp: '2026-08-01T00:00:01Z', tool: 'Bash', callId: 'b', outcome: 'ok' },
+      { type: 'message', agent: 'claude', timestamp: '2026-08-01T02:05:01Z', role: 'user', content: 'back' },
+    ];
+    const html = renderTrajectoryHtml(buildTrajectory(overnight, meta()));
+    expect(html).toContain('idle 2h05m'); // the gap divider, in hours
+    expect(html).not.toMatch(/idle 125m/); // never runaway minutes
+  });
+
   it('an empty trajectory still renders a valid page (no crash)', () => {
     const html = renderTrajectoryHtml(buildTrajectory([], meta({ agent: 'openclaw' })));
     expect(html).toContain('<!DOCTYPE html>');

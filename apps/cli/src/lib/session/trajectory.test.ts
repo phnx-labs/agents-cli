@@ -67,6 +67,9 @@ describe('buildTrajectory — durations by callId pairing', () => {
     expect(label('cd apps/cli && cat f | grep x')).toBe('cat f | grep x');
     // A command that is nothing but `cd` is left as-is, never emptied.
     expect(label('cd /home/u/src/agents-cli')).toBe('cd /home/u/src/agents-cli');
+    // A separator INSIDE a quoted arg would cut mid-quote — keep the whole command
+    // rather than show a dangling-quote fragment.
+    expect(label('cd "/path/with; semicolon" && git push')).toBe('cd "/path/with; semicolon" && git push');
     // A non-noise command is untouched, and the label now agrees with the badge.
     const t = buildTrajectory(cmd('cd apps/cli && bun test'), meta(), { redact: false });
     expect(t.steps[0].label).toBe('bun test');

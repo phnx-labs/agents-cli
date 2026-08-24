@@ -200,9 +200,18 @@ function stringArg(args: Record<string, any> | undefined, ...keys: string[]): st
  * Conservative on purpose: only a LEADING run of noise statements separated by
  * `&&`, `;`, or a newline is removed (an assignment PREFIX like `VAR=val cmd` too),
  * pipelines (`|`) are left intact, and a command that is nothing but noise (a lone
- * `cd dir`) is returned unchanged rather than emptied. Display-only — the value is
- * still clipped and secret-redacted downstream.
+ * `cd dir`) is returned unchanged rather than emptied. The separator match is a
+ * plain negated class, not a shell tokenizer, so a separator INSIDE a quoted arg
+ * (`cd "a; b" && x`) would cut mid-quote — guarded by refusing any strip that
+ * leaves the label with unbalanced quotes and falling back to the whole command.
+ * Display-only — the value is still clipped and secret-redacted downstream.
  */
+function quotesBalanced(text: string): boolean {
+  const dq = (text.match(/(?<!\\)"/g) ?? []).length;
+  const sq = (text.match(/(?<!\\)'/g) ?? []).length;
+  return dq % 2 === 0 && sq % 2 === 0;
+}
+
 function stripLeadingShellNoise(command: string): string {
   // A leading `cd`/`export`/`set`/`source`/`unset`/`local`/`eval` statement, or an
   // assignment, terminated by a statement separator (`&&`, `;`, or newline).
@@ -217,7 +226,11 @@ function stripLeadingShellNoise(command: string): string {
     cmd = cmd.replace(noiseStatement, '').replace(assignment, '');
   }
   const trimmed = cmd.trim();
-  return trimmed.length > 0 ? trimmed : command.trim();
+  if (trimmed.length === 0) return command.trim();
+  // A strip that severed a quoted argument (a separator lived inside quotes) leaves
+  // a dangling quote — keep the whole command rather than show a mangled fragment.
+  if (!quotesBalanced(trimmed) && quotesBalanced(command)) return command.trim();
+  return trimmed;
 }
 
 /**
