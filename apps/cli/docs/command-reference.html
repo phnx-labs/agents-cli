@@ -354,9 +354,10 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       # narrow by who/what published it
       agents artifacts share list --agent claude
       agents artifacts share list --label-contains &quot;fleet plan&quot; lists the active pages in your namespace — expired links and the sibling .png og
-  covers are omitted (it mirrors the public gallery). it reads the endpoint&#39;s json
-  listing route, which ships with the current worker template. if your deployed
-  worker predates this feature the command says so and points you at &#39;agents
+  covers are omitted (it mirrors the public gallery). signed-in users list the
+  managed endpoint (share.agents-cli.sh/&lt;userid&gt;); otherwise byo. it reads the
+  endpoint&#39;s json listing route, which ships with the current worker template. if
+  a byo worker predates this feature the command says so and points you at &#39;agents
   artifacts share update&#39; (rush-2449) rather than returning a wrong or empty result
   — see &#39;agents artifacts share status&#39; for whether an update is due.
 
@@ -373,9 +374,10 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       # Narrow by who/what published it
       agents artifacts share list --agent claude
       agents artifacts share list --label-contains &quot;fleet plan&quot;</code></pre><h4>Notes</h4><p class="notes">Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
-  covers are omitted (it mirrors the public gallery). It reads the endpoint&#39;s JSON
-  listing route, which ships with the current Worker template. If your deployed
-  Worker predates this feature the command says so and points you at &#39;agents
+  covers are omitted (it mirrors the public gallery). Signed-in users list the
+  managed endpoint (share.agents-cli.sh/&lt;userId&gt;); otherwise BYO. It reads the
+  endpoint&#39;s JSON listing route, which ships with the current Worker template. If
+  a BYO Worker predates this feature the command says so and points you at &#39;agents
   artifacts share update&#39; (RUSH-2449) rather than returning a wrong or empty result
   — see &#39;agents artifacts share status&#39; for whether an update is due.
 
@@ -394,7 +396,8 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   (pass --no-revision at publish time to skip it) — this is history, never
   shown on the public gallery or in &#39;agents artifacts share list&#39; beyond its
   count. each revision&#39;s own url is still directly reachable and honors its own
-  recorded expiry."><div class="command-head"><h3><code>agents artifacts share revisions &lt;target&gt;</code></h3></div><p>Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;target&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username for resolving a bare-slug target (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--revisions-json</code></td><td>emit the machine-readable revision list</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Prior versions kept under this slug (bare slug — your own namespace)
+  recorded expiry. signed-in users resolve a bare slug against the managed
+  phoenix namespace; otherwise byo (github username / --for-user)."><div class="command-head"><h3><code>agents artifacts share revisions &lt;target&gt;</code></h3></div><p>Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;target&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--for-user &lt;user&gt;</code></td><td>GitHub username for resolving a bare-slug target (default: resolved from gh/git config)</td><td></td><td></td></tr><tr><td><code>--revisions-json</code></td><td>emit the machine-readable revision list</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Prior versions kept under this slug (bare slug — your own namespace)
       agents artifacts share revisions q3-report
 
       # By &lt;user&gt;/&lt;slug&gt; or full URL, same target forms as &#39;agents artifacts unshare&#39;
@@ -407,7 +410,8 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
   (pass --no-revision at publish time to skip it) — this is history, never
   shown on the public gallery or in &#39;agents artifacts share list&#39; beyond its
   count. Each revision&#39;s own URL is still directly reachable and honors its own
-  recorded expiry.</p></article>
+  recorded expiry. Signed-in users resolve a bare slug against the managed
+  Phoenix namespace; otherwise BYO (GitHub username / --for-user).</p></article>
 <article id="artifacts-share-status" data-search="status artifacts share status  show the configured share endpoint and namespace. -h, --help show help  "><div class="command-head"><h3><code>agents artifacts share status</code></h3></div><p>Show the configured share endpoint and namespace.</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="artifacts-share-update" data-search="update artifacts share update  re-deploy the worker script to the current template on an already-provisioned endpoint (idempotent). --bundle &lt;name&gt; secrets bundle holding the cloudflare api token --account &lt;id&gt; cloudflare account id override (default: the configured endpoint&#39;s account) --token &lt;t&gt; cloudflare api token (else read from --bundle) --force re-deploy even if the deployed template already matches --update-json emit a machine-readable result -h, --help show help # push a worker-template.ts change out to your already-provisioned endpoint
       agents artifacts share update

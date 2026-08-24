@@ -1136,7 +1136,7 @@
                 }
               ],
               "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --list-json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --for-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"",
-              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON\n  listing route, which ships with the current Worker template. If your deployed\n  Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side;\n  --list-json's count reflects the filtered set.",
+              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). Signed-in users list the\n  managed endpoint (share.agents-cli.sh/<userId>); otherwise BYO. It reads the\n  endpoint's JSON listing route, which ships with the current Worker template. If\n  a BYO Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side;\n  --list-json's count reflects the filtered set.",
               "subcommands": []
             },
             {
@@ -1183,7 +1183,7 @@
                 }
               ],
               "examples": "# Prior versions kept under this slug (bare slug — your own namespace)\n      agents artifacts share revisions q3-report\n\n      # By <user>/<slug> or full URL, same target forms as 'agents artifacts unshare'\n      agents artifacts share revisions octocat/q3-report\n      agents artifacts share revisions https://share.agents-cli.sh/octocat/q3-report\n\n      # Machine-readable, and a bare slug resolved against another namespace\n      agents artifacts share revisions q3-report --revisions-json\n      agents artifacts share revisions q3-report --for-user octocat",
-              "notes": "A revision is created automatically on every republish of an existing slug\n  (pass --no-revision at publish time to skip it) — this is history, never\n  shown on the public gallery or in 'agents artifacts share list' beyond its\n  count. Each revision's own URL is still directly reachable and honors its own\n  recorded expiry.",
+              "notes": "A revision is created automatically on every republish of an existing slug\n  (pass --no-revision at publish time to skip it) — this is history, never\n  shown on the public gallery or in 'agents artifacts share list' beyond its\n  count. Each revision's own URL is still directly reachable and honors its own\n  recorded expiry. Signed-in users resolve a bare slug against the managed\n  Phoenix namespace; otherwise BYO (GitHub username / --for-user).",
               "subcommands": []
             },
             {
