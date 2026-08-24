@@ -364,4 +364,15 @@ describe('renderLineageHtml — self-contained node graph', () => {
     expect(out).not.toContain('<script>x</script>');
     expect(out).toContain('&lt;script&gt;');
   });
+
+  it('footer honors the redaction flag (RUSH-3077)', () => {
+    const lineage = buildLineage([root, kid], { rootId: root.id, now: NOW });
+    // Default and explicit-true keep the redacted claim.
+    expect(renderLineageHtml(lineage)).toContain('Secret-redacted lineage rendered');
+    expect(renderLineageHtml(lineage, true)).toContain('Secret-redacted lineage rendered');
+    // --no-redact must read honestly, never claim redaction that did not happen.
+    const unredacted = renderLineageHtml(lineage, false);
+    expect(unredacted).toContain('Unredacted (local only) lineage rendered');
+    expect(unredacted).not.toContain('Secret-redacted');
+  });
 });

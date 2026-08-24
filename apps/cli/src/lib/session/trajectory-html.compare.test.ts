@@ -73,4 +73,22 @@ describe('renderTrajectoryCompareHtml — self-contained and safe', () => {
     expect(html).toContain('<!DOCTYPE html>');
     expect(html).toContain('No divergence');
   });
+
+  it('footer honors the redaction flag of the compared trajectories (RUSH-3077)', () => {
+    // Redacted build (the default) keeps the "Secret-redacted" claim.
+    const ar = buildTrajectory(eventsA, meta({ id: 'a' }), { redact: true });
+    const br = buildTrajectory(eventsB, meta({ id: 'b', agent: 'codex' }), { redact: true });
+    expect(renderTrajectoryCompareHtml(diffTrajectories(ar, br))).toContain('Secret-redacted compare rendered');
+
+    // --no-redact on both must read honestly, never claim redaction that did not happen.
+    const au = buildTrajectory(eventsA, meta({ id: 'a' }), { redact: false });
+    const bu = buildTrajectory(eventsB, meta({ id: 'b', agent: 'codex' }), { redact: false });
+    const unredacted = renderTrajectoryCompareHtml(diffTrajectories(au, bu));
+    expect(unredacted).toContain('Unredacted (local only) compare rendered');
+    expect(unredacted).not.toContain('Secret-redacted');
+
+    // A mixed pair (one side still redacted) is not "unredacted" — the honest
+    // label is the redacted one, so no false safe-to-share claim.
+    expect(renderTrajectoryCompareHtml(diffTrajectories(ar, bu))).toContain('Secret-redacted compare rendered');
+  });
 });

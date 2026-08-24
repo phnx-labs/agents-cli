@@ -18,6 +18,16 @@ import type { SessionTrajectory, TrajectoryStep } from './trajectory.js';
 import type { TrajectoryComparison } from './trajectory-compare.js';
 import type { LineageNode, SessionLineage } from './trajectory-lineage.js';
 
+/**
+ * The honest footer prefix for a rendered trace: the redacted label only when
+ * something was actually redacted, else the "local only" disclaimer under
+ * `--no-redact`. One source for all three layouts (single / compare / lineage)
+ * so the label never drifts back to a hardcoded "Secret-redacted" claim.
+ */
+function redactionLabel(redacted: boolean): string {
+  return redacted ? 'Secret-redacted' : 'Unredacted (local only)';
+}
+
 /** Color a tool bar by family; an error outcome overrides to red. */
 function toolColor(step: TrajectoryStep): string {
   if (step.outcome === 'error') return '#f87171';
@@ -238,7 +248,7 @@ export function renderTrajectoryHtml(model: SessionTrajectory): string {
   </div>
 </main>
 <footer>
-  ${model.truncatedSteps > 0 ? 'Truncated · ' : ''}${model.redacted ? 'Secret-redacted' : 'Unredacted (local only)'} trajectory rendered by agents-cli &middot; <code>agents sessions trace</code>
+  ${model.truncatedSteps > 0 ? 'Truncated · ' : ''}${redactionLabel(model.redacted)} trajectory rendered by agents-cli &middot; <code>agents sessions trace</code>
 </footer>
 <script>${THEME_SCRIPT}</script>
 </body>
@@ -531,7 +541,7 @@ export function renderTrajectoryCompareHtml(cmp: TrajectoryComparison): string {
   ${renderCompareDiffLists(cmp)}
 </main>
 <footer>
-  Secret-redacted compare rendered by agents-cli &middot; <code>agents sessions trace</code>
+  ${redactionLabel(cmp.a.redacted || cmp.b.redacted)} compare rendered by agents-cli &middot; <code>agents sessions trace</code>
 </footer>
 <script>${THEME_SCRIPT}</script>
 </body>
@@ -712,8 +722,12 @@ const LINEAGE_SCRIPT = `
  * auto-discovered from the team records) plus a per-node summary card revealed
  * by clicking a node. Same shell, redaction, and no-CDN rule as the other two
  * layouts; local paths (`filePath`/`cwd`) are deliberately never rendered.
+ *
+ * `redacted` follows the trace's `--no-redact` flag so the footer states the
+ * honest label, exactly as the single-trajectory and compare renderers do; it
+ * defaults to the redacted claim to keep the shared/safe default.
  */
-export function renderLineageHtml(lineage: SessionLineage): string {
+export function renderLineageHtml(lineage: SessionLineage, redacted = true): string {
   const root = lineage.nodes[0];
   const title = root ? `${root.agent} · ${root.shortId}` : 'lineage';
   const spawned = Math.max(0, lineage.nodes.length - 1);
@@ -757,7 +771,7 @@ export function renderLineageHtml(lineage: SessionLineage): string {
   </div>
 </main>
 <footer>
-  Secret-redacted lineage rendered by agents-cli &middot; <code>agents sessions trace --tree</code>
+  ${redactionLabel(redacted)} lineage rendered by agents-cli &middot; <code>agents sessions trace --tree</code>
 </footer>
 <script>${THEME_SCRIPT}</script>
 <script>${LINEAGE_SCRIPT}</script>

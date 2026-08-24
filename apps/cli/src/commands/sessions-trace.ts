@@ -353,7 +353,7 @@ Three or more selectors, and --tree with more than one selector, fail loud.`,
       }
 
       // HTML.
-      const html = renderLineageHtml(lineage);
+      const html = renderLineageHtml(lineage, redact);
       if (options.output) {
         fs.writeFileSync(options.output, html, { mode: 0o600 });
         process.stdout.write(`${path.resolve(options.output)}\n`);
