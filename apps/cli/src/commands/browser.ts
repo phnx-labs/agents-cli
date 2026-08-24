@@ -254,8 +254,10 @@ function syncTaskIndex(request: IPCRequest, response: IPCResponse): void {
     return;
   }
   if (request.action === 'gc') {
-    for (const closed of response.reaped?.closed ?? []) {
-      unbindTask(closed.task);
+    if (!request.dryRun) {
+      for (const closed of response.reaped?.closed ?? []) {
+        unbindTask(closed.task);
+      }
     }
     return;
   }
