@@ -1263,7 +1263,8 @@ agents artifacts unshare fleet                              # take a published l
 `agents artifacts share` closes the loop: an agent makes work (a plan, a viz, a report),
 publishes it, and you open the link to see it. **Signed-in users** publish to the
 already-live managed endpoint (`share.agents-cli.sh`) with the Phoenix session — no
-Cloudflare account, bucket, or write token. `--visibility unlisted` (hidden aliases
+Cloudflare account, bucket, or write token — and `share status` / `list` / `revisions`
+/ `unshare` talk to that same endpoint. `--visibility unlisted` (hidden aliases
 `--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
 and the Worker sends `X-Robots-Tag: noindex`. **BYO Cloudflare** remains: `setup` reads
 a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates

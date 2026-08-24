@@ -23,6 +23,7 @@ import {
   DEFAULT_SHARE_DOMAIN,
   readShareConfig,
   readWriteToken,
+  readWriteTokenEnv,
   type ShareConfig,
 } from './config.js';
 
@@ -50,12 +51,22 @@ export interface ResolveShareBackendOpts {
   config?: ShareConfig;
   /** DI seam — override `readSession()`. `null` means signed out. */
   session?: PhoenixSession | null;
+  /**
+   * When false, BYO may resolve without a WRITE_TOKEN. Public GET routes
+   * (list / revisions / status) don't need one; publish and delete do.
+   * Default true.
+   */
+  requireToken?: boolean;
 }
 
 /** Env var that forces the BYO path. Value must be exactly `byo`. */
 export const SHARE_BACKEND_ENV = 'AGENTS_SHARE_BACKEND';
 
-/** URL-safe namespace: lowercase `[a-z0-9-]+`. Matches the Worker's sanitize. */
+/** URL-safe namespace: lowercase `[a-z0-9-]+`. Matches the Worker's sanitize.
+ *
+ * Phoenix userId is expected to already be `[a-z0-9-]+` (UUIDs sanitize
+ * losslessly). This is URL-safety, not collision-resistance: two ids that
+ * differ only in case or punctuation would share a prefix. */
 export function sanitizeShareNamespace(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }
@@ -110,7 +121,9 @@ function resolveByoBackend(opts: ResolveShareBackendOpts): ShareBackend {
       "Not set up yet. Run 'agents auth login' to publish on the managed endpoint (zero Cloudflare setup), or 'agents artifacts setup' / 'agents artifacts share join' for your own Cloudflare.",
     );
   }
-  const token = opts.writeToken ?? readWriteToken();
+  const token =
+    opts.writeToken ??
+    (opts.requireToken === false ? (readWriteTokenEnv() ?? '') : readWriteToken());
   // Namespace is the GitHub username. An explicit --github-user is sanitized
   // here; otherwise publish fills it via resolveShareUsername (gh/git config).
   const namespace = opts.githubUser ? sanitizeShareNamespace(opts.githubUser) : '';

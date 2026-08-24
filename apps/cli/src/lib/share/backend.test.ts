@@ -167,4 +167,22 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
       resolveShareBackend({ session: { access_token: 'pid_x' } }),
     ).toThrow(/no user id/);
   });
+
+  it('requireToken:false lets BYO list/status resolve without a WRITE_TOKEN', () => {
+    writeShareConfig({
+      baseUrl: 'https://byo.example',
+      accountId: 'acct',
+      workerName: 'w',
+      bucketName: 'b',
+    });
+    const backend = resolveShareBackend({
+      session: null,
+      requireToken: false,
+      githubUser: 'octocat',
+    });
+    expect(backend.kind).toBe('byo');
+    expect(backend.token).toBe('');
+    expect(backend.baseUrl).toBe('https://byo.example');
+    expect(backend.namespace).toBe('octocat');
+  });
 });

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { deleteObject, deleteShare, resolveDeleteTarget, type CheckFn, type DeleteFn, type RevisionsFetchFn } from './delete.js';
+import { DEFAULT_SHARE_DOMAIN } from './config.js';
 
 const CFG = {
   baseUrl: 'https://share.example',
@@ -297,5 +298,27 @@ describe('deleteShare', () => {
         }),
       ).rejects.toThrow(/retained revision.*not verified/i);
     });
+  });
+});
+
+describe('deleteShare managed backend (RUSH-3135)', () => {
+  it('signed-in with no BYO config deletes against the managed endpoint namespace', async () => {
+    const base = `https://${DEFAULT_SHARE_DOMAIN}`;
+    const { checker, deleter, deletedUrls } = fakeStore([
+      `${base}/alice/plan`,
+      `${base}/alice/plan.png`,
+    ]);
+    const r = await deleteShare('plan', {
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' },
+      checker,
+      deleter,
+      fetchRevisions: NO_REVISIONS,
+    });
+    expect(r.key).toBe('alice/plan');
+    expect(r.url).toBe(`${base}/alice/plan`);
+    expect(r.existedBefore).toBe(true);
+    expect(r.verified404).toBe(true);
+    expect(deletedUrls[0]).toBe(`${base}/alice/plan`);
+    expect(deletedUrls[1]).toBe(`${base}/alice/plan.png`);
   });
 });

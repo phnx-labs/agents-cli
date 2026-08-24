@@ -422,6 +422,8 @@ function safeEqual(a, b) {
   return out === 0 && la === lb;
 }
 
+// URL-safety, not collision-resistance. Phoenix userId is a UUID (sanitizes
+// losslessly); two ids that differ only in case/punctuation would share a prefix.
 function sanitizeNamespace(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 }

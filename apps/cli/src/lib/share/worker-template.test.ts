@@ -609,3 +609,104 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
     expect(store.get('octocat/admin')?.customMetadata.owner).toBe('octocat');
   });
 });
+
+describe('defaultVerifyPhoenixToken real fetch/parse (RUSH-3135)', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubFetch(handler: (req: Request) => Response | Promise<Response>): Array<{ url: string; method: string; authorization: string | null }> {
+    const seen: Array<{ url: string; method: string; authorization: string | null }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(input, init);
+      seen.push({ url: req.url, method: req.method, authorization: req.headers.get('authorization') });
+      return handler(req);
+    }) as typeof fetch;
+    return seen;
+  }
+
+  it('200 {userId,email} yields claims and GETs ${PHOENIX_ID_BASE}/api/v1/auth/me with the bearer', async () => {
+    const worker = await loadWorker();
+    const seen = stubFetch(
+      () => new Response(JSON.stringify({ userId: 'alice', email: 'alice@example.com' }), { status: 200 }),
+    );
+    const claims = await worker.hooks.verifyPhoenixToken(
+      new Request('https://share.test/alice/plan', { headers: { authorization: 'Bearer pid_alice' } }),
+      { PHOENIX_ID_BASE: 'https://phoenix.test/' },
+    );
+    expect(claims).toEqual({ userId: 'alice', email: 'alice@example.com' });
+    expect(seen).toEqual([
+      { url: 'https://phoenix.test/api/v1/auth/me', method: 'GET', authorization: 'Bearer pid_alice' },
+    ]);
+  });
+
+  it('401 / non-ok yields null (does not trust a non-2xx body)', async () => {
+    const worker = await loadWorker();
+    stubFetch(
+      () => new Response(JSON.stringify({ userId: 'attacker', email: 'x@y.z' }), { status: 401 }),
+    );
+    const claims = await worker.hooks.verifyPhoenixToken(
+      new Request('https://share.test/alice/plan', { headers: { authorization: 'Bearer bad' } }),
+      { PHOENIX_ID_BASE: 'https://phoenix.test' },
+    );
+    expect(claims).toBeNull();
+  });
+
+  it('malformed body / missing userId yields null', async () => {
+    const worker = await loadWorker();
+    const env = { PHOENIX_ID_BASE: 'https://phoenix.test' };
+    const req = new Request('https://share.test/alice/plan', { headers: { authorization: 'Bearer pid' } });
+
+    stubFetch(() => new Response('not-json', { status: 200 }));
+    expect(await worker.hooks.verifyPhoenixToken(req, env)).toBeNull();
+
+    stubFetch(() => new Response(JSON.stringify({ email: 'a@b.com' }), { status: 200 }));
+    expect(await worker.hooks.verifyPhoenixToken(req, env)).toBeNull();
+
+    stubFetch(() => new Response(JSON.stringify({ userId: 123 }), { status: 200 }));
+    expect(await worker.hooks.verifyPhoenixToken(req, env)).toBeNull();
+
+    stubFetch(() => new Response(JSON.stringify({ userId: '' }), { status: 200 }));
+    expect(await worker.hooks.verifyPhoenixToken(req, env)).toBeNull();
+  });
+
+  it('PUT through the un-stubbed hook: Phoenix 200 publishes, Phoenix 401 does not', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+
+    stubFetch(
+      () => new Response(JSON.stringify({ userId: 'alice', email: 'a@b.com' }), { status: 200 }),
+    );
+    const ok = await worker.default.fetch(
+      new Request('https://share.test/alice/plan', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer pid_alice',
+          'content-type': 'text/html; charset=utf-8',
+        },
+        body: '<h1>managed</h1>',
+      }),
+      env,
+    );
+    expect(ok.status).toBe(200);
+    expect(store.get('alice/plan')?.customMetadata.owner).toBe('alice');
+
+    stubFetch(() => new Response('nope', { status: 401 }));
+    const denied = await worker.default.fetch(
+      new Request('https://share.test/alice/other', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer pid_alice',
+          'content-type': 'text/html; charset=utf-8',
+        },
+        body: '<h1>nope</h1>',
+      }),
+      env,
+    );
+    expect(denied.status).toBe(401);
+    expect(store.has('alice/other')).toBe(false);
+  });
+});

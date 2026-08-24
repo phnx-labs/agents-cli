@@ -65,6 +65,14 @@ function shareGroup(program: Command): Command | undefined {
   return program.commands.find((c) => c.name() === 'artifacts')?.commands.find((c) => c.name() === 'share');
 }
 
+function clearPhoenixSessionFile(): void {
+  // identity/client.ts reads phoenix-session.json from AGENTS_STATE_DIR (the
+  // vitest fork sandbox), not from $HOME. Tests that writeSession() must not
+  // leak a signed-in principal into a later BYO-only assertion.
+  const stateDir = process.env.AGENTS_STATE_DIR;
+  if (stateDir) fs.rmSync(path.join(stateDir, 'phoenix-session.json'), { force: true });
+}
+
 beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-share-command-'));
   previousHome = process.env.HOME;
@@ -77,6 +85,7 @@ beforeEach(() => {
   // resolves through the (mocked) bundle, not this process's real env.
   previousShareWriteToken = process.env.SHARE_WRITE_TOKEN;
   delete process.env.SHARE_WRITE_TOKEN;
+  clearPhoenixSessionFile();
   // Reads go to a temp HOME with an in-memory keychain backend.
   vi.spyOn(console, 'log').mockImplementation(() => {});
 });
@@ -92,6 +101,7 @@ afterEach(() => {
   else process.env.AGENTS_SHARE_GITHUB_USER = previousShareGitHubUser;
   if (previousShareWriteToken === undefined) delete process.env.SHARE_WRITE_TOKEN;
   else process.env.SHARE_WRITE_TOKEN = previousShareWriteToken;
+  clearPhoenixSessionFile();
   fs.rmSync(tmpHome, { recursive: true, force: true });
 });
 
@@ -536,6 +546,35 @@ describe('share status and analytics namespace display', () => {
     expect(out).not.toMatch(/Not configured/);
   });
 
+  it('signed-in with no BYO config reports the managed endpoint (RUSH-3135)', async () => {
+    const { artifacts } = await freshShareModules();
+    const { writeSession } = await import('../lib/identity/client.js');
+    writeSession({ access_token: 'pid_alice', userId: 'alice-user-1', email: 'alice@example.com' });
+
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'status']);
+
+    const out = loggedOutput();
+    expect(out).toContain('managed');
+    expect(out).toContain('share.agents-cli.sh/alice-user-1');
+    expect(out).not.toMatch(/Not configured/);
+    expect(out).not.toMatch(/artifacts setup/);
+  });
+
+  it('signed-in analytics names the managed endpoint instead of "Not configured" (RUSH-3135)', async () => {
+    const { artifacts } = await freshShareModules();
+    const { writeSession } = await import('../lib/identity/client.js');
+    writeSession({ access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' });
+
+    const program = programWithArtifacts(artifacts);
+    await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'analytics']);
+
+    const out = loggedOutput();
+    expect(out).toMatch(/BYO feature/i);
+    expect(out).toContain('share.agents-cli.sh');
+    expect(out).not.toMatch(/Not configured/);
+  });
+
   it('shows the template as current right after `agents artifacts share update` and outdated once the hash is stale', async () => {
     const { artifacts, share, config } = await freshShareModules();
     config.writeShareConfig({
@@ -763,6 +802,48 @@ describe('runShareList', () => {
   it('refuses when share was never configured', async () => {
     const { share } = await freshShareModules();
     await expect(share.runShareList({ githubUser: 'octocat' })).rejects.toThrow(/Not set up yet/);
+    await expect(share.runShareList({ githubUser: 'octocat' })).rejects.toThrow(/agents auth login/);
+  });
+
+  it('signed-in with no BYO config lists the managed endpoint namespace (RUSH-3135)', async () => {
+    const { share } = await freshShareModules();
+    const { DEFAULT_SHARE_DOMAIN } = await import('../lib/share/config.js');
+    const seen: string[] = [];
+    const result = await share.runShareList({
+      phoenixSession: { access_token: 'pid_alice', userId: 'alice-user-1', email: 'a@b.com' },
+      fetchListing: async (url: string) => {
+        seen.push(url);
+        return {
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            user: 'alice-user-1',
+            count: 1,
+            objects: [{
+              slug: 'plan',
+              url: `https://${DEFAULT_SHARE_DOMAIN}/alice-user-1/plan`,
+              size: 5,
+              contentType: 'text/html',
+              publishedAt: '2026-08-08T00:00:00.000Z',
+              expiresAt: null,
+            }],
+          }),
+        };
+      },
+    });
+    expect(seen).toEqual([`https://${DEFAULT_SHARE_DOMAIN}/alice-user-1?format=json`]);
+    expect(result.user).toBe('alice-user-1');
+    expect(result.count).toBe(1);
+    expect(result.objects[0].slug).toBe('plan');
+  });
+
+  it('managed 404 is an empty namespace, not "not set up"', async () => {
+    const { share } = await freshShareModules();
+    const result = await share.runShareList({
+      phoenixSession: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' },
+      fetchListing: async () => ({ status: 404, contentType: 'text/plain', body: 'not found' }),
+    });
+    expect(result).toEqual({ user: 'alice', count: 0, objects: [] });
   });
 
   it('filters by --agent (case-insensitive, exact) and reflects it in count', async () => {
@@ -986,6 +1067,26 @@ describe('runShareRevisions', () => {
   it('refuses when share was never configured', async () => {
     const { share } = await freshShareModules();
     await expect(share.runShareRevisions('q3-report', { githubUser: 'octocat' })).rejects.toThrow(/Not set up yet/);
+    await expect(share.runShareRevisions('q3-report', { githubUser: 'octocat' })).rejects.toThrow(/agents auth login/);
+  });
+
+  it('signed-in resolves a bare slug against the Phoenix namespace (RUSH-3135)', async () => {
+    const { share } = await freshShareModules();
+    const { DEFAULT_SHARE_DOMAIN } = await import('../lib/share/config.js');
+    const seen: string[] = [];
+    const result = await share.runShareRevisions('q3-report', {
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' },
+      fetchListing: async (url: string) => {
+        seen.push(url);
+        return {
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ key: 'alice/q3-report', count: 0, revisions: [] }),
+        };
+      },
+    });
+    expect(seen).toEqual([`https://${DEFAULT_SHARE_DOMAIN}/alice/q3-report?revisions=json`]);
+    expect(result.key).toBe('alice/q3-report');
   });
 });
 

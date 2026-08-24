@@ -48,8 +48,14 @@ import {
 import { deleteShare, resolveDeleteTarget, type DeleteShareResult } from '../lib/share/delete.js';
 import { renderWorkerScript } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
+import {
+  resolveShareBackend,
+  type ResolveShareBackendOpts,
+  type ShareBackend,
+} from '../lib/share/backend.js';
 import { resolveGitHubUsername } from '../lib/git.js';
 import { setHelpSections } from '../lib/help.js';
+import type { PhoenixSession } from '../lib/identity/client.js';
 
 export function formatSharePublishResult(result: PublishResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
@@ -183,15 +189,28 @@ export function parseShareListing(user: string, body: string): ShareListResult {
   return { user, count: objects.length, objects };
 }
 
+/** Namespace for list/revisions: managed uses the verified Phoenix userId;
+ * BYO still resolves GitHub username (gh / git config / --for-user). */
+async function namespaceForBackend(backend: ShareBackend, githubUser?: string): Promise<string> {
+  if (backend.kind === 'managed') return backend.namespace;
+  return resolveShareUsername({ githubUser: githubUser || backend.namespace || undefined });
+}
+
 /** Fetch and parse the machine-readable listing of the caller's namespace from the
  * Worker's `?format=json` route. Fails loud when share was never configured, when
  * the deployed template is known-outdated (RUSH-2449 templateHash), or when the
  * live response proves the route is absent (404 or a non-JSON 200 = the old HTML
- * gallery) — never a silent empty/wrong result. */
+ * gallery) — never a silent empty/wrong result. Signed-in users hit the managed
+ * endpoint; BYO still uses `readShareConfig()`. */
 export async function runShareList(
   opts: {
     githubUser?: string;
     config?: ShareConfig;
+    writeToken?: string;
+    byo?: boolean;
+    /** DI seam — override `readSession()`. Named `phoenixSession` because
+     * `session` is already the listing filter (session id). */
+    phoenixSession?: PhoenixSession | null;
     fetchListing?: ListingFetchFn;
     /** Only shares published by this agent/harness (case-insensitive, exact). */
     agent?: string;
@@ -201,22 +220,29 @@ export async function runShareList(
     label?: string;
   } = {},
 ): Promise<ShareListResult> {
-  const cfg = opts.config ?? readShareConfig();
-  if (!cfg) {
-    throw new Error(
-      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
-    );
-  }
-  // A known-stale template can't have the listing route — say so before any network
-  // call. 'unknown' (provisioned before templateHash tracking) is attempted, then
-  // caught by the response checks below if the route turns out to be absent.
-  const templateStatus = shareTemplateStatus(cfg);
-  if (templateStatus === 'outdated') {
-    throw new Error(OUTDATED_TEMPLATE_HINT);
+  const backend = resolveShareBackend({
+    githubUser: opts.githubUser,
+    config: opts.config,
+    writeToken: opts.writeToken,
+    byo: opts.byo,
+    session: opts.phoenixSession,
+    requireToken: false,
+  } satisfies ResolveShareBackendOpts);
+  // Managed: the platform Worker is current; skip the BYO template-hash gate.
+  // A known-stale BYO template can't have the listing route — say so before any
+  // network call. 'unknown' (provisioned before templateHash tracking) is
+  // attempted, then caught by the response checks below if the route is absent.
+  let templateStatus: 'current' | 'outdated' | 'unknown' = 'current';
+  if (backend.kind === 'byo') {
+    const cfg = opts.config ?? readShareConfig();
+    templateStatus = cfg ? shareTemplateStatus(cfg) : 'unknown';
+    if (templateStatus === 'outdated') {
+      throw new Error(OUTDATED_TEMPLATE_HINT);
+    }
   }
 
-  const user = await resolveShareUsername({ githubUser: opts.githubUser });
-  const listUrl = `${cfg.baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(user)}?format=json`;
+  const user = await namespaceForBackend(backend, opts.githubUser);
+  const listUrl = `${backend.baseUrl.replace(/\/+$/, '')}/${encodeURIComponent(user)}?format=json`;
   const fetchListing = opts.fetchListing ?? defaultListingFetch;
   const res = await fetchListing(listUrl);
 
@@ -227,7 +253,7 @@ export async function runShareList(
     // endpoint predates the listing route entirely. The recorded templateHash
     // disambiguates: a 'current' template HAS the route, so its 404 means an empty
     // namespace ("nothing published"); otherwise the route may be absent, so point
-    // at `agents artifacts share update`.
+    // at `agents artifacts share update`. Managed is always 'current'.
     if (templateStatus === 'current') {
       return { user, count: 0, objects: [] };
     }
@@ -235,12 +261,16 @@ export async function runShareList(
   }
   if (res.status !== 200) {
     throw new Error(
-      `Listing failed (${res.status}) for ${listUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' completed.`,
+      `Listing failed (${res.status}) for ${listUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' / 'agents auth login' completed.`,
     );
   }
   if (!/application\/json/i.test(res.contentType)) {
     // A 200 that isn't JSON means the old Worker ignored ?format=json and served
-    // the HTML gallery — the deployed template is outdated.
+    // the HTML gallery — the deployed template is outdated. Managed never hits
+    // this (platform Worker is current); fail loud if it somehow does.
+    if (backend.kind === 'managed') {
+      throw new Error(`Managed listing at ${listUrl} did not return JSON (${res.contentType || 'no content-type'}).`);
+    }
     throw new Error(OUTDATED_TEMPLATE_HINT);
   }
   const parsed = parseShareListing(user, res.body);
@@ -371,30 +401,48 @@ export function parseShareRevisions(key: string, body: string): ShareRevisionsRe
  * {@link resolveDeleteTarget} rather than re-deriving the key. */
 export async function runShareRevisions(
   target: string,
-  opts: { githubUser?: string; config?: ShareConfig; fetchListing?: ListingFetchFn } = {},
+  opts: {
+    githubUser?: string;
+    config?: ShareConfig;
+    writeToken?: string;
+    byo?: boolean;
+    session?: PhoenixSession | null;
+    fetchListing?: ListingFetchFn;
+  } = {},
 ): Promise<ShareRevisionsResult> {
-  const cfg = opts.config ?? readShareConfig();
-  if (!cfg) {
-    throw new Error(
-      "Not set up yet. Run 'agents artifacts setup' (provision your own endpoint) or 'agents artifacts share join' (use an existing one).",
-    );
-  }
-  const templateStatus = shareTemplateStatus(cfg);
-  if (templateStatus === 'outdated') {
-    throw new Error(OUTDATED_TEMPLATE_HINT);
+  const backend = resolveShareBackend({
+    githubUser: opts.githubUser,
+    config: opts.config,
+    writeToken: opts.writeToken,
+    byo: opts.byo,
+    session: opts.session,
+    requireToken: false,
+  } satisfies ResolveShareBackendOpts);
+  if (backend.kind === 'byo') {
+    const cfg = opts.config ?? readShareConfig();
+    if (cfg && shareTemplateStatus(cfg) === 'outdated') {
+      throw new Error(OUTDATED_TEMPLATE_HINT);
+    }
   }
 
-  const { key } = await resolveDeleteTarget(target, { githubUser: opts.githubUser });
-  const revUrl = `${cfg.baseUrl.replace(/\/+$/, '')}/${key}?revisions=json`;
+  const githubUser =
+    backend.kind === 'managed'
+      ? backend.namespace
+      : opts.githubUser || backend.namespace || undefined;
+  const { key } = await resolveDeleteTarget(target, { githubUser });
+  const revUrl = `${backend.baseUrl.replace(/\/+$/, '')}/${key}?revisions=json`;
   const fetchListing = opts.fetchListing ?? defaultListingFetch;
   const res = await fetchListing(revUrl);
 
   if (res.status !== 200) {
     throw new Error(
-      `Revisions lookup failed (${res.status}) for ${revUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' completed.`,
+      `Revisions lookup failed (${res.status}) for ${revUrl}. Check the endpoint is reachable, or that 'agents artifacts setup' / 'agents auth login' completed.`,
     );
   }
   if (!/application\/json/i.test(res.contentType)) {
+    if (backend.kind === 'managed') {
+      throw new Error(`Managed revisions at ${revUrl} did not return JSON (${res.contentType || 'no content-type'}).`);
+    }
     throw new Error(OUTDATED_TEMPLATE_HINT);
   }
   return parseShareRevisions(key, res.body);
@@ -745,11 +793,26 @@ ${SHARE_DELETE_NOTES}
     .command('status')
     .description('Show the configured share endpoint and namespace.')
     .action(async () => {
+      let backend: ShareBackend;
+      try {
+        backend = resolveShareBackend({ requireToken: false });
+      } catch (e) {
+        console.log(chalk.dim((e as Error).message));
+        return;
+      }
+      if (backend.kind === 'managed') {
+        console.log(`${chalk.bold('backend')}   ${chalk.green('managed')}`);
+        console.log(`${chalk.bold('endpoint')}  ${chalk.green(backend.baseUrl)}`);
+        console.log(`${chalk.bold('namespace')} ${chalk.cyan(`${backend.baseUrl}/${backend.namespace}`)}`);
+        console.log(chalk.dim("Phoenix session — no Cloudflare setup. Force BYO with AGENTS_SHARE_BACKEND=byo."));
+        return;
+      }
       const cfg = readShareConfig();
       if (!cfg) {
         console.log(chalk.dim("Not configured. Run 'agents artifacts setup' or 'agents artifacts share join'."));
         return;
       }
+      console.log(`${chalk.bold('backend')}   ${chalk.green('byo')}`);
       console.log(`${chalk.bold('endpoint')}  ${chalk.green(cfg.baseUrl)}`);
       console.log(chalk.dim(`worker ${cfg.workerName} · bucket ${cfg.bucketName} · account ${cfg.accountId || 'missing'}`));
       if (!cfg.accountId) {
@@ -818,9 +881,10 @@ ${SHARE_DELETE_NOTES}
     `,
     notes: `
   Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
-  covers are omitted (it mirrors the public gallery). It reads the endpoint's JSON
-  listing route, which ships with the current Worker template. If your deployed
-  Worker predates this feature the command says so and points you at 'agents
+  covers are omitted (it mirrors the public gallery). Signed-in users list the
+  managed endpoint (share.agents-cli.sh/<userId>); otherwise BYO. It reads the
+  endpoint's JSON listing route, which ships with the current Worker template. If
+  a BYO Worker predates this feature the command says so and points you at 'agents
   artifacts share update' (RUSH-2449) rather than returning a wrong or empty result
   — see 'agents artifacts share status' for whether an update is due.
 
@@ -868,7 +932,8 @@ ${SHARE_DELETE_NOTES}
   (pass --no-revision at publish time to skip it) — this is history, never
   shown on the public gallery or in 'agents artifacts share list' beyond its
   count. Each revision's own URL is still directly reachable and honors its own
-  recorded expiry.
+  recorded expiry. Signed-in users resolve a bare slug against the managed
+  Phoenix namespace; otherwise BYO (GitHub username / --for-user).
     `,
   });
 
@@ -876,6 +941,22 @@ ${SHARE_DELETE_NOTES}
     .command('analytics')
     .description('Show the Cloudflare Web Analytics status for this share endpoint.')
     .action(async () => {
+      let backend: ShareBackend | undefined;
+      try {
+        backend = resolveShareBackend({ requireToken: false });
+      } catch (e) {
+        console.log(chalk.dim((e as Error).message));
+        return;
+      }
+      if (backend.kind === 'managed') {
+        console.log(chalk.yellow('Cloudflare Web Analytics is a BYO feature.'));
+        console.log(
+          chalk.dim(
+            `You're on the managed endpoint (${backend.baseUrl}). Per-page analytics for the managed endpoint is not in this release — provision your own Cloudflare with 'agents artifacts setup --analytics-token <token>', or force BYO with AGENTS_SHARE_BACKEND=byo.`,
+          ),
+        );
+        return;
+      }
       const cfg = readShareConfig();
       if (!cfg) {
         console.log(chalk.dim("Not configured. Run 'agents artifacts setup' or 'agents artifacts share join'."));

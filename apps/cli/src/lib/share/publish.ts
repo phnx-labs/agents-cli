@@ -88,7 +88,8 @@ export interface PublishOptions {
   /**
    * Structured metadata (`--meta key=value`, repeatable). Keys are validated by
    * {@link parseMetaEntries} — lowercase `[a-z0-9-]`, and may not collide with
-   * {@link RESERVED_META_KEYS}, which the CLI sets automatically.
+   * {@link RESERVED_META_KEYS} (Worker-stamped owner/visibility/expires-at,
+   * plus provenance the CLI sets automatically).
    */
   meta?: Record<string, string>;
   /**
@@ -138,11 +139,23 @@ export interface ShareProvenance {
 }
 
 /**
- * Reserved `customMetadata` keys the CLI sets automatically from the exec env,
- * git, and the local clock (plus `label`/`label-source`) — a `--meta key=value`
- * may not target any of these (see {@link parseMetaEntries}).
+ * Reserved `customMetadata` keys a `--meta key=value` may not target (see
+ * {@link parseMetaEntries}). Matches the Worker's `RESERVED_METADATA_KEYS`:
+ * provenance the CLI sets automatically, plus `expires-at` / `visibility` /
+ * `owner` which the Worker stamps itself.
  */
-export const RESERVED_META_KEYS = ['agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'] as const;
+export const RESERVED_META_KEYS = [
+  'expires-at',
+  'visibility',
+  'owner',
+  'agent',
+  'session',
+  'host',
+  'repo',
+  'date',
+  'label',
+  'label-source',
+] as const;
 
 const META_KEY_RE = /^[a-z0-9-]{1,64}$/;
 
@@ -170,8 +183,9 @@ export function resolveShareProvenance(
 /**
  * Parse repeated `--meta key=value` CLI args into a validated metadata record.
  * Keys are lowercase `[a-z0-9-]`, up to 64 characters, and may not collide with
- * {@link RESERVED_META_KEYS} (the provenance the CLI sets automatically, plus
- * label/label-source) — throws naming the offending pair on any violation.
+ * {@link RESERVED_META_KEYS} (Worker-stamped owner/visibility/expires-at, plus
+ * the provenance the CLI sets automatically, plus label/label-source) — throws
+ * naming the offending pair on any violation.
  */
 export function parseMetaEntries(pairs: string[]): Record<string, string> {
   const meta: Record<string, string> = {};
@@ -189,7 +203,7 @@ export function parseMetaEntries(pairs: string[]): Record<string, string> {
     }
     if ((RESERVED_META_KEYS as readonly string[]).includes(key)) {
       throw new Error(
-        `--meta ${key}=… is reserved (set automatically from your session/git) — pass a different key.`,
+        `--meta ${key}=… is reserved (Worker-stamped, or set automatically from your session/git) — pass a different key.`,
       );
     }
     meta[key] = value;

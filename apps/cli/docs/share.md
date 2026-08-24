@@ -36,11 +36,15 @@ agents artifacts unshare fleet                                # take the link (+
 ```
 
 **Managed (default when signed in).** The CLI reads `readSession()` from
-`phoenix-session.json` and PUTs to `https://share.agents-cli.sh/<userId>/<slug>` with
-`Authorization: Bearer <access_token>`. The Worker verifies the bearer against Phoenix ID
+`phoenix-session.json` and talks to `https://share.agents-cli.sh/<userId>/…` with
+`Authorization: Bearer <access_token>` — publish, list, revisions, status, and
+unshare/delete all resolve through the same `resolveShareBackend` seam, so a
+signed-in user with no Cloudflare config can manage what they just published.
+The Worker verifies the bearer against Phoenix ID
 (`GET ${PHOENIX_ID_BASE}/api/v1/auth/me`) and namespaces the R2 key by that `userId`, so
 one user cannot write another's prefix. Force the BYO path while signed in with
-`AGENTS_SHARE_BACKEND=byo`.
+`AGENTS_SHARE_BACKEND=byo`. Cloudflare Web Analytics (`share analytics`) is BYO-only
+in this release — managed users get a message naming that, not a "not set up" error.
 
 **BYO Cloudflare.** `setup` reads a Cloudflare API token from your `cloudflare` secrets
 bundle (or pass `--token`), creates an R2 bucket, installs the share lifecycle rule,
@@ -141,11 +145,13 @@ agent makes plan.html
 - **Pre-publish scan.** Before upload, the CLI refuses files that contain email addresses
   or credential-shaped strings (`ghp_…`, `sk-…`, `AKIA…`, `Bearer …`, …) — the exact
   failure mode behind RUSH-2428. Pass `--force` to publish anyway.
-- **Usage analytics.** `setup --analytics-token <cf-token>` enables Cloudflare Web Analytics:
-  a cookieless, privacy-first beacon is injected into every published HTML page, so you get
-  per-path pageviews without GA4-style tracking. Opt out per publish with `--no-analytics`.
-  Use `agents artifacts share analytics` for the dashboard link; per-path breakdowns are available in
-  the Cloudflare dashboard under `/<github-username>/`.
+- **Usage analytics.** `setup --analytics-token <cf-token>` enables Cloudflare Web Analytics
+  on a **BYO** endpoint: a cookieless, privacy-first beacon is injected into every published
+  HTML page, so you get per-path pageviews without GA4-style tracking. Opt out per publish
+  with `--no-analytics`. Use `agents artifacts share analytics` for the dashboard link;
+  per-path breakdowns are available in the Cloudflare dashboard under `/<github-username>/`.
+  The managed endpoint does not expose this dashboard in P1 — `share analytics` says so
+  instead of claiming the endpoint isn't set up.
 - **Preview cards (OG images).** Publishing an HTML page screenshots its own hero at
   1200×630 and attaches it as `og:image` + `twitter:card`, so the link unfurls into a
   rich card in Slack, iMessage, Twitter/X, and Discord. Capture is client-side (headless
@@ -193,9 +199,11 @@ you've shared, not just a bag of slugs:
 - **`--meta key=value` (repeatable)** attaches structured metadata — keys are
   lowercase `[a-z0-9-]`, up to 64 characters. Recommended (not enforced) keys:
   `kind` (`plan`/`report`/`visual`/`screenshot`/`recording`/`deck`/`doc`),
-  `project`, `ticket`, `status` (`draft`/`final`). `agent`, `session`, `host`,
-  `repo`, `date`, `label`, and `label-source` are **reserved** — the CLI sets
-  them automatically and refuses a `--meta` that collides with one, and the
+  `project`, `ticket`, `status` (`draft`/`final`). `expires-at`, `visibility`,
+  `owner`, `agent`, `session`, `host`, `repo`, `date`, `label`, and
+  `label-source` are **reserved** — the CLI refuses a `--meta` that collides
+  with one (Worker-stamped `owner`/`visibility`/`expires-at`, plus provenance
+  the CLI sets automatically), and the
   Worker independently strips the same reserved keys from stored metadata even
   if a raw request somehow smuggled one through. The combined metadata payload
   (provenance + label + `--meta`) is capped around 2KB, the same ceiling S3's
@@ -304,11 +312,14 @@ bundle to a peer with `agents secrets export share --device <box>`; local agent,
 teammate, and supported cloud launches inject the token automatically when the
 synced config exists and the token is already available.
 
-**Publish vs provision.** `agents artifacts share <file>` needs `share.baseUrl` plus
+**Publish vs provision.** Signed-in users need neither `share.baseUrl` nor
+`WRITE_TOKEN` — the Phoenix session is enough. BYO still needs `share.baseUrl` plus
 `WRITE_TOKEN`. `accountId` / worker / bucket are for `setup`/`update` only. An empty
 `accountId: ""` (or a config from before that field existed) is still a configured
-endpoint — `status` prints it, and publish uses it. `status` says "Not configured"
-only when `baseUrl` is absent. If a partial `writeMeta` used to delete the whole
+BYO endpoint — `status` prints it, and publish uses it. `status` names both doors
+(`agents auth login` or `agents artifacts setup` / `share join`) when neither
+principal can authenticate; it no longer says "Not configured" for a signed-in
+managed user. If a partial `writeMeta` used to delete the whole
 `share:` block, that is a bug (RUSH-2837); the writer now leaves `share:` in place
 when a write simply omitted the key.
 
@@ -318,13 +329,13 @@ when a write simply omitted the key.
 |---|---|
 | `agents artifacts share <file> [--slug s] [--github-user u] [--expire spec] [--visibility public\|unlisted] [--force] [--no-cover] [--no-analytics] [--label text] [--meta k=v ...] [--no-revision] [--json]` | Publish `<file>` (default expiry **30d**). Signed-in → managed `share.agents-cli.sh/<userId>/…` with the Phoenix bearer; otherwise BYO under your GitHub-username namespace. Print the link, or emit `{ url, coverUrl, expiresAt, visibility, unlisted?, label, labelSource }` with `--json`. `--visibility unlisted` (hidden aliases `--unlisted`/`--private`) hides from the gallery and noindexes GET; `--force` bypasses the email/credential scan. HTML pages get an auto OG cover unless `--no-cover` and a CF Web Analytics beacon unless `--no-analytics`. `--label`/`--title` sets a human title (else derived); `--meta` attaches structured metadata; republishing an existing slug keeps the prior version unless `--no-revision` (see [Provenance, labels, and metadata](#provenance-labels-and-metadata) and [Revisions](#revisions)). |
 | `agents sessions share <session> [--public] [--slug s] [--label text] [--expire spec] [--reasoning omit\|fold\|include] [--force] [--no-cover]` | Render one session as a redacted, self-contained page and publish it under `session-<shortId>`; print the link, or the full publish result with `--json`. **Unlisted unless `--public`**, and emails are masked before the scan runs (see [Sharing a session](#sharing-a-session)). |
-| `agents artifacts share list [--for-user u] [--agent name] [--session id] [--label-contains substr] [--list-json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--list-json` (see [Listing your shares](#listing-your-shares) below). `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
-| `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). |
-| `agents artifacts share delete <targets...>` [--for-user u] [--delete-json] / `agents artifacts unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). |
+| `agents artifacts share list [--for-user u] [--agent name] [--session id] [--label-contains substr] [--list-json]` | List the ACTIVE pages in your namespace, newest first — human table, or the raw listing with `--list-json` (see [Listing your shares](#listing-your-shares) below). Signed-in → managed `share.agents-cli.sh/<userId>`; otherwise BYO. `--agent`/`--session`/`--label-contains` narrow the fetched list client-side. |
+| `agents artifacts share revisions <target> [--for-user u] [--revisions-json]` | Show the retained prior versions of one published slug, newest first (see [Revisions](#revisions)). Same backend seam as list: signed-in → managed namespace; a bare slug resolves against your Phoenix userId. |
+| `agents artifacts share delete <targets...>` [--for-user u] [--delete-json] / `agents artifacts unshare <targets...>` | Take a published page down (see [Deleting a share](#deleting-a-share) below). Signed-in → authed DELETE to the managed endpoint with the Phoenix bearer. |
 | `agents artifacts setup [--token t] [--account id] [--bundle b] [--worker w] [--bucket b] [--domain h] [--analytics-token token]` | Provision an R2 bucket + Worker on your Cloudflare, map `share.agents-cli.sh` when visible (or `--domain h`), optionally configure a CF Web Analytics token, and save the config. It runs the interactive wizard (provision, join, or update an existing endpoint) only when you type **no** endpoint flag on a TTY; type any of `--bundle`/`--worker`/`--bucket`/`--account`/`--token`/`--domain`/`--analytics-token`, or run non-interactively, and it provisions directly with what you named — matching what the retired `agents share setup` did. |
 | `agents artifacts share join [baseUrl] [--token t]` | Use an existing endpoint, no provisioning. With no URL, consumes synced `share:` config plus `SHARE_WRITE_TOKEN` / the local `share` bundle. |
-| `agents artifacts share status` | Show the configured endpoint, namespace, analytics state, and whether the deployed Worker matches the current template. |
-| `agents artifacts share analytics` | Show the Web Analytics status and dashboard link. |
+| `agents artifacts share status` | Show the active backend (managed vs BYO), endpoint, and namespace. BYO also reports analytics state and whether the deployed Worker matches the current template. Signed-in with no Cloudflare config reports the managed endpoint — it does not say "Not configured." |
+| `agents artifacts share analytics` | Show the Cloudflare Web Analytics status and dashboard link. **BYO only in this release** (P1 exclusion): a managed-only user is told analytics is a BYO feature, not sent to `agents artifacts setup`. |
 | `agents artifacts share update [--bundle b] [--account id] [--token t] [--force] [--update-json]` | Re-deploy the Worker script to your existing endpoint (same account/worker/bucket, same write token). No-op when the deployed template already matches unless `--force`. |
 
 > **Naming note.** `list`/`revisions`/`delete`/`unshare`/`update` use `--for-user`/`--list-json`/
@@ -339,8 +350,9 @@ when a write simply omitted the key.
 `agents artifacts share list` answers "what have I published?" from the CLI. Before it existed,
 the only way to enumerate your public pages after an accidental publish was to fetch the
 gallery HTML and grep it (the RUSH-2428 incident). It reads the Worker's machine-readable
-listing route (`GET /<user>?format=json`) for your namespace and prints a table, newest
-first:
+listing route (`GET /<user>?format=json`) for your namespace — managed
+`share.agents-cli.sh/<userId>` when signed in, otherwise your BYO GitHub-username
+namespace — and prints a table, newest first:
 
 ```bash
 agents artifacts share list                          # human table for your own namespace
