@@ -191,6 +191,18 @@ STUB
     fi
 fi
 
+# Static guard against re-introducing the double-install: the ssh-routing
+# heredoc must NOT install deps. The --publish-phase re-entry it invokes now
+# installs at the shared block, so a `bun install` back inside the heredoc would
+# install twice on the remote path. Extract the heredoc payload (between the
+# `<<REMOTE_EOF` opener and its closing sentinel) and assert it is install-free.
+HEREDOC_BODY="$(awk '/<<REMOTE_EOF/{f=1;next} /^REMOTE_EOF$/{f=0} f' "$RELEASE_SH")"
+if printf '%s' "$HEREDOC_BODY" | grep -q 'bun install'; then
+    fail "RUSH-3114: routing heredoc still runs 'bun install' (double-install on the remote path)"
+else
+    pass "routing heredoc no longer installs deps (single install on the remote path)"
+fi
+
 echo
 if [ "$FAIL" -eq 0 ]; then
     echo "All tests passed."
