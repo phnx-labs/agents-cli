@@ -221,8 +221,8 @@ fi
 git -C "\$CACHE" checkout --quiet --detach "\$SHA"
 
 cd "\$CACHE/apps/ext"
-bun install --silent
-(cd ui && bun install --silent)
+# Deps are installed by the --publish-phase re-entry below, at the single
+# shared point every local publish path passes through — not here.
 bash scripts/release.sh "\$VERSION" $flags --publish-phase
 REMOTE_EOF
 )"
@@ -383,6 +383,19 @@ if [ $PUBLISH_VSCE -eq 1 ]; then
     fi
     echo "VSCE PAT verified."
 fi
+
+# --- Dependencies --------------------------------------------------------
+#
+# The single point every local publish path reaches before the gate — whether
+# this box holds the bundle, --here pinned it here, or the routed --publish-phase
+# re-entry runs on the publish box. A clean checkout has no node_modules, so both
+# the test run and the build (each needs the workspace deps) would die here. The
+# routing heredoc no longer installs; the install lives here so it happens exactly
+# once per invocation and is never duplicated across the local and remote paths.
+# Placed after the `agents secrets exec` re-exec above so it runs once, not twice.
+echo "${DRY}Installing dependencies..."
+bun install --silent
+(cd ui && bun install --silent)
 
 # --- Tests + Build -------------------------------------------------------
 
