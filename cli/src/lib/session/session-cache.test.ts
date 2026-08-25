@@ -6,7 +6,7 @@
  * without SSH / process-table cost; the critical path under test is the
  * freshness/staleness + immutable-memo contract.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -21,15 +21,18 @@ import {
   isActiveSnapshotFresh,
   loadFleetActiveSessions,
   loadLocalActiveSessions,
+  noteActiveSessionsJournalReader,
   pickImmutableFields,
   publishLocalActiveSessions,
   readActiveSessionsCache,
   readImmutableMemo,
+  setActiveSessionsReaderPresencePathForTest,
   setActiveSessionsSnapshotPathForTest,
   setImmutableMemoPathForTest,
   stripLiveStatusKeys,
   transcriptMtimeMs,
   updateImmutableMemos,
+  watchActiveSessionsReaderPresence,
   writeActiveSessionsCache,
   writeImmutableMemo,
 } from './session-cache.js';
@@ -371,5 +374,94 @@ describe('immutable memo — mtime-keyed, never carries live status', () => {
     expect(transcriptMtimeMs(session({ sessionId: 'x', lastActivityMs: 9, startedAtMs: 1 }))).toBe(9);
     expect(transcriptMtimeMs(session({ sessionId: 'x', startedAtMs: 3 }))).toBe(3);
     expect(transcriptMtimeMs(session({ sessionId: 'x' }))).toBeNull();
+  });
+});
+
+describe('watchActiveSessionsReaderPresence — out-of-band trigger on reader connect (RUSH-2484)', () => {
+  // Real defect this closes: noteActiveSessionsJournalReader() (called by
+  // watchLocalSessions on connect) ONLY writes a timestamp file — it has no
+  // path back into the daemon process that owns the 15s warm-tick
+  // setInterval. A watcher connecting to a cold/idle daemon used to sit on
+  // "awaiting publisher" for up to a full ACTIVE_SESSIONS_WARM_TICK_MS (15s).
+  // These tests drive real setInterval-based scheduling via fake timers and
+  // assert the callback fires from the poll noticing the presence-file edge —
+  // never from a second, manually-invoked call to the tick function.
+  const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
+  let dir: string;
+  let prevPresence: string | null;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reader-presence-'));
+    prevPresence = setActiveSessionsReaderPresencePathForTest(path.join(dir, 'reader.presence'));
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    setActiveSessionsReaderPresencePathForTest(prevPresence);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('never fires while idle, then fires on the very next poll after a reader connects', () => {
+    let connects = 0;
+    const stop = watchActiveSessionsReaderPresence(() => { connects++; }, { pollMs: 100 });
+
+    // Cold daemon, no reader: several polls pass with zero connects — proves
+    // the poll itself is not what triggers a gather.
+    vi.advanceTimersByTime(2_000);
+    expect(connects).toBe(0);
+
+    // A watcher connects. This mirrors watch.ts:165 exactly: it only writes
+    // a presence timestamp, nothing more.
+    noteActiveSessionsJournalReader();
+
+    // The idle->recent edge is caught on the very next 100ms poll — far
+    // short of the 15s scheduled warm-tick a watcher used to wait on.
+    vi.advanceTimersByTime(100);
+    expect(connects).toBe(1);
+    expect(100).toBeLessThan(ACTIVE_SESSIONS_WARM_TICK_MS);
+
+    stop();
+  });
+
+  it('does not re-fire on repeated heartbeats from an already-connected reader', () => {
+    let connects = 0;
+    const stop = watchActiveSessionsReaderPresence(() => { connects++; }, { pollMs: 100 });
+
+    noteActiveSessionsJournalReader();
+    vi.advanceTimersByTime(100);
+    expect(connects).toBe(1);
+
+    // Simulate the watcher's periodic heartbeat re-noting presence (watch.ts's
+    // heartbeatTimer) — must not trigger a second out-of-band gather per beat.
+    for (let i = 0; i < 5; i++) {
+      noteActiveSessionsJournalReader();
+      vi.advanceTimersByTime(100);
+    }
+    expect(connects).toBe(1);
+
+    stop();
+  });
+
+  it('re-fires after the reader goes idle and a fresh watcher reconnects', () => {
+    let connects = 0;
+    const stop = watchActiveSessionsReaderPresence(() => { connects++; }, { pollMs: 100, idleWindowMs: 500 });
+
+    noteActiveSessionsJournalReader();
+    vi.advanceTimersByTime(100);
+    expect(connects).toBe(1);
+
+    // Reader disconnects — no further presence writes — and ages past the
+    // idle window with no reconnect yet.
+    vi.advanceTimersByTime(600);
+    expect(connects).toBe(1);
+
+    // A new watcher connects to what is now, from the daemon's view, an idle
+    // box — exactly the reconnect-after-idle case the fix targets.
+    noteActiveSessionsJournalReader();
+    vi.advanceTimersByTime(100);
+    expect(connects).toBe(2);
+
+    stop();
   });
 });

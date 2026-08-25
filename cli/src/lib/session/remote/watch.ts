@@ -159,6 +159,10 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
   try { offset = fs.statSync(journal).size; } catch { /* first publication */ }
   const initial = readCache('local');
   options.emit(state.reset(options.scope, initial?.sessions ?? []));
+  // Known gap (out of scope for RUSH-2484): a present cache alone marks
+  // 'available' with no staleness/age check, so a reconnect can briefly render
+  // a stale snapshot as live before the out-of-band gather this file triggers
+  // (see watchActiveSessionsReaderPresence in session-cache.ts) replaces it.
   options.emit(state.scope(options.scope, initial ? 'available' : 'unavailable', initial ? undefined : 'awaiting publisher'));
   if (options.signal.aborted) return;
   // Signal the daemon that a consumer is live so it does not skip the gather.

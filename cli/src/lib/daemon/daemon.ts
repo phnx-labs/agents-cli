@@ -34,6 +34,7 @@ import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { startAccountStateService } from '../account-state-service.js';
 import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runUsageRefreshTick } from '../daemon-ticks.js';
+import { watchActiveSessionsReaderPresence } from '../session/session-cache.js';
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
 import type { ServiceHealth } from './service.js';
@@ -1113,7 +1114,10 @@ export async function runDaemon(): Promise<void> {
 
   // Active-sessions publish-own: continuous journal writer for `sessions watch`.
   // Fire once immediately so a cold daemon does not leave watchers on
-  // "awaiting publisher" for a full tick (RUSH-2484).
+  // "awaiting publisher" for a full tick (RUSH-2484). This boot-time fire alone
+  // no-ops on a genuinely cold boot (no reader has connected yet) — the
+  // presence watch below is what actually closes the gap for a watcher that
+  // connects later, whether at cold boot or after the reader-idle window.
   let activeSessionsWarmInFlight = false;
   const runActiveSessionsWarm = async (): Promise<void> => {
     if (activeSessionsWarmInFlight) return;
@@ -1128,6 +1132,13 @@ export async function runDaemon(): Promise<void> {
   };
   void runActiveSessionsWarm();
   const activeSessionsWarmInterval = setInterval(() => { void runActiveSessionsWarm(); }, ACTIVE_SESSIONS_WARM_TICK_MS);
+  // Out-of-band trigger (RUSH-2484): a reader connecting only writes a presence
+  // timestamp (noteActiveSessionsJournalReader in watch.ts) with no path back to
+  // this timer, so on its own the interval above leaves a fresh connection
+  // waiting up to ACTIVE_SESSIONS_WARM_TICK_MS for its first rows. This watches
+  // for the idle->recent edge and gathers immediately instead of waiting for the
+  // next scheduled tick — a genuinely idle box with no reader still never gathers.
+  const stopActiveSessionsReaderWatch = watchActiveSessionsReaderPresence(() => { void runActiveSessionsWarm(); });
 
   // Session-index warm (RUSH-2682): keep THIS host's transcript index current so
   // a locally-started session is discoverable within seconds. Migrated onto
@@ -1555,6 +1566,7 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Daemon shutting down');
     accountStateService?.stop();
     clearInterval(activeSessionsWarmInterval);
+    stopActiveSessionsReaderWatch();
     await supervisor.stopAll();
     activeServiceSupervisor = null;
     if (watchdogInterval) clearInterval(watchdogInterval);

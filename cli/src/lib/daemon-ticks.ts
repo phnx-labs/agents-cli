@@ -176,10 +176,12 @@ export async function runUsageRefreshTick(): Promise<void> {
  *
  * Gated on reader presence (RUSH-3193): when no `sessions watch` / `feed watch`
  * consumer has checked in within {@link ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS} the
- * expensive `ps`+`lsof` gather is skipped entirely. The moment a watcher
- * connects it calls {@link noteActiveSessionsJournalReader}; the following tick
- * immediately gathers, so consumers always receive fresh rows within one normal
- * tick interval.
+ * expensive `ps`+`lsof` gather is skipped entirely on this scheduled tick. A
+ * watcher connecting to a cold/idle daemon is NOT served by this tick alone —
+ * {@link noteActiveSessionsJournalReader} only writes a presence timestamp, with
+ * no path back to this timer — so the daemon separately runs
+ * {@link watchActiveSessionsReaderPresence} to detect that idle→recent edge and
+ * fire an out-of-band call into this same function immediately (RUSH-2484).
  */
 export async function runActiveSessionsWarmTick(
   opts: { gather?: () => Promise<import('./session/active.js').ActiveSession[]>; nowMs?: number } = {},

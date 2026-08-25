@@ -276,6 +276,41 @@ export function isActiveSessionsJournalReaderRecent(
   }
 }
 
+/** Default poll cadence for {@link watchActiveSessionsReaderPresence}. */
+export const ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS = 1_000;
+
+/**
+ * Watch for a reader going from absent/idle to present and fire `onConnect`
+ * out of band, instead of waiting for the next scheduled warm tick (RUSH-2484).
+ *
+ * {@link noteActiveSessionsJournalReader} only writes a timestamp — it has no
+ * path back to the daemon process that owns the warm tick's `setInterval`. A
+ * watcher connecting to a cold or long-idle daemon therefore used to wait up
+ * to one full {@link ACTIVE_SESSIONS_WARM_TICK_MS} tick for its first fresh
+ * rows. This polls the tiny presence file (not the expensive `ps`+`lsof`
+ * gather) at {@link ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS} and calls
+ * `onConnect` only on the idle→recent edge, so a steadily-connected reader's
+ * repeated heartbeats never re-trigger it and an idle box with no reader never
+ * gathers — the CPU win from RUSH-3193 is preserved.
+ *
+ * Returns a disposer that stops the poll.
+ */
+export function watchActiveSessionsReaderPresence(
+  onConnect: () => void,
+  opts: { pollMs?: number; idleWindowMs?: number; nowMs?: () => number } = {},
+): () => void {
+  const pollMs = opts.pollMs ?? ACTIVE_SESSIONS_READER_TRANSITION_POLL_MS;
+  const now = opts.nowMs ?? Date.now;
+  let lastRecent = isActiveSessionsJournalReaderRecent(now(), opts.idleWindowMs);
+  const timer = setInterval(() => {
+    const recent = isActiveSessionsJournalReaderRecent(now(), opts.idleWindowMs);
+    if (recent && !lastRecent) onConnect();
+    lastRecent = recent;
+  }, pollMs);
+  timer.unref?.();
+  return () => clearInterval(timer);
+}
+
 // ── snapshot read / write ──────────────────────────────────────────────────
 
 /** Read one scope from the snapshot file (best-effort; missing/corrupt → null). */
