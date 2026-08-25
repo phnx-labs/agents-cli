@@ -261,6 +261,7 @@ const COMPACT_BAR_LEN = 5;
 const USAGE_BAR_LEN = 10;
 const FULL = '\u2588';
 const EMPTY = '\u2591';
+const PARTIAL_BLOCKS = ['', '\u258F', '\u258E', '\u258D', '\u258C', '\u258B', '\u258A', '\u2589'];
 
 /** Discriminator for usage window types. */
 export type UsageWindowKey = 'session' | 'week' | 'sonnet_week' | 'month';
@@ -2514,15 +2515,18 @@ function renderUsageBar(usedPercent: number): string {
 
 /** Render a compact usage bar for inline summaries. */
 function renderCompactUsageBar(usedPercent: number): string {
-  return renderBar(usedPercent, COMPACT_BAR_LEN, usedPercent > 0 ? 1 : 0);
+  return renderBar(usedPercent, COMPACT_BAR_LEN);
 }
 
-/** Render a colored block-character progress bar. */
-export function renderBar(usedPercent: number, length: number, minimumVisible = 0): string {
-  const rounded = Math.round((usedPercent / 100) * length);
-  const filled = Math.max(minimumVisible, Math.max(0, Math.min(length, rounded)));
+/** Render a proportional colored progress bar at one-eighth-cell resolution. */
+export function renderBar(usedPercent: number, length: number): string {
+  const clamped = Math.max(0, Math.min(100, usedPercent));
+  const eighths = Math.round((clamped / 100) * length * 8);
+  const filled = Math.floor(eighths / 8);
+  const partial = eighths % 8;
   const color = getUsageColor(usedPercent);
-  return color(FULL.repeat(filled)) + chalk.dim(EMPTY.repeat(length - filled));
+  const gauge = FULL.repeat(filled) + PARTIAL_BLOCKS[partial];
+  return color(gauge) + chalk.dim(EMPTY.repeat(length - filled - (partial > 0 ? 1 : 0)));
 }
 
 /** Apply the appropriate color to a text string based on usage percentage. */

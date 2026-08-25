@@ -21,6 +21,7 @@ import {
   setClaudeUsageCachePathForTest,
   deriveUsageHeadroom,
   formatUsageSummary,
+  renderBar,
   classifyUsageErrorKind,
   classifyUsageFetchFailure,
   getUsageBenignState,
@@ -43,6 +44,14 @@ import { noteUsageRateLimited, setUsageBackoffDirForTest, usageRateLimitedUntil 
 import { setKeychainToken, setKeychainBackendForTest, secretsKeychainItem, type KeychainBackend } from '../secrets/index.js';
 import { writeBundle, keychainRef, bundleItemStore } from '../secrets/bundles.js';
 import { _resetFileStoreForTest } from '../secrets/filestore.js';
+
+describe('renderBar', () => {
+  it('renders low and intermediate percentages proportionally', () => {
+    expect(renderBar(2, 5)).toBe('▏░░░░');
+    expect(renderBar(46, 5)).toBe('██▎░░');
+    expect(renderBar(81, 5)).toBe('████░');
+  });
+});
 
 const LEEWAY_MS = 5 * 60 * 1000;
 const NOW = 1_800_000_000_000; // fixed epoch ms so the tests are deterministic

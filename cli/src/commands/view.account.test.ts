@@ -29,7 +29,7 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
     const wEmail = 10;
     const wUsage = 22;
     const wStatus = 12;
-    const wActive = 10;
+    const wActive = 18;
 
     const row = (
       ver: string,
@@ -56,8 +56,8 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
       'a@x.com',
       'Max  S: 100%',
       'rate-limited',
-      '8h ago',
-      '○ 1m ago',
+      'active 8h ago',
+      '○ auth 1m ago',
     );
     const healthy = row(
       '2.1.219',
@@ -65,8 +65,8 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
       'b@y.com',
       'Max  S: 5%',
       '',
-      '2m ago',
-      '● 1m ago',
+      'active 2m ago',
+      '● auth 1m ago',
     );
 
     const authAt = (line: string): number => {

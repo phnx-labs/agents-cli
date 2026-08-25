@@ -183,12 +183,12 @@ export function renderByokBar(result: ByokUsageResult): string {
   if (!result.budget) return '';
   const { budget } = result;
   if (budget.limitUsd === null) {
-    const bar = renderBar(0, 10, 0);
+    const bar = renderBar(0, 10);
     const credit = budget.remainingUsd !== null ? `$${budget.remainingUsd.toFixed(2)} credit, ` : '';
     return `$: ${bar} ${credit}$${budget.usedUsd.toFixed(2)} used (no spending limit)`;
   }
   const pct = budget.usedPercent ?? 0;
-  const bar = renderBar(pct, 10, pct > 0 ? 1 : 0);
+  const bar = renderBar(pct, 10);
   const color = getUsageColor(pct);
   const remaining = budget.remainingUsd !== null ? `$${budget.remainingUsd.toFixed(2)}` : '?';
   const limit = `$${budget.limitUsd.toFixed(2)}`;

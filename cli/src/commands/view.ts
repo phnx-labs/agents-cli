@@ -167,8 +167,8 @@ export function compareAccountOrderedVersions(
  */
 const OVERVIEW_MAX_USAGE_WINDOWS = 2;
 
-/** Fixed width for the last-active column ("just now", "8h ago", "2d ago"). */
-const LAST_ACTIVE_COL_WIDTH = 10;
+/** Fixed width for the last-active column ("active just now", "active 8h ago"). */
+const LAST_ACTIVE_COL_WIDTH = 18;
 
 /**
  * Join fixed view columns with a consistent two-space gutter. Empty trailing
@@ -426,7 +426,7 @@ function liveAuthChip(cache: Record<string, AuthHealth>, host: string, agentId: 
     : h.verdict === 'revoked' ? chalk.red('○')
     : h.verdict === 'expired' ? chalk.yellow('○')
     : chalk.yellow('◐');
-  return `${glyph} ${chalk.gray(formatCheckedAge(h.checkedAt))}`;
+  return `${glyph} ${chalk.gray(`auth ${formatCheckedAge(h.checkedAt)}`)}`;
 }
 
 async function showInstalledVersions(
@@ -752,7 +752,8 @@ async function showInstalledVersions(
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
-        const activeStr = vInfo && hasEmail ? formatLastActive(vInfo.lastActive) : '';
+        const lastActive = vInfo && hasEmail ? formatLastActive(vInfo.lastActive) : '';
+        const activeStr = lastActive ? `active ${lastActive}` : '';
         const hasActive = activeStr.length > 0;
         // The model now has its own column above; keep only the run mode here.
         const runDefaults = resolveRunDefaults(agentId, version);
@@ -896,7 +897,8 @@ async function showInstalledVersions(
         3,
         viewUsageSummaryOptions(agentId, !!gInfo?.signedIn, gUsage, usageWindowCap),
       );
-      const gActiveStr = gInfo ? formatLastActive(gInfo.lastActive) : '';
+      const gLastActive = gInfo ? formatLastActive(gInfo.lastActive) : '';
+      const gActiveStr = gLastActive ? `active ${gLastActive}` : '';
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
         const gDisplay = accountColumnLabel(gInfo);
         parts.push(gDisplay ? chalk.cyan(padToWidth(gDisplay, gMaxEmail)) : ' '.repeat(gMaxEmail));

@@ -438,7 +438,9 @@ The watchdog decider is now an agent, not a heuristic script. Every idle session
   seven-day rate limits for the active account, so `agents view claude` gains
   fresh bars without reading or copying OAuth credentials. The status line also
   shows the hostname and active model and preserves any existing status-line
-  command.
+  command. Compact usage bars now render at one-eighth-cell resolution instead
+  of exaggerating every nonzero value to at least 20%, and the trailing activity
+  and authentication-probe ages identify which event they measure.
 
 ## 1.22.47
 
