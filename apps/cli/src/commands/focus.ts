@@ -102,6 +102,7 @@ export interface FocusOptions {
   abandoned?: boolean;
   queued?: boolean;
   unknown?: boolean;
+  reconnectReattach?: boolean;
 }
 
 const INHERITED_FOCUS_OPTIONS: Array<keyof FocusOptions> = [
@@ -158,6 +159,7 @@ export function registerFocusCommand(program: Command): void {
     .option('--launch-id <id>', 'Target the run by its launcher AGENT_LAUNCH_ID instead of a session id (resolved from this machine\'s hook records)')
     .option('--local', 'Only this machine (skip the cross-host sweep)')
     .option('--attach-only', 'Attach only — never open a new tab / resume a copy (the old `go` behavior)')
+    .option('--reconnect-reattach', '(internal) Set by the reconnect loop — warns when the expected pane is dead and a fresh copy starts instead', false)
     .option('-D, --device <target...>', 'Scope the picker to live sessions on these devices (device alias from `agents devices`, user@host; repeatable)')
     .option('--active', 'Only sessions present in the live roster')
     .option('-a, --agent <agent>', 'Filter by harness and recorded version (for example claude@latest)')
@@ -321,7 +323,7 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
         // still joined instead of resumed as a copy; a crashed session has no live
         // row and recovers in place.
         const { activeById } = await gatherLiveTargets(true, { statuses: [] });
-        await focusResolvedSession(localMatch[0], activeById, self, fallback, opts.attachOnly === true);
+        await focusResolvedSession(localMatch[0], activeById, self, fallback, opts.attachOnly === true, opts.reconnectReattach === true);
         return;
       }
     }
@@ -417,7 +419,7 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       exact = [focusTargetForResolved(filteredMatch, outcome.session)];
     }
     if (exact.length === 1) {
-      await focusResolvedSession(exact[0], liveById, self, fallback, opts.attachOnly === true);
+      await focusResolvedSession(exact[0], liveById, self, fallback, opts.attachOnly === true, opts.reconnectReattach === true);
       return;
     }
     if (exact.length > 1) {
@@ -693,6 +695,7 @@ async function focusResolvedSession(
   self: string,
   fallback: UnreachableFallback,
   attachOnly: boolean,
+  reconnectReattach: boolean = false,
 ): Promise<void> {
   const active = liveById.get(meta.id);
   if (active && isAttachableLiveSession(active)) {
@@ -713,6 +716,19 @@ async function focusResolvedSession(
       process.exitCode = 1;
     }
     return;
+  }
+  if (reconnectReattach) {
+    // The reconnect loop expected this pane to be alive. It isn't — the peer
+    // rebooted, tmux crashed, or the agent exited while the link was down.
+    // Starting a fresh copy preserves continuity, but the user deserves to know
+    // the original context was not recovered.
+    console.error(chalk.yellow(
+      `\nWarning: ${meta.shortId}'s pane died on this host (reboot, tmux crash, or agent exited).`
+    ));
+    console.error(chalk.gray(
+      `  Your prior context is in the transcript — starting a fresh copy.\n` +
+      `  To see what happened: agents sessions preview ${meta.shortId}`
+    ));
   }
   await resumeSessionInPlace(meta);
 }

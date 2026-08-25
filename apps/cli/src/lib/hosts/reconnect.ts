@@ -398,7 +398,7 @@ export function reattachRemoteCommand(target: ReconnectTarget): string {
   const selector = target.kind === 'launch'
     ? ['--launch-id', target.id]
     : [target.id];
-  const inner = ['agents', 'sessions', 'focus', ...selector, '--local']
+  const inner = ['agents', 'sessions', 'focus', ...selector, '--local', '--reconnect-reattach']
     .map(shellQuote)
     .join(' ');
   return wrapRemoteExitCode(inner);
