@@ -12,7 +12,10 @@ facts:
   - "Shared-system 23-rule distillation PR #381 was closed, not merged"
   - "Hook refinement: major message and guard improvements merged; full 14-to-8 target not complete"
   - "Live system inventory: 19 injected subrules and 27 registered logical hooks"
-  - "Agency audit: 7 keep, 7 loosen, 4 move to skills, 1 fold into another rule"
+  - "Agency audit: 8 keep, 6 loosen, 4 move to skills, 1 fold into another rule"
+links:
+  - https://linear.app/getrush/issue/PHNX-2678/fleet-session-audit-7d-23-rulehookguard-changes-for-agents
+  - https://github.com/phnx-labs/agi-cli/pull/3067
 ---
 
 ## Story
