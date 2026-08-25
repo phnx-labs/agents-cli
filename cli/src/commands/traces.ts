@@ -21,6 +21,11 @@ const SYNC_EXAMPLES = `
 
   $ agents traces sync --limit 20
   Sync at most 20 sessions (useful for a first run on a large fleet device).
+
+  $ agents traces sync --dry-run --out ./trace-preview
+  Compute the shards from your real sessions.db and WRITE them locally — no
+  Phoenix sign-in, no worker, no upload. Point a console at ./trace-preview to
+  see your real trajectories before wiring the hosted path.
 `.trimStart();
 
 const SYNC_NOTES = `
@@ -56,23 +61,32 @@ const SETUP_EXAMPLES = `
 // Command handlers
 // ---------------------------------------------------------------------------
 
-async function handleSync(opts: { limit?: string }): Promise<void> {
+async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string }): Promise<void> {
   const limit = opts.limit !== undefined ? parseInt(opts.limit, 10) : undefined;
+  const dryRun = opts.dryRun === true;
 
-  // Validate backend connectivity (throws with a user-friendly message if not signed in)
-  try {
-    resolveTracesBackend();
-  } catch (err) {
-    console.error(chalk.red((err as Error).message));
+  if (dryRun && !opts.out) {
+    console.error(chalk.red('traces sync --dry-run requires --out <dir>'));
     process.exitCode = 1;
     return;
   }
 
-  console.log(chalk.dim('Syncing traces…'));
+  // A dry-run computes locally and needs no Phoenix backend; a real sync does.
+  if (!dryRun) {
+    try {
+      resolveTracesBackend();
+    } catch (err) {
+      console.error(chalk.red((err as Error).message));
+      process.exitCode = 1;
+      return;
+    }
+  }
+
+  console.log(chalk.dim(dryRun ? `Computing traces locally → ${opts.out}` : 'Syncing traces…'));
 
   let result;
   try {
-    result = await syncTraces({ limit });
+    result = await syncTraces({ limit, dryRun, outDir: opts.out });
   } catch (err) {
     console.error(chalk.red(`Sync failed: ${(err as Error).message}`));
     process.exitCode = 1;
@@ -81,7 +95,7 @@ async function handleSync(opts: { limit?: string }): Promise<void> {
 
   const parts: string[] = [];
   if (result.uploaded > 0) {
-    parts.push(chalk.green(`${result.uploaded} uploaded`));
+    parts.push(chalk.green(`${result.uploaded} ${dryRun ? 'written' : 'uploaded'}`));
   }
   if (result.skipped > 0) {
     parts.push(chalk.dim(`${result.skipped} skipped`));
@@ -182,6 +196,8 @@ export function registerTracesCommands(program: Command): void {
     .command('sync')
     .description('Push derived, redacted trajectories (incremental)')
     .option('--limit <n>', 'Maximum number of sessions to sync in this run')
+    .option('--dry-run', 'Compute the shards from real sessions.db and WRITE them locally (no auth, no upload)')
+    .option('--out <dir>', 'Directory to write index.json + sessions/<id>.json (required with --dry-run)')
     .action(handleSync);
 
   setHelpSections(syncCmd, { examples: SYNC_EXAMPLES, notes: SYNC_NOTES });

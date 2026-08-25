@@ -45,6 +45,15 @@ export interface SyncOpts {
   limit?: number;
   /** When true, skip uploading the per-device index shard. */
   skipIndex?: boolean;
+  /**
+   * Compute the derived shards from this device's real sessions.db and WRITE
+   * them to `outDir` instead of uploading. No Phoenix auth, no worker, no
+   * network — a local export for verifying the real signal. Ignores the
+   * incremental watermark so the export reflects every session.
+   */
+  dryRun?: boolean;
+  /** Directory to write `index.json` + `sessions/<id>.json` when `dryRun` is set. */
+  outDir?: string;
 }
 
 export interface SyncResult {
@@ -55,19 +64,28 @@ export interface SyncResult {
 
 /** Push derived, redacted trajectories for this device to the traces store. */
 export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
-  const backend = resolveTracesBackend();
+  const dryRun = opts.dryRun === true;
+  const outDir = opts.outDir;
+  if (dryRun && !outDir) {
+    throw new Error('traces sync --dry-run requires --out <dir>');
+  }
+  // A dry-run computes locally and writes to disk: no Phoenix backend needed.
+  const backend = dryRun ? null : resolveTracesBackend();
+  const owner = backend?.userId ?? 'local';
   const ledger = readSyncLedger();
   const db = getDB();
   const device = localDevice();
 
   // Scope to this machine only — the DB can contain peer rows mirrored from the
   // fleet; uploading those under this device's prefix would corrupt the index.
-  // NULL machine rows are legacy local sessions (pre-machine-field).
+  // NULL machine rows are legacy local sessions (pre-machine-field). A dry-run
+  // ignores the incremental watermark so the export covers every session.
+  const sinceMtime = dryRun ? 0 : (ledger.lastSyncMtime ?? 0);
   const rows = db
     .prepare(
       'SELECT * FROM sessions WHERE (machine = ? OR machine IS NULL) AND file_mtime_ms > ? ORDER BY file_mtime_ms ASC',
     )
-    .all(device, ledger.lastSyncMtime ?? 0) as SyncRow[];
+    .all(device, sinceMtime) as SyncRow[];
 
   const limited = opts.limit !== undefined ? rows.slice(0, opts.limit) : rows;
   const knownSecrets = knownSecretValuesFromEnv();
@@ -78,6 +96,10 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
   // Advance the watermark only to the max mtime of successfully uploaded sessions
   // so failures are retried on the next run.
   let maxSuccessMtime = ledger.lastSyncMtime ?? 0;
+
+  if (dryRun && outDir) {
+    fs.mkdirSync(path.join(outDir, 'sessions'), { recursive: true });
+  }
 
   for (const row of limited) {
     if (!row.file_path) {
@@ -95,7 +117,14 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       continue;
     }
     try {
-      await putSessionTrace(backend, device, row.id, traj);
+      if (dryRun && outDir) {
+        fs.writeFileSync(
+          path.join(outDir, 'sessions', `${row.id}.json`),
+          JSON.stringify(buildSessionDetail(traj)),
+        );
+      } else {
+        await putSessionTrace(backend!, device, row.id, traj);
+      }
       uploaded++;
       maxSuccessMtime = Math.max(maxSuccessMtime, row.file_mtime_ms ?? 0);
     } catch {
@@ -108,14 +137,21 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       const allRows = db
         .prepare('SELECT * FROM sessions WHERE machine = ? OR machine IS NULL')
         .all(device) as SyncRow[];
-      const shard = buildIndexShard(allRows, device, backend.userId);
-      await putIndexShard(backend, device, backend.userId, shard);
+      const shard = buildIndexShard(allRows, device, owner);
+      if (dryRun && outDir) {
+        fs.writeFileSync(path.join(outDir, 'index.json'), JSON.stringify(shard, null, 2));
+      } else {
+        await putIndexShard(backend!, device, owner, shard);
+      }
     } catch {
-      // index PUT failure is not fatal — the per-session data is already uploaded
+      // index PUT/write failure is not fatal — the per-session data is already written
     }
   }
 
-  writeSyncLedger({ lastSyncMtime: maxSuccessMtime });
+  // A dry-run never advances the incremental watermark: it is a read-only export.
+  if (!dryRun) {
+    writeSyncLedger({ lastSyncMtime: maxSuccessMtime });
+  }
   return { uploaded, skipped, errors };
 }
 
@@ -328,21 +364,86 @@ export function buildIndexShard(rows: SyncRow[], device: string, owner: string):
 // HTTP PUT helpers
 // ---------------------------------------------------------------------------
 
+/** Per-session drill-down detail the console consumes (sessions/<id>.json). */
+export interface SessionDetail {
+  schema: 1;
+  id: string;
+  meta: {
+    spanMs: number;
+    turns: number;
+    tools: number;
+    errorCount: number;
+    tokens: number;
+    costUsd: number;
+    outcome: string;
+    repo: string;
+    agent: string;
+    model: string;
+  };
+  steps: SessionTrajectory['steps'];
+  gaps: SessionTrajectory['gaps'];
+  whereItWentWrong: string | null;
+}
+
+/** Plain-language summary of the friction in a run, or null when it ran clean. */
+function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
+  const errorSteps = traj.steps.filter((s) => s.outcome === 'error');
+  const biggestGap = traj.gaps.reduce<SessionTrajectory['gaps'][number] | null>(
+    (max, g) => (!max || g.durationMs > max.durationMs ? g : max),
+    null,
+  );
+  const parts: string[] = [];
+  if (errorSteps.length > 0) {
+    const first = errorSteps[0];
+    const who = first.tool ?? first.lane;
+    parts.push(
+      `${errorSteps.length} tool error${errorSteps.length === 1 ? '' : 's'} (first: ${who} — ${first.label})`,
+    );
+  }
+  if (biggestGap && biggestGap.durationMs >= 60_000) {
+    parts.push(`stalled ${Math.round(biggestGap.durationMs / 60_000)}m`);
+  }
+  if (parts.length === 0) return null;
+  return `This run hit ${parts.join('; ')}.`;
+}
+
 /**
- * Strip local-machine fields that carry no analytical value and could expose
- * filesystem paths or account PII if written to R2.
+ * Map the derived trajectory to the console's SessionDetail shape, stripping
+ * local-machine PII (full cwd, account) that would expose filesystem paths if
+ * written to R2. `repo` is the cwd basename only.
  */
-function scrubTrajectoryForStorage(traj: SessionTrajectory): unknown {
-  const { session, ...rest } = traj;
-  const {
-    filePath: _fp,
-    cwd: _cwd,
-    account: _account,
-    accountKey: _accountKey,
-    accountOrg: _accountOrg,
-    ...cleanSession
-  } = session;
-  return { ...rest, session: cleanSession };
+export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
+  const s = traj.session as SessionMeta & {
+    project?: string;
+    cwd?: string;
+    costUsd?: number;
+  };
+  const stats = traj.stats as {
+    userTurns?: number;
+    assistantTurns?: number;
+    toolCount?: number;
+    outputTokens?: number;
+  };
+  const repo = s.project ?? (s.cwd ? path.basename(s.cwd) : 'unknown');
+  return {
+    schema: 1,
+    id: s.id,
+    meta: {
+      spanMs: traj.spanMs,
+      turns: (stats.userTurns ?? 0) + (stats.assistantTurns ?? 0),
+      tools: stats.toolCount ?? 0,
+      errorCount: traj.errorCount,
+      tokens: stats.outputTokens ?? 0,
+      costUsd: s.costUsd ?? 0,
+      outcome: traj.errorCount > 0 ? 'errored' : 'completed',
+      repo,
+      agent: s.agent,
+      model: s.model ?? 'unknown',
+    },
+    steps: traj.steps,
+    gaps: traj.gaps,
+    whereItWentWrong: buildWhereItWentWrong(traj),
+  };
 }
 
 async function putSessionTrace(
@@ -358,7 +459,7 @@ async function putSessionTrace(
       authorization: `Bearer ${backend.token}`,
       'content-type': 'application/json; charset=utf-8',
     },
-    body: JSON.stringify(scrubTrajectoryForStorage(traj)),
+    body: JSON.stringify(buildSessionDetail(traj)),
   });
   if (!res.ok) {
     throw new Error(`PUT ${url} → ${res.status}`);

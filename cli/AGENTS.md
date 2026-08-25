@@ -28,13 +28,18 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
-`agents traces sync` publishes two redacted derived surfaces: the unchanged
-per-session `SessionTrajectory` at `sessions/<id>.json`, and a rich per-device
-`index.json` for Phoenix Evals. The index contains duration/error statistics,
+`agents traces sync` publishes two redacted derived surfaces: a per-session
+`SessionDetail` at `sessions/<id>.json` (a `meta` summary —
+spanMs/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
+`whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
+rich per-device `index.json`. The index contains duration/error statistics,
 ranked attention flags, metadata/tool-mix topic buckets, and structured tool
 failure cause buckets (`real`, `guard`, `hook`). Topic classification is lazily
 cached in the self-healing `session_topics` table by transcript mtime + size;
-it is not part of the hot session scan or `SCHEMA_VERSION`.
+it is not part of the hot session scan or `SCHEMA_VERSION`. `agents traces sync
+--dry-run --out <dir>` computes both surfaces from the local `sessions.db` and
+writes them to a directory (no Phoenix auth, no worker, no upload) — a local
+export for verifying the real signal before the hosted path is wired.
 
 ## Core design choices (read this first)
 

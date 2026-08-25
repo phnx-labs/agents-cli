@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDB, readSessionTopics } from '../session/db.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { ClassifiedTopic } from './classify.js';
-import { buildIndexShard, syncTraces, type SyncRow } from './sync.js';
+import { buildIndexShard, buildSessionDetail, syncTraces, type SyncRow } from './sync.js';
 
 const id = 'trace-rich-fixture';
 const transcript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
@@ -134,5 +134,57 @@ describe('rich traces index shard', () => {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
     expect(requests.filter((url) => url.includes(`/sessions/${id}.json`))).toHaveLength(1);
+  });
+});
+
+describe('buildSessionDetail (per-session drill-down shape)', () => {
+  const baseTraj = {
+    session: { id: 's1', agent: 'claude', model: 'opus-4-8', cwd: '/home/x/repo', costUsd: 1.5 },
+    spanMs: 60_000,
+    steps: [
+      { ordinal: 1, lane: 'Bash', tool: 'Bash', startMs: 0, durationMs: 100, outcome: 'error', label: 'git rebase' },
+      { ordinal: 2, lane: 'Read', tool: 'Read', startMs: 200, durationMs: 50, outcome: 'ok', label: 'read file' },
+    ],
+    gaps: [{ startMs: 300, durationMs: 130_000, afterOrdinal: 2 }],
+    programTimeShare: {},
+    errorCount: 1,
+    redacted: true,
+    stats: { userTurns: 3, assistantTurns: 4, toolCount: 2, outputTokens: 1000 },
+    truncatedSteps: 0,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } as any;
+
+  it('emits the console meta summary from real trajectory fields', () => {
+    const d = buildSessionDetail(baseTraj);
+    expect(d.schema).toBe(1);
+    expect(d.id).toBe('s1');
+    expect(d.meta.spanMs).toBe(60_000);
+    expect(d.meta.turns).toBe(7); // userTurns + assistantTurns
+    expect(d.meta.tools).toBe(2);
+    expect(d.meta.errorCount).toBe(1);
+    expect(d.meta.tokens).toBe(1000);
+    expect(d.meta.costUsd).toBe(1.5);
+    expect(d.meta.outcome).toBe('errored');
+    expect(d.meta.repo).toBe('repo'); // cwd basename, not the full path (PII)
+    expect(d.meta.agent).toBe('claude');
+    expect(d.steps).toHaveLength(2);
+  });
+
+  it('synthesizes a whereItWentWrong narrative from error steps + stalls', () => {
+    const d = buildSessionDetail(baseTraj);
+    expect(d.whereItWentWrong).toContain('1 tool error');
+    expect(d.whereItWentWrong).toContain('Bash');
+    expect(d.whereItWentWrong).toContain('stalled 2m');
+  });
+
+  it('returns whereItWentWrong=null for a clean run', () => {
+    const clean = buildSessionDetail({
+      ...baseTraj,
+      steps: [baseTraj.steps[1]],
+      gaps: [],
+      errorCount: 0,
+    });
+    expect(clean.whereItWentWrong).toBeNull();
+    expect(clean.meta.outcome).toBe('completed');
   });
 });
