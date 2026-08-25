@@ -117,6 +117,16 @@ export interface LeaseRunResult {
   toreDown: boolean;
 }
 
+/**
+ * Exit code the box-side bootstrap raises when `agents setup` did not leave a
+ * usable install (`~/.agents/.system` is still not a git repo). The run-side gate
+ * (`ensureInitialized`, commands/setup.ts) refuses `agents run` with "agents-cli
+ * is not set up" in exactly that state, so the bootstrap aborts with this code
+ * instead of running the agent into that refusal. `leaseAndRun` reads it to stop
+ * a box THIS run provisioned — a newly created box that can't run is pure cost.
+ */
+export const LEASE_BOOTSTRAP_FAILED_CODE = 97;
+
 /** POSIX single-quote for safe embedding in the generated bootstrap script. */
 function q(s: string): string {
   return "'" + s.replace(/'/g, "'\\''") + "'";
@@ -162,12 +172,14 @@ function runtimeInstallSpec(id: AgentId, dispatchProfile?: LeaseDispatchProfile)
 }
 
 /**
- * Bash snippet that guarantees `agents` is runnable on the box. Fresh crabbox
- * images ship without node, and the box user may not own the global npm prefix,
- * so everything installs user-level under ~/.local (node from the official
+ * Bash snippet that guarantees `agents` is runnable AND set up on the box. Fresh
+ * crabbox images ship without node, and the box user may not own the global npm
+ * prefix, so everything installs user-level under ~/.local (node from the official
  * latest-v22.x tarball to satisfy engines.node >=22.5.0). Exits 96 with a
- * diagnostic when the CLI still isn't runnable — a silent `|| true` here used
- * to surface only as `agents: command not found` deep in the script.
+ * diagnostic when the CLI still isn't runnable, and {@link LEASE_BOOTSTRAP_FAILED_CODE}
+ * when `agents setup` did not leave a git-repo `~/.agents/.system` — both used to
+ * surface only as a downstream failure (`agents: command not found`, or the run-side
+ * "agents-cli is not set up" gate) after a swallowed `|| true`.
  */
 const ENSURE_AGENTS_CLI = [
   'export PATH="$HOME/.local/bin:$PATH"',
@@ -185,9 +197,20 @@ const ENSURE_AGENTS_CLI = [
   '  echo "lease bootstrap: agents-cli install failed (node: $(command -v node || echo missing))" >&2',
   '  exit 96',
   'fi',
-  // Same first-run guard the hosts bootstrap uses (hosts/ready.ts) — a fresh
-  // install refuses `agents run` with "agents-cli is not set up" until setup ran.
-  'if [ ! -d "$HOME/.agents/.system" ]; then agents setup >/dev/null 2>&1 || true; fi',
+  // The run-side gate (`ensureInitialized`, commands/setup.ts) refuses `agents run`
+  // with "agents-cli is not set up" until `~/.agents/.system` is a GIT REPO. Gate
+  // setup on that same postcondition — not a swallowed exit: capture setup's output,
+  // and if the repo still isn't there afterward, print the real cause and abort so
+  // the box is never run into that refusal (a swallowed `|| true` here is what left
+  // a provisioned box dying at "agents-cli is not set up").
+  'if [ ! -d "$HOME/.agents/.system/.git" ]; then',
+  '  setup_out=$(agents setup 2>&1)',
+  '  if [ ! -d "$HOME/.agents/.system/.git" ]; then',
+  '    echo "lease bootstrap: agents setup did not complete (~/.agents/.system is not a git repo)" >&2',
+  '    printf "%s\\n" "$setup_out" >&2',
+  `    exit ${LEASE_BOOTSTRAP_FAILED_CODE}`,
+  '  fi',
+  'fi',
 ].join('\n');
 
 /**
@@ -427,8 +450,11 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
         refresh: false,
         remoteDir: opts.workspaceId ? `${leaseHomeDir(opts.workspaceId)}/.agents/` : undefined,
       });
-    } catch {
-      /* best-effort — never block the run on a config-copy failure */
+    } catch (err) {
+      // Best-effort — a config-copy failure never blocks the run (the agent runs
+      // without the pushed ~/.agents config), but surface it instead of swallowing
+      // it silently so a broken sync is visible rather than a mystery.
+      opts.onData?.(`lease: setup copy failed — running without pushed ~/.agents config (${(err as Error).message})\n`);
     }
   }
 
@@ -445,10 +471,17 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
       renewIdleTimeoutSecs,
     });
   } finally {
-    // Normal --lease establishes or reuses the warm pool, so the box outlives
-    // this run; credentials are still shredded inside the script above. Only
-    // --fresh requests the old one-shot lifecycle and tears its new box down.
-    if (!opts.keep && opts.fresh && !reused) {
+    // A box this run PROVISIONED (never a reused one) whose bootstrap failed is
+    // unusable capacity — keep it and it bills until the idle GC window. Stop it
+    // regardless of --keep-box: the user asked to keep a working box, not a broken
+    // one. A reused box is left alone (a concurrent run may share it).
+    const bootstrapFailed = exitCode === LEASE_BOOTSTRAP_FAILED_CODE;
+    // Normal --lease establishes or reuses the warm pool, so a healthy box outlives
+    // this run; credentials are still shredded inside the script above. Only --fresh
+    // requests the old one-shot lifecycle and tears its new box down.
+    const teardownHealthy = !opts.keep && opts.fresh && !reused;
+    const teardownBroken = bootstrapFailed && !reused;
+    if (teardownHealthy || teardownBroken) {
       opts.onPhase?.({ kind: 'teardown' });
       toreDown = crabboxStop(box.slug, { secretsBundle: opts.secretsBundle });
     }
