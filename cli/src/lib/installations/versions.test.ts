@@ -1313,8 +1313,8 @@ describe('resolveVersionAliasLoose — @any', () => {
   it('treats "any" like "default": no version constraint (undefined)', () => {
     const home = makeTempHome();
     const moduleUrl = pathToFileURL(path.resolve('src/lib/installations/versions.ts')).href;
-    const tsxBin = path.resolve('node_modules/.bin/tsx');
-    const child = spawnSync(tsxBin, ['--input-type=module', '-e', `
+    const tsxBin = path.resolve('node_modules/tsx/dist/cli.mjs');
+    const child = spawnSync(nodeExecPath(), [tsxBin, '--input-type=module', '-e', `
       import { resolveVersionAlias, resolveVersionAliasLoose } from ${JSON.stringify(moduleUrl)};
       console.log(JSON.stringify({
         strictAny: resolveVersionAlias('claude', 'any') ?? null,
