@@ -18,11 +18,14 @@ function run(args: string[], env: NodeJS.ProcessEnv = {}) {
 // about that one property — offload is the default, local is opt-in, and an
 // unavailable offload target FAILS instead of falling back.
 describe('scripts/test.sh — the suite never runs locally by accident', () => {
-  it('refuses an unreachable --device instead of falling back to local', () => {
+  it('refuses an unusable --device instead of falling back to local', () => {
+    // A name that is not in the registry now fails at the REGISTRY LOOKUP, before
+    // any ssh is attempted — the address a device is reached at comes from the
+    // registry, not from whatever the local resolver makes of the bare name.
+    // What this test pins is the invariant that survives either path: an
+    // unusable target aborts, and never silently becomes a local run.
     const r = run(['--device', 'no-such-box-xyz.invalid']);
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/cannot reach 'no-such-box-xyz\.invalid' over ssh/);
-    // The critical half: it must not have decided to run the suite here instead.
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
