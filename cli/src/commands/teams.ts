@@ -516,16 +516,23 @@ export function wireCloudDispatcher(mgr: AgentManager): void {
       throw new Error(`Teammate ${a.agentId} has no cloud provider set`);
     }
     const prov = resolveProvider(a.cloudProvider as CloudProviderId);
-    const dispatchOpts: DispatchOptions = {
-      prompt: a.prompt,
-      agent: a.agentType,
-      repo: a.cloudRepo ?? undefined,
-      branch: a.cloudBranch ?? undefined,
-      model: a.model ?? undefined,
-    };
+    const dispatchOpts = cloudDispatchOptions(a);
     const cloudTask = await prov.dispatch(dispatchOpts);
     return { cloudSessionId: cloudTask.id };
   });
+}
+
+export function cloudDispatchOptions(
+  agent: Pick<AgentProcess, 'prompt' | 'agentType' | 'cloudRepo' | 'cloudBranch' | 'model'>,
+): DispatchOptions {
+  return {
+    prompt: agent.prompt,
+    agent: agent.agentType,
+    repo: agent.cloudRepo ?? undefined,
+    branch: agent.cloudBranch ?? undefined,
+    model: agent.model ?? undefined,
+    env: shareRuntimeEnv(),
+  };
 }
 
 /**
