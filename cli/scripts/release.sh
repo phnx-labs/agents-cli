@@ -141,6 +141,16 @@ TARGET=""
 # build + sign + notarize + npm publish phase; defaults to mac-mini. A for-loop
 # with a pending flag (not `shift`) preserves "$@" intact, so the release-worktree
 # re-exec (RELEASE_ARGS=("$@")) forwards every arg including --device.
+#
+# A NEW FLAG DOES NOT WORK UNTIL IT IS ON origin/<default>. `:190` execs
+# release-worktree.sh, which checks out a worktree at `origin/$DEFAULT_BRANCH`
+# and re-runs THIS script from there — so the second parse is the merged copy,
+# not your working tree, and an unmerged flag dies as `unknown flag`. Verified on
+# 2026-08-25 while adding --with-helpers: the local parser accepted it and the
+# re-exec rejected it. To exercise a new flag pre-merge, pass
+# `--orchestration-phase` (the internal marker that means "already in the
+# worktree") to skip the re-exec. Content-assertion tests cannot catch this class:
+# they read the working-tree file, while the failure is in a different copy.
 DEVICE=""
 expect_device=false
 for arg in "$@"; do
@@ -160,7 +170,7 @@ for arg in "$@"; do
     --orchestration-phase) ORCHESTRATION_PHASE=true ;;
     --device|--host) expect_device=true ;;
     --device=*|--host=*) DEVICE="${arg#*=}" ;;
-    -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--device <name>] [--skip-tests] [--yes]"; exit 0 ;;
+    -h|--help) printf '%s\n' "usage: scripts/release.sh <version> [--apply] [--with-helpers] [--device <name>] [--skip-tests] [--yes]"; exit 0 ;;
     --*) die "unknown flag: $arg" ;;
     *)
       [[ -z "$TARGET" ]] || die "unexpected argument: $arg"

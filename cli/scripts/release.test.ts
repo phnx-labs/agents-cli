@@ -104,6 +104,24 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
     expect(RELEASE_SH).toMatch(/^WITH_HELPERS=false$/m);
   });
 
+  it('advertises the flag in --help, so it is discoverable without reading the source', () => {
+    // Caught by running the script, not by reading it: --help listed every other
+    // flag and silently omitted this one.
+    const help = RELEASE_SH.slice(RELEASE_SH.indexOf('-h|--help)'));
+    expect(help.slice(0, 300)).toContain('--with-helpers');
+  });
+
+  it('warns that a new flag is inert until merged, because the script re-execs from origin', () => {
+    // release.sh:190 execs release-worktree.sh, which checks out
+    // `origin/$DEFAULT_BRANCH` and re-runs THIS script from there. The second
+    // parse is the MERGED copy, so an unmerged flag dies as `unknown flag` even
+    // though the local parser handles it. No content assertion can catch that —
+    // they read the working tree, the failure is in another copy — so the trap is
+    // pinned as prose instead, next to the parser it bites.
+    expect(RELEASE_SH).toContain('A NEW FLAG DOES NOT WORK UNTIL IT IS ON origin/<default>');
+    expect(RELEASE_SH).toContain('--orchestration-phase');
+  });
+
   it('builds the download patterns as an array, never a word-split splice', () => {
     // A `$( ... )` splice here is word-split by the shell — the same class of bug
     // that silently dropped vitest args in test.sh — and an empty splice trips
