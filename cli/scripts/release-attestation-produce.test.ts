@@ -166,6 +166,22 @@ function runProduce(
 
 
 describe('release-attestation-produce.sh', () => {
+  it('skips the helper manifest by default, so a helper source change cannot block a CLI attestation', () => {
+    // The live failure this prevents: a one-line COMMENT fix in
+    // native/computer-mac/scripts/build.sh (an `apps/cli/` -> `cli/` path in
+    // prose) changed computer-mac's input digest and aborted an otherwise-clean
+    // 1.22.49 attestation — for a helper the tarball no longer ships and the CLI
+    // resolves from its own tag. release.sh gained --with-helpers for exactly
+    // this; the producer had the same unconditional check and was missed.
+    const fx = buildFixture(tmp('attest-produce-nomanifest-'));
+    const result = runProduce(fx);
+    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('CLI-only attestation: skipping the helper manifest');
+    // The attestation itself is still produced — this is a skip, not a bail.
+    expect(out).toMatch(/Wrote .*\.json/);
+  });
+
   it('does NOT seed helper apps on a non-Mac producer — the tarball ships none (RUSH-3100)', () => {
     // This replaces the RUSH-3026 seeding test, and the reversal is the point.
     //
@@ -515,6 +531,17 @@ function seedManifest(store: string, helpers: Record<string, { inputDigest: stri
 }
 
 describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => {
+  // The manifest step is opt-in since --with-helpers (a CLI-only attestation must
+  // not abort because a helper's SOURCE moved — a one-line comment fix in
+  // native/computer-mac/scripts/build.sh blocked a real 1.22.49 attestation that
+  // way). Every test in this block is ABOUT the manifest, so they all pass the
+  // flag; a separate test below pins that the DEFAULT skips it.
+  const runProduceWithHelpers = (
+    fx: ReturnType<typeof buildFixture>,
+    extra: string[] = [],
+    env: NodeJS.ProcessEnv = {},
+  ) => runProduce(fx, ['--with-helpers', ...extra], env);
+
   it('carries forward an unchanged helper and records fresh digests for changed ones', () => {
     const root = tmp('attest-produce-manifest-');
     const fx = buildManifestFixture(root);
@@ -524,7 +551,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     // the "signed" assets committed into the fixture.
     seedManifest(fx.store, { 'computer-mac': { inputDigest: fx.manifestDigests['computer-mac'] } });
 
-    const result = runProduce(fx);
+    const result = runProduceWithHelpers(fx);
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout + result.stderr).toContain('helper computer-mac unchanged');
 
@@ -590,7 +617,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     );
     fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
 
-    const result = runProduce(fx);
+    const result = runProduceWithHelpers(fx);
 
     expect(result.status, result.stdout + result.stderr).toBe(0);
     expect(result.stdout + result.stderr).toContain('Seeded the helper manifest from v9.9.8');
@@ -647,7 +674,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     fs.chmodSync(ghPath, 0o755);
 
     const output = (() => {
-      const r = runProduce(fx);
+      const r = runProduceWithHelpers(fx);
       return r.stdout + r.stderr;
     })();
 
@@ -689,7 +716,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     );
     fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
 
-    const result = runProduce(fx);
+    const result = runProduceWithHelpers(fx);
     const out = result.stdout + result.stderr;
 
     expect(out, out).toContain('Seeded the helper manifest from v9.9.8');
@@ -715,7 +742,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     );
     fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
 
-    const result = runProduce(fx);
+    const result = runProduceWithHelpers(fx);
 
     expect(result.status).not.toBe(0);
     expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
@@ -727,7 +754,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     // No seeded manifest at all: computer-mac has no recorded digest, and this
     // producer never rebuilds it, so it must refuse rather than ship a stale
     // or missing helper record.
-    const result = runProduce(fx);
+    const result = runProduceWithHelpers(fx);
     expect(result.status).not.toBe(0);
     expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
     expect(result.stdout + result.stderr).toContain('publish-computer-helper-mac.sh');

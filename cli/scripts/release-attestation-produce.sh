@@ -34,6 +34,11 @@
 # Usage:
 #   scripts/release-attestation-produce.sh <commit-ish> [--dir DIR]
 #                                           [--repo-root DIR] [--keep]
+#                                           [--with-helpers]
+#
+# --with-helpers (default OFF) additionally verifies the helper input-digest
+# manifest. Off by default for the same reason release.sh's flag is: the check
+# aborts on any helper source change, including ones the tarball does not ship.
 #
 # --dir defaults to $RELEASE_ATTESTATION_DIR or <repo-root>/.release-attestations
 # -- the same resolution release.sh uses, so producing and requiring agree
@@ -57,6 +62,14 @@ STORE=""
 KEEP=false
 # Where the suite runs. Empty = scripts/test.sh's default (auto-pick a fleet worker).
 TEST_TARGET=()
+# Default OFF, matching release.sh's flag of the same name. The helper manifest
+# re-derives every helper's INPUT DIGEST and fails when one moved without a
+# rebuild — correct when a release is publishing helpers, and pure obstruction
+# when it is not. Proven on 2026-08-25: a one-line COMMENT fix in
+# native/computer-mac/scripts/build.sh (an `apps/cli/` -> `cli/` path in prose)
+# changed the digest and blocked an otherwise-perfect 1.22.49 attestation, for a
+# helper the tarball no longer ships and the CLI resolves from its own tag.
+WITH_HELPERS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) STORE="$2"; shift 2 ;;
@@ -68,6 +81,7 @@ while [[ $# -gt 0 ]]; do
     # two of the three lanes, and a release on a box with no fleet worker in
     # reach had no way to ask for the disposable crabbox it can still use.
     --test-crabbox) TEST_TARGET=(--crabbox); shift ;;
+    --with-helpers) WITH_HELPERS=true; shift ;;
     -h|--help)
       sed -n '3,32p' "$0" | sed 's/^# \?//'
       exit 0
@@ -313,7 +327,7 @@ newest_release_with_manifest() {
   printf '%s\n' "$newest"
 }
 
-if [[ -x scripts/release-manifest.sh ]]; then
+if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
   bold "Updating the helper manifest..."
   MANIFEST_FILE="$STORE/release-manifest.json"
   CLI_VERSION_MANIFEST="$(jq -r .version package.json)"
@@ -388,5 +402,9 @@ if [[ -x scripts/release-manifest.sh ]]; then
   done
   green "Manifest at $MANIFEST_FILE"
 else
-  gray "No scripts/release-manifest.sh in this tree -- skipping helper manifest production."
+  if [[ "$WITH_HELPERS" != true ]]; then
+    gray "CLI-only attestation: skipping the helper manifest (pass --with-helpers to include it)."
+  else
+    gray "No scripts/release-manifest.sh in this tree -- skipping helper manifest production."
+  fi
 fi
