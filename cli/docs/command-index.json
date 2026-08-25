@@ -29168,7 +29168,7 @@
             }
           ],
           "examples": "$ agents traces sync\n  Push this device's derived, redacted trajectories to your Phoenix account.\n\n  $ agents traces sync --limit 20\n  Sync at most 20 sessions (useful for a first run on a large fleet device).\n\n  $ agents traces sync --dry-run --out ./trace-preview\n  Compute the shards from your real sessions.db and WRITE them locally — no\n  Phoenix sign-in, no worker, no upload. Point a console at ./trace-preview to\n  see your real trajectories before wiring the hosted path.",
-          "notes": "Reads from the local sessions.db, computes a derived SessionTrajectory (steps +\n  gaps + stats, no raw transcript text), redacts secrets, and PUTs each to\n  the agents-traces store.\n\n  An incremental gate (traces-sync.json ledger) means re-runs only upload\n  sessions whose file_mtime_ms changed since the last sync.\n\n  Sign in first with: agents auth login",
+          "notes": "Reads from the local sessions.db, computes a derived SessionTrajectory (steps +\n  gaps + stats, no raw transcript text), redacts secrets, and PUTs each to\n  the agents-traces store.\n\n  An incremental gate (traces-sync.json ledger) means re-runs only upload\n  sessions whose file_mtime_ms changed since the last sync.\n\n  On a real (non-dry-run) sync with the managed Phoenix backend, also\n  fire-and-forget registers this session with Prix (api.prix.dev) so the\n  console can serve live trajectories — a link failure never blocks sync.\n\n  Sign in first with: agents auth login",
           "subcommands": []
         }
       ]

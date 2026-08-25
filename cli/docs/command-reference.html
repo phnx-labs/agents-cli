@@ -4373,6 +4373,10 @@ Three or more selectors, and --tree with more than one selector, fail loud.</p><
   an incremental gate (traces-sync.json ledger) means re-runs only upload
   sessions whose file_mtime_ms changed since the last sync.
 
+  on a real (non-dry-run) sync with the managed phoenix backend, also
+  fire-and-forget registers this session with prix (api.prix.dev) so the
+  console can serve live trajectories — a link failure never blocks sync.
+
   sign in first with: agents auth login"><div class="command-head"><h3><code>agents traces sync</code></h3></div><p>Push derived, redacted trajectories (incremental)</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--limit &lt;n&gt;</code></td><td>Maximum number of sessions to sync in this run</td><td></td><td></td></tr><tr><td><code>--dry-run</code></td><td>Compute the shards from real sessions.db and WRITE them locally (no auth, no upload)</td><td></td><td></td></tr><tr><td><code>--out &lt;dir&gt;</code></td><td>Directory to write index.json + sessions/&lt;id&gt;.json (required with --dry-run)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>$ agents traces sync
   Push this device&#39;s derived, redacted trajectories to your Phoenix account.
 
@@ -4388,6 +4392,10 @@ Three or more selectors, and --tree with more than one selector, fail loud.</p><
 
   An incremental gate (traces-sync.json ledger) means re-runs only upload
   sessions whose file_mtime_ms changed since the last sync.
+
+  On a real (non-dry-run) sync with the managed Phoenix backend, also
+  fire-and-forget registers this session with Prix (api.prix.dev) so the
+  console can serve live trajectories — a link failure never blocks sync.
 
   Sign in first with: agents auth login</p></article>
 <article id="trash" data-search="trash trash  inspect and restore soft-deleted agent version directories -h, --help show help  "><div class="command-head"><h3><code>agents trash</code></h3></div><p>Inspect and restore soft-deleted agent version directories</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
