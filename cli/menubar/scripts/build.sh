@@ -151,10 +151,24 @@ codesign --force --options runtime --sign "$SIGN_ID" --identifier "$BUNDLE_ID" "
 # callers (release.sh, remote-sign-mac.sh) run this build under `agents secrets
 # exec apple.com`, the same vars the keychain helper + CLI binary notarize with,
 # so a release build fails loud here if they're missing. A debug build (local
-# Swift dev) skips notarization and never ships; an ad-hoc release (SIGN_ID="-",
-# no Developer ID) skips too and is caught by the prepack gate
-# (verify-menubar-helper.sh) so it can't ship un-notarized.
-if [ "$MODE" = "release" ] && [ "$SIGN_ID" != "-" ]; then
+# Swift dev) is ad-hoc signed and skips notarization; it is caught by the prepack
+# gate (verify-menubar-helper.sh) so it can't ship un-notarized. Anything signed
+# with a real Developer ID is notarized regardless of mode -- see the gate below.
+# The gate is the SIGNATURE, not the mode. It used to be
+# `[ "$MODE" = "release" ] && [ "$SIGN_ID" != "-" ]`, which meant a non-release
+# invocation on a box that HAS a Developer ID produced a real Developer-ID-signed
+# bundle and silently skipped notarization -- exit 0, self-tests green, and
+# `spctl` reporting `rejected / source=Unnotarized Developer ID`. Gatekeeper on
+# macOS 26+ rejects such a bundle as "damaged" and crashes AppKit at launch
+# (RUSH-2134), so that is a shippable-looking artifact that cannot run. The three
+# credential guards below also lived inside that branch, so the very check meant
+# to fail loud on missing creds was itself unreachable.
+#
+# Now: a Developer-ID signature ALWAYS implies notarization, whatever the mode.
+# An ad-hoc build (SIGN_ID="-") is the only exemption -- it cannot be notarized
+# by construction, and the prepack gate (verify-menubar-helper.sh) stops it from
+# shipping.
+if [ "$SIGN_ID" != "-" ]; then
   : "${APPLE_ID:?notarization requires APPLE_ID (from the apple.com secrets bundle)}"
   : "${APPLE_APP_SPECIFIC_PASSWORD:?notarization requires APPLE_APP_SPECIFIC_PASSWORD (apple.com bundle)}"
   : "${APPLE_TEAM_ID:?notarization requires APPLE_TEAM_ID (apple.com bundle)}"
