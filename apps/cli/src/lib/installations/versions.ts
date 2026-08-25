@@ -88,6 +88,7 @@ import { getWriter, getDetector } from '../staleness/registry.js';
 import { syncMemoryToVersionHome } from '../memory.js';
 import { listPluginSkillNames, resolveCommandSource, resolveSkillSource } from '../staleness/writers/sources.js';
 import { syncProjectResourcesToAgent } from '../project-resources.js';
+import { installClaudeStatusLine } from '../claude-statusline.js';
 
 /** Promisified exec for running shell commands. */
 const execAsync = promisify(exec);
@@ -2637,6 +2638,13 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     const trackerResult = installSessionTrackerHookSync(agent, version);
     if (!trackerResult.installed && trackerResult.error) {
       console.warn(`agents: SessionStart hook not installed for ${agent}@${version}: ${trackerResult.error}`);
+    }
+  }
+
+  if (agent === 'claude') {
+    const statusLine = installClaudeStatusLine(versionHome);
+    if (statusLine.error) {
+      console.warn(`agents: Claude status line not installed for ${agent}@${version}: ${statusLine.error}`);
     }
   }
 

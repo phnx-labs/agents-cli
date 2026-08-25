@@ -15,6 +15,7 @@
  *   - `__vault-age-helper`
  *   - `__secrets-get` / `__secrets-ping` / `__secrets-lock` (SYNC_* tokens)
  *   - `__shim`
+ *   - `__claude-statusline`
  *   - `__daemon-run`
  *
  * The tokens are imported from the leaf module sync-commands.ts — the SAME
@@ -79,6 +80,11 @@ if (process.argv[2] === '__shim') {
   const { execShimPassthrough } = await import('./lib/exec.js');
   const code = await execShimPassthrough(agent as import('./lib/types.js').AgentId, rawArgs, process.cwd(), pinned || undefined);
   process.exit(code);
+}
+
+if (process.argv[2] === '__claude-statusline') {
+  const { runClaudeStatusLine } = await import('./lib/claude-statusline.js');
+  process.exit(await runClaudeStatusLine());
 }
 
 if (process.argv[2] === '__daemon-run') {
