@@ -2328,6 +2328,7 @@ export class AgentManager {
     const resume = { id: agent.remoteSessionId ?? agent.agentId, message };
     const priorRuntime = {
       status: agent.status,
+      failure: agent.failure,
       completedAt: agent.completedAt,
       pid: agent.pid,
       startTime: agent.startTime,
@@ -2344,6 +2345,13 @@ export class AgentManager {
     // that happens, restore the stopped lifecycle state and keep its existing
     // metadata/log directory intact so the user can retry.
     agent.status = AgentStatus.RUNNING;
+    // Failure evidence describes the CURRENT attempt. Once a resume has
+    // successfully launched, retaining the prior terminal attempt's failure on
+    // a RUNNING (and eventually COMPLETED) teammate is false state. Clear it
+    // before either launcher persists RUNNING; priorRuntime restores it if the
+    // replacement launch fails, so a failed resume never erases the evidence
+    // needed to diagnose and retry the original attempt.
+    agent.failure = null;
     agent.completedAt = null;
 
     try {

@@ -190,6 +190,14 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       id, 'failure-team', 'claude', 'do a thing',
       null, 'edit', null, AgentStatus.COMPLETED, startedAt, completedAt, base,
     );
+    agent.failure = {
+      stage: 'execution',
+      code: 'process-exit-nonzero',
+      message: 'prior attempt exited 1',
+      exit_code: 1,
+      retryable: true,
+      observed_at: new Date().toISOString(),
+    };
     await agent.saveMeta();
     fs.writeFileSync(path.join(dir, 'prior-turn.log'), 'preserve me');
     const stdoutPath = path.join(dir, 'stdout.log');
@@ -240,6 +248,7 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(retained!.startedAt.toISOString()).toBe(startedAt.toISOString());
       expect(retained!.pid).toBeNull();
       expect(retained!.startTime).toBeNull();
+      expect(retained!.failure).toEqual(agent.failure);
       expect(fs.readFileSync(path.join(dir, 'prior-turn.log'), 'utf-8')).toBe('preserve me');
       expect(fs.readFileSync(stdoutPath, 'utf-8')).toBe('prior stdout');
       // Neither the launch nor the restore write ever reached the filesystem
@@ -249,6 +258,7 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(restored).not.toBeNull();
       expect(restored!.status).toBe(AgentStatus.COMPLETED);
       expect(restored!.completedAt?.toISOString()).toBe(completedAt.toISOString());
+      expect(restored!.failure).toEqual(agent.failure);
       expect(() => execFileSync('pgrep', ['-f', marker], { stdio: 'ignore' })).toThrow();
     } finally {
       fs.rmSync(base, { recursive: true, force: true });
