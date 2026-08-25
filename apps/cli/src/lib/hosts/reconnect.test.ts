@@ -219,7 +219,7 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
     const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'session', id: INJECTION_SID })], { encoding: 'utf8' });
     // No --attach-only: the peer's focus attaches a live pane or RESUMES a dead
     // one (RUSH-2085), so a reattach after the pane died never dead-ends.
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local']);
+    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', INJECTION_SID, '--local', '--reconnect-reattach']);
   });
 
   test.skipIf(!runsBash)('a 255 from the wrapped `agents` command comes back as REMOTE_EXIT_255_REMAPPED (254) — exercised end-to-end through reattachRemoteCommand, not just the wrapRemoteExitCode primitive', () => {
@@ -246,7 +246,7 @@ describe('reattachRemoteCommand — the real remote invocation, exercised throug
 
   test("the plain string, no shell needed: wraps in bash -lc around the peer's own recovery verb (attach-else-resume, no --attach-only)", () => {
     expect(reattachRemoteCommand(SESSION_TARGET)).toBe(
-      `bash -lc 'agents sessions focus ${SID} --local; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
+      `bash -lc 'agents sessions focus ${SID} --local --reconnect-reattach; rc=$?; [ "$rc" = "255" ] && rc=254; exit "$rc"'`,
     );
   });
 });
@@ -291,13 +291,13 @@ describe('reattachRemoteCommand — a launch target resolves on the PEER, needin
   test.skipIf(!runsBash)('sends --launch-id, so the box holding the hook records does the lookup', () => {
     const cmd = reattachRemoteCommand({ kind: 'launch', id: LAUNCH_ID });
     const res = execFileSync('bash', ['-c', argvShim + cmd], { encoding: 'utf8' });
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', '--launch-id', LAUNCH_ID, '--local']);
+    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', '--launch-id', LAUNCH_ID, '--local', '--reconnect-reattach']);
   });
 
   test.skipIf(!runsBash)('a launch id needing shell quoting still round-trips intact — no injection', () => {
     const nasty = "a'b; touch /tmp/PWNED-launchid-test; #";
     const res = execFileSync('bash', ['-c', argvShim + reattachRemoteCommand({ kind: 'launch', id: nasty })], { encoding: 'utf8' });
-    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', '--launch-id', nasty, '--local']);
+    expect(res.trimEnd().split('\n')).toEqual(['sessions', 'focus', '--launch-id', nasty, '--local', '--reconnect-reattach']);
   });
 });
 

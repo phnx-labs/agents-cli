@@ -707,6 +707,19 @@ async function focusResolvedSession(
     process.exitCode = 1;
     return;
   }
+  if (reconnectReattach) {
+    // The reconnect loop expected this pane to be alive. It isn't — the peer
+    // rebooted, tmux crashed, or the agent exited while the link was down.
+    // Warn before any recovery attempt (local resume OR remote hop) so the
+    // user always knows their original context was not directly recovered.
+    console.error(chalk.yellow(
+      `\nWarning: ${meta.shortId}'s pane is gone (reboot, tmux crash, or agent exited).`
+    ));
+    console.error(chalk.gray(
+      `  Prior context is in the transcript — starting recovery.\n` +
+      `  To see what happened: agents sessions preview ${meta.shortId}`
+    ));
+  }
   const remote = sessionProcessHost(meta, self);
   if (remote) {
     console.log(chalk.gray(`Recovering ${meta.shortId} on ${remote}…`));
@@ -716,19 +729,6 @@ async function focusResolvedSession(
       process.exitCode = 1;
     }
     return;
-  }
-  if (reconnectReattach) {
-    // The reconnect loop expected this pane to be alive. It isn't — the peer
-    // rebooted, tmux crashed, or the agent exited while the link was down.
-    // Starting a fresh copy preserves continuity, but the user deserves to know
-    // the original context was not recovered.
-    console.error(chalk.yellow(
-      `\nWarning: ${meta.shortId}'s pane died on this host (reboot, tmux crash, or agent exited).`
-    ));
-    console.error(chalk.gray(
-      `  Your prior context is in the transcript — starting a fresh copy.\n` +
-      `  To see what happened: agents sessions preview ${meta.shortId}`
-    ));
   }
   await resumeSessionInPlace(meta);
 }
