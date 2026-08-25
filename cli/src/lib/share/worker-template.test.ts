@@ -1,10 +1,14 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderWorkerScript } from './worker-template.js';
 
-// The Worker source is emitted as a string. Import it as an ES module via a
-// data: URI (same technique as publish.test.ts) and drive its `fetch` handler
-// against an in-memory BUCKET so the real route logic is exercised — no mocking
-// of the listing/format code under test.
+// The Worker source is emitted as a string. Import it as an ES module (temp
+// file — the script is past bun's data: URI NameTooLong limit) and drive its
+// `fetch` handler against an in-memory BUCKET so the real route logic is
+// exercised — no mocking of the listing/format code under test.
 
 interface StoredObject {
   body: Buffer;
@@ -68,8 +72,13 @@ function makeEnv() {
 }
 
 async function loadWorker() {
+  // The Worker source is an ES module. A data: URI used to work, but HMAC
+  // cookie helpers pushed it past bun's NameTooLong limit for data URLs.
   const src = renderWorkerScript();
-  return import(`data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`);
+  const dir = mkdtempSync(join(tmpdir(), 'share-worker-'));
+  const file = join(dir, `worker-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
+  writeFileSync(file, src);
+  return import(pathToFileURL(file).href);
 }
 
 async function put(worker: any, env: any, key: string, body: string, headers: Record<string, string> = {}) {
@@ -660,7 +669,7 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
     expect(store.has('7b28a4b7-1fb0-4abe-948d-32daf2ff7298/old')).toBe(false);
   });
 
-  it('400s org visibility on PUT (not supported in P1)', async () => {
+  it('400s org visibility on BYO WRITE_TOKEN PUT (Phoenix identity required)', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
     const res = await worker.default.fetch(
@@ -676,7 +685,7 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
       env,
     );
     expect(res.status).toBe(400);
-    expect(await res.json()).toMatchObject({ error: 'visibility org is not supported yet' });
+    expect(await res.json()).toMatchObject({ error: 'visibility me/org requires Phoenix identity' });
   });
 
   it('BYO WRITE_TOKEN path still publishes and stamps owner from the path namespace', async () => {
@@ -821,5 +830,282 @@ describe('defaultVerifyPhoenixToken real fetch/parse (RUSH-3135)', () => {
     );
     expect(denied.status).toBe(401);
     expect(store.has('alice/other')).toBe(false);
+  });
+});
+
+describe('me/org GET identity gate (PHNX-3260)', () => {
+  const originalFetch = globalThis.fetch;
+
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  function stubFetch(handler: (req: Request) => Response | Promise<Response>): Array<{ url: string; method: string; body: string }> {
+    const seen: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const req = input instanceof Request ? input : new Request(input, init);
+      seen.push({ url: req.url, method: req.method, body: await req.clone().text() });
+      return handler(req);
+    }) as typeof fetch;
+    return seen;
+  }
+
+  async function putAsPhoenix(
+    worker: any,
+    env: any,
+    key: string,
+    body: string,
+    identity: { userId: string; email: string },
+    visibility: 'me' | 'org' | 'public' | 'unlisted',
+  ) {
+    worker.hooks.verifyPhoenixToken = async () => identity;
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = env.PHOENIX_ID_BASE || 'https://phoenix.test';
+    const handle = identity.email.split('@')[0].split('+')[0];
+    const res = await worker.default.fetch(
+      new Request(`https://share.test/${key}`, {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix-token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': visibility,
+        },
+        body,
+      }),
+      env,
+    );
+    expect(res.status, `PUT ${key} as ${handle} vis=${visibility}`).toBe(200);
+    return res;
+  }
+
+  function setCookieHeader(res: Response): string {
+    const cookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
+    if (cookies.length > 0) return cookies[0]!;
+    return res.headers.get('set-cookie') || '';
+  }
+
+  it('public and unlisted GET stay anonymous 200', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/public-page', '<h1>public</h1>');
+    await put(worker, env, 'octocat/secret-report', '<h1>secret</h1>', {
+      'x-share-visibility': 'unlisted',
+    });
+
+    const listed = await worker.default.fetch(new Request('https://share.test/octocat/public-page'), env);
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get('cache-control')).toBe('public, max-age=60');
+    expect(listed.headers.get('X-Robots-Tag')).toBeNull();
+
+    const unlisted = await worker.default.fetch(new Request('https://share.test/octocat/secret-report'), env);
+    expect(unlisted.status).toBe(200);
+    expect(unlisted.headers.get('X-Robots-Tag')).toBe('noindex');
+  });
+
+  it('me GET with no auth 302s to Phoenix login?return=<this url>', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>mine</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => null;
+
+    const res = await worker.default.fetch(new Request('https://share.test/alice/secret'), env);
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe(
+      'https://phoenix.test/login?return=' + encodeURIComponent('https://share.test/alice/secret'),
+    );
+  });
+
+  it('me GET with no PHOENIX_ID_BASE 401s loud instead of bouncing', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    store.set('alice/secret', {
+      body: Buffer.from('<h1>mine</h1>'),
+      httpMetadata: { contentType: 'text/html' },
+      customMetadata: { visibility: 'me', owner: 'alice' },
+      uploaded: new Date().toISOString(),
+      size: 12,
+    });
+    worker.hooks.verifyPhoenixToken = async () => null;
+
+    const res = await worker.default.fetch(new Request('https://share.test/alice/secret'), env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'phoenix login is not configured' });
+  });
+
+  it('phoenix_ticket redeem sets HMAC cookie and 302s stripping the ticket (keeps other query)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>mine</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const seen = stubFetch(
+      () => new Response(JSON.stringify({ userId: 'alice', email: 'alice@acme.com' }), { status: 200 }),
+    );
+
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/secret?ref=slack&phoenix_ticket=tix-1'),
+      env,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('https://share.test/alice/secret?ref=slack');
+    expect(seen).toEqual([
+      { url: 'https://phoenix.test/api/v1/auth/ticket', method: 'POST', body: JSON.stringify({ ticket: 'tix-1' }) },
+    ]);
+
+    const setCookie = setCookieHeader(res);
+    expect(setCookie).toContain('__Host-phoenix_share=');
+    expect(setCookie).toContain('HttpOnly');
+    expect(setCookie).toContain('Secure');
+    expect(setCookie).toContain('Path=/');
+    expect(setCookie).toContain('SameSite=Lax');
+    expect(setCookie).toContain('Max-Age=604800');
+
+    const cookieValue = setCookie.split(';')[0]!;
+    const follow = await worker.default.fetch(
+      new Request('https://share.test/alice/secret', { headers: { cookie: cookieValue } }),
+      env,
+    );
+    expect(follow.status).toBe(200);
+    expect(await follow.text()).toContain('mine');
+    expect(follow.headers.get('cache-control')).toBe('private, no-store');
+    expect(follow.headers.get('X-Robots-Tag')).toBe('noindex');
+  });
+
+  it('me GET by a second identity 404s with the same body as a missing object', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>mine</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'bob', email: 'bob@acme.com' });
+
+    const denied = await worker.default.fetch(
+      new Request('https://share.test/alice/secret', { headers: { authorization: 'Bearer bob' } }),
+      env,
+    );
+    expect(denied.status).toBe(404);
+    expect(denied.headers.get('content-type')).toBe('text/plain');
+    expect(await denied.text()).toBe('not found');
+
+    const missing = await worker.default.fetch(new Request('https://share.test/alice/does-not-exist'), env);
+    expect(missing.status).toBe(404);
+    expect(await missing.text()).toBe('not found');
+  });
+
+  it('org GET 200s same-domain and 404s a mismatched domain', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/team', '<h1>org</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'org');
+    expect(store.get('alice/team')?.customMetadata.org_domain).toBe('acme.com');
+
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'carol', email: 'carol@acme.com' });
+    const ok = await worker.default.fetch(
+      new Request('https://share.test/alice/team', { headers: { authorization: 'Bearer carol' } }),
+      env,
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('cache-control')).toBe('private, no-store');
+    expect(ok.headers.get('X-Robots-Tag')).toBe('noindex');
+
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'dave', email: 'dave@other.com' });
+    const denied = await worker.default.fetch(
+      new Request('https://share.test/alice/team', { headers: { authorization: 'Bearer dave' } }),
+      env,
+    );
+    expect(denied.status).toBe(404);
+    expect(await denied.text()).toBe('not found');
+  });
+
+  it('org PUT from gmail 400s (public inbox)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@gmail.com' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/plan', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix-token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'org',
+        },
+        body: '<h1>org</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({
+      error: 'org visibility cannot use a public email domain',
+      domain: 'gmail.com',
+    });
+  });
+
+  it('valid bearer skips the login redirect on me GET', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>mine</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@acme.com' });
+
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/secret', { headers: { authorization: 'Bearer phoenix-token' } }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('location')).toBeNull();
+    expect(await res.text()).toContain('mine');
+  });
+
+  it('gallery and JSON listing omit me and org pages', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/public-page', '<h1>public</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'public');
+    await putAsPhoenix(worker, env, 'alice/only-me', '<h1>me</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    await putAsPhoenix(worker, env, 'alice/team', '<h1>org</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'org');
+
+    const listing = await worker.default.fetch(new Request('https://share.test/alice?format=json'), env);
+    const payload = await listing.json();
+    expect(payload.objects.map((o: any) => o.slug)).toEqual(['public-page']);
+    expect(payload.count).toBe(1);
+
+    const gallery = await worker.default.fetch(new Request('https://share.test/alice'), env);
+    const html = await gallery.text();
+    expect(html).toContain('public-page');
+    expect(html).not.toContain('only-me');
+    expect(html).not.toContain('team');
+  });
+
+  it('unsigned cookie is not accepted as identity (HMAC required)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>mine</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => null;
+
+    const exp = Math.floor(Date.now() / 1000) + 604800;
+    const payload = `alice|alice@acme.com|${exp}`;
+    const unsigned = Buffer.from(payload).toString('base64url');
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/secret', {
+        headers: { cookie: `__Host-phoenix_share=${unsigned}.deadbeef` },
+      }),
+      env,
+    );
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toContain('/login?return=');
+  });
+
+  it('me PUT without PHOENIX_ID_BASE 400s even with a Phoenix hook', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@acme.com' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/alice/secret', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix-token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'me',
+        },
+        body: '<h1>mine</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'visibility me/org requires Phoenix identity' });
   });
 });
