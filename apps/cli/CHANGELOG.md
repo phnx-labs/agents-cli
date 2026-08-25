@@ -1,5 +1,439 @@
 # Changelog
 
+## 1.22.48
+
+- **On your own machine, every Claude run uses your normal login — not the
+  worker setup-token (RUSH-2395).** The credential now follows **device role**,
+  not run mode. A device marked `config.role: personal` (your interactive box —
+  set it with `agents devices role <name> personal`) authenticates every Claude
+  run from its per-version login, whether it opens a TUI or is a headless
+  one-shot like `agents run claude "fix the bug"`. Before, the choice keyed only
+  on whether a prompt was present ("this opens a TUI", not "a human is present"),
+  so a headless run on your laptop grabbed the reserved `auth`-bundle setup-token
+  and took the session off your login — surfacing as `/status` reporting
+  `Auth token: CLAUDE_CODE_OAUTH_TOKEN`. The setup-token stays the credential for
+  headless runs on **worker** devices (and unmarked boxes), which have no
+  keychain login to defer to. Routines follow the same role gate. Source:
+  `apps/cli/src/lib/harness/adapters/claude.ts`,
+  `apps/cli/src/lib/exec.ts`, `apps/cli/src/lib/daemon/runner.ts`,
+  `apps/cli/src/lib/device-config.ts`.
+
+- **A hand-cut release no longer dead-ends on a fresh attestation store or a lost `RELEASE_ATTESTATION_DIR` (RUSH-2970).** Three traps that cost roughly eight failed release attempts across 1.22.43-1.22.46 are fixed at the source. (1) `release-attestation-produce.sh` now seeds `release-manifest.json` from the last published GitHub release before falling back to an empty one — a fresh store had no recorded `computer-mac` inputDigest, so the helper loop read "input changed" and told the operator to run `publish-computer-helper-mac.sh`, which does not write a manifest, so the instruction looped forever on a byte-identical helper. (2) `release-worktree.sh` now exports `RELEASE_ATTESTATION_DIR` to the caller's store when it is unset: the throwaway release worktree resolved its own empty `.release-attestations`, so `require` reported `missing exact attestation key` with `?` for every key component — which reads like a key mismatch rather than a wrong directory. An explicit export still wins. (3) `publish-computer-helper-mac.sh` now sources `headless-sign-context.sh` itself: its own documented invocation (`agents secrets exec apple.com -- ...`) injected the notary creds but left the Developer ID signing keychain locked, so a headless publish died in `codesign` with `errSecInternalComponent` unless the operator knew to source that context first — which nothing said. On a Mac without the release-box pass files it is a no-op. Source: `apps/cli/scripts/{release-attestation-produce,release-worktree,publish-computer-helper-mac}.sh`.
+
+- **Session rows show what the agent DID, and dead crash-orphans stop piling up (RUSH-3011).**
+  The `agents sessions watch --json` row (which the AGI EXT Fleet reads) now carries a
+  **recap** so a row reads as the agent's work, not its stale first prompt: `title` follows
+  a best-source-wins ladder — a `/rename`/harness `label` (which also holds an agent-generated
+  title) → the last agent line → the first-prompt topic — and `recapSource`
+  (`'label'|'last'|'prompt'`) names which rung won, so a session that produced work shows an
+  agent-derived line. The first
+  user turn is cleaned into `userPromptClean`/`userPromptKind` (with `lastAgentLine` exposed)
+  so a screenshot path folds to `[image]`, a pasted `$ cmd` to the command, and a `/skill`
+  install path to `/<name>` — path noise never shows on the "You" line — and the recap card's
+  `Prompt:` line uses the same cleaning. Separately, a crash-leaked `--device` tunnel session
+  that is genuinely dead and days-stale (`abandoned` + dead pid) is folded OUT of the
+  reconnectable set (`resumable: false`, `recovery: null`), so the "Needs reconnecting" list
+  stops ballooning; a live pid (idle-but-unfinished) or a recently-closed session is never
+  reaped. Source: `apps/cli/src/lib/session/{prompt,active,render}.ts`,
+  `apps/cli/src/lib/session/remote/watch.ts`, `apps/cli/docs/sessions.md`.
+
+- **Keep generated session names in `label`, separate from the first-prompt
+  `topic` (RUSH-3011).** Claude `ai-title` and `/rename` events now populate the
+  canonical name field consumed by fleet clients, and an empty live metadata
+  record can no longer erase an existing generated title or launch handle.
+  Source: `apps/cli/src/lib/session/discover.ts`,
+  `apps/cli/src/lib/session/db.ts`.
+
+- fix(teams): observe AgentManager's fire-and-forget init rejection so a lost init race (dir removed mid-mkdir) fails the awaiting caller instead of crashing the process as an unhandled rejection — the flake that failed two fully-green release attestation runs
+
+- **Per-account 429 backoff + auth verdicts derived from fresh usage fetches — the last four 'usage unavailable' accounts recover (RUSH-3036).** After the 20-min probe throttle shipped, four of eight Claude accounts still showed `usage unavailable`: the 429 backoff was per-PROVIDER, so the first account to hit its quota in a refresh pass parked `claude` entirely and every account after it in the loop's fixed iteration order was never fetched — the same accounts starved every pass. The backoff is now scoped per account (`usage-backoff.ts` records `claude@<usageKey>.<deadline>`; a provider-wide penalty still parks everyone, and callers with no account identity keep the old behavior). Second, the auth-health probe no longer spends a second request on the same endpoint: a fresh (≤20 min) successful usage snapshot is the same authenticated request with the same shared setup-token, so `probeAuthHealth` derives a `live` verdict from it and only fires a network probe when no fresh evidence exists — roughly halving fleet endpoint load. `agents devices ping --strict` passes `forceLive`, which skips the derivation entirely — its contract stays a genuinely live request that surfaces `revoked` immediately — and derivation additionally requires a local credential (`signedIn`), so a fleet-imported snapshot on an unsigned home never reads as `live`. The auth probes themselves are account-scoped too, so a probe 429 parks only its account. Source: `apps/cli/src/lib/usage-backoff.ts`, `apps/cli/src/lib/accounting/usage.ts` (`UsageOptions.usageScope`), `apps/cli/src/lib/auth-health.ts` (`verdictFromFreshUsage`), `apps/cli/src/lib/usage-refresh.ts`, `apps/cli/src/lib/daemon-ticks.ts`.
+
+- **`agents menubar doctor` no longer claims a healthy just-upgraded helper is "running the OLD binary" (RUSH-3038).** The stale-process check compared a pid start time parsed from `ps -o lstart`, which prints whole **seconds**, against the installed bundle's sub-second mtime. `restartMenubarHelperAfterSwap` restarts the helper within the same second as the swap that triggered it, so a correct upgrade always tripped the strict `<`: on zion at 1.22.46 the pid started at `…353000` and the bundle was written at `…353700` — 700 ms apart, one second — and doctor reported the helper stale and told the user their Accessibility grant "may not be trusted", after an upgrade that had already restarted it onto the new binary. The bundle mtime is now truncated to the same whole second before comparing, so a pid that started in the swap's own second reads fresh while a pid a full second or more older is still caught. Source: `apps/cli/src/lib/menubar/install-menubar.ts`.
+
+- **`agents run codex --mode auto` stops prompting for approval.** Codex declared only `plan`/`edit`/`skip`, so `--mode auto` silently degraded to `edit` — and `edit` is `approval_policy="on-request"`, which asks before every command the sandbox denies. Every unattended caller that passes `--mode auto` (AGI EXT's agent launches, teams teammates, routines) therefore sat on an approval dialog nobody was there to answer. Codex now has a real `auto`: the `agents-auto` permission profile, identical sandbox to `agents-edit` (workspace, `~/.agents`, the regenerable toolchain cache roots, network on), with `approval_policy="never"` — a sandbox-denied command surfaces to the model as a plain command failure it can work around instead of stopping the run. Autonomy is the approval axis only: `auto` does not widen the sandbox, and `--mode skip` remains the only mode that removes it. Interactive shim launches (a bare `codex` at your own terminal) still pin `edit`, where an approval prompt is the useful outcome. Source: `apps/cli/src/lib/codex-policy.ts`, `apps/cli/src/lib/harness/adapters/codex.ts`, `apps/cli/src/lib/agent-spec/agents.ts`, `apps/cli/src/lib/exec.ts`.
+
+- **Hooks can be scoped to a permission mode: new `matches.permission_mode` predicate (RUSH-3050).** A `hooks.yaml` / subrule `hooks.yaml` entry may declare `matches: { permission_mode: plan }` (string or array) so the hook fires only when the harness reports that mode in the hook's stdin JSON (`permission_mode`, or Grok-style `permissionMode`). The predicate is deliberately fail-open on absence: a harness that never reports a mode (Codex, and most others — Claude Code is the one that does) keeps firing the hook, so declaring it never silently disables a hook fleet-wide. Enforced in both the TS reference evaluator (`shouldFire()`) and the generated shim gate, pinned together by the existing conformance suite. Motivating case: the plan-presentation Stop hook fired on every stop in every session and false-positived on ordinary answers that mentioned plans; it can now declare `permission_mode: plan`. Source: `apps/cli/src/lib/types.ts` (`HookMatches`), `apps/cli/src/lib/hooks/match.ts`, `apps/cli/src/lib/hooks/cache.ts`, `apps/cli/docs/hooks.md`.
+
+- **New device config key `description` — a one-line, fleet-synced answer to
+  "what is this box FOR".** `agents devices config <name> description "gpu box
+  — cuda 12.4"` stores a single-line summary in the device's tracked
+  `~/.agents/devices/<name>/agents.yaml` under `config.description`, so it
+  syncs to every machine via `agents repo push/pull` exactly as `role` does,
+  and any box may set it for any device (`shared` visibility). Because it
+  will be shown by the device-list renderer it is validated: a newline is rejected outright and
+  the value is capped at 80 characters — over-long input fails with a readable
+  error naming the cap, never a silent truncation. `notes` is unchanged: it
+  stays the appended list of long-form operator scratch, and both key
+  descriptions now state the distinction. Source:
+  `apps/cli/src/lib/device-config.ts`.
+
+- **Dismissing a discovered device is now a fleet-wide fact (RUSH-3062).** The ignore-list lived at `~/.agents/.history/devices/ignored.json` — a gitignored, per-machine path — so a node dismissed on one box kept re-surfacing as an auto-discovery suggestion on every other box. It now lives in the tracked, synced central `~/.agents/agents.yaml` under `fleet.ignored`, a list of `{ name, ignoredAt, ignoredOn }` entries (who dismissed it, when, on which box — the read side for a future `agents devices ignored`). An ignored node is deliberately not a device, so it has no per-device doc; central agents.yaml is the established home (it already carries `fleet.defaults`). Writes go through the existing `updateMeta` path (`withMetaLock` + atomic write), and a malformed `fleet.ignored` block is still a hard error rather than a silently-emptied set. A one-shot migration folds any existing `ignored.json` into `fleet.ignored` (union by name, legacy `updatedAt` kept as `ignoredAt`) and removes the legacy file only after the central write lands; running it twice is a no-op. The `loadIgnored` / `isIgnored` / `addIgnored` / `removeIgnored` signatures are unchanged, so no call site churn. Source: `apps/cli/src/lib/devices/registry.ts`, `apps/cli/src/lib/devices/config-migration.ts`, `apps/cli/src/lib/state.ts`.
+
+---
+type: feat
+---
+
+Collect root-disk capacity in the existing device health probe and cache static hardware specifications for seven days.
+
+---
+type: feat
+---
+
+Put real capacity in the default `agents devices list` — a `spec` cell (cores / total RAM / total disk), a `disk` used column beside load and mem, and the per-device `description` as the tail column (truncated first on narrow terminals, then role; the numbers never truncate). Add `agents devices describe <name> <text>` (task-shaped sugar over the `description` config key) and `agents devices ignored` (dismissed nodes — when, and which machine dismissed them). `devices list --json` gains `description` and disk totals inside `health` (additive only).
+
+- **Interactive `agents run` now spawns directly by default (RUSH-3066).** `tmux.enabled` is an explicit per-device opt-in for addressable panes instead of the default wrapper: the wrap's benefit (a unique `%pane` so `agents sessions --active` can tell co-located agents apart, and `agents focus` re-attaching without forking) accrues to the control plane, while the cost — mouse, scrollback and clipboard behavior — is paid by whoever is at the terminal. Turn it back on per device with `agents config set devices.<name>.tmux on`. `--no-tmux` and `--disable-tmux` remain compatible no-ops while wrapping is off.
+
+---
+type: fix
+---
+
+Make opt-in tmux-wrapped runs default to mouse interaction, OSC 52 system clipboard integration, and 20,000 lines of scrollback while preserving the user's tmux configuration.
+
+- **`agents sessions trace --no-redact` reads honestly in compare and lineage too (RUSH-3077).** The single-trajectory footer already said `Unredacted (local only)` under `--no-redact`, but the compare (`--compare`) and lineage (`--tree`) renderers hardcoded a `Secret-redacted` footer regardless of the flag — claiming a redaction that never happened. Both now share the single-trajectory labelling logic (`redactionLabel`): compare derives it from the two compared trajectories' own `redacted` state (a mixed pair still reads redacted, never a false safe-to-share claim), and lineage takes the trace's redaction flag. Redacted-by-default output is unchanged. Source: `apps/cli/src/lib/session/trajectory-html.ts`, `apps/cli/src/commands/sessions-trace.ts`.
+
+- **BREAKING: the top-level `agents usage` command is removed (RUSH-3079).** It was a second, worse surface for the same data `agents view` already renders — per-account quota/rate-limit usage with the account, version, and auth state beside it — and in practice most harnesses printed `stale` or "does not publish usage data" there. Use `agents view` (optionally `agents view <agent>`, `--refresh` for an explicit collection, `--json` for scripts). The name is retired: `agents usage` fails as an unknown command and never auto-corrects into a live command. The shared usage library behind `agents view` and rotation/backoff is untouched. Source: `apps/cli/src/commands/usage.ts` (deleted), `apps/cli/src/cli/command-registry.ts`, `apps/cli/src/lib/startup/command-registry.ts`.
+
+- **`agents browser` binds `--device` at start (RUSH-3086, RUSH-3087).** `--device` stays on `agents browser start` and is rejected on later verbs; the starting machine records a local `task → device` index so `type`/`click`/`screenshot --task post` resolve the device without repeating the flag. A verb naming an unknown or killed task exits non-zero and lists the open tasks (real URL + device), and never opens a second browser. `screenshot -o /path/x.png` now writes exactly that path — the daemon still sandboxes its own cache, and the CLI copies out. Source: `apps/cli/src/lib/browser/task-index.ts`, `apps/cli/src/commands/browser.ts`.
+
+---
+type: fix
+---
+
+- **An offline device keeps its spec cell (RUSH-3096).** `agents devices list`
+  rendered a down box as a bare `ci-runner-fsn1  linux  offline`, because a failed
+  probe wrote a row with no hardware facts over the cached one. Cores, total RAM,
+  and root-disk capacity now survive an unreachable probe and render beside the
+  offline marker — `ci-runner-fsn1  linux  8c 16G 500G  offline`. Load, memory, and
+  disk-used stay blank (there is no current reading for a box that did not answer),
+  and the Fleet capacity footer still counts only reachable devices.
+  Source: `apps/cli/src/lib/devices/stats-cache.ts`, `apps/cli/src/commands/ssh.ts`.
+
+- **The macOS keychain broker (`Agents CLI.app`) now has a download-on-demand fallback (RUSH-3100).** The signed + notarized keychain helper still ships inside the npm tarball, but a release now also publishes an `Agents CLI.app.zip` GitHub release asset per tagged version. A machine whose tarball lacks the bundle fetches that asset for its exact CLI version on the explicit `agents setup secrets` path (and the upgrade self-heal) — verified by sha256 + codesign + Developer ID Team + notarization before install — reusing the shared helper-download machinery already behind the computer and menu-bar helpers. The secrets hot path (`getKeychainHelperPath`) stays synchronous and network-free: when no bundled helper exists it now fails loud pointing at `agents setup secrets` rather than a bare "reinstall". Unlike the menu-bar helper it pins no designated requirement, since keychain items are gated by the access-group entitlement + biometry, not a DR-keyed grant. Source: `apps/cli/src/lib/secrets/download-keychain.ts`, `apps/cli/src/lib/secrets/install-helper.ts`, `apps/cli/scripts/release.sh`.
+
+- **The menu-bar helper can be fetched on demand, mirroring the computer helper (RUSH-3100 Stage N).** `MenubarHelper.app` is now ALSO published as a signed + notarized `MenubarHelper.app.zip` GitHub release asset, so a machine whose npm tarball lacks the bundle can fetch + verify it from the `v<version>` release. `agents menubar enable` / `agents menubar setup` download it when no bundled or local `.app` is present; a downloaded bundle is verified (sha256 + `codesign --verify --deep --strict` + Developer ID Team `2HTP252L87` + a **designated-requirement pin** on bundle id `com.phnx-labs.agents-menubar` + `spctl` notarization) before it is ever installed — the DR pin is what keeps the Accessibility grant alive across upgrades, so a substituted bundle is refused loud, never silently accepted. The `.app` STILL ships inside the npm tarball this release (bundled-first, download-fallback); the download runs only on the explicit enable/setup path, never on the every-invocation startup self-heal, which stays synchronous and no-ops when no local source exists. The download and verify machinery is shared with the computer helper in a new `src/lib/helper-download.ts` (no duplicated code path). Source: `apps/cli/src/lib/helper-download.ts`, `apps/cli/src/lib/menubar/download-menubar.ts`, `apps/cli/src/lib/menubar/install-menubar.ts`, `apps/cli/src/lib/computer/download.ts`, `apps/cli/scripts/release.sh`.
+
+- **Fix: the menu-bar helper's Accessibility row now reads "AGI Menu", not "MenubarHelper" (RUSH-3101).** Since the RUSH-3076 grant-persistence fix, the compiled executable was still named `MenubarHelper`, and launchd execs that Mach-O directly — bypassing LaunchServices name resolution — so macOS fell back to `CFBundleExecutable` for both the Accessibility list row (blank icon) and the "would like to control this computer" prompt. The executable inside the bundle is now named `AGI Menu`; the bundle folder (`MenubarHelper.app`), bundle id (`com.phnx-labs.agents-menubar`), and designated requirement are all unchanged, so the existing Accessibility grant is unaffected by the upgrade. Every basename-matching check moved with the rename: `classifyMenubarProcesses`/`installedExecutablePath` (`install-menubar.ts`), the `orphan-reap.ts` protected-service regex, and the Swift side's `SingleInstance.swift`/`ChildProcessSelfTest.swift`, now reading a shared `HelperIdentity.executableName` constant. Source: `apps/cli/menubar/Package.swift`, `apps/cli/menubar/scripts/build.sh`, `apps/cli/menubar/Sources/MenubarHelper/HelperIdentity.swift`, `apps/cli/src/lib/menubar/install-menubar.ts`, `apps/cli/src/lib/tmux/orphan-reap.ts`.
+
+- **Fixed a module-initialization cycle that crashed any entry point reaching `helper-download` first.** `helper-download.ts` imported two pure sha256 helpers (`parseSha256Asset`, `sha256File`) from `computer/ssh-tunnel.ts`, whose import graph runs `browser/drivers/ssh` → `browser/chrome` → `secrets/*` → `secrets/download-keychain`, which imports back into `helper-download` while it is still evaluating — before `EXPECTED_TEAM_ID` is bound. The result was a hard `ReferenceError: Cannot access 'EXPECTED_TEAM_ID' before initialization` thrown from `secrets/download-keychain.ts:45`, which took down the `drift-sync` apply path and the `self-heal` isolated-home sweep (both run real subprocesses) and blocked release attestation, since the producer runs the full suite fail-closed. The two helpers now live in a dependency-free leaf module, `lib/sha256-asset.ts`, so nothing in the download path pulls the ssh/browser/secrets graph in at module-init time. Source: `apps/cli/src/lib/sha256-asset.ts`, `apps/cli/src/lib/helper-download.ts`, `apps/cli/src/lib/computer/ssh-tunnel.ts`.
+
+- **`agents accounts label` reads like the task: label by `<harness>@<version>`, or pick from a list (RUSH-3126).** Labeling the account behind a specific install used to require knowing its email — `agents accounts label codex work --account you@example.com` — even though the user is looking at `agents view codex`, which is organized by version. The first argument now also accepts `<harness>@<version>`: `agents accounts label codex@0.146.0 work` labels whatever account is signed in there, and the label stays bound to the account identity, so `codex#work` keeps selecting it after that account moves to a newer install. A bare-harness call with several signed-in logins opens an interactive picker (identity · default marker · versions) instead of erroring; the same account signed into multiple versions counts as ONE login, so it never demands a selector. Non-interactive callers keep the loud error, now naming both script-safe forms, and `--account <email|id>` still works. Passing both `@<version>` and `--account` is refused as contradictory. Source: `apps/cli/src/commands/accounts.ts` (`groupLabelIdentities`).
+
+- **Managed artifact sharing: sign in and publish with zero Cloudflare setup (RUSH-3135, Phase 1).** Signed-in users (`agents auth login`) publish to the already-live managed endpoint at `share.agents-cli.sh` — the Phoenix access_token from `phoenix-session.json` is the bearer, so there is no R2 bucket, Worker, or write token to provision. `share status`, `share list`, `share revisions`, and `unshare`/`share delete` resolve through the same `resolveShareBackend` seam, so a managed-only user can see and take down what they just published instead of being told to run `agents artifacts setup`. `share analytics` is a scoped P1 exclusion (Cloudflare Web Analytics is BYO): a managed user gets a message naming that, not the generic "Not configured" error. The Worker verifies `Authorization: Bearer` against Phoenix ID (`GET ${PHOENIX_ID_BASE}/api/v1/auth/me`), stamps `customMetadata.owner` with the verified `userId`, and namespaces the R2 key by that userId so one user cannot write another's prefix. `--visibility public|unlisted` (default `public`) replaces the `--unlisted`/`--private` booleans; those flags stay as hidden aliases mapping to `--visibility unlisted`. Unlisted GET now sends `X-Robots-Tag: noindex` (it was already hidden from the gallery/list). `org` visibility is 400 — that is Phase 2. `--meta owner=` / `visibility=` / `expires-at=` is rejected client-side (those keys are Worker-stamped). BYO Cloudflare is unchanged: a static `WRITE_TOKEN` is still honored when the bearer matches it (checked first, so the platform endpoint may set both principals); `AGENTS_SHARE_BACKEND=byo` or a caller-supplied write token forces the BYO path while signed in. Already-provisioned BYO endpoints need `agents artifacts share update` to pick up the new Worker (template hash changed). Source: `apps/cli/src/lib/share/{backend,worker-template,publish,delete,config}.ts`, `apps/cli/src/commands/share.ts`.
+
+- **Managed share deploy wires `PHOENIX_ID_BASE` so Phoenix-bearer auth survives `agents artifacts share update` (RUSH-3138).** Cloudflare's script-upload API clears Worker bindings/secrets wholesale; the managed Worker reads `env.PHOENIX_ID_BASE` to verify bearers at `${PHOENIX_ID_BASE}/api/v1/auth/me`, so every update wiped it and Phoenix PUTs 401'd while BYO `WRITE_TOKEN` kept working. The deploy path now re-applies `PHOENIX_ID_BASE` as a `secret_text` after every script upload (same Secrets API as `WRITE_TOKEN`), sourced from the CLI's `PHOENIX_ID_BASE` (env, else the deployed Phoenix ID service). Pure-BYO deploys do not set it. Source: `apps/cli/src/lib/share/{provision,backend}.ts`, `apps/cli/src/commands/share.ts`.
+
+- **Security: the remote browser-control consent gate now covers the whole launch path.**
+  `agents browser remote-control off` (the default) was only enforced on the
+  `browser start` command, but `navigate`, `click`, `screenshot`, `evaluate` and
+  the other page verbs open a browser implicitly when the caller has no live
+  task. A `browser navigate --device <box>` therefore opened a browser on a
+  machine whose owner never opted in, while `browser start --device <box>` was
+  correctly refused. The gate now sits in the daemon at the two points that can
+  launch a browser (`BrowserService.start` and the create branch of
+  `resolveOrCreateTask`), so every implicit-LAUNCH verb is covered. It does not
+  cover *attaching*: a request naming an existing task (`--task`, or the
+  single-match-by-caller path) returns before the gate and can drive that task's
+  tabs. That is pre-existing and tracked separately — `remote-control off` means
+  "no new browser", not "no access". The consent
+  marker rides the IPC request rather than the daemon's environment: a daemon
+  auto-started by a fleet-remote CLI inherits `AGENTS_FLEET_REMOTE=1`
+  permanently, and reading that would have refused every later local drive.
+  Source: `src/lib/browser/service.ts`, `src/lib/browser/remote-control.ts`,
+  `src/lib/browser/ipc.ts`, `src/lib/browser/types.ts`.
+
+- **`agents browser profiles edit`.** An existing profile's description,
+  endpoints, secrets, viewport, and binary could not be changed without deleting
+  and recreating it — `-d/--description` existed only on `create`, and
+  `updateProfile()` had no CLI caller at all. `profiles edit <name>` reuses
+  `create`'s flag spellings (minus `-b/--browser`, which keys the on-disk profile
+  cache) and validates the merged record, so a binary edit re-resolves the
+  browser path and a `--target-filter` edit re-checks the `--electron` gate.
+  Source: `src/lib/browser/profiles.ts`, `src/commands/browser.ts`.
+- **`profiles doctor` flags a profile that resolves to the wrong machine's
+  browser.** A profile declared by one device but bound to `cdp://localhost:PORT`
+  is evaluated on the machine running the command, so the name meant a different
+  browser on every box — silently handing an agent a logged-out stranger instead
+  of the credentialed profile it asked for. The check now names both the
+  declaring device and this one. `ssh://` profiles are unaffected: they address a
+  host, so they mean the same browser from anywhere.
+  Source: `src/lib/browser/runtime-state.ts` (`identityLoopbackMismatch`).
+- **Fixed: editing a profile's endpoint could collide with itself.** The local
+  port scan `createProfile` runs was never applied on update, and applying it
+  naively would have failed every edit against the profile's own stored port.
+  Extracted as `assertLocalPortFree(profile, { ignore })` and now used by both.
+  Source: `src/lib/browser/profiles.ts`.
+
+- **`agents browser profiles rename <from> <to>`.** A profile could not be
+  renamed at all: `profiles edit` refuses a name change because the name keys the
+  on-disk runtime dir, every endpoint/fork dir derived from it, and the
+  `browser.profile` pointer. The only route was delete-and-recreate, which
+  silently abandons the browser's `--user-data-dir` — where a profile's logins
+  live. On a real agent browser that is gigabytes of session state and every
+  account it has ever signed into. `rename` moves the config (staying in whichever
+  store it already lives in), moves every cache dir belonging to the old name, and
+  repoints both `browser.profile` and `browser.viewer` when either pointed there — a dangling `browser.viewer` sends every artifact back to the OS default handler, which is the exact bug the viewer seam was built to fix. Refuses while the profile is in
+  use, because moving a `--user-data-dir` out from under a running browser
+  corrupts it; refuses when the name exists in BOTH stores, since rewriting one
+  would leave the other listed under the old name with its data already moved
+  away; and validates every destination BEFORE moving any of them, so a
+  collision on the second endpoint cannot strand the first one's logins under a
+  name with no config entry. `os` joins `default` as a name a profile may not
+  take — it is the reserved `browser.viewer` value meaning the OS handler. Source: `src/lib/browser/profiles.ts`, `src/commands/browser.ts`.
+- **Profile-name validation is shared between `create` and `rename`.** The shape
+  rule lived inline in `profiles create`, so a second caller would have accepted
+  names `create` rejects. Now `assertRegistrableProfileName`, which also refuses
+  `default` — the reserved alias meaning "this machine's configured profile"
+  (RUSH-2709), not a name. Source: `src/lib/browser/profiles.ts`.
+
+- **User-facing pages open in your configured browser profile, not the OS
+  default.** `agents browser navigate` honoured `browser.profile` and nothing
+  else did: `agents fleet login`, `agents devices lease`, `agents feedback`,
+  `agents sessions trace --open`, and `agents browser sessions --open` each
+  shelled straight to `open`/`xdg-open`, so every one of them landed in whatever
+  the OS handler happened to be — on a Mac with Arc set as default, all of them
+  opened in Arc while the configured Comet profile sat unused. They now route
+  through one seam (`showUrl`/`showFile`), which resolves the viewer once.
+  This matters beyond tidiness: the configured profile is where the fleet's
+  logins accumulate, so a page opened there is one you are already signed in for,
+  and a login it acquires is inherited by every later agent.
+  The seam does not auto-start the browser daemon: showing a page is a side
+  errand, so blocking it on a cold start would be a surprising stall. Daemon
+  already running -> the viewer; not running -> the OS handler.
+  Source: `src/lib/open-url.ts`.
+- **New `browser.viewer` config key** (device scope) — a profile name, or `os`
+  to keep using the OS default handler. Unset follows `browser.profile`.
+  Deliberately distinct from `browser.profile`: one is the profile agents drive,
+  the other is the browser that shows you a page. Source: `src/lib/device-config.ts`.
+- **New `show` IPC action** — opens a tab bound to no task, so the abandoned-task
+  reaper never closes a page you are reading. That is the whole reason it is not
+  `navigate`. Screenshots, PDFs and recordings still go to the OS app, where
+  Preview and QuickTime are the better viewer.
+  Source: `src/lib/browser/service.ts`, `src/lib/browser/ipc.ts`.
+- **New `agents browser show <url|file>`** — the CLI entry point to that seam, so
+  external tools (a renderer's `--open`, a script) can show a page in the
+  configured profile instead of shelling to `open`. Use it instead of `navigate`
+  for anything a person will read: `navigate` binds a task and the reaper closes
+  a task's tabs. `--os-browser` forces the OS handler; `--json` reports where it
+  landed. Source: `src/commands/browser.ts`.
+
+- **`--device interactive` resolves to the machine the human is at.** `--device
+  auto` picks a box by load; this picks the one box someone is actually looking
+  at, pinned as `interactive.host`. It resolves in the shared host
+  matcher rather than per command, so `browser`, `run`, `sessions` and `secrets`
+  inherit it; `teams` and `ssh` resolve it explicitly because they leave the
+  fleet passthrough before the matcher runs. A few narrower `--device` surfaces
+  do not consult the matcher. None of them mis-routes: most fail loud, and
+  `devices harnesses` filters to an empty result. Wiring them up is a follow-up.
+  It exists because a skill cannot teach a host name: guidance that says
+  "deliver it to <box>" is wrong on every other fleet and stale the moment the
+  pin changes, so agents were left inferring the target or skipping the step. A
+  fixed token is something documentation can state literally and have be correct
+  everywhere.
+  When no host is pinned it refuses and names the command that fixes it, rather
+  than falling back to the local machine — running on a headless worker with
+  nobody watching is the exact failure the sentinel prevents, and it would fail
+  invisibly. Source: `src/lib/devices/interactive-host.ts`.
+
+- **`agents sessions stop <id>` ends a live agent outright, and a tmux-wrapped agent no longer leaves an orphaned dead session behind (graceful shutdown, #5a/#5b).** Two halves of one gap — a single close should tear down every layer (agent → tmux mux → tab):
+  - New verb `agents sessions stop <id>` on the session-lifecycle axis (beside `detach`/`attach`): it stops the interactive process and tears down its tmux/mux session — reusing `detach`'s exact `stopInteractive` teardown (`kill-session` when tmux-hosted, else SIGTERM→SIGKILL the pid) and resolution (remote sessions stopped over SSH, cloud/team refused) — but does NOT resume it headless. Use `detach` to keep an agent working unattended, `stop` when the work is over. AGI EXT calls it when a user genuinely closes an agent tab so the agent + mux shut down instead of lingering idle. Source: `apps/cli/src/commands/sessions-stop.ts`.
+  - The tmux-wrap `pane-died` hook is now `session_attached`-aware (`AGENT_HOOK_SCHEMA` v6): with a client attached it `detach-client`s as before (so `resolveAfterAttach` reads the exit status, EXEC-23b unchanged); with **no** client attached it `kill-session`s outright. A wrapped agent that exits unattended — a closed terminal, or a `/exit` after the user detached — previously left a dead `remain-on-exit` husk on the socket until the daemon's periodic reap, showing as an orphaned idle session. Source: `apps/cli/src/lib/tmux/session.ts`, `apps/cli/src/lib/exec.ts`.
+
+- **`agents accounts list` is grouped, aligned, and label-first (RUSH-3053).** The native-logins section was a ragged, ungrouped wall — 15 logins in one flat list, no columns, no labels, opaque ids dumped raw. It now groups logins **by harness** (printed once per group), aligns **label · identity · version** into columns, marks the **default account per harness** with `*`, and prints the `run <harness>#<label>` / `run <harness> --account <name>` selector hints inline. Provider bundles keep their own aligned section. `--json` output is unchanged. This completes RUSH-3053's list-redesign track — the `<harness>#<label>` account selector itself shipped in 1.22.47. The renderer is extracted as the pure, unit-tested `renderAccountList`. Source: `apps/cli/src/commands/accounts.ts`.
+
+---
+type: breaking
+---
+
+Browser profiles now live only in each declaring machine's `devices/<machine>/agents.yaml`. The fleet registry is the read-time union of those files: a name declared once is identity-bearing, while the same name declared by several devices is fungible. Leftover central `browser:` entries are not claimed on first read — run `agents browser profiles claim` on the machine that hosts the browser. Only profiles that machine can actually launch are moved into its device file; the rest stay central until that machine claims them. A configured default that no device declares is now an error on `agents browser start`, not a silent fallback to a logged-out `auto-chrome`. `profiles prune` only considers profiles this device declares (`--fleet` is gone; deleting a peer's declaration is not possible).
+
+---
+type: feat
+---
+
+- **`agents browser profiles list` shows WHERE, not a stored scope.** The
+  column is the devices whose own `devices/<machine>/agents.yaml` declares the
+  name — true by construction, no field to drift. `--json` adds `devices` and
+  `kind` (`identity` when exactly one device declares the name, `fungible` when
+  several do). `profiles add` is an alias of `create` and prints
+  `Added "<name>" on <device> (port N).`
+  Source: `src/commands/browser.ts`.
+- **`profiles doctor` fails `where` on the original comet-local shape.** An
+  identity-bearing name whose endpoint is loopback, viewed from a box that is
+  not the declaring device, exits non-zero and names both machines. Local
+  binary/port/onboarding checks are skipped so they cannot paint a green local
+  chromium over someone else's logins. `ssh://` endpoints and fungible names
+  are unaffected.
+  Source: `src/lib/browser/runtime-state.ts` (`identityLoopbackMismatch`),
+  `src/commands/browser.ts`.
+
+---
+type: breaking
+---
+
+`agents browser` no longer asks the caller which machine a profile lives on. The daemon reads the device-declaration registry: a name this machine declares connects locally; a name only other machines declare is tunnelled to a reachable declaring device (and the command output names which one); a name nobody declares fails loudly, listing similar names, and never auto-creates a logged-out local browser. Identity-bearing profiles share one connection (no Electron fork, no second chrome-data). Runtime keys are `<profile>@<device>` instead of `<profile>@endpoint-N`; leftover `@endpoint-N` dirs are renamed onto the new key.
+
+- **`browser remote-control off` now gates *attaching* to a running browser, not just *launching* one (RUSH-3064).** PR #2932 moved the consent gate to `BrowserService.start` and the create branch of `resolveOrCreateTask`, closing the implicit-launch bypass — but the two early-return attach paths (an explicit `--task`, or a lone caller-identity match) returned before it, and `tabAdd` reached `createPageTarget` unconditionally. So on a machine whose browser was already running with live tasks, a fleet-remote caller could act in the owner's *authenticated* profile with consent off (`agents browser tab-add --device <box> --task <name>` — and task names are discoverable through the ungated `status`). The gate now sits at the top of `resolveOrCreateTask`, the one chokepoint every page/close verb resolves through, so a fleet-remote attach is refused exactly as a fleet-remote create already was. It stays per-request (`IPCRequest.fleetRemote`), never the daemon's env, so an auto-started daemon that inherited `AGENTS_FLEET_REMOTE=1` never refuses a subsequent local drive. Local drives are unaffected. Source: `apps/cli/src/lib/browser/service.ts`.
+
+---
+type: fixed
+---
+
+A leftover local `comet-local@endpoint-N` chrome-data on a worker is no longer renamed onto the declaring device's key and attached over localhost when the daemon should tunnel. Identity-bearing browsers stay on the declaring machine.
+
+---
+type: fix
+---
+
+`agents devices capture` no longer wipes `fleet.ignored` — the captured manifest carries device dismissals forward instead of rebuilding the fleet block without them.
+
+---
+type: feat
+---
+
+- **Deletion verbs normalize on `remove` (specific item) and `prune` (bulk
+  stale), old spellings kept as hidden aliases.** The CLI had drifted into seven
+  different words for "delete" across groups — `remove`, `rm`, `delete`, `gc`,
+  `cleanup`, plus `prune`. The canonical pair `remove <name>` / `prune` (already
+  the pattern in `commands`, `hooks`, `skills`, `versions`) is now applied to the
+  stragglers: `agents route rm` / `agents devices rm` / `agents projects rm` make
+  `remove` the primary spelling (`rm` stays an alias); `agents browser profiles
+  delete` → `remove` (alias `delete`); and the bulk-stale sweeps `agents browser
+  gc`, `agents lease gc`, `agents mailboxes gc`, and `agents routines cleanup`
+  become `prune` (each old verb stays a hidden alias). No invocation breaks — the
+  old verbs still resolve; they just no longer appear in `--help`. `agents
+  secrets remove`/`delete` (key vs whole-bundle) and `agents artifacts share
+  delete`/`unshare` are deliberately left as-is: those pairs encode a real
+  distinction, not drift. Source: `apps/cli/src/commands/{route,ssh,projects,
+  browser,lease,mailboxes,routines}.ts`.
+
+- **An interactive `--device` agent now survives a dropped connection, and one blink no longer takes out every tab (RUSH-3125).** A remote interactive agent was a direct child of the sshd session holding its TTY, so a brief network disruption SIGHUPed it and the in-flight turn was lost — while the auto-reconnect layer re-attached on the stated premise that "the agent is still running there." Durability had been gated on the peer's `tmux.enabled`, which defaults **off** (and was off across the whole fleet), even though that toggle is an ergonomics preference about tmux's mouse, clipboard, and scrollback at the local operator's keyboard. The two are now separate: the interactive dispatch exports `AGENTS_REMOTE_INTERACTIVE=1` and the peer wraps the run in a detached tmux session regardless of the local toggle, so the agent outlives the link that carries it. `--raw`, `--no-tmux`, and `AGENTS_NO_TMUX=1` still win, so the escape hatch keeps working over `--device`; a remote run on a peer with **no tmux installed** is now refused with an install hint rather than started as something a blink would kill. Separately, the interactive stream no longer rides the shared `ControlMaster` — `ControlPath=cm-%C` hashes only host/port/user, so every agent tab pointed at a peer shared one master and OpenSSH closes all its channels when it dies (six tabs on one socket, observed live). Probes and fan-outs keep multiplexing. Source: `apps/cli/src/lib/exec.ts` (`shouldWrapInTmux` → `resolveTmuxWrap`), `apps/cli/src/lib/hosts/dispatch.ts`, `apps/cli/src/lib/types.ts`.
+
+---
+type: feat
+---
+
+Feed attention is now modeled as an explicit lifecycle the CLI reconciles, the foundation for a feed-driven Needs-You surface. `OpenBlock` carries `generation`/`source`/`state`/`sourceCursor` (back-compatible — derived for existing blocks), the answer/continue/clear paths write a resolution tombstone before the block clears so a resolved ask can no longer silently resurrect, and a new pure `reconcileAttention` merges the open-block ledger, session lifecycle, and a CLI-supplied PR signal into one canonical `AttentionItem`.
+
+- **Stream and answer the canonical operator feed.** `agents feed watch --json`
+  now emits one versioned agents, attention, activity, and scope projection for
+  thin clients, including retained peer rows across disconnects. `agents feed
+  answer <attention-key>` atomically claims the first answer and routes it over
+  the recorded reply rail; concurrent losers return `already_answered` without
+  injecting twice. Pull-request attention is refreshed by the CLI on a bounded
+  TTL. Source: `apps/cli/src/lib/feed/{watch,answer,pr-status}.ts`.
+
+- **`agents auth` help no longer claims plan tiers.** The command's description
+  now reads "the account layer behind team spaces" — there are no plan tiers —
+  and its help notes state that signing in is optional: every local feature
+  works with no account, and team spaces are the one thing an account unlocks.
+  READMEs and docs updated to match, and license references now name
+  FSL-1.1-Apache-2.0. Source: `apps/cli/src/commands/auth.ts`.
+
+- **The `git-output` tests no longer fail on any box that exports a git identity (unblocks the release attestation).** `git-output.test.ts`'s fixture authored its commits with `-c user.email=…`, but git's `GIT_AUTHOR_EMAIL` / `GIT_COMMITTER_EMAIL` environment variables **outrank** `-c` config — so on a machine that exports them (developer laptops and the agent fleet do) every fixture commit was silently re-authored to the ambient identity, `collectCommits` matched none of them, and four tests failed with a bare `expected +0 to be 2`. CI never caught it because its runners export no such vars, which made this a local-only failure that also wedged `release-attestation-produce.sh` — that script is fail-closed, so no attestation was written and no release could be cut from an affected box. The fixture now passes identity through the environment it builds for git, and always assigns those four vars so an ambient value can never decide fixture authorship. Verified by causation: the unchanged test is 4-failed with the vars set and 9-passed with them cleared. Source: `apps/cli/src/lib/output/__tests__/git-output.test.ts`.
+
+- **`permission_mode_not` was typed, documented, and silently inert — every gated hook fired anyway (RUSH-3116).** The predicate shipped in `shouldFire()` (`src/lib/hooks/match.ts:156`), but nothing at runtime calls that function: the generated hook shim decides fire/skip with a **hand-mirrored Python copy** of the same logic embedded in `src/lib/hooks/cache.ts`, and the mirror was never updated. So `matches: {permission_mode_not: plan}` fell through to `return True` and the hook ran in plan mode regardless — fail-open, so nothing was left unguarded, but the predicate did nothing while still charging a Python gate subprocess per fire. Verified on published 1.22.47: `MATCHES_JSON='{"permission_mode_not":"plan"}'` against a `permission_mode: plan` payload printed `FIRE`, while the positive `permission_mode` control correctly printed `SKIP`. The Python gate now implements the negative form with the same fail-open-on-absence and camelCase (`permissionMode`) handling as the TS reference. Source: `apps/cli/src/lib/hooks/cache.ts`.
+
+- **The shim/TS conformance suite now pins itself to the `HookMatches` surface, so a predicate cannot ship half-implemented again.** `cache-matches.test.ts` already cross-checked the shim's real bash+Python decision against `shouldFire()` "so the two implementations can't drift" — but only over a hand-written fixture list, and `permission_mode_not` had no fixture, so the suite stayed green through the drift. A new test reads the `HookMatches` interface out of `types.ts` and fails with the offending key name when any declared predicate has no conformance fixture; `permission_mode_not`, `git_dirty` and `project_has` were all uncovered and now have fixtures. Source: `apps/cli/src/lib/hooks/cache-matches.test.ts`.
+
+- **New hook predicate `matches.permission_mode_not` — gate a hook OFF in one
+  mode without enumerating every other one.** The existing `permission_mode` is
+  an allowlist, so "run everywhere except plan mode" had to be spelled as a list
+  of every other mode — and that list silently stops matching the moment a
+  harness adds or renames one, which for a guard means it quietly stops
+  guarding. The new predicate names the mode to skip instead, so an unknown mode
+  still fires: the failure direction is "ran unnecessarily", never "did not
+  run". Same fail-open-on-absence rule as its positive twin (a harness that
+  reports no mode keeps firing), reads both `permission_mode` and Grok's
+  camelCase `permissionMode`, and ANDs with the positive form when both are
+  declared. Motivation, measured from `~/.agents/.cache/perf/perf.db`: nine
+  guards fire on **every** `Bash` tool call for a combined 292 ms before the
+  command runs, across 285,667 recorded fires of which 284 (0.099%) changed the
+  outcome — and four of them (`merge-guard`, `pr-description-reminder`,
+  `large-file-add-guard`, `git-require-clean-tree`) cannot fire meaningfully
+  during a planning turn. Source: `apps/cli/src/lib/hooks/match.ts`,
+  `apps/cli/src/lib/types.ts`, `apps/cli/docs/hooks.md`.
+
+- **Interactive Claude on a keychain-less Linux worker now authenticates from an attached setup-token, instead of falling back to an empty per-version login and printing "looks logged out".** Two gaps combined to break it: (1) `generateVersionedAliasScript` — the `claude@<version>` alias shim `agents run` actually invokes for a pinned/balanced version — carried a **hand-copied subset** of the config env that had dropped the Linux `.oauth_token` fallback block the main shim's `claudeAdapter.shimConfigEnvBash` has (the alias env now reuses that adapter block verbatim via `VERSION_DIR`, so the two can't drift again); and (2) **nothing wrote the `.oauth_token` file** the shim reads — it was referenced only by the read in the shim, never created — so the fallback could never fire. `agents accounts attach <setup-token-account> claude@<version>` now writes the resolved setup-token to `<version-home>/.claude/.oauth_token` (mode 0600) on Linux, a no-op on macOS where the credential lives in the keychain. Headless dispatch was unaffected (it injects the token via `buildExecEnv`); this fixes the interactive path only. Source: `apps/cli/src/lib/installations/shims.ts`, `apps/cli/src/commands/accounts.ts`.
+
+- **A regression test now pins the `claude@<version>` alias shim to the `.oauth_token` fallback**, so the alias env cannot silently drop it again. `generateVersionedAliasScript('claude', …)` is asserted to contain the block, alongside the existing main-shim assertion. Source: `apps/cli/src/lib/installations/shims.test.ts`.
+
+- **`agents run claude --interactive` on a worker no longer prints a false "⚠ claude looks logged out" banner** when it authenticates from a setup-token. The pre-launch check probed only native credentials (empty on a keychain-less worker), so it warned even though the shim's `.oauth_token` fallback authenticates the run. It now also treats a resolvable per-version setup-token as signed in (no-op on macOS, where the credential is in the keychain). Source: `apps/cli/src/commands/exec.ts`.
+
+- **A leased box that can't finish setup fails loud and is stopped, instead of provisioning a billed box that dies at "agents-cli is not set up".** `agents run … --lease` ran `agents setup` on the fresh box with `>/dev/null 2>&1 || true` — output and exit both discarded — so a setup that never left `~/.agents/.system` a git repo was invisible, and the agent then ran straight into the run-side gate (`ensureInitialized`) that refuses with *"agents-cli is not set up"*. The bootstrap now gates on that exact postcondition: it captures `agents setup`'s output, and if the system repo still isn't a git repo it prints the real cause and aborts (exit 97) rather than running the agent. A box **this run provisioned** whose bootstrap failed is stopped (even without `--fresh`/`--keep-box`) so unusable capacity doesn't bill until the idle-GC window; a **reused** box is never auto-stopped. A `~/.agents` config-copy failure is now surfaced instead of silently swallowed. Source: `apps/cli/src/lib/crabbox/lease.ts`.
+
+- **New versions are licensed FSL-1.1-Apache-2.0.** Use, modification, and redistribution remain free for every user. Offering agents-cli as a competing commercial product or service is barred. Each version converts to Apache-2.0 two years after it is made available. Already-shipped Apache-2.0 versions are unchanged. Source: `LICENSE`, `apps/cli/LICENSE`.
+
+---
+type: fix
+---
+
+AGI Menu no longer re-prompts for Accessibility on dev machines, and the clip-paste hotkey (Cmd-Shift-V) no longer depends on the grant at all. A locally-built (ad-hoc) menu-bar helper now signs under a distinct `com.phnx-labs.agents-menubar.dev` bundle id, so it can never poison the shipped app's Accessibility grant (macOS keys the grant to the bundle id and revokes it when a same-id binary fails the stored Developer-ID code requirement). An ad-hoc build also can no longer overwrite a healthy Developer-ID install when the recorded owner path vanishes. A release now hard-fails if the shipped helper's designated requirement ever drops the pinned bundle id or Developer ID team, since that would silently revoke every user's grant on upgrade. And when the grant is missing, Cmd-Shift-V now silently copies the `host:path` reference to the clipboard (press Cmd-V) instead of re-showing the system permission modal on every paste — auto-type stays on only where Accessibility is already granted.
+
+---
+type: fix
+---
+
+Cmd-Shift-V once again pastes the clip reference in a single keystroke. 1.22.47 decoupled the paste from Accessibility so it never prompted — but that meant an ungranted machine silently fell back to copying the token to the clipboard, so you had to press Cmd-V yourself (two keystrokes). The helper now prompts for Accessibility **once** per launch to restore the one-keystroke auto-type, then falls back to the clipboard silently if you decline (no per-paste nagging). Because dev builds now use a distinct `.dev` bundle id and the release pins the helper's designated requirement, granting it once sticks across upgrades — so a single prompt is all it takes.
+
+- **Auto-reconnect now works for every harness, not just Claude (RUSH-3125).** When an interactive `--device` run lost its link, only Claude ever reconnected. Claude is handed a `--session-id` before launch, so its id survives the drop; every other harness's real session id is coined on the peer and was read back over SSH *after* the interactive stream returned — that is, over the link that had just died. The read failed exactly when it was needed, so the run had no id to reconnect with and the process exited straight to a bare shell. A Grok tab therefore showed nothing at all while a Claude tab beside it counted down. Reconnect now falls back to the launcher-minted `AGENT_LAUNCH_ID`, which is known before the connection exists and so cannot be lost with it, and the peer maps it to the real session with a purely local lookup. Codex, Grok, Kimi, Droid, Cursor, OpenCode and the rest recover for the first time. Source: `apps/cli/src/lib/hosts/reconnect.ts` (`pickReconnectTarget`), `apps/cli/src/commands/exec.ts`.
+- **`agents sessions focus --launch-id <id>`** targets a run by the launch id its dispatcher minted instead of a session id, resolving it from that machine's own hook records. This is what makes the reconnect above work with no network at the moment there is none; it is also usable directly when you know the launch id but not the session. An unknown launch id fails loudly rather than opening the picker, so an automated reattach can never strand itself at an interactive prompt. Source: `apps/cli/src/commands/focus.ts`.
+- **The reconnect give-up notices name a command that still exists (RUSH-3125).** When the retry window closed, all three notices told you to run `agents reconnect <id>` — a command deprecated and hidden in favour of `agents sessions resume`, so the advice printed at the one moment you needed something that worked was stale. They now name `agents sessions resume <id>`, or for a launch-id target the peer-side resolver, since no local verb accepts a launch id. Source: `apps/cli/src/lib/hosts/reconnect.ts` (`recoveryHint`).
+
+- **Reconnect waits minutes instead of 90 seconds, counts down, and Ctrl-C works (RUSH-3125).** The retry budget was 6 attempts over a 2/4/8/16/30/30 backoff — about **90 seconds**, shorter than a laptop lid close, a Wi-Fi handoff, a VPN or Tailscale re-auth, or a router reboot. Worse, timers are suspended across sleep, so on wake the whole backoff fired back-to-back before the network was up and the budget was gone in seconds. The bound is now a **15-minute wall-clock window** over an unproductive streak, and it still resets the moment a reattach reconnects and holds — so a session that blinks all day keeps reconnecting, exactly as before. The notice counts the window down (`Reconnecting in 30s · 12m14s left · attempt 7 · Ctrl-C to stop`) rather than printing an attempt fraction that no longer says when it stops. **Ctrl-C during the wait** previously hit node's default handler and killed the whole process mid-notice, dropping you at a bare shell with no hint the agent was still alive on the peer; it now exits the loop cleanly (130) and prints where the agent is and how to get back.
+- **The terminal is restored after an interactive remote stream dies (RUSH-3125).** `ssh -tt` leaves the local tty in raw mode, and an agent TUI killed by a dropped link never sends its own exit sequences — so focus reporting and the mode/colour-scheme reports stayed armed and the terminal answered back at a shell that was not expecting it, littering the screen with `^[[?997;1n ^[[I ^[[O`. Those bytes were also still queued on the tty, so the next reattach handed them to the agent as if they had been typed. A `stty -g` snapshot is now taken before the spawn and restored after, the DEC modes a TUI arms are reset (focus, bracketed paste, alt screen, mouse tracking, cursor), and the input buffer is drained. Done in `sshStream` itself, so every caller that opens an interactive remote stream is covered. Source: `apps/cli/src/lib/ssh-exec.ts`, `apps/cli/src/lib/hosts/reconnect.ts`.
+
+- **A release no longer needs `main` to hold still — publish is decoupled from live `main` (RUSH-2395 audit).** `release.sh` used to squash-merge the release PR into `origin/main` and then refuse to publish unless `main`'s tree byte-matched the attested release tree — so any commit that landed on `main` during the release (or a `CHANGELOG` merge conflict) killed it, forcing a ~15-minute quiet window that a busy fleet rarely offers. It now **tags and publishes the attested release commit itself** — the exact tree CI attested and the tarball was packed from — and merges the version-bump PR **asynchronously, after publish, best-effort**. The published bytes are the attested tree by construction, so `main` can churn freely and the bump-merge can be deferred or hand-resolved without ever wedging the release. The attestation of the release-commit tree remains the sole functional gate; the tag push and publish routing stay lease-gated. The catch-up recovery path (registry behind a `main` already at the target version) is unchanged. Source: `apps/cli/scripts/release.sh`.
+
+- **Fixed: `resolve-target.test.ts` failed on any machine actually named `mac-mini` or `zion`.** The
+  fixtures wrote device declarations for two real fleet hostnames and then asserted the resolver
+  would tunnel to them. On a box with that `machineId()` the resolver correctly reports the profile
+  as locally declared, so the tunnel assertions failed — green on Linux CI, red on both Macs, which
+  is where releases run. The suite is now hermetic: fixtures use `peer-alpha`/`peer-zulu`, keeping
+  the sort order the "first reachable declaring device" assertions depend on.
+  Source: `src/lib/browser/resolve-target.test.ts`.
+
+- **A session launched with a skill is no longer named after the skill's install path.** Claude derives its generated `ai-title` from the first turn, so a session opened with `/continue` (or any skill) was named `Base directory for this skill: /home/…/.claude/skills/continue` — the scaffolding line the skill injects, not the task. That name lands in `SessionMeta.label`, which wins on **every** surface for the session's whole life: the interactive `agents sessions` preview header, `--flat` / `--tree`, the `agents feed watch` / `sessions watch` streams, the AGI EXT Fleet row, and the editor tab title. The generated title now goes through `classifyUserPrompt` and collapses to `/<skill>` when — and only when — the classifier reports that injected line. A user's `/rename` (`custom-title`) is never rewritten, including one that merely names a `skills/…` path. Fixed at the one point where the label is composed, so every reader inherits it with no reader-side special-casing. **Not retroactive:** transcript rescans are `(mtime, size)`-gated with no scan-version invalidation, so a session already indexed under the old derivation keeps its stored label until that file next changes and triggers a rescan — tracked in RUSH-3122. Scoped to Claude's `ai-title`; a harness that supplies its own title verbatim (e.g. Cursor's `chatMeta.title`) is unaffected and untouched (RUSH-3123). Source: `apps/cli/src/lib/session/discover.ts` (`finalizeClaudeScan`).
+
+- **`agents sessions preview` shows the fan-out a session left behind, on remote rows too (RUSH-3091, RUSH-3095).** The Doing line now carries `N sub-agents · N background shells`. Both counts are persisted at scan time (`sessions.sub_agent_count` / `background_shell_count`, schema v40) rather than only recomputed per render, which is what makes them visible on a **remote or unindexed row** — that path renders from `SessionMeta` alone through `formatMetaOnlyBody`, so it had no events to derive from and silently showed no fan-out at all. A freshly derived count still wins when the caller has parsed events, since the column lags the transcript by one scan. Background-shell detection is a per-harness registry probed against real transcripts, not assumed: claude/kimi flag `Bash` with `run_in_background`, grok flags `run_terminal_command` with `background`; codex and droid record no such concept and cursor persists no tool calls locally, so those render **nothing** rather than `0 background shells` — a zero would assert "none running" where the truth is "cannot know", and `NULL` (not scanned) stays distinct from `0` (scanned, none found) for the same reason. The counts mean "started / left behind", never "still running": a transcript records a start and never a death, the same trap `agents devices ps` documents, so live status stays with `sessions --active`. Source: `apps/cli/src/lib/session/highlights.ts`, `apps/cli/src/lib/session/{db,discover}.ts`, `apps/cli/src/commands/sessions-picker.ts`.
+
+- **`agents sessions trace` now reads newer Codex sessions by program, not a wall of "exec".** Codex `gpt-5.6-sol` (codex ~0.145+) runs every shell command inside a JS cell — a `custom_tool_call` named `exec` whose code is `await tools.exec_command({cmd:"git status …"})`. The trace now unwraps that cell to the real shell command, so a Codex trajectory reads `agents 68% · git 15% · scp 13%` with `git fetch origin` / `sed -n …` steps and exit codes, exactly like Claude's `Bash` and Droid's `Execute` — instead of `exec 100%` with every step labeled `exec`. Genuine non-shell cells (`tools.view_image`, raw JS) stay labeled by their code. Source: `apps/cli/src/lib/session/parse.ts` (`extractCodexExecCommand`), `trajectory.ts` (`SHELL_TOOLS`).
+
+- **`agents sessions trace` compares two sessions.** Pass exactly two selectors and the same command renders a **compare**: the two sessions' tool sequences aligned by tool name, the first divergence point (where the runs' tool order stops lining up), the steps each session ran that the other never did, and a per-session summary — in the same three renderings (HTML with stacked lanes on a shared time axis, compact text, and `--json` with `layout: 'compare'`). Three or more selectors, or `--tree`, still fail loud — lineage (a parent + its team) lands in a follow-up PR. Source: `apps/cli/src/lib/session/trajectory-compare.ts`, `apps/cli/src/commands/sessions-trace.ts`.
+
+- **`agents sessions trace <id> --tree` renders a team's lineage.** The third layout of the trace surface, after the single trajectory and the two-session compare: the selected session and every session it spawned, drawn as a delegation graph. The edges are read from the session index, not inferred — a teammate's `meta.json` `parent_session_id` (`teamOrigin.parentSessionId`), with the team's agreed-on spawner (`groupSessionsByTeam().spawnerSessionId`) filling in for a teammate whose own record names none, bounded to that run's own spawn window so a second run of the same team name never adopts the first run's teammates; the edge carries which record established it. A node is always a real session: an inline `Task`/`Agent` sub-agent is a step inside one transcript and produces no session, so it is never drawn as a node. Each node carries its handle, harness, role, indexed tool count, span, PR number, and a recency class (`active`/`idle`/`stale`) — recency, not a success verdict, because nothing on a session row records whether the work landed. HTML draws a self-contained inline-SVG graph with clickable per-node summaries; `--text` prints an indented tree; `--json` emits `layout: 'lineage'` with a `lineage: { rootId, nodes, edges, teams, unresolvedParentIds }` block plus the root's trajectory. Selecting a child roots the graph at its topmost ancestor, so the whole team is always shown; a referenced parent outside the scanned pool is reported rather than dropped. Source: `apps/cli/src/lib/session/trajectory-lineage.ts`, `apps/cli/src/lib/session/trajectory-html.ts`, `apps/cli/src/lib/session/trajectory-text.ts`, `apps/cli/src/commands/sessions-trace.ts`.
+
+- **`agents sessions trace` v2 — a real session debugger, program-aware.** The HTML view is rebuilt from a wall-clock waterfall (which crammed all activity into a sliver on long, idle-gappy sessions) into an **analysis hero** — where the time went, the slowest steps, the command/program mix, and error/idle KPIs — over a **readable, execution-ordered step list** with expandable output and clean idle-gap dividers. Every shell step is labeled by the **effective program** it ran (`git`, `gh`, `agents`, `bun`, `sed`… via the shared `extractShellPrograms` parser; `sudo`/`env`/`agents ssh` unwrapped, bare `cd`/`export` skipped) across **every harness's shell tool** — Claude's `Bash`, Codex's `exec_command`, `run_shell_command`, `shell`, `Execute` — so the mix reads `git 94 · agents 81 · gh 75` instead of "Bash 98%". Process **exit codes** show on failures. The "where the time went" share is now keyed by program in **both** the HTML and `--text` renderers off one model field — a Bash-heavy run reads `git 56% · gh 33% · agents 11%`, never `Bash 100%`. `--text` and the `--json` step model gain additive `program` + `exitCode` fields, and the trajectory's `toolTimeShare` is renamed `programTimeShare` (program-keyed) in the `--json` envelope. Source: `apps/cli/src/lib/session/trajectory.ts`, `trajectory-html.ts`, `trajectory-text.ts`.
+
+- **`agents sessions trace` (alias `agents trace`) — visualize a session's trajectory.** A tool-call waterfall over a real time axis (durations, errors, idle stalls, delegations) instead of scrolling the Markdown wall. One `buildTrajectory()` model, rendered three ways and auto-selected by audience: an interactive HTML page on your interactive host for a person, a compact token-bounded text trajectory for an agent (`--text`, `--errors-only`), and the versioned `sessions-trace` JSON envelope (`--json`) for tools. Single-session in this release; multi-session compare and team lineage follow. Redacted by default, self-contained HTML (no CDN). Source: `apps/cli/src/commands/sessions-trace.ts`, `apps/cli/src/lib/session/trajectory.ts`.
+
+---
+type: fix
+---
+
+- **`agents sessions trace` steps read by what the command DID, not their `cd`
+  prefix.** A shell step's label now strips the leading throwaway statements —
+  `cd <repo> &&`, `export X=Y;`, `set -e`, `source …`, and bare `VAR=val`
+  assignments — so `cd /long/path && git fetch origin` renders as
+  `git fetch origin`, and a multi-line script whose first line is `cd <repo>`
+  shows its real command instead. Before this, most rows in a coding session
+  rendered an identical `cd [HOME]/…/<repo>` and the trajectory was unreadable;
+  now every row is distinct and agrees with its program badge. Pipelines are left
+  intact and a command that is nothing but `cd` is shown as-is. Fixed at the
+  model (`buildTrajectory`), so the HTML, text, and `--json` renderings all
+  benefit. Source: `apps/cli/src/lib/session/trajectory.ts`.
+- **Trace durations roll into hours past 60 minutes.** An overnight idle gap now
+  reads `24h01m` instead of `1441m18s`, in both the HTML and the compact text
+  renderings. Source: `apps/cli/src/lib/session/trajectory-html.ts`,
+  `trajectory-text.ts`.
+
+- **`agents view` stops printing "usage unavailable" for a harness that reports a plan and no meters.** Grok's collector writes a subscription tier with no usage windows (`{plan: 'SuperGrok Heavy', windows: []}`), and the cache deserializer treated "no fresh windows" as "nothing cached" — so `--refresh` rendered `SuperGrok Heavy`, the very next plain `agents view grok` rendered `usage unavailable`, and reading the row also **deleted** it. Both grok accounts were permanently stuck in the wrong state because the daemon's periodic refresh re-wrote a row that the next read destroyed. A cached row that carries a plan now survives with no windows; a row with no windows, no plan, and no refusal is still dropped, so an all-expired snapshot keeps pruning (RUSH-2858) and a meterless row can never read as a 0% bar or an `available` badge — `deriveUsageStatusFromSnapshot` still returns null for zero windows. Routing keeps the same guarantee from the other side: a windowless snapshot no longer counts as verified usage, so a meterless pool still spreads across its accounts instead of pinning to whichever one ran most recently. Source: `apps/cli/src/lib/accounting/usage.ts`, `apps/cli/src/lib/accounting/rotate.ts` (RUSH-3060).
+
+---
+type: feat
+---
+
+The watchdog decider is now an agent, not a heuristic script. Every idle session on the machine (its originating task + transcript tail) is handed to ONE `agents run --mode plan` call per tick, which judges each: idle-but-unfinished → nudge that drives it to finish; idle-and-done or genuinely-needs-human → skip. The deterministic pre-filter (`isLikelyTrulyBlocked`, completion/promise regex) and the per-session LLM spawn are gone — one bounded call per tick, only when something is actually idle. A nudge is booked in the cooldown ledger and logged `nudge` ONLY when delivery is confirmed; tmux/iterm/pty self-confirm, while vscodium's fire-and-forget `--open-url` is recorded `undelivered` until the swarm-ext extension acks the verb, ending the phantom-nudge ledger. `agents watchdog history` gains an `undelivered` row; the `--smart` flag is removed (the agent is always the decider). Defaults stay OFF.
+
 ## 1.22.47
 
 - **`agents traces sync` pushes derived, redacted trajectories to your Phoenix account (RUSH-3140).** A new `agents traces` command group increments over `sessions.db` via the `file_mtime_ms` gate (only sessions modified since the last sync are uploaded), computes a `SessionTrajectory` for each (steps + gaps + stats, no raw transcript text), applies `redactSecrets()` before PUT, and stores the result under `<userId>/<device>/sessions/<id>.json` in an R2 bucket guarded by Phoenix bearer auth — no public GET path exists anywhere. A per-device index shard (`index.json`) is updated on each run. Three subcommands: `agents traces sync` (incremental push), `agents traces status` (show last sync time), `agents traces open` (open the Phoenix Evals console). The traces Worker uses `cache-control: private, no-store` on every response. Source: `apps/cli/src/lib/traces/{backend,sync,worker-template}.ts`, `apps/cli/src/commands/traces.ts`.
