@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { isFreshFleetAuthSnapshot, isCachedFleetAuthProbeFresh, shouldReuseCachedAuthProbe, AUTH_PROBE_MAX_AGE_MS, runActiveSessionsWarmTick } from './daemon-ticks.js';
+import { isFreshFleetAuthSnapshot, isCachedFleetAuthProbeFresh, shouldReuseCachedAuthProbe, AUTH_PROBE_MAX_AGE_MS, runActiveSessionsWarmTick, runUsageRefreshTick } from './daemon-ticks.js';
 import {
   readActiveSessionsCache,
   setActiveSessionsSnapshotPathForTest,
@@ -23,7 +23,6 @@ import {
   isActiveSessionsJournalReaderRecent,
   ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS,
 } from './session/session-cache.js';
-import { usageRefreshRole } from './usage-fleet.js';
 
 describe('isFreshFleetAuthSnapshot', () => {
   const minimum = 1_000;
@@ -186,13 +185,23 @@ describe('isActiveSessionsJournalReaderRecent', () => {
 // which must redirect HOME before the session modules load (they capture it at
 // import time) — so it needs its own file rather than a suite here.
 
-describe('usage refresh publisher/subscriber gate', () => {
-  it('publishes locally when this host is primary or the pin is absent', () => {
-    expect(usageRefreshRole(undefined, 'zion')).toBe('publisher');
-    expect(usageRefreshRole('zion', 'zion')).toBe('publisher');
-  });
-
-  it('subscribes without provider refreshes when another host is primary', () => {
-    expect(usageRefreshRole('yosemite-s0', 'zion')).toBe('subscriber');
+describe('runUsageRefreshTick — every host is its own publisher (RUSH-3193 #15)', () => {
+  it('runs the local refresh unconditionally, with no primary/subscriber envelope in its report', async () => {
+    const logs: string[] = [];
+    const originalLog = console.log;
+    console.log = (msg: string) => { logs.push(String(msg)); };
+    try {
+      await runUsageRefreshTick();
+    } finally {
+      console.log = originalLog;
+    }
+    const line = logs.find((l) => l.startsWith('usage refresh:'));
+    expect(line).toBeDefined();
+    // The old envelope-shaped report ("imported N account(s) from primary host
+    // X" or "published N account(s)") is gone — this host always ran its own
+    // local refresh, never a cross-host import.
+    expect(line).not.toMatch(/imported \d+ account\(s\) from primary host/);
+    expect(line).not.toMatch(/published \d+ account\(s\)/);
+    expect(line).toMatch(/refreshed, .* failed, .* not-due, .* backed-off, .* capped; BYOK/);
   });
 });

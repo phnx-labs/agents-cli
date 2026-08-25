@@ -364,7 +364,6 @@ describe('listConfig', () => {
       'ssh.identity-file',
       'ssh.user',
       'tmux.enabled',
-      'usage.primary-host',
       'watchdog.enabled',
     ]);
     expect(byName['interactive.host']).toMatchObject({ value: 'zion', source: 'user' });

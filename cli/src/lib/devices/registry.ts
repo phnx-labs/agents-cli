@@ -186,7 +186,7 @@ export function assertValidDeviceName(name: string): void {
  *
  * Deliberately separate from {@link assertValidDeviceName}, and called from
  * exactly two kinds of place: `agents devices add <name>`, and the config keys
- * that point AT a device (`interactive.host`, `usage.primary-host`).
+ * that point AT a device (`interactive.host`).
  *
  * Not from `upsertDevice`, `addIgnored` or the discovery writers. Those all
  * receive tailnet node names the user never typed — `devices sync` upserts every

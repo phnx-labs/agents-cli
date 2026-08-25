@@ -1047,8 +1047,7 @@ export interface Meta {
   /**
    * User-scope config block (`config:` in central agents.yaml). Holds the
    * user-scope keys from the device-config registry (`lib/device-config.ts`) —
-   * currently `interactiveHost` and `usagePrimaryHost`. Syncs fleet-wide via
-   * `agents repo push/pull`.
+   * currently `interactiveHost`. Syncs fleet-wide via `agents repo push/pull`.
    * Device-scope keys live in the per-device doc
    * `devices/<name>/agents.yaml` `config:` block, layered over the fleet-wide
    * defaults in {@link Meta.fleet} (`fleet.defaults.config`).

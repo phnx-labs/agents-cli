@@ -18,7 +18,7 @@ cross-device feature in this repo is built on top of one primitive (ssh +
 CLI verb), not a shared daemon protocol.
 
 **Services are inline `setInterval` closures inside `runDaemon()`, not a
-managed list.** There are 11 today, each scheduled directly in `runDaemon()`:
+managed list.** There are 12 today, each scheduled directly in `runDaemon()`:
 catchup (5min, `daemon.ts:1059`), active-sessions warm (15s,
 `daemon.ts:1112`), session-index warm (20s, `daemon.ts:1137`), watchdog
 (3min, `daemon.ts:1166`), device-probe (3min, `daemon.ts:1212`), monitor
@@ -80,13 +80,13 @@ Linux) to relaunch the whole process — every service restarts together, not
 just the one that threw. Only a subset of subsystems report health
 proactively: `cli/src/lib/daemon-health.ts` exposes `recordSubsystemOk`
 (`daemon-health.ts:85`) and `recordSubsystemError`
-(`daemon-health.ts:93`), called from `daemon.ts` at 7 sites covering just
+(`daemon-health.ts:93`), called from `daemon.ts` at 6 sites covering just
 the secrets broker (`daemon.ts:948`, `:952`) and browser IPC
 (`daemon.ts:1322`, `:1326`), plus daemon-start bookkeeping (`daemon.ts:1473`,
 `:1796`). The other 9 interval services have no recorded health signal
 beyond their own log lines.
 
-**Four cross-device distribution patterns already exist, each hand-rolled
+**Three cross-device distribution patterns already exist, each hand-rolled
 independently — there is no shared abstraction between them:**
 
 - **fanout** (per-peer watch, local process per remote): `watchFleetFeed`
@@ -98,12 +98,6 @@ independently — there is no shared abstraction between them:**
   `writeAuthHealthEntries` (`cli/src/lib/auth-health.ts:373`, called at
   `auth-health.ts:603`) each write a local file that other devices read and
   merge — no single device owns the aggregate.
-- **provider** (one primary produces, others pull via SSH import):
-  `usageRefreshRole` (`cli/src/lib/usage-fleet.ts:54`) and
-  `importUsageFleetFromHost` (`cli/src/lib/usage-fleet.ts:135`) implement
-  primary/subscriber usage refresh; the primary is pinned by the
-  `usage.primary-host` config key, resolved in `device-config.ts:580` (falls
-  back to `interactive.host`, comment at `device-config.ts:579`).
 - **elected-singleton** (first-come binds, others detect and back off):
   the secrets broker binds a local socket in `startHostedBroker`
   (`cli/src/lib/secrets/agent.ts:915`, bind call at `:925`); daemon-side
@@ -115,6 +109,14 @@ independently — there is no shared abstraction between them:**
     return !isHosting && !brokerReachable;
   }
   ```
+
+A fourth pattern, **provider** (one primary produces, others pull via SSH
+import), existed here until RUSH-3193 #15: usage refresh was its only
+consumer, and it is now every-device local — each host lists its own
+credential-backed accounts and calls providers directly
+(`runUsageRefreshTick`, `cli/src/lib/daemon-ticks.ts:136`), with no
+cross-host broadcast or primary/subscriber envelope. Don't reintroduce a
+`usage.primary-host`-style pin without a real cross-host need.
 
 **Caching is mostly ad-hoc — the bounded primitive is underused.**
 `createMemoryCache` (`cli/src/lib/memory-cache.ts:21-23`) is a bounded
@@ -144,10 +146,10 @@ just the 2 that currently call `daemon-health.ts` — a per-service error
 boundary (so one throwing service no longer takes down the whole daemon via
 `crash()` → `process.exit(1)`), a per-tick deadline, backoff with a circuit
 breaker, uniform health reporting, and live enable/disable without a daemon
-restart. It also plans to formalize the four hand-rolled distribution
-patterns above as declared `placement` (`every-device` | `singleton`) and
-`distribution` (`fanout` | `mirror` | `provider` | `local`) fields resolved
-by shared helpers instead of four independent implementations, and to route
+restart. It also plans to formalize the hand-rolled distribution patterns
+above as declared `placement` (`every-device` | `singleton`) and
+`distribution` (`fanout` | `mirror` | `local`) fields resolved
+by shared helpers instead of independent implementations, and to route
 caching through `createMemoryCache` under a declared `cache` policy instead
 of ad-hoc TTL constants. None of this exists in the code yet as of this
 writing — see [RUSH-3193](https://linear.app/getrush/issue/RUSH-3193) for
