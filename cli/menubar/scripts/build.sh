@@ -122,6 +122,7 @@ if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ] && [ -z "${APPLE_ID:-}" ] && [ "$M
     echo "  \"damaged\", so this debug build signs AD-HOC instead (dev bundle id below)." >&2
     echo "  For a shippable bundle:  agents secrets exec apple.com -- $0 release" >&2
     SIGN_ID="-"
+    _SIGN_ID_DECLINED=1
 fi
 
 BUNDLE_ID="com.phnx-labs.agents-menubar"
@@ -130,7 +131,14 @@ if [ -z "$SIGN_ID" ] || [ "$SIGN_ID" = "-" ]; then
     SIGN_ID="-"
     BUNDLE_ID="com.phnx-labs.agents-menubar.dev"
     APP_DISPLAY_NAME="AGI Menu (Dev)"
-    echo "  WARNING: no Developer ID identity found — signing ad-hoc (DEV ONLY)." >&2
+    # Two ways to land here: no identity in the keychain at all, or the branch
+    # above deliberately dropped one for want of notary creds. Say which, rather
+    # than claiming "none found" when one was found and declined.
+    if [ -n "${MENUBAR_HELPER_SIGN_ID:-}" ] || [ "$SIGN_ID" = "-" ] && [ -n "${_SIGN_ID_DECLINED:-}" ]; then
+        echo "  WARNING: signing ad-hoc (DEV ONLY) — see the note above." >&2
+    else
+        echo "  WARNING: no Developer ID identity found — signing ad-hoc (DEV ONLY)." >&2
+    fi
     echo "  Using the dev bundle id ${BUNDLE_ID} so this build can never touch the" >&2
     echo "  shipped helper's Accessibility grant. An ad-hoc build cannot be notarized," >&2
     echo "  so prepack (verify-menubar-helper.sh) refuses to pack it. Sign on a host" >&2
