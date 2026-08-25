@@ -121,7 +121,12 @@ case "$MODE" in
     ssh -o BatchMode=yes -o ConnectTimeout=15 "$ADDR" true 2>/dev/null \
       || die "cannot reach '$DEVICE' ($ADDR) over ssh -- see 'agents devices list'"
 
-    remote_dir="\$HOME/.agents/test-runs/agents-cli"
+    # NOT under ~/.agents: that directory is itself a git repo (the DotAgents
+    # repo). A tree unpacked inside it makes `git rev-parse --show-toplevel`
+    # resolve to ~/.agents for anything in the suite that asks, and shows up as
+    # `?? test-runs/` in the operator's own repo status. ~/.cache has no git
+    # ancestor, which is why sandbox.sh's ~/workspaces choice never hit this.
+    remote_dir="\$HOME/.cache/agents-cli/test-runs/tree"
     bold "Offloading the suite to $DEVICE"
     gray "  addr:   $ADDR"
     gray "  tree:   $TREE_ROOT"
@@ -133,7 +138,7 @@ case "$MODE" in
     rsync -az --delete \
       --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
       --exclude '.agents/worktrees' --exclude '.release-attestations' \
-      "$TREE_ROOT/" "$ADDR:.agents/test-runs/agents-cli/"
+      "$TREE_ROOT/" "$ADDR:.cache/agents-cli/test-runs/tree/"
 
     # Bound the repo root to the shipped tree.
   #
@@ -160,11 +165,11 @@ case "$MODE" in
   # The remediation lives in its own script so the suite can exercise the SAME
   # code rather than a copy that drifts (scripts/ is part of the rsync, so it is
   # already on the worker).
-  ssh "$ADDR" 'bash ~/.agents/test-runs/agents-cli/apps/cli/scripts/bound-repo-root.sh ~/.agents/test-runs/agents-cli' \
+  ssh "$ADDR" 'bash ~/.cache/agents-cli/test-runs/tree/apps/cli/scripts/bound-repo-root.sh ~/.cache/agents-cli/test-runs/tree' \
     || die "could not bound the repo root on $name -- refusing to run the suite against an unrelated repository"
 
   green "Tree shipped. Running the suite on $DEVICE..."
-    ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli/apps/cli \
+    ssh "$ADDR" "cd ~/.cache/agents-cli/test-runs/tree/apps/cli \
       && bun install --silent \
       && bun run build >/dev/null \
       && bun run test$(vitest_suffix)"
