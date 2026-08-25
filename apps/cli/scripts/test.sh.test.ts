@@ -1,0 +1,65 @@
+import { describe, expect, it } from 'vitest';
+import { spawnSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+
+const TEST_SH = path.resolve(__dirname, 'test.sh');
+
+function run(args: string[], env: NodeJS.ProcessEnv = {}) {
+  return spawnSync('bash', [TEST_SH, ...args], {
+    encoding: 'utf-8',
+    env: { ...process.env, ...env },
+  });
+}
+
+// The whole reason this script exists (RUSH-3178): the ~13k-test suite must
+// never quietly land on the machine someone is using. Every assertion here is
+// about that one property — offload is the default, local is opt-in, and an
+// unavailable offload target FAILS instead of falling back.
+describe('scripts/test.sh — the suite never runs locally by accident', () => {
+  it('refuses an unreachable --device instead of falling back to local', () => {
+    const r = run(['--device', 'no-such-box-xyz.invalid']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/cannot reach 'no-such-box-xyz\.invalid' over ssh/);
+    // The critical half: it must not have decided to run the suite here instead.
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('fails loud and names --device when the offload target is unavailable', () => {
+    // A PATH with no `crabbox` is exactly the fleet-outage case (RUSH-3004),
+    // which is when someone is most tempted to "just run it here".
+    const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopath-'));
+    const r = run([], { PATH: `${emptyBin}:/usr/bin:/bin` });
+    fs.rmSync(emptyBin, { recursive: true, force: true });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/crabbox is not installed/);
+    // It must hand the operator the actionable alternatives, not just die.
+    expect(r.stderr).toMatch(/--device/);
+    expect(r.stderr).toMatch(/--here/);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('rejects an unknown flag rather than forwarding it to vitest', () => {
+    const r = run(['--oops']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/unexpected argument: --oops/);
+    // Names the escape hatch so the next person does not guess.
+    expect(r.stderr).toMatch(/-- --oops/);
+  });
+
+  it('requires a value for --device (never silently offloads to nowhere)', () => {
+    const r = run(['--device']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--device needs a machine name/);
+  });
+
+  it('rejects a --repo-root that is not a repo checkout', () => {
+    const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-notrepo-'));
+    const r = run(['--repo-root', empty, '--device', 'no-such-box-xyz.invalid']);
+    fs.rmSync(empty, { recursive: true, force: true });
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/has no apps\/cli/);
+  });
+});

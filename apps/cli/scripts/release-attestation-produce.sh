@@ -53,11 +53,15 @@ COMMIT_ISH=""
 REPO_ROOT="$DEFAULT_REPO_ROOT"
 STORE=""
 KEEP=false
+# Where the suite runs. Empty = scripts/test.sh's default (offload to a crabbox).
+TEST_TARGET=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) STORE="$2"; shift 2 ;;
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --keep) KEEP=true; shift ;;
+    --test-device) [[ -n "${2:-}" ]] || die "--test-device needs a machine name"; TEST_TARGET=(--device "$2"); shift 2 ;;
+    --test-here) TEST_TARGET=(--here); shift ;;
     -h|--help)
       sed -n '3,32p' "$0" | sed 's/^# \?//'
       exit 0
@@ -148,7 +152,17 @@ SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
 # ci-scope to select those same flaky files into THIS pr's CI, which self-blocks
 # the fix; and CLI flags override whatever config the attested commit carries, so
 # the mitigation applies to every tree the producer runs, old or new.
-if bun run test -- --retry=2 --maxWorkers=2 2>&1 | tee "$SUITE_LOG"; then
+# Offloaded via scripts/test.sh (RUSH-3178). This script must run on a macOS
+# signing box whenever a native helper input changed, and it used to run the
+# whole ~13k-test suite there too -- welding "sign on a Mac" to "pin a Mac for
+# ten minutes". test.sh decides WHERE the suite runs; the Mac keeps only
+# sign/notarize/pack. Default is the crabbox pool; --test-device <box> targets a
+# fleet Linux box (use this while RUSH-3004 keeps the pool down); --test-here
+# restores the old in-place behavior explicitly.
+# bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
+# input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
+# under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.
+if scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} -- --retry=2 --maxWorkers=2 2>&1 | tee "$SUITE_LOG"; then
   green "Suite passed."
 elif suite_green_despite_worker_crash "$SUITE_LOG"; then
   gray "vitest worker exited after zero test failures; treating as pass (RUSH-2215)."

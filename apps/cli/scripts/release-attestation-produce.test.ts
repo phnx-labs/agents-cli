@@ -12,6 +12,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
+const TEST_SCRIPT = path.resolve(__dirname, 'test.sh');
 const PRODUCE_SCRIPT = path.resolve(__dirname, 'release-attestation-produce.sh');
 const ATTEST_SCRIPT = path.resolve(__dirname, 'release-attestation.sh');
 const MANIFEST_SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
@@ -75,6 +76,13 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   fs.mkdirSync(path.join(caller, 'apps/cli/scripts'), { recursive: true });
   fs.mkdirSync(path.join(caller, 'apps/cli/ci'), { recursive: true });
   fs.mkdirSync(path.join(caller, 'scripts'), { recursive: true });
+  // RUSH-3178: the producer no longer runs `bun run test` itself -- it calls
+  // scripts/test.sh, which owns WHERE the suite runs. The fixture therefore has
+  // to carry the real test.sh, and runProduce passes --test-here so the fake
+  // `bun run test` below is still what actually executes. Deliberately the real
+  // script and not a stub: that is what pins the producer -> test.sh contract.
+  fs.copyFileSync(TEST_SCRIPT, path.join(caller, 'apps/cli/scripts/test.sh'));
+  fs.chmodSync(path.join(caller, 'apps/cli/scripts/test.sh'), 0o755);
   fs.copyFileSync(PRODUCE_SCRIPT, path.join(caller, 'apps/cli/scripts/release-attestation-produce.sh'));
   fs.copyFileSync(ATTEST_SCRIPT, path.join(caller, 'apps/cli/scripts/release-attestation.sh'));
   fs.chmodSync(path.join(caller, 'apps/cli/scripts/release-attestation-produce.sh'), 0o755);
@@ -139,6 +147,9 @@ function runProduce(
     [
       path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
       fx.headCommit,
+      // Run the suite in place: the fixture's fake `bun` IS the suite, and these
+      // tests assert on attestation/manifest behavior, not on offload routing.
+      '--test-here',
       '--repo-root',
       fx.caller,
       '--dir',
@@ -209,6 +220,8 @@ describe('release-attestation-produce.sh', () => {
       [
         path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
         fx.headCommit,
+        // In-place: the fixture's fake `bun` is the suite (see runProduce).
+        '--test-here',
         '--repo-root',
         fx.caller,
         '--dir',
@@ -284,6 +297,8 @@ describe('release-attestation-produce.sh', () => {
       [
         path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
         fx.headCommit,
+        // In-place: the fixture's fake `bun` is the suite (see runProduce).
+        '--test-here',
         '--repo-root',
         fx.caller,
         '--dir',

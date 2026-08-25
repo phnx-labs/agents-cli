@@ -312,12 +312,22 @@ main() {
 
   echo "Using crabbox: $box_id (task: $TASK_ID)"
 
-  # Default command: run tests
-  if [[ $# -eq 0 ]]; then
-    cmd="bun install && bun run test"
-  else
-    cmd="$*"
-  fi
+  # Verb vocabulary, matching every sibling project (rush/cli, rush/app,
+  # prix/api and harness all dispatch `sandbox.sh test`). Baking the canonical
+  # command in IS the point: when each caller has to compose the command string
+  # itself, offloading becomes opt-in per call site and every call site opts out
+  # -- which is how build.sh and the attestation producer both ended up running
+  # the suite locally (RUSH-3178).
+  #
+  # The old bare default ran `bun install && bun run test` at the REPO ROOT,
+  # which has no test script: this is a monorepo and the suite lives in apps/cli.
+  # That is the same trap 6abd4a2ea had to fix for the test:remote alias.
+  local test_cmd='cd apps/cli && bun install && bun run build && bun run test'
+  case "${1:-}" in
+    ''|test) cmd="$test_cmd" ;;
+    verify)  cmd='echo "[sandbox] ready"; uname -srm; bun --version' ;;
+    *)       cmd="$*" ;;
+  esac
 
   # Isolated workspace path on remote (under $HOME so it survives rsync prune)
   workspace_dir="workspaces/${REPO_NAME}-${TASK_ID}"

@@ -231,8 +231,8 @@ one-off command in a PR.
 |---|---|---|
 | CLI build | [`apps/cli/scripts/build.sh`](apps/cli/scripts/build.sh) `[<version>] [--clean]` | builds into `apps/cli/dist` |
 | CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
-| CLI tests | `bun run test:remote` (in `apps/cli`) | full vitest suite offloaded to a remote crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh) — the laptop-safe path |
-| CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — tests on a dynamic crabbox, PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
+| CLI tests | [`apps/cli/scripts/test.sh`](apps/cli/scripts/test.sh) `[--device <box>] [--here]` | the full vitest suite. **Offloads by default** — crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh), or `--device <box>` for any fleet Linux box. Never runs locally unless you pass `--here`, and fails loud (naming `--device`) rather than falling back. `bun run test` is the raw in-place runner the offload targets invoke; do not call it directly on a machine someone is using |
+| CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — requires an exact-tree attestation (it runs **no** tests itself; `release-attestation-produce.sh` does, offloaded via `test.sh`), PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
 | ext build / release | [`apps/ext/scripts/build.sh`](apps/ext/scripts/build.sh) `<version>` · [`release.sh`](apps/ext/scripts/release.sh) `<x.y.z> [--confirm] [--device <name>] [--here]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`). Self-routing like the CLI release: the marketplace PATs live in the `vs-marketplace` secrets bundle on one machine, and tokens never move between hosts, so invoking from a box without the bundle probes `zion` then `mac-mini` and re-runs the publish there against a clean clone of the same commit. `--device` pins the publish box, `--here` refuses to route |
 | agents-dbg app release | [`scripts/release.sh`](scripts/release.sh) `<version> [--confirm]` | root — builds/signs/notarizes the debug Mac app, uploads the GitHub release, updates the Homebrew tap |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
@@ -250,7 +250,8 @@ To run your changes:
 ```bash
 cd apps/cli
 bun run test                      # the suite, locally
-bun run test:remote               # the suite, offloaded to a crabbox
+scripts/test.sh                   # the suite, offloaded (crabbox)
+scripts/test.sh --device mark-1   # the suite, on a named fleet Linux box
 
 scripts/install.sh --skip-tests   # build + install this working tree
 agents-dev sessions --active      # drive YOUR build
