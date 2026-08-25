@@ -32,7 +32,14 @@ spanMs/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
 `whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
 rich per-device `index.json`. The index contains duration/error statistics,
 ranked attention flags, metadata/tool-mix topic buckets, and structured tool
-failure cause buckets (`real`, `guard`, `hook`). Topic classification is lazily
+failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**:
+
+| Field | Type | Description |
+|---|---|---|
+| `bucketHistory` | `BucketStats[][]` | 14-day rolling window. Each inner array is one day's per-bucket stats (errorRate = tool errors / total calls; stallRate = sessions with ≥1 stall / total sessions). |
+| `driftSignals` | `DriftSignal[]` | Buckets whose error or stall rate crossed ±0.20 vs the 7-day average. `severity`: `degrading | stable | improving`. Sorted by errorDelta desc. Buckets with <3 historical days are skipped. |
+
+On live sync, the prior shard is fetched from R2 before the PUT to seed history; failures (404, parse error) fall back to empty history. `--dry-run --out <dir>` seeds from the previous `index.json` in the output directory. Topic classification is lazily
 cached in the self-healing `session_topics` table by transcript mtime + size;
 it is not part of the hot session scan or `SCHEMA_VERSION`. `agents traces sync
 --dry-run --out <dir>` computes both surfaces from the local `sessions.db` and
