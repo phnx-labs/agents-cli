@@ -2254,11 +2254,14 @@ schema (`--json` passes through each agent's native stream format).
   `seedActiveCursorLoginPerVersion` (`lib/installations/migrate.ts`) migrates only the
   legacy misplaced `~/.config/cursor/auth.json` token into the active account's home on upgrade; it MUST NOT
   export or delete an OS-keychain login. The versioned-alias shim mirrors both
-  file-store export (`CONFIG_ENV_ISOLATED_AGENTS` includes cursor). Cursor's
-  HOME-relative `~/.cursor` (cli-config.json,
-  chats) has no env override and stays on the shared home; the routine overlay
-  path (`buildRoutineSpawnEnv`) is unchanged and still seeds from the active
-  login by design.
+  HOME swap and file-store export (`CONFIG_ENV_ISOLATED_AGENTS` includes cursor).
+  Because Cursor keeps `auth.json`, `cli-config.json`, chats, and preferences in
+  the HOME-relative `~/.cursor` tree, that entire tree is version-local for
+  managed runs and direct version aliases. Routine sandboxes are the deliberate
+  exception: `prepareJobHome` creates a disposable HOME and
+  `generateCursorConfig` links the daemon host's active `~/.cursor/auth.json`
+  and `cli-config.json` into it. Routines therefore use the active host login by
+  design; they do not select a managed version account through this overlay.
 - **EXEC-17 (MUST).** The Windows `.cmd` shim delegate
   (`execShimPassthrough`) MUST route its env through the same `buildExecEnv`
   `agents run` uses (`lib/exec.ts:1348`) — so on Windows the isolated-agent
