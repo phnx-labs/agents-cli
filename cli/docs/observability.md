@@ -50,3 +50,21 @@ second activity timestamp.
 Health findings use one severity registry and one remediation vocabulary. A finding must
 name a command that fixes the full scope represented by its row. Unavailable evidence is
 reported as unknown or degraded, never healthy by default.
+
+**Severity rubric** — `FINDING_SEVERITY` in `src/lib/devices/doctor-findings.ts` is the
+single source of truth; this prose copy is pinned to it by a test, so the two cannot
+drift.
+
+**CRITICAL** — needs you now: `logged-out`, `missing-hook`, `missing-plugin`,
+`unwired-hook`, `hook-runtime-broken`, `cli-missing`, `owner-sink-unreachable`,
+`ssh-key-enrollment`.
+
+**WARNING** — worth fixing, not urgent: `logout-unprovable`,
+`hook-runtime-visibility-unavailable`, `missing-resource`, `content-drift`,
+`never-synced`, `stale`, `repo-behind`, `repo-drift`, `fleet-resource-gap`,
+`version-skew`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`, `host-cli-missing`,
+`host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `exec-policy`, `stale-cli`,
+`binary-shadow`.
+
+The split is provability and blast radius: a critical is something the operator can act
+on right now with a known fix, while a warning is drift that one sweep resolves.

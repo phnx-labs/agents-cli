@@ -14,7 +14,14 @@ let TEST_ROOT: string;
 let SYSTEM_DIR: string;
 let USER_DIR: string;
 
-vi.mock('../state.js', () => ({
+// Spread the REAL module and override only the directory resolvers this test
+// needs redirected. The previous form hand-listed every export, so adding one to
+// state.ts broke this file with `No "<name>" export is defined on the mock` --
+// which is how `getCliVersionCachePath` took the whole file down on main. A
+// partial mock that enumerates its surface is a maintenance trap; this one
+// tracks the module automatically.
+vi.mock('../state.js', async (importActual) => ({
+  ...(await importActual<typeof import('../state.js')>()),
   get getAgentsDir() { return () => SYSTEM_DIR; },
   get getSystemAgentsDir() { return () => SYSTEM_DIR; },
   get getUserAgentsDir() { return () => USER_DIR; },
