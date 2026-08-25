@@ -17,7 +17,7 @@
  * out here rather than hidden: 60 tracked launches models an actively-used box.
  *
  * Not wired into `vitest run` (vitest.config.ts:11 includes only `*.test.ts`);
- * run with `npx vitest bench --run` from apps/cli.
+ * run with `npx vitest bench --run` from cli.
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';

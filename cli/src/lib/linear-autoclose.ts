@@ -7,7 +7,7 @@
  * routine YAML's `command:` shell script so the routine stays self-contained
  * and independent of the CLI build.
  *
- * @see apps/cli/routines/linear-autoclose.yml
+ * @see cli/routines/linear-autoclose.yml
  */
 
 /**

@@ -7,7 +7,7 @@
  *      (must never exceed USAGE_FETCH_CONCURRENCY).
  *   3. Overview meter width with and without maxWindows=2 (alignment regressor).
  *
- * Run from apps/cli:
+ * Run from cli:
  *   bun bench/view-usage-perf.ts
  *   # or: npx tsx bench/view-usage-perf.ts
  *

@@ -134,7 +134,7 @@ describe('formatActiveRowDescription (RUSH-2045)', () => {
       mk({
         status: 'running',
         label: 'views',
-        cwd: '/home/u/src/github.com/phnx-labs/agents-cli/apps/cli',
+        cwd: '/home/u/src/github.com/phnx-labs/agents-cli/cli',
         preview: 'editing sessions.ts',
         todos: { items: [], done: 1, total: 2, activeForm: 'A5 wiring runner' },
       }),

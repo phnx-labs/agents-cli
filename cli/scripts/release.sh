@@ -56,6 +56,29 @@ bold()   { printf '\033[1m%s\033[0m\n'  "$*"; }
 
 die() { red "error: $*"; exit 1; }
 
+# ----- apps/cli -> cli flatten compatibility (RUSH-3189 follow-up) -----
+# The apps/ wrapper died with the ext split: the CLI now lives at cli/ instead of
+# apps/cli/. New commits and tags carry cli/package.json, but every tag cut before
+# the flatten still carries apps/cli/package.json. Read the recorded version from
+# whichever layout the ref actually has -- cli/ first, the pre-flatten path as
+# fallback -- so the catch-up-publish and stuck/already-published tag guards that
+# read package.json out of an OLD tag keep working. Defined once and reused rather
+# than open-coding the two-path git show at each guard.
+pkg_version_at_ref() {
+  # $1 = git ref (tag, sha, or remote-tracking ref). Echoes the recorded CLI
+  # version, or nothing if neither layout resolves at that ref. Path is a tree
+  # path (no ./), so it resolves from any cwd inside the repo.
+  local ref="$1" path
+  if git cat-file -e "$ref:cli/package.json" 2>/dev/null; then
+    path="cli/package.json"
+  elif git cat-file -e "$ref:apps/cli/package.json" 2>/dev/null; then
+    path="apps/cli/package.json"
+  else
+    return 0
+  fi
+  git show "$ref:$path" 2>/dev/null | jq -r .version 2>/dev/null || true
+}
+
 # ----- Home base: which machine runs the promote + npm publish phase -----
 # Promote-only (RUSH-3026): the phase needs the npm publish token + gh auth,
 # nothing macOS-specific. It defaults to mac-mini and is overridable with
@@ -168,7 +191,7 @@ echo
 # worktree and invokes THAT worktree's script with --home-base-phase), so the
 # script executing here is guaranteed to carry --home-base-phase and
 # headless-sign-context.sh. It therefore assumes it is ALREADY inside the tagged
-# worktree ($ROOT = <tag-worktree>/apps/cli, cwd set by the caller): it verifies
+# worktree ($ROOT = <tag-worktree>/cli, cwd set by the caller): it verifies
 # the checked-out version == $TARGET, downloads the attested tarball + manifest
 # from the tag (the throwaway worktree has no store), publishes those bytes, and
 # re-attaches the verified helper zip. It does NOT create its own worktree.
@@ -369,7 +392,7 @@ bun install --frozen-lockfile >/dev/null \
 # HOME_BASE_WT_SNIPPET is the shared shell that both paths run (locally via bash,
 # or remotely via ssh): fetch origin + the tag, verify the tag's version, create a
 # detached worktree at v$TARGET, and run THAT worktree's
-# apps/cli/scripts/release.sh $TARGET --home-base-phase. The worktree is removed on
+# cli/scripts/release.sh $TARGET --home-base-phase. The worktree is removed on
 # exit whether the phase succeeds or fails (BLOCKER 3), via a scoped EXIT trap.
 home_base_wt_snippet() {
   # $1 = version. Emits a self-contained bash program (no outer-shell expansion of
@@ -381,7 +404,13 @@ git -C "\$REPO_ROOT" fetch --quiet origin
 git -C "\$REPO_ROOT" fetch --quiet origin "refs/tags/v$1:refs/tags/v$1" 2>/dev/null || true
 git -C "\$REPO_ROOT" rev-parse --verify --quiet "refs/tags/v$1^{commit}" >/dev/null \\
   || { echo "tag v$1 not found on the home base after fetch" >&2; exit 1; }
-TAG_VER="\$(git -C "\$REPO_ROOT" show "v$1:apps/cli/package.json" | jq -r .version)"
+# apps/cli -> cli flatten (RUSH-3189 follow-up): the CLI moved up to cli/ at the
+# repo root. A tag cut after the flatten carries cli/; the pre-flatten tags carry
+# apps/cli/. Detect which layout THIS tag's tree uses once, then drive every path
+# below off it so the snippet is layout-agnostic for both old and new tags.
+CLI_DIR="cli"
+git -C "\$REPO_ROOT" cat-file -e "v$1:cli/package.json" 2>/dev/null || CLI_DIR="apps/cli"
+TAG_VER="\$(git -C "\$REPO_ROOT" show "v$1:\$CLI_DIR/package.json" | jq -r .version)"
 [ "\$TAG_VER" = "$1" ] \\
   || { echo "tag v$1 tree is at \$TAG_VER, not $1 -- refusing home-base phase" >&2; exit 1; }
 WT="\$REPO_ROOT/.agents/worktrees/homebase-publish-v$1-\$\$"
@@ -392,17 +421,20 @@ git -C "\$REPO_ROOT" worktree add --quiet --detach "\$WT" "v$1" \\
   || { echo "home-base publish worktree \$WT is incomplete -- refusing to build" >&2; exit 1; }
 # The signed keychain + menu-bar helpers need bin/embedded.provisionprofile -- an
 # Apple provisioning profile that is a COMMITTED input as of commit 2567004b4
-# (negated out of .gitignore: /apps/cli/bin/* + !/apps/cli/bin/embedded.provisionprofile),
-# so any tag cut after that commit already carries it in the checked-out \$WT
-# tree, with nothing left to seed. Two cases still need recovery: an OLDER tag
-# cut before 2567004b4 (e.g. the stuck v1.22.36) genuinely lacks it in its own
-# tree, and a home base whose own on-disk checkout (REPO_ROOT) has simply never
-# been git-pulled past that commit -- "any Mac that has not previously been home
-# base" (RUSH-2541) -- lacks it on disk even though origin does not. The fetch
-# above always refreshes origin/\$DEFAULT_BRANCH's remote-tracking ref regardless
-# of REPO_ROOT's local working-tree state, so recover the blob from THAT ref
-# rather than trusting whatever happens to be checked out on REPO_ROOT's disk.
-mkdir -p "\$WT/apps/cli/bin"
+# (negated out of .gitignore: /cli/bin/* + !/cli/bin/embedded.provisionprofile,
+# pre-flatten /apps/cli/bin/*), so any tag cut after that commit already carries it
+# in the checked-out \$WT tree, with nothing left to seed. Two cases still need
+# recovery: an OLDER tag cut before 2567004b4 (e.g. the stuck v1.22.36) genuinely
+# lacks it in its own tree, and a home base whose own on-disk checkout (REPO_ROOT)
+# has simply never been git-pulled past that commit -- "any Mac that has not
+# previously been home base" (RUSH-2541) -- lacks it on disk even though origin
+# does not. The fetch above always refreshes origin/\$DEFAULT_BRANCH's
+# remote-tracking ref regardless of REPO_ROOT's local working-tree state, so
+# recover the blob from THAT ref rather than trusting whatever happens to be
+# checked out on REPO_ROOT's disk. Recovery sources try the cli/ layout first and
+# fall back to the pre-flatten apps/cli/ layout, since a stale REPO_ROOT checkout
+# (or origin at the transition) may still carry the old path.
+mkdir -p "\$WT/\$CLI_DIR/bin"
 # Guarded with \`|| true\`, NOT a bare assignment: under this snippet's own
 # \`set -euo pipefail\` (top of this heredoc), symbolic-ref returning non-zero --
 # the normal state of a checkout bootstrapped via \`init && remote add && fetch\`
@@ -412,17 +444,21 @@ mkdir -p "\$WT/apps/cli/bin"
 # assert_promote_home_base uses for this reason.
 DEFAULT_BRANCH="\$(git -C "\$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')" || true
 [ -n "\$DEFAULT_BRANCH" ] || DEFAULT_BRANCH="main"
-if [ -f "\$WT/apps/cli/bin/embedded.provisionprofile" ]; then
+if [ -f "\$WT/\$CLI_DIR/bin/embedded.provisionprofile" ]; then
   : # already in the tagged tree -- nothing to seed
-elif git -C "\$REPO_ROOT" show "origin/\$DEFAULT_BRANCH:apps/cli/bin/embedded.provisionprofile" > "\$WT/apps/cli/bin/embedded.provisionprofile" 2>/dev/null; then
-  : # recovered from the freshly-fetched origin/\$DEFAULT_BRANCH ref
+elif git -C "\$REPO_ROOT" show "origin/\$DEFAULT_BRANCH:cli/bin/embedded.provisionprofile" > "\$WT/\$CLI_DIR/bin/embedded.provisionprofile" 2>/dev/null; then
+  : # recovered from the freshly-fetched origin/\$DEFAULT_BRANCH ref (cli/ layout)
+elif git -C "\$REPO_ROOT" show "origin/\$DEFAULT_BRANCH:apps/cli/bin/embedded.provisionprofile" > "\$WT/\$CLI_DIR/bin/embedded.provisionprofile" 2>/dev/null; then
+  : # recovered from origin/\$DEFAULT_BRANCH ref (pre-flatten apps/cli/ layout)
+elif [ -f "\$REPO_ROOT/cli/bin/embedded.provisionprofile" ]; then
+  cp "\$REPO_ROOT/cli/bin/embedded.provisionprofile" "\$WT/\$CLI_DIR/bin/embedded.provisionprofile"
 elif [ -f "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" ]; then
-  cp "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" "\$WT/apps/cli/bin/embedded.provisionprofile"
+  cp "\$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" "\$WT/\$CLI_DIR/bin/embedded.provisionprofile"
 else
-  echo "error: apps/cli/bin/embedded.provisionprofile not found on the tagged tree, on origin/\$DEFAULT_BRANCH, or on this home base's disk. It is a committed file (see commit 2567004b4) -- recover it from git history and verify apps/cli/bin/embedded.provisionprofile is tracked on origin/\$DEFAULT_BRANCH, then retry. Do NOT regenerate it at developer.apple.com; the existing profile is valid until 2044." >&2
+  echo "error: cli/bin/embedded.provisionprofile (pre-flatten apps/cli/bin/embedded.provisionprofile) not found on the tagged tree, on origin/\$DEFAULT_BRANCH, or on this home base's disk. It is a committed file (see commit 2567004b4) -- recover it from git history and verify cli/bin/embedded.provisionprofile is tracked on origin/\$DEFAULT_BRANCH, then retry. Do NOT regenerate it at developer.apple.com; the existing profile is valid until 2044." >&2
   exit 1
 fi
-cd "\$WT/apps/cli"
+cd "\$WT/\$CLI_DIR"
 scripts/release.sh $1 --home-base-phase --device "$RELEASE_HOME_BASE"
 SNIPPET
 }
@@ -431,7 +467,7 @@ route_home_base_phase() {
   snippet="$(home_base_wt_snippet "$TARGET")"
   if $ON_HOME_BASE; then
     bold "Building + signing + publishing on the home base ($RELEASE_HOME_BASE, this box) from the tagged tree..."
-    # cwd is this repo's apps/cli (ROOT), so the snippet's `git rev-parse
+    # cwd is this repo's cli (ROOT), so the snippet's `git rev-parse
     # --show-toplevel` resolves the checkout we are in.
     bash -c "$snippet" || return 1
     return 0
@@ -617,7 +653,7 @@ echo
 # merged release tree rather than whatever newer code now happens to be on main.
 RELEASE_BRANCH="release/v$TARGET"
 MAIN_AT_TARGET=false
-if [[ "$(git show "origin/$DEFAULT_BRANCH:apps/cli/package.json" 2>/dev/null | jq -r .version 2>/dev/null || echo '')" == "$TARGET" ]]; then
+if [[ "$(pkg_version_at_ref "origin/$DEFAULT_BRANCH")" == "$TARGET" ]]; then
   MAIN_AT_TARGET=true
 fi
 
@@ -665,7 +701,7 @@ if $MAIN_AT_TARGET && ! $PHNX_TARGET_PUBLISHED && [[ -n "$MERGED_RELEASE_SHA" ]]
   if [[ "$(git rev-parse "$CI_TESTED_HEAD^{tree}")" != "$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")" ]]; then
     die "$DEFAULT_BRANCH tree $(git rev-parse "$MERGED_RELEASE_SHA^{tree}") != attested candidate $(git rev-parse "$CI_TESTED_HEAD^{tree}") -- refusing parent/nearby evidence"
   fi
-  [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+  [[ "$(pkg_version_at_ref "$MERGED_RELEASE_SHA")" == "$TARGET" ]] \
     || die "merged release PR #$MERGED_RELEASE_PR is not version $TARGET"
 
   # The catch-up guards above (CI-tested head match + tree match + version match)
@@ -933,7 +969,7 @@ if $PHNX_TARGET_PUBLISHED; then
     else
       TAG_TARGET="origin/$DEFAULT_BRANCH"
     fi
-    [[ "$(git show "$TAG_TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    [[ "$(pkg_version_at_ref "$TAG_TARGET")" == "$TARGET" ]] \
       || die "refusing to create v$TARGET: $TAG_TARGET does not contain package version $TARGET"
     # This is the second place a tag gets pushed (the already-published recovery
     # path), and it is just as irreversible as the primary one -- gate it too, or
@@ -952,7 +988,7 @@ if $PHNX_TARGET_PUBLISHED; then
     # fetch's exit code.
     git fetch --quiet --force origin "refs/tags/v$TARGET:refs/tags/v$TARGET" \
       || die "could not fetch remote tag v$TARGET to verify its version"
-    [[ "$(git show "v$TARGET:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+    [[ "$(pkg_version_at_ref "v$TARGET")" == "$TARGET" ]] \
       || die "remote tag v$TARGET points at $REMOTE_TAG_SHA, which is not version $TARGET"
     gray "Tag v$TARGET already present for the published release."
   fi
@@ -1241,7 +1277,7 @@ if $HISTORICAL_CATCHUP; then
   # decouple -- keep the original behavior: tag the on-main merged commit and keep
   # verifying its tree equals the CI-tested head the attestation is bound to.
   git fetch --quiet origin "$DEFAULT_BRANCH"
-  [[ "$(git show "$MERGED_RELEASE_SHA:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+  [[ "$(pkg_version_at_ref "$MERGED_RELEASE_SHA")" == "$TARGET" ]] \
     || die "catch-up: $DEFAULT_BRANCH ${MERGED_RELEASE_SHA:0:9} is not version $TARGET -- refusing to tag/publish"
   MERGED_TREE="$(git rev-parse "$MERGED_RELEASE_SHA^{tree}")"
   ATTESTED_TREE="$(git rev-parse "$CI_TESTED_HEAD^{tree}")"
@@ -1266,7 +1302,7 @@ else
   # tree == the published tree by construction.
   CI_COMMIT="$RELEASE_CI_HEAD"
   [[ -n "${CI_COMMIT:-}" ]] || die "internal: no attested release commit resolved -- refusing to publish"
-  [[ "$(git show "$CI_COMMIT:apps/cli/package.json" | jq -r .version)" == "$TARGET" ]] \
+  [[ "$(pkg_version_at_ref "$CI_COMMIT")" == "$TARGET" ]] \
     || die "attested release commit ${CI_COMMIT:0:9} is not version $TARGET -- refusing to publish"
   ATTESTED_TREE="$(git rev-parse "$CI_COMMIT^{tree}")"
   wait_for_attestation "$ATTESTED_TREE" >/dev/null

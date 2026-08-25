@@ -70,10 +70,10 @@ describe('detectDevBuild', () => {
     expect(detectDevBuild(entry, '1.20.27')).toBe(false);
   });
 
-  it('a monorepo source checkout (package nested under apps/cli) IS a dev build', () => {
+  it('a monorepo source checkout (package nested under cli) IS a dev build', () => {
     // This repo's actual layout: `.git` lives at the true repo root, one level
-    // above the package (`apps/cli`), not at the package root itself. Both
-    // running tsx from `apps/cli/src/index.ts` and a built `apps/cli/dist/index.js`
+    // above the package (`cli`), not at the package root itself. Both
+    // running tsx from `cli/src/index.ts` and a built `cli/dist/index.js`
     // must still be recognized as a dev build (RUSH-2749).
     const repoRoot = mkTmp();
     fs.mkdirSync(path.join(repoRoot, '.git'));

@@ -23,7 +23,7 @@ import { resetActorCache } from '../actor.js';
 import type { HostTask } from './tasks.js';
 
 const LOCAL_HOME = process.env.HOME ?? os.homedir();
-const REPO_ROOT = path.resolve(import.meta.dirname, '../../../../..');
+const REPO_ROOT = path.resolve(import.meta.dirname, '../../../..');
 
 function runDispatchDiagnostic(debug: boolean): ReturnType<typeof spawnSync> {
   const env = { ...process.env };
@@ -31,7 +31,7 @@ function runDispatchDiagnostic(debug: boolean): ReturnType<typeof spawnSync> {
   else delete env.AGENTS_DISPATCH_DEBUG;
   return spawnSync('bun', [
     '-e',
-    "import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs } from './apps/cli/src/lib/hosts/dispatch.ts'; " +
+    "import { buildRunForwardedArgs, buildInteractiveRunForwardedArgs } from './cli/src/lib/hosts/dispatch.ts'; " +
       "buildRunForwardedArgs({ agent: 'grok', prompt: '--token=sk-live-prompt', mode: 'auto', " +
       "env: ['API_TOKEN=sk-live-env'], passthroughArgs: ['--api-key', 'sk-live-arg'] }); " +
       "buildInteractiveRunForwardedArgs({ agent: 'grok', prompt: '--token=sk-live-interactive', " +

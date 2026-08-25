@@ -94,9 +94,9 @@ resolve_repo_root() {
 
 lockfile_digest_of() {
   local root="$1"
-  local lock="$root/apps/cli/bun.lock"
+  local lock="$root/cli/bun.lock"
   [[ -f "$lock" ]] || lock="$root/bun.lock"
-  [[ -f "$lock" ]] || die "lockfile not found under $root (apps/cli/bun.lock or bun.lock)"
+  [[ -f "$lock" ]] || die "lockfile not found under $root (cli/bun.lock or bun.lock)"
   printf 'sha256:%s\n' "$(file_sha256 "$lock")"
 }
 
@@ -104,8 +104,8 @@ policy_version_of() {
   local root="$1"
   local concat="" f rel
   for f in \
-    "$root/apps/cli/vitest.config.ts" \
-    "$root/apps/cli/ci/test-ownership.yaml" \
+    "$root/cli/vitest.config.ts" \
+    "$root/cli/ci/test-ownership.yaml" \
     "$root/scripts/ci-scope.ts"
   do
     [[ -f "$f" ]] || continue

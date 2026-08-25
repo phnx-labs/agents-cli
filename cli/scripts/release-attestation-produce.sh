@@ -107,7 +107,12 @@ git -C "$REPO_ROOT" worktree add --quiet --detach "$WT" "$SHA" \
 missing="$(git -C "$WT" status --short | awk '$1 == "D" || $2 == "D" { print $2 }')"
 [[ -z "$missing" ]] || die "worktree $WT is incomplete; missing tracked files: $missing"
 
-cd "$WT/apps/cli"
+# apps/cli -> cli flatten (RUSH-3189 follow-up): the CLI moved up to cli/. A tree
+# cut after the flatten carries cli/; older candidates carry apps/cli/. Drive off
+# whichever layout THIS worktree's tree actually has.
+CLI_DIR="cli"
+[[ -d "$WT/cli" ]] || CLI_DIR="apps/cli"
+cd "$WT/$CLI_DIR"
 
 bun install --frozen-lockfile || die "bun install failed for ${SHA:0:12}"
 
@@ -208,9 +213,14 @@ else
   # tampered seed fails the pack exactly as before. Seeding is copy-if-absent
   # only -- a Darwin producer's freshly signed apps are never overwritten.
   for app in "Agents CLI.app" "MenubarHelper.app"; do
-    if [[ ! -d "bin/$app" && -d "$REPO_ROOT/apps/cli/bin/$app" ]]; then
+    # Seed source is the caller checkout ($REPO_ROOT); accept the cli/ layout and
+    # the pre-flatten apps/cli/ layout so a stale caller checkout still seeds.
+    seed=""
+    [[ -d "$REPO_ROOT/cli/bin/$app" ]] && seed="$REPO_ROOT/cli/bin/$app"
+    [[ -z "$seed" && -d "$REPO_ROOT/apps/cli/bin/$app" ]] && seed="$REPO_ROOT/apps/cli/bin/$app"
+    if [[ ! -d "bin/$app" && -n "$seed" ]]; then
       mkdir -p bin
-      cp -R "$REPO_ROOT/apps/cli/bin/$app" "bin/$app"
+      cp -R "$seed" "bin/$app"
       gray "seeded bin/$app from the caller checkout (already-signed; prepack gates verify it)"
     fi
   done

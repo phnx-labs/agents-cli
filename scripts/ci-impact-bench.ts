@@ -6,7 +6,7 @@
 import { selectImpact, commandsForPlan, IMPACT_BUDGET_SEC, repoRootFrom } from './ci-scope';
 
 const repoRoot = repoRootFrom();
-const leaf = process.argv[2] ?? 'apps/cli/src/lib/artifact-actions.ts';
+const leaf = process.argv[2] ?? 'cli/src/lib/artifact-actions.ts';
 const t0 = performance.now();
 const plan = selectImpact({ files: [leaf], repoRoot });
 const planMs = Math.round(performance.now() - t0);

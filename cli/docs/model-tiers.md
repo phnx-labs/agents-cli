@@ -119,13 +119,13 @@ subscription harnesses ship a **curated** default ladder (e.g. Kimi: `k2.7-highs
 
 ## Source
 
-- `apps/cli/src/lib/model-tiers.ts` — `MODEL_TIERS`, `isTierToken`, `tierizeModels`,
+- `cli/src/lib/model-tiers.ts` — `MODEL_TIERS`, `isTierToken`, `tierizeModels`,
   `resolveTierMap`, `resolveTier`.
-- `apps/cli/src/lib/models.ts` — catalog extraction (incl. the Claude id-scan
+- `cli/src/lib/models.ts` — catalog extraction (incl. the Claude id-scan
   floor) and per-model pricing.
-- `apps/cli/src/lib/exec.ts` — `buildExecCommand` resolves a tier token to a model
+- `cli/src/lib/exec.ts` — `buildExecCommand` resolves a tier token to a model
   for both `agents run` and `agents teams`.
-- `apps/cli/src/lib/model-tier-overrides.ts` — user overrides in `agents.yaml` (`tier set/clear/list`).
-- `apps/cli/src/commands/models.ts` — the compact `agents models` menu, `--all`, `--json`, and the `tier` subcommands.
-- `apps/cli/src/lib/pricing/prices.json` — per-token USD table (the ranking
+- `cli/src/lib/model-tier-overrides.ts` — user overrides in `agents.yaml` (`tier set/clear/list`).
+- `cli/src/commands/models.ts` — the compact `agents models` menu, `--all`, `--json`, and the `tier` subcommands.
+- `cli/src/lib/pricing/prices.json` — per-token USD table (the ranking
   cross-check and `$/Mtok` display).

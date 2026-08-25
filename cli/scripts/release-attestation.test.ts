@@ -46,10 +46,10 @@ function initRepo(): { root: string; tree: string; commit: string } {
   git(root, 'init', '-q', '-b', 'main');
   git(root, 'config', 'user.email', 'test@example.com');
   git(root, 'config', 'user.name', 'test');
-  fs.mkdirSync(path.join(root, 'apps/cli'), { recursive: true });
-  fs.writeFileSync(path.join(root, 'apps/cli/bun.lock'), 'lock-v1\n');
-  fs.writeFileSync(path.join(root, 'apps/cli/vitest.config.ts'), 'export default {}\n');
-  fs.writeFileSync(path.join(root, 'apps/cli/package.json'), '{"version":"1.0.0"}\n');
+  fs.mkdirSync(path.join(root, 'cli'), { recursive: true });
+  fs.writeFileSync(path.join(root, 'cli/bun.lock'), 'lock-v1\n');
+  fs.writeFileSync(path.join(root, 'cli/vitest.config.ts'), 'export default {}\n');
+  fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.0"}\n');
   git(root, 'add', '-A');
   git(root, 'commit', '-q', '-m', 'base');
   return {
@@ -177,7 +177,7 @@ describeUnix('release-attestation.sh', () => {
     expect(ok.status, ok.out).toBe(0);
     expect(ok.out.trim()).toBe(written.out.trim());
 
-    fs.writeFileSync(path.join(root, 'apps/cli/src.ts'), 'changed\n');
+    fs.writeFileSync(path.join(root, 'cli/src.ts'), 'changed\n');
     git(root, 'add', '-A');
     git(root, 'commit', '-q', '-m', 'child');
     const child = git(root, 'rev-parse', 'HEAD^{tree}');

@@ -43,7 +43,7 @@ reject unknown scopes, agents, versions, properties, or tiers with a clear error
 - WHEN `parseConfigKey` is called
 - THEN it returns `{ scope: 'run', agent: 'claude', version: '2.1.45', property: 'model' }`.
 
-Evidence: `apps/cli/src/lib/config-keys.ts:parseConfigKey` matches `^run\.(.*)\.(model|mode|effort)$` and validates the captured `agent@version` token.
+Evidence: `cli/src/lib/config-keys.ts:parseConfigKey` matches `^run\.(.*)\.(model|mode|effort)$` and validates the captured `agent@version` token.
 
 #### Scenario: reject an unknown agent
 
@@ -51,7 +51,7 @@ Evidence: `apps/cli/src/lib/config-keys.ts:parseConfigKey` matches `^run\.(.*)\.
 - WHEN `parseConfigKey` is called
 - THEN it throws an error naming the key and listing known agents.
 
-Evidence: `apps/cli/src/lib/config-keys.ts:parseAgentVersion` checks `agent in AGENTS`.
+Evidence: `cli/src/lib/config-keys.ts:parseAgentVersion` checks `agent in AGENTS`.
 
 ### Requirement: Run defaults are stored under a selector-keyed map
 
@@ -64,8 +64,8 @@ under `run.defaults.<agent:version>.<field>` in central `agents.yaml`.
 - WHEN the user runs `agents config set run.claude@*.model claude-opus-4-8`
 - THEN `~/.agents/agents.yaml` contains `run: { defaults: { "claude:*": { model: claude-opus-4-8 } } }`.
 
-Evidence: `apps/cli/src/commands/config.ts:setConfig` routes run model keys to
-`setRunDefaultModel` (`apps/cli/src/lib/run-defaults.ts`), which writes to
+Evidence: `cli/src/commands/config.ts:setConfig` routes run model keys to
+`setRunDefaultModel` (`cli/src/lib/run-defaults.ts`), which writes to
 `meta.run.defaults[selector]`.
 
 ### Requirement: Exact run-default selectors override wildcard selectors
@@ -78,7 +78,7 @@ The system SHALL resolve run defaults so that an exact `<agent>:<version>` selec
 - WHEN `resolveRunDefaults('claude', '2.1.45')` is called
 - THEN the resolved model is `opus`.
 
-Evidence: `apps/cli/src/lib/run-defaults.ts:131` merges wildcard first, then exact selector per-field.
+Evidence: `cli/src/lib/run-defaults.ts:131` merges wildcard first, then exact selector per-field.
 
 ### Requirement: Project-local run configs override central run defaults
 
@@ -91,7 +91,7 @@ The system SHALL discover project-local `agents.yaml` files from the current wor
 - WHEN `resolveRunDefaults('claude', version, projectPath)` is called
 - THEN the resolved model is `haiku`.
 
-Evidence: `apps/cli/src/lib/run-defaults.ts:202` passes `[readMeta().run, ...projectRunConfigs]` to `resolveRunDefaultsFromConfigs`, and `apps/cli/src/lib/run-config.ts:19` walks upward from the start path.
+Evidence: `cli/src/lib/run-defaults.ts:202` passes `[readMeta().run, ...projectRunConfigs]` to `resolveRunDefaultsFromConfigs`, and `cli/src/lib/run-config.ts:19` walks upward from the start path.
 
 ### Requirement: Model tier overrides are folded into the run namespace
 
@@ -104,8 +104,8 @@ under `model.tiers.<agent:version>.<tier>` in central `agents.yaml`.
 - WHEN the user runs `agents config set run.claude@*.tier.best claude-opus-4-8`
 - THEN `~/.agents/agents.yaml` contains `model: { tiers: { "claude:*": { best: claude-opus-4-8 } } }`.
 
-Evidence: `apps/cli/src/commands/config.ts:setConfig` routes tier keys to
-`setTierOverride` (`apps/cli/src/lib/model-tier-overrides.ts:93`), which writes to
+Evidence: `cli/src/commands/config.ts:setConfig` routes tier keys to
+`setTierOverride` (`cli/src/lib/model-tier-overrides.ts:93`), which writes to
 `meta.model.tiers[selector]`.
 
 ### Requirement: Tier overrides resolve most-specific selector first
@@ -118,7 +118,7 @@ The system SHALL apply tier overrides so that `<agent>:<version>` overrides `<ag
 - WHEN resolving the best tier for `claude` version `2.1.45`
 - THEN the model is `claude-opus-4-8`.
 
-Evidence: `apps/cli/src/lib/model-tier-overrides.ts:66` merges wildcard first, then exact version.
+Evidence: `cli/src/lib/model-tier-overrides.ts:66` merges wildcard first, then exact version.
 
 ### Requirement: Tier resolution falls back to auto-ranking when the override is unknown
 
@@ -131,7 +131,7 @@ The system SHALL ignore an overridden model id that is not present in the instal
 - WHEN the best tier is resolved
 - THEN the system uses the auto-ranked best model for that version.
 
-Evidence: `apps/cli/src/lib/model-tiers.ts:applyTierOverrides` validates overrides against `catalogIds` and keeps the base value when the id is missing.
+Evidence: `cli/src/lib/model-tiers.ts:applyTierOverrides` validates overrides against `catalogIds` and keeps the base value when the id is missing.
 
 ### Requirement: Device-scope config keys are stored per-device
 
@@ -145,9 +145,9 @@ The system SHALL write `agents config set devices.<name>.<property>` to
 - THEN `~/.agents/devices/mac-mini/agents.yaml` contains `config: { maxAgents: 4 }`
 - AND central `agents.yaml` is unchanged.
 
-Evidence: `apps/cli/src/commands/config.ts:setConfig` maps `max-agents` to the internal
+Evidence: `cli/src/commands/config.ts:setConfig` maps `max-agents` to the internal
 key `agents.max-concurrent` and calls `setConfigValue` with `{ device: name }`;
-`apps/cli/src/lib/device-config.ts:302` writes to the peer device doc.
+`cli/src/lib/device-config.ts:302` writes to the peer device doc.
 
 ### Requirement: Central config keys are stored in `~/.agents/agents.yaml`
 
@@ -160,7 +160,7 @@ The system SHALL store central-scope config keys (`interactive.host`, `browser.p
 - THEN `~/.agents/agents.yaml` contains `config: { interactiveHost: zion }`
 - AND the device doc for `zion` is unchanged.
 
-Evidence: `apps/cli/src/lib/state.ts:900` classifies `config` and `run` and `model` as `'central'`; `apps/cli/src/commands/config.ts:setConfig` calls `setConfigValue('interactive.host', name)` which routes to central `agents.yaml` via `apps/cli/src/lib/device-config.ts:274`.
+Evidence: `cli/src/lib/state.ts:900` classifies `config` and `run` and `model` as `'central'`; `cli/src/commands/config.ts:setConfig` calls `setConfigValue('interactive.host', name)` which routes to central `agents.yaml` via `cli/src/lib/device-config.ts:274`.
 
 ### Requirement: User-level config is visible in per-device views via `--inherited`
 
@@ -177,8 +177,8 @@ only device-scope keys.
 - AND that section contains `interactive.host` with value `zion`
 - BUT `agents devices config mac-mini` (without `--inherited`) does not contain `interactive.host`.
 
-Evidence: `apps/cli/src/commands/ssh.ts:configureCmd` adds `--inherited` and renders
-`listUserConfig()` separately from device-scope keys; `apps/cli/src/lib/device-config.ts`
+Evidence: `cli/src/commands/ssh.ts:configureCmd` adds `--inherited` and renders
+`listUserConfig()` separately from device-scope keys; `cli/src/lib/device-config.ts`
 exposes `listUserConfig()` for user-scope entries.
 
 ### Requirement: Default browser profile is a device-scope meta field
@@ -191,8 +191,8 @@ The system SHALL store the default browser profile in the top-level `defaultBrow
 - WHEN the user runs `agents config set browser.profile work`
 - THEN `~/.agents/devices/<self>/agents.yaml` contains `defaultBrowserProfile: work`.
 
-Evidence: `apps/cli/src/commands/config.ts:setConfig` writes `defaultBrowserProfile` via
-`updateMeta` for the self device; `apps/cli/src/lib/state.ts:905` classifies
+Evidence: `cli/src/commands/config.ts:setConfig` writes `defaultBrowserProfile` via
+`updateMeta` for the self device; `cli/src/lib/state.ts:905` classifies
 `defaultBrowserProfile` as `'device'`.
 
 ### Requirement: Deprecated commands still mutate the same YAML paths
@@ -209,7 +209,7 @@ underlying stores as `agents config`, while emitting a deprecation warning.
 - THEN `~/.agents/agents.yaml` contains `run.defaults."claude:*".model = opus`
 - AND the command emits a deprecation warning pointing to `agents config`.
 
-Evidence: `apps/cli/src/commands/defaults.ts` calls `setRunDefault` and prints
+Evidence: `cli/src/commands/defaults.ts` calls `setRunDefault` and prints
 `DEPRECATION` via `console.warn`.
 
 ### Requirement: Unset config keys restore default behavior
@@ -223,11 +223,11 @@ The system SHALL treat an absent or unset key as “use the built-in default beh
 - THEN the selector is removed from `run.defaults`
 - AND subsequent runs resolve as if no default had ever been set.
 
-Evidence: `apps/cli/src/commands/config.ts:unsetConfig` delegates to `unsetRunDefault`;
-`apps/cli/src/lib/run-defaults.ts:255` deletes the selector and, if empty, deletes `run.defaults`.
+Evidence: `cli/src/commands/config.ts:unsetConfig` delegates to `unsetRunDefault`;
+`cli/src/lib/run-defaults.ts:255` deletes the selector and, if empty, deletes `run.defaults`.
 
 ## Coverage gaps and ambiguities
 
 1. **Project-local run config precedence is implicit.** A project `agents.yaml` can silently override user defaults, including model, with no warning emitted to the user.
 2. **Fleet sync is manual.** Central `agents.yaml` and `devices/` docs sync via the DotAgents repo push/pull workflow; the CLI does not automatically propagate a config change to other online devices.
-3. **No validation that a run-default model id exists in the catalog.** `setRunDefault` accepts any non-empty string (`apps/cli/src/lib/run-defaults.ts:72`), unlike tier overrides which are checked against the catalog at resolution time.
+3. **No validation that a run-default model id exists in the catalog.** `setRunDefault` accepts any non-empty string (`cli/src/lib/run-defaults.ts:72`), unlike tier overrides which are checked against the catalog at resolution time.

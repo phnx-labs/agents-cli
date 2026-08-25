@@ -39,7 +39,7 @@ function git(cwd: string, ...args: string[]): string {
 }
 
 // Builds a caller repo (a bare remote + a clone) shaped enough like the real
-// monorepo for release-attestation.sh's identity() to resolve: apps/cli/{
+// monorepo for release-attestation.sh's identity() to resolve: cli/{
 // package.json, bun.lock, vitest.config.ts, ci/test-ownership.yaml } plus a
 // root-level scripts/ci-scope.ts. A fake bun/npm on PATH stand in for the
 // real toolchain; `failSuite` makes the fake `bun run test` exit non-zero.
@@ -73,24 +73,24 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
   git(caller, 'config', 'user.email', 'attest-test@example.com');
   git(caller, 'config', 'user.name', 'attest-test');
 
-  fs.mkdirSync(path.join(caller, 'apps/cli/scripts'), { recursive: true });
-  fs.mkdirSync(path.join(caller, 'apps/cli/ci'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'cli/ci'), { recursive: true });
   fs.mkdirSync(path.join(caller, 'scripts'), { recursive: true });
   // RUSH-3178: the producer no longer runs `bun run test` itself -- it calls
   // scripts/test.sh, which owns WHERE the suite runs. The fixture therefore has
   // to carry the real test.sh, and runProduce passes --test-here so the fake
   // `bun run test` below is still what actually executes. Deliberately the real
   // script and not a stub: that is what pins the producer -> test.sh contract.
-  fs.copyFileSync(TEST_SCRIPT, path.join(caller, 'apps/cli/scripts/test.sh'));
-  fs.chmodSync(path.join(caller, 'apps/cli/scripts/test.sh'), 0o755);
-  fs.copyFileSync(PRODUCE_SCRIPT, path.join(caller, 'apps/cli/scripts/release-attestation-produce.sh'));
-  fs.copyFileSync(ATTEST_SCRIPT, path.join(caller, 'apps/cli/scripts/release-attestation.sh'));
-  fs.chmodSync(path.join(caller, 'apps/cli/scripts/release-attestation-produce.sh'), 0o755);
-  fs.chmodSync(path.join(caller, 'apps/cli/scripts/release-attestation.sh'), 0o755);
-  fs.writeFileSync(path.join(caller, 'apps/cli/package.json'), '{"name":"@phnx-labs/agents-cli","version":"9.9.9"}\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/bun.lock'), 'lock-v1\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/vitest.config.ts'), 'export default {}\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/ci/test-ownership.yaml'), 'ownership: {}\n');
+  fs.copyFileSync(TEST_SCRIPT, path.join(caller, 'cli/scripts/test.sh'));
+  fs.chmodSync(path.join(caller, 'cli/scripts/test.sh'), 0o755);
+  fs.copyFileSync(PRODUCE_SCRIPT, path.join(caller, 'cli/scripts/release-attestation-produce.sh'));
+  fs.copyFileSync(ATTEST_SCRIPT, path.join(caller, 'cli/scripts/release-attestation.sh'));
+  fs.chmodSync(path.join(caller, 'cli/scripts/release-attestation-produce.sh'), 0o755);
+  fs.chmodSync(path.join(caller, 'cli/scripts/release-attestation.sh'), 0o755);
+  fs.writeFileSync(path.join(caller, 'cli/package.json'), '{"name":"@phnx-labs/agents-cli","version":"9.9.9"}\n');
+  fs.writeFileSync(path.join(caller, 'cli/bun.lock'), 'lock-v1\n');
+  fs.writeFileSync(path.join(caller, 'cli/vitest.config.ts'), 'export default {}\n');
+  fs.writeFileSync(path.join(caller, 'cli/ci/test-ownership.yaml'), 'ownership: {}\n');
   fs.writeFileSync(path.join(caller, 'scripts/ci-scope.ts'), '// scope\n');
   git(caller, 'add', '-A');
   git(caller, 'commit', '-q', '-m', 'init');
@@ -145,7 +145,7 @@ function runProduce(
   return spawnSync(
     'bash',
     [
-      path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
+      path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
       fx.headCommit,
       // Run the suite in place: the fixture's fake `bun` IS the suite, and these
       // tests assert on attestation/manifest behavior, not on offload routing.
@@ -179,7 +179,7 @@ describe('release-attestation-produce.sh', () => {
       ['Agents CLI.app', 'Agents CLI'],
       ['MenubarHelper.app', 'AGI Menu'],
     ] as const) {
-      const dir = path.join(fx.caller, 'apps/cli/bin', app, 'Contents/MacOS');
+      const dir = path.join(fx.caller, 'cli/bin', app, 'Contents/MacOS');
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(path.join(dir, binName), 'signed-bytes\n');
     }
@@ -193,8 +193,8 @@ describe('release-attestation-produce.sh', () => {
     // The kept worktree genuinely carries the seeded apps where prepack looks.
     const kept = out.match(/kept worktree for inspection: (\S+)/);
     expect(kept, out).toBeTruthy();
-    expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI'))).toBe(true);
-    expect(fs.existsSync(path.join(kept![1], 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'))).toBe(true);
+    expect(fs.existsSync(path.join(kept![1], 'cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI'))).toBe(true);
+    expect(fs.existsSync(path.join(kept![1], 'cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'))).toBe(true);
   });
 
   it('does not seed when the caller checkout has no apps (nothing to reuse; gates decide)', () => {
@@ -218,7 +218,7 @@ describe('release-attestation-produce.sh', () => {
     const result = spawnSync(
       'bash',
       [
-        path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
+        path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
         fx.headCommit,
         // In-place: the fixture's fake `bun` is the suite (see runProduce).
         '--test-here',
@@ -295,7 +295,7 @@ describe('release-attestation-produce.sh', () => {
     const result = spawnSync(
       'bash',
       [
-        path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh'),
+        path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
         fx.headCommit,
         // In-place: the fixture's fake `bun` is the suite (see runProduce).
         '--test-here',
@@ -308,12 +308,12 @@ describe('release-attestation-produce.sh', () => {
     );
     expect(result.status, result.stdout + result.stderr).toBe(0);
 
-    // The script cd's to its own apps/cli directory before resolving --dir
+    // The script cd's to its own cli directory before resolving --dir
     // (matching how release.sh's own docs invoke release-attestation.sh with
-    // a relative path from apps/cli), so a relative --dir resolves there --
+    // a relative path from cli), so a relative --dir resolves there --
     // NOT wherever the caller happened to be, and NOT inside the throwaway
     // worktree the script deletes on exit.
-    const resolvedStore = path.join(fx.caller, 'apps/cli', relativeStore);
+    const resolvedStore = path.join(fx.caller, 'cli', relativeStore);
     expect(fs.existsSync(resolvedStore)).toBe(true);
     const jsonFile = fs.readdirSync(resolvedStore).find((f) => f.endsWith('.json'));
     expect(jsonFile).toBeTruthy();
@@ -353,7 +353,7 @@ describe('release-attestation-produce.sh', () => {
   it('requires a commit-ish argument', () => {
     const root = tmp('attest-produce-usage-');
     const fx = buildFixture(root);
-    const result = spawnSync('bash', [path.join(fx.caller, 'apps/cli/scripts/release-attestation-produce.sh')], {
+    const result = spawnSync('bash', [path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh')], {
       encoding: 'utf-8',
     });
     expect(result.status).not.toBe(0);
@@ -363,7 +363,7 @@ describe('release-attestation-produce.sh', () => {
 
 // Extends the base fixture with a real (copied, not faked) release-manifest.sh
 // plus minimal source trees for all three known helpers -- computer-mac at repo
-// root, keychain + menubar under apps/cli -- so the producer's helper-manifest
+// root, keychain + menubar under cli -- so the producer's helper-manifest
 // step (RUSH-2766) has real inputs to hash. keychain/menubar's "signed" assets
 // are plain placeholder files standing in for what the Darwin-only sign block
 // would have built; the manifest step only checks the files exist and hashes
@@ -419,22 +419,22 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
   fs.writeFileSync(path.join(caller, 'native/computer-mac/scripts/build.sh'), '#!/usr/bin/env bash\n');
   fs.writeFileSync(path.join(caller, 'native/computer-mac/Package.swift'), '// swift package\n');
 
-  fs.writeFileSync(path.join(caller, 'apps/cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/scripts/keychain-entitlements.plist'), '<plist/>\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/scripts/verify-keychain-helper.sh'), '#!/usr/bin/env bash\n');
-  fs.copyFileSync(MANIFEST_SCRIPT, path.join(caller, 'apps/cli/scripts/release-manifest.sh'));
-  fs.chmodSync(path.join(caller, 'apps/cli/scripts/release-manifest.sh'), 0o755);
+  fs.writeFileSync(path.join(caller, 'cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(caller, 'cli/scripts/keychain-entitlements.plist'), '<plist/>\n');
+  fs.writeFileSync(path.join(caller, 'cli/scripts/verify-keychain-helper.sh'), '#!/usr/bin/env bash\n');
+  fs.copyFileSync(MANIFEST_SCRIPT, path.join(caller, 'cli/scripts/release-manifest.sh'));
+  fs.chmodSync(path.join(caller, 'cli/scripts/release-manifest.sh'), 0o755);
 
-  fs.mkdirSync(path.join(caller, 'apps/cli/menubar/Sources'), { recursive: true });
-  fs.mkdirSync(path.join(caller, 'apps/cli/menubar/scripts'), { recursive: true });
-  fs.writeFileSync(path.join(caller, 'apps/cli/menubar/Sources/dummy.swift'), '// dummy\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/menubar/scripts/build.sh'), '#!/usr/bin/env bash\n');
-  fs.writeFileSync(path.join(caller, 'apps/cli/menubar/Package.swift'), '// swift package\n');
+  fs.mkdirSync(path.join(caller, 'cli/menubar/Sources'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'cli/menubar/scripts'), { recursive: true });
+  fs.writeFileSync(path.join(caller, 'cli/menubar/Sources/dummy.swift'), '// dummy\n');
+  fs.writeFileSync(path.join(caller, 'cli/menubar/scripts/build.sh'), '#!/usr/bin/env bash\n');
+  fs.writeFileSync(path.join(caller, 'cli/menubar/Package.swift'), '// swift package\n');
 
-  fs.mkdirSync(path.join(caller, 'apps/cli/bin/Agents CLI.app/Contents/MacOS'), { recursive: true });
-  fs.writeFileSync(path.join(caller, "apps/cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI"), 'fake-keychain-binary\n');
-  fs.mkdirSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS'), { recursive: true });
-  fs.writeFileSync(path.join(caller, 'apps/cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'), 'fake-menubar-binary\n');
+  fs.mkdirSync(path.join(caller, 'cli/bin/Agents CLI.app/Contents/MacOS'), { recursive: true });
+  fs.writeFileSync(path.join(caller, "cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI"), 'fake-keychain-binary\n');
+  fs.mkdirSync(path.join(caller, 'cli/bin/MenubarHelper.app/Contents/MacOS'), { recursive: true });
+  fs.writeFileSync(path.join(caller, 'cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'), 'fake-menubar-binary\n');
 
   git(caller, 'add', '-A');
   git(caller, 'commit', '-q', '-m', 'add helper manifest fixture');

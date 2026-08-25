@@ -37,7 +37,7 @@
  * extra repos (`getEnabledExtraRepos()`), and a REAL installed version home
  * under ~/.agents/.history/versions/claude/<version>/home discovered at runtime
  * via versions.ts:1284 `listInstalledVersions`. `process.cwd()` during a real
- * `vitest bench` run is apps/cli inside the invoking checkout, so the
+ * `vitest bench` run is cli inside the invoking checkout, so the
  * project-layer walk (`getProjectAgentsDir`) runs at its real depth.
  *
  * Side effects, stated plainly -- these are real writes, identical to what

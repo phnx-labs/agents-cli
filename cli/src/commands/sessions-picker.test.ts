@@ -81,8 +81,8 @@ describe('relativizeDir — readable Dirs line', () => {
 
   it('(a) strips the session cwd prefix, leaving the relative remainder', () => {
     expect(
-      relativizeDir('/home/me/repo/apps/cli/src/lib/secrets.ts', '/home/me/repo'),
-    ).toBe('apps/cli/src/lib');
+      relativizeDir('/home/me/repo/cli/src/lib/secrets.ts', '/home/me/repo'),
+    ).toBe('cli/src/lib');
   });
 
   it('(a) returns "." when the file sits directly in the cwd', () => {
@@ -93,10 +93,10 @@ describe('relativizeDir — readable Dirs line', () => {
     // cwd unrelated to the worktree → collapse applies for disambiguation.
     expect(
       relativizeDir(
-        '/home/me/repo/.agents/worktrees/fix-crabbox-touchid-storm/apps/cli/src/lib/crabbox/x.ts',
+        '/home/me/repo/.agents/worktrees/fix-crabbox-touchid-storm/cli/src/lib/crabbox/x.ts',
         '/home/me/other',
       ),
-    ).toBe('⧉ fix-crabbox-touchid-storm/apps/cli/src/lib/crabbox');
+    ).toBe('⧉ fix-crabbox-touchid-storm/cli/src/lib/crabbox');
   });
 
   it('(b) collapses to bare ⧉ <slug> when nothing follows the worktree root', () => {
@@ -107,8 +107,8 @@ describe('relativizeDir — readable Dirs line', () => {
 
   it('(A) cwd INSIDE the worktree, file under cwd → concise cwd-relative, NOT ⧉ (regression)', () => {
     // The dominant case in this repo: the session edits its own worktree. cwd-relative
-    // must win so paths stay concise (`src/lib`), never longer `⧉ <slug>/apps/cli/src/lib`.
-    const cwd = '/home/me/repo/.agents/worktrees/fix-session-dirs/apps/cli';
+    // must win so paths stay concise (`src/lib`), never longer `⧉ <slug>/cli/src/lib`.
+    const cwd = '/home/me/repo/.agents/worktrees/fix-session-dirs/cli';
     const out = relativizeDir(`${cwd}/src/lib/foo.ts`, cwd);
     expect(out).toBe('src/lib');
     expect(out).not.toContain('⧉');
@@ -119,10 +119,10 @@ describe('relativizeDir — readable Dirs line', () => {
     // collapse still applies (it disambiguates the other worktree).
     expect(
       relativizeDir(
-        '/home/me/repo/.agents/worktrees/worktree-y/apps/cli/src/lib/bar.ts',
-        '/home/me/repo/.agents/worktrees/worktree-x/apps/cli',
+        '/home/me/repo/.agents/worktrees/worktree-y/cli/src/lib/bar.ts',
+        '/home/me/repo/.agents/worktrees/worktree-x/cli',
       ),
-    ).toBe('⧉ worktree-y/apps/cli/src/lib');
+    ).toBe('⧉ worktree-y/cli/src/lib');
   });
 
   it('(c1) collapses a `--`/dot-dir worktree slug to ⧉ <name> (never a lossy // path)', () => {
@@ -151,10 +151,10 @@ describe('relativizeDir — readable Dirs line', () => {
     // Starts with `/`, not `-`, so the slug branch never fires; normal cwd-relativize.
     expect(
       relativizeDir(
-        '/home/me/src/phnx-labs/agents-cli/apps/cli/x.ts',
+        '/home/me/src/phnx-labs/agents-cli/cli/x.ts',
         '/home/me/src/phnx-labs/agents-cli',
       ),
-    ).toBe('apps/cli');
+    ).toBe('cli');
   });
 
   it('(d) collapses the home prefix to ~', () => {
@@ -465,9 +465,9 @@ describe('remote preview body — richer, and sanitized', () => {
 
   it('renders the directories the scan recorded on the row', () => {
     const out = stripVTControlCharacters(
-      buildPreview(remote({ recentDirectoriesTouched: ['apps/cli/src', 'docs'] }))
+      buildPreview(remote({ recentDirectoriesTouched: ['cli/src', 'docs'] }))
     );
-    expect(out).toContain('apps/cli/src');
+    expect(out).toContain('cli/src');
     expect(out).toContain('docs');
   });
 
@@ -491,7 +491,7 @@ describe('remote preview body — richer, and sanitized', () => {
     const out = buildPreview(
       remote({
         plan: '\x1b[31mred plan title\x1b[0m',
-        recentDirectoriesTouched: ['\x1b]0;pwned\x07apps/cli'],
+        recentDirectoriesTouched: ['\x1b]0;pwned\x07cli'],
       })
     );
     expect(out).not.toContain('\x1b[31m');
@@ -520,7 +520,7 @@ describe('remote preview — fetched peer digest fills the pane', () => {
     subAgentCount: 0,
     toolTags: [],
     changes: { created: 1, modified: 2, deleted: 0 },
-    dirs: ['apps/cli/src'],
+    dirs: ['cli/src'],
     repos: ['agents-cli'],
     artifacts: [],
     skills: [{ name: 'review', count: 2 }],
@@ -555,7 +555,7 @@ describe('remote preview — fetched peer digest fills the pane', () => {
     expect(after).not.toContain('fetching preview');
     expect(after).toContain('Fix the fan-out preview');
     expect(after).toContain('Landed the fix in remote-list.ts');
-    expect(after).toContain('apps/cli/src');
+    expect(after).toContain('cli/src');
     expect(after).toContain('review');
   });
 

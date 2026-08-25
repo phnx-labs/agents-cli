@@ -43,7 +43,7 @@ describe('buildTrajectory — durations by callId pairing', () => {
     const prog = (command: string) => buildTrajectory(cmd(command, 'x'), meta()).steps[0].program;
     expect(prog('git -C /repo push origin HEAD:main')).toBe('git');
     expect(prog('export FOO=bar; gh pr create --base main')).toBe('gh'); // export skipped
-    expect(prog('cd apps/cli && bun test')).toBe('bun'); // cd skipped
+    expect(prog('cd cli && bun test')).toBe('bun'); // cd skipped
     expect(prog('cat file.txt')).toBe('cat');
     expect(prog('cat f | grep x')).toBe('cat'); // pipeline: leftmost effective program
   });
@@ -64,14 +64,14 @@ describe('buildTrajectory — durations by callId pairing', () => {
     expect(label('set -e; bun test')).toBe('bun test');
     expect(label('FOO=bar git push')).toBe('git push');
     // A pipeline stays intact (only leading noise is removed).
-    expect(label('cd apps/cli && cat f | grep x')).toBe('cat f | grep x');
+    expect(label('cd cli && cat f | grep x')).toBe('cat f | grep x');
     // A command that is nothing but `cd` is left as-is, never emptied.
     expect(label('cd /home/u/src/agents-cli')).toBe('cd /home/u/src/agents-cli');
     // A separator INSIDE a quoted arg would cut mid-quote — keep the whole command
     // rather than show a dangling-quote fragment.
     expect(label('cd "/path/with; semicolon" && git push')).toBe('cd "/path/with; semicolon" && git push');
     // A non-noise command is untouched, and the label now agrees with the badge.
-    const t = buildTrajectory(cmd('cd apps/cli && bun test'), meta(), { redact: false });
+    const t = buildTrajectory(cmd('cd cli && bun test'), meta(), { redact: false });
     expect(t.steps[0].label).toBe('bun test');
     expect(t.steps[0].program).toBe('bun');
   });

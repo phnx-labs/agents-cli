@@ -37,16 +37,16 @@ beforeEach(() => {
   git('init', '-q', '-b', 'main');
   git('config', 'user.email', 'test@example.com');
   git('config', 'user.name', 'test');
-  fs.mkdirSync(path.join(repo, 'apps/cli/.changelog'), { recursive: true });
+  fs.mkdirSync(path.join(repo, 'cli/.changelog'), { recursive: true });
   fs.writeFileSync(
-    path.join(repo, 'apps/cli/.changelog/9.9.9.md'),
+    path.join(repo, 'cli/.changelog/9.9.9.md'),
     '- **Ship annotated tags.** Notes from the fold.\n',
   );
   fs.writeFileSync(
-    path.join(repo, 'apps/cli/package.json'),
+    path.join(repo, 'cli/package.json'),
     '{"name":"@phnx-labs/agents-cli","version":"9.9.9"}\n',
   );
-  git('add', 'apps/cli/.changelog/9.9.9.md', 'apps/cli/package.json');
+  git('add', 'cli/.changelog/9.9.9.md', 'cli/package.json');
   git('commit', '-q', '-m', 'prep 9.9.9');
 });
 
@@ -67,7 +67,7 @@ describeTag('create-annotated-release-tag.sh', () => {
   });
 
   it('fails loud when the commit has no folded changelog file', () => {
-    fs.unlinkSync(path.join(repo, 'apps/cli/.changelog/9.9.9.md'));
+    fs.unlinkSync(path.join(repo, 'cli/.changelog/9.9.9.md'));
     git('add', '-A');
     git('commit', '-q', '-m', 'drop notes');
     const r = runTag('9.9.9', 'HEAD');

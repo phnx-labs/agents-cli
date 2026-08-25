@@ -383,8 +383,8 @@ function isDotAgentsRoot(dir: string): boolean {
   for (const kind of DRILLABLE_KINDS) {
     // `routines/` alone is NOT a marker. Shipping example routine YAML for
     // `agents routines add` is a documented pattern (this repo's own
-    // apps/cli/routines/), and that directory is the ONLY kind dir there — so
-    // counting it would make `agents inspect apps/cli` resolve a source tree as
+    // cli/routines/), and that directory is the ONLY kind dir there — so
+    // counting it would make `agents inspect cli` resolve a source tree as
     // a DotAgents repo. Same reasoning as the nested-`.agents/` case above.
     if (kind === 'routines') continue;
     if (safeStat(path.join(dir, kind))?.isDirectory()) return true;

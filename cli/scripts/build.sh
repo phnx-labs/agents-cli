@@ -80,7 +80,7 @@ bun run build >/dev/null 2>&1
 # that only works if the helper travels with the installed CLI tarball. Build the
 # package here rather than requiring a prior manual build — a conditional copy
 # silently shipped a CLI with the hook permanently disabled on any clean checkout.
-ST_ROOT=../../packages/session-tracker
+ST_ROOT=../packages/session-tracker
 [ -d "$ST_ROOT" ] || { echo "error: $ST_ROOT missing — monorepo layout expected" >&2; exit 1; }
 dim "  Building session-tracker hook helper"
 (cd "$ST_ROOT" && bun install --silent && bun run build >/dev/null)

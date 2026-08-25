@@ -14,13 +14,13 @@
 policy_version: impact-v1
 
 areas:
-  - prefix: apps/cli/src/
+  - prefix: cli/src/
     companion: true
     related: true
     checks: [typecheck]
-  - prefix: apps/cli/scripts/
+  - prefix: cli/scripts/
     companion: true
-  - prefix: apps/cli/
+  - prefix: cli/
     companion: true
     related: true
   - prefix: packages/session-tracker/
@@ -39,31 +39,31 @@ groups:
   # non-interactive suite is split.
   - id: cli-bootstrap
     when:
-      - apps/cli/src/bootstrap.ts
-      - apps/cli/src/index.ts
-      - apps/cli/src/browser.ts
-      - apps/cli/src/computer.ts
-      - apps/cli/scripts/build.sh
-      - apps/cli/scripts/build-bin.sh
-      - apps/cli/scripts/build-win.sh
+      - cli/src/bootstrap.ts
+      - cli/src/index.ts
+      - cli/src/browser.ts
+      - cli/src/computer.ts
+      - cli/scripts/build.sh
+      - cli/scripts/build-bin.sh
+      - cli/scripts/build-win.sh
     tests:
-      - apps/cli/tests/non-interactive.test.ts
-      - apps/cli/src/index.command-star-routing.test.ts
-      - apps/cli/src/index.spellcheck.test.ts
-      - apps/cli/src/index.tombstones.test.ts
+      - cli/tests/non-interactive.test.ts
+      - cli/src/index.command-star-routing.test.ts
+      - cli/src/index.spellcheck.test.ts
+      - cli/src/index.tombstones.test.ts
     checks: [typecheck, binary-smoke]
     budget_sec: 120
 
   - id: command-surface
     when:
-      - apps/cli/src/commands/**
-      - apps/cli/src/cli/**
-      - apps/cli/scripts/gen-command-index.ts
-      - apps/cli/scripts/gen-command-index.test.ts
-      - apps/cli/scripts/verify-command-index.sh
-      - apps/cli/scripts/verify-docs.sh
-      - apps/cli/docs/command-index.md
-      - apps/cli/docs/command-index.json
+      - cli/src/commands/**
+      - cli/src/cli/**
+      - cli/scripts/gen-command-index.ts
+      - cli/scripts/gen-command-index.test.ts
+      - cli/scripts/verify-command-index.sh
+      - cli/scripts/verify-docs.sh
+      - cli/docs/command-index.md
+      - cli/docs/command-index.json
     checks: [command-index, docs, typecheck]
     # The devices/config command tests drive the REAL CLI as a subprocess (repo
     # convention forbids mocking), so each case costs a process spawn — the group
@@ -77,9 +77,9 @@ groups:
 
   - id: cli-docs
     when:
-      - apps/cli/docs/**
-      - apps/cli/AGENTS.md
-      - apps/cli/CHANGELOG.md
+      - cli/docs/**
+      - cli/AGENTS.md
+      - cli/CHANGELOG.md
     checks: [docs]
 
   # CHANGELOG.md is GENERATED from .changelog/<version>.md (gen-changelog.ts), and
@@ -93,10 +93,10 @@ groups:
   # causes it.
   - id: changelog-sources
     when:
-      - apps/cli/CHANGELOG.md
-      - apps/cli/.changelog/**
+      - cli/CHANGELOG.md
+      - cli/.changelog/**
     tests:
-      - apps/cli/scripts/gen-changelog.test.ts
+      - cli/scripts/gen-changelog.test.ts
 
   # 180s, not the default 85s. Any edit to sessions.ts — a two-line subcommand
   # registration included — selects the whole sessions* suite: 24 files, 92s of
@@ -119,18 +119,18 @@ groups:
   # behavior suite. Lower the budget only against a measured post-split run.
   - id: sessions
     when:
-      - apps/cli/src/lib/session/**
-      - apps/cli/src/commands/sessions.ts
-      - apps/cli/src/commands/sessions.test.ts
-      - apps/cli/src/commands/sessions.*.test.ts
-      - apps/cli/src/commands/sessions.test-fixture.ts
-      - apps/cli/src/commands/__tests__/sessions-*.test.ts
-      - apps/cli/bench/sessions-active-perf.ts
+      - cli/src/lib/session/**
+      - cli/src/commands/sessions.ts
+      - cli/src/commands/sessions.test.ts
+      - cli/src/commands/sessions.*.test.ts
+      - cli/src/commands/sessions.test-fixture.ts
+      - cli/src/commands/__tests__/sessions-*.test.ts
+      - cli/bench/sessions-active-perf.ts
     tests:
-      - apps/cli/src/commands/sessions.cli-list.test.ts
-      - apps/cli/src/commands/sessions.cli-tools.test.ts
-      - apps/cli/src/commands/sessions.computer.test.ts
-      - apps/cli/src/commands/sessions.render.test.ts
+      - cli/src/commands/sessions.cli-list.test.ts
+      - cli/src/commands/sessions.cli-tools.test.ts
+      - cli/src/commands/sessions.computer.test.ts
+      - cli/src/commands/sessions.render.test.ts
     checks: [typecheck, sessions-bench]
     budget_sec: 240
 
@@ -146,10 +146,10 @@ groups:
   # under load (RUSH-2839), so it inherits this budget instead of the flat 85s.
   - id: daemon
     when:
-      - apps/cli/src/lib/daemon/**
-      - apps/cli/src/lib/daemon-ticks.ts
-      - apps/cli/src/commands/daemon.ts
-      - apps/cli/src/commands/daemon.test.ts
+      - cli/src/lib/daemon/**
+      - cli/src/lib/daemon-ticks.ts
+      - cli/src/commands/daemon.ts
+      - cli/src/commands/daemon.test.ts
     checks: [typecheck]
     budget_sec: 240
 
@@ -166,14 +166,14 @@ groups:
   # pass the flat 85s.
   - id: scheduling
     when:
-      - apps/cli/src/lib/scheduling/**
-      - apps/cli/src/commands/routines.ts
-      - apps/cli/src/commands/routines.test.ts
-      - apps/cli/src/commands/routines.*.test.ts
-      - apps/cli/src/commands/routines.test-fixture.ts
+      - cli/src/lib/scheduling/**
+      - cli/src/commands/routines.ts
+      - cli/src/commands/routines.test.ts
+      - cli/src/commands/routines.*.test.ts
+      - cli/src/commands/routines.test-fixture.ts
     tests:
-      - apps/cli/src/commands/routines.add.test.ts
-      - apps/cli/src/commands/routines.list.test.ts
+      - cli/src/commands/routines.add.test.ts
+      - cli/src/commands/routines.list.test.ts
     checks: [typecheck]
     budget_sec: 180
 
@@ -184,7 +184,7 @@ groups:
   # against a measured run, and lower it when the suite is split.
   - id: installations
     when:
-      - apps/cli/src/lib/installations/**
+      - cli/src/lib/installations/**
     checks: [typecheck]
     budget_sec: 120
 
@@ -193,17 +193,17 @@ groups:
   # run (48 files / 1099 tests, all passed). Under 85s the move cannot merge.
   - id: hooks
     when:
-      - apps/cli/src/lib/hooks/**
+      - cli/src/lib/hooks/**
     checks: [typecheck]
     budget_sec: 150
 
   - id: toolchain
     when:
-      - apps/cli/bun.lock
-      - apps/cli/vitest.config.ts
-      - apps/cli/tsconfig.json
-      - apps/cli/tests/setup.ts
-      - apps/cli/tests/global-setup.ts
+      - cli/bun.lock
+      - cli/vitest.config.ts
+      - cli/tsconfig.json
+      - cli/tests/setup.ts
+      - cli/tests/global-setup.ts
     suite: cli-full
     checks: [typecheck]
 
@@ -214,10 +214,10 @@ groups:
   # cli-full too.
   - id: toolchain-metadata
     when:
-      - apps/cli/package.json
+      - cli/package.json
     suite: metadata-gated
     tests:
-      - apps/cli/src/lib/version.test.ts
+      - cli/src/lib/version.test.ts
     checks: [typecheck]
 
   - id: impact-policy
@@ -226,7 +226,7 @@ groups:
       - scripts/ci-scope.test.ts
       - scripts/ci-impact-bench.ts
       - scripts/ci-bench/**
-      - apps/cli/ci/test-ownership.yaml
+      - cli/ci/test-ownership.yaml
       - .github/workflows/tests.yml
       - .github/workflows/tests-gate.test.ts
     checks: [impact-tests, workflow-policy]
@@ -242,6 +242,11 @@ testless:
   # AGI EXT moved to its own repo (phnx-labs/agi-ext, RUSH-3189); kept mapped so
   # historical paths never read as unmapped.
   - apps/ext/**
+  # apps/cli moved up to cli/ (RUSH-3189 follow-up, the apps/ wrapper died with
+  # the ext split). The live paths are cli/** below; this old prefix is kept
+  # mapped so a historical or deleted apps/cli/... path — including this very
+  # rename, which the selector reads as delete+add — never reads as unmapped.
+  - apps/cli/**
   - .agents/**
   - assets/**
   - demo/**
@@ -249,11 +254,11 @@ testless:
   - openspec/**
   - native/**
   - apps/ios/**
-  - apps/cli/menubar/**
-  - apps/cli/bin/**
-  - apps/cli/schema/**
-  - apps/cli/routines/**
-  - apps/cli/bench/**
+  - cli/menubar/**
+  - cli/bin/**
+  - cli/schema/**
+  - cli/routines/**
+  - cli/bench/**
   - packages/agi-cli/**
   - packages/swarmify-mirror/**
   - website/**
@@ -270,9 +275,9 @@ testless:
   - .gitignore
   - .gitleaks.toml
   - agents.yaml
-  - apps/cli/.crabbox.yaml
-  - apps/cli/.gitignore
-  - apps/cli/.npmignore
-  - apps/cli/LICENSE
-  - apps/cli/CLAUDE.md
-  - apps/cli/GEMINI.md
+  - cli/.crabbox.yaml
+  - cli/.gitignore
+  - cli/.npmignore
+  - cli/LICENSE
+  - cli/CLAUDE.md
+  - cli/GEMINI.md

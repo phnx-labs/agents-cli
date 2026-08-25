@@ -256,7 +256,7 @@ struct MenubarSnapshot: Decodable {
     let activeSessions: [ActiveSession]
     // Optional so a snapshot from an older installed `agents` CLI (no devices
     // field) still decodes — version skew between the helper and the on-PATH CLI
-    // is real (see the multi-install notes in apps/cli/CLAUDE.md).
+    // is real (see the multi-install notes in cli/CLAUDE.md).
     let devices: [Device]?
     let watchdog: MenubarWatchdogSnapshot
 }

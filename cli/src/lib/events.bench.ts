@@ -44,7 +44,7 @@ import { stampProvenance, resetEventProvenanceForTest } from './event-provenance
 import { resetActorCache } from './actor.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-/** dist/ of THIS checkout — src/lib/ is two levels under apps/cli, dist is a sibling of src. */
+/** dist/ of THIS checkout — src/lib/ is two levels under cli, dist is a sibling of src. */
 const DIST_ROOT = path.resolve(__dirname, '../../dist');
 const distUrl = (rel: string): string => pathToFileURL(path.join(DIST_ROOT, rel)).href;
 
@@ -149,7 +149,7 @@ afterAll(() => {
  */
 const REALISTIC_ARGV = [
   'run', 'claude', '--mode', 'auto',
-  '--prompt', 'Benchmark the event-emission bootstrap in apps/cli: read index.ts:213-214, events.ts and event-provenance.ts end to end, commit a vitest bench beside the source that exercises the real emit/redactArgs/stampProvenance path against a temp sink, then propose optimizations from the measured numbers.',
+  '--prompt', 'Benchmark the event-emission bootstrap in cli: read index.ts:213-214, events.ts and event-provenance.ts end to end, commit a vitest bench beside the source that exercises the real emit/redactArgs/stampProvenance path against a temp sink, then propose optimizations from the measured numbers.',
   '--session', 'ce1e00cb-61dc-4c62-b30e-f053ef6ce990',
   '--device', 'yosemite-s1',
   '--remote-cwd', '/home/muqsit/src/github.com/muqsitnawaz/agents-cli',

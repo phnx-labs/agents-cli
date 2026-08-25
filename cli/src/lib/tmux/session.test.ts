@@ -729,7 +729,7 @@ describe('already-running server reconcile (RUSH-3066)', () => {
   // These drive the REAL createSession() against a REAL tmux server, because the
   // bug being fixed lives in createSession's control flow, not in tmux. A test
   // that only shells out to `tmux` directly would still pass with the fix
-  // deleted, which is exactly the ceremony apps/cli/AGENTS.md forbids.
+  // deleted, which is exactly the ceremony cli/AGENTS.md forbids.
   const mk = () => fs.mkdtempSync(path.join(os.tmpdir(), 'ag-reconcile-'));
 
   it('configures a server that was ALREADY running before agents-cli touched it', async () => {

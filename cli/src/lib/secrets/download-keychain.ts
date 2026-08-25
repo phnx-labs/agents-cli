@@ -43,7 +43,7 @@ export const KEYCHAIN_HELPER_SPEC: HelperSpec = {
   appName: KEYCHAIN_HELPER_APP_NAME,
   cacheSubdir: ['secrets', 'mac-helper'],
   expectedTeamId: EXPECTED_TEAM_ID,
-  localBuildHint: 'apps/cli/scripts/build-keychain-helper.sh',
+  localBuildHint: 'cli/scripts/build-keychain-helper.sh',
 };
 
 /** Release-asset URLs for the keychain helper zip + its checksum at `v<version>`. */

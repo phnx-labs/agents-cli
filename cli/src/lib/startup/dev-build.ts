@@ -23,12 +23,12 @@ import * as path from 'path';
  * looking for `.git`.
  *
  * That package root does not always hold `.git` itself, though — this repo is a
- * monorepo where the package lives at `apps/cli` and `.git` sits one level
+ * monorepo where the package lives at `cli` and `.git` sits one level
  * higher, at the true repo root. `.git` is therefore searched for in a SMALL,
  * bounded set of ancestors above the package root (see
  * `DEV_BUILD_GIT_ANCESTOR_DEPTH`), not just the package root itself — a source
- * checkout run via tsx/ts-node from `apps/cli/src/` or built to
- * `apps/cli/dist/` must still be recognized. The bound keeps this well short of
+ * checkout run via tsx/ts-node from `cli/src/` or built to
+ * `cli/dist/` must still be recognized. The bound keeps this well short of
  * an unrelated ancestor repo: a real Homebrew npm-global install's package root
  * sits 3 directories below `/opt/homebrew` (`lib/node_modules/@phnx-labs/…`),
  * so a depth of 2 finds this repo's `.git` while staying short of Homebrew's.

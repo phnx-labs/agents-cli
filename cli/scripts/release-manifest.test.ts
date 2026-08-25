@@ -9,7 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 const SCRIPT = path.resolve(__dirname, 'release-manifest.sh');
-const REPO = path.resolve(__dirname, '../../..');
+const REPO = path.resolve(__dirname, '../..');
 const temps: string[] = [];
 
 function tmp(prefix: string): string {

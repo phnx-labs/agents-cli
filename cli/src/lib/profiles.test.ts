@@ -358,7 +358,7 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
 
     // No `models:` opt-in at all: this function leaves the tier token and env
     // untouched. It does NOT write its own "no model configured" note --
-    // apps/cli/src/commands/exec.ts's profile-tier discard guard (merged
+    // cli/src/commands/exec.ts's profile-tier discard guard (merged
     // separately, "cost tiers don't apply to profile ...") is the canonical
     // message for this case, covered by its own test in exec.test.ts.
     const resolved = resolveProfileForRun('kimi', 'best');

@@ -45,5 +45,9 @@ if [[ -z "${RELEASE_ATTESTATION_DIR:-}" && -d "$REPO_ROOT/.release-attestations"
   export RELEASE_ATTESTATION_DIR="$REPO_ROOT/.release-attestations"
 fi
 
-cd "$WORKTREE/apps/cli"
+# apps/cli -> cli flatten (RUSH-3189 follow-up): the CLI moved up to cli/. Drive
+# off whichever layout the checked-out default branch actually has.
+CLI_SUBDIR="cli"
+[[ -d "$WORKTREE/cli" ]] || CLI_SUBDIR="apps/cli"
+cd "$WORKTREE/$CLI_SUBDIR"
 scripts/release.sh "${RELEASE_ARGS[@]}" --orchestration-phase

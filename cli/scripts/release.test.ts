@@ -177,8 +177,8 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     git(remote, 'init', '--quiet', '-b', 'main');
     git(remote, 'config', 'user.email', 'test@example.com');
     git(remote, 'config', 'user.name', 'test');
-    fs.mkdirSync(path.join(remote, 'apps/cli'), { recursive: true });
-    fs.writeFileSync(path.join(remote, 'apps/cli/package.json'), JSON.stringify({ version: '1.2.3' }));
+    fs.mkdirSync(path.join(remote, 'cli'), { recursive: true });
+    fs.writeFileSync(path.join(remote, 'cli/package.json'), JSON.stringify({ version: '1.2.3' }));
     git(remote, 'add', '-A');
     git(remote, 'commit', '--quiet', '-m', 'v1.2.3 tree, no profile yet');
     git(remote, 'tag', 'v1.2.3');
@@ -188,10 +188,10 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     // tree even though origin (fetched below) is current.
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-snippet-homebase-'));
     git(repoRoot, 'clone', '--quiet', remote, '.');
-    expect(fs.existsSync(path.join(repoRoot, 'apps/cli/bin/embedded.provisionprofile'))).toBe(false);
+    expect(fs.existsSync(path.join(repoRoot, 'cli/bin/embedded.provisionprofile'))).toBe(false);
 
-    fs.mkdirSync(path.join(remote, 'apps/cli/bin'), { recursive: true });
-    fs.writeFileSync(path.join(remote, 'apps/cli/bin/embedded.provisionprofile'), 'PROFILE-BYTES');
+    fs.mkdirSync(path.join(remote, 'cli/bin'), { recursive: true });
+    fs.writeFileSync(path.join(remote, 'cli/bin/embedded.provisionprofile'), 'PROFILE-BYTES');
     git(remote, 'add', '-A');
     git(remote, 'commit', '--quiet', '-m', 'commit embedded.provisionprofile (2567004b4)');
 
@@ -202,10 +202,10 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     expect(gen.status, gen.stderr).toBe(0);
 
     // Run just the seeding portion of the generated snippet (stop short of
-    // `cd "$WT/apps/cli"; scripts/release.sh ...`, which needs the real CLI
+    // `cd "$WT/cli"; scripts/release.sh ...`, which needs the real CLI
     // installed) and cat the recovered file back out BEFORE the snippet's own
     // EXIT trap removes the worktree.
-    const seedOnly = `${gen.stdout.split('cd "$WT/apps/cli"')[0]}\ncat "$WT/apps/cli/bin/embedded.provisionprofile"`;
+    const seedOnly = `${gen.stdout.split('cd "$WT/cli"')[0]}\ncat "$WT/cli/bin/embedded.provisionprofile"`;
     const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
     expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
     expect(run.stdout).toContain('PROFILE-BYTES');
@@ -216,8 +216,8 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     git(remote, 'init', '--quiet', '-b', 'main');
     git(remote, 'config', 'user.email', 'test@example.com');
     git(remote, 'config', 'user.name', 'test');
-    fs.mkdirSync(path.join(remote, 'apps/cli'), { recursive: true });
-    fs.writeFileSync(path.join(remote, 'apps/cli/package.json'), JSON.stringify({ version: '1.2.3' }));
+    fs.mkdirSync(path.join(remote, 'cli'), { recursive: true });
+    fs.writeFileSync(path.join(remote, 'cli/package.json'), JSON.stringify({ version: '1.2.3' }));
     git(remote, 'add', '-A');
     git(remote, 'commit', '--quiet', '-m', 'v1.2.3 tree, profile never committed');
     git(remote, 'tag', 'v1.2.3');
@@ -231,7 +231,7 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     });
     expect(gen.status, gen.stderr).toBe(0);
 
-    const seedOnly = gen.stdout.split('cd "$WT/apps/cli"')[0];
+    const seedOnly = gen.stdout.split('cd "$WT/cli"')[0];
     const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
     expect(run.status).not.toBe(0); // fails fast, not a "warning" that limps forward
     expect(run.stderr).toContain('embedded.provisionprofile not found');
@@ -253,9 +253,9 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     git(remote, 'init', '--quiet', '-b', 'main');
     git(remote, 'config', 'user.email', 'test@example.com');
     git(remote, 'config', 'user.name', 'test');
-    fs.mkdirSync(path.join(remote, 'apps/cli/bin'), { recursive: true });
-    fs.writeFileSync(path.join(remote, 'apps/cli/package.json'), JSON.stringify({ version: '1.2.3' }));
-    fs.writeFileSync(path.join(remote, 'apps/cli/bin/embedded.provisionprofile'), 'PROFILE-BYTES');
+    fs.mkdirSync(path.join(remote, 'cli/bin'), { recursive: true });
+    fs.writeFileSync(path.join(remote, 'cli/package.json'), JSON.stringify({ version: '1.2.3' }));
+    fs.writeFileSync(path.join(remote, 'cli/bin/embedded.provisionprofile'), 'PROFILE-BYTES');
     git(remote, 'add', '-A');
     git(remote, 'commit', '--quiet', '-m', 'v1.2.3 tree, profile already in it');
     git(remote, 'tag', 'v1.2.3');
@@ -279,7 +279,7 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     });
     expect(gen.status, gen.stderr).toBe(0);
 
-    const seedOnly = `${gen.stdout.split('cd "$WT/apps/cli"')[0]}\ncat "$WT/apps/cli/bin/embedded.provisionprofile"`;
+    const seedOnly = `${gen.stdout.split('cd "$WT/cli"')[0]}\ncat "$WT/cli/bin/embedded.provisionprofile"`;
     const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
     expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
     expect(run.stdout).toContain('PROFILE-BYTES');

@@ -12,7 +12,7 @@ describe('projectKeyFromCwd', () => {
   });
 
   it('folds a subdirectory INSIDE a worktree to the same repo', () => {
-    expect(projectKeyFromCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing/apps/cli')).toBe('agents-cli');
+    expect(projectKeyFromCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing/cli')).toBe('agents-cli');
   });
 
   it('resolves a plain repo cwd to its basename', () => {
@@ -40,7 +40,7 @@ describe('projectKeyFromCwd', () => {
   it('agrees across the sessions overview and the activity timeline', () => {
     for (const cwd of [
       '/Users/m/src/agents-cli/.agents/worktrees/fix-thing',
-      '/Users/m/src/agents-cli/.agents/worktrees/fix-thing/apps/cli',
+      '/Users/m/src/agents-cli/.agents/worktrees/fix-thing/cli',
       '/Users/m/src/rush',
     ]) {
       expect(overviewProjectKey({ cwd })).toBe(projectKeyFromCwd(cwd));
@@ -57,7 +57,7 @@ describe('repoAgentsDirForCwd (pure worktree fold — no filesystem)', () => {
   });
 
   it('folds a subdirectory inside a worktree to the same primary .agents', () => {
-    expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing/apps/cli/dist'))
+    expect(repoAgentsDirForCwd('/Users/m/src/agents-cli/.agents/worktrees/fix-thing/cli/dist'))
       .toBe(path.join('/Users/m/src/agents-cli', '.agents'));
   });
 
@@ -96,7 +96,7 @@ describe('repoRootForCwd / resolveProjectKey (a cwd on this machine)', () => {
   });
 
   it('files a monorepo subdirectory under the REPO, not the leaf dir', () => {
-    // The bug this fixes: `<repo>/apps/cli` used to group as `cli`.
+    // The bug this fixes: `<repo>/cli` used to group as `cli`.
     expect(resolveProjectKey(path.join(repo, 'apps', 'cli'), home)).toBe('agents-cli');
     expect(projectKeyFromCwd(path.join(repo, 'apps', 'cli'))).toBe('cli');
   });

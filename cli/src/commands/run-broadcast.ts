@@ -2,7 +2,7 @@
  * `agents run --broadcast` — run the same task/prompt across an agent × model
  * matrix (formerly `agents bench`).
  *
- * Task definitions live under apps/cli/bench/tasks/<id>/task.json.
+ * Task definitions live under cli/bench/tasks/<id>/task.json.
  */
 
 import * as fs from 'fs';

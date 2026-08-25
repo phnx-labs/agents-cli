@@ -19,7 +19,7 @@ PROFILE="$REPO_ROOT/bin/embedded.provisionprofile"
 ENTITLEMENTS="$REPO_ROOT/scripts/keychain-entitlements.plist"
 APP="$REPO_ROOT/bin/Agents CLI.app"
 BIN="$APP/Contents/MacOS/Agents CLI"
-LOGO="$REPO_ROOT/../../assets/logo.png"
+LOGO="$REPO_ROOT/../assets/logo.png"
 
 # Build an .icns from the master logo. Runs on macOS only (sips + iconutil).
 generate_app_icon() {
@@ -46,7 +46,7 @@ generate_app_icon() {
 : "${APPLE_APP_SPECIFIC_PASSWORD:?APPLE_APP_SPECIFIC_PASSWORD not set}"
 : "${APPLE_TEAM_ID:?APPLE_TEAM_ID not set}"
 
-[ -f "$PROFILE" ] || { echo "Missing $PROFILE. It is a committed input (see commit 2567004b4) -- do NOT regenerate it at developer.apple.com. Recover it from git history and verify apps/cli/bin/embedded.provisionprofile is tracked on origin/<default>, then either re-run from an up-to-date checkout or rerun via release.sh, whose home-base phase recovers it from origin/<default> automatically." >&2; exit 1; }
+[ -f "$PROFILE" ] || { echo "Missing $PROFILE. It is a committed input (see commit 2567004b4) -- do NOT regenerate it at developer.apple.com. Recover it from git history and verify cli/bin/embedded.provisionprofile is tracked on origin/<default>, then either re-run from an up-to-date checkout or rerun via release.sh, whose home-base phase recovers it from origin/<default> automatically." >&2; exit 1; }
 
 SIGN_IDENTITY="Developer ID Application: Muqit Nawaz ($APPLE_TEAM_ID)"
 

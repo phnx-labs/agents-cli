@@ -112,15 +112,15 @@ helper_paths() {
       ;;
     keychain)
       printf '%s\n' \
-        "$root/apps/cli/scripts/build-keychain-helper.sh" \
-        "$root/apps/cli/scripts/keychain-entitlements.plist" \
-        "$root/apps/cli/scripts/verify-keychain-helper.sh"
+        "$root/cli/scripts/build-keychain-helper.sh" \
+        "$root/cli/scripts/keychain-entitlements.plist" \
+        "$root/cli/scripts/verify-keychain-helper.sh"
       ;;
     menubar)
       printf '%s\n' \
-        "$root/apps/cli/menubar/Sources" \
-        "$root/apps/cli/menubar/scripts/build.sh" \
-        "$root/apps/cli/menubar/Package.swift"
+        "$root/cli/menubar/Sources" \
+        "$root/cli/menubar/scripts/build.sh" \
+        "$root/cli/menubar/Package.swift"
       ;;
   esac
 }

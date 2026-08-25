@@ -88,7 +88,7 @@ BYOK gateway, a team's shared key? `agents accounts add <name> --provider <p>
 `agents run <agent> --account <name>` or make the default with `agents
 accounts switch <agent>` (picker) / `agents accounts set-default <agent> <name>`;
 `agents accounts sync <name> --device
-<device>` copies it to another machine. See [Accounts](../../../README.md#accounts)
+<device>` copies it to another machine. See [Accounts](../../README.md#accounts)
 in the root README.
 
 `--mode plan` is read-only (safe to run against anything); `edit` lets the
@@ -210,4 +210,4 @@ Two things worth knowing exist, without dumping their full docs here:
 | Browser — driving Chrome/Brave/Edge via CDP | [`browser.md`](browser.md) |
 | Secrets — Keychain-backed env bundles | [`secrets.md`](secrets.md) |
 | Routines — cron-scheduled and webhook-triggered runs | [`routines.md`](routines.md) |
-| Full command reference | root [`README.md`](../../../README.md) and [`docs/README.md`](README.md) |
+| Full command reference | root [`README.md`](../../README.md) and [`docs/README.md`](README.md) |

@@ -19,7 +19,7 @@
 #
 # This script rsyncs the exact build INPUTS from THIS worktree to the home base,
 # runs the two Mac build scripts there under its headless signing creds, then
-# pulls the signed bundles back into THIS worktree's apps/cli/bin/ so
+# pulls the signed bundles back into THIS worktree's cli/bin/ so
 # `bun run build` (presence-gated) can package them.
 #
 # NO ENV VARS: the sign host defaults to mac-mini (matching release.sh) and is
@@ -54,7 +54,7 @@ done
 $expect_device && { printf 'error: --device needs a machine name\n' >&2; exit 1; }
 readonly RELEASE_HOME_BASE="${DEVICE:-$RELEASE_HOME_BASE_DEFAULT}"
 
-# apps/cli in THIS worktree (script lives in apps/cli/scripts/).
+# cli in THIS worktree (script lives in cli/scripts/).
 LOCAL_CLI="$(cd "$(dirname "$0")/.." && pwd)"
 
 log()  { printf '\033[36m[remote-sign]\033[0m %s\n' "$*"; }
@@ -66,17 +66,17 @@ command -v rsync >/dev/null || die "rsync not found"
 
 HOME_BASE="$RELEASE_HOME_BASE"
 log "home base:        $HOME_BASE (build + sign + notarize)"
-log "local apps/cli:   $LOCAL_CLI"
+log "local cli:   $LOCAL_CLI"
 
 # Resolve the remote build workspace. $HOME expands on the REMOTE side (never the
 # local shell), so single-quote it and let the home base's shell expand it.
-HOST_CLI="$(ssh "$HOME_BASE" 'echo $HOME/src/github.com/muqsitnawaz/agents-cli/apps/cli')" \
+HOST_CLI="$(ssh "$HOME_BASE" 'echo $HOME/src/github.com/muqsitnawaz/agents-cli/cli')" \
   || die "could not reach the home base $HOME_BASE over ssh"
-[[ -n "$HOST_CLI" ]] || die "resolved an empty remote apps/cli path on $HOME_BASE"
-log "remote apps/cli:  $HOME_BASE:$HOST_CLI"
+[[ -n "$HOST_CLI" ]] || die "resolved an empty remote cli path on $HOME_BASE"
+log "remote cli:  $HOME_BASE:$HOST_CLI"
 
 # ----- 1. Ship the build inputs from this worktree to the sign host -----
-# We stage into the sign host's apps/cli subtree so the Mac build scripts see the
+# We stage into the sign host's cli subtree so the Mac build scripts see the
 # layout they expect (scripts/.., src/lib/secrets/.., menubar/..). This is a build
 # workspace, not a git checkout — the sign host's own branch/version is irrelevant.
 log "staging build inputs on $HOME_BASE ..."

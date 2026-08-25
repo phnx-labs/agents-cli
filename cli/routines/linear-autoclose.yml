@@ -1,7 +1,7 @@
 # Routine: auto-close Linear issues when their linked GitHub PRs merge.
 #
 # Install:
-#   agents routines add ./apps/cli/routines/linear-autoclose.yml
+#   agents routines add ./cli/routines/linear-autoclose.yml
 #
 # Prerequisites:
 #   - LINEAR_API_KEY env var, OR `security add-generic-password -s linear-api-key` on macOS
@@ -13,7 +13,7 @@
 #   Set AGENTS_LINEAR_AUTOCLOSE_DRY_RUN=0 to enable real closing.
 #
 # Decision logic mirrors the pure TypeScript function in
-#   apps/cli/src/lib/linear-autoclose.ts :: shouldCloseIssue
+#   cli/src/lib/linear-autoclose.ts :: shouldCloseIssue
 #   PR state == MERGED  AND  mergedAt != null  =>  close the issue.
 #
 # Runs as a `command:` (plain shell) routine — no LLM, no token burn.

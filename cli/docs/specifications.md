@@ -40,7 +40,7 @@ guarantee, the reference for the mechanism.
   deviation from another requirement in this document). Normative `MUST`/`SHOULD`
   bodies state only the contract; the shortfall lives in the `-GAP-` entry. An entry
   that exists purely to record such a deviation carries no RFC-2119 keyword.
-- Every requirement cites the implementing `file:line` under `apps/cli/src/` unless
+- Every requirement cites the implementing `file:line` under `cli/src/` unless
   noted, and SHOULD name the symbol/function/constant. **Line numbers drift as code
   moves — the cited symbol is the durable anchor, not the number.**
 - Behavioral scenarios are written Given/When/Then so they map 1:1 to tests.
@@ -114,7 +114,7 @@ disagree, one of them is a bug; fixing the drift is mandatory.
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the
-`file:line` that implements it, under `apps/cli/src/` unless noted. Behavioral
+`file:line` that implements it, under `cli/src/` unless noted. Behavioral
 scenarios are Given/When/Then so they map 1:1 to tests.
 
 ---
@@ -1291,7 +1291,7 @@ spec disagree, one of them is a bug; fixing the drift is mandatory, not optional
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the
-`file:line` that implements it, under `apps/cli/src/` unless noted. Behavioral
+`file:line` that implements it, under `cli/src/` unless noted. Behavioral
 scenarios are written Given/When/Then so they map 1:1 to tests.
 
 ---
@@ -2011,7 +2011,7 @@ This is the **contract** for `agents run`: what a human, an agent, or a
 downstream tool (`agents teams`, routines, `--device` dispatch) is entitled to
 rely on when a run is dispatched, stated as testable requirements. It exists
 because "one execution engine" is a real architectural claim
-(`apps/cli/AGENTS.md` / repo `CLAUDE.md`, §Core concepts) that code can
+(`cli/AGENTS.md` / repo `CLAUDE.md`, §Core concepts) that code can
 silently violate — a new agent added without env isolation, a bypass path that
 skips the audit funnel, a flag that stops crossing the `--device` SSH boundary.
 When code and this spec disagree, one of them is a bug; fixing the drift is
@@ -2040,7 +2040,7 @@ Credential account selection adds three requirements to that funnel:
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the
-`file:line` that implements it, under `apps/cli/src/` unless noted. Behavioral
+`file:line` that implements it, under `cli/src/` unless noted. Behavioral
 scenarios are written Given/When/Then so they map 1:1 to tests.
 
 ---
@@ -2227,7 +2227,7 @@ schema (`--json` passes through each agent's native stream format).
   (`lib/exec.ts:971-988`) can instead resolve straight to the real npm
   binary, bypassing that isolation entirely. Antigravity workflows and
   OpenCode auth are separately, explicitly documented as account-global —
-  not per-version — by design (`apps/cli/AGENTS.md:150`;
+  not per-version — by design (`cli/AGENTS.md:150`;
   `lib/agents.ts:1410-1425`, doc comment: *"account-global (not
   per-version)"*).
 
@@ -2725,7 +2725,7 @@ and host/lease dispatch (`--device`/`--remote-cwd`/`--no-follow`/
   mailbox/session wiring. This is undocumented as an isolation exception
   anywhere outside this spec.
 - **EXEC-GAP-3.** Antigravity workflows and OpenCode auth are explicitly
-  account-global, not per-version (`apps/cli/AGENTS.md:150`;
+  account-global, not per-version (`cli/AGENTS.md:150`;
   `lib/agents.ts:1410-1425`) — a deliberate, named exception to "isolated
   version home" — but `buildExecEnv`'s own doc comment only claims
   "Pins CLAUDE_CONFIG_DIR for Claude, CODEX_HOME for Codex, and
@@ -2854,7 +2854,7 @@ nothing but its own view cache.
 
 - **SING-1 (MUST).** Every fleet-affecting capability MUST have exactly one scheduler
   and one executor: the agi-cli daemon (`agents __daemon-run`,
-  `apps/cli/src/lib/daemon/daemon.ts`) or a CLI command the daemon or the user drives.
+  `cli/src/lib/daemon/daemon.ts`) or a CLI command the daemon or the user drives.
   Status: **Current** for routines (`lib/scheduler.ts`) and rotate
   (`lib/watchdog/rotate.ts`). `agents daemon` is the user-facing runtime
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
@@ -2913,7 +2913,7 @@ nothing but its own view cache.
 - **SING-3 (MUST).** Where an action needs a UI-owned surface (typing into an editor
   tab, opening a tab), the UI MUST expose a narrow endpoint the CLI drives — the
   trigger MUST stay in the CLI. Precedent: the extension's `/inject` URI verb over
-  `live-terminals.json`, driven by `apps/cli/src/lib/terminal/inject.ts`; the
+  `live-terminals.json`, driven by `cli/src/lib/terminal/inject.ts`; the
   terminal engine's vscodium launch backend.
 - **SING-4 (MUST).** A control in any UI that turns a fleet-affecting capability on
   or off MUST flip the CLI's own state (`agents watchdog on|off|rotate`,
@@ -2977,7 +2977,7 @@ nothing but its own view cache.
   every monitor `run` action recorded `skipReason: "wrong_owner"` with an empty
   allowlist and no action ever executed.
 - **SING-6 (MUST).** A new fleet-affecting feature MUST be implemented in
-  `apps/cli` (daemon routine and/or command) first; the UI PR adds rendering and
+  `cli` (daemon routine and/or command) first; the UI PR adds rendering and
   control wiring only. If the feature seemingly requires UI-side execution, SING-3
   applies — the UI grows an endpoint, the CLI keeps the trigger.
 - **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
@@ -3447,7 +3447,7 @@ readiness/context fields RT-1..RT-8 describe.
   (a user click invoking the CLI), but it MUST NOT hold a cron, countdown, or
   readiness loop of its own. This is SING-2/SING-5 applied to the menu bar; the timer
   bound in the helper is a cached *refresher* of read-only views, never an executor
-  (`apps/cli/menubar/…` `ChildProcess` cached refreshers; `apps/cli/CLAUDE.md`
+  (`cli/menubar/…` `ChildProcess` cached refreshers; `cli/CLAUDE.md`
   §menu-bar). Status: **Current**.
 
 ### 6. Given/When/Then scenarios

@@ -101,13 +101,13 @@ describe('buildLinearImportCandidates', () => {
 
   it('preserves hand-set fields on an existing def and overwrites only linear', () => {
     const existing = new Map<string, ProjectDef>([
-      ['agents-cli', { name: 'agents-cli', description: 'the CLI', contexts: [{ path: 'apps/cli', purpose: 'the package' }], linear: { projectId: 'old' } }],
+      ['agents-cli', { name: 'agents-cli', description: 'the CLI', contexts: [{ path: 'cli', purpose: 'the package' }], linear: { projectId: 'old' } }],
     ]);
     const r = buildLinearImportCandidates([{ id: 'lin_1', name: 'Agents CLI' }], existing, noLocal, { force: false });
     expect(r.defs[0]).toEqual({
       name: 'agents-cli',
       description: 'the CLI',
-      contexts: [{ path: 'apps/cli', purpose: 'the package' }],
+      contexts: [{ path: 'cli', purpose: 'the package' }],
       linear: { projectId: 'lin_1', name: 'Agents CLI' },
     });
   });

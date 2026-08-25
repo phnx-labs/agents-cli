@@ -177,7 +177,7 @@ describe('extractRepos', () => {
   });
 
   it('skips relative paths when the session cwd is unknown (never the viewer cwd)', () => {
-    const repos = extractRepos([tool('Read', {}, 'apps/cli/src/a.ts')], undefined);
+    const repos = extractRepos([tool('Read', {}, 'cli/src/a.ts')], undefined);
     expect(repos).toEqual([]);
   });
 

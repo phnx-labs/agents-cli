@@ -14,7 +14,7 @@ writing; treat them as pointers, not guarantees.
 
 `agents-cli` is two application-layer surfaces over one shared set of on-disk state:
 
-- **`apps/cli` — the `agents` / `ag` CLI. The framework.** It owns the durable
+- **`cli` — the `agents` / `ag` CLI. The framework.** It owns the durable
   state and every mechanism: the SQLite transcript index, `sessions` / `teams` /
   `run` / `cloud`, the CLI-side pid→id registry, the audit log, and the SSH fan-out
   to peer machines.
@@ -28,7 +28,7 @@ writing; treat them as pointers, not guarantees.
 ```mermaid
 flowchart LR
   subgraph machine["one machine"]
-    CLI["apps/cli — the agents CLI<br/><b>the framework</b><br/>sessions index · teams · run · cloud<br/>pid-registry · events.jsonl · SSH fan-out"]
+    CLI["cli — the agents CLI<br/><b>the framework</b><br/>sessions index · teams · run · cloud<br/>pid-registry · events.jsonl · SSH fan-out"]
     FAC["agi-ext — AGI EXT<br/><b>a consumer</b><br/>terminal tabs · Fleet<br/>presentation stores"]
     CLI -- "streams: agents sessions watch --json<br/>commands: sessions · devices · teams · watchdog" --> FAC
   end
@@ -114,7 +114,7 @@ sequenceDiagram
   `src/lib/session/active.ts`) instead of dropping it to the `ps`-scan fallback.
 - **session-tracker — `terminals/sessions/<pid>.json`.** Written by the polyglot
   `SessionStart` hook after the agent boots
-  ([`packages/session-tracker`](../../../packages/session-tracker), `STATE_DIR` in
+  ([`packages/session-tracker`](../../packages/session-tracker), `STATE_DIR` in
   `src/state-file.ts`, interface `SessionState`). Authoritative (reads the agent's
   own payload) and covers **any** start — including a user typing `claude` in a
   terminal, which the CLI never launched — for harnesses that expose a hook.
@@ -305,4 +305,4 @@ current behavior against this doc; that file owns the proposals.
 - [sessions.md](sessions.md) — the transcript index in depth
 - [observability.md](observability.md) — events, feed, mailboxes, cost
 - [teams.md](teams.md) · [hosts.md](hosts.md) · [ssh-transport.md](ssh-transport.md)
-- [`packages/session-tracker/README.md`](../../../packages/session-tracker/README.md) — the live-state writer (hook)
+- [`packages/session-tracker/README.md`](../../packages/session-tracker/README.md) — the live-state writer (hook)

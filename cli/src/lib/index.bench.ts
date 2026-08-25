@@ -334,7 +334,7 @@ describe('command-registry.ts loaders — warm in-process registration only (mod
  * source and dist are the same code doing the same syscalls.
  */
 
-/** apps/cli of THIS checkout. */
+/** cli of THIS checkout. */
 const CLI_ROOT = path.resolve(__dirname, '../..');
 /** Derived from CLI_ENTRY (declared above) so the two can never disagree. */
 const DIST_ROOT = path.dirname(CLI_ENTRY);
@@ -425,7 +425,7 @@ describe('detectDevBuild(process.argv[1], VERSION) — runs unconditionally at i
     detectDevBuild(SHIM_LINK, REAL_VERSION);
   });
 
-  bench('`node apps/cli/dist/index.js` from this working tree: realpathSync (no link) + ONE existsSync(.git) miss -> false. dirname(dirname(dist/index.js)) is apps/cli, and .git is TWO levels above that, so index.ts:106 case 2 ("running node dist/index.js from a working tree") does not fire in the monorepo layout', () => {
+  bench('`node cli/dist/index.js` from this working tree: realpathSync (no link) + ONE existsSync(.git) miss -> false. dirname(dirname(dist/index.js)) is cli, and .git is ONE level above that, so index.ts:106 case 2 ("running node dist/index.js from a working tree") does not fire in the monorepo layout', () => {
     detectDevBuild(CLI_ENTRY, REAL_VERSION);
   });
 
@@ -973,7 +973,7 @@ const REAL_ARGV = process.argv;
 process.argv = [
   process.argv[0], process.argv[1],
   'sessions', 'list', '--json', '--limit', '50',
-  '--query', 'benchmark the commander root bootstrap and audit hooks in apps/cli/src/index.ts, read the call path end to end, commit a vitest bench beside the source, and propose optimizations from the measured numbers only',
+  '--query', 'benchmark the commander root bootstrap and audit hooks in cli/src/index.ts, read the call path end to end, commit a vitest bench beside the source, and propose optimizations from the measured numbers only',
   '--session', 'ce1e00cb-61dc-4c62-b30e-f053ef6ce990',
   '--device', 'yosemite-s1',
   '--cwd', '/home/muqsit/src/github.com/muqsitnawaz/agents-cli',
@@ -1352,7 +1352,7 @@ const PACKAGE_JSON_PATH = path.join(CLI_ROOT, 'package.json');
 const PACKAGE_JSON_RAW = fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8');
 
 describe('startup package.json read + parse (index.ts:30-34)', () => {
-  bench('fs.readFileSync(packageJsonPath, "utf-8") — the real apps/cli/package.json', () => {
+  bench('fs.readFileSync(packageJsonPath, "utf-8") — the real cli/package.json', () => {
     fs.readFileSync(PACKAGE_JSON_PATH, 'utf-8');
   });
 

@@ -146,8 +146,8 @@ esac
   it('bakes in the monorepo-correct suite command, not a repo-root one', () => {
     const { cmd, out } = composeVia(['test']);
     // The bare default used to run `bun install && bun run test` at the REPO
-    // ROOT, which has no test script — the suite lives in apps/cli.
-    expect(cmd, out).toContain('cd apps/cli');
+    // ROOT, which has no test script — the suite lives in cli.
+    expect(cmd, out).toContain('cd cli');
     expect(cmd).toContain('bun run test');
   });
 

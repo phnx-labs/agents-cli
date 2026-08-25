@@ -25,11 +25,11 @@ not re-key bun/node/`uname` from the releaser PATH, so a Linux-tested record
 is valid on the Darwin home base.
 
 ```bash
-apps/cli/scripts/release-attestation.sh identity --repo-root .
-apps/cli/scripts/release-attestation.sh require --dir .release-attestations --tree <tree>
-apps/cli/scripts/release-attestation.sh promote --file <attestation.json> --tarball <file.tgz>
-apps/cli/scripts/release-manifest.sh require --file release-manifest.json --repo-root .
-apps/cli/scripts/release-install-smoke.sh <file.tgz> <version>
+cli/scripts/release-attestation.sh identity --repo-root .
+cli/scripts/release-attestation.sh require --dir .release-attestations --tree <tree>
+cli/scripts/release-attestation.sh promote --file <attestation.json> --tarball <file.tgz>
+cli/scripts/release-manifest.sh require --file release-manifest.json --repo-root .
+cli/scripts/release-install-smoke.sh <file.tgz> <version>
 ```
 
 ## Ordinary flow
@@ -63,7 +63,7 @@ is not built yet. Until it lands, an operator runs the producer by hand before
 
 ```bash
 export RELEASE_ATTESTATION_DIR=~/.agents-cli-release-attestations   # any stable dir, same for both commands
-apps/cli/scripts/release-attestation-produce.sh origin/main
+cli/scripts/release-attestation-produce.sh origin/main
 ```
 
 Run it once for `origin/<default>` before the first `release.sh --apply`. If

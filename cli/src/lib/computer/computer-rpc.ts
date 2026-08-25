@@ -193,8 +193,8 @@ export function writeComputerPeers(allowedExecPaths: string[]): void {
 export function resolveHelperExec(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    // Local build (running from the agents-cli checkout). apps/cli/dist/lib/computer -> repo root (5 up) -> native/computer-mac.
-    path.resolve(here, '..', '..', '..', '..', '..', 'native', 'computer-mac', 'dist', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
+    // Local build (running from the agents-cli checkout). cli/dist/lib/computer -> repo root (4 up) -> native/computer-mac.
+    path.resolve(here, '..', '..', '..', '..', 'native', 'computer-mac', 'dist', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
     // Bundled with the npm package (dist/lib/computer -> dist/).
     path.resolve(here, '..', '..', 'computer-helper', 'ComputerHelper.app', 'Contents', 'MacOS', 'ComputerHelper'),
   ];

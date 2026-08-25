@@ -49,7 +49,7 @@ import {
 } from './state.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-/** dist/ of THIS checkout — src/lib/ is two levels under apps/cli, dist is a sibling of src. */
+/** dist/ of THIS checkout — src/lib/ is two levels under cli, dist is a sibling of src. */
 const DIST_ROOT = path.resolve(__dirname, '../../dist');
 const distUrl = (rel: string): string => pathToFileURL(path.join(DIST_ROOT, rel)).href;
 

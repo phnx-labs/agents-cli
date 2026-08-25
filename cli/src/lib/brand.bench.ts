@@ -57,7 +57,7 @@
  * (package.json:58, globs `src/lib/*.bench.ts`) type-checks it, and so
  * `vitest bench` picks it up. It is NOT run by `vitest run` — vitest.config.ts
  * `include` matches only `*.test.ts`, so this file never runs in the PR test gate;
- * run it explicitly with `bun run bench` (`vitest bench --run`) inside apps/cli.
+ * run it explicitly with `bun run bench` (`vitest bench --run`) inside cli.
  */
 import { describe, bench } from 'vitest';
 import * as path from 'node:path';
@@ -121,7 +121,7 @@ describe('brand runtime compute — branded invocation (AGENTS_BRAND set): the r
 // Node caches an ESM module for a process's life, so cold cost can only come
 // from a fresh process. Each sample spawns `node --input-type=module -e "await
 // import(<dist url>)"` importing the REAL built artifacts. `dist(p)` resolves
-// under ../../dist/lib relative to this file (src/lib -> apps/cli), the same
+// under ../../dist/lib relative to this file (src/lib -> cli), the same
 // place the installed CLI runs from.
 const distUrl = (p: string): string =>
   pathToFileURL(path.resolve(__dirname, '../../dist/lib', p)).href;

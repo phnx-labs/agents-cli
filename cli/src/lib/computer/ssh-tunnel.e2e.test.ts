@@ -12,7 +12,7 @@
  * stays green with no Windows runner. To run it, point the var at a registered
  * Windows device and build the helper exe first:
  *
- *   bash apps/cli/scripts/build-win.sh
+ *   bash cli/scripts/build-win.sh
  *   AGENTS_TEST_WIN_HOST=win-mini bun run test -- src/lib/computer/ssh-tunnel.e2e.test.ts
  *
  * Real invocations only — no mocking. The device must be reachable over the same

@@ -799,7 +799,7 @@ describe('projectFromCwd', () => {
     expect(projectFromCwd('/home/me/src/agents-cli/.agents/worktrees/my-slug')).toBe('agents-cli');
   });
   it('resolves a subdir inside a worktree to the repo', () => {
-    expect(projectFromCwd('/home/me/src/agents-cli/.agents/worktrees/my-slug/apps/cli')).toBe('agents-cli');
+    expect(projectFromCwd('/home/me/src/agents-cli/.agents/worktrees/my-slug/cli')).toBe('agents-cli');
   });
   it('falls back to the basename for a plain path, stripping a trailing slash', () => {
     expect(projectFromCwd('/home/me/src/rush')).toBe('rush');

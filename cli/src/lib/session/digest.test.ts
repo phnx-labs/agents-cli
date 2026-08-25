@@ -79,7 +79,7 @@ describe('extractDeletedPaths', () => {
   });
   it('drops shell junk: redirect tokens, unexpanded vars, node_modules, .system', () => {
     expect(extractDeletedPaths('rm -rf node_modules 2>&1')).toEqual([]);
-    expect(extractDeletedPaths('rm -rf "$WT/apps/cli/.system" 2>/dev/null')).toEqual([]);
+    expect(extractDeletedPaths('rm -rf "$WT/cli/.system" 2>/dev/null')).toEqual([]);
     expect(extractDeletedPaths('rm -f app.log 2>&1')).toEqual(['app.log']);
   });
 });

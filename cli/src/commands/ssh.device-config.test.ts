@@ -413,7 +413,7 @@ describe('devices role', () => {
 describe('devices describe (RUSH-3062 surface)', () => {
   // `describe` is thin sugar over the 'description' config key — these tests
   // pin that BOTH names drive the same store, not two parallel code paths.
-  // Every `run()` is a full process spawn (~2s) and apps/cli/AGENTS.md treats the
+  // Every `run()` is a full process spawn (~2s) and cli/AGENTS.md treats the
   // required check's latency as a correctness requirement, so this asserts through
   // the device doc — a file read — wherever a second CLI round-trip would only
   // re-read what was just written. The CLI reads that remain are the ones whose

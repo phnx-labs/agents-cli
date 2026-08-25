@@ -710,7 +710,7 @@ export function registerRunCommand(program: Command): void {
     .option('--no-auth-check', 'Skip the pre-launch "looks logged out" warning on an interactive run (advisory; never blocks anyway). Also silenced by AGENTS_NO_AUTH_CHECK=1.')
     .option('-i, --interactive', 'Force interactive mode even when a prompt is provided. Mutually exclusive with --headless.')
     .option('--broadcast', 'Run the same prompt or --task across multiple agents (comma-separated [agent]) × --model cells. Replaces the former `agents bench` group.')
-    .option('--task <id>', 'With --broadcast: house benchmark task id under apps/cli/bench/tasks/')
+    .option('--task <id>', 'With --broadcast: house benchmark task id under cli/bench/tasks/')
     .option('--list-tasks', 'With --broadcast: list available broadcast task ids')
     .option('--results [run-id]', 'With --broadcast: show one saved matrix run, or list saved runs newest first')
     .option('--concurrency <n>', 'With --broadcast: maximum cells running at once', '3')

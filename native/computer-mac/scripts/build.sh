@@ -177,7 +177,7 @@ echo "notarized: $APP"
 # Emit the release artifact: a zip of the STAPLED .app plus its sha256, ready to
 # publish as a GitHub release asset. `agents computer setup` downloads this,
 # verifies the sha256, extracts it, and re-verifies the signature/notarization
-# before install (apps/cli/src/lib/computer/download.ts).
+# before install (cli/src/lib/computer/download.ts).
 ASSET_ZIP="$DEST_DIR/ComputerHelper.app.zip"
 rm -f "$ASSET_ZIP" "$ASSET_ZIP.sha256"
 ditto -c -k --keepParent "$APP" "$ASSET_ZIP"

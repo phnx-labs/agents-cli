@@ -320,9 +320,9 @@ main() {
   # the suite locally (RUSH-3178).
   #
   # The old bare default ran `bun install && bun run test` at the REPO ROOT,
-  # which has no test script: this is a monorepo and the suite lives in apps/cli.
+  # which has no test script: this is a monorepo and the suite lives in cli.
   # That is the same trap 6abd4a2ea had to fix for the test:remote alias.
-  local test_cmd='cd apps/cli && bun install && bun run build && bun run test'
+  local test_cmd='cd cli && bun install && bun run build && bun run test'
   case "${1:-}" in
     ''|test)
       # Trailing args ride through to vitest: `sandbox.sh test --retry=2`.

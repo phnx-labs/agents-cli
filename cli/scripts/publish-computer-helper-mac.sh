@@ -10,7 +10,7 @@
 # (a dev box, or the release sign host), the same machines that already sign the
 # keychain/menubar helpers and the standalone binary.
 #
-# The client half is apps/cli/src/lib/computer/download.ts: an npm-installed CLI
+# The client half is cli/src/lib/computer/download.ts: an npm-installed CLI
 # with no local build downloads `ComputerHelper.app.zip` from
 # `releases/download/v<version>/`, verifies it against the `.sha256` asset, and
 # re-checks the code signature + notarization before install.
@@ -19,7 +19,7 @@
 # the notary creds in env — APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
 # APPLE_TEAM_ID. Run under the bundle so they are injected:
 #
-#   agents secrets exec apple.com -- apps/cli/scripts/publish-computer-helper-mac.sh [version]
+#   agents secrets exec apple.com -- cli/scripts/publish-computer-helper-mac.sh [version]
 #
 # That invocation injects the NOTARY creds but does not unlock the Developer ID
 # SIGNING keychain, so on a headless run codesign used to die with
@@ -29,12 +29,12 @@
 # the release home base the context is a no-op (it is guarded on its pass files),
 # and an interactive run signs with the usual Touch ID prompt as before.
 #
-# `version` defaults to apps/cli/package.json's version; the asset is uploaded to
+# `version` defaults to cli/package.json's version; the asset is uploaded to
 # the matching `v<version>` release (created if it does not exist yet).
 set -euo pipefail
 
-CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"        # apps/cli
-REPO_ROOT="$(cd "$CLI_DIR/../.." && pwd)"           # repo root
+CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"        # cli
+REPO_ROOT="$(cd "$CLI_DIR/.." && pwd)"              # repo root
 HELPER_DIR="$REPO_ROOT/native/computer-mac"
 REPO_SLUG="phnx-labs/agents-cli"
 

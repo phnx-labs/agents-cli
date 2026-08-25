@@ -28,11 +28,11 @@ describe('release-worktree.sh', () => {
     git(root, 'clone', remote, caller);
     git(caller, 'config', 'user.name', 'Release Test');
     git(caller, 'config', 'user.email', 'release-test@example.com');
-    fs.mkdirSync(path.join(caller, 'apps/cli/scripts'), { recursive: true });
+    fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
     fs.mkdirSync(path.join(caller, '.agents/worktrees'), { recursive: true });
-    fs.copyFileSync(SCRIPT, path.join(caller, 'apps/cli/scripts/release-worktree.sh'));
+    fs.copyFileSync(SCRIPT, path.join(caller, 'cli/scripts/release-worktree.sh'));
     fs.writeFileSync(
-      path.join(caller, 'apps/cli/scripts/release.sh'),
+      path.join(caller, 'cli/scripts/release.sh'),
       '#!/usr/bin/env bash\nset -euo pipefail\n' +
         'test "$(git rev-parse --abbrev-ref HEAD)" = HEAD\n' +
         'test -z "$(git status --porcelain)"\n' +
@@ -40,7 +40,7 @@ describe('release-worktree.sh', () => {
         'for arg in "$@"; do [[ "$arg" == --* ]] || { target="$arg"; break; }; done\n' +
         'printf "isolated:%s:%s\\n" "$target" "${*: -1}"\n',
     );
-    fs.chmodSync(path.join(caller, 'apps/cli/scripts/release.sh'), 0o755);
+    fs.chmodSync(path.join(caller, 'cli/scripts/release.sh'), 0o755);
     git(caller, 'add', '.');
     git(caller, 'commit', '-m', 'initial');
     git(caller, 'branch', '-M', 'main');
@@ -54,7 +54,7 @@ describe('release-worktree.sh', () => {
 
     const result = spawnSync(
       'bash',
-      [path.join(feature, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      [path.join(feature, 'cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
       { cwd: feature, encoding: 'utf-8' },
     );
 
@@ -81,15 +81,15 @@ function callerRepoRecordingEnv(root: string): string {
   git(root, 'clone', remote, caller);
   git(caller, 'config', 'user.name', 'Release Test');
   git(caller, 'config', 'user.email', 'release-test@example.com');
-  fs.mkdirSync(path.join(caller, 'apps/cli/scripts'), { recursive: true });
+  fs.mkdirSync(path.join(caller, 'cli/scripts'), { recursive: true });
   fs.mkdirSync(path.join(caller, '.agents/worktrees'), { recursive: true });
-  fs.copyFileSync(SCRIPT, path.join(caller, 'apps/cli/scripts/release-worktree.sh'));
+  fs.copyFileSync(SCRIPT, path.join(caller, 'cli/scripts/release-worktree.sh'));
   fs.writeFileSync(
-    path.join(caller, 'apps/cli/scripts/release.sh'),
+    path.join(caller, 'cli/scripts/release.sh'),
     '#!/usr/bin/env bash\nset -euo pipefail\n' +
       'printf "STORE=%s\\n" "${RELEASE_ATTESTATION_DIR:-<unset>}"\n',
   );
-  fs.chmodSync(path.join(caller, 'apps/cli/scripts/release.sh'), 0o755);
+  fs.chmodSync(path.join(caller, 'cli/scripts/release.sh'), 0o755);
   git(caller, 'add', '.');
   git(caller, 'commit', '-m', 'initial');
   git(caller, 'branch', '-M', 'main');
@@ -115,7 +115,7 @@ describe('release-worktree.sh — the attestation store the caller owns', () => 
 
     const result = spawnSync(
       'bash',
-      [path.join(caller, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
       { cwd: caller, encoding: 'utf-8', env: { ...process.env, RELEASE_ATTESTATION_DIR: '' } },
     );
 
@@ -133,7 +133,7 @@ describe('release-worktree.sh — the attestation store the caller owns', () => 
 
     const result = spawnSync(
       'bash',
-      [path.join(caller, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
       { cwd: caller, encoding: 'utf-8', env: { ...process.env, RELEASE_ATTESTATION_DIR: explicit } },
     );
 
@@ -148,7 +148,7 @@ describe('release-worktree.sh — the attestation store the caller owns', () => 
 
     const result = spawnSync(
       'bash',
-      [path.join(caller, 'apps/cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
+      [path.join(caller, 'cli/scripts/release-worktree.sh'), caller, '--skip-tests', '9.8.7'],
       { cwd: caller, encoding: 'utf-8', env: { ...process.env, RELEASE_ATTESTATION_DIR: '' } },
     );
 

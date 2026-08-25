@@ -712,7 +712,7 @@
         }
       ],
       "examples": "# Signed in? Just publish — no Cloudflare setup\n      agents auth login\n      agents artifacts share ./out/plan.html\n\n      # Or provision your own Cloudflare endpoint (or join a teammate's)\n      agents artifacts setup\n      agents artifacts share join https://share.agents-cli.sh\n\n      # What's live in your namespace, and taking one down\n      agents artifacts share list\n      agents artifacts unshare my-plan-a1b2\n\n      # Endpoint health, and pushing a new Worker template to it\n      agents artifacts share status\n      agents artifacts share update",
-      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning. It runs the interactive wizard only when you\n  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/\n  --account/--token/--domain/--analytics-token, or run non-interactively, and it\n  provisions directly with what you named.\n\n  agents artifacts unshare <targets...> is the nested alias of\n  agents artifacts share delete. Top-level `agents unshare` is gone.\n\n  Full reference: apps/cli/docs/share.md.",
+      "notes": "agents artifacts share is the publish action; agents artifacts setup is the\n  one-time endpoint provisioning. It runs the interactive wizard only when you\n  type NO endpoint flag on a TTY; type any of --bundle/--worker/--bucket/\n  --account/--token/--domain/--analytics-token, or run non-interactively, and it\n  provisions directly with what you named.\n\n  agents artifacts unshare <targets...> is the nested alias of\n  agents artifacts share delete. Top-level `agents unshare` is gone.\n\n  Full reference: cli/docs/share.md.",
       "subcommands": [
         {
           "name": "setup",
@@ -20121,7 +20121,7 @@
         },
         {
           "flags": "--task <id>",
-          "description": "With --broadcast: house benchmark task id under apps/cli/bench/tasks/",
+          "description": "With --broadcast: house benchmark task id under cli/bench/tasks/",
           "long": "--task",
           "required": true,
           "optional": false,

@@ -154,8 +154,8 @@ export const WIN_HELPER_TOKEN_FILE = 'helper-token';
 export function resolveWinHelperExe(): string | null {
   const here = path.dirname(fileURLToPath(import.meta.url));
   const candidates = [
-    // Running from the agents-cli checkout. apps/cli/dist/lib/computer -> repo root (5 up) -> native/computer-win.
-    path.resolve(here, '..', '..', '..', '..', '..', 'native', 'computer-win', 'dist', WIN_HELPER_EXE),
+    // Running from the agents-cli checkout. cli/dist/lib/computer -> repo root (4 up) -> native/computer-win.
+    path.resolve(here, '..', '..', '..', '..', 'native', 'computer-win', 'dist', WIN_HELPER_EXE),
     // Bundled with the npm package (dist/lib/computer -> dist/).
     path.resolve(here, '..', '..', 'computer-helper-win', WIN_HELPER_EXE),
   ];

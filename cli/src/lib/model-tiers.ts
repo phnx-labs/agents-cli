@@ -7,7 +7,7 @@
  * actually ships — so `--model cheap|default|best|ultra` works on `agents run`
  * and `agents teams add` alike, funnelling through `resolveModel()`.
  *
- * Ranking signal, in priority (see apps/cli/docs — model ranking mechanisms):
+ * Ranking signal, in priority (see cli/docs — model ranking mechanisms):
  *   1. Provider-declared lineup — the catalog's own family names / descriptions
  *      (opus/sonnet/haiku/fable; Codex "frontier / balanced / fast"). Most
  *      drift-proof: the provider tells us its own ranking.

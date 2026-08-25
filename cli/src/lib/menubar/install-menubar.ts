@@ -149,7 +149,7 @@ export function menubarServiceInstalled(): boolean {
  * Locate the source `.app` shipped alongside the compiled JS.
  *   1. dist/lib/menubar/MenubarHelper.app — npm install layout (sibling of this file)
  *   2. <repo>/bin/MenubarHelper.app       — raw working tree (tsx/dev)
- *   3. apps/cli/menubar/dist/MenubarHelper.app — fresh local build
+ *   3. cli/menubar/dist/MenubarHelper.app — fresh local build
  *   4. <on-disk install>/dist/lib/menubar/MenubarHelper.app — Bun single-file
  *      binary: `import.meta.url` is a virtual `/$bunfs/` path, so the sibling
  *      candidates above can't see the on-disk bundle; recover it via the

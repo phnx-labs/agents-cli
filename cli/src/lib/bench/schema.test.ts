@@ -15,10 +15,10 @@ describe("bench schemas", () => {
           { type: "command_succeeds", command: "node --check index.js" },
         ],
       },
-      "/repo/apps/cli/bench/tasks/hello-repo/task.json",
+      "/repo/cli/bench/tasks/hello-repo/task.json",
     );
     expect(task.fixtureDir).toBe(
-      path.join("/repo/apps/cli/bench/tasks/hello-repo", "fixture"),
+      path.join("/repo/cli/bench/tasks/hello-repo", "fixture"),
     );
     expect(task.pass).toHaveLength(4);
   });

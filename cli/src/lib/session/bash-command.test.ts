@@ -167,7 +167,7 @@ describe('classifyBashCommand', () => {
   });
 
   it('skips a value-taking flag on bun (--cwd dir)', () => {
-    expect(classifyBashCommand('bun --cwd apps/cli test')).toMatchObject({
+    expect(classifyBashCommand('bun --cwd cli test')).toMatchObject({
       tool: 'bun',
       subcommand: 'test',
       summary: 'bun test',

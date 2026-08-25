@@ -30,7 +30,7 @@ enum AgentAvatar {
         let color: NSColor
     }
 
-    /// Brand per agent id. Keys are `AgentId` (apps/cli/src/lib/types.ts) — the
+    /// Brand per agent id. Keys are `AgentId` (cli/src/lib/types.ts) — the
     /// ids the CLI passes via `--notify --agent`. An id absent here is not an
     /// error: it falls back to its own initial on the agents-cli lime, so a
     /// harness newly added to the registry still gets a usable avatar before

@@ -47,7 +47,7 @@
  * this file adds no CI assertion and no flakiness. It IS type-checked, by
  * `typecheck:bench` (package.json:60, globs `src/lib/**\/*.bench.ts`). Run it:
  *
- *   npx vitest bench --run src/lib/hosts/passthrough.bench.ts   # from apps/cli
+ *   npx vitest bench --run src/lib/hosts/passthrough.bench.ts   # from cli
  */
 
 import { execFileSync } from 'child_process';
@@ -59,7 +59,7 @@ import { maybeRunOnHost, flagValue } from './passthrough.js';
 import { hasHostRoutingFlag } from './routing-flag.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
-// src/lib/hosts -> apps/cli
+// src/lib/hosts -> cli
 const cliRoot = path.resolve(here, '../../..');
 const distPassthrough = path.join(cliRoot, 'dist/lib/hosts/passthrough.js');
 const distRoutingFlag = path.join(cliRoot, 'dist/lib/hosts/routing-flag.js');
@@ -69,13 +69,13 @@ const distRoutingFlag = path.join(cliRoot, 'dist/lib/hosts/routing-flag.js');
 if (!fs.existsSync(distPassthrough)) {
   throw new Error(
     `passthrough.bench.ts needs the built artifact at ${distPassthrough}. ` +
-      `Build it first: bash scripts/build.sh (from apps/cli).`,
+      `Build it first: bash scripts/build.sh (from cli).`,
   );
 }
 if (!fs.existsSync(distRoutingFlag)) {
   throw new Error(
     `passthrough.bench.ts needs the built artifact at ${distRoutingFlag}. ` +
-      `Build it first: bash scripts/build.sh (from apps/cli).`,
+      `Build it first: bash scripts/build.sh (from cli).`,
   );
 }
 

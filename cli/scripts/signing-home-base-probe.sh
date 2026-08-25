@@ -6,7 +6,7 @@
 # computer-helper, run_home_base_phase in release.sh) can ONLY run on a macOS box
 # that carries ALL of:
 #   - the Apple provisioning profile the signed helpers embed
-#     (apps/cli/bin/embedded.provisionprofile -- a committed input, negated out of
+#     (cli/bin/embedded.provisionprofile -- a committed input, negated out of
 #     .gitignore as of commit 2567004b4, and recoverable from a freshly fetched
 #     origin/<default> ref even when the box's own on-disk checkout predates it);
 #   - a `Developer ID Application` codesigning identity reachable in a
@@ -47,7 +47,7 @@ set -uo pipefail
 missing=()
 
 # Where the provisionprofile is looked up. release.sh runs this from the tag
-# worktree's apps/cli, and the profile lives at <repo>/apps/cli/bin/ in the home
+# worktree's cli, and the profile lives at <repo>/cli/bin/ in the home
 # base's own checkout; resolve the checkout root the same way (top-level), with an
 # override for the test.
 REPO_ROOT="${SIGNING_PROBE_REPO_ROOT:-$(git rev-parse --show-toplevel 2>/dev/null || true)}"
@@ -74,15 +74,21 @@ fi
 #    on a box that would actually build fine. `git fetch` only refreshes a
 #    remote-tracking ref; it mutates no local branch/tag, so it stays within
 #    this probe's read-only contract.
-if [[ -n "$REPO_ROOT" && -f "$REPO_ROOT/apps/cli/bin/embedded.provisionprofile" ]]; then
+# apps/cli -> cli flatten (RUSH-3189 follow-up): the profile moved to cli/bin/. A
+# stale home base disk (or origin at the transition) may still carry the pre-flatten
+# apps/cli/bin/ path, so accept EITHER layout on disk and on the origin ref.
+PROFILE_REL="cli/bin/embedded.provisionprofile"
+PROFILE_REL_OLD="apps/cli/bin/embedded.provisionprofile"
+if [[ -n "$REPO_ROOT" && ( -f "$REPO_ROOT/$PROFILE_REL" || -f "$REPO_ROOT/$PROFILE_REL_OLD" ) ]]; then
   :
 elif [[ -n "$REPO_ROOT" ]] && git -C "$REPO_ROOT" fetch --quiet origin 2>/dev/null; then
   PROBE_DEFAULT_BRANCH="$(git -C "$REPO_ROOT" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')"
   [[ -n "$PROBE_DEFAULT_BRANCH" ]] || PROBE_DEFAULT_BRANCH="main"
-  git -C "$REPO_ROOT" cat-file -e "origin/$PROBE_DEFAULT_BRANCH:apps/cli/bin/embedded.provisionprofile" 2>/dev/null \
-    || missing+=("apps/cli/bin/embedded.provisionprofile absent from the checkout and from origin/$PROBE_DEFAULT_BRANCH -- the signed helpers embed it")
+  git -C "$REPO_ROOT" cat-file -e "origin/$PROBE_DEFAULT_BRANCH:$PROFILE_REL" 2>/dev/null \
+    || git -C "$REPO_ROOT" cat-file -e "origin/$PROBE_DEFAULT_BRANCH:$PROFILE_REL_OLD" 2>/dev/null \
+    || missing+=("cli/bin/embedded.provisionprofile absent from the checkout and from origin/$PROBE_DEFAULT_BRANCH -- the signed helpers embed it")
 else
-  missing+=("apps/cli/bin/embedded.provisionprofile absent from the checkout -- the signed helpers embed it")
+  missing+=("cli/bin/embedded.provisionprofile absent from the checkout -- the signed helpers embed it")
 fi
 
 # 3) A Developer ID codesigning identity in a headless-unlockable keychain. Unlock

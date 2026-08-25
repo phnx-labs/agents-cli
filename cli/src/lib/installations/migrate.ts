@@ -1507,7 +1507,7 @@ function migrateVersionResourcesToPatterns(): void {
   }
 
   if (changed) {
-    const META_HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agents-cli\n# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agents-cli/main/apps/cli/schema/agents-yaml.schema.json\n\n';
+    const META_HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agents-cli\n# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agents-cli/main/cli/schema/agents-yaml.schema.json\n\n';
     fs.writeFileSync(metaFile, META_HEADER + yaml.stringify(meta), 'utf-8');
     console.error('Migrated agents.yaml versions: entries to pattern format');
   }

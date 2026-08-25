@@ -278,7 +278,7 @@ describe('validateDaemonBinary — path guard', () => {
   });
 
   it('warns for a binary under .agents/worktrees/', () => {
-    const { warnings } = validateDaemonBinary('/home/user/repo/.agents/worktrees/my-branch/apps/cli/dist/index.js');
+    const { warnings } = validateDaemonBinary('/home/user/repo/.agents/worktrees/my-branch/cli/dist/index.js');
     expect(warnings.some((w) => /worktree/.test(w))).toBe(true);
   });
 

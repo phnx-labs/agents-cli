@@ -3784,8 +3784,8 @@ function resolveSessionTrackerRoot(): string | null {
   if (fs.existsSync(path.join(built, 'dist', 'hook.sh'))) {
     return built;
   }
-  // Source layout: apps/cli/src/lib/hooks/ -> repo root -> packages/session-tracker
-  const source = path.resolve(here, '..', '..', '..', '..', '..', 'packages', 'session-tracker');
+  // Source layout: cli/src/lib/hooks/ -> repo root (4 up) -> packages/session-tracker
+  const source = path.resolve(here, '..', '..', '..', '..', 'packages', 'session-tracker');
   if (fs.existsSync(path.join(source, 'src', 'hook.sh'))) {
     return source;
   }

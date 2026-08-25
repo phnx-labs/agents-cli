@@ -39,7 +39,7 @@ describe('classifyMenubarProcesses', () => {
     '/Users/muqsit/Library/Application Support/agents-cli/MenubarHelper.app/Contents/MacOS/AGI Menu';
   // Orphaned SwiftPM debug build from a deleted worktree, started over ssh.
   const ORPHAN =
-    '/Users/muqsit/src/github.com/muqsitnawaz/agents-cli/.agents/worktrees/menubar-verify/apps/cli/menubar/.build/arm64-apple-macosx/debug/AGI Menu';
+    '/Users/muqsit/src/github.com/muqsitnawaz/agents-cli/.agents/worktrees/menubar-verify/cli/menubar/.build/arm64-apple-macosx/debug/AGI Menu';
 
   it('reports the installed bundle as running', () => {
     const r = classifyMenubarProcesses(`74027 ${INSTALLED}`, `74027 ${INSTALLED}`, INSTALLED);

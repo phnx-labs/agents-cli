@@ -19,7 +19,7 @@ describe('version', () => {
   // (`getCliVersionFresh = () => getCliVersion()`). RUSH-2862 made the
   // package.json path an optional parameter (production call sites still use
   // the zero-arg form) so a test can swap the file a running module reads
-  // without touching the real, fork-shared apps/cli/package.json.
+  // without touching the real, fork-shared cli/package.json.
   it('getCliVersionFresh follows an on-disk change; getCliVersion stays memoized (RUSH-2862)', async () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-version-test-'));
     const pkgJsonPath = path.join(dir, 'package.json');

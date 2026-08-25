@@ -55,10 +55,10 @@ done
 # --repo-root lets the attestation producer test the isolated worktree it built
 # at an exact commit, so the bytes tested are the bytes attested.
 if [[ -n "$REPO_ROOT" ]]; then
-  [[ -d "$REPO_ROOT/apps/cli" ]] || die "--repo-root '$REPO_ROOT' has no apps/cli"
-  CLI_DIR="$(cd "$REPO_ROOT/apps/cli" && pwd)"
+  [[ -d "$REPO_ROOT/cli" ]] || die "--repo-root '$REPO_ROOT' has no cli"
+  CLI_DIR="$(cd "$REPO_ROOT/cli" && pwd)"
 fi
-TREE_ROOT="$(cd "$CLI_DIR/../.." && pwd)"
+TREE_ROOT="$(cd "$CLI_DIR/.." && pwd)"
 
 # Render the vitest args for a command string that a SHELL will re-parse.
 # Per-arg `%q`, never "$*": splicing joins on a space, so `--testNamePattern="a b"`
@@ -156,11 +156,11 @@ case "$MODE" in
     # Give the shipped tree its own git repo. The WHY lives in
     # bound-repo-root.sh's docblock -- one explanation, one place. Fails loud:
     # without a repo, anything resolving a repo root breaks.
-    ssh "$ADDR" "bash $remote_dir/apps/cli/scripts/bound-repo-root.sh $remote_dir" \
+    ssh "$ADDR" "bash $remote_dir/cli/scripts/bound-repo-root.sh $remote_dir" \
       || die "could not give the shipped tree a git repo on '$DEVICE' -- refusing to run the suite, since anything resolving a repo root would fail or escape"
 
   green "Tree shipped. Running the suite on $DEVICE..."
-    ssh "$ADDR" "cd $remote_dir/apps/cli \
+    ssh "$ADDR" "cd $remote_dir/cli \
       && bun install --silent \
       && bun run build >/dev/null \
       && bun run test$(vitest_suffix)"

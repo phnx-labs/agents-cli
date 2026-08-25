@@ -405,7 +405,7 @@ describe('handler config layer', () => {
         name: 'anchored-handler',
         source: 'linear',
         project: 'agents-cli',
-        cwd: 'apps/cli',
+        cwd: 'cli',
         mode: 'skip',
         run: { agent: 'claude', prompt: 'go' },
       };
@@ -421,7 +421,7 @@ describe('handler config layer', () => {
         },
       });
       expect(dispatched[0].project).toBe('agents-cli');
-      expect(dispatched[0].cwd).toBe('apps/cli');
+      expect(dispatched[0].cwd).toBe('cli');
       expect(dispatched[0].mode).toBe('skip');
     });
 
@@ -549,7 +549,7 @@ describe('handler config layer', () => {
         source: 'linear',
         routine: 'anchored-routine',
         project: 'agents-cli',
-        cwd: 'apps/cli',
+        cwd: 'cli',
         mode: 'skip',
       };
       const dispatched: JobConfig[] = [];
@@ -564,7 +564,7 @@ describe('handler config layer', () => {
         },
       });
       expect(dispatched[0].project).toBe('agents-cli');
-      expect(dispatched[0].cwd).toBe('apps/cli');
+      expect(dispatched[0].cwd).toBe('cli');
       expect(dispatched[0].mode).toBe('skip');
     });
 

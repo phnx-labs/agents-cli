@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
 # Create an annotated v<version> tag whose message is the folded changelog already
-# on that commit (apps/cli/.changelog/<version>.md). Agents write fragments under
+# on that commit (cli/.changelog/<version>.md). Agents write fragments under
 # .changelog/next/; release-changelog.ts folds them before the release commit —
 # do not invent a second notes channel at tag time.
 #
@@ -20,7 +20,7 @@ set -euo pipefail
 version="$1"
 commit="$2"
 force="${3:-}"
-notes_path="apps/cli/.changelog/${version}.md"
+notes_path="cli/.changelog/${version}.md"
 
 [[ -n "$version" && -n "$commit" ]] || {
   echo "error: create-annotated-release-tag.sh needs <version> <commit>" >&2
@@ -32,6 +32,11 @@ notes_path="apps/cli/.changelog/${version}.md"
 }
 
 commit="$(git rev-parse "$commit^{commit}")"
+# apps/cli -> cli flatten (RUSH-3189 follow-up): the folded changelog moved to
+# cli/.changelog/. Re-tagging (--force) an older pre-flatten commit still has it
+# under apps/cli/.changelog/, so fall back to that layout when cli/ is absent at
+# the commit being tagged.
+git cat-file -e "${commit}:${notes_path}" 2>/dev/null || notes_path="apps/cli/.changelog/${version}.md"
 if ! notes_body="$(git show "${commit}:${notes_path}" 2>/dev/null)"; then
   echo "error: refusing to tag v${version}: ${commit:0:9} has no ${notes_path}" >&2
   exit 1

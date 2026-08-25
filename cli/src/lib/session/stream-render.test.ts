@@ -59,13 +59,13 @@ describe('makeStreamRenderer', () => {
         type: 'custom_tool_call',
         name: 'apply_patch',
         call_id: 'call_1',
-        input: '*** Begin Patch\n*** Update File: apps/cli/src/commands/sessions-tail.ts\n@@\n-old\n+new\n*** End Patch',
+        input: '*** Begin Patch\n*** Update File: cli/src/commands/sessions-tail.ts\n@@\n-old\n+new\n*** End Patch',
       },
     }));
     expect(use).toContain('14:32:09');
     expect(use).toContain('→');
     expect(use).toContain('Edit');
-    expect(use).toContain('apps/cli/src/commands/sessions-tail.ts');
+    expect(use).toContain('cli/src/commands/sessions-tail.ts');
 
     const result = render(JSON.stringify({
       type: 'response_item',

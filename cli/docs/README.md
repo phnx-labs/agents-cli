@@ -92,7 +92,7 @@ How agi-cli is laid out on disk and how it decides what to load.
 - **YAML schema** blocks document the on-disk format. Field types come from the matching TypeScript interface in `src/`.
 - **Command reference** tables list every subcommand and flag. Run `agents <cmd> --help` if anything looks stale.
 - **Recipes** are numbered, copy-pasteable shell sequences. They run end-to-end, not toy snippets.
-- **Demo clips** under `assets/videos/` are 6–15s real terminal captures. The pipeline is documented in [`../../../assets/videos/README.md`](../../../assets/videos/README.md).
+- **Demo clips** under `assets/videos/` are 6–15s real terminal captures. The pipeline is documented in [`../../assets/videos/README.md`](../../assets/videos/README.md).
 
 ## Contributing
 

@@ -6,7 +6,7 @@ Cursor, OpenCode, OpenClaw, Grok, Droid, …) from one place.
 
 > Phoenix Labs · FSL-1.1-Apache-2.0.
 
-**The main project here is the agents CLI** — [`apps/cli`](apps/cli), the
+**The main project here is the agents CLI** — [`cli`](cli), the
 published `@phnx-labs/agents-cli`. Everything else (`native/computer-*`,
 `packages/*`) is a **helper app / library for one feature**, not a main project.
 **AGI EXT, the VS Code extension, lives in its own repo:
@@ -62,7 +62,7 @@ assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in 
 
 | Component | What it is | Read |
 |---|---|---|
-| [`apps/cli`](apps/cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](apps/cli/AGENTS.md) · [README.md](apps/cli/README.md) |
+| [`cli`](cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](cli/AGENTS.md) · [README.md](cli/README.md) |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | AGI EXT VS Code extension (own repo) — agent terminals as tabs, Fleet dashboard, dispatch | that repo's AGENTS.md |
 | [`native/computer-mac`](native/computer-mac) | macOS `agents computer` backend (Swift) | [AGENTS.md](native/computer-mac/AGENTS.md) · [README.md](native/computer-mac/README.md) |
 | [`native/computer-win`](native/computer-win) | Windows `agents computer` backend (C#/.NET) | [AGENTS.md](native/computer-win/AGENTS.md) · [README.md](native/computer-win/README.md) |
@@ -79,11 +79,11 @@ cross-package imports except the CLI resolving the native helpers by relative pa
 
 What agents-cli actually is: one engine that installs the **resources** an agent needs,
 **runs** the agent, and extends it with real-world **tools**, **sessions**, **teams**, and
-other **machines**. Deep reference: [`apps/cli/docs/concepts.md`](apps/cli/docs/concepts.md)
-and [`architecture.md`](apps/cli/docs/architecture.md).
+other **machines**. Deep reference: [`cli/docs/concepts.md`](cli/docs/concepts.md)
+and [`architecture.md`](cli/docs/architecture.md).
 
 - **Resources** — the typed things an agent needs, one kind per subdirectory of a
-  DotAgents repo (`ResourceKind` in `apps/cli/src/lib/resources.ts`): `rules` (this
+  DotAgents repo (`ResourceKind` in `cli/src/lib/resources.ts`): `rules` (this
   `AGENTS.md` → `CLAUDE.md`/`GEMINI.md`/…), `commands`, `skills`, `hooks`, `mcp`,
   `clis`, `permissions`, `subagents`, `workflows`, `profiles`, `routers`, `secrets`.
   Installed once in `~/.agents/` and synced into each agent's native format.
@@ -93,7 +93,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   `ResourceKind` subdirectory.
 - **One execution engine.** Every agent invocation goes through one path —
   `buildExecEnv` → `execAgent` / `runWithFallback` in
-  [`apps/cli/src/lib/exec.ts`](apps/cli/src/lib/exec.ts), entered via `agents run`. Each
+  [`cli/src/lib/exec.ts`](cli/src/lib/exec.ts), entered via `agents run`. Each
   agent version runs in an isolated **version home** (`HOME` swapped before exec) so
   configs never bleed between versions.
 - **Real-world tool surfaces.** `agents browser` (web) and `agents computer` (native
@@ -109,7 +109,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   **devices** are the Tailscale fleet (`agents devices`), **hosts** are dispatch targets
   (`agents hosts`); `-D/--device <name>` routes a command to any of them. This is the
   cross-device fabric under sessions, teams, run, and cloud.
-- **One engine, many consumers.** `apps/cli` owns the state — the session index, the
+- **One engine, many consumers.** `cli` owns the state — the session index, the
   pid→id registry, `sessions`/`teams`/`run`/`cloud`, and the SSH fan-out. AGI EXT
   ([phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext))
   is a **consumer**: the VS Code UI layer projects `agents sessions watch --json` and
@@ -127,7 +127,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   snapshots, the device registry). Where an action needs a UI-owned surface, the UI
   exposes a narrow endpoint the CLI drives (the `/inject` verb is the precedent) — the
   trigger stays in the CLI. Routines are covered by the same rule: `agents routines` +
-  the daemon's pid-claimed scheduler (`apps/cli/src/lib/daemon/daemon.ts`) are the only cron
+  the daemon's pid-claimed scheduler (`cli/src/lib/daemon/daemon.ts`) are the only cron
   that fires them; a UI button may *request* a run, never *schedule* one. **Multiple
   devices are fine — shared queues are not.** Every device runs its own daemon, and
   an unrestricted routine MAY fire on all of them when its input is the firing
@@ -140,7 +140,7 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   the double-fire bug class — the 2026-08-03 incident (the ext's watchdog rotate loop
   racing the daemon, spawning resume-tabs every 120s into exhausted accounts) is the
   canonical example; the consolidation (PR #1914) is the canonical fix. The normative
-  contract is [§Scheduling & execution singularity](apps/cli/docs/specifications.md#scheduling--execution-singularity).
+  contract is [§Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity).
 
 ## CLI surface conventions
 
@@ -166,7 +166,7 @@ them (see [§Code review conventions](#code-review-conventions-the-reviewer-must
   clean up. When you add an action to one, reuse the analogous verb on the other.
 - **Help teaches agents workflows, not man-page flag dumps.** A non-trivial command sets
   an `examples` block (and `notes` for prereqs and follow-ups) via `setHelpSections`
-  ([`apps/cli/src/lib/help.ts`](apps/cli/src/lib/help.ts)), so `--help` renders an ordered
+  ([`cli/src/lib/help.ts`](cli/src/lib/help.ts)), so `--help` renders an ordered
   happy-path sequence before the flag list. An agent reading help mid-task needs a
   three-line playbook, not 40 alphabetized options. Don't leave a non-trivial tool on
   commander's default help.
@@ -232,10 +232,10 @@ one-off command in a PR.
 
 | Task | Script | Contract |
 |---|---|---|
-| CLI build | [`apps/cli/scripts/build.sh`](apps/cli/scripts/build.sh) `[<version>] [--clean]` | builds into `apps/cli/dist` |
-| CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
-| CLI tests | [`apps/cli/scripts/test.sh`](apps/cli/scripts/test.sh) `[--device <box>] [--here]` | the full vitest suite. **Offloads by default** — crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh), or `--device <box>` for an explicit fleet Linux target. Never runs locally unless you pass `--here`, and fails loud rather than falling back. `bun run test` is the raw in-place runner the offload targets invoke; do not call it directly on a machine someone is using |
-| CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — requires an exact-tree attestation (it runs **no** tests itself; `release-attestation-produce.sh` does, offloaded via `test.sh`), PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
+| CLI build | [`cli/scripts/build.sh`](cli/scripts/build.sh) `[<version>] [--clean]` | builds into `cli/dist` |
+| CLI dev install | [`cli/scripts/install.sh`](cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
+| CLI tests | [`cli/scripts/test.sh`](cli/scripts/test.sh) `[--device <box>] [--here]` | the full vitest suite. **Offloads by default** — crabbox via [`sandbox.sh`](cli/scripts/sandbox.sh), or `--device <box>` for an explicit fleet Linux target. Never runs locally unless you pass `--here`, and fails loud rather than falling back. `bun run test` is the raw in-place runner the offload targets invoke; do not call it directly on a machine someone is using |
+| CLI release | [`cli/scripts/release.sh`](cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — requires an exact-tree attestation (it runs **no** tests itself; `release-attestation-produce.sh` does, offloaded via `test.sh`), PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
 | ext / agents-dbg build + release | in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) `scripts/` | AGI EXT and the agents-dbg app moved with the extension repo (RUSH-3189) |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
 
@@ -244,13 +244,13 @@ one-off command in a PR.
 **This repo builds the `agents` command itself, so the usual "install it globally
 and run it" advice is exactly wrong here — it overwrites the CLI the user (and
 every other agent on the fleet) depends on.** The general rule *"no locally built
-CLIs — install globally with `npm i -g`"* does **not** apply to `apps/cli`; this
+CLIs — install globally with `npm i -g`"* does **not** apply to `cli`; this
 paragraph overrides it for this repo.
 
 To run your changes:
 
 ```bash
-cd apps/cli
+cd cli
 bun run test                      # the suite, locally
 scripts/test.sh                   # the suite, offloaded to a crabbox (default)
 scripts/test.sh --device mark-1   # the suite, on an explicit fleet Linux box
@@ -325,7 +325,7 @@ absolute home paths before it lands. Never scatter scratch in `/tmp` or the repo
 - **The `swarm-ext://` URI authority is the extension id `swarmify.swarm-ext`.**
   The extension itself lives in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)
   (its frozen publish identity is documented there), but the CLI emits into that
-  URI (`apps/cli/src/lib/terminal/inject.ts`, `backends/vscodium-agent.ts`) — a
+  URI (`cli/src/lib/terminal/inject.ts`, `backends/vscodium-agent.ts`) — a
   CLI change must never assume a different extension id.
 
 ## Code review conventions (the reviewer must enforce these)
@@ -349,7 +349,7 @@ the exception.
   cover **every** harness the capability applies to — or the PR states which are out of
   scope and why. Flag a diff that wires up two or three agents and silently skips the rest.
   The registry-driven integrations are the pattern to follow (one table entry, e.g.
-  `SUBAGENT_TARGETS` in `apps/cli/src/lib/subagents-registry.ts`, gated by
+  `SUBAGENT_TARGETS` in `cli/src/lib/subagents-registry.ts`, gated by
   `capableAgents(...)` — not near-identical `else if (agent === '...')` arms), and the
   completeness tests that pin the registry to the capability list must still pass.
 - **The capability table stays truthful, in lockstep with the code.** A harness that lacks
@@ -364,13 +364,13 @@ the exception.
   passthrough, teams (local **and** remote teammates), and routines/cron — or the PR
   states which boundaries are out of scope and why. The tell is an **absence** at a
   remote call site (no `SetEnv`/`--env` forwarding across the SSH hop), so check the
-  remote dispatch builders (`apps/cli/src/lib/hosts/dispatch.ts`, `hosts/remote-cmd.ts`),
+  remote dispatch builders (`cli/src/lib/hosts/dispatch.ts`, `hosts/remote-cmd.ts`),
   not just the changed files — a diff that wires only the local path and silently drops
   the data at the first SSH boundary is incomplete. (RUSH-2028 fixed exactly this gap for
   actor provenance, which PR #1525 shipped local-only.)
 - **Docs stay in sync with behavior.** A change to a flag, command, config key, or
   user-visible behavior updates the docs that cover it — the relevant component
-  `AGENTS.md`, its `README.md`, and `apps/cli/docs/`. Flag a diff that adds or changes a
+  `AGENTS.md`, its `README.md`, and `cli/docs/`. Flag a diff that adds or changes a
   surface but leaves the docs describing the old behavior, and flag examples/command names
   in docs that the change has made stale. Exempt: pure internal refactors, test-only
   changes, self-evident renames.
@@ -384,7 +384,7 @@ the exception.
 - **README / feature list for core features.** A new core capability (a new top-level
   command or a substantial subsystem) updates the README and any feature/command index so
   it's discoverable — shipping it code-only, invisible to users, is incomplete.
-- **CHANGELOG for user-visible changes.** `apps/cli` ships as the published
+- **CHANGELOG for user-visible changes.** `cli` ships as the published
   `@phnx-labs/agents-cli` npm package. A change to a flag, command, or behavior adds a
   CHANGELOG entry under the next version. Same exemptions as docs.
 - **No fallback band-aids.** Reject "just in case" branches, defensive lookups that paper
@@ -405,7 +405,7 @@ the exception.
   belongs in the CLI daemon or a CLI command; the UI may only render the state and wire
   controls to CLI calls. (Canonical incident: the ext watchdog rotate loop,
   2026-08-03; canonical fix: PR #1914. See
-  [§Scheduling & execution singularity](apps/cli/docs/specifications.md#scheduling--execution-singularity).)
+  [§Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity).)
 - **No dead or commented-out code.** Removed logic is deleted, not commented out "for
   later." git history is the archive.
 - **Tests exercise the real path.** New behavior ships with a test that hits the actual
@@ -435,19 +435,19 @@ documented in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext).)
 
 ## Detailed design
 
-[`apps/cli/docs/`](apps/cli/docs/README.md) is the source-grounded reference. Start
-with [`architecture.md`](apps/cli/docs/architecture.md) for the CLI/extension layering
-and the session mechanisms, then [`concepts.md`](apps/cli/docs/concepts.md) for
+[`cli/docs/`](cli/docs/README.md) is the source-grounded reference. Start
+with [`architecture.md`](cli/docs/architecture.md) for the CLI/extension layering
+and the session mechanisms, then [`concepts.md`](cli/docs/concepts.md) for
 the resource model and resolution semantics of the CLI.
 
 **Normative contract.** The major subsystems carry a source-of-truth spec
 (RFC-2119 MUST/SHOULD + Given/When/Then, cited to `file:line`) that a change MUST
-NOT silently deviate from — [`apps/cli/docs/specifications.md`](apps/cli/docs/specifications.md)
-(§[Sessions](apps/cli/docs/specifications.md#sessions) ·
-§[Secrets](apps/cli/docs/specifications.md#secrets) ·
-§[Agent execution](apps/cli/docs/specifications.md#agent-execution) ·
-§[Scheduling & execution singularity](apps/cli/docs/specifications.md#scheduling--execution-singularity) ·
-§[Watchdog](apps/cli/docs/specifications.md#watchdog)). Its
-[coverage inventory](apps/cli/docs/specifications.md#coverage-inventory) names every
+NOT silently deviate from — [`cli/docs/specifications.md`](cli/docs/specifications.md)
+(§[Sessions](cli/docs/specifications.md#sessions) ·
+§[Secrets](cli/docs/specifications.md#secrets) ·
+§[Agent execution](cli/docs/specifications.md#agent-execution) ·
+§[Scheduling & execution singularity](cli/docs/specifications.md#scheduling--execution-singularity) ·
+§[Watchdog](cli/docs/specifications.md#watchdog)). Its
+[coverage inventory](cli/docs/specifications.md#coverage-inventory) names every
 other command group as documented-elsewhere or unspecified — check it before assuming
 a surface has a contract.

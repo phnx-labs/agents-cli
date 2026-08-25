@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Verify that agents-cli docs stay internally consistent.
-# Run from apps/cli/.
+# Run from cli/.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

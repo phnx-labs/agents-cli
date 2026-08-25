@@ -2,6 +2,6 @@
 /README.md
 
 # `bun build --compile` (scripts/build-bin.sh) drops this compile-intermediate in
-# apps/cli/ and can leave it behind, dirtying the tree and tripping release.sh's
+# cli/ and can leave it behind, dirtying the tree and tripping release.sh's
 # clean-tree preflight.
 *.bun-build

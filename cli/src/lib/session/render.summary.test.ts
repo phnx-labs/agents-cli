@@ -38,17 +38,17 @@ describe('renderSummary — Plan checklist status markers', () => {
 describe('renderSummary — Changes worktree collapse', () => {
   it('collapses out-of-cwd worktree prefixes to ⧉ <slug>/…', () => {
     const out = stripVTControlCharacters(renderSummary([
-      tool('Write', { file_path: '/home/u/repo/.agents/worktrees/feat-x/apps/cli/a.ts' }, '/home/u/repo/.agents/worktrees/feat-x/apps/cli/a.ts'),
+      tool('Write', { file_path: '/home/u/repo/.agents/worktrees/feat-x/cli/a.ts' }, '/home/u/repo/.agents/worktrees/feat-x/cli/a.ts'),
     ], '/home/u/repo'));
-    expect(out).toContain('⧉ feat-x/apps/cli/');
-    expect(out).not.toContain('.agents/worktrees/feat-x/apps/cli/a.ts');
+    expect(out).toContain('⧉ feat-x/cli/');
+    expect(out).not.toContain('.agents/worktrees/feat-x/cli/a.ts');
   });
 
   it('keeps cwd-relative labels for files inside the cwd', () => {
     const out = stripVTControlCharacters(renderSummary([
-      tool('Write', { file_path: '/home/u/repo/apps/cli/a.ts' }, '/home/u/repo/apps/cli/a.ts'),
+      tool('Write', { file_path: '/home/u/repo/cli/a.ts' }, '/home/u/repo/cli/a.ts'),
     ], '/home/u/repo'));
-    expect(out).toContain('apps/cli/');
+    expect(out).toContain('cli/');
     expect(out).not.toContain('/home/u/repo');
   });
 });

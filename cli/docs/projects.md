@@ -548,10 +548,10 @@ printing a column of silent `0%`s:
 The card could say how many agents ran and how many PRs merged, but not *what was worked on*.
 That answer is already in the checkout: every commit names the files it touched. `focus` ranks
 the directories the window's commits landed in, three levels deep so a monorepo reads as
-`apps/cli/src` rather than `apps`:
+`cli/src` rather than `apps`:
 
 ```
-focus    apps/cli/src 2.3k  ·  apps/cli/docs 302  file-touches (7d)  # git log --name-only buckets
+focus    cli/src 2.3k  ·  cli/docs 302  file-touches (7d)  # git log --name-only buckets
 ```
 
 Local `git log --name-only`, no GitHub API, no credential, no rate-limit budget — measured at
@@ -609,12 +609,12 @@ is the part that needed fixing:
 - each `repos[].path`, and `repos[].path` + `subpath`, anchor as well.
 
 Without this, two definitions sharing one monorepo checkout — an umbrella `rush` at
-`~/src/rush` and a subproject `rush-cli` at `~/src/rush` with `defaultPath ~/src/rush/apps/cli`
+`~/src/rush` and a subproject `rush-cli` at `~/src/rush` with `defaultPath ~/src/rush/cli`
 — both anchored at `~/src/rush`. Longest-match had nothing to separate them, so a session in
-`rush/apps/cli` was attributed to whichever definition was listed first, and the answer
+`rush/cli` was attributed to whichever definition was listed first, and the answer
 changed with definition order.
 
-A subproject scoped to `apps/cli` deliberately does **not** own `apps/web`; that work falls to
+A subproject scoped to `cli` deliberately does **not** own `apps/web`; that work falls to
 the umbrella. Set the scope with `agents projects add <name> --root <monorepo> --path <subdir>`.
 
 When the subproject is the *only* definition on that checkout there is no umbrella to fall to,

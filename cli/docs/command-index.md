@@ -6,7 +6,7 @@ Every `agents` command and subcommand, with its argument names and one-line
 description. Generated from the CLI's own command tree, so it never drifts from
 what `agents` actually registers.
 
-- Regenerate: `npm run gen:index` (from `apps/cli`), or it is rebuilt on release.
+- Regenerate: `npm run gen:index` (from `cli`), or it is rebuilt on release.
 - Full option lists live in the machine-readable [`command-index.json`](command-index.json).
 - `agents <group> --help` shows the workflow-first help (examples + notes) for a group.
 

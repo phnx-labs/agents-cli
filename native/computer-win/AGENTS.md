@@ -2,7 +2,7 @@
 
 Windows backend for `agents computer` — C#/.NET 10 daemon, sibling of the Swift
 [`native/computer-mac`](../computer-mac). Same JSON-RPC wire protocol, same result
-shapes; one TS client (`apps/cli/src/lib/computer/computer-rpc.ts`) drives both.
+shapes; one TS client (`cli/src/lib/computer/computer-rpc.ts`) drives both.
 
 This file is a **map**. Read the code (and [README.md](README.md)) for current detail.
 
@@ -24,7 +24,7 @@ tests/LaunchTarget.Tests.csproj  net10.0 xunit tests for LaunchTarget (cross-pla
 ## Build
 
 ```bash
-bash ../../apps/cli/scripts/build-win.sh   # dotnet publish -r win-x64 --self-contained -p:PublishSingleFile
+bash ../../cli/scripts/build-win.sh   # dotnet publish -r win-x64 --self-contained -p:PublishSingleFile
 ```
 
 Output: `dist/computer-helper-win.exe` (gitignored; staged into the npm tarball at
@@ -33,9 +33,9 @@ release). Needs the **.NET 10 SDK**; cross-publishes from macOS/Linux
 
 ## How the CLI reaches it
 
-`apps/cli/src/lib/computer/ssh-tunnel.ts` — `resolveWinHelperExe()` looks for
+`cli/src/lib/computer/ssh-tunnel.ts` — `resolveWinHelperExe()` looks for
 `native/computer-win/dist/computer-helper-win.exe` (dev checkout, 5 hops up from
-`apps/cli/dist/lib/computer`) or the bundled npm copy. `setupRemoteHelper()` scp's the exe
+`cli/dist/lib/computer`) or the bundled npm copy. `setupRemoteHelper()` scp's the exe
 to `%LOCALAPPDATA%\agents\`, registers a Task Scheduler task
 (`AgentsComputerHelper`, `-AtLogOn`, interactive), and starts it. The CLI connects
 over an `ssh -L` tunnel to the daemon's loopback TCP port (`8765`).

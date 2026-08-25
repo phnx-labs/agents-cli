@@ -40,7 +40,7 @@
  *
  * This file is NOT wired into `vitest run` — vitest.config.ts:11 includes only
  * `*.test.ts`, so a `*.bench.ts` adds no CI assertion or flakiness; run it
- * explicitly with `npx vitest bench --run` from apps/cli.
+ * explicitly with `npx vitest bench --run` from cli.
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';

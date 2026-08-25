@@ -40,7 +40,7 @@
  * graveyard size -- since that dir already accumulates on every real fleet box.
  *
  * Not wired into `vitest run` (vitest.config.ts:18 includes only `*.test.ts`);
- * run with `npx vitest bench --run` from apps/cli.
+ * run with `npx vitest bench --run` from cli.
  */
 import * as fs from 'node:fs';
 import * as os from 'node:os';

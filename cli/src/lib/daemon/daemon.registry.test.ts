@@ -319,7 +319,7 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
 
   // The third layer (RUSH-2418): `src/index.ts` awaited runDaemon() with no
   // try/catch and there was no `uncaughtException`/`unhandledRejection` handler
-  // anywhere in apps/cli/src, so a startup throw died on Node's default handler
+  // anywhere in cli/src, so a startup throw died on Node's default handler
   // — a raw stack to whatever the service manager had on stdout, nothing in
   // logs.jsonl, and an exit code that depended on how it died. Drive the real
   // `__daemon-run` entrypoint into a startup failure and assert it now exits
@@ -436,12 +436,12 @@ describe('describeEphemeralDaemonRoot', () => {
   // both the launch-time check (validateDaemonBinary) and the runtime startup
   // self-check (warnEphemeralDaemonRoot) share, so it must classify precisely.
   it('flags a git worktree entry', () => {
-    expect(describeEphemeralDaemonRoot('/home/u/.agents/worktrees/rv/apps/cli/src/index.ts')).toBe('a git worktree');
+    expect(describeEphemeralDaemonRoot('/home/u/.agents/worktrees/rv/cli/src/index.ts')).toBe('a git worktree');
   });
 
   it('flags /tmp and /private/tmp entries (the /tmp/rv-head case)', () => {
-    expect(describeEphemeralDaemonRoot('/tmp/rv-head/apps/cli/src/index.ts')).toBe('a temporary directory');
-    expect(describeEphemeralDaemonRoot('/private/tmp/rv-head/apps/cli/src/index.ts')).toBe('a temporary directory');
+    expect(describeEphemeralDaemonRoot('/tmp/rv-head/cli/src/index.ts')).toBe('a temporary directory');
+    expect(describeEphemeralDaemonRoot('/private/tmp/rv-head/cli/src/index.ts')).toBe('a temporary directory');
   });
 
   it('flags macOS /var/folders and linux /dev/shm entries', () => {
@@ -456,7 +456,7 @@ describe('describeEphemeralDaemonRoot', () => {
     // dev run and every install would emit a spurious wedge warning.
     expect(describeEphemeralDaemonRoot('/home/u/.agents/.history/versions/agents/1.20.88/node_modules/@phnx-labs/agents-cli/dist/index.js')).toBeNull();
     expect(describeEphemeralDaemonRoot('/opt/homebrew/lib/node_modules/@phnx-labs/agents-cli/dist/index.js')).toBeNull();
-    expect(describeEphemeralDaemonRoot('/home/u/src/github.com/x/agents-cli/apps/cli/src/index.ts')).toBeNull();
+    expect(describeEphemeralDaemonRoot('/home/u/src/github.com/x/agents-cli/cli/src/index.ts')).toBeNull();
     // A directory merely named "tmp" under $HOME is not a temp root (anchored match).
     expect(describeEphemeralDaemonRoot('/home/u/tmp/agents-cli/dist/index.js')).toBeNull();
   });
@@ -469,10 +469,10 @@ describe('warnEphemeralDaemonRoot', () => {
   // shim's main entry is missing). resolveBin is injected so all three branches
   // hit the real code path without mocking the module.
   it('warns for an ephemeral launch root (the /tmp/rv-head case)', () => {
-    const msg = warnEphemeralDaemonRoot(() => '/tmp/rv-head/apps/cli/src/index.ts');
+    const msg = warnEphemeralDaemonRoot(() => '/tmp/rv-head/cli/src/index.ts');
     expect(msg).not.toBeNull();
     expect(msg).toContain('a temporary directory');
-    expect(msg).toContain('/tmp/rv-head/apps/cli/src/index.ts');
+    expect(msg).toContain('/tmp/rv-head/cli/src/index.ts');
   });
 
   it('stays silent for a stable version-home launch root', () => {
@@ -500,12 +500,12 @@ describe('warnEphemeralDaemonRoot', () => {
 
 describe('validateDaemonBinary (ephemeral-root warning)', () => {
   it('warns when the daemon binary is under /tmp', () => {
-    const { warnings } = validateDaemonBinary('/tmp/rv-head/apps/cli/src/index.ts');
+    const { warnings } = validateDaemonBinary('/tmp/rv-head/cli/src/index.ts');
     expect(warnings.some((w) => w.includes('a temporary directory'))).toBe(true);
   });
 
   it('warns when the daemon binary is inside a git worktree', () => {
-    const { warnings } = validateDaemonBinary('/home/u/.agents/worktrees/rv/apps/cli/src/index.ts');
+    const { warnings } = validateDaemonBinary('/home/u/.agents/worktrees/rv/cli/src/index.ts');
     expect(warnings.some((w) => w.includes('a git worktree'))).toBe(true);
   });
 

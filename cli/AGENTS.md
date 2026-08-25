@@ -652,10 +652,10 @@ package's npm tarball; two more helpers are dev-only and live at repo-root `nati
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset**, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/computer/ssh-tunnel.ts` |
 
-Path math: compiled resolvers run from `apps/cli/dist/lib/…`. Files still in `dist/lib/`
+Path math: compiled resolvers run from `cli/dist/lib/…`. Files still in `dist/lib/`
 reach repo-root `native/` in **4 hops** (`../../../../native/…`); files in
 `dist/lib/computer/` need **5 hops**. The co-located `menubar/` is **3 hops up**
-(`../../../menubar/dist/…`) because it moved into `apps/cli` with the CLI. Recompute
+(`../../../menubar/dist/…`) because it moved into `cli` with the CLI. Recompute
 depth if you move files — don't blind-replace.
 
 ## Build, test, dev
@@ -670,7 +670,7 @@ runs the real suite cheaply on Linux — `test`
 `gitleaks`; those two are the required checks. The full cross-platform matrix
 (ubuntu + macOS + Windows × Node 22/24, `ci.yml`) is cost-gated to `release/**`
 branch pushes/PRs and manual `workflow_dispatch` — not `v*` tags (the tag points
-at the commit already gated on the release branch). CI runs from `apps/cli` via
+at the commit already gated on the release branch). CI runs from `cli` via
 `defaults.run.working-directory`.
 
 **Live Windows `--device` e2e (opt-in):** `src/lib/computer/ssh-tunnel.e2e.test.ts` and
@@ -750,7 +750,7 @@ tagged). `release.sh` now **preflights the resolved home base BEFORE any mutatio
 ([`scripts/signing-home-base-probe.sh`](scripts/signing-home-base-probe.sh), run on
 that box over `agents ssh`): an unprovisioned `--device` aborts at the preflight,
 before the crabbox/PR/merge/tag phases, naming the exact gap, so a mac-mini outage
-no longer risks a half-finished release. `apps/cli/bin/embedded.provisionprofile` is a
+no longer risks a half-finished release. `cli/bin/embedded.provisionprofile` is a
 committed input (commit 2567004b4) that self-heals — the preflight and the
 home-base phase both recover it from a freshly fetched `origin/<default>` ref when
 the box's own on-disk checkout predates that commit, so a brand-new home base
@@ -858,7 +858,7 @@ After the invoking box merges + tags (git + gh, which need that box's auth),
 `release.sh` routes build + sign + notarize + `npm publish` + computer-helper to
 `mac-mini`. Whether inline (you invoked it there) or over ssh, it first checks out
 `v<version>` into a throwaway worktree under `.agents/worktrees/`, then runs **that
-worktree's** `apps/cli/scripts/release.sh <version> --home-base-phase` — so the
+worktree's** `cli/scripts/release.sh <version> --home-base-phase` — so the
 script that publishes is the one carried by the release tag (with
 `--home-base-phase` + `headless-sign-context.sh`), never the home base's possibly-
 stale on-disk checkout. The worktree is removed on exit whether the phase succeeds
@@ -879,8 +879,8 @@ suite; the GH Actions CI matrix on the release PR still gates the cross-platform
 (macOS/Windows) legs (`wait_for_ci_green` blocks on them, fail-closed). `--skip-tests`
 skips only the crabbox lease.
 
-**Idempotent re-runs.** The script's git-scope reads use `<ref>:apps/cli/package.json`
-(not root) since the package moved under `apps/cli`. If a publish fails after the PR
+**Idempotent re-runs.** The script's git-scope reads use `<ref>:cli/package.json`
+(not root) since the package moved under `cli`. If a publish fails after the PR
 merges, rerun the same command: registry-truth short-circuits skip an
 already-published version, tag creation is idempotent against the verified release
 commit, and the catch-up guards (CI-tested-head match + merged-tree match + version

@@ -6,7 +6,7 @@
 # Requires bun + node_modules (the generator loads every command module). Run
 # from a CI job that has the toolchain and fires on CLI *source* changes
 # (cli-preflight) so it catches the real drift case, plus the docs job for a
-# hand-edit of the committed artifacts. Run from apps/cli/.
+# hand-edit of the committed artifacts. Run from cli/.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -117,7 +117,7 @@ scriptable CI gate (exit non-zero on drift). See
 ## Performance warehouse (`agents perf`)
 
 Latency samples for optimization — **not** the audit log. Implementation:
-`apps/cli/src/lib/perf/db.ts`, CLI: `apps/cli/src/commands/perf.ts`.
+`cli/src/lib/perf/db.ts`, CLI: `cli/src/commands/perf.ts`.
 
 ```
 agents perf                              # summary: commands + hooks + runs
@@ -160,8 +160,8 @@ timing/perf writes), plus `AGENTS_HOOK_SHIMS_DIR` / `AGENTS_HOOK_CACHE_DIR` /
 
 Resource and session **frequency** under the `insights` verb — **not** model quota
 (`agents view`) and **not** latency (`agents perf`). Implementation:
-`apps/cli/src/lib/analytics/` (recipes + `mix-commands.ts`); CLI entry is
-`apps/cli/src/commands/insights.ts` (registers the mix tree). Former top-level
+`cli/src/lib/analytics/` (recipes + `mix-commands.ts`); CLI entry is
+`cli/src/commands/insights.ts` (registers the mix tree). Former top-level
 `agents trends` is `agents insights mix` (also `agents insights trends`).
 
 ```

@@ -56,7 +56,7 @@ agents run claude "explain this repo"  # run any agent on your existing subscrip
 
 Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` exists only for [team spaces](#sign-in). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
-Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`apps/cli/docs/QUICKSTART.md`](apps/cli/docs/QUICKSTART.md).
+Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`cli/docs/QUICKSTART.md`](cli/docs/QUICKSTART.md).
 
 **Learn (concepts):** [Loop + graph engineering](https://agi-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agi-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agi-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agi-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agi-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
 
@@ -336,7 +336,7 @@ agents insights --since 7d
 
 Interactive picker when you're in a terminal. Structured output (`--json`, `--markdown`, filtered by role or turn count) when piped.
 
-Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached; repeated `--query` clauses must match distinct calls in one session. Tool queries read SQLite only: `agents sessions backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions. The index stores ordered static Bash program sites, so `--count` reports occurrences, containing tool calls, and distinct sessions without reparsing. `--fleet` executes one origin partition per device, so synced mirrors cannot duplicate compact evidence or counts returned over SSH; transcript bodies stay on their origin machine. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/sessions.md](apps/cli/docs/sessions.md) for the schemas and [docs/observability.md](apps/cli/docs/observability.md) for the consumption patterns.
+Backed by a SQLite + FTS5 index at `~/.agents/.history/sessions/sessions.db` with incremental scanning -- warm reads in ~100ms. Tool-call evidence is redacted and bounded before it is cached; repeated `--query` clauses must match distinct calls in one session. Tool queries read SQLite only: `agents sessions backfill tools` performs the one-time historical parse, while normal incremental scans index new and changed sessions. The index stores ordered static Bash program sites, so `--count` reports occurrences, containing tool calls, and distinct sessions without reparsing. `--fleet` executes one origin partition per device, so synced mirrors cannot duplicate compact evidence or counts returned over SSH; transcript bodies stay on their origin machine. This uses relational SQLite rows and literal FTS5 only, with no embeddings, vector database, or model calls. External tools can consume `--json` output as a programmatic observability layer; see [docs/sessions.md](cli/docs/sessions.md) for the schemas and [docs/observability.md](cli/docs/observability.md) for the consumption patterns.
 
 ### Live state, and catching up fast
 
@@ -492,7 +492,7 @@ agents fleet apply --no-login             # skip login propagation
 
 `agents fleet apply` probes every target over the existing SSH transport, then reconciles it to the profile: installs missing agents, upgrades `agi-cli`, syncs the named config scopes, and **propagates logins** so a host signed in once seeds the fleet -- turning "6 hosts x 8 harnesses = 48 OAuth flows" into one. Portable credential files (claude, codex, grok, kimi, opencode, droid, antigravity) stream to each target over encrypted SSH stdin, never shell-interpolated, and land at `0600`. **Honest boundary:** macOS keychain-bound tokens (claude, antigravity on a Mac target) can't be extracted -- those surface as a one-time manual login, never faked. `--plan` / `--dry-run` shows the full matrix without touching anything.
 
-See [docs/fleet.md](apps/cli/docs/fleet.md) for the manifest schema and reconcile semantics.
+See [docs/fleet.md](cli/docs/fleet.md) for the manifest schema and reconcile semantics.
 
 ---
 
@@ -709,9 +709,9 @@ email) and naming which harnesses use it — the fast way to see which accounts 
 and healthy across every machine. Scope either with `--agents <csv>` / `--device <csv>`, and
 add `--json` for the machine-readable per-host rows.
 
-**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](apps/cli/docs/concepts.md#devices--hosts).
+**Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](cli/docs/concepts.md#devices--hosts).
 
-Every `--device` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](apps/cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+Every `--device` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
 
 ---
 
@@ -736,7 +736,7 @@ agents teams status auth-feature    # Who's working, what they changed, what the
 
 Teammates run detached -- close your terminal, they keep working. Check in with `teams status`, glance at a teammate's summary with `teams logs <name>` (add `--full` for the raw output), clean up with `teams disband`.
 
-Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/observability.md](apps/cli/docs/observability.md).
+Team state is observable via `agents teams list --json` / `agents teams status --json` (compact by default; add `--verbose` for the full per-teammate shape). External tools join it with `sessions --json` (teammates get `isTeamOrigin: true`) and `cloud list --json` (for `--cloud` teammates) to build a unified fleet view. See [docs/observability.md](cli/docs/observability.md).
 
 ---
 
@@ -907,7 +907,7 @@ agents setup mine toggle jack --enable teams
 agents setup mine remove jack --purge
 ```
 
-Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](apps/cli/docs/profiles.md). Full reference: [Make it yours](apps/cli/docs/mine.md).
+Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](cli/docs/profiles.md). Full reference: [Make it yours](cli/docs/mine.md).
 
 > Branded builds are free for personal and commercial use alike. New versions ship under FSL-1.1-Apache-2.0: every user and company may use, modify, and redistribute; only offering agents-cli itself as a competing commercial product or service is barred, and each version automatically becomes Apache-2.0 two years after release.
 
@@ -1133,7 +1133,7 @@ agents routines add daily-digest \
   --schedule "0 9 * * 1-5" \
   --agent claude \
   --project-anchor agents-cli \
-  --cwd apps/cli \
+  --cwd cli \
   --prompt "Review yesterday's PRs and summarize key changes"
 
 agents routines list                   # All jobs + next run times
@@ -1165,7 +1165,7 @@ Jobs run sandboxed -- agents only see directories and tools you explicitly allow
 decides where the body runs. The reliability contract (execution anchor + `--cwd`,
 readiness that saves a blocked routine paused, and the `blocked`/`skipped` run
 statuses) is specified in
-[docs/specifications.md §Routine execution & readiness](apps/cli/docs/specifications.md#routine-execution--readiness);
+[docs/specifications.md §Routine execution & readiness](cli/docs/specifications.md#routine-execution--readiness);
 some of it is planned (RUSH-2290), and the section marks what is landed vs intended.
 
 ### Daemon
@@ -1297,7 +1297,7 @@ full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace);
 targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
 (`--keep-cover` opts out) and verifies the page actually 404s before reporting success —
 the Worker's delete is idempotent, so `{"ok":true}` alone is never proof.
-See [docs/share.md](apps/cli/docs/share.md).
+See [docs/share.md](cli/docs/share.md).
 
 ---
 
@@ -1346,9 +1346,9 @@ Two repos with the same shape, different roles:
 
 **Resource resolution:** When syncing resources (commands, skills, rules, hooks, MCP, permissions), the order is **project > user > system**. A `.agents/` directory at project root wins, then `~/.agents/`, then `~/.agents-system/`. Same-named resources higher in the chain override lower ones; everything else unions in. Run `agents view --merged` to see the effective skills, commands, MCP servers, hooks, rules, plugins, workflows, and subagents, with each row tagged by its winning layer.
 
-See [docs/concepts.md](apps/cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
+See [docs/concepts.md](cli/docs/concepts.md) for the full mental model: DotAgents repos, resource kinds, and how resolution works end-to-end.
 
-Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](apps/cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
+Other useful commands: `agents doctor` checks CLI availability and resource sync drift, `agents view` shows per-account quota/rate-limit data for installed agents, `agents config budget` shows cross-vendor spend caps and current spend-to-cap (and enforces pre-flight estimates + a hard-cap kill-switch on every run — see [docs/observability.md](cli/docs/observability.md#budget-guardrails-agents-budget)), `agents import` adopts an existing unmanaged install, `agents trash` lists and restores soft-deleted version directories, and `agents subagents` installs reusable subagent definitions for parent-agent workflows.
 
 ---
 
@@ -1471,7 +1471,7 @@ By default, secrets sync via iCloud Keychain to your other Macs. With `--no-iclo
 
 ## Compatibility
 
-Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](apps/cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](apps/cli/src/lib/capabilities.ts). Full matrix also in [docs/concepts.md](apps/cli/docs/concepts.md).
+Which DotAgents resources each agent CLI can load. Source of truth: [src/lib/agents.ts](cli/src/lib/agents.ts) (`capabilities`); gates use `supports(agent, cap, version)` from [src/lib/capabilities.ts](cli/src/lib/capabilities.ts). Full matrix also in [docs/concepts.md](cli/docs/concepts.md).
 
 > **Gemini CLI is hard-deprecated.** Google retired it for free, Pro, and Ultra tiers on **June 18, 2026** (announced at Google I/O 2026); the `gemini` command no longer serves requests on those tiers. agi-cli keeps the legacy `gemini` id only so old sessions/config can still be read. `agents add gemini`, `agents import gemini`, and `agents sync gemini` fail and point to **Antigravity CLI** (`antigravity`), Google's official successor — see [the transition notice](https://developers.googleblog.com/an-important-update-transitioning-gemini-cli-to-antigravity-cli/).
 
@@ -1599,7 +1599,7 @@ Profiles (experimental — available by default). Works with LiteLLM Proxy, Olla
 
 ### Can I add support for a new agent?
 
-Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is a config object declaring commands dir, rules file, and capabilities. PRs welcome.
+Agents are defined in [src/lib/agents.ts](cli/src/lib/agents.ts) -- each is a config object declaring commands dir, rules file, and capabilities. PRs welcome.
 
 ### What's the relationship to Phoenix Labs / Rush?
 
@@ -1611,7 +1611,7 @@ Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is
 
 | Path | What |
 |---|---|
-| [`apps/cli`](apps/cli) | **The CLI** (this README) — version management, config sync, sessions, teams, cloud, browser, computer, secrets. |
+| [`cli`](cli) | **The CLI** (this README) — version management, config sync, sessions, teams, cloud, browser, computer, secrets. |
 | [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | **AGI EXT** — the VS Code extension (agent terminals as tabs + the Fleet dashboard). Moved to its own repo (RUSH-3189); separate product, own publish identity. |
 | [`native/computer-mac`](native/computer-mac) · [`native/computer-win`](native/computer-win) | Native backends behind `agents computer` — Swift (macOS Accessibility + screen capture) and C#/.NET (Windows UI Automation). |
 | [`packages/session-tracker`](packages/session-tracker) | The `SessionStart` hook that writes live-session state **AGI EXT** reads back (agi-ext `src/core/liveSession.ts`) — not the CLI, which reads transcripts. |
@@ -1620,11 +1620,11 @@ Agents are defined in [src/lib/agents.ts](apps/cli/src/lib/agents.ts) -- each is
 
 ```bash
 git clone https://github.com/phnx-labs/agi-cli
-cd agi-cli/apps/cli
+cd agi-cli/cli
 bun install && bun run build && bun test
 ```
 
-Commands in [`apps/cli/src/commands/`](apps/cli/src/commands/), libraries in [`apps/cli/src/lib/`](apps/cli/src/lib/), tests as `*.test.ts` under vitest. [CLAUDE.md](CLAUDE.md) has the full style guide. [docs/landscape.md](apps/cli/docs/landscape.md) covers the competitive landscape.
+Commands in [`cli/src/commands/`](cli/src/commands/), libraries in [`cli/src/lib/`](cli/src/lib/), tests as `*.test.ts` under vitest. [CLAUDE.md](CLAUDE.md) has the full style guide. [docs/landscape.md](cli/docs/landscape.md) covers the competitive landscape.
 
 ## License
 

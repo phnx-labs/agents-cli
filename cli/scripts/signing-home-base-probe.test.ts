@@ -38,7 +38,7 @@ function probe(repoRoot: string) {
 function fixtureRepo(withProfile: boolean): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sign-probe-'));
   if (withProfile) {
-    const binDir = path.join(root, 'apps/cli/bin');
+    const binDir = path.join(root, 'cli/bin');
     fs.mkdirSync(binDir, { recursive: true });
     fs.writeFileSync(path.join(binDir, 'embedded.provisionprofile'), 'PROFILE');
   }
@@ -108,13 +108,13 @@ function staleHomeBaseFixture(): string {
   // The remote gains the profile AFTER the clone -- the checkout's local main
   // and working tree never see it until something fetches origin/main, which
   // is exactly what the probe must now do.
-  const binDir = path.join(remote, 'apps/cli/bin');
+  const binDir = path.join(remote, 'cli/bin');
   fs.mkdirSync(binDir, { recursive: true });
   fs.writeFileSync(path.join(binDir, 'embedded.provisionprofile'), 'PROFILE');
-  git(remote, 'add', 'apps/cli/bin/embedded.provisionprofile');
+  git(remote, 'add', 'cli/bin/embedded.provisionprofile');
   git(remote, 'commit', '--quiet', '-m', 'commit embedded.provisionprofile (2567004b4)');
 
-  expect(fs.existsSync(path.join(checkout, 'apps/cli/bin/embedded.provisionprofile'))).toBe(false);
+  expect(fs.existsSync(path.join(checkout, 'cli/bin/embedded.provisionprofile'))).toBe(false);
   return checkout;
 }
 

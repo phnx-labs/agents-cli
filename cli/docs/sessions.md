@@ -998,7 +998,7 @@ agents sessions trace a1b2c3d4 --tree --text          # the lineage, as an inden
 
 Pass **exactly two** selectors and the same command renders a **compare**: the two
 sessions' tool sequences aligned by tool name (`diffTrajectories()` in
-`apps/cli/src/lib/session/trajectory-compare.ts`), laid on a shared relative-time
+`cli/src/lib/session/trajectory-compare.ts`), laid on a shared relative-time
 axis, with the **first divergence point** — where the two runs' tool order stops
 lining up — called out, plus the steps each session ran that the other never did
 (the step-level diff) and a per-session summary (tools, errors, duration, tokens).
@@ -1023,7 +1023,7 @@ derived from the event stream; nothing is persisted onto `SessionEvent` or the
 
 Pass **one** selector with `--tree` and the same command renders a **lineage**: the
 session and every session it spawned, drawn as a delegation graph
-(`buildLineage()` in `apps/cli/src/lib/session/trajectory-lineage.ts`). It answers
+(`buildLineage()` in `cli/src/lib/session/trajectory-lineage.ts`). It answers
 "what did this orchestrator fan out to, and where did the fan-out go?" — the shape
 of a team run, not one run's steps.
 

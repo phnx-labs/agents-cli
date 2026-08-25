@@ -26,7 +26,7 @@ Implication: don't edit `~/.agents/.system/` directly; put overrides in `~/.agen
 
 [`src/lib/capabilities.ts`](../src/lib/capabilities.ts) `supports(agent, cap, version?)` is the single source of truth for "can this agent+version receive this resource?". Out-of-range versions are skipped silently. Never scatter `=== 'claude'` checks; route through `supports()`.
 
-Snapshot in [`apps/cli/AGENTS.md`](../AGENTS.md) §Supported harnesses — keep it in sync when you change the registry.
+Snapshot in [`cli/AGENTS.md`](../AGENTS.md) §Supported harnesses — keep it in sync when you change the registry.
 
 ## 5. Version homes isolate every agent version
 
@@ -59,7 +59,7 @@ The default branch is untouchable. Create a worktree under `.agents/worktrees/<s
 
 ## 10. Tests use real services — no mocking
 
-Tests hit the actual critical path. Integration tests live in `tests/`; unit tests sit next to source (`read.ts` → `read.test.ts`). The full suite runs via `bun run test:remote` in `apps/cli`.
+Tests hit the actual critical path. Integration tests live in `tests/`; unit tests sit next to source (`read.ts` → `read.test.ts`). The full suite runs via `bun run test:remote` in `cli`.
 
 ## 11. Where the major code lives
 
