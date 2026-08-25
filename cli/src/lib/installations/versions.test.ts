@@ -1036,6 +1036,42 @@ describe('installVersion Grok binary relocation', () => {
     expect(result).toContain('0.2.77');
   });
 
+  it.skipIf(process.platform === 'win32')('copies a current Grok binary whose filename omits the release', () => {
+    const home = makeTempHome();
+    const oldDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '1.0.5', 'home', '.grok', 'downloads');
+    fs.mkdirSync(oldDownloads, { recursive: true });
+    fs.symlinkSync(path.dirname(oldDownloads), path.join(home, '.grok'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.agents', 'meta.json'), JSON.stringify({ defaults: { grok: '1.0.5' } }));
+
+    const genericBinary = path.join(oldDownloads, 'grok-linux-x86_64');
+    fs.writeFileSync(genericBinary, Buffer.alloc(1_000_001));
+    fs.chmodSync(genericBinary, 0o755);
+
+    const binDir = path.join(home, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'grok');
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 1.0.5"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    const outcome = runInstallVersionWithScript(home, 'grok', '0.2.101', 'exit 0', binDir);
+    expect(outcome.result?.success).toBe(true);
+    expect(outcome.result?.installedVersion).toBe('0.2.101');
+    expect(fs.existsSync(genericBinary)).toBe(true);
+    expect(fs.existsSync(path.join(
+      home,
+      '.agents',
+      '.history',
+      'versions',
+      'grok',
+      '0.2.101',
+      'home',
+      '.grok',
+      'downloads',
+      'grok-linux-x86_64',
+    ))).toBe(true);
+  });
+
   it.skipIf(process.platform === 'win32')('fails loudly instead of creating a literal "latest" version dir when the post-install version probe never resolves (regression)', () => {
     const home = makeTempHome();
     const oldConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.106', 'home', '.grok');

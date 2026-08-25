@@ -62,6 +62,7 @@ import {
   isVersionIsolated,
   listInstalledVersions,
   pickCanonicalGlobalBinaryVersion,
+  resolveGrokFallbackBinary,
   resolveVersion,
 } from './store.js';
 export * from './store.js';
@@ -1202,7 +1203,19 @@ function transferGrokDownloads(
     }
   }
 
-  if (movedPaths.length === 0) return false;
+  if (movedPaths.length === 0) {
+    const fallback = resolveGrokFallbackBinary(sourceDownloads);
+    if (!fallback) return false;
+    const dst = path.join(targetDownloads, path.basename(fallback));
+    try {
+      fs.mkdirSync(targetDownloads, { recursive: true });
+      if (copy) fs.copyFileSync(fallback, dst);
+      else fs.renameSync(fallback, dst);
+      return true;
+    } catch {
+      return false;
+    }
+  }
 
   // The installer also creates a generic platform binary (e.g. grok-macos-aarch64)
   // that is a copy of the versioned binary. Move it too if its size matches.
