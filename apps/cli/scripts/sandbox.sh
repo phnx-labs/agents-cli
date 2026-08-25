@@ -328,7 +328,16 @@ main() {
       # Trailing args ride through to vitest: `sandbox.sh test --retry=2`.
       cmd="$test_cmd"
       if [[ $# -gt 0 ]]; then shift; fi
-      if [[ $# -gt 0 ]]; then cmd="$cmd -- $*"; fi
+      if [[ $# -gt 0 ]]; then
+        # Quote each arg with %q rather than splicing "$*". The command string is
+        # re-parsed by a shell on the remote box, so an unquoted arg containing a
+        # space (`--testNamePattern="a b"`) would arrive there split into two
+        # words. Neither caller passes one today; test.sh documents `-- <anything>`
+        # as a general escape hatch, so it must not be a trap.
+        cmd="$cmd --"
+        local a
+        for a in "$@"; do cmd="$cmd $(printf '%q' "$a")"; done
+      fi
       ;;
     verify)  cmd='echo "[sandbox] ready"; uname -srm; bun --version' ;;
     *)       cmd="$*" ;;
