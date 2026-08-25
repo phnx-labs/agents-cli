@@ -44,7 +44,7 @@ completeness. All 21 discovered launch transcripts were recovered successfully.
 
 ### 1. Fatal-looking bootstrap errors accompany successful launches
 
-Five independent Claude launches, spanning versions 2.1.186, 2.1.217,
+Four independent Claude launches, spanning versions 2.1.186, 2.1.217,
 2.1.218, and 2.1.221, emitted:
 
 > `ERROR: GVM_ROOT not set. Please source $GVM_ROOT/scripts/gvm`
