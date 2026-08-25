@@ -7,15 +7,22 @@ name: computer-helper-win
 # Required check: the verb set is at parity with the macOS helper and the smoke
 # is green on windows-latest, so a failure blocks the merge.
 #
-# On v* tags (pushed by cli/scripts/release.sh) the release-exe job builds
-# the shipped single-file exe, smokes it, and uploads it + a .sha256 as release
-# assets — the download source for npm-installed CLIs (GitHub #547). The paths
-# filter does not gate tag runs: GitHub does not evaluate `paths` for tag pushes.
+# On `computer-win/v*` tags the release-exe job builds the shipped single-file
+# exe, smokes it, and uploads it + a .sha256 as release assets — the download
+# source for npm-installed CLIs (GitHub #547). The paths filter does not gate tag
+# runs: GitHub does not evaluate `paths` for tag pushes, which is why the tag
+# pattern itself has to be the gate.
 
 on:
   push:
     branches: ['win-computer-use', 'main']
-    tags: ['v*']
+    # The helper's OWN tag, not the CLI's `v*`. Cutting `computer-win/v<x.y.z>`
+    # is a deliberate act, so the trigger IS the rebuild gate: an ordinary CLI
+    # release no longer rebuilds and re-uploads a ~165MB exe that nobody changed.
+    # It also puts the asset where the client actually looks — `ssh-tunnel.ts`
+    # resolves `computer-win/v<x.y.z>` since the helper-tag split, so uploading
+    # onto the CLI tag was publishing to an address no client requests.
+    tags: ['computer-win/v*']
     paths:
       - 'native/computer-win/**'
       - '.github/workflows/computer-helper-win.yml'
@@ -92,10 +99,13 @@ jobs:
           Write-Host "exe: $full"
           node smoke/smoke.mjs --exe "$full" --port 8772
 
-  # On v* tags: build the SAME self-contained single-file exe, smoke it, and
-  # upload it + its sha256 as release assets. `ssh-tunnel.ts` downloads exactly
-  # `releases/download/v<cli-version>/computer-helper-win.exe` when no local
-  # build exists (npm global installs), verifying against the .sha256 asset.
+  # On `computer-win/v*` tags: build the SAME self-contained single-file exe,
+  # smoke it, and upload it + its sha256 as release assets. `ssh-tunnel.ts`
+  # downloads `releases/download/computer-win/v<x.y.z>/computer-helper-win.exe`
+  # when no local build exists (npm global installs), verifying against the
+  # .sha256 asset. The version comes from the CLI's pinned helper floor
+  # (cli/src/lib/helper-versions.ts), NOT from the CLI's own version — that
+  # coupling is what this tag split removed.
   release-exe:
     if: github.ref_type == 'tag'
     runs-on: windows-latest
@@ -143,7 +153,7 @@ jobs:
         run: |
           gh release view $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY 2>$null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --verify-tag --title $env:GITHUB_REF_NAME --notes "agents-cli $env:GITHUB_REF_NAME. Assets: the Windows computer-helper daemon exe (downloaded on demand by 'agents computer setup --host')."
+            gh release create $env:GITHUB_REF_NAME --repo $env:GITHUB_REPOSITORY --verify-tag --title $env:GITHUB_REF_NAME --notes "Windows computer-helper daemon, $env:GITHUB_REF_NAME. Downloaded on demand by ``agents computer setup --host``; the CLI resolves this tag from its pinned helper floor (cli/src/lib/helper-versions.ts), not from its own version."
             if ($LASTEXITCODE -ne 0) { throw "gh release create failed" }
           }
           gh release upload $env:GITHUB_REF_NAME dist/computer-helper-win.exe dist/computer-helper-win.exe.sha256 --clobber --repo $env:GITHUB_REPOSITORY
