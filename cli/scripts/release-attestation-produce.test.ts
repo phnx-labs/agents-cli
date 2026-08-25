@@ -166,15 +166,23 @@ function runProduce(
 
 
 describe('release-attestation-produce.sh', () => {
-  it('seeds the already-signed helper apps from the caller checkout on a non-Mac producer (RUSH-3026)', () => {
-    // The producer's fresh worktree has an empty bin/ (the .apps are untracked),
-    // so before this fix every non-Mac producer died at prepack — chaining
-    // attestation production, and therefore releases, to a Mac. The caller
-    // checkout's already-signed apps must be seeded copy-if-absent; the prepack
-    // gates still verify them.
-    const root = tmp('attest-produce-seed-');
+  it('does NOT seed helper apps on a non-Mac producer — the tarball ships none (RUSH-3100)', () => {
+    // This replaces the RUSH-3026 seeding test, and the reversal is the point.
+    //
+    // Seeding existed ONLY because `prepack` refused to pack without the signed
+    // .apps, and the producer's fresh worktree has an empty bin/. That was the
+    // workaround for the very coupling RUSH-3100 removed. With the gates gone,
+    // copying signed bundles into a tree that will not ship them is pure motion —
+    // and the seed's own comment ("the prepack gates still decide … fails the pack
+    // exactly as before") became false the moment they were removed.
+    //
+    // The assertion that matters is the NEGATIVE one: a non-Mac producer must
+    // still succeed. Asserting only "no seeding" would pass on a producer that
+    // broke outright.
+    const root = tmp('attest-produce-noseed-');
     const fx = buildFixture(root);
-    // Untracked, already-signed apps exist only in the CALLER checkout.
+    // Already-signed apps present in the CALLER checkout — the exact condition
+    // that used to trigger seeding.
     for (const [app, binName] of [
       ['Agents CLI.app', 'Agents CLI'],
       ['MenubarHelper.app', 'AGI Menu'],
@@ -184,17 +192,20 @@ describe('release-attestation-produce.sh', () => {
       fs.writeFileSync(path.join(dir, binName), 'signed-bytes\n');
     }
     const result = runProduce(fx, ['--keep']);
-    // Strip ANSI color codes so the path capture below is not polluted by the
-    // gray() escape sequences the producer wraps its lines in.
-    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
+    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
+
+    // It still produces an attestation.
     expect(result.status, out).toBe(0);
-    expect(out).toContain('seeded bin/Agents CLI.app');
-    expect(out).toContain('seeded bin/MenubarHelper.app');
-    // The kept worktree genuinely carries the seeded apps where prepack looks.
+    // …without copying either bundle anywhere.
+    expect(out).not.toContain('seeded bin/');
     const kept = out.match(/kept worktree for inspection: (\S+)/);
     expect(kept, out).toBeTruthy();
-    expect(fs.existsSync(path.join(kept![1], 'cli/bin/Agents CLI.app/Contents/MacOS/Agents CLI'))).toBe(true);
-    expect(fs.existsSync(path.join(kept![1], 'cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'))).toBe(true);
+    for (const app of ['Agents CLI.app', 'MenubarHelper.app']) {
+      expect(
+        fs.existsSync(path.join(kept![1], 'cli/bin', app)),
+        `${app} must not be copied into the producer worktree`,
+      ).toBe(false);
+    }
   });
 
   it('routes --test-crabbox to test.sh\'s crabbox lane (surface parity, RUSH-3211)', () => {

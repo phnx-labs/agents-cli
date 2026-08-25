@@ -183,8 +183,10 @@ rm -f "$SUITE_LOG"
 
 # Sign + notarize headlessly, matching what release.sh's privileged phase did
 # before RUSH-2666 moved build/sign to attestation time. Skipped off a macOS
-# signing box; npm pack's own prepack gates fail closed in that case (no
-# unsigned tarball is ever attested).
+# signing box -- and since RUSH-3100 that skip costs nothing, because the tarball
+# no longer carries a helper bundle for `npm pack` to gate on. The claim that
+# "prepack gates fail closed in that case" was the old contract and is no longer
+# what stops an unsigned helper shipping; nothing ships one, from anywhere.
 if [[ "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
   && [[ -x scripts/sign-cli-binary.sh ]]; then
   bold "Signing + notarizing the CLI binary and helper apps..."
@@ -208,27 +210,17 @@ if [[ "$(uname)" == "Darwin" ]] && command -v agents >/dev/null 2>&1 \
     shasum -a 256 "bin/Agents CLI.app/Contents/MacOS/Agents CLI" > "scripts/Agents CLI.app.sha256"
   ' || die "signed helper build failed"
 else
-  gray "Not on a macOS signing box -- skipping helper sign/build; npm pack's prepack gates decide."
-  # Seed the already-signed helper .apps from the caller checkout (RUSH-3026).
-  # The ordinary release never rebuilds an unchanged helper, and this fresh
-  # worktree has an empty bin/ -- without seeding, every non-Mac producer died
-  # at prepack, which chained attestation production (and therefore releases)
-  # to a Mac. The prepack gates still decide: the keychain app must match the
-  # tree's committed sha pin and the menubar app must be present, so a wrong or
-  # tampered seed fails the pack exactly as before. Seeding is copy-if-absent
-  # only -- a Darwin producer's freshly signed apps are never overwritten.
-  for app in "Agents CLI.app" "MenubarHelper.app"; do
-    # Seed source is the caller checkout ($REPO_ROOT); accept the cli/ layout and
-    # the pre-flatten apps/cli/ layout so a stale caller checkout still seeds.
-    seed=""
-    [[ -d "$REPO_ROOT/cli/bin/$app" ]] && seed="$REPO_ROOT/cli/bin/$app"
-    [[ -z "$seed" && -d "$REPO_ROOT/apps/cli/bin/$app" ]] && seed="$REPO_ROOT/apps/cli/bin/$app"
-    if [[ ! -d "bin/$app" && -n "$seed" ]]; then
-      mkdir -p bin
-      cp -R "$seed" "bin/$app"
-      gray "seeded bin/$app from the caller checkout (already-signed; prepack gates verify it)"
-    fi
-  done
+  # Nothing to do off a signing box: the tarball carries no helper bundle
+  # (RUSH-3100), so `npm pack` neither wants nor gates on one.
+  #
+  # This branch used to SEED the already-signed .apps from the caller checkout,
+  # because `prepack` refused to pack without them and a fresh worktree has an
+  # empty bin/ -- that seeding was the workaround for the very coupling RUSH-3100
+  # removed. With the gates gone the seed copies signed bundles into a tree that
+  # will not ship them, and its own comment ("the prepack gates still decide ...
+  # fails the pack exactly as before") became false the moment they were removed.
+  # A stale comment guarding nothing is worse than no comment, so both are gone.
+  gray "Not a macOS signing box -- nothing to do: the tarball ships no helper bundle."
 fi
 
 bold "Building (bun run build)..."
