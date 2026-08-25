@@ -2726,7 +2726,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: custom harness pins its own version/auth\n`));
         } else {
           try {
-            const resolved = await resolveRunVersion(agent, strategy, cwd);
+            // Account-centric candidate list: native version-home logins PLUS
+            // provider accounts (setup-token / API-key) that can auth this agent,
+            // so `--strategy balanced` spreads across ALL accounts, not just the
+            // ones sitting in a version home (RUSH-3182). Run-path only — the
+            // picker's other callers keep the native-only collector.
+            const { collectRunCandidatesForRun } = await import('../lib/accounting/account-pool-collect.js');
+            const resolved = await resolveRunVersion(agent, strategy, cwd, collectRunCandidatesForRun);
             if (resolved.exhausted) {
               // Zero healthy accounts splits two ways, and conflating them is what
               // stranded a logged-out harness with no way in at all (RUSH-2334):
@@ -2776,6 +2782,21 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             } else if (resolved.version) {
               version = resolved.version;
               rotationResult = resolved.rotation;
+              // A balanced/available pick of a PROVIDER account (setup-token /
+              // API-key) carries `providerAccount`. Resolve its env through the
+              // same `resolveSpawnAccount` path an explicit `--account` uses, so
+              // exec injects the credential; a native pick has no providerAccount
+              // and runs from its own version home unchanged (RUSH-3182).
+              const pickedProviderAccount = resolved.rotation?.picked.providerAccount;
+              if (pickedProviderAccount) {
+                try {
+                  const picked = resolveSpawnAccount(pickedProviderAccount, agent, resolved.version, readMeta(), { useDefault: false });
+                  if (picked?.kind === 'provider') accountEnv = picked.env;
+                } catch (err) {
+                  console.error(chalk.red((err as Error).message));
+                  process.exit(1);
+                }
+              }
               if (resolved.rotation && !options.quiet) {
                 const banner = formatRotationBanner(resolved.rotation, strategy);
                 process.stderr.write(chalk.gray(banner + '\n'));

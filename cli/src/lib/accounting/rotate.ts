@@ -78,6 +78,15 @@ export interface RotateCandidate {
    */
   authVerdict: AuthVerdict | null;
   lastActive: Date | null;
+  /**
+   * Set only for a candidate that comes from a provider account bundle rather
+   * than a native version-home login (RUSH-3182): the account name to inject via
+   * the `--account` spawn path (`resolveSpawnAccount` → `accountEnv`). Undefined
+   * for a native login, whose credential already lives in `version`'s home. The
+   * run path routes on this so a balanced pick of a setup-token / API-key account
+   * authenticates through the existing provider-account injection.
+   */
+  providerAccount?: string;
 }
 
 export interface RotateResult {
@@ -324,7 +333,7 @@ export async function checkRunAccountReadiness(agent: AgentId, version: string):
   return readinessFromCandidate(candidate);
 }
 
-export function getRoutingUsedPercent(snapshot: UsageSnapshot | null | undefined): number | null {
+function getRoutingUsedPercent(snapshot: UsageSnapshot | null | undefined): number | null {
   if (!snapshot || snapshot.windows.length === 0) return null;
   const routingWindows = snapshot.windows.filter((window) => window.key !== 'session');
   const windows = routingWindows.length > 0 ? routingWindows : snapshot.windows;
