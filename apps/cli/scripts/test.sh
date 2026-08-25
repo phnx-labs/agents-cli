@@ -60,8 +60,16 @@ if [[ -n "$REPO_ROOT" ]]; then
 fi
 TREE_ROOT="$(cd "$CLI_DIR/../.." && pwd)"
 
+# Render the vitest args for a command string that a SHELL will re-parse.
+# Per-arg `%q`, never "$*": splicing joins on a space, so `--testNamePattern="a b"`
+# arrives as two words and silently selects a different set of tests -- observed
+# as 10,620 tests running where a filter should have matched a handful. Same bug
+# sandbox.sh had; this is the sweep of the remaining call sites.
 vitest_suffix() {
-  ((${#VITEST_ARGS[@]})) && printf ' -- %s' "${VITEST_ARGS[*]}"
+  ((${#VITEST_ARGS[@]})) || return 0
+  local a
+  printf ' --'
+  for a in "${VITEST_ARGS[@]}"; do printf ' %s' "$(printf '%q' "$a")"; done
 }
 
 # Resolve a device NAME to an address ssh/rsync can actually reach.
@@ -104,7 +112,12 @@ case "$MODE" in
     red "         ~13k tests, several minutes of pinned CPU. Ctrl-C now to offload instead."
     cd "$CLI_DIR"
     # shellcheck disable=SC2046
-    exec bun run test $( ((${#VITEST_ARGS[@]})) && printf -- '-- %s' "${VITEST_ARGS[*]}" )
+    # Local exec: pass the array straight through. No command string is built,
+    # so there is nothing for a second shell to re-split.
+    if ((${#VITEST_ARGS[@]})); then
+      exec bun run test -- "${VITEST_ARGS[@]}"
+    fi
+    exec bun run test
     ;;
 
   device)
@@ -138,38 +151,16 @@ case "$MODE" in
     rsync -az --delete \
       --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
       --exclude '.agents/worktrees' --exclude '.release-attestations' \
-      "$TREE_ROOT/" "$ADDR:.cache/agents-cli/test-runs/tree/"
+      "$TREE_ROOT/" "$ADDR:${remote_dir#\$HOME/}/"
 
-    # Bound the repo root to the shipped tree.
-  #
-  # The tree ships WITHOUT .git — for the attestation producer's isolated
-  # worktree that file is just a `gitdir:` pointer into the origin machine's
-  # object store, meaningless here. But without any .git marker,
-  # `git rev-parse --show-toplevel` walks UP out of the shipped tree and returns
-  # the first ancestor repo it finds. On a worker that is `~/.agents` (the
-  # DotAgents repo), so every git-rooted path resolves against a completely
-  # unrelated repository — release-manifest.test.ts went looking for
-  # `~/.agents/native/computer-mac/Sources` and the suite failed 4 tests with a
-  # confusing "helper input missing". An empty repo here stops the walk.
-  #
-  # This mirrors what sandbox.sh's crabbox path has always done -- its comment
-  # reads "blank git for tests that need one" -- including the initial commit,
-  # so a test that reads HEAD finds one instead of an unborn branch. The device
-  # path reinvented the transport without carrying that across, which is how
-  # the escape appeared in the first place.
-  # Identity is passed with `-c`, not written to config: a worker generally has
-  # no git identity, and without it the commit fails and the usual `|| true`
-  # swallows it -- leaving an unborn HEAD that surfaces later as some other
-  # test's confusing failure. Verified on a worker: HEAD resolves, and the
-  # box's global config is left untouched.
-  # The remediation lives in its own script so the suite can exercise the SAME
-  # code rather than a copy that drifts (scripts/ is part of the rsync, so it is
-  # already on the worker).
-  ssh "$ADDR" 'bash ~/.cache/agents-cli/test-runs/tree/apps/cli/scripts/bound-repo-root.sh ~/.cache/agents-cli/test-runs/tree' \
-    || die "could not give the shipped tree a git repo on '$DEVICE' -- refusing to run the suite, since anything resolving a repo root would fail or escape"
+    # Give the shipped tree its own git repo. The WHY lives in
+    # bound-repo-root.sh's docblock -- one explanation, one place. Fails loud:
+    # without a repo, anything resolving a repo root breaks.
+    ssh "$ADDR" "bash $remote_dir/apps/cli/scripts/bound-repo-root.sh $remote_dir" \
+      || die "could not give the shipped tree a git repo on '$DEVICE' -- refusing to run the suite, since anything resolving a repo root would fail or escape"
 
   green "Tree shipped. Running the suite on $DEVICE..."
-    ssh "$ADDR" "cd ~/.cache/agents-cli/test-runs/tree/apps/cli \
+    ssh "$ADDR" "cd $remote_dir/apps/cli \
       && bun install --silent \
       && bun run build >/dev/null \
       && bun run test$(vitest_suffix)"
