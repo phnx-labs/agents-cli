@@ -85,7 +85,7 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    unchanged. The five-hour and seven-day fields may arrive independently, so
    ingestion merges each window into the last snapshot instead of replacing the
    other one. `agents view claude` always reserves both `S` and `W` slots: a
-   provider-omitted window is a filled red unavailable bar, distinct from a real
+   provider-omitted window is a filled red `unavailable` slot, distinct from a real
    zero-percent window. Do not restore `/api/oauth/usage` polling or read/copy the
    interactive OAuth credential to fill these bars.
 

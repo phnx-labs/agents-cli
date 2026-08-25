@@ -774,7 +774,7 @@ describe('formatUsageSummary expected window slots', () => {
       ],
     }, 3, { expectedWindows });
 
-    expect(weekOnly).toContain('S: █████ --');
+    expect(weekOnly).toContain('S: █████ unavailable');
     expect(weekOnly.indexOf('W:')).toBe(both.indexOf('W:'));
   });
 
@@ -784,7 +784,7 @@ describe('formatUsageSummary expected window slots', () => {
       windows: [{ key: 'session' as const, label: 'Session', shortLabel: 'S', usedPercent: 0, resetsAt: null, windowMinutes: 300 }],
     }, 3, { expectedWindows });
     expect(rendered).toContain('S: ░░░░░ 0%');
-    expect(rendered).toContain('W: █████ --');
+    expect(rendered).toContain('W: █████ unavailable');
   });
 });
 

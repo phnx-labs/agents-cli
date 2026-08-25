@@ -829,7 +829,7 @@ export function formatUsageSummary(
       : selected.map((window) => ({ window, shortLabel: window.shortLabel }));
     const windowParts = windowsToRender.map(({ window, shortLabel }, index) => {
       if (!window) {
-        const missing = chalk.red(`${shortLabel}: ${FULL.repeat(COMPACT_BAR_LEN)} --`);
+        const missing = chalk.red(`${shortLabel}: ${FULL.repeat(COMPACT_BAR_LEN)} unavailable`);
         return index < windowsToRender.length - 1 ? padToWidth(missing, 20) : missing;
       }
       const bar = renderCompactUsageBar(window.usedPercent);
