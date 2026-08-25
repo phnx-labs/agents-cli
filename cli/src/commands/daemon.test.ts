@@ -1,89 +1,34 @@
 /**
- * End-to-end CLI subprocess tests for `agents daemon` (RUSH-2354).
+ * agents daemon — command surface, status, enable/disable.
  *
- * Every test spawns the real CLI against an isolated mkdtemp HOME with no
- * daemon running — no mocks. Modeled on routines.test.ts. Replaces
- * daemon-removal.test.ts, which pinned the command group as intentionally
- * absent; it is absent no longer.
+ * The command group itself: that it resolves, that Funnel nests under it, and
+ * that status/enable/disable agree about whether this device runs a daemon.
+ *
+ * Split out of a single 34-test `daemon.test.ts` that ran 159s — the slowest
+ * file in the repo, and therefore the whole suite's floor: vitest parallelises
+ * across FILES and runs one file's tests sequentially in a single worker. The
+ * shared spawn harness lives in `daemon-test-harness.ts`.
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync, spawn, type ChildProcess } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { fileURLToPath, pathToFileURL } from 'url';
-import { createRequire } from 'module';
+import { spawn, spawnSync, type ChildProcess } from 'child_process';
+import {
+  DAEMON_TESTS_SUPPORTED,
+  REPO_ROOT,
+  TSX_IMPORT,
+  CLI_ENTRYPOINT,
+  makeHome,
+  run,
+  spawnFakeRegisteredDaemon,
+  registerInstance,
+  killFakeDaemon,
+} from './daemon-test-harness.js';
 
-const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const require = createRequire(import.meta.url);
-const TSX_IMPORT = pathToFileURL(require.resolve('tsx')).href;
-const CLI_ENTRYPOINT = path.join(REPO_ROOT, 'src', 'index.ts');
+const describeDaemon = DAEMON_TESTS_SUPPORTED ? describe : describe.skip;
 
-// win32: subprocess CLI + process-group signals / path spawn assumptions (RUSH-2215).
-const describeDaemon = process.platform === 'win32' ? describe.skip : describe;
-
-/** Provision an isolated HOME with just enough scaffolding for the CLI to boot. */
-function makeHome(): string {
-  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-daemon-test-'));
-  fs.mkdirSync(path.join(home, '.agents', '.system', '.git'), { recursive: true });
-  fs.writeFileSync(path.join(home, '.agents', 'agents.yaml'), 'agents: {}\n');
-  return home;
-}
-
-/** Run `agents daemon <args>` against an isolated HOME — no daemon process ever started. */
-function run(home: string, args: string[]): ReturnType<typeof spawnSync> {
-  return spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'daemon', ...args], {
-    cwd: REPO_ROOT,
-    env: {
-      ...process.env,
-      HOME: home,
-      USERPROFILE: home,
-      AGENTS_SKIP_MIGRATION: '1',
-      AGENTS_NO_AUTOPULL: '1',
-      AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
-      AGENTS_DAEMON_DIR: path.join(home, '.agents', '.cache', 'helpers', 'daemon'),
-    },
-    encoding: 'utf-8',
-    timeout: 30_000,
-  });
-}
-
-/**
- * Spawn a real, long-lived process whose command line ends in `__daemon-run`
- * (so `isDaemonRunProcess`'s `ps` check accepts it — see
- * `lib/daemon.test.ts`'s "reaps a live __daemon-run registrant" test, same
- * technique) and register it in `home`'s OWN instance registry, exactly the
- * marker `registerDaemonInstance` would write. A real live process, not a
- * mock — `agents daemon status` reads it through the actual registry +
- * `ps`-liveness path, the same one the reaper and `stopDaemon`'s postcondition
- * use.
- */
-async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProcess> {
-  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], {
-    stdio: 'ignore',
-  });
-  // Give the exec a moment to land before `ps` (read by the status command's
-  // isDaemonRunProcess check) is asked to see its real argv — mirrors
-  // lib/daemon.test.ts's identical fake-daemon technique.
-  await new Promise((r) => setTimeout(r, 150));
-  const instancesDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
-  fs.mkdirSync(instancesDir, { recursive: true });
-  fs.writeFileSync(path.join(instancesDir, String(child.pid)), '__daemon-run', 'utf-8');
-  return child;
-}
-
-/** Register a pid in `home`'s instance registry — the scope stale/duplicate reporting uses. */
-function registerInstance(home: string, pid: number): void {
-  const dir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(path.join(dir, String(pid)), '__daemon-run', 'utf-8');
-}
-
-function killFakeDaemon(child: ChildProcess): void {
-  try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
-}
-
-describeDaemon('agents daemon', () => {
+describeDaemon('agents daemon — command surface, status, enable/disable', () => {
   it('resolves as a real command — the group daemon-removal.test.ts used to pin absent', () => {
     const res = run(makeHome(), ['--help']);
     expect(res.status).toBe(0);
@@ -96,7 +41,6 @@ describeDaemon('agents daemon', () => {
     // No `jobs` subcommand — scheduled work is `agents routines`, always.
     expect(res.stdout).not.toMatch(/^\s*jobs\b/m);
   });
-
   it('nests Funnel management under daemon and removes the top-level command', () => {
     const home = makeHome();
     const nested = run(home, ['funnel', '--help']);
@@ -121,41 +65,12 @@ describeDaemon('agents daemon', () => {
     expect(topLevel.status).not.toBe(0);
     expect(topLevel.stderr + topLevel.stdout).toContain("unknown command 'funnel'");
   });
-
-  it('status --json reports stopped with no pid when no daemon is running for THIS install', () => {
-    const res = run(makeHome(), ['status', '--json']);
-    expect(res.status).toBe(0);
-    const payload = JSON.parse(res.stdout);
-    expect(payload.state).toBe('stopped');
-    expect(payload.pid).toBeNull();
-    // `duplicates` is scoped to THIS install's instance registry (RUSH-2368),
-    // which lives inside the isolated AGENTS_DAEMON_DIR this test set. Nothing
-    // has ever registered there, so it is always empty here — whatever else is
-    // running on the dev machine (or on another test's isolated HOME) is a
-    // different registry and never appears, by construction, not by luck.
-    expect(payload.duplicates).toEqual([]);
-    expect(payload.daemonEnabled).toBe(true);
-    expect(payload.services.secretsBroker).toHaveProperty('reachable', false);
-    expect(payload.services.browserIpc).toHaveProperty('bound', false);
-    // Daemon housekeeping (watchdog, device-probe, ...) are plain daemon-core
-    // timers, NOT routines (RUSH-2495), so a fresh install with nothing on disk
-    // carries zero scheduled routines.
-    expect(payload.scheduler).toEqual(
-      expect.objectContaining({
-        routineCount: 0,
-        enabledCount: 0,
-        failingCount: 0,
-      }),
-    );
-  });
-
   it('bare `agents daemon` (no subcommand) is the same as `status`', () => {
     const home = makeHome();
     const bare = run(home, ['--json']);
     const status = run(home, ['status', '--json']);
     expect(JSON.parse(bare.stdout).state).toBe(JSON.parse(status.stdout).state);
   });
-
   it('disable persists daemon.enabled: false and status reflects it as "disabled"', () => {
     const home = makeHome();
     const disable = run(home, ['disable']);
@@ -180,7 +95,6 @@ describeDaemon('agents daemon', () => {
     const central = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
     expect(central).not.toContain('daemonEnabled');
   });
-
   it('enable clears the kill switch again', () => {
     const home = makeHome();
     run(home, ['disable']);
@@ -191,7 +105,6 @@ describeDaemon('agents daemon', () => {
     expect(JSON.parse(status.stdout).daemonEnabled).toBe(true);
     expect(JSON.parse(status.stdout).state).toBe('stopped');
   });
-
   it('a disabled device refuses `agents routines start` with a message naming the fix', () => {
     const home = makeHome();
     run(home, ['disable']);
@@ -205,42 +118,6 @@ describeDaemon('agents daemon', () => {
     expect(res.stderr + res.stdout).toContain('daemon.enabled=false');
     expect(res.stderr + res.stdout).toContain('agents daemon enable');
   });
-
-  it('services --json reports both hosted services with a socket path even when unreachable', () => {
-    const res = run(makeHome(), ['services', '--json']);
-    expect(res.status).toBe(0);
-    const payload = JSON.parse(res.stdout);
-    // Pinned: existing agents/CI consumers read these two fields directly —
-    // RUSH-3193 P4 must only ADD a `services` array alongside them.
-    expect(payload.secretsBroker.reachable).toBe(false);
-    expect(typeof payload.secretsBroker.socketPath).toBe('string');
-    expect(payload.browserIpc.bound).toBe(false);
-    expect(typeof payload.browserIpc.socketPath).toBe('string');
-  });
-
-  it('services --json additionally reports every registered service with health, live or inferred', () => {
-    const res = run(makeHome(), ['services', '--json']);
-    expect(res.status).toBe(0);
-    const payload = JSON.parse(res.stdout) as {
-      secretsBroker: unknown;
-      browserIpc: unknown;
-      services: Array<{ id: string; enabled: boolean; state: string; supervised: boolean; consecutiveFailures: number }>;
-    };
-    // Old fields still present (pinned above), new field additive.
-    expect(payload.secretsBroker).toBeDefined();
-    expect(payload.browserIpc).toBeDefined();
-    expect(Array.isArray(payload.services)).toBe(true);
-    // No daemon has ever run in this HOME, so every service is "stopped" and
-    // none has a real supervisor-reported state yet.
-    expect(payload.services.length).toBe(12); // DAEMON_SERVICE_IDS.length (daemon-services.ts)
-    const sessionIndex = payload.services.find((s) => s.id === 'session-index');
-    expect(sessionIndex).toBeDefined();
-    expect(sessionIndex!.enabled).toBe(true);
-    expect(sessionIndex!.state).toBe('stopped');
-    expect(sessionIndex!.supervised).toBe(false);
-    expect(sessionIndex!.consecutiveFailures).toBe(0);
-  });
-
   it('a stale health.json is not trusted as live when the daemon is not running (RUSH-2368)', () => {
     const home = makeHome();
     // Seed a supervisor record claiming session-index is "running", but no daemon
@@ -261,260 +138,6 @@ describeDaemon('agents daemon', () => {
     // trusting it would contradict the live-probed hosted-socket rows in the same output.
     expect(si.state).toBe('stopped');
   });
-
-  it('services (no --json) renders a state column for every registered service', () => {
-    const res = run(makeHome(), ['services']);
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('Daemon services');
-    expect(res.stdout).toContain('session-index');
-    expect(res.stdout).toContain('secrets-broker');
-    expect(res.stdout).toContain('Hosted sockets');
-  });
-
-  it('services restart rejects an unknown service id and a not-running daemon', () => {
-    const home = makeHome();
-    const unknown = run(home, ['services', 'restart', 'not-a-service']);
-    expect(unknown.status).toBe(1);
-    expect(unknown.stderr + unknown.stdout).toContain("Unknown service 'not-a-service'");
-
-    const notRunning = run(home, ['services', 'restart', 'session-index']);
-    expect(notRunning.status).toBe(1);
-    expect(notRunning.stdout).toContain('Daemon is not running');
-  });
-
-  /** Run `agents secrets <args>` against an isolated HOME. */
-  function runSecrets(home: string, args: string[]): ReturnType<typeof spawnSync> {
-    return spawnSync('node', ['--import', TSX_IMPORT, CLI_ENTRYPOINT, 'secrets', ...args], {
-      cwd: REPO_ROOT,
-      env: {
-        ...process.env,
-        HOME: home,
-        USERPROFILE: home,
-        AGENTS_SKIP_MIGRATION: '1',
-        AGENTS_NO_AUTOPULL: '1',
-        AGENTS_CLI_DISABLE_AUTO_UPDATE: '1',
-        AGENTS_DAEMON_DIR: path.join(home, '.agents', '.cache', 'helpers', 'daemon'),
-      },
-      encoding: 'utf-8',
-      timeout: 30_000,
-    });
-  }
-
-  it('secrets broker disabled surfaces in agents secrets status on macOS', () => {
-    if (process.platform !== 'darwin') return;
-    const home = makeHome();
-    run(home, ['services', 'disable', 'secrets-broker']);
-    const status = runSecrets(home, ['status']);
-    expect(status.status).toBe(0);
-    expect(status.stdout).toContain('disabled');
-    expect(status.stdout).toContain('agents daemon services enable secrets-broker');
-  });
-
-  it('services list shows every service enabled by default', () => {
-    const res = run(makeHome(), ['services', 'list']);
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('secrets-broker');
-    expect(res.stdout).toContain('scheduler');
-    expect(res.stdout).toContain('enabled');
-  });
-
-  // 90s, not the default 30s: several real `agents` CLI boots (cold `node
-  // --import tsx`), measured over the 30s cap under 16 CPU-bound background
-  // processes on a 20-core box (RUSH-2839).
-  it('webhooks add/list/remove drive the real daemon/webhooks.yaml (RUSH-2548)', () => {
-    const home = makeHome();
-    const configPath = path.join(home, '.agents', 'daemon', 'webhooks.yaml');
-
-    const empty = run(home, ['webhooks', 'list', '--json']);
-    expect(empty.status).toBe(0);
-    expect(JSON.parse(empty.stdout)).toEqual([]);
-
-    const add = run(home, ['webhooks', 'add', '--secrets-bundle', 'linear-webhook', '--port', '8788', '--funnel-port', '443']);
-    expect(add.status).toBe(0);
-    expect(add.stdout).toContain('127.0.0.1:8788');
-    expect(fs.readFileSync(configPath, 'utf-8')).toContain('linear-webhook');
-
-    const listed = JSON.parse(run(home, ['webhooks', 'list', '--json']).stdout);
-    expect(listed).toEqual([{ bundle: 'linear-webhook', port: 8788, rateLimit: 60, funnelPort: 443 }]);
-
-    const removed = run(home, ['webhooks', 'remove', '8788']);
-    expect(removed.status).toBe(0);
-    expect(JSON.parse(run(home, ['webhooks', 'list', '--json']).stdout)).toEqual([]);
-  }, 90_000);
-
-  it('webhooks rejects a funnel port Tailscale cannot serve, and an unknown remove', () => {
-    const home = makeHome();
-    const bad = run(home, ['webhooks', 'add', '--secrets-bundle', 'b', '--funnel-port', '9999']);
-    expect(bad.status).toBe(1);
-    expect(bad.stderr).toContain('443, 8443, 10000');
-
-    const missing = run(home, ['webhooks', 'remove', '8787']);
-    expect(missing.status).toBe(1);
-    expect(missing.stderr).toContain('No receiver declared on port 8787');
-  });
-
-  it('services disable writes the config and services list reflects it', () => {
-    const home = makeHome();
-    const disable = run(home, ['services', 'disable', 'secrets-broker']);
-    expect(disable.status).toBe(0);
-    expect(disable.stdout).toContain("Disabled 'secrets-broker'");
-
-    const list = run(home, ['services', 'list', '--json']);
-    expect(list.status).toBe(0);
-    const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
-    const broker = services.find((s) => s.id === 'secrets-broker');
-    expect(broker).toBeDefined();
-    expect(broker!.enabled).toBe(false);
-
-    const cfgPath = path.join(home, '.agents', 'daemon', 'services.yaml');
-    expect(fs.readFileSync(cfgPath, 'utf-8')).toContain('secrets-broker: false');
-  });
-
-  it('services enable re-enables a disabled service', () => {
-    const home = makeHome();
-    run(home, ['services', 'disable', 'secrets-broker']);
-    const enable = run(home, ['services', 'enable', 'secrets-broker']);
-    expect(enable.status).toBe(0);
-    expect(enable.stdout).toContain("Enabled 'secrets-broker'");
-
-    const list = run(home, ['services', 'list', '--json']);
-    const services = JSON.parse(list.stdout) as Array<{ id: string; enabled: boolean }>;
-    expect(services.find((s) => s.id === 'secrets-broker')!.enabled).toBe(true);
-  });
-
-  it('a disabled secrets-broker is not hosted by the daemon on macOS', async () => {
-    if (process.platform !== 'darwin') return;
-    const home = makeHome();
-    run(home, ['services', 'disable', 'secrets-broker']);
-    const start = run(home, ['start']);
-    expect(start.status).toBe(0);
-    // Give the daemon time to boot and skip hosting the broker.
-    await new Promise((r) => setTimeout(r, 1500));
-    const services = run(home, ['services', '--json']);
-    expect(services.status).toBe(0);
-    // `record` is the internal field name (probeSecretsBroker, daemon.ts:318);
-    // `services --json` publishes it as `health` (daemon.ts:547, and :454 for
-    // `status --json`). Asserting `record` here read an absent key as undefined,
-    // so this test could never pass on macOS — and since the macOS legs only run
-    // on release/** branches, it stayed invisible until a release PR ran.
-    const payload = JSON.parse(services.stdout) as { secretsBroker: { reachable: boolean; health: unknown } };
-    expect(payload.secretsBroker.reachable).toBe(false);
-    expect(payload.secretsBroker.health).toBeNull();
-    run(home, ['stop']);
-  }, 30_000);
-
-  it('services enable|disable reject unknown service ids', () => {
-    const home = makeHome();
-    const enable = run(home, ['services', 'enable', 'not-a-service']);
-    expect(enable.status).toBe(1);
-    expect(enable.stderr + enable.stdout).toContain("Unknown service 'not-a-service'");
-
-    const disable = run(home, ['services', 'disable', 'not-a-service']);
-    expect(disable.status).toBe(1);
-    expect(disable.stderr + disable.stdout).toContain("Unknown service 'not-a-service'");
-  });
-
-  it('logs reports no matching lines when no daemon has ever logged', () => {
-    const res = run(makeHome(), ['logs']);
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('No matching log lines');
-  });
-
-  it('logs --json returns an empty array, not a crash, with no log file', () => {
-    const res = run(makeHome(), ['logs', '--json']);
-    expect(res.status).toBe(0);
-    expect(JSON.parse(res.stdout.trim())).toEqual([]);
-  });
-
-  it('doctor exits non-zero and names the problem when the daemon should be running but is not', () => {
-    const res = run(makeHome(), ['doctor']);
-    expect(res.status).toBe(1);
-    expect(res.stdout).toContain('Daemon is not running');
-  });
-
-  // RUSH-2418: the auto-start circuit breaker tells the operator to "Run
-  // 'agents daemon doctor'", so doctor has to be able to answer them. Before
-  // this, `runDoctor` read only the secrets-broker and browser-IPC health
-  // records, so following that instruction produced "Daemon is not running.
-  // Start it: agents daemon start" — the exact action the breaker had just
-  // refused, with no mention of a breaker, a streak, or the cause.
-  it('doctor reports an open auto-start circuit breaker, with the recorded cause', () => {
-    const home = makeHome();
-    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
-    fs.mkdirSync(daemonDir, { recursive: true });
-    // The record a run of failed starts leaves behind, written in the same shape
-    // recordSubsystemError produces.
-    fs.writeFileSync(path.join(daemonDir, 'health.json'), JSON.stringify({
-      'daemon-start': {
-        subsystem: 'daemon-start',
-        lastError: 'start issued; no daemon has reported healthy since',
-        lastErrorAt: new Date().toISOString(),
-        consecutiveFailures: 5,
-        lastOkAt: null,
-      },
-    }), 'utf-8');
-
-    const res = run(home, ['doctor', '--json']);
-    expect(res.status).toBe(1);
-    const problems: string[] = JSON.parse(res.stdout).problems;
-    const breaker = problems.find((p) => p.includes('auto-start is disabled'));
-    expect(breaker).toBeDefined();
-    expect(breaker).toContain('5 consecutive');
-    expect(breaker).toContain('start issued; no daemon has reported healthy since');
-  });
-
-  // A start is marked failed the moment it is issued and cleared once the daemon
-  // finishes booting, so a sub-threshold streak on a LIVE daemon is just the boot
-  // window — reporting it would be a false alarm that clears itself a second
-  // later. The open breaker is still reported unconditionally; only the
-  // sub-threshold warning is scoped to a daemon that is actually down.
-  it('doctor does not report a sub-threshold start streak while the daemon is running', () => {
-    const home = makeHome();
-    const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
-    fs.mkdirSync(daemonDir, { recursive: true });
-    fs.writeFileSync(path.join(daemonDir, 'health.json'), JSON.stringify({
-      'daemon-start': {
-        subsystem: 'daemon-start',
-        lastError: 'start issued; no daemon has reported healthy since',
-        lastErrorAt: new Date().toISOString(),
-        consecutiveFailures: 1,
-        lastOkAt: null,
-      },
-    }), 'utf-8');
-    // A live "daemon": this test process, recorded as the pid-file owner, so
-    // getDaemonStatus() reports running against a real live pid.
-    fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(process.pid), 'utf-8');
-
-    const res = run(home, ['doctor', '--json']);
-    const problems: string[] = JSON.parse(res.stdout).problems;
-    expect(problems.some((p) => p.includes('consecutive failure'))).toBe(false);
-    expect(problems.some((p) => p.includes('Daemon is not running'))).toBe(false);
-  });
-
-  it('doctor does not flag "not running" once the daemon is disabled for this device', () => {
-    // Hosted-service problems can still fire here — the secrets broker/browser
-    // IPC probes are real sockets, not scoped to this install. Duplicate-process
-    // problems cannot: they are scoped to THIS install's instance registry
-    // (RUSH-2368), which is always empty for a fresh isolated HOME. What
-    // disabling controls is specifically the "should be running but isn't" check.
-    const home = makeHome();
-    run(home, ['disable']);
-    const res = run(home, ['doctor']);
-    expect(res.stdout).not.toContain('Daemon is not running');
-  });
-
-  it('stop on a device with no running daemon is a clean no-op', () => {
-    const res = run(makeHome(), ['stop']);
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('not running');
-  });
-
-  it('reload with no running daemon reports nothing to reload rather than crashing', () => {
-    const res = run(makeHome(), ['reload']);
-    expect(res.status).toBe(0);
-    expect(res.stdout).toContain('not running');
-  });
-
   it(
     'duplicates come from THIS install\'s instance registry — a fixture daemon under a separate ' +
     'AGENTS_DAEMON_DIR never appears, even though a genuine same-registry duplicate does (RUSH-2368)',
@@ -549,7 +172,6 @@ describeDaemon('agents daemon', () => {
     },
     20_000,
   );
-
   it(
     'a subsystem whose last-ok record is stale but is unreachable RIGHT NOW never renders "healthy" (RUSH-2368)',
     () => {
@@ -634,7 +256,6 @@ describeDaemon('agents daemon', () => {
       fs.rmSync(home, { recursive: true, force: true });
     }
   }, 90_000);
-
   it('does not flag a non-path entry as deleted code', async () => {
     const home = makeHome();
     // `node -e '<code>' __daemon-run` — the second-to-last token is a code blob,
