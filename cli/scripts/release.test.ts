@@ -79,7 +79,10 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
    * text instead of its behaviour, so this runs the function and observes the
    * calls. Same extract-and-run shape `home_base_wt_snippet` already uses below.
    */
-  function runUpload(withHelpers: boolean): { calls: string[]; status: number | null; out: string } {
+  function runUpload(
+    withHelpers: boolean,
+    fail: { attestationFails?: boolean; tarballMissing?: boolean } = {},
+  ): { calls: string[]; status: number | null; out: string } {
     const src = RELEASE_SH.match(/upload_release_proof\(\) \{[\s\S]*?\n\}/)?.[0];
     expect(src, 'upload_release_proof not extractable').toBeDefined();
 
@@ -94,18 +97,30 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
       `#!/usr/bin/env bash\necho "gh $*" >> ${log}\nexit 0\n`);
     fs.writeFileSync(path.join(bin, 'jq'),
       `#!/usr/bin/env bash\necho "jq $*" >> ${log}\ncat >/dev/null\necho "${dir}/pkg.tgz"\n`);
-    for (const name of ['release-attestation.sh', 'release-manifest.sh']) {
-      fs.writeFileSync(path.join(scripts, name),
-        `#!/usr/bin/env bash\necho "${name} $*" >> ${log}\nexit 0\n`);
-      fs.chmodSync(path.join(scripts, name), 0o755);
+    // release-attestation.sh's output is CAPTURED (`attest="$(...)"`), so a stub
+    // that only logs leaves $attest empty and `cp "$attest"` fails — which the
+    // harness swallowed until the review caught it. Log to the file, echo a real
+    // path to stdout.
+    fs.writeFileSync(path.join(dir, 'attestation.json'), '{}');
+    fs.writeFileSync(path.join(scripts, 'release-attestation.sh'),
+      `#!/usr/bin/env bash\necho "release-attestation.sh $*" >> ${log}\n`
+      + (fail.attestationFails ? 'exit 1\n'
+        : `printf '%s\\n' ${JSON.stringify(path.join(dir, 'attestation.json'))}\n`));
+    fs.writeFileSync(path.join(scripts, 'release-manifest.sh'),
+      `#!/usr/bin/env bash\necho "release-manifest.sh $*" >> ${log}\nexit 0\n`);
+    for (const n of ['release-attestation.sh', 'release-manifest.sh']) {
+      fs.chmodSync(path.join(scripts, n), 0o755);
     }
     for (const f of ['gh', 'jq']) fs.chmodSync(path.join(bin, f), 0o755);
-    fs.writeFileSync(path.join(dir, 'pkg.tgz'), 'tgz');
+    if (!fail.tarballMissing) fs.writeFileSync(path.join(dir, 'pkg.tgz'), 'tgz');
     // The store the function reads its manifest from.
     fs.writeFileSync(path.join(dir, 'release-manifest.json'), '{}');
 
     const harness = [
-      'set -uo pipefail',
+      // Production runs under `set -euo pipefail`. Without -e the harness keeps
+      // going past a failure the real script aborts on, so it can exercise a
+      // control flow production never takes.
+      'set -euo pipefail',
       'die() { echo "die: $*" >&2; exit 9; }',
       'gray() { :; }; green() { :; }; bold() { :; }; yellow() { :; }; red() { :; }',
       `attestation_store_dir() { printf '%s\\n' ${JSON.stringify(dir)}; }`,
@@ -130,6 +145,26 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
     expect(calls.some((c) => c.startsWith('release-manifest.sh')), out).toBe(false);
     // …and still does the CLI work, so this is not passing by dying early.
     expect(calls.some((c) => c.startsWith('gh release')), out).toBe(true);
+  });
+
+  it('aborts when the attestation lookup fails, rather than uploading unproven bytes', () => {
+    // Asserts the INVARIANT — never upload unproven bytes — not the presence of
+    // the `|| die`. Verified by mutation: deleting that guard does NOT fail this
+    // test, and should not, because under production's `set -euo pipefail` the
+    // assignment `attest="$(...)"` aborts on a non-zero command regardless. The
+    // `die` supplies a message, not the abort. A test demanding the guard's text
+    // would be back to asserting source, which is what failed three times here.
+    const { calls, status } = runUpload(false, { attestationFails: true });
+    expect(status).not.toBe(0);
+    expect(calls.some((c) => c.startsWith('gh release')), 'must not upload without proof').toBe(false);
+  });
+
+  it('aborts when the pretested tarball is missing, rather than rebuilding', () => {
+    // Same shape, same caveat: this pins the behaviour (abort, no upload), which
+    // `set -e` also enforces, rather than the guard's presence.
+    const { calls, status } = runUpload(false, { tarballMissing: true });
+    expect(status).not.toBe(0);
+    expect(calls.some((c) => c.startsWith('gh release')), 'must not upload without a tarball').toBe(false);
   });
 
   it('DOES stage the computer-mac asset with --with-helpers', () => {
