@@ -45,20 +45,10 @@ function makeWorker(opts: {
 
   // Evaluate the generated worker JS.
   const src = renderTracesWorkerScript();
-  // Inject a stub verifyPhoenixToken so we don't need real HTTP.
-  const patched = src.replace(
-    'export const hooks = {\n  verifyPhoenixToken: defaultVerifyPhoenixToken,\n};',
-    `export const hooks = {\n  verifyPhoenixToken: async () => (${JSON.stringify(opts.verifyResult)}),\n};`,
-  );
-
-  // Evaluate using Function constructor so we can extract the default export.
-  let handler: { fetch: (req: Request, env: unknown) => Promise<Response> } | null = null;
-  const mod = new Function('exports', patched + '\nexports.default = exports.default ?? null;');
-  const exports: Record<string, unknown> = {};
-  mod(exports);
-  // The generated module uses `export default { async fetch... }` — not CommonJS.
-  // We need to parse it differently: grab the fetch handler from the source.
-  // Simpler: re-evaluate as a function that returns the default export.
+  // Evaluate the generated worker in a Function context. Strip ES module syntax
+  // so it runs in a non-module eval: replace `export default {` → `return {`,
+  // replace remaining leading `export ` with `const `, and inject the stub
+  // verifyPhoenixToken instead of the real HTTP-fetching one.
   const fn = new Function(
     'fetchImpl',
     src
@@ -66,7 +56,7 @@ function makeWorker(opts: {
       .replace(/export default \{/, 'return {')
       .replace(/^export /gm, 'const '),
   );
-  handler = fn(null);
+  const handler = fn(null) as { fetch: (req: Request, env: unknown) => Promise<Response> };
 
   return {
     async fetch(url: string, init?: RequestInit) {

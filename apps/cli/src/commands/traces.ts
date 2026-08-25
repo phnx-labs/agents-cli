@@ -101,7 +101,7 @@ async function handleOpen(): Promise<void> {
   const url = managedTracesBaseUrl();
   console.log(chalk.dim(`Opening ${url}`));
   const outcome = await showUrl(url);
-  if (outcome === 'no-viewer') {
+  if (outcome.via === 'none') {
     console.log(url);
   }
 }
