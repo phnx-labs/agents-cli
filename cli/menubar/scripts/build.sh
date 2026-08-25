@@ -101,6 +101,29 @@ SIGN_ID="${MENUBAR_HELPER_SIGN_ID:-}"
 if [ -z "$SIGN_ID" ]; then
     SIGN_ID=$(security find-identity -v -p codesigning 2>/dev/null | grep -oE '"Developer ID Application: [^"]+"' | head -1 | tr -d '"')
 fi
+# The invariant is: NEVER EMIT a Developer-ID-signed bundle that is not notarized.
+# Two honest ways to satisfy it -- notarize it, or don't Developer-ID sign it --
+# and which applies depends on whether the notary creds are present.
+#
+# This matters because SIGN_ID is AUTO-DETECTED from the keychain just above, so
+# a plain `build.sh` on any Mac holding the cert would otherwise be obliged to
+# notarize. Demanding creds unconditionally turns every local debug build on a
+# signing-capable Mac into a hard failure; demanding them only in `release` mode
+# is what let an un-notarized Developer-ID bundle out the door to begin with.
+#
+# Resolved HERE, before BUNDLE_ID is chosen and before Info.plist is written: a
+# late downgrade would emit an ad-hoc bundle still carrying the PRODUCTION bundle
+# id, which is precisely the Accessibility-grant poisoning the `.dev` id exists
+# to prevent. A release build never reaches this branch -- it fails loud on the
+# `:?` credential guards at the notarize step instead.
+if [ -n "$SIGN_ID" ] && [ "$SIGN_ID" != "-" ] && [ -z "${APPLE_ID:-}" ] && [ "$MODE" != "release" ]; then
+    echo "  NOTE: Developer ID identity found, but no apple.com notary creds in env." >&2
+    echo "  Gatekeeper rejects a Developer-ID-signed bundle that is not notarized as" >&2
+    echo "  \"damaged\", so this debug build signs AD-HOC instead (dev bundle id below)." >&2
+    echo "  For a shippable bundle:  agents secrets exec apple.com -- $0 release" >&2
+    SIGN_ID="-"
+fi
+
 BUNDLE_ID="com.phnx-labs.agents-menubar"
 APP_DISPLAY_NAME="AGI Menu"
 if [ -z "$SIGN_ID" ] || [ "$SIGN_ID" = "-" ]; then
