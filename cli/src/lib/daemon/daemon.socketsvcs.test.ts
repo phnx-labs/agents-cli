@@ -53,6 +53,22 @@ vi.mock('../daemon-ticks.js', () => ({
   runFleetCacheWarmTick: vi.fn(async () => {}),
 }));
 
+// Stub the broker primitives so SecretsBrokerService.onStart() takes a
+// DETERMINISTic path regardless of whether the box running the test already has
+// a live secrets broker: `agentPing` reports unreachable (so onStart always
+// hosts, and never blocks on a real socket probe) and `startHostedBroker`
+// returns a fake broker whose `close` we can observe. The wrapper's real
+// onStart()/onStop() bodies still run — only these two machine-touching broker
+// calls are redirected, exactly as the account-state ticks above are. The
+// shared `brokerCloseMock` lets onStop's `this.hostedBroker?.close()` be asserted.
+const brokerCloseMock = vi.fn();
+
+vi.mock('../secrets/agent.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../secrets/agent.js')>()),
+  agentPing: vi.fn(async () => ({ reachable: false })),
+  startHostedBroker: vi.fn(async () => ({ close: brokerCloseMock })),
+}));
+
 // ---------------------------------------------------------------------------
 // Test infrastructure
 // ---------------------------------------------------------------------------
@@ -297,6 +313,8 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     const { AccountStateDaemonService } = await import('./account-state-daemon-service.js');
     const { BrowserService } = await import('../browser/service.js');
     const { getSocketPath } = await import('../browser/ipc.js');
+    const { startHostedBroker } = await import('../secrets/agent.js');
+    const { runUsageRefreshTick, runFleetCacheWarmTick } = await import('../daemon-ticks.js');
 
     const supervisor = new ServiceSupervisor();
     const secrets = new SecretsBrokerService();
@@ -316,8 +334,21 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(health['account-state'].state).toBe('running');
     expect(health['browser-ipc'].state).toBe('running');
 
-    // The real BrowserIPCServer actually bound a unix socket on disk.
+    // Real-EFFECT assertions, one per service. `state === 'running'` alone only
+    // proves onStart() didn't throw (BaseDaemonService sets it unconditionally),
+    // so each service needs an observable that its REAL onStart() body produced —
+    // otherwise emptying that body leaves the suite green, the exact #3046 gap.
+    // browser-ipc: the real BrowserIPCServer bound a unix socket on disk.
     expect(fs.existsSync(getSocketPath())).toBe(true);
+    // monitors: the real onStart() constructed a live MonitorEngine.
+    expect(monitors.getEngine()).not.toBeNull();
+    // account-state: startAccountStateService() kicks off an immediate usage +
+    // auth refresh synchronously (both stubbed here), so the real body ran.
+    expect(vi.mocked(runUsageRefreshTick)).toHaveBeenCalled();
+    expect(vi.mocked(runFleetCacheWarmTick)).toHaveBeenCalled();
+    // secrets-broker: the real onStart() saw an unreachable broker (stubbed) and
+    // hosted one via startHostedBroker(). Emptying onStart() skips this call.
+    expect(vi.mocked(startHostedBroker)).toHaveBeenCalled();
 
     await supervisor.stopAll();
 
@@ -326,8 +357,11 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(stopped['monitors'].state).toBe('stopped');
     expect(stopped['account-state'].state).toBe('stopped');
     expect(stopped['browser-ipc'].state).toBe('stopped');
-    // The real stop() path unlinks the socket file.
+    // Real stop() effects: browser socket unlinked, engine released, and the
+    // hosted broker's close() was invoked. Emptying each onStop() skips these.
     expect(fs.existsSync(getSocketPath())).toBe(false);
+    expect(monitors.getEngine()).toBeNull();
+    expect(brokerCloseMock).toHaveBeenCalled();
   });
 
   it('a real service whose onStart() throws is parked and reported unhealthy, without taking down a healthy sibling', async () => {
