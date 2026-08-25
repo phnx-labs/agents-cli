@@ -70,11 +70,22 @@ function readAll(): Record<string, SubsystemHealth> {
   }
 }
 
+/**
+ * Never throws. `recordSubsystemOk`/`recordSubsystemError` are called from
+ * inside a service's error boundary (`ServiceSupervisor.runTick`'s catch, and
+ * its own catch-of-a-catch in `recordFailure`) — a write failure here (disk
+ * full, permission, or the state dir removed mid-run, which this daemon
+ * explicitly anticipates via the state-dir self-check) must degrade to a
+ * dropped health update, never escape as an unhandled rejection that would
+ * hit the process-wide handler and take down every OTHER service too.
+ */
 function writeAll(records: Record<string, SubsystemHealth>): void {
-  const healthPath = getHealthPath();
-  fs.mkdirSync(path.dirname(healthPath), { recursive: true });
-  fs.writeFileSync(healthPath, JSON.stringify(records), 'utf-8');
-  try { fs.chmodSync(healthPath, 0o600); } catch { /* best effort */ }
+  try {
+    const healthPath = getHealthPath();
+    fs.mkdirSync(path.dirname(healthPath), { recursive: true });
+    fs.writeFileSync(healthPath, JSON.stringify(records), 'utf-8');
+    try { fs.chmodSync(healthPath, 0o600); } catch { /* best effort */ }
+  } catch { /* see docblock above — health recording must never crash a caller */ }
 }
 
 function blankRecord(subsystem: string): SubsystemHealth {

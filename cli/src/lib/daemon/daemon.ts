@@ -36,8 +36,26 @@ import { startAccountStateService } from '../account-state-service.js';
 import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runUsageRefreshTick } from '../daemon-ticks.js';
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
+import type { ServiceHealth } from './service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from '../daemon-services.js';
+
+/**
+ * The live `ServiceSupervisor` for the current `runDaemon()` invocation, or
+ * `null` before boot / after shutdown. In-process only — a separate `agents
+ * daemon status` process cannot see this; per-service health that must
+ * survive across processes goes through `daemon-health.ts` instead (which
+ * `ServiceSupervisor` already writes on every tick). This getter exists so a
+ * FUTURE same-process consumer (e.g. a `daemon services` live-status IPC
+ * handler) can read the supervisor's richer state (`parked`, not just
+ * ok/error) without needing its own reference to `runDaemon()`'s locals.
+ */
+let activeServiceSupervisor: ServiceSupervisor | null = null;
+
+/** Health for every service currently registered on the live supervisor, or `null` if the daemon isn't running in this process. */
+export function getServiceSupervisorHealth(): Record<string, ServiceHealth> | null {
+  return activeServiceSupervisor?.health() ?? null;
+}
 
 const PID_FILE = 'daemon.pid';
 const LIFETIME_FILE = 'daemon.lifetime';
@@ -1120,6 +1138,7 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
   else log('INFO', 'Session-index warm service disabled');
   await supervisor.startAll({ log });
+  activeServiceSupervisor = supervisor;
 
   // Watchdog: nudge this host's own stalled agent sessions. Gated on the
   // `watchdog.enabled` device-config flag (`agents watchdog enable`), so the
@@ -1537,6 +1556,7 @@ export async function runDaemon(): Promise<void> {
     accountStateService?.stop();
     clearInterval(activeSessionsWarmInterval);
     await supervisor.stopAll();
+    activeServiceSupervisor = null;
     if (watchdogInterval) clearInterval(watchdogInterval);
     if (deviceProbeInterval) clearInterval(deviceProbeInterval);
     stopScheduler();

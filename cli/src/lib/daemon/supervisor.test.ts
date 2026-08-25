@@ -277,4 +277,38 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
     expect(svc.stopCalls).toBe(stopCallsAfterRestart + 1);
   });
+
+  // Review finding on PR #3037: recordSubsystemOk/Error (daemon-health.ts) are
+  // called from inside runTick's own catch block. Before the fix, a health-file
+  // write failure there (disk full, permission, or — as simulated here — the
+  // state dir replaced with an unwritable path mid-run) would throw OUT of
+  // that catch with no further handler, becoming an unhandled rejection that
+  // takes the whole daemon down with `process.exit(1)` — reproducing exactly
+  // the failure mode this supervisor exists to prevent.
+  it('a health-ledger write failure never escapes runTick — the daemon and every sibling survive', async () => {
+    // Point AGENTS_DAEMON_DIR at a FILE instead of a directory, so daemon-health's
+    // mkdirSync/writeFileSync both fail on every recordSubsystemOk/Error call.
+    fs.rmSync(testDaemonDir, { recursive: true, force: true });
+    fs.writeFileSync(testDaemonDir, 'not a directory', 'utf-8');
+
+    const supervisor = new ServiceSupervisor({ parkAfterFailures: 3, backoffBaseMs: 5_000, backoffMaxMs: 20_000 });
+    const bad = new ThrowingService();
+    const healthy = new HealthyService('scheduler');
+    supervisor.register(bad);
+    supervisor.register(healthy);
+
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    // The failing service still tracks its own failures correctly...
+    expect(bad.ticks).toBeGreaterThan(0);
+    expect(supervisor.health()['watchdog'].consecutiveFailures).toBeGreaterThan(0);
+    // ...and the healthy sibling was never touched by the other service's
+    // health-write failures — this is the actual regression: an escaped throw
+    // there would have killed the process before this line ever ran.
+    expect(healthy.ticks).toBeGreaterThan(0);
+    expect(supervisor.health()['scheduler'].state).toBe('running');
+
+    fs.rmSync(testDaemonDir, { force: true });
+  });
 });

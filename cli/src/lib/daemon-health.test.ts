@@ -119,4 +119,27 @@ describe('daemon-health', () => {
     recordSubsystemOk('secrets-broker');
     expect(readSubsystemHealth('secrets-broker')?.consecutiveFailures).toBe(0);
   });
+
+  // Review finding on PR #3037 (RUSH-3193 P1): recordSubsystemOk/Error are
+  // called from inside ServiceSupervisor.runTick's own catch block (and from
+  // recordFailure, its catch-of-a-catch). If the write here threw, that throw
+  // would escape as an unhandled rejection past every enclosing try/catch,
+  // hit the process-wide handler, and process.exit the WHOLE daemon —
+  // exactly the failure mode the supervisor exists to prevent. A disk-full,
+  // permission-denied, or (per this daemon's own state-dir self-check) a
+  // removed state directory must all degrade to a silently dropped health
+  // update instead.
+  it('recordSubsystemOk/Error never throw even when the health file cannot be written', () => {
+    // health.json's parent dir is itself a FILE, so mkdirSync/writeFileSync
+    // both fail — this simulates disk-full/permission-denied without needing
+    // real filesystem quota tricks.
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.writeFileSync(dir, 'not a directory', 'utf-8');
+
+    expect(() => recordSubsystemOk('session-index')).not.toThrow();
+    expect(() => recordSubsystemError('session-index', 'tick exceeded deadline')).not.toThrow();
+    expect(() => recordSubsystemErrorReason('session-index', 'refined reason')).not.toThrow();
+
+    fs.rmSync(dir, { force: true });
+  });
 });
