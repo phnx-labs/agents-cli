@@ -1,8 +1,8 @@
 ---
 kind: visual
-title: The personal rulebook is distilled. The shared system is only partly there.
+title: Every system rule and hook, with the remaining simplification work
 summary: >
-  The 23-rule, roughly 1.5k-word distillation is live for Muqsit's fleet through user-layer overrides, not in the shared system repo. The system did land a 60% rules cleanup and a substantial hook-message/refinement wave, but the full 14-to-8 hook consolidation remains incomplete.
+  The 23-rule personal distillation is live, while the shared system remains at 19 rules. This dashboard now inventories every injected system rule and every registered logical hook: what it does today, what already improved, and what remains proposed.
 status: final
 date: 2026-08-25
 context: status of rules, subrules, and hook messaging across muqsitnawaz/.agents and phnx-labs/.agents-system
@@ -11,6 +11,7 @@ facts:
   - "Shared system: 14,695 to 6,042 words, merged in .agents-system PR #348"
   - "Shared-system 23-rule distillation PR #381 was closed, not merged"
   - "Hook refinement: major message and guard improvements merged; full 14-to-8 target not complete"
+  - "Live system inventory: 19 injected subrules and 27 registered logical hooks"
 ---
 
 ## Story
@@ -48,6 +49,113 @@ The hook cleanup is a program, not a single pending switch. The measurement arti
 ### Important nuance
 
 The `plan-html-reminder` was initially treated as dangling in personal PR #291, then correctly restored in [PR #292](https://github.com/muqsitnawaz/.agents/pull/292) because the active script lives beside its system subrule. This is a useful warning: the cleanup is real, but one audit initially missed rule-adjacent hooks.
+
+## Detailed inventory
+
+This is the decision sheet the earlier dashboard lacked. “Current instruction” is the live shared-system text or emitted behavior as of `~/.agents/.system` at commit `2a0c0eb`. “Next change” is either a landed improvement or a proposal grounded in the closed distillation PR and the hook-battlefield analysis; proposed items are not presented as approved work.
+
+<div class="artifact-callout"><strong>How to read it:</strong> rules are injected language. Hooks are runtime actions. The 14→8 target applies only to deny/reminder guards, not to all 27 lifecycle hooks; SessionStart injectors and state-recording hooks are a different surface.</div>
+
+### System rules — all 19 injected subrules
+
+| Rule | Purpose | Current instruction, in essence | Change / improvement status |
+|---|---|---|---|
+| `foundations` | Define F1–F5 autonomy, verification, communication, and safety | Act end-to-end; self-unblock; verify the visible outcome; involve the owner minimally; protect irreversible state | **Landed:** rewritten in #348. **Keep:** core spine; personal layer carries a shorter variant. |
+| `research-discipline` | Make claims traceable and current | Fetch current code, follow the complete data path, quote file/line evidence, web-check time-sensitive facts | **Landed:** shortened in #348. **Keep distinct:** evidence discipline is not a workflow recipe. |
+| `fleet-delegation` | Decide when and how to use the fleet | Mix harnesses, rotate healthy accounts, reserve expensive models, parallelize multi-dimensional work | **Proposed:** fold with `parallel-teams` and `remote-fleet-dispatch` into one “Running Agents & Teams” rule, as #381 proposed. |
+| `code-quality` | Prevent local patches and prose/code bloat | No fallbacks, duplication, scope creep, ad-hoc consumer fixes, marketing filler | **Landed:** essence rewrite in #348. **Keep.** |
+| `testing-strict` | Define meaningful verification | Tests beside source, real services, meaningful failure coverage, end-to-end proof | **Landed:** essence rewrite in #348. **Keep.** |
+| `truly-agentic-git-workflow` | Own the worktree → PR → review → merge path | Never edit the primary checkout; use a fresh linked worktree; attach real evidence; merge on green | **Landed:** large rewrite in #348 plus auto-worktree/fetch fixes. **Proposed:** absorb `gh-merge-guard` prose while preserving its adjacent hook. |
+| `gh-merge-guard` | State the non-author-review merge contract | Rebase-merge autonomously only after green CI and a verdict on this PR; never bypass protection | **Landed:** short rule; verdict correctness fixed in #376/#382. **Possible consolidation:** prose can live in git workflow; hook must remain registered. |
+| `no-pr-footer` | Ban generated-by promotional footers | Never add Claude/agent promotional signatures to commits, PRs, or issues | **Landed:** `footer-guard` removed after zero useful fires; prose rule remains. **No further runtime work.** |
+| `operational` | Cover execution mechanics that do not belong elsewhere | Act → verify → show → continue; bounded waits; keychain secrets; durable output; minimal handoffs | **Landed:** shortened and de-metaphored in #348. **Review candidate:** some lines duplicate Foundations and repo-local policy. |
+| `conventions` | Pin memory, tickets, and coordination conventions | `AGENTS.md` is canonical; claim real work; do not create parking-lot tickets; use teams for multi-surface work | **Landed:** shortened. **Keep**, but ticket details may belong in the `tickets` skill rather than every prompt. |
+| `agents-cli` | Teach three agents-cli-specific facts | Agent homes are symlinks; search prior sessions; inspect active agents before spawning | **Proposed removal:** #381 removed it from injected rules and delegated mechanics to skills. Still present in shared system. |
+| `parallel-teams` | Provide the full multi-agent execution contract | Plan ownership boundaries, isolate worktrees, mix rosters, verify spawns, watch and land every track | **Partially simplified:** #348 cut repetition. **Proposed merge:** one Running Agents & Teams rule; mechanics stay in `teams` skill. |
+| `tech-stack` | Route tasks to native tools | Tickets → skill, web → browser, native → computer, credentials → secrets, charts → inline SVG | **Landed:** concise map in #348. **Keep as a compact routing table.** |
+| `ui-work-discipline` | Make visual verification mandatory | Render the real surface, screenshot it, read it back, and present real variations for genuine design choices | **Landed:** concise visual contract. **Keep.** |
+| `plan-presentation` | Make plans reviewable and visual | Markdown source, inline-SVG architecture, real diffs, checklist, render/check/read-back before presentation | **Landed:** shortened; skill consolidation moved authoring detail to `artifacts`. **Keep guard-backed core, trim duplicated mechanics when safe.** |
+| `task-checklists` | Keep multi-step work legible and bound to delivery | Create and advance a checklist for 3+ steps or ticketed work; close it with proof | **Landed:** shortened. **Keep.** |
+| `feed-status-posts` | Separate activity history from phone-worthy updates | Plain posts record; `--level important` delivers sparingly; `--blocked` only for genuine owner needs | **Landed:** wording corrected in #365 so every done claim no longer asks for a phone ping. **Keep.** |
+| `remote-fleet-dispatch` | Preserve non-derivable remote execution traps | Use native `--device`, never raw SSH launch; probe the actual operation; reconcile detached status | **Landed:** mechanics delegated to skills in #348. **Proposed merge:** fold remaining traps into Running Agents & Teams. |
+| `unattended-verification` | Prevent silent-success automation | Assert postconditions, probe the real action class, key state per run, bound waits, fail loud only on real gaps | **Proposed consolidation/removal:** #381 removed it as a standalone rule; unique postcondition lines should survive under Foundations/F3. |
+
+### Registered hooks — lifecycle injectors and state recorders
+
+These are not candidates for the 14→8 guard count unless the “Next change” column explicitly says so.
+
+| Hook | Event | Purpose | Current instruction / behavior | Change / improvement status |
+|---|---|---|---|---|
+| `session-identity` | SessionStart | Join pid, native session, launch, terminal, and transcript identity | Writes the live identity record; injects only intentional identity context | **Keep.** One canonical “who am I” hook. |
+| `linear-tasks` | SessionStart | Put team, projects, milestones, and current tickets in context | Prints the current board brief; uses non-interactive Linear config | **Keep;** largest SessionStart context cost, so future work should measure usefulness rather than blindly trim. |
+| `inject-device-topology` | SessionStart | Let dispatch choose a real available machine | Injects reachable hosts plus live load/memory/disk; cached for 60 seconds | **Keep;** cache and topology shape already corrected. |
+| `inject-repo-inflight` | SessionStart | Prevent duplicate PR/session work | Injects open PRs and other active agents for the current project | **Keep;** deliberately not cached because output is session-relative. |
+| `session-start-autosync` | SessionStart | Start from current config/resources | Pulls config repos, secrets metadata, and sessions; stays silent | **Keep;** side-effect hook, not messaging clutter. |
+| `git-pull-forward` | SessionStart | Start a clean repo at its latest fast-forwardable state | Fast-forwards only when clean; never force/rebase/autostash | **Keep.** |
+| `expand-promptcuts` | UserPromptSubmit | Expand named prompt shortcuts | Replaces trusted shortcut markers with their full instructions | **Keep;** public enable/disable CLI remains planned, YAML override works today. |
+| `expand-bang-commands` | UserPromptSubmit | Execute explicit inline shell snippets in a prompt | Runs trusted backticked `!cmd` blocks concurrently and injects ordered output | **Keep with caution;** enabled by default; first-class CLI off-switch is still unshipped. |
+| `vacation-recap` | UserPromptSubmit | Restore context after a long gap | Advises a back-from-vacation recap before continuing | **Keep;** advisory only. |
+| `verify-work-goal-boundary` | UserPromptSubmit | Scope Stop evidence to the current goal | Stores a prompt hash and transcript byte offset, never prompt text | **Keep;** correctness foundation for Stop checks. |
+| `worktree-law-reminder` | UserPromptSubmit | Keep primary-checkout law in every context window | Injects the one-line worktree reminder on each prompt | **Review after measuring:** hard enforcement exists; this reminder may still earn its context cost because violations are destructive. |
+| `mailbox-inject` | PreToolUse | Deliver queued cross-agent messages during a running turn | Injects waiting mailbox content at a tool boundary | **Keep.** |
+| `visual-readback-nudge` | PreToolUse | Catch visual delivery without inspection | Advises render → screenshot → `view_image` before delivery | **Keep;** advisory, and it caught a real contrast defect in this artifact. |
+| `attention-sentinel` | Notification / Stop / UserPromptSubmit | Maintain per-session needs-attention state | Records and clears attention based on lifecycle events | **Keep;** state mechanism, not a prose guard. |
+| `gather-before-reply` | Stop | Prevent instant agreement without checking reality | If no tool or skill was used after the last user message, inject “gather context first” | **Newly landed in #389.** Measure false nudges before making it blocking. |
+
+### Registered hooks — guards and reminders in the 14→8 discussion
+
+| Guard / reminder | Purpose | Current block or instruction | Landed change | Remaining decision |
+|---|---|---|---|---|
+| `git-guard` | Prevent destructive Git/history loss | `blocked_op` + reason + a safe alternative for reset, force-push, checkout/switch, stash, clean, branch deletion, and config writes | Shared git parser landed in #387 | **Battlefield proposal:** absorb `main-branch`, `large-file-add`, and `clean-tree` policy into one git guard; not landed. |
+| `main-branch-guard` | Keep every tracked write out of the primary checkout | Blocks file tools and git writes there; now creates the correct fresh worktree instead of only lecturing | Auto-worktree behavior #368; bounded fetch #379 | **Merge was proposed**, but its runnable recovery is the strongest measured pattern. Consolidate only if that behavior survives exactly. |
+| `large-file-add-guard` | Keep oversized files out of Git | Blocks `git add` when a target exceeds 5 MiB | Restored registration; skips explicit plan mode in #369; shared parser #387 | **Proposed merge into `git-guard`;** not landed. |
+| `git-require-clean-tree` | Prevent pull/rebase over dirty work | Blocks pull, rebase, and autostash until the tree is clean | Skips explicit plan mode in #369 | **Proposed merge into `git-guard`;** not landed. |
+| `rm-guard` | Prevent recursive deletion of protected paths | `blocked_op` + protected target + use trash/move or narrow the path | Message normalized in #348 | **Keep standalone:** filesystem deletion is not Git policy. |
+| `secrets-guard` | Stop secret material from entering model/transcript output | Blocks plaintext export, bundle-key `get`, and non-TTY reveal; points to `agents secrets exec` | Parser fail-closed coverage and concise message landed | **Keep standalone.** |
+| `public-artifact-guard` | Stop confidential strategy entering a public committed artifact | Blocks staging sensitive strategy under committed `.agents/artifacts/` | Added for RUSH-3033; measured high recovery | **Keep standalone.** |
+| `merge-guard` | Enforce green, non-author-reviewed merges without bypass | Blocks admin merge, self-approval, red checks, or no verdict on this PR | Review-body lookup #376; accepts `APPROVED` #382; skips plan mode #369 | **Keep.** It protects an external irreversible boundary. |
+| `pr-description-reminder` | Require honest run evidence and tracking in a PR | Nudges on PR create/edit when evidence or an honest no-run declaration is missing | Shortened in #348; skips plan mode #369 | **Keep reminder;** continue measuring delivery. |
+| `plan-html-reminder` / Stop backstop | Ensure plans are rendered, checked, and paired with a checklist | On ExitPlanMode/Stop, points to the missing Markdown/HTML/figure/checklist requirement | Message shortened; rule/skill references corrected; active hook restored in personal docs #292 | **Unresolved:** battlefield proposed CUT after low delivery, but later audit proved it is active and intentional. Decide from fresh outcome data, not dangling-reference assumptions. |
+| `verify-work-complete` | Refuse premature “done” and hand-back behavior | Goal-scoped checks ask for verification, delivery-chain proof, ticket closure, and one feed record | 30–40 lines → 6–12 in #348; phone escalation fixed #365; repeat cap and attribution fixes #374 | **Keep, but continue simplification:** it remains the highest-fire/lowest-obedience guard and should emit one actionable next step per failure. |
+| `teams-roster-guard` | Prevent accidental same-harness monocultures | Blocks the third same-harness teammate when multiple harnesses exist unless the brief records `single-harness: <reason>` | Added and documented with `parallel-teams`; remains rule-adjacent | **Keep or re-measure:** it protects diversity, but its value should be compared with its block/recovery rate. The current hooks README omits it from the subrule table even though `parallel-teams/hooks.yaml` registers it. |
+
+### Non-registered helpers (not extra hooks)
+
+`verify-work-state.py`, `visual_readback.py`, and `verify-delivery-chain.py` are invoked by `verify-work-complete`; `check-outcome-backfill.py` is offline analysis. Counting them as separate hooks would exaggerate the runtime surface. `02-expand-prompt-skill-refs.py` is the one true orphan documented by the hook maintenance contract: register it or delete it.
+
+<figure>
+<figcaption><strong>Figure 3 — The real simplification surface.</strong> Nineteen injected rules can be consolidated as language. Twenty-seven logical hooks span context, state, advisory nudges, and enforcement; only the twelve guard/reminder entries belong in the 14→8 debate.</figcaption>
+<svg viewBox="0 0 1120 430" role="img" aria-label="Three-lane map separating rules, lifecycle hooks, and guard simplification candidates">
+  <defs><marker id="inv-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#84cc16"/></marker></defs>
+  <rect x="45" y="55" width="290" height="290" rx="24" fill="#172554" stroke="#60a5fa" stroke-width="3"/>
+  <text x="75" y="100" fill="#bfdbfe" font-size="25" font-weight="700">19 system rules</text>
+  <text x="75" y="138" fill="#ffffff" font-size="18">language in every prompt</text>
+  <text x="75" y="180" fill="#bfdbfe" font-size="18">keep distinct cores</text>
+  <text x="75" y="210" fill="#bfdbfe" font-size="18">merge fleet/team trio</text>
+  <text x="75" y="240" fill="#bfdbfe" font-size="18">remove/delegate 2</text>
+  <text x="75" y="282" fill="#fbbf24" font-size="20" font-weight="700">shared end-state open</text>
+
+  <path d="M350 200 L415 200" stroke="#84cc16" stroke-width="5" marker-end="url(#inv-arrow)"/>
+  <rect x="430" y="55" width="290" height="290" rx="24" fill="#052e16" stroke="#84cc16" stroke-width="3"/>
+  <text x="460" y="100" fill="#bef264" font-size="25" font-weight="700">27 logical hooks</text>
+  <text x="460" y="138" fill="#ffffff" font-size="18">6 session injectors</text>
+  <text x="460" y="168" fill="#ffffff" font-size="18">5 prompt/state hooks</text>
+  <text x="460" y="198" fill="#ffffff" font-size="18">3 advisory/state hooks</text>
+  <text x="460" y="228" fill="#ffffff" font-size="18">12 guards/reminders</text>
+  <text x="460" y="258" fill="#ffffff" font-size="18">1 attention sentinel</text>
+  <text x="460" y="302" fill="#bef264" font-size="18">do not flatten unlike jobs</text>
+
+  <path d="M735 200 L800 200" stroke="#84cc16" stroke-width="5" marker-end="url(#inv-arrow)"/>
+  <rect x="815" y="55" width="260" height="290" rx="24" fill="#3f0b0b" stroke="#fb7185" stroke-width="3"/>
+  <text x="845" y="100" fill="#fecdd3" font-size="25" font-weight="700">12 → 8 debate</text>
+  <text x="845" y="140" fill="#ffffff" font-size="18">merge 3 git policies</text>
+  <text x="845" y="175" fill="#ffffff" font-size="18">keep 6 boundaries</text>
+  <text x="845" y="210" fill="#ffffff" font-size="18">measure plan reminder</text>
+  <text x="845" y="245" fill="#ffffff" font-size="18">simplify Stop output</text>
+  <text x="845" y="292" fill="#fda4af" font-size="21" font-weight="700">not yet closed</text>
+  <text x="560" y="400" text-anchor="middle" fill="var(--text)" font-size="19">Simplify within each lane. A context injector, a state recorder, and a deny guard are not duplicates merely because all three are called “hooks.”</text>
+</svg>
+</figure>
 
 ## Figure
 
