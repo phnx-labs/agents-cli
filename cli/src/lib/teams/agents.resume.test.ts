@@ -170,6 +170,46 @@ describe('resumeTeammate — resume-id guard', () => {
   });
 });
 
+describe.skipIf(IS_WINDOWS)('resumeTeammate — successful launch state', () => {
+  it('persists RUNNING without the prior attempt failure after a real local resume launch', async () => {
+    const base = tmpBase();
+    const id = `claude-agent-resume-success-${Date.now()}`;
+    fs.mkdirSync(path.join(base, id), { recursive: true });
+
+    const agent = new AgentProcess(
+      id, 'resume-success-team', 'claude', 'do a thing',
+      null, 'edit', null, AgentStatus.FAILED, new Date(), new Date(), base,
+    );
+    agent.failure = {
+      stage: 'execution',
+      code: 'process-exit-nonzero',
+      message: 'prior attempt exited 1',
+      exit_code: 1,
+      retryable: true,
+      observed_at: new Date().toISOString(),
+    };
+    await agent.saveMeta();
+
+    const mgr = new AgentManager(50, base);
+    try {
+      // Exercise the production resume + local spawn path. The harness may
+      // reject this synthetic session after launch; the invariant under test is
+      // the durable state written atomically when the replacement process has
+      // successfully spawned.
+      const resumed = await mgr.resumeTeammate(id, 'Continue the task');
+      expect(resumed.status).toBe(AgentStatus.RUNNING);
+      expect(resumed.failure).toBeNull();
+
+      const persisted = await AgentProcess.loadFromDisk(id, base);
+      expect(persisted?.status).toBe(AgentStatus.RUNNING);
+      expect(persisted?.failure).toBeNull();
+    } finally {
+      await mgr.stop(id).catch(() => false);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
 describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
   it('terminates the replacement and restores all prior state when persistence fails after spawn', async () => {
     const base = tmpBase();
@@ -190,6 +230,14 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       id, 'failure-team', 'claude', 'do a thing',
       null, 'edit', null, AgentStatus.COMPLETED, startedAt, completedAt, base,
     );
+    agent.failure = {
+      stage: 'execution',
+      code: 'process-exit-nonzero',
+      message: 'prior attempt exited 1',
+      exit_code: 1,
+      retryable: true,
+      observed_at: new Date().toISOString(),
+    };
     await agent.saveMeta();
     fs.writeFileSync(path.join(dir, 'prior-turn.log'), 'preserve me');
     const stdoutPath = path.join(dir, 'stdout.log');
@@ -240,6 +288,7 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(retained!.startedAt.toISOString()).toBe(startedAt.toISOString());
       expect(retained!.pid).toBeNull();
       expect(retained!.startTime).toBeNull();
+      expect(retained!.failure).toEqual(agent.failure);
       expect(fs.readFileSync(path.join(dir, 'prior-turn.log'), 'utf-8')).toBe('preserve me');
       expect(fs.readFileSync(stdoutPath, 'utf-8')).toBe('prior stdout');
       // Neither the launch nor the restore write ever reached the filesystem
@@ -249,6 +298,7 @@ describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
       expect(restored).not.toBeNull();
       expect(restored!.status).toBe(AgentStatus.COMPLETED);
       expect(restored!.completedAt?.toISOString()).toBe(completedAt.toISOString());
+      expect(restored!.failure).toEqual(agent.failure);
       expect(() => execFileSync('pgrep', ['-f', marker], { stdio: 'ignore' })).toThrow();
     } finally {
       fs.rmSync(base, { recursive: true, force: true });

@@ -36,6 +36,10 @@ const SYNC_NOTES = `
   An incremental gate (traces-sync.json ledger) means re-runs only upload
   sessions whose file_mtime_ms changed since the last sync.
 
+  On a real (non-dry-run) sync with the managed Phoenix backend, also
+  fire-and-forget registers this session with Prix (api.prix.dev) so the
+  console can serve live trajectories — a link failure never blocks sync.
+
   Sign in first with: agents auth login
 `.trimStart();
 
