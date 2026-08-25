@@ -4,7 +4,9 @@ import {
   pickFromPool,
   eligibleAccounts,
   injectionFor,
+  registryPoolCandidates,
   type PoolInputs,
+  type RegistryAccountRecord,
 } from './account-pool.js';
 
 function inputs(over: Partial<PoolInputs> = {}): PoolInputs {
@@ -99,6 +101,36 @@ describe('eligibleAccounts / pickFromPool', () => {
     }));
     expect(pickFromPool(allDead, 'balanced')).toBeNull();
     expect(pickFromPool([], 'balanced')).toBeNull();
+  });
+});
+
+describe('registryPoolCandidates — harness capability filter', () => {
+  const records: RegistryAccountRecord[] = [
+    { name: 'claude-setup', provider: 'anthropic', auth: 'setup-token' },
+    { name: 'openai-key', provider: 'openai', auth: 'api-key' },
+    { name: 'cursor-key', provider: 'cursor', auth: 'api-key' },
+    { name: 'or-key', provider: 'openrouter', auth: 'api-key' },
+  ];
+
+  it('claude pool includes anthropic + openrouter (both can auth claude), excludes openai/cursor', () => {
+    const names = registryPoolCandidates(records, 'claude').map((c) => c.name);
+    expect(names).toEqual(['claude-setup', 'or-key']);
+  });
+
+  it('codex pool includes openai + openrouter, excludes anthropic setup-token + cursor', () => {
+    const names = registryPoolCandidates(records, 'codex').map((c) => c.name);
+    expect(names).toEqual(['openai-key', 'or-key']);
+  });
+
+  it('cursor pool includes only the cursor key', () => {
+    expect(registryPoolCandidates(records, 'cursor').map((c) => c.name)).toEqual(['cursor-key']);
+  });
+
+  it('tags a synthetic agent-scoped accountKey until identity capture backfills it', () => {
+    const [c] = registryPoolCandidates(records, 'claude');
+    expect(c.accountKey).toBe('claude:name=claude-setup');
+    expect(c.email).toBeNull();
+    expect(c.auth).toBe('setup-token');
   });
 });
 

@@ -83,6 +83,49 @@ const authKindToPoolKind: Record<AccountAuthKind, PoolAccountKind> = {
   'bearer-token': 'bearer-token',
 };
 
+/** A provider account record as stored in the registry (identity captured separately). */
+export interface RegistryAccountRecord {
+  name: string;
+  provider: string;
+  auth: AccountAuthKind;
+}
+
+/**
+ * The registry side of the collector, pure: which provider accounts can
+ * authenticate `agent` at all. An account is a candidate for harness H only when
+ * its provider adapter has an `envFor(H, kind)` mapping — the same capability
+ * check `attach` uses (`accounts.ts:533`) — so a Cursor key never enters Claude's
+ * pool and a Claude setup-token never enters Codex's. This is what makes the pool
+ * harness-parity-correct without a per-harness `else if`.
+ *
+ * `accountKey` is synthetic here (`${agent}:name=${name}`) — a stable per-account
+ * key so balancing can include it immediately; the real agent-scoped identity
+ * (email/org uuid) is backfilled by identity capture and replaces it. `email` is
+ * null until then, which routes the account as usage-unverified but still
+ * eligible, never excluded.
+ */
+export function registryPoolCandidates(
+  records: RegistryAccountRecord[],
+  agent: AgentId,
+): RegistryAccountInput[] {
+  const out: RegistryAccountInput[] = [];
+  for (const r of records) {
+    try {
+      getAccountProvider(r.provider).envFor(agent, r.auth); // throws when it can't auth this harness
+    } catch {
+      continue; // provider can't authenticate `agent` — not in this harness's pool
+    }
+    out.push({
+      accountKey: `${agent}:name=${r.name}`,
+      email: null,
+      name: r.name,
+      provider: r.provider,
+      auth: r.auth,
+    });
+  }
+  return out;
+}
+
 /**
  * Build the harness's account pool from already-collected inputs.
  *
