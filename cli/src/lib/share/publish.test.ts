@@ -465,6 +465,54 @@ describe('publishToEndpoint', () => {
     expect(result.unlisted).toBe(true);
   });
 
+  it('sends x-share-visibility: me when visibility: me is set (RUSH-3260)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-vis-me-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let visibility = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'owner-only',
+        githubUser: 'octocat',
+        expire: 'never',
+        visibility: 'me',
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          visibility = headers['x-share-visibility'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(visibility).toBe('me');
+    expect(result.visibility).toBe('me');
+    expect(result.unlisted).toBeUndefined();
+  });
+
+  it('sends x-share-visibility: org when visibility: org is set (RUSH-3260)', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-vis-org-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let visibility = '';
+    const result = await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'org-only',
+        githubUser: 'octocat',
+        expire: 'never',
+        visibility: 'org',
+        cover: false,
+        uploader: async (_u, _b, headers) => {
+          visibility = headers['x-share-visibility'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(visibility).toBe('org');
+    expect(result.visibility).toBe('org');
+    expect(result.unlisted).toBeUndefined();
+  });
+
   it('refuses a page with emails unless --force (RUSH-2443 / RUSH-2428)', async () => {
     const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-scan-')), 'report.html');
     writeFileSync(htmlPath, '<h1>Spend</h1><p>alice@example.com spent $12</p>');

@@ -43,7 +43,9 @@ export interface PublishOptions {
   /**
    * Server-enforced visibility (RUSH-3135). `public` (default) is listed in
    * the gallery; `unlisted` is a capability URL (GET still 200, X-Robots-Tag:
-   * noindex, hidden from gallery/list). `org` is Phase 2 — the Worker 400s it.
+   * noindex, hidden from gallery/list). `me` requires a Phoenix session and is
+   * visible only to the signed-in owner; `org` requires the same and is visible
+   * to members of the same Phoenix organization.
    */
   visibility?: ShareVisibility;
   /**
@@ -103,7 +105,7 @@ export interface PublishOptions {
   provenance?: ShareProvenance;
 }
 
-export type ShareVisibility = 'public' | 'unlisted';
+export type ShareVisibility = 'public' | 'unlisted' | 'me' | 'org';
 
 export interface PublishResult {
   url: string;
@@ -119,10 +121,13 @@ export interface PublishResult {
   labelSource?: 'explicit' | 'derived';
 }
 
-/** `--unlisted` / `{ unlisted: true }` map to `unlisted`; otherwise `visibility` (default public). */
+/**
+ * `--unlisted` / `{ unlisted: true }` map to `unlisted`; `--visibility me|org`
+ * passes through; otherwise `visibility` (default public).
+ */
 export function resolveShareVisibility(opts: { visibility?: ShareVisibility; unlisted?: boolean } = {}): ShareVisibility {
   if (opts.unlisted === true) return 'unlisted';
-  if (opts.visibility === 'unlisted') return 'unlisted';
+  if (opts.visibility === 'unlisted' || opts.visibility === 'me' || opts.visibility === 'org') return opts.visibility;
   return 'public';
 }
 

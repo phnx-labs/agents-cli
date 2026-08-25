@@ -1373,7 +1373,7 @@ describe('formatSharePublishResult', () => {
 });
 
 describe('--visibility flag (RUSH-3135)', () => {
-  it('registers --visibility with public|unlisted choices and default public; --unlisted/--private stay as hidden aliases', async () => {
+  it('registers --visibility with public|unlisted|me|org choices and default public; --unlisted/--private stay as hidden aliases', async () => {
     const { artifacts } = await freshShareModules();
     const program = programWithArtifacts(artifacts);
     const share = shareGroup(program);
@@ -1382,7 +1382,7 @@ describe('--visibility flag (RUSH-3135)', () => {
     expect(longs).toEqual(expect.arrayContaining(['--visibility', '--unlisted', '--private']));
 
     const vis = share!.options.find((o) => o.long === '--visibility');
-    expect(vis?.argChoices).toEqual(['public', 'unlisted']);
+    expect(vis?.argChoices).toEqual(['public', 'unlisted', 'me', 'org']);
     expect(vis?.defaultValue).toBe('public');
     expect(vis?.hidden).toBeFalsy();
 
@@ -1444,6 +1444,18 @@ describe('--visibility flag (RUSH-3135)', () => {
     const { visibilityHeader, output } = await publishWithFlag(['--expire', 'never']);
     expect(visibilityHeader).toBe('public');
     expect(output).toContain('visibility: public');
+  });
+
+  it('--visibility me sends x-share-visibility: me and prints the login-required hint', async () => {
+    const { visibilityHeader, output } = await publishWithFlag(['--visibility', 'me', '--expire', 'never']);
+    expect(visibilityHeader).toBe('me');
+    expect(output).toContain('visibility: me (login required, hidden from gallery)');
+  });
+
+  it('--visibility org sends x-share-visibility: org and prints the login-required hint', async () => {
+    const { visibilityHeader, output } = await publishWithFlag(['--visibility', 'org', '--expire', 'never']);
+    expect(visibilityHeader).toBe('org');
+    expect(output).toContain('visibility: org (login required, hidden from gallery)');
   });
 });
 

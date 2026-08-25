@@ -74,6 +74,8 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
   const visibility = result.visibility ?? (result.unlisted ? 'unlisted' : 'public');
   if (visibility === 'unlisted') {
     lines.push(chalk.dim('  visibility: unlisted (noindex, hidden from gallery)'));
+  } else if (visibility === 'me' || visibility === 'org') {
+    lines.push(chalk.dim(`  visibility: ${visibility} (login required, hidden from gallery)`));
   } else {
     lines.push(chalk.dim(`  visibility: ${visibility}`));
   }
@@ -603,8 +605,8 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
     .addOption(
-      new Option('--visibility <level>', 'public | unlisted (default public). unlisted is a capability URL: GET still works, hidden from the gallery, X-Robots-Tag: noindex')
-        .choices(['public', 'unlisted'])
+      new Option('--visibility <level>', 'public | unlisted | me | org (default public). unlisted is a capability URL; me/org require a Phoenix session and are hidden from the gallery')
+        .choices(['public', 'unlisted', 'me', 'org'])
         .default('public'),
     )
     .addOption(new Option('--unlisted', 'hidden alias of --visibility unlisted').hideHelp())
@@ -713,8 +715,10 @@ ${SHARE_DELETE_EXAMPLES}
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
   hides the page from the public gallery and agents artifacts share list; the
   direct URL is still world-readable (unlisted, not secret) and GET sends
-  X-Robots-Tag: noindex. A pre-publish scan refuses emails and credential-shaped
-  strings unless --force is passed.
+  X-Robots-Tag: noindex. --visibility me requires a Phoenix session and is only
+  visible to the signed-in owner; --visibility org requires the same and is
+  visible to members of the same Phoenix organization. A pre-publish scan
+  refuses emails and credential-shaped strings unless --force is passed.
 
   Every publish carries provenance auto-captured from the exec env/git/clock
   (agent, session, host, repo, date) — never invented, only sent when present —
