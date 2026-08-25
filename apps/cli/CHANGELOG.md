@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.22.47
 
 - **`agents traces sync` pushes derived, redacted trajectories to your Phoenix account (RUSH-3140).** A new `agents traces` command group increments over `sessions.db` via the `file_mtime_ms` gate (only sessions modified since the last sync are uploaded), computes a `SessionTrajectory` for each (steps + gaps + stats, no raw transcript text), applies `redactSecrets()` before PUT, and stores the result under `<userId>/<device>/sessions/<id>.json` in an R2 bucket guarded by Phoenix bearer auth — no public GET path exists anywhere. A per-device index shard (`index.json`) is updated on each run. Three subcommands: `agents traces sync` (incremental push), `agents traces status` (show last sync time), `agents traces open` (open the Phoenix Evals console). The traces Worker uses `cache-control: private, no-store` on every response. Source: `apps/cli/src/lib/traces/{backend,sync,worker-template}.ts`, `apps/cli/src/commands/traces.ts`.
 

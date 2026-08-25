@@ -10,7 +10,7 @@ const LOADED_COMMAND_NAMES = [
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
   'teams', 'cloud', 'message', 'send', 'notify', 'feed',
   'mailboxes', 'mailbox', 'artifacts', 'webhooks',
-  'humans', 'daemon',
+  'humans', 'daemon', 'traces',
 ] as const;
 
 const INLINE_COMMAND_NAMES = [
