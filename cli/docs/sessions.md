@@ -1592,7 +1592,9 @@ can answer. The session preview shares this one predicate, so the human-facing
 "needs you" line and the scriptable gate can never disagree about a row.
 
 **The `hostLink` field's values.** `connected` (a client was observed — a counted tmux
-client, or a window republishing its slice), `no-client` (alive, nothing attached),
+client or a window republishing its slice — **or** the row is excluded from the other
+verdicts by construction: a deliberate `agents sessions detach`, or a pid already
+reported `closed`), `no-client` (alive, nothing attached),
 `host-gone` (the window died and took the agent with it), and `unknown` (neither signal
 was available, so the question is open). `unknown` is the case for a bare terminal, a
 team spawn, a cloud task, and any `--device` session whose pane lives on another machine
