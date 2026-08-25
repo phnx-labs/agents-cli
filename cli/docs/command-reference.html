@@ -4281,22 +4281,32 @@ Three or more selectors, and --tree with more than one selector, fail loud.</p><
 <article id="traces-status" data-search="status traces status  show last sync time for this device -h, --help show help $ agents traces status
   show what&#39;s been synced — session count and last sync time for this device. "><div class="command-head"><h3><code>agents traces status</code></h3></div><p>Show last sync time for this device</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>$ agents traces status
   Show what&#39;s been synced — session count and last sync time for this device.</code></pre></article>
-<article id="traces-sync" data-search="sync traces sync  push derived, redacted trajectories (incremental) --limit &lt;n&gt; maximum number of sessions to sync in this run -h, --help show help $ agents traces sync
+<article id="traces-sync" data-search="sync traces sync  push derived, redacted trajectories (incremental) --limit &lt;n&gt; maximum number of sessions to sync in this run --dry-run compute the shards from real sessions.db and write them locally (no auth, no upload) --out &lt;dir&gt; directory to write index.json + sessions/&lt;id&gt;.json (required with --dry-run) -h, --help show help $ agents traces sync
   push this device&#39;s derived, redacted trajectories to your phoenix account.
 
   $ agents traces sync --limit 20
-  sync at most 20 sessions (useful for a first run on a large fleet device). reads from the local sessions.db, computes a derived sessiontrajectory (steps +
+  sync at most 20 sessions (useful for a first run on a large fleet device).
+
+  $ agents traces sync --dry-run --out ./trace-preview
+  compute the shards from your real sessions.db and write them locally — no
+  phoenix sign-in, no worker, no upload. point a console at ./trace-preview to
+  see your real trajectories before wiring the hosted path. reads from the local sessions.db, computes a derived sessiontrajectory (steps +
   gaps + stats, no raw transcript text), redacts secrets, and puts each to
   the agents-traces store.
 
   an incremental gate (traces-sync.json ledger) means re-runs only upload
   sessions whose file_mtime_ms changed since the last sync.
 
-  sign in first with: agents auth login"><div class="command-head"><h3><code>agents traces sync</code></h3></div><p>Push derived, redacted trajectories (incremental)</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--limit &lt;n&gt;</code></td><td>Maximum number of sessions to sync in this run</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>$ agents traces sync
+  sign in first with: agents auth login"><div class="command-head"><h3><code>agents traces sync</code></h3></div><p>Push derived, redacted trajectories (incremental)</p><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--limit &lt;n&gt;</code></td><td>Maximum number of sessions to sync in this run</td><td></td><td></td></tr><tr><td><code>--dry-run</code></td><td>Compute the shards from real sessions.db and WRITE them locally (no auth, no upload)</td><td></td><td></td></tr><tr><td><code>--out &lt;dir&gt;</code></td><td>Directory to write index.json + sessions/&lt;id&gt;.json (required with --dry-run)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code>$ agents traces sync
   Push this device&#39;s derived, redacted trajectories to your Phoenix account.
 
   $ agents traces sync --limit 20
-  Sync at most 20 sessions (useful for a first run on a large fleet device).</code></pre><h4>Notes</h4><p class="notes">Reads from the local sessions.db, computes a derived SessionTrajectory (steps +
+  Sync at most 20 sessions (useful for a first run on a large fleet device).
+
+  $ agents traces sync --dry-run --out ./trace-preview
+  Compute the shards from your real sessions.db and WRITE them locally — no
+  Phoenix sign-in, no worker, no upload. Point a console at ./trace-preview to
+  see your real trajectories before wiring the hosted path.</code></pre><h4>Notes</h4><p class="notes">Reads from the local sessions.db, computes a derived SessionTrajectory (steps +
   gaps + stats, no raw transcript text), redacts secrets, and PUTs each to
   the agents-traces store.
 
