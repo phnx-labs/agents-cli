@@ -13,6 +13,7 @@ import {
   activeSessionsJournalPath,
   activeSessionJournalIdentity,
   readActiveSessionsCache,
+  noteActiveSessionsJournalReader,
   type ActiveSessionsJournalRecord,
 } from '../session-cache.js';
 
@@ -160,6 +161,8 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
   options.emit(state.reset(options.scope, initial?.sessions ?? []));
   options.emit(state.scope(options.scope, initial ? 'available' : 'unavailable', initial ? undefined : 'awaiting publisher'));
   if (options.signal.aborted) return;
+  // Signal the daemon that a consumer is live so it does not skip the gather.
+  noteActiveSessionsJournalReader();
   await new Promise<void>((resolve) => {
     let partial = '';
     let reading = false;
@@ -193,7 +196,10 @@ export async function watchLocalSessions(options: WatchLocalOptions): Promise<vo
     fs.mkdirSync(path.dirname(journal), { recursive: true });
     const journalListener = () => readAppended();
     fs.watchFile(journal, { interval: options.journalPollMs ?? 250 }, journalListener);
-    const heartbeatTimer = setInterval(() => options.emit(state.heartbeat(options.scope)), heartbeatMs);
+    const heartbeatTimer = setInterval(() => {
+      noteActiveSessionsJournalReader();
+      options.emit(state.heartbeat(options.scope));
+    }, heartbeatMs);
     const stop = () => { fs.unwatchFile(journal, journalListener); clearInterval(heartbeatTimer); resolve(); };
     options.signal.addEventListener('abort', stop, { once: true });
     // Close the offset/read/watch handoff: a publisher may append after the

@@ -173,12 +173,24 @@ export async function runUsageRefreshTick(): Promise<void> {
  * Cadence matches {@link DEFAULT_ACTIVE_CACHE_MAX_AGE_MS} so one-shot readers and
  * long-lived watchers share one writer. Without this tick the journal has no
  * continuous producer and Factory freezes after the initial cache snapshot.
+ *
+ * Gated on reader presence (RUSH-3193): when no `sessions watch` / `feed watch`
+ * consumer has checked in within {@link ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS} the
+ * expensive `ps`+`lsof` gather is skipped entirely. The moment a watcher
+ * connects it calls {@link noteActiveSessionsJournalReader}; the following tick
+ * immediately gathers, so consumers always receive fresh rows within one normal
+ * tick interval.
  */
 export async function runActiveSessionsWarmTick(
-  opts: { gather?: () => Promise<import('./session/active.js').ActiveSession[]> } = {},
+  opts: { gather?: () => Promise<import('./session/active.js').ActiveSession[]>; nowMs?: number } = {},
 ): Promise<{ sessions: number }> {
-  const { publishLocalActiveSessions } = await import('./session/session-cache.js');
-  const r = await publishLocalActiveSessions({ gather: opts.gather });
+  const { publishLocalActiveSessions, isActiveSessionsJournalReaderRecent } = await import('./session/session-cache.js');
+  const nowMs = opts.nowMs ?? Date.now();
+  if (!isActiveSessionsJournalReaderRecent(nowMs)) {
+    console.log('active-sessions warm: idle (no recent reader), skipping gather');
+    return { sessions: 0 };
+  }
+  const r = await publishLocalActiveSessions({ gather: opts.gather, nowMs });
   console.log(`active-sessions warm: ${r.sessions.length} session(s) published`);
   return { sessions: r.sessions.length };
 }

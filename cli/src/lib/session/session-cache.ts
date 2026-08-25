@@ -167,11 +167,23 @@ interface ImmutableMemoFile {
   entries: Record<string, ImmutableMemoEntry>;
 }
 
+/**
+ * How long after the last reader heartbeat the daemon considers the journal
+ * to have no active consumer and skips the expensive `ps`+`lsof` gather.
+ *
+ * Must be significantly larger than {@link SESSION_WATCH_HEARTBEAT_MS} (15s)
+ * so a single delayed heartbeat does not cause a false-idle. Three tick-lengths
+ * gives adequate margin while still cutting load within ~45s of the last
+ * watcher disconnecting.
+ */
+export const ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS = 45_000;
+
 // ── path overrides (test seam) ─────────────────────────────────────────────
 
 let snapshotPathOverride: string | null = null;
 let immutablePathOverride: string | null = null;
 let journalPathOverride: string | null = null;
+let readerPresencePathOverride: string | null = null;
 
 /** Test seam: redirect the snapshot file. Returns the previous override. */
 export function setActiveSessionsSnapshotPathForTest(p: string | null): string | null {
@@ -200,6 +212,13 @@ export function setActiveSessionsJournalPathForTest(p: string | null): string | 
   return prev;
 }
 
+/** Test seam: redirect the reader-presence file. Returns the previous override. */
+export function setActiveSessionsReaderPresencePathForTest(p: string | null): string | null {
+  const prev = readerPresencePathOverride;
+  readerPresencePathOverride = p;
+  return prev;
+}
+
 function snapshotPath(): string {
   return snapshotPathOverride ?? path.join(getCacheDir(), SNAPSHOT_FILE);
 }
@@ -211,6 +230,50 @@ function immutablePath(): string {
 export function activeSessionsJournalPath(): string {
   return journalPathOverride
     ?? (snapshotPathOverride ? `${snapshotPathOverride}.journal.jsonl` : path.join(getCacheDir(), JOURNAL_FILE));
+}
+
+const READER_PRESENCE_FILE = '.active-sessions-reader.presence';
+
+function readerPresencePath(): string {
+  return readerPresencePathOverride ?? path.join(getCacheDir(), READER_PRESENCE_FILE);
+}
+
+/**
+ * Record that a journal consumer is active right now.
+ *
+ * Called by {@link watchLocalSessions} on startup and on each heartbeat so
+ * the daemon warm tick can gate the expensive `ps`+`lsof` gather on reader
+ * presence and skip it when no watcher has checked in recently.
+ */
+export function noteActiveSessionsJournalReader(): void {
+  try {
+    const p = readerPresencePath();
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, String(Date.now()));
+  } catch { /* best-effort: a failed write does not block the caller */ }
+}
+
+/**
+ * True when a journal consumer has signalled its presence within
+ * {@link ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS}.
+ *
+ * Used by the daemon warm tick to decide whether to run the expensive
+ * `ps`+`lsof` gather. On an idle box with no watcher the tick skips the
+ * gather entirely; the moment a new watcher connects it calls
+ * {@link noteActiveSessionsJournalReader} and the following tick gathers.
+ */
+export function isActiveSessionsJournalReaderRecent(
+  nowMs: number = Date.now(),
+  idleWindowMs: number = ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS,
+): boolean {
+  try {
+    const content = fs.readFileSync(readerPresencePath(), 'utf8').trim();
+    const ts = Number(content);
+    if (!Number.isFinite(ts)) return false;
+    return nowMs - ts < idleWindowMs;
+  } catch {
+    return false;
+  }
 }
 
 // ── snapshot read / write ──────────────────────────────────────────────────

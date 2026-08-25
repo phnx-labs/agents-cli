@@ -18,6 +18,10 @@ import {
   readActiveSessionsCache,
   setActiveSessionsSnapshotPathForTest,
   setImmutableMemoPathForTest,
+  setActiveSessionsReaderPresencePathForTest,
+  noteActiveSessionsJournalReader,
+  isActiveSessionsJournalReaderRecent,
+  ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS,
 } from './session/session-cache.js';
 import { usageRefreshRole } from './usage-fleet.js';
 
@@ -73,20 +77,24 @@ describe('runActiveSessionsWarmTick', () => {
   let dir: string;
   let prevSnap: string | null;
   let prevImm: string | null;
+  let prevPresence: string | null;
 
   beforeEach(() => {
     dir = fs.mkdtempSync(path.join(os.tmpdir(), 'active-warm-'));
     prevSnap = setActiveSessionsSnapshotPathForTest(path.join(dir, 'snap.json'));
     prevImm = setImmutableMemoPathForTest(path.join(dir, 'imm.json'));
+    prevPresence = setActiveSessionsReaderPresencePathForTest(path.join(dir, 'reader.presence'));
   });
 
   afterEach(() => {
     setActiveSessionsSnapshotPathForTest(prevSnap);
     setImmutableMemoPathForTest(prevImm);
+    setActiveSessionsReaderPresencePathForTest(prevPresence);
     fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('publishes a local active-sessions snapshot (daemon continuous writer)', async () => {
+  it('publishes a local active-sessions snapshot when a reader is present', async () => {
+    noteActiveSessionsJournalReader();
     const r = await runActiveSessionsWarmTick({ gather: async () => [] });
     expect(r.sessions).toBe(0);
     const cached = readActiveSessionsCache('local');
@@ -95,6 +103,82 @@ describe('runActiveSessionsWarmTick', () => {
     const journal = fs.readFileSync(path.join(dir, 'snap.json.journal.jsonl'), 'utf8').trim().split('\n');
     expect(journal.length).toBeGreaterThanOrEqual(1);
     expect(JSON.parse(journal.at(-1)!)).toMatchObject({ version: 1, scope: 'local', upserts: [], removes: [] });
+  });
+
+  it('skips the gather when no reader has checked in (idle box)', async () => {
+    let gatherCalled = false;
+    const r = await runActiveSessionsWarmTick({ gather: async () => { gatherCalled = true; return []; } });
+    expect(r.sessions).toBe(0);
+    expect(gatherCalled).toBe(false);
+    // Snapshot must remain absent — the gather was skipped entirely.
+    expect(readActiveSessionsCache('local')).toBeNull();
+  });
+
+  it('skips the gather when the reader presence is older than the idle window', async () => {
+    const staleTs = Date.now() - ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS - 1_000;
+    fs.writeFileSync(path.join(dir, 'reader.presence'), String(staleTs));
+    let gatherCalled = false;
+    const r = await runActiveSessionsWarmTick({ gather: async () => { gatherCalled = true; return []; } });
+    expect(r.sessions).toBe(0);
+    expect(gatherCalled).toBe(false);
+  });
+
+  it('gathers immediately after a reader signals presence mid-idle', async () => {
+    // First tick — idle, no gather.
+    const r1 = await runActiveSessionsWarmTick({ gather: async () => [] });
+    expect(r1.sessions).toBe(0);
+    expect(readActiveSessionsCache('local')).toBeNull();
+
+    // Reader connects and notes itself.
+    noteActiveSessionsJournalReader();
+
+    // Next tick — gathers and publishes.
+    let gatherCalled = false;
+    const r2 = await runActiveSessionsWarmTick({ gather: async () => { gatherCalled = true; return []; } });
+    expect(r2.sessions).toBe(0);
+    expect(gatherCalled).toBe(true);
+    expect(readActiveSessionsCache('local')).not.toBeNull();
+  });
+});
+
+describe('isActiveSessionsJournalReaderRecent', () => {
+  let dir: string;
+  let prevPresence: string | null;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'reader-presence-'));
+    prevPresence = setActiveSessionsReaderPresencePathForTest(path.join(dir, 'reader.presence'));
+  });
+
+  afterEach(() => {
+    setActiveSessionsReaderPresencePathForTest(prevPresence);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('returns false when no presence file exists', () => {
+    expect(isActiveSessionsJournalReaderRecent()).toBe(false);
+  });
+
+  it('returns true for a freshly written presence', () => {
+    noteActiveSessionsJournalReader();
+    expect(isActiveSessionsJournalReaderRecent()).toBe(true);
+  });
+
+  it('returns false when the presence is older than the idle window', () => {
+    const staleTs = Date.now() - ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS - 1_000;
+    fs.writeFileSync(path.join(dir, 'reader.presence'), String(staleTs));
+    expect(isActiveSessionsJournalReaderRecent()).toBe(false);
+  });
+
+  it('returns true for a presence written just inside the idle window', () => {
+    const freshTs = Date.now() - ACTIVE_SESSIONS_READER_IDLE_WINDOW_MS + 5_000;
+    fs.writeFileSync(path.join(dir, 'reader.presence'), String(freshTs));
+    expect(isActiveSessionsJournalReaderRecent()).toBe(true);
+  });
+
+  it('returns false for corrupt content', () => {
+    fs.writeFileSync(path.join(dir, 'reader.presence'), 'not-a-number');
+    expect(isActiveSessionsJournalReaderRecent()).toBe(false);
   });
 });
 
