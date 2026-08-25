@@ -94,6 +94,59 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(got).toBe('test --retry=2 --maxWorkers=2');
   });
 
+  // --- sharding (RUSH-3230) ------------------------------------------------
+  // The lever that actually moves release time. Measured on a real full run: the
+  // suite is 3079s of CPU at 11.5x parallelism on ONE box, so wall == CPU/workers
+  // (269s) — it is THROUGHPUT-bound, not bound by any single slow file. Adding
+  // boxes divides the CPU; splitting files does not (that only moved the total
+  // 296s -> 269s). These pin the routing, not the arithmetic.
+
+  it('requires a worker count, so `--shard` alone cannot fan out to nowhere', () => {
+    const r = run(['--shard']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--shard needs a worker count/);
+  });
+
+  it('rejects a non-numeric worker count', () => {
+    expect(run(['--shard', 'abc']).status).not.toBe(0);
+    expect(run(['--shard=x']).status).not.toBe(0);
+  });
+
+  it('names the version requirement when the installed CLI cannot enumerate workers', () => {
+    // `devices pick --json` landed in 1.22.49. An older CLI answers with a
+    // commander "unknown option" that says nothing about sharding, so the script
+    // must name the version AND the fix rather than pass the confusion through.
+    const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-oldcli-'));
+    fs.writeFileSync(
+      path.join(bin, 'agents'),
+      '#!/usr/bin/env bash\n'
+      + 'if [ "$1" = "--version" ]; then echo 1.22.47; exit 0; fi\n'
+      + 'exit 1\n',
+    );
+    fs.chmodSync(path.join(bin, 'agents'), 0o755);
+    const r = run(['--shard', '4'], { PATH: `${bin}:${process.env.PATH}` });
+    fs.rmSync(bin, { recursive: true, force: true });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/has no 'devices pick --json'/);
+    expect(r.stderr).toMatch(/1\.22\.49/);
+    // And never silently degrades into a local run.
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('does not use `mapfile` — macOS ships bash 3.2, where it does not exist', () => {
+    // Caught by running it: `mapfile: command not found` on the interactive Mac
+    // that dispatches the fan-out. bash 4+ only.
+    // Comment lines are exempt: the script explains WHY it avoids mapfile, and a
+    // naive whole-file match flags that explanation — which is how this test
+    // failed on its first run.
+    const code = fs.readFileSync(TEST_SH, 'utf-8')
+      .split('\n')
+      .filter((l) => !l.trim().startsWith('#'))
+      .join('\n');
+    expect(code).not.toMatch(/\bmapfile\b/);
+  });
+
   it('rejects an unknown flag rather than forwarding it to vitest', () => {
     const r = run(['--oops']);
     expect(r.status).not.toBe(0);

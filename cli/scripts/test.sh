@@ -23,6 +23,7 @@
 #   scripts/test.sh                      # auto-pick the least-loaded worker (default)
 #   scripts/test.sh --device auto        # the same thing, said explicitly
 #   scripts/test.sh --device <box>       # run on a named fleet box over ssh
+#   scripts/test.sh --shard 6            # fan out across 6 fleet workers (fastest)
 #   scripts/test.sh --crabbox            # offload to a disposable crabbox instead
 #   scripts/test.sh --here               # run on THIS machine (explicit, loud)
 #   scripts/test.sh --repo-root <dir>    # test that tree instead of this one
@@ -50,6 +51,7 @@ die()   { red "error: $*"; exit 1; }
 # so defaulting to it made the default path fail on any box without them.
 MODE="auto"
 DEVICE=""
+SHARDS=0
 REPO_ROOT=""
 VITEST_ARGS=()
 while [[ $# -gt 0 ]]; do
@@ -57,6 +59,11 @@ while [[ $# -gt 0 ]]; do
     --device) [[ -n "${2:-}" ]] || die "--device needs a machine name"; DEVICE="$2"; MODE="device"; shift 2 ;;
     --device=*) DEVICE="${1#*=}"; MODE="device"; shift ;;
     --crabbox) MODE="crabbox"; shift ;;
+    # Fan out across N workers. This is the lever that hits the release-time
+    # target: the suite is throughput-bound (3079s CPU / 11.5x on one box), so
+    # dividing the CPU across machines is what shortens it.
+    --shard) [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--shard needs a worker count, e.g. --shard 6"; SHARDS="$2"; MODE="shard"; shift 2 ;;
+    --shard=*) SHARDS="${1#*=}"; [[ "$SHARDS" =~ ^[0-9]+$ ]] || die "--shard needs a worker count"; MODE="shard"; shift ;;
     --here|--local) MODE="here"; shift ;;
     --repo-root) [[ -n "${2:-}" ]] || die "--repo-root needs a directory"; REPO_ROOT="$2"; shift 2 ;;
     --repo-root=*) REPO_ROOT="${1#*=}"; shift ;;
@@ -164,6 +171,39 @@ if [[ "$MODE" == "auto" ]]; then
   fi
 fi
 
+# Ship this tree to $1 and run the suite there. $2.. are extra vitest args
+# (sharding appends `--shard=i/N`). Factored out of the `device` branch so the
+# shard fan-out can reuse it N times instead of duplicating the rsync/bind/run
+# sequence -- one place to fix, and the shard path cannot drift from the single
+# -device path it is built on.
+ship_and_run() {
+  local device="$1"; shift
+  local addr remote_dir extra
+  extra="$*"
+
+  addr="$(device_addr "$device")" || case $? in
+    2) die "'$device' is the INTERACTIVE host -- the suite is never scheduled there." ;;
+    3) die "device '$device' has no reachable address in the registry" ;;
+    *) die "device '$device' is not in the registry -- see 'agents devices list'" ;;
+  esac
+  ssh -o BatchMode=yes -o ConnectTimeout=15 "$addr" true 2>/dev/null \
+    || die "cannot reach '$device' ($addr) over ssh"
+
+  # Per-device dir so two shards on ONE box (or a stale run) cannot collide.
+  remote_dir="\$HOME/.cache/agents-cli/test-runs/tree"
+  ssh "$addr" "mkdir -p $remote_dir" >/dev/null
+  rsync -az --delete \
+    --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
+    --exclude '.agents/worktrees' --exclude '.release-attestations' \
+    "$TREE_ROOT/" "$addr:${remote_dir#\$HOME/}/"
+  ssh "$addr" "bash $remote_dir/cli/scripts/bound-repo-root.sh $remote_dir" \
+    || die "could not give the shipped tree a git repo on '$device'"
+  ssh "$addr" "cd $remote_dir/cli \
+    && bun install --silent \
+    && bun run build >/dev/null \
+    && bun run test$(vitest_suffix)${extra:+ $extra}"
+}
+
 case "$MODE" in
   here|here-worker)
     # `here` is deliberately loud: running the full suite on the machine someone
@@ -187,47 +227,86 @@ case "$MODE" in
   device)
     command -v rsync >/dev/null || die "rsync not found (needed to ship the tree to $DEVICE)"
     command -v ssh   >/dev/null || die "ssh not found"
-
-    ADDR="$(device_addr "$DEVICE")" || case $? in
-      2) die "'$DEVICE' is the INTERACTIVE host -- the suite is never scheduled there.
-  Pass --here if you genuinely mean to pin this machine." ;;
-      3) die "device '$DEVICE' has no reachable address in the registry (agents devices list)" ;;
-      *) die "device '$DEVICE' is not in the registry -- see 'agents devices list'" ;;
-    esac
-
-    ssh -o BatchMode=yes -o ConnectTimeout=15 "$ADDR" true 2>/dev/null \
-      || die "cannot reach '$DEVICE' ($ADDR) over ssh -- see 'agents devices list'"
-
-    # NOT under ~/.agents: that directory is itself a git repo (the DotAgents
-    # repo). A tree unpacked inside it makes `git rev-parse --show-toplevel`
-    # resolve to ~/.agents for anything in the suite that asks, and shows up as
-    # `?? test-runs/` in the operator's own repo status. ~/.cache has no git
-    # ancestor, which is why sandbox.sh's ~/workspaces choice never hit this.
-    remote_dir="\$HOME/.cache/agents-cli/test-runs/tree"
     bold "Offloading the suite to $DEVICE"
-    gray "  addr:   $ADDR"
     gray "  tree:   $TREE_ROOT"
+    ship_and_run "$DEVICE"
+    ;;
 
-    ssh "$ADDR" "mkdir -p $remote_dir" >/dev/null
-    # Ship the working tree, not a git clone: this must test the EXACT bytes on
-    # disk (the producer's isolated worktree, or an operator's uncommitted work),
-    # never whatever the remote could fetch from origin.
-    rsync -az --delete \
-      --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
-      --exclude '.agents/worktrees' --exclude '.release-attestations' \
-      "$TREE_ROOT/" "$ADDR:${remote_dir#\$HOME/}/"
 
-    # Give the shipped tree its own git repo. The WHY lives in
-    # bound-repo-root.sh's docblock -- one explanation, one place. Fails loud:
-    # without a repo, anything resolving a repo root breaks.
-    ssh "$ADDR" "bash $remote_dir/cli/scripts/bound-repo-root.sh $remote_dir" \
-      || die "could not give the shipped tree a git repo on '$DEVICE' -- refusing to run the suite, since anything resolving a repo root would fail or escape"
+  shard)
+    # Fan the suite across N workers with vitest's own `--shard=i/N`.
+    #
+    # This is the change that actually moves the number, and the reason is
+    # arithmetic rather than intuition: measured on a real full run, the suite is
+    # 3079s of CPU at 11.5x parallelism on one box -- so wall == CPU/workers
+    # (269s), and it is THROUGHPUT-bound, not bound by any single slow file.
+    # Splitting the slowest file moved the total only 296s -> 269s (~9%). Adding
+    # boxes divides the CPU: 3 boxes ~93s, 6 ~47s, 9 ~31s.
+    #
+    # A file still must not exceed the per-shard budget, or it becomes the new
+    # floor -- but that is a narrow constraint on a couple of files, not a
+    # prerequisite for sharding.
+    command -v rsync >/dev/null || die "rsync not found"
+    command -v ssh   >/dev/null || die "ssh not found"
+    command -v agents >/dev/null 2>&1 || die "the 'agents' CLI is not on PATH, so workers cannot be picked"
+    # `devices pick --json` is how the fan-out gets its candidate list WITH loads,
+    # from the same auto pool a single run uses. It landed in 1.22.49; an older
+    # installed CLI gives a confusing "unknown option" from commander rather than
+    # anything actionable, so name the requirement and the fix.
+    if ! agents devices pick --json >/dev/null 2>&1; then
+      die "the installed 'agents' ($(agents --version 2>/dev/null || echo unknown)) has no 'devices pick --json'.
+  Sharding needs >= 1.22.49. Upgrade it, then re-run:  scripts/test.sh --shard $SHARDS
+  Until then:                                          scripts/test.sh --device <box>"
+    fi
 
-  green "Tree shipped. Running the suite on $DEVICE..."
-    ssh "$ADDR" "cd $remote_dir/cli \
-      && bun install --silent \
-      && bun run build >/dev/null \
-      && bun run test$(vitest_suffix)"
+    # Take the N least-loaded eligible workers from the SAME auto pool a single
+    # --device auto run draws from, so role marks govern the fan-out too.
+    # NOT `mapfile`: macOS ships bash 3.2, where it does not exist (bash 4+ only).
+    # This script must run on the interactive Mac that dispatches the fan-out.
+    SHARD_DEVICES=()
+    while IFS= read -r _dev; do
+      [[ -n "$_dev" ]] && SHARD_DEVICES+=("$_dev")
+    done < <(
+      agents devices pick --json 2>/dev/null \
+        | python3 -c '
+import json, sys
+plan = json.load(sys.stdin)
+cands = [c for c in plan.get("candidates", []) if c.get("headroom") != "loaded"]
+cands.sort(key=lambda c: c.get("loadPercent") if c.get("loadPercent") is not None else 999)
+for c in cands: print(c["device"])
+'
+    )
+    (( ${#SHARD_DEVICES[@]} )) || die "could not enumerate workers ('agents devices pick --json')"
+
+    (( ${#SHARD_DEVICES[@]} )) || die "no eligible workers to shard across -- see 'agents devices list'"
+    if (( SHARDS > ${#SHARD_DEVICES[@]} )); then
+      gray "Only ${#SHARD_DEVICES[@]} eligible workers; sharding across those instead of $SHARDS."
+      SHARDS=${#SHARD_DEVICES[@]}
+    fi
+
+    bold "Sharding the suite across $SHARDS workers"
+    declare -a SHARD_PIDS=() SHARD_LOGS=() SHARD_NAMES=()
+    for ((i = 1; i <= SHARDS; i++)); do
+      dev="${SHARD_DEVICES[$((i - 1))]}"
+      log="$(mktemp "${TMPDIR:-/tmp}/agents-shard-$i.XXXXXX")"
+      gray "  shard $i/$SHARDS -> $dev"
+      ship_and_run "$dev" "--shard=$i/$SHARDS" > "$log" 2>&1 &
+      SHARD_PIDS+=("$!"); SHARD_LOGS+=("$log"); SHARD_NAMES+=("$dev")
+    done
+
+    # Wait for ALL shards before reporting, so one early failure does not hide
+    # the others -- the operator needs every failing shard, not the first.
+    failed=0
+    for ((i = 0; i < ${#SHARD_PIDS[@]}; i++)); do
+      if wait "${SHARD_PIDS[$i]}"; then
+        green "  shard $((i + 1))/$SHARDS passed on ${SHARD_NAMES[$i]}"
+      else
+        red   "  shard $((i + 1))/$SHARDS FAILED on ${SHARD_NAMES[$i]} (log: ${SHARD_LOGS[$i]})"
+        failed=1
+      fi
+    done
+    (( failed == 0 )) || die "$SHARDS-way shard run had failures; the logs above are the source of truth"
+    green "All $SHARDS shards passed."
     ;;
 
   crabbox)
