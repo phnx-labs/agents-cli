@@ -9,7 +9,11 @@ describe('provisionTraces', () => {
     const requests: Array<{ url: string; init: RequestInit }> = [];
     vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
       requests.push({ url, init });
-      const result = url.includes('/zones?') ? [{ id: 'zone_1' }] : {};
+      const result = url.endsWith('/workers/subdomain')
+        ? { subdomain: 'account-subdomain' }
+        : url.includes('/zones?')
+          ? [{ id: 'zone_1' }]
+          : {};
       return new Response(JSON.stringify({ success: true, result }), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -30,7 +34,8 @@ describe('provisionTraces', () => {
       'PUT /client/v4/accounts/acct_1/workers/scripts/agents-traces/secrets',
       'PUT /client/v4/accounts/acct_1/workers/scripts/agents-traces/secrets',
       'POST /client/v4/accounts/acct_1/workers/scripts/agents-traces/subdomain',
-      'GET /client/v4/zones?name=agents-cli.sh',
+      'GET /client/v4/accounts/acct_1/workers/subdomain',
+      'GET /client/v4/zones?name=traces.agents-cli.sh',
       'PUT /client/v4/accounts/acct_1/workers/domains',
     ]);
     expect(requests[0]?.init.headers).toEqual({
@@ -57,11 +62,31 @@ describe('provisionTraces', () => {
       type: 'secret_text',
     });
     expect(JSON.parse(requests[4]?.init.body as string)).toEqual({ enabled: true, previews_enabled: false });
-    expect(JSON.parse(requests[6]?.init.body as string)).toEqual({
+    expect(JSON.parse(requests[7]?.init.body as string)).toEqual({
       zone_id: 'zone_1',
       hostname: 'traces.agents-cli.sh',
       service: 'agents-traces',
       environment: 'production',
+    });
+  });
+
+  it('keeps the workers.dev endpoint when the custom-domain zone is not visible', async () => {
+    vi.stubGlobal('fetch', async (url: string) => {
+      const result = url.endsWith('/workers/subdomain') ? { subdomain: 'account-subdomain' } : [];
+      return new Response(JSON.stringify({ success: true, result }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    });
+
+    await expect(provisionTraces({
+      apiToken: 'cf-token',
+      accountId: 'acct_1',
+      workerName: 'agents-traces',
+      bucketName: 'agents-traces',
+      phoenixIdBase: 'https://identity.example.test',
+    })).resolves.toEqual({
+      baseUrl: 'https://agents-traces.account-subdomain.workers.dev',
     });
   });
 });
