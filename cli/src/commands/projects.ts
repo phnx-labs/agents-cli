@@ -549,6 +549,50 @@ function renderCard(
   if (!detail) console.log('');
 }
 
+/** Options shared by `status` and `view`. */
+export type ProjectCardOpts = {
+  json?: boolean;
+  window?: string;
+  remote?: boolean;
+  /** Scope the fleet fan-out to specific devices; undefined = the whole fleet. */
+  deviceFilter?: string[];
+};
+
+/**
+ * Merge `--device a b` (variadic) and `--devices a,b,c` (comma list) into one
+ * deduped device filter; undefined when neither was given (= whole fleet).
+ */
+export function resolveDeviceFilter(device?: string[], devices?: string): string[] | undefined {
+  const merged = [
+    ...(device ?? []),
+    ...(devices ? devices.split(',').map((s) => s.trim()).filter(Boolean) : []),
+  ];
+  return merged.length ? [...new Set(merged)] : undefined;
+}
+
+/** Print the YAML-side fields that sit under the shared card in `view` mode. */
+export function printProjectDefinition(def: ProjectDef, name: string): void {
+  console.log();
+  if (def.root) console.log(`  ${chalk.dim('root')}     ${def.root}`);
+  if (def.defaultPath) console.log(`  ${chalk.dim('path')}     ${def.defaultPath}`);
+  for (const rp of def.repos ?? []) {
+    const where = [rp.subpath ? `subpath ${rp.subpath}` : undefined, rp.path].filter(Boolean).join(' · ');
+    console.log(`  ${chalk.dim('repo')}     ${rp.slug}${where ? chalk.dim(`  (${where})`) : ''}`);
+  }
+  for (const g of def.goals ?? []) console.log(`  ${chalk.dim('goal')}     ${g.objective}${g.measure ? chalk.dim(`  · ${g.measure}`) : ''}`);
+  for (const c of def.contexts ?? []) console.log(`  ${chalk.dim('context')}  ${chalk.cyan(c.path)} ${chalk.dim('—')} ${c.purpose}`);
+  for (const ig of def.integrations ?? []) {
+    console.log(`  ${chalk.dim(ig.kind.padEnd(8))} ${ig.url}${ig.label ? chalk.dim(`  (${ig.label})`) : ''}`);
+  }
+  if (def.linear?.url || def.linear?.projectId || def.linear?.name) {
+    const ref = def.linear.url ?? def.linear.projectId;
+    const label = def.linear.name ? chalk.cyan(def.linear.name) : '';
+    console.log(`  ${chalk.dim('linear')}   ${[label, ref && chalk.dim(ref)].filter(Boolean).join('  ')}`);
+  }
+  for (const d of def.docs ?? []) console.log(`  ${chalk.dim('doc')}      ${d}`);
+  console.log(chalk.gray(`  ${projectDefPath(name)}`));
+}
+
 export function registerProjectsCommands(program: Command): void {
   const projects = program
     .command('projects')
@@ -567,7 +611,7 @@ export function registerProjectsCommands(program: Command): void {
       echo '{...}' | agents projects save --json  # create/update one def from stdin
       agents projects remove rush --json   # machine-readable removal
       agents projects status              # every project, across the whole fleet
-      agents projects status rush         # one project (same body as view/show)
+      agents projects status rush         # one project (same body as view)
       agents projects view rush           # alias of status <name>
       agents projects status --device s0  # scope to one device (or --devices a,b,c)
       agents projects link rush --linear  # bind the Linear project (auto-suggest)
@@ -707,57 +751,7 @@ export function registerProjectsCommands(program: Command): void {
       },
     );
 
-  // ---- status / view (one body; view is the named + definition mode) ----
-  //
-  // `status` and `view` are aliases of the same progress card. The only
-  // intentional deltas: `view` requires a name, prints every milestone, and
-  // appends the stored definition; `status` can roll every project and accepts
-  // `--fleet`. Both go through `runProjectCard` so a signal added for either
-  // surface cannot silently miss the other (the bug that made `view` thinner).
-  type ProjectCardOpts = {
-    json?: boolean;
-    window?: string;
-    remote?: boolean;
-    // Scope the fleet fan-out to specific devices; undefined = the whole fleet.
-    deviceFilter?: string[];
-  };
-
-  /** Merge `--device a b` (variadic) and `--devices a,b,c` (comma list) into one
-   *  deduped device filter; undefined when neither was given (= whole fleet). */
-  function resolveDeviceFilter(device?: string[], devices?: string): string[] | undefined {
-    const merged = [
-      ...(device ?? []),
-      ...(devices ? devices.split(',').map((s) => s.trim()).filter(Boolean) : []),
-    ];
-    return merged.length ? [...new Set(merged)] : undefined;
-  }
-
-  /** Print the YAML-side fields that sit under the shared card in `view` mode. */
-  function printProjectDefinition(def: ProjectDef, name: string): void {
-    console.log();
-    if (def.root) console.log(`  ${chalk.dim('root')}     ${def.root}`);
-    if (def.defaultPath) console.log(`  ${chalk.dim('path')}     ${def.defaultPath}`);
-    for (const rp of def.repos ?? []) {
-      const where = [rp.subpath ? `subpath ${rp.subpath}` : undefined, rp.path].filter(Boolean).join(' · ');
-      console.log(`  ${chalk.dim('repo')}     ${rp.slug}${where ? chalk.dim(`  (${where})`) : ''}`);
-    }
-    for (const g of def.goals ?? []) console.log(`  ${chalk.dim('goal')}     ${g.objective}${g.measure ? chalk.dim(`  · ${g.measure}`) : ''}`);
-    for (const c of def.contexts ?? []) console.log(`  ${chalk.dim('context')}  ${chalk.cyan(c.path)} ${chalk.dim('—')} ${c.purpose}`);
-    for (const ig of def.integrations ?? []) {
-      console.log(`  ${chalk.dim(ig.kind.padEnd(8))} ${ig.url}${ig.label ? chalk.dim(`  (${ig.label})`) : ''}`);
-    }
-    if (def.linear?.url || def.linear?.projectId || def.linear?.name) {
-      // Lead with the board's own name — the id/url answers "which project",
-      // but the name is what a reader (or an agent) calls the work.
-      const ref = def.linear.url ?? def.linear.projectId;
-      const label = def.linear.name ? chalk.cyan(def.linear.name) : '';
-      console.log(`  ${chalk.dim('linear')}   ${[label, ref && chalk.dim(ref)].filter(Boolean).join('  ')}`);
-    }
-    for (const d of def.docs ?? []) console.log(`  ${chalk.dim('doc')}      ${d}`);
-    console.log(chalk.gray(`  ${projectDefPath(name)}`));
-  }
-
-  async function runProjectCard(
+async function runProjectCard(
     name: string | undefined,
     opts: ProjectCardOpts,
     mode: 'status' | 'view',
@@ -902,8 +896,7 @@ export function registerProjectsCommands(program: Command): void {
   projects
     .command('status [name]')
     .alias('view')
-    .alias('show')
-    .description('Progress card for every project across the whole fleet, or one named project (aliases: view, show). Named form also prints every milestone and the stored definition.')
+    .description('Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition.')
     .option('--json', 'Machine-readable output')
     .option('--window <days>', 'Window for merged PRs, artifacts, and focus areas', '7')
     .option('--no-remote', 'Skip the GitHub and Linear lookups; faster, offline')
@@ -911,8 +904,8 @@ export function registerProjectsCommands(program: Command): void {
     .option('--devices <names>', 'Scope fleet status to a comma-separated list of devices')
     .action(async (name: string | undefined, rawOpts: ProjectCardOpts & { device?: string[]; devices?: string }) => {
       // Named invocation = `view` depth (all milestones + definition). Unnamed
-      // stays the scannable multi-project rollup. `view`/`show` are commander
-      // aliases of this same command, so there is only one implementation.
+      // stays the scannable multi-project rollup. `view` is a commander alias
+      // of this same command, so there is only one implementation.
       // Fleet is dialled by default; --device/--devices narrows it to a subset.
       const opts: ProjectCardOpts = {
         json: rawOpts.json,
@@ -946,7 +939,6 @@ export function registerProjectsCommands(program: Command): void {
   projects
     .command('probe [paths...]', { hidden: true })
     .description('Probe workspace repos (presence, branch, drift, dirtiness) and print JSON. Answers for this machine only.')
-    .option('--json', 'Machine-readable output (the only output format)')
     .action((paths: string[]) => {
       // Never fans out — the recursion guard env is set by the parent fan-out,
       // and this command has no remote code path either way.
@@ -958,7 +950,6 @@ export function registerProjectsCommands(program: Command): void {
     .command('pull-local', { hidden: true })
     .description('Fast-forward workspace repos (default-branch only) and print JSON. Answers for this machine only.')
     .requiredOption('--targets <json>', 'JSON array of {path, expectedSlug} targets, from the orchestrating `pull`')
-    .option('--json', 'Machine-readable output (the only output format)')
     .action(async (opts: { targets: string }) => {
       // Never fans out — this is the peer half of the fleet fan-out.
       //
@@ -1308,19 +1299,17 @@ export function registerProjectsCommands(program: Command): void {
         }
         process.exit(1);
       }
-      if (removeProjectDef(name)) {
-        if (opts.json) {
-          console.log(JSON.stringify({ ok: true, name, removed: true }));
-        } else {
-          console.log(chalk.green(`Removed project "${name}"`));
-        }
+      const removed = removeProjectDef(name);
+      if (opts.json) {
+        console.log(JSON.stringify(removed
+          ? { ok: true, name, removed: true }
+          : { ok: false, name, error: `No project named "${name}"` }
+        ));
+      } else if (removed) {
+        console.log(chalk.green(`Removed project "${name}"`));
       } else {
-        if (opts.json) {
-          console.log(JSON.stringify({ ok: false, name, error: `No project named "${name}"` }));
-        } else {
-          console.error(chalk.red(`No project named "${name}".`));
-        }
-        process.exit(1);
+        console.error(chalk.red(`No project named "${name}".`));
       }
+      if (!removed) process.exit(1);
     });
 }

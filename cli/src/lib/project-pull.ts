@@ -111,7 +111,7 @@ export function encodePullTargets(targets: ProjectRepoTarget[]): string {
  * test can exercise the real caller-side arguments rather than a retyped copy.
  */
 export function pullLocalArgs(targets: ProjectRepoTarget[]): string[] {
-  return ['projects', 'pull-local', '--json', '--targets', encodePullTargets(targets)];
+  return ['projects', 'pull-local', '--targets', encodePullTargets(targets)];
 }
 
 /**
