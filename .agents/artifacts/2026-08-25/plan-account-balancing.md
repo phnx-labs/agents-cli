@@ -35,9 +35,14 @@ Seven decisions carry this change. Everything else follows from them.
    `email`/UUID fields today (`apps/cli/src/lib/account-registry.ts:29-38`). A
    setup-token is opaque, so we capture identity from the `auth` bundle key slug
    plus a `user:profile` fetch when the scope is present.
-4. **Worker homes should not hold native refresh tokens.** The two accounts that
-   currently balance on the workers are shared native logins — the documented
-   rotation hazard. The setup-token path removes it.
+4. **Workers use setup-tokens, never per-device logins.** You log in once per account
+   on your personal box, mint a `claude setup-token` (long-lived, non-rotating), store it
+   in the shared `auth` bundle, and sync it to every device — **8 mints total, not 8×11
+   logins**. Verified on m1: `muqsit@getrush.ai` already works this way (no credential
+   file, setup-token only). The bug is only that a home needs its `oauthAccount` seeded to
+   be visible. A **stray** real `.credentials.json` (a rotating refresh token — the
+   revocation hazard) was found on m1's `muqsitnawaz@icloud.com` home; the migration
+   removes it and re-seeds it as a setup-token account.
 5. **The balanceable unit is a (harness, account) binding, not a version home.** An
    account is a credential identity (OAuth / long-lived token / API-key); one account
    can bind to several harnesses (an OpenRouter key runs Codex and Claude); `label`
@@ -301,8 +306,8 @@ Attached claude-social to claude@2.1.222.      # success message...
 
 $ agents view claude --device yosemite-m1
   Claude (balanced)
-    2.1.207  muqsit@getrush.ai       Max   native login (shared token)
-    2.1.187  muqsitnawaz@icloud.com  Max   native login (shared token)
+    2.1.207  muqsit@getrush.ai       Max   setup-token (correct)
+    2.1.187  muqsitnawaz@icloud.com  Max   stray real login (to migrate)
     2.1.222  (logged out - log in with: claude)   attached, still dead
     2.1.220  (logged out - log in with: claude)   attached, still dead
     2.1.219  (logged out - log in with: claude)   attached, still dead
@@ -575,7 +580,7 @@ for i in $(seq 1 8); do agents run claude "hi" --strategy balanced --mode plan \
 | --- | --- |
 | Setup-token lacks `user:profile` scope (RUSH-2392) | Email from bundle key still gives signed-in + runnable; UUID backfilled from the usage fetch when available. Usage weighting degrades to fallback, never to "excluded." |
 | Overwriting a real native `oauthAccount` on seed | Seed only when the home has no native `oauthAccount`, or the account matches; never clobber a live native login. |
-| Shared native refresh tokens on workers | Convert worker homes to identity-seed + shared setup-token; strip native `.credentials.json` on workers only (never s1/zion). |
+| A stray real `.credentials.json` on a worker (rotating refresh token — verified on m1 icloud) | The migration seeds `oauthAccount` from the shared setup-token and strips the stray credential on worker homes only (never a personal box like zion). Not a manual per-device sweep — the feature does it. |
 | Layer 2 changes the hot routing path | Ship Layer 1 first; Layer 2 behind the same `collectRunCandidates` tests, verified on a worker before release. |
 | Worktree law / release | Land via `.agents/worktrees/` + PR; release through `apps/cli/scripts/release.sh`, never a hand-rolled build. |
 
