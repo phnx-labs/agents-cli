@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 561,
+  "commands": 562,
   "root": {
     "name": "agents",
     "path": "",
@@ -28954,6 +28954,85 @@
             }
           ],
           "examples": "$ agents traces open\n  Open the Phoenix Evals console for your account.",
+          "subcommands": []
+        },
+        {
+          "name": "setup",
+          "path": "traces setup",
+          "aliases": [],
+          "description": "Provision the private Cloudflare Worker and R2 bucket for traces",
+          "args": [],
+          "options": [
+            {
+              "flags": "--bundle <name>",
+              "description": "secrets bundle holding the Cloudflare API token",
+              "long": "--bundle",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "cloudflare"
+            },
+            {
+              "flags": "--worker <name>",
+              "description": "Worker name",
+              "long": "--worker",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "agents-traces"
+            },
+            {
+              "flags": "--bucket <name>",
+              "description": "R2 bucket name",
+              "long": "--bucket",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "agents-traces"
+            },
+            {
+              "flags": "--account <id>",
+              "description": "Cloudflare account id (else read from the bundle / prompt)",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token <token>",
+              "description": "Cloudflare API token (else read from the --bundle)",
+              "long": "--token",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--domain <host>",
+              "description": "custom domain to map",
+              "long": "--domain",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "traces.agents-cli.sh"
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "$ agents traces setup\n  Provision the private agents-traces Worker, R2 bucket, and managed domain.\n\n  $ agents traces setup --account <id> --token <token>\n  Provision non-interactively with explicit Cloudflare credentials.",
           "subcommands": []
         },
         {
