@@ -1167,9 +1167,14 @@ export function setIsolatedDefault(agent: AgentId, version: string | undefined):
 /**
  * Move any `grok-<installedVersion>-...` binary (and its generic platform
  * copy) found directly under `sourceDownloads` into `targetDownloads`.
- * Returns true if the versioned binary was moved.
+ * Returns true if the versioned binary was transferred.
  */
-function tryMoveGrokDownloads(sourceDownloads: string, targetDownloads: string, installedVersion: string): boolean {
+function transferGrokDownloads(
+  sourceDownloads: string,
+  targetDownloads: string,
+  installedVersion: string,
+  copy: boolean,
+): boolean {
   if (!fs.existsSync(sourceDownloads)) return false;
   if (path.resolve(sourceDownloads) === path.resolve(targetDownloads)) return false;
 
@@ -1189,7 +1194,8 @@ function tryMoveGrokDownloads(sourceDownloads: string, targetDownloads: string, 
     if (fs.existsSync(dst)) continue;
     try {
       fs.mkdirSync(targetDownloads, { recursive: true });
-      fs.renameSync(src, dst);
+      if (copy) fs.copyFileSync(src, dst);
+      else fs.renameSync(src, dst);
       movedPaths.push(dst);
     } catch {
       /* ignore per-file failures */
@@ -1208,7 +1214,8 @@ function tryMoveGrokDownloads(sourceDownloads: string, targetDownloads: string, 
     if (fs.existsSync(dst)) continue;
     try {
       if (fs.statSync(src).size === movedSize) {
-        fs.renameSync(src, dst);
+        if (copy) fs.copyFileSync(src, dst);
+        else fs.renameSync(src, dst);
       }
     } catch {
       /* ignore per-file failures */
@@ -1231,7 +1238,11 @@ function tryMoveGrokDownloads(sourceDownloads: string, targetDownloads: string, 
  * whatever version was default at the time), sweep every other installed
  * grok version home for the missing file before giving up.
  */
-function relocateGrokBinaryToVersionHome(installedVersion: string): void {
+function relocateGrokBinaryToVersionHome(
+  installationLabel: string,
+  releaseVersion: string,
+  copyExisting: boolean,
+): void {
   const hostGrokLink = path.join(getHomeDir(), agentConfigDirName('grok'));
   let sourceDownloads: string;
   try {
@@ -1240,18 +1251,18 @@ function relocateGrokBinaryToVersionHome(installedVersion: string): void {
     sourceDownloads = path.join(hostGrokLink, 'downloads');
   }
   const targetDownloads = path.join(
-    getVersionHomePath('grok', installedVersion),
+    getVersionHomePath('grok', installationLabel),
     agentConfigDirName('grok'),
     'downloads'
   );
 
-  if (tryMoveGrokDownloads(sourceDownloads, targetDownloads, installedVersion)) return;
+  if (transferGrokDownloads(sourceDownloads, targetDownloads, releaseVersion, copyExisting)) return;
 
   for (const version of listInstalledVersions('grok')) {
-    if (version === installedVersion) continue;
+    if (version === installationLabel) continue;
     const candidate = path.join(getVersionHomePath('grok', version), agentConfigDirName('grok'), 'downloads');
     if (path.resolve(candidate) === path.resolve(sourceDownloads)) continue; // already tried
-    if (tryMoveGrokDownloads(candidate, targetDownloads, installedVersion)) return;
+    if (transferGrokDownloads(candidate, targetDownloads, releaseVersion, copyExisting)) return;
   }
 }
 
@@ -1300,6 +1311,7 @@ export async function installVersion(
   opts?: { clean?: boolean }
 ): Promise<{ success: boolean; installedVersion: string; error?: string }> {
   const agentConfig = AGENTS[agent];
+  const requestedLabel = version;
 
   if (isAgentHardDeprecated(agent)) {
     return { success: false, installedVersion: version, error: hardDeprecationError(agent) };
@@ -1335,7 +1347,7 @@ export async function installVersion(
       version = 'latest';
     }
 
-    let installedVersion = version;
+    let releaseVersion = version;
     try {
       if (runInstaller) {
         const script = agentConfig.installScript.replaceAll('VERSION', version);
@@ -1365,14 +1377,21 @@ export async function installVersion(
             error: `${agentConfig.name} installed but its version could not be determined after several attempts.`,
           };
         }
-        installedVersion = probed;
+        releaseVersion = probed;
         // Fold any stale literal `latest` dir from an earlier probe-failed
         // install into the real version so it stops shadowing `agents view`.
-        await reconcileStaleLatestDir(agent, installedVersion);
+        await reconcileStaleLatestDir(agent, releaseVersion);
       }
 
+      // Self-updating installers always fetch the current vendor release, but a
+      // concrete requested token is still the stable installation/account slot.
+      // Keeping the two strings separate lets several homes carry the same
+      // release without sharing credentials. `latest` remains the convenient
+      // release-named slot; concrete tokens remain exactly addressable.
+      const installationLabel = requestedLabel === 'latest' ? releaseVersion : requestedLabel;
+
       if (agent === 'grok') {
-        await checkGrokAccountCollision(installedVersion);
+        await checkGrokAccountCollision(installationLabel);
       }
 
       onProgress?.(`${agentConfig.name} installed. Setting up agents-cli version home for isolation...`);
@@ -1382,7 +1401,8 @@ export async function installVersion(
     }
 
     ensureAgentsDir();
-    const versionDir = getVersionDir(agent, installedVersion);
+    const installationLabel = requestedLabel === 'latest' ? releaseVersion : requestedLabel;
+    const versionDir = getVersionDir(agent, installationLabel);
     fs.mkdirSync(versionDir, { recursive: true });
     fs.mkdirSync(path.join(versionDir, 'home'), { recursive: true });
 
@@ -1390,7 +1410,7 @@ export async function installVersion(
     // resolves to the PREVIOUS default home. Move it into the target version home
     // so version isolation is correct.
     if (agent === 'grok') {
-      relocateGrokBinaryToVersionHome(installedVersion);
+      relocateGrokBinaryToVersionHome(installationLabel, releaseVersion, !runInstaller);
     }
 
     // Symlink the installed binary into the version's node_modules/.bin so
@@ -1418,7 +1438,7 @@ export async function installVersion(
       if (installedBinary) {
         importInstallScriptBinary(
           { agentId: agent, npmPackage: agentConfig.npmPackage, cliCommand: agentConfig.cliCommand },
-          installedVersion,
+          installationLabel,
           installedBinary,
           versionDir
         );
@@ -1428,20 +1448,20 @@ export async function installVersion(
          correctly reports it uninstalled. */
     }
 
-    createVersionedAlias(agent, installedVersion);
+    createVersionedAlias(agent, installationLabel);
     // Freeze this installation's identity. The dir name is its stable label from
     // here on; the release it carries is recorded separately so `agents update`
     // can move the release without invalidating any reference to the label.
-    createInstallation(agent, installedVersion, installedVersion);
-    const trackerInstall = await installSessionTrackerHook(agent, installedVersion);
+    createInstallation(agent, installationLabel, releaseVersion);
+    const trackerInstall = await installSessionTrackerHook(agent, installationLabel);
     if (!trackerInstall.installed && trackerInstall.error) {
-      console.warn(`agents: SessionStart hook not installed for ${agent}@${installedVersion}: ${trackerInstall.error}`);
+      console.warn(`agents: SessionStart hook not installed for ${agent}@${installationLabel}: ${trackerInstall.error}`);
     }
     // The self-updating binary just changed on disk — drop the cached
     // `--version` so `agents view` reflects the freshly-installed release.
     invalidateLiveVersionCache(agent);
-    emit('version.install', { agent, version: installedVersion });
-    return { success: true, installedVersion };
+    emit('version.install', { agent, version: installationLabel });
+    return { success: true, installedVersion: installationLabel };
   }
 
   // Resolve the `latest`/`oldest` aliases to a concrete npm version up front so

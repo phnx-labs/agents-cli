@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Self-updating Cursor and Grok installs keep account slots separate from vendor releases (PHNX-3250).** A concrete `agents add <agent>@<label>` now preserves that label as the stable version-home identity while recording the current self-updated binary in `installation.json.releaseVersion`. Multiple homes can therefore carry the same current release without sharing credentials, and `remove --isolated` can no longer target a normal install merely because both report the same vendor version.
+
 - **`agents sync <agent> system` now reconciles system-layer plugins (RUSH-3207).**
   `resourceSourceMap` hardcoded every plugin's source layer to `'user'`, so a
   `system:*` selection expanded to zero plugins and a `system`-scoped sync silently

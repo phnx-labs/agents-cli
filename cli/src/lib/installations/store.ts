@@ -280,15 +280,18 @@ export function getBinaryPath(agent: AgentId, version: string): string {
   const agentConfig = AGENTS[agent];
   if (agent === 'grok') {
     const grokDownloads = path.join(getVersionHomePath(agent, version), '.grok', 'downloads');
-    // Best effort: first matching file for this version
+    // The directory token is the stable installation/account label. A
+    // self-updating slot may carry a newer vendor release, whose binary keeps
+    // the release in its filename; resolve through the frozen install record.
+    const releaseVersion = readInstallation(agent, version)?.releaseVersion ?? version;
     try {
       const entries = fs.readdirSync(grokDownloads);
-      const match = entries.find((e: string) => e.includes(version) && e.startsWith('grok-'));
+      const match = entries.find((e: string) => e.includes(releaseVersion) && e.startsWith('grok-'));
       if (match) return path.join(grokDownloads, match);
     } catch {}
     const fallback = resolveGrokFallbackBinary(grokDownloads);
     if (fallback) return fallback;
-    return path.join(grokDownloads, `grok-${version}`);
+    return path.join(grokDownloads, `grok-${releaseVersion}`);
   }
   if (agent === 'droid') {
     // Factory.ai's installer drops a standalone native binary (no npm package,

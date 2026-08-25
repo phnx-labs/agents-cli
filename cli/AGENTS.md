@@ -200,6 +200,15 @@ stale dirs into the survivor, `agents view` shows the live `--version`, and
 grok is self-updating but stores a real per-version binary under each version-home, so
 it is NOT a global-binary agent and is left uncollapsed. (RUSH-1321)
 
+For a concrete self-updating spec, the requested token is the stable installation
+label/account slot even when the vendor installer can only fetch today's release.
+`installation.json.releaseVersion` records the probed vendor release separately.
+This identity/release split is load-bearing: two Cursor or Grok homes may carry the
+same current release while retaining different native credentials, and removing an
+isolated label must never target a normal installation merely because their releases
+match. `@latest` keeps the probed release as its convenient label; concrete labels stay
+exactly addressable.
+
 ### 10. Diagnostic command taxonomy — `doctor` is the umbrella (RUSH-2027)
 
 Three diagnostics, distinct scopes. Don't blur them — each answers a different

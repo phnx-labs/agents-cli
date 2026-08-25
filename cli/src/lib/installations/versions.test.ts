@@ -914,7 +914,7 @@ describe('installVersion version validation', () => {
     expect(fs.existsSync(path.join(home, '.agents', '.history', 'versions', 'gemini'))).toBe(false);
   });
 
-  it.skipIf(process.platform === 'win32')('gracefully redirects a pinned self-updating install to the current release (RUSH-1321)', () => {
+  it.skipIf(process.platform === 'win32')('keeps a pinned self-updating install as a stable label while recording the current release', () => {
     const home = makeTempHome();
     // A valid version passes VERSION_RE. `kiro` is self-updating (brew, no
     // VERSION token). A `kiro-cli` on PATH makes the single binary read as
@@ -931,7 +931,13 @@ describe('installVersion version validation', () => {
     expect(outcome.ok).toBe(true);
     const result = outcome.result;
     expect(result?.success).toBe(true);
-    expect(result?.installedVersion).toBe('2.12.1'); // the live version, not the ignored pin
+    expect(result?.installedVersion).toBe('0.0.0-rc.1');
+    const record = JSON.parse(fs.readFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'kiro', '0.0.0-rc.1', 'installation.json'),
+      'utf-8',
+    ));
+    expect(record.label).toBe('0.0.0-rc.1');
+    expect(record.releaseVersion).toBe('2.12.1');
     expect(result?.error ?? '').not.toContain('Invalid version');
     expect(result?.error ?? '').not.toContain('does not support version-pinned installs');
   });
@@ -979,7 +985,7 @@ function runInstallVersionWithScript(
 }
 
 describe('installVersion Grok binary relocation', () => {
-  it.skipIf(process.platform === 'win32')('moves the installer-dropped binary from the previous default home into the target version home', () => {
+  it.skipIf(process.platform === 'win32')('moves the current binary into the requested account-slot label and records its release', () => {
     const home = makeTempHome();
     const oldConfigDir = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.32', 'home', '.grok');
     const hostGrok = path.join(home, '.grok');
@@ -994,6 +1000,14 @@ describe('installVersion Grok binary relocation', () => {
     fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 0.2.101"; exit 0; fi\nexit 0\n', 'utf-8');
     fs.chmodSync(stub, 0o755);
 
+    // A concrete self-updating slot reuses the already-installed live release
+    // instead of rerunning the vendor installer. Seed the previous active
+    // home's real download exactly as that live installation would.
+    const existingVersioned = path.join(oldConfigDir, 'downloads', 'grok-0.2.101-macos-aarch64');
+    fs.writeFileSync(existingVersioned, '#!/bin/sh\nexit 0\n', 'utf-8');
+    fs.chmodSync(existingVersioned, 0o755);
+    fs.copyFileSync(existingVersioned, path.join(oldConfigDir, 'downloads', 'grok-macos-aarch64'));
+
     const script = [
       'mkdir -p ~/.grok/downloads',
       'printf \'#!/bin/sh\\nif [ "$1" = "--version" ]; then echo "grok 0.2.101"; exit 0; fi\\nexit 0\\n\' > ~/.grok/downloads/grok-0.2.101-macos-aarch64',
@@ -1001,17 +1015,25 @@ describe('installVersion Grok binary relocation', () => {
       'cp ~/.grok/downloads/grok-0.2.101-macos-aarch64 ~/.grok/downloads/grok-macos-aarch64',
     ].join(' && ');
 
-    const outcome = runInstallVersionWithScript(home, 'grok', 'latest', script, binDir);
+    const outcome = runInstallVersionWithScript(home, 'grok', '0.2.77', script, binDir);
     expect(outcome.ok).toBe(true);
     expect(outcome.result?.success).toBe(true);
-    expect(outcome.result?.installedVersion).toBe('0.2.101');
+    expect(outcome.result?.installedVersion).toBe('0.2.77');
 
-    const targetDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.101', 'home', '.grok', 'downloads');
+    const targetDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.77', 'home', '.grok', 'downloads');
     expect(fs.existsSync(path.join(targetDownloads, 'grok-0.2.101-macos-aarch64'))).toBe(true);
     expect(fs.existsSync(path.join(targetDownloads, 'grok-macos-aarch64'))).toBe(true);
+    expect(fs.existsSync(existingVersioned)).toBe(true);
+
+    const record = JSON.parse(fs.readFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.77', 'installation.json'),
+      'utf-8',
+    ));
+    expect(record.label).toBe('0.2.77');
+    expect(record.releaseVersion).toBe('0.2.101');
 
     const result = runVersionSync(home, "listInstalledVersions('grok')") as string[];
-    expect(result).toContain('0.2.101');
+    expect(result).toContain('0.2.77');
   });
 
   it.skipIf(process.platform === 'win32')('fails loudly instead of creating a literal "latest" version dir when the post-install version probe never resolves (regression)', () => {
