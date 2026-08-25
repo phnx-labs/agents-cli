@@ -735,14 +735,18 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 |---|---|---|
 | Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
 | CI / tests (Linux) | an **auto-picked fleet worker** | [`scripts/test.sh`](scripts/test.sh) resolves it through `agents devices pick` — the least-loaded reachable POSIX box in the same auto pool `agents run --device auto` uses, so `role=worker`/`role=personal` marks govern it. `--test-device <box>` pins one; `--crabbox` still routes to a disposable [`sandbox.sh`](scripts/sandbox.sh) workspace. **Dynamic either way, never a hardcoded or release-exclusive instance** |
-| Promote attested tgz + npm publish + computer-helper re-attach | the **home base** (any OS — promote-only, RUSH-3026) | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
+| Promote attested tgz + npm publish (+ computer-helper re-attach **only with `--with-helpers`**) | the **home base** (any OS — promote-only, RUSH-3026) | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
 The home base holds the npm publish token + gh auth. It defaults to `mac-mini`
 and is overridable with **`--device <name>`**. Not an env var: a flag with a
 default. Since RUSH-3026 the home-base phase is **promote-only** (download the
-attested tarball, verify, install-smoke, `npm publish`, re-attach the reused
-helper zip) — nothing on it signs or notarizes, so **any OS works as the home
-base**, Linux included. `assert_promote_home_base` preflights it (tools + gh
+attested tarball, verify, install-smoke, `npm publish`) — nothing on it signs or
+notarizes, so **any OS works as the home base**, Linux included. Re-attaching the
+reused helper zip and verifying the helper input-digest manifest are **opt-in**
+(`--with-helpers`): an ordinary release publishes the CLI and nothing else, since
+helpers resolve from their own tags
+([`src/lib/helper-versions.ts`](src/lib/helper-versions.ts)) and a manifest check
+would otherwise abort a good CLI release whenever a helper's sources moved. `assert_promote_home_base` preflights it (tools + gh
 auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
 first mutation. Helper signing is a separate, source-change-only path and still
 needs a provisioned Mac. The test worker is **not** hardcoded.

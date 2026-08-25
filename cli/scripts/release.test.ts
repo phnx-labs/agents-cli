@@ -72,11 +72,18 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
   /**
    * True when `needle` sits INSIDE an open `if [[ "$WITH_HELPERS" == true ]]`.
    *
-   * The first version of this helper just grabbed the nearest preceding
-   * WITH_HELPERS conditional — which passes even when the needle's own gate is
-   * removed, because an EARLIER block's `if` is still behind it. Verified by
-   * mutation: replacing this needle's gate with `if true;` left the test green.
-   * So the check also requires no `fi` closing that block before the needle.
+   * Two earlier versions were defeated, both caught by mutation rather than by
+   * reading:
+   *   1. "nearest preceding WITH_HELPERS conditional" — passed even when the
+   *      needle's own gate was deleted, because an EARLIER block's `if` remained.
+   *   2. "no `\n  fi` between" — depended on the closing `fi` being indented
+   *      exactly two spaces, so reindenting an unrelated earlier gate's `fi` by
+   *      one space made a fully un-gated needle read as gated.
+   *
+   * Both failures came from pattern-matching text. This counts BLOCK DEPTH
+   * instead: walk from the gate to the needle and track opens (`if`/`for`/`while`
+   * /`case`) against closes (`fi`/`done`/`esac`). The needle is gated only if the
+   * gate's own block never closed. Indentation is irrelevant.
    */
   const isGated = (needle: string): boolean => {
     const at = RELEASE_SH.indexOf(needle);
@@ -84,10 +91,14 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
     const before = RELEASE_SH.slice(0, at);
     const gate = before.lastIndexOf('if [[ "$WITH_HELPERS" == true ]]');
     if (gate === -1) return false;
-    // Anything between the gate and the needle that closes a block at the gate's
-    // own indent means the needle is outside it.
-    const between = before.slice(gate);
-    return !/\n  fi\b/.test(between) && !/\n  else\b/.test(between);
+    let depth = 1; // the gate's own `if`
+    for (const raw of before.slice(gate).split('\n').slice(1)) {
+      const line = raw.trim();
+      if (/^(if|for|while|case)\b/.test(line)) depth += 1;
+      else if (/^(fi|done|esac)\b/.test(line)) depth -= 1;
+      if (depth === 0) return false; // the gate closed before the needle
+    }
+    return depth > 0;
   };
 
   it('stages the computer-mac asset only under --with-helpers', () => {
