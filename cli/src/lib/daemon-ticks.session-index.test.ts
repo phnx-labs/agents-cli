@@ -130,6 +130,7 @@ describe('runSessionIndexWarmTick (RUSH-2682, RUSH-2691)', () => {
       topic: 'index me',
       status: 'running',
     };
+    sessionCache.noteActiveSessionsJournalReader();
     await runActiveSessionsWarmTick({ gather: async () => [raw] });
 
     const published = sessionCache.readActiveSessionsCache('local')?.sessions.find((row) => row.sessionId === id);
