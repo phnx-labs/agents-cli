@@ -1251,6 +1251,7 @@ agents artifacts share plan.html --visibility unlisted      # → https://share.
 
 # Or provision your own Cloudflare R2 (~$0).
 agents artifacts setup                                      # once: provision bucket + Worker on your CF
+agents traces setup                                         # provision the private traces Worker + R2 bucket
 agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>/fleet
 agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # human title + structured metadata
 agents artifacts share plan.html --json                     # URL object for plan-render hooks

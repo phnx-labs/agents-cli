@@ -5,6 +5,11 @@ import { syncTraces } from '../lib/traces/sync.js';
 import { readSyncLedger } from '../lib/traces/sync.js';
 import { managedTracesBaseUrl, resolveTracesBackend } from '../lib/traces/backend.js';
 import { showUrl } from '../lib/open-url.js';
+import { DEFAULT_CF_BUNDLE, readCloudflareCreds } from '../lib/share/config.js';
+import { PHOENIX_ID_BASE } from '../lib/identity/client.js';
+import { DEFAULT_BUCKET_NAME, DEFAULT_WORKER_NAME } from '../lib/traces/config.js';
+import { DEFAULT_TRACES_DOMAIN } from '../lib/traces/backend.js';
+import { provisionTraces } from '../lib/traces/provision.js';
 
 // ---------------------------------------------------------------------------
 // Help text
@@ -37,6 +42,14 @@ const STATUS_EXAMPLES = `
 const OPEN_EXAMPLES = `
   $ agents traces open
   Open the Phoenix Evals console for your account.
+`.trimStart();
+
+const SETUP_EXAMPLES = `
+  $ agents traces setup
+  Provision the private agents-traces Worker, R2 bucket, and managed domain.
+
+  $ agents traces setup --account <id> --token <token>
+  Provision non-interactively with explicit Cloudflare credentials.
 `.trimStart();
 
 // ---------------------------------------------------------------------------
@@ -106,6 +119,35 @@ async function handleOpen(): Promise<void> {
   }
 }
 
+interface SetupOptions {
+  bundle: string;
+  worker: string;
+  bucket: string;
+  account?: string;
+  token?: string;
+  domain: string;
+}
+
+async function handleSetup(opts: SetupOptions): Promise<void> {
+  const { input } = await import('@inquirer/prompts');
+  const { apiToken, accountId: bundledAccountId } = readCloudflareCreds(opts.bundle, {
+    apiToken: opts.token,
+    accountId: opts.account,
+  });
+  const accountId = opts.account ?? bundledAccountId ?? await input({ message: 'Cloudflare account id' });
+  if (!accountId) throw new Error('A Cloudflare account id is required.');
+
+  const result = await provisionTraces({
+    apiToken,
+    accountId,
+    workerName: opts.worker,
+    bucketName: opts.bucket,
+    domain: opts.domain,
+    phoenixIdBase: PHOENIX_ID_BASE,
+  });
+  console.log(chalk.green(`Traces endpoint ready → ${chalk.bold(result.baseUrl)}`));
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
@@ -114,6 +156,26 @@ export function registerTracesCommands(program: Command): void {
   const tracesCmd = program
     .command('traces')
     .description("Sync this device's derived, redacted trajectories to your Phoenix account");
+
+  const setupCmd = tracesCmd
+    .command('setup')
+    .description('Provision the private Cloudflare Worker and R2 bucket for traces')
+    .option('--bundle <name>', 'secrets bundle holding the Cloudflare API token', DEFAULT_CF_BUNDLE)
+    .option('--worker <name>', 'Worker name', DEFAULT_WORKER_NAME)
+    .option('--bucket <name>', 'R2 bucket name', DEFAULT_BUCKET_NAME)
+    .option('--account <id>', 'Cloudflare account id (else read from the bundle / prompt)')
+    .option('--token <token>', 'Cloudflare API token (else read from the --bundle)')
+    .option('--domain <host>', 'custom domain to map', DEFAULT_TRACES_DOMAIN)
+    .action(async (opts: SetupOptions) => {
+      try {
+        await handleSetup(opts);
+      } catch (err) {
+        console.error(chalk.red((err as Error).message));
+        process.exitCode = 1;
+      }
+    });
+
+  setHelpSections(setupCmd, { examples: SETUP_EXAMPLES });
 
   // sync
   const syncCmd = tracesCmd
