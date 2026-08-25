@@ -210,10 +210,55 @@ describeDaemon('agents daemon', () => {
     const res = run(makeHome(), ['services', '--json']);
     expect(res.status).toBe(0);
     const payload = JSON.parse(res.stdout);
+    // Pinned: existing agents/CI consumers read these two fields directly —
+    // RUSH-3193 P4 must only ADD a `services` array alongside them.
     expect(payload.secretsBroker.reachable).toBe(false);
     expect(typeof payload.secretsBroker.socketPath).toBe('string');
     expect(payload.browserIpc.bound).toBe(false);
     expect(typeof payload.browserIpc.socketPath).toBe('string');
+  });
+
+  it('services --json additionally reports every registered service with health, live or inferred', () => {
+    const res = run(makeHome(), ['services', '--json']);
+    expect(res.status).toBe(0);
+    const payload = JSON.parse(res.stdout) as {
+      secretsBroker: unknown;
+      browserIpc: unknown;
+      services: Array<{ id: string; enabled: boolean; state: string; supervised: boolean; consecutiveFailures: number }>;
+    };
+    // Old fields still present (pinned above), new field additive.
+    expect(payload.secretsBroker).toBeDefined();
+    expect(payload.browserIpc).toBeDefined();
+    expect(Array.isArray(payload.services)).toBe(true);
+    // No daemon has ever run in this HOME, so every service is "stopped" and
+    // none has a real supervisor-reported state yet.
+    expect(payload.services.length).toBe(12); // DAEMON_SERVICE_IDS.length (daemon-services.ts)
+    const sessionIndex = payload.services.find((s) => s.id === 'session-index');
+    expect(sessionIndex).toBeDefined();
+    expect(sessionIndex!.enabled).toBe(true);
+    expect(sessionIndex!.state).toBe('stopped');
+    expect(sessionIndex!.supervised).toBe(false);
+    expect(sessionIndex!.consecutiveFailures).toBe(0);
+  });
+
+  it('services (no --json) renders a state column for every registered service', () => {
+    const res = run(makeHome(), ['services']);
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('Daemon services');
+    expect(res.stdout).toContain('session-index');
+    expect(res.stdout).toContain('secrets-broker');
+    expect(res.stdout).toContain('Hosted sockets');
+  });
+
+  it('services restart rejects an unknown service id and a not-running daemon', () => {
+    const home = makeHome();
+    const unknown = run(home, ['services', 'restart', 'not-a-service']);
+    expect(unknown.status).toBe(1);
+    expect(unknown.stderr + unknown.stdout).toContain("Unknown service 'not-a-service'");
+
+    const notRunning = run(home, ['services', 'restart', 'session-index']);
+    expect(notRunning.status).toBe(1);
+    expect(notRunning.stdout).toContain('Daemon is not running');
   });
 
   /** Run `agents secrets <args>` against an isolated HOME. */

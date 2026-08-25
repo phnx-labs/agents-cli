@@ -189,3 +189,50 @@ export function listDaemonServiceStates(): Array<DaemonServiceDef & { enabled: b
   const cfg = readDaemonServicesConfig();
   return DAEMON_SERVICES.map((s) => ({ ...s, enabled: cfg.services[s.id] !== false }));
 }
+
+/**
+ * A tiny cross-process action queue for `agents daemon services restart <id>`
+ * (RUSH-3193 P4) — SIGHUP can only signal "reload", it carries no payload, so a
+ * restart request is dropped here first and the daemon's reload handler drains
+ * it. Same file-backed pattern as `services.yaml` above, for the same reason:
+ * the CLI invocation and the daemon are separate processes.
+ */
+function getDaemonServiceActionsPath(): string {
+  return path.join(getDaemonConfigDir(), 'service-actions.json');
+}
+
+/** Queue a live restart for `id`, to be picked up on the next SIGHUP reload. */
+export function queueDaemonServiceRestart(id: DaemonServiceId): void {
+  const filePath = getDaemonServiceActionsPath();
+  let ids: string[] = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as { restart?: string[] };
+    if (Array.isArray(parsed.restart)) ids = parsed.restart;
+  } catch {
+    // Missing or corrupt -> start a fresh queue.
+  }
+  if (!ids.includes(id)) ids.push(id);
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  atomicWriteFileSync(filePath, JSON.stringify({ restart: ids }), 'utf-8');
+}
+
+/**
+ * Drain every queued restart request. Called once per SIGHUP reload by the
+ * daemon; never throws. Clears the file so a request is applied at most once.
+ */
+export function drainDaemonServiceRestartQueue(): DaemonServiceId[] {
+  const filePath = getDaemonServiceActionsPath();
+  let ids: DaemonServiceId[] = [];
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf-8')) as { restart?: DaemonServiceId[] };
+    if (Array.isArray(parsed.restart)) ids = parsed.restart;
+  } catch {
+    return [];
+  }
+  try {
+    fs.unlinkSync(filePath);
+  } catch {
+    // Already gone.
+  }
+  return ids;
+}

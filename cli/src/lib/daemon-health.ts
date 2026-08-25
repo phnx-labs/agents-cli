@@ -51,6 +51,14 @@ export interface SubsystemHealth {
   consecutiveFailures: number;
   /** ISO timestamp of the most recent success, or null if it has never succeeded. */
   lastOkAt: string | null;
+  /**
+   * `ServiceSupervisor`'s lifecycle state (`idle`/`running`/`parked`/`stopped`),
+   * written by `recordSubsystemState` on every transition. Only present for
+   * supervisor-managed subsystems (RUSH-3193 P4) — a subsystem that predates the
+   * supervisor (e.g. `daemon-start`) never has this field, which is how `agents
+   * daemon services` tells a measured state from an inferred one.
+   */
+  state?: string;
 }
 
 function getHealthPath(): string {
@@ -131,6 +139,19 @@ export function recordSubsystemErrorReason(subsystem: string, error: string, at:
   const existing = all[subsystem];
   if (!existing) return;
   all[subsystem] = { ...existing, lastError: error, lastErrorAt: at };
+  writeAll(all);
+}
+
+/**
+ * Record a `ServiceSupervisor` lifecycle-state transition, without touching
+ * the ok/error streak. Cross-process readers (`agents daemon services`) have
+ * no other way to see `parked`/`stopped` vs `running` — `agents daemon
+ * status` runs as a separate process from the daemon (see module docblock).
+ */
+export function recordSubsystemState(subsystem: string, state: string): void {
+  const all = readAll();
+  const existing = all[subsystem] ?? blankRecord(subsystem);
+  all[subsystem] = { ...existing, subsystem, state };
   writeAll(all);
 }
 

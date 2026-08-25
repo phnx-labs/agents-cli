@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 563 commands._
+_69 command groups · 564 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -214,10 +214,11 @@ agents daemon funnel up <host>            Expose a localhost webhook receiver th
 agents daemon logs                        Read the daemon's own log (lifecycle + subsystem errors — not routine run output).
 agents daemon reload                      Send SIGHUP to reload jobs and re-evaluate the scheduler.enabled gate, without a restart.
 agents daemon restart                     Stop then start the daemon.
-agents daemon services                    The hosted services: health, bound state, socket path, and per-service toggles.
-agents daemon services disable <service>  Disable a daemon service.
-agents daemon services enable <service>   Enable a daemon service.
+agents daemon services                    Every registered daemon service: live health, enabled state, and live enable/disable/restart.
+agents daemon services disable <service>  Disable a daemon service. Applies live for supervised services; a legacy service needs a restart.
+agents daemon services enable <service>   Enable a daemon service. Applies live for supervised services; a legacy service needs a restart.
 agents daemon services list               List every daemon service and whether it is enabled.
+agents daemon services restart <service>  Restart a supervised daemon service live, right now, outside its normal backoff schedule.
 agents daemon start                       Start the daemon. Bypasses daemon.enabled — this is the deliberate override.
 agents daemon status                      Identity (state/pid/uptime/binary), duplicate daemons, daemons running deleted code, and per-service health.
 agents daemon stop                        Stop the daemon.

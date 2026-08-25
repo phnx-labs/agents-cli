@@ -36,6 +36,7 @@ import {
 import { getConfigValue, setConfigValue, isDaemonEnabled } from '../lib/device-config.js';
 import {
   readSubsystemHealth,
+  readAllSubsystemHealth,
   SUBSYSTEM_SECRETS_BROKER,
   SUBSYSTEM_BROWSER_IPC,
   SUBSYSTEM_DAEMON_START,
@@ -47,6 +48,7 @@ import {
   listDaemonServiceStates,
   setDaemonServiceEnabled,
   getDaemonServicesConfigPath,
+  queueDaemonServiceRestart,
 } from '../lib/daemon-services.js';
 import { listJobs, getLatestRun } from '../lib/scheduling/routines.js';
 import { JobScheduler } from '../lib/scheduler.js';
@@ -551,19 +553,91 @@ async function runStatus(opts: { json?: boolean }): Promise<void> {
   }
 }
 
+// ─── Full service roster (RUSH-3193 P4) ──────────────────────────────────────
+
+/** One row of the roster every registered daemon service — supervisor-managed or legacy — renders in `agents daemon services`. */
+export interface DaemonServiceRow {
+  id: DaemonServiceId;
+  title: string;
+  description: string;
+  enabled: boolean;
+  /**
+   * `ServiceSupervisor`'s real lifecycle state when `supervised` is true
+   * (`idle`/`running`/`parked`/`stopped`, written cross-process via
+   * `recordSubsystemState`). A legacy `setInterval`-driven service has no such
+   * record, so its state is inferred from `enabled` + whether the daemon
+   * process is up — labelled distinctly so a reader can't mistake it for a
+   * measured value.
+   */
+  state: string;
+  supervised: boolean;
+  lastRunMs: number | null;
+  lastError: string | null;
+  consecutiveFailures: number;
+}
+
+/**
+ * Combine the persisted enable/disable toggles with whatever health the
+ * `ServiceSupervisor` (or a legacy subsystem) has reported. Pure — reads two
+ * on-disk files, makes no probes — so it's cheap to call from both the
+ * non-interactive renderer and the interactive picker's refresh tick.
+ */
+function buildServiceRows(daemonRunning: boolean): DaemonServiceRow[] {
+  const states = listDaemonServiceStates();
+  const healthById = new Map(readAllSubsystemHealth().map((h) => [h.subsystem, h]));
+  return states.map((s) => {
+    const h = healthById.get(s.id);
+    const supervised = h?.state !== undefined;
+    const state = h?.state ?? (s.enabled ? (daemonRunning ? 'running (unsupervised)' : 'stopped') : 'stopped');
+    return {
+      id: s.id,
+      title: s.title,
+      description: s.description,
+      enabled: s.enabled,
+      state,
+      supervised,
+      lastRunMs: h?.lastOkAt ? Date.parse(h.lastOkAt) : null,
+      lastError: h?.lastError ?? null,
+      consecutiveFailures: h?.consecutiveFailures ?? 0,
+    };
+  });
+}
+
+function serviceStateLabel(state: string): string {
+  if (state === 'running') return chalk.green('running');
+  if (state === 'parked') return chalk.red('parked');
+  if (state === 'stopped') return chalk.gray('stopped');
+  if (state === 'idle') return chalk.gray('idle');
+  return chalk.yellow(state); // 'running (unsupervised)' or any future label
+}
+
 async function runServices(opts: { json?: boolean }): Promise<void> {
   const [secrets, browserIpc] = await Promise.all([probeSecretsBroker(), probeBrowserIPC()]);
+  const rows = buildServiceRows(isDaemonRunning());
   if (opts.json) {
     console.log(JSON.stringify({
+      // Existing fields — unchanged shape, agents/CI consume these directly.
       secretsBroker: { reachable: secrets.reachable, socketPath: secrets.socketPath, heldBundles: secrets.heldBundles, health: secrets.record },
       browserIpc: { bound: browserIpc.bound, socketPath: browserIpc.socketPath, sessionCount: browserIpc.sessionCount, health: browserIpc.record },
+      // Additive: every registered service, supervised or legacy.
+      services: rows,
     }, null, 2));
     return;
   }
-  console.log(chalk.bold('Hosted services\n'));
+  console.log(chalk.bold('Daemon services\n'));
+  for (const row of rows) {
+    const lastRun = row.lastRunMs ? new Date(row.lastRunMs).toLocaleString() : '-';
+    console.log(
+      `  ${row.id.padEnd(16)} ${serviceStateLabel(row.state).padEnd(20)} `
+      + `enabled=${row.enabled ? 'yes' : 'no '}  fails=${row.consecutiveFailures}  last-run=${lastRun}`,
+    );
+    if (row.lastError) console.log(chalk.gray(`    last-error: ${row.lastError}`));
+  }
+  console.log(chalk.bold('\nHosted sockets\n'));
   console.log(healthLine(`secrets broker  ${secrets.reachable ? `(${secrets.socketPath}, ${secrets.heldBundles} bundle(s) held)` : '(unreachable)'}`, secrets.reachable, secrets.record));
   console.log(healthLine(`browser IPC     ${browserIpc.bound ? `(${browserIpc.socketPath}, ${browserIpc.sessionCount} session(s))` : '(unbound)'}`, browserIpc.bound, browserIpc.record));
   console.log(chalk.gray('\nScheduled routines run through `agents routines` — see: agents routines stats'));
+  console.log(chalk.gray('agents daemon services enable|disable|restart <id> apply live for supervised services.'));
 }
 
 // ─── Logs ────────────────────────────────────────────────────────────────
@@ -889,8 +963,15 @@ export function registerDaemonCommand(program: Command): void {
       # Reload config (SIGHUP) without restarting — picks up routine/scheduler-gate changes
       agents daemon reload
 
-      # Every hosted service (secrets broker, browser IPC, webhook receiver, ...)
+      # Every registered service — state, enabled, failures, last error
       agents daemon services
+
+      # Toggle or restart a service live — applies without a daemon restart
+      # for supervisor-managed services (secrets-broker, browser-ipc,
+      # account-state, session-index, monitors' off-transition)
+      agents daemon services disable secrets-broker
+      agents daemon services enable secrets-broker
+      agents daemon services restart secrets-broker
 
       # Host a signed webhook receiver here, supervised and restarted on crash
       agents daemon webhooks add --secrets-bundle linear-webhook
@@ -915,6 +996,16 @@ export function registerDaemonCommand(program: Command): void {
       the daemon (daemon.enabled: false in ~/.agents/devices/<host>/agents.yaml).
       'agents daemon start' still starts it explicitly, same as
       'systemctl start' on a disabled unit.
+
+      'agents daemon services enable|disable|restart <id>' applies live (no
+      daemon restart) for the 5 supervisor-managed services: secrets-broker,
+      browser-ipc, account-state, session-index, and monitors (off only —
+      turning monitors back on still needs a restart). The other 7 services
+      (scheduler, webhook-receiver, self-heal, keychain-reap, watchdog,
+      device-probe, state-dir-check) are still bare interval loops with no
+      live start/stop hook, so a toggle there — and 'enable' on any service
+      that was disabled at daemon boot — still needs 'agents daemon restart'.
+      'agents daemon services' names which case you're in per row.
     `,
   });
 
@@ -1010,11 +1101,38 @@ export function registerDaemonCommand(program: Command): void {
 
   const servicesCmd = cmd
     .command('services')
-    .description('The hosted services: health, bound state, socket path, and per-service toggles.')
+    .description('Every registered daemon service: live health, enabled state, and live enable/disable/restart.')
     .option('--json', 'Emit as JSON')
     .action(async (opts, command) => {
       await runServices({ json: command.optsWithGlobals().json === true });
     });
+
+  setHelpSections(servicesCmd, {
+    examples: `
+      # State, enabled, consecutive failures, last error for every service
+      agents daemon services
+
+      # Machine-readable — additive: also carries the pre-existing
+      # secretsBroker/browserIpc hosted-socket fields
+      agents daemon services --json
+
+      # Just the enable/disable metadata, no health probe
+      agents daemon services list
+
+      # Toggle or restart live — no daemon restart for a supervisor-managed
+      # service (secrets-broker, browser-ipc, account-state, session-index)
+      agents daemon services disable secrets-broker
+      agents daemon services enable secrets-broker
+      agents daemon services restart secrets-broker
+    `,
+    notes: `
+      A service disabled at daemon boot was never registered on the
+      supervisor, so 'enable' on it — and any toggle/restart on the 7
+      services the supervisor doesn't manage yet — falls back to 'restart the
+      daemon to apply'. Each row in the plain-text view names which case it
+      is; 'supervised: true/false' does the same in --json.
+    `,
+  });
 
   servicesCmd
     .command('list')
@@ -1042,9 +1160,27 @@ export function registerDaemonCommand(program: Command): void {
       console.log(chalk.gray('Changes take effect on the next daemon reload or restart.'));
     });
 
+  /**
+   * Apply an enable/disable toggle live (RUSH-3193 P4): persist it, then signal
+   * the running daemon to reload — its handler diffs the toggle and drives
+   * `supervisor.start/stop(id)` for a supervised service, so no restart is
+   * needed for the 5 supervisor-managed services (secrets-broker, browser-ipc,
+   * account-state, session-index, monitors' off-transition). A legacy
+   * `setInterval`-driven service (scheduler, webhook-receiver, self-heal,
+   * keychain-reap, watchdog, device-probe, state-dir-check) and monitors'
+   * on-transition still need a restart — the daemon's own reload log says so.
+   */
+  function applyServiceToggleLive(service: string): void {
+    if (!isDaemonRunning()) return;
+    const ok = signalDaemonReload();
+    console.log(ok
+      ? chalk.gray('Signalled the daemon to apply live. Confirm: agents daemon services')
+      : chalk.yellow('Reload signal not delivered — restart the daemon to apply: agents daemon restart'));
+  }
+
   servicesCmd
     .command('enable <service>')
-    .description('Enable a daemon service.')
+    .description('Enable a daemon service. Applies live for supervised services; a legacy service needs a restart.')
     .action((service: string) => {
       if (!DAEMON_SERVICE_IDS.includes(service as DaemonServiceId)) {
         console.error(chalk.red(`Unknown service '${service}'. Run 'agents daemon services list' for valid services.`));
@@ -1052,14 +1188,12 @@ export function registerDaemonCommand(program: Command): void {
       }
       setDaemonServiceEnabled(service as DaemonServiceId, true);
       console.log(chalk.green(`Enabled '${service}'.`));
-      if (isDaemonRunning()) {
-        console.log(chalk.gray('Run `agents daemon reload` (or restart) to apply.'));
-      }
+      applyServiceToggleLive(service);
     });
 
   servicesCmd
     .command('disable <service>')
-    .description('Disable a daemon service.')
+    .description('Disable a daemon service. Applies live for supervised services; a legacy service needs a restart.')
     .action((service: string) => {
       if (!DAEMON_SERVICE_IDS.includes(service as DaemonServiceId)) {
         console.error(chalk.red(`Unknown service '${service}'. Run 'agents daemon services list' for valid services.`));
@@ -1067,9 +1201,26 @@ export function registerDaemonCommand(program: Command): void {
       }
       setDaemonServiceEnabled(service as DaemonServiceId, false);
       console.log(chalk.green(`Disabled '${service}'.`));
-      if (isDaemonRunning()) {
-        console.log(chalk.gray('Run `agents daemon reload` (or restart) to apply.'));
+      applyServiceToggleLive(service);
+    });
+
+  servicesCmd
+    .command('restart <service>')
+    .description('Restart a supervised daemon service live, right now, outside its normal backoff schedule.')
+    .action((service: string) => {
+      if (!DAEMON_SERVICE_IDS.includes(service as DaemonServiceId)) {
+        console.error(chalk.red(`Unknown service '${service}'. Run 'agents daemon services list' for valid services.`));
+        process.exit(1);
       }
+      if (!isDaemonRunning()) {
+        console.log(chalk.yellow('Daemon is not running — nothing to restart. Start it: agents daemon start'));
+        process.exit(1);
+      }
+      queueDaemonServiceRestart(service as DaemonServiceId);
+      const ok = signalDaemonReload();
+      console.log(ok
+        ? chalk.green(`Restart requested for '${service}'.`) + chalk.gray(' Confirm: agents daemon services')
+        : chalk.yellow('Reload signal not delivered (unsupported on this platform, or the daemon just exited).'));
     });
   registerWebhooksSubcommand(cmd);
   registerFunnelCommand(cmd);

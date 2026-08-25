@@ -22,7 +22,7 @@
  * unaffected.
  */
 
-import { recordSubsystemOk, recordSubsystemError } from '../daemon-health.js';
+import { recordSubsystemOk, recordSubsystemError, recordSubsystemState } from '../daemon-health.js';
 import type { DaemonServiceId } from '../daemon-services.js';
 import type { DaemonContext, DaemonService, PeriodicService, ServiceHealth, ServiceState } from './service.js';
 import { isPeriodicService } from './service.js';
@@ -99,7 +99,7 @@ export class ServiceSupervisor {
     for (const id of this.registry.keys()) await this.stopOne(id);
   }
 
-  /** Force one service to restart right now, outside its normal backoff schedule. For a future on-demand `daemon services restart <id>` command — not wired up yet. */
+  /** Force one service to restart right now, outside its normal backoff schedule. Drives `agents daemon services restart <id>` (RUSH-3193 P4). */
   async restartOne(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
@@ -108,6 +108,38 @@ export class ServiceSupervisor {
       entry.restartTimer = undefined;
     }
     await this.attemptRestart(id);
+  }
+
+  /** Whether `id` is registered on this supervisor. A service disabled at daemon boot is never registered — see {@link start}. */
+  isRegistered(id: DaemonServiceId): boolean {
+    return this.registry.has(id);
+  }
+
+  /** Every currently registered service id. */
+  registeredIds(): DaemonServiceId[] {
+    return Array.from(this.registry.keys());
+  }
+
+  /**
+   * Start one registered service live — drives `agents daemon services enable
+   * <id>` (RUSH-3193 P4). Only affects a service already registered on this
+   * supervisor: one disabled at daemon boot was never constructed or
+   * registered, so enabling it live is not possible without a daemon restart
+   * (the CLI falls back to that advice — see `commands/daemon.ts`).
+   */
+  async start(id: DaemonServiceId): Promise<void> {
+    const entry = this.registry.get(id);
+    if (!entry) throw new Error(`service '${id}' is not registered`);
+    if (entry.state === 'running') return;
+    await this.startOne(id);
+  }
+
+  /** Stop one registered service live — drives `agents daemon services disable <id>` (RUSH-3193 P4). */
+  async stop(id: DaemonServiceId): Promise<void> {
+    const entry = this.registry.get(id);
+    if (!entry) throw new Error(`service '${id}' is not registered`);
+    if (entry.state === 'stopped') return;
+    await this.stopOne(id);
   }
 
   /** Health for every registered service, keyed by service id. */
@@ -137,6 +169,7 @@ export class ServiceSupervisor {
     }
     entry.everStarted = true;
     entry.state = 'running';
+    recordSubsystemState(id, 'running');
     if (isPeriodicService(entry.service)) {
       this.scheduleTimer(id);
       void this.runTick(id);
@@ -159,6 +192,7 @@ export class ServiceSupervisor {
       entry.restartTimer = undefined;
     }
     entry.state = 'stopped';
+    recordSubsystemState(id, 'stopped');
     if (!entry.everStarted) return; // start() never succeeded — nothing to stop.
     try {
       await entry.service.stop();
@@ -215,6 +249,7 @@ export class ServiceSupervisor {
     const entry = this.registry.get(id);
     if (!entry || entry.state === 'parked' || entry.state === 'stopped') return;
     entry.state = 'parked';
+    recordSubsystemState(id, 'parked');
     if (entry.timer) {
       clearInterval(entry.timer);
       entry.timer = undefined;
@@ -239,6 +274,7 @@ export class ServiceSupervisor {
       await entry.service.restart();
       entry.everStarted = true; // restart() is stop()+start() on the service — a successful one means it is running again and owes a stop() at shutdown.
       entry.state = 'running';
+      recordSubsystemState(id, 'running');
       entry.consecutiveFailures = 0;
       entry.restartAttempts = 0;
       entry.lastError = undefined;
@@ -253,6 +289,7 @@ export class ServiceSupervisor {
     } catch (err) {
       this.recordFailure(entry, id, err);
       entry.state = 'parked';
+      recordSubsystemState(id, 'parked');
       this.scheduleRestart(id);
     }
   }

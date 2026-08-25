@@ -42,7 +42,7 @@ import { AccountStateDaemonService } from './account-state-daemon-service.js';
 import { BrowserIPCService } from './browser-ipc-service.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
-import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from '../daemon-services.js';
+import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
 
 /**
  * The live `ServiceSupervisor` for the current `runDaemon()` invocation, or
@@ -1407,16 +1407,45 @@ export async function runDaemon(): Promise<void> {
       const was = servicesConfig.services[id] !== false;
       const now = reloadedEnabled(id);
       if (was !== now) {
-        // scheduler and monitors are re-evaluated live later in this handler,
-        // so don't tell the user they need a restart for those.
+        // scheduler and monitors' off-transition are re-evaluated live later in
+        // this handler, so don't tell the user they need a restart for those.
         if (id === 'scheduler' || (id === 'monitors' && !now)) {
           continue;
         }
-        log('INFO', `Service '${id}' toggled ${now ? 'on' : 'off'} — restart daemon to apply`);
+        if (id === 'monitors') {
+          // monitors' on-transition still needs a restart — starting the
+          // engine live is not wired up (see the liveMonitorEngine block below).
+          log('INFO', `Service '${id}' toggled on — restart daemon to apply`);
+          continue;
+        }
+        // RUSH-3193 P4: a service the supervisor already owns (it was enabled
+        // at daemon boot, so it was registered) takes the toggle live via
+        // supervisor.start/stop — no restart needed. One disabled at boot was
+        // never registered, so it falls through to the same "restart to
+        // apply" advice as before.
+        if (supervisor.isRegistered(id)) {
+          const action = now ? supervisor.start(id) : supervisor.stop(id);
+          void action
+            .then(() => log('INFO', `Service '${id}' ${now ? 'started' : 'stopped'} live (SIGHUP reload)`))
+            .catch((err) => log('WARN', `Service '${id}' live ${now ? 'start' : 'stop'} failed: ${(err as Error).message}`));
+        } else {
+          log('INFO', `Service '${id}' toggled ${now ? 'on' : 'off'} — restart daemon to apply`);
+        }
       }
     }
     // Remember the reloaded state so subsequent reloads log transitions truthfully.
     servicesConfig = reloadedConfig;
+
+    // Drain queued `agents daemon services restart <id>` requests (RUSH-3193 P4).
+    for (const id of drainDaemonServiceRestartQueue()) {
+      if (supervisor.isRegistered(id)) {
+        void supervisor.restartOne(id)
+          .then(() => log('INFO', `Service '${id}' restarted live (SIGHUP reload)`))
+          .catch((err) => log('WARN', `Service '${id}' live restart failed: ${(err as Error).message}`));
+      } else {
+        log('WARN', `Restart requested for '${id}' but it is not supervisor-managed on this daemon — restart the daemon instead`);
+      }
+    }
 
     // Refresh user-layer copies of opted-in project routines BEFORE the
     // scheduler reloads, so YAML edits under `<project>/.agents/routines/`
