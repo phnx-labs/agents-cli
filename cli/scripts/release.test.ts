@@ -47,10 +47,69 @@ describeRelease('release.sh attestation promotion (RUSH-2666)', () => {
     expect(RELEASE_SH).toContain('upload_release_proof');
     expect(RELEASE_SH).toContain('gh release download "v$TARGET"');
     expect(RELEASE_SH).toContain('ComputerHelper.app.zip');
+    // ...but only behind the opt-in. An ordinary release publishes the CLI and
+    // nothing else; helpers live on their own tags now.
+    expect(RELEASE_SH).toContain('--with-helpers) WITH_HELPERS=true');
+    expect(RELEASE_SH).toContain('WITH_HELPERS=false');
     expect(RELEASE_SH).not.toContain('sign-cli-binary.sh');
     expect(RELEASE_SH).not.toContain('publish-computer-helper-mac.sh');
     expect(RELEASE_SH).not.toContain('menubar/scripts/build.sh release');
     expect(RELEASE_SH).toContain('rebuild/notarization is outside the ordinary release path');
+  });
+});
+
+describeRelease('release.sh: an ordinary release is CLI-only', () => {
+  /**
+   * The default path must do NO helper work. Two couplings made that false and
+   * each is asserted separately, because they fail differently:
+   *
+   *  - staging `ComputerHelper.app.zip` onto `v$TARGET` publishes an asset no
+   *    client requests (helpers resolve from their own tags), and
+   *  - `release-manifest.sh require` re-derives every helper's input digest and
+   *    ABORTS when one moved without a rebuild — so editing Swift the CLI does
+   *    not ship could fail a perfectly good CLI release.
+   */
+  /**
+   * True when `needle` sits INSIDE an open `if [[ "$WITH_HELPERS" == true ]]`.
+   *
+   * The first version of this helper just grabbed the nearest preceding
+   * WITH_HELPERS conditional — which passes even when the needle's own gate is
+   * removed, because an EARLIER block's `if` is still behind it. Verified by
+   * mutation: replacing this needle's gate with `if true;` left the test green.
+   * So the check also requires no `fi` closing that block before the needle.
+   */
+  const isGated = (needle: string): boolean => {
+    const at = RELEASE_SH.indexOf(needle);
+    expect(at, `${needle} not found`).toBeGreaterThan(-1);
+    const before = RELEASE_SH.slice(0, at);
+    const gate = before.lastIndexOf('if [[ "$WITH_HELPERS" == true ]]');
+    if (gate === -1) return false;
+    // Anything between the gate and the needle that closes a block at the gate's
+    // own indent means the needle is outside it.
+    const between = before.slice(gate);
+    return !/\n  fi\b/.test(between) && !/\n  else\b/.test(between);
+  };
+
+  it('stages the computer-mac asset only under --with-helpers', () => {
+    expect(isGated('--helper computer-mac --asset-path')).toBe(true);
+  });
+
+  it('verifies the helper manifest only under --with-helpers', () => {
+    // Unguarded, this is the assertion that fails a CLI-only release for a
+    // helper source change it does not ship.
+    expect(isGated('release-manifest.sh require')).toBe(true);
+  });
+
+  it('defaults the flag OFF, so CLI-only is what you get without asking', () => {
+    expect(RELEASE_SH).toMatch(/^WITH_HELPERS=false$/m);
+  });
+
+  it('builds the download patterns as an array, never a word-split splice', () => {
+    // A `$( ... )` splice here is word-split by the shell — the same class of bug
+    // that silently dropped vitest args in test.sh — and an empty splice trips
+    // `set -u`.
+    expect(RELEASE_SH).toContain('dl_patterns=(');
+    expect(RELEASE_SH).toContain('"${dl_patterns[@]}"');
   });
 });
 

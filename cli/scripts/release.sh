@@ -23,7 +23,13 @@
 # attested candidate; tag; promote the exact .tgz. Ordinary release P99 is
 # <=180 seconds. A retry still demands the same exact-tree key.
 #
-# Usage: scripts/release.sh <version> [--apply] [--device <name>]
+# Usage: scripts/release.sh <version> [--apply] [--with-helpers] [--device <name>]
+#
+# --with-helpers (default OFF) opts the release into helper work: staging the
+# computer-mac asset onto v<version> and verifying the helper input-digest
+# manifest. An ordinary release publishes the CLI and NOTHING else -- helpers
+# live on their own tags (cli/src/lib/helper-versions.ts) and are downloaded on
+# demand, so a CLI release neither ships nor gates on them.
 #
 # --device <name> (alias --host) picks the Mac that builds/signs/publishes;
 # defaults to mac-mini. Everything else is unchanged and zero-config.
@@ -119,6 +125,7 @@ phase_fail() {
 
 # ----- Parse args -----
 APPLY=false
+WITH_HELPERS=false
 SKIP_TESTS=false
 YES=false
 # --home-base-phase is an INTERNAL entrypoint, not a user knob: the trigger box
@@ -141,6 +148,13 @@ for arg in "$@"; do
   case "$arg" in
     --apply) APPLY=true ;;
     --skip-tests) SKIP_TESTS=true ;;
+    # Default OFF. An ordinary release publishes the CLI and NOTHING else: helpers
+    # live on their own tags now (cli/src/lib/helper-versions.ts), so staging a
+    # helper asset onto v$TARGET produces something no client requests, and
+    # requiring the helper manifest fails a perfectly good CLI release whenever a
+    # helper's sources moved without a rebuild. That coupling is the thing this
+    # flag exists to remove; pass it to opt a release back into helper work.
+    --with-helpers) WITH_HELPERS=true ;;
     --yes|-y) YES=true ;;
     --home-base-phase) HOME_BASE_PHASE=true ;;
     --orchestration-phase) ORCHESTRATION_PHASE=true ;;
@@ -239,11 +253,15 @@ run_home_base_phase() {
   # The tagged worktree is throwaway and has no store. Pull the files the
   # trigger uploaded to v$TARGET (stable names) into a temp dir.
   attest_dir="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-release-attest.XXXXXX")"
-  gh release download "v$TARGET" --dir "$attest_dir" \
-    --pattern 'release-attestation.json' \
-    --pattern 'release-manifest.json' \
-    --pattern 'phnx-labs-agents-cli-*.tgz' \
-    --pattern 'ComputerHelper.app.zip*' \
+  # Build the pattern list as an ARRAY. A `$( ... )` splice here would be
+  # word-split by the shell, which is the same class of bug that silently dropped
+  # vitest args in test.sh -- and an empty splice under `set -u` is its own trap.
+  dl_patterns=(--pattern 'release-attestation.json'
+               --pattern 'phnx-labs-agents-cli-*.tgz')
+  if [[ "$WITH_HELPERS" == true ]]; then
+    dl_patterns+=(--pattern 'release-manifest.json' --pattern 'ComputerHelper.app.zip*')
+  fi
+  gh release download "v$TARGET" --dir "$attest_dir" "${dl_patterns[@]}" \
     || die "could not download attested artifacts from GitHub release v$TARGET -- the trigger must upload them before this phase"
   bold "Requiring exact-tree attestation for ${tree:0:12} (no parent/nearby fallback)..."
   attest="$(scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$repo_root")" \
@@ -253,10 +271,19 @@ run_home_base_phase() {
   scripts/release-attestation.sh promote --file "$attest" --tarball "$tgz" >/dev/null \
     || die "pretested tarball failed digest bind -- refusing to rebuild"
 
-  manifest="$attest_dir/release-manifest.json"
-  [[ -f "$manifest" ]] || die "release manifest missing at $manifest -- no fallback rebuild"
-  scripts/release-manifest.sh require --file "$manifest" --repo-root "$repo_root" \
-    || die "helper manifest failed -- rebuild/notarization is outside the ordinary release path"
+  # Helper-manifest verification is opt-in (--with-helpers). It re-derives every
+  # helper's input digest and FAILS when one moved without a rebuild -- correct
+  # when the release is publishing helpers, and pure obstruction when it is not:
+  # a CLI-only release would abort because someone edited Swift the CLI does not
+  # ship. Helpers resolve from their own tags, so nothing here gates what users get.
+  if [[ "$WITH_HELPERS" == true ]]; then
+    manifest="$attest_dir/release-manifest.json"
+    [[ -f "$manifest" ]] || die "release manifest missing at $manifest -- no fallback rebuild"
+    scripts/release-manifest.sh require --file "$manifest" --repo-root "$repo_root" \
+      || die "helper manifest failed -- rebuild/notarization is outside the ordinary release path"
+  else
+    gray "CLI-only release: skipping helper-manifest verification (pass --with-helpers to include it)"
+  fi
 
   bold "Install-smoke of the exact pretested tarball..."
   scripts/release-install-smoke.sh "$tgz" "$TARGET" \
@@ -1040,19 +1067,30 @@ upload_release_proof() {
   tgz="$(jq -r .path <<<"$tgz_json")"
   [[ -n "$tgz" && -f "$tgz" ]] || die "pretested tarball missing -- refusing to rebuild"
   cp "$tgz" "$dest/$(basename "$tgz")"
-  [[ -f "$store/release-manifest.json" ]] \
-    || die "release manifest missing at $store/release-manifest.json -- no fallback rebuild"
-  cp "$store/release-manifest.json" "$dest/release-manifest.json"
-  if ! scripts/release-manifest.sh copy-asset --file "$store/release-manifest.json" --helper computer-mac --asset-path "$dest"; then
-    gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'ComputerHelper.app.zip*' \
-      || die "could not reuse ComputerHelper.app.zip from v$PHNX_LATEST -- no fallback rebuild"
+  # Helper assets and the manifest ride the release ONLY with --with-helpers.
+  #
+  # By default a CLI release publishes the CLI and nothing else. Helpers resolve
+  # from their OWN tags (`menubar/v<x.y.z>`, `keychain/v<x.y.z>`,
+  # `computer-mac/v<x.y.z>`, `computer-win/v<x.y.z>` -- see
+  # cli/src/lib/helper-versions.ts), so an asset staged onto v$TARGET is one no
+  # client ever requests: dead weight on every release, and previously a filename
+  # proven to 404 (the keychain staging wrote `Agents CLI.app.zip`, which GitHub
+  # rewrites to a dot).
+  #
+  # The comment that used to sit here claimed no helper assets were staged at all,
+  # which was false three lines below its own text -- computer-mac was still being
+  # copied. Flagged in the review of #3056; the flag is what makes the claim true.
+  if [[ "$WITH_HELPERS" == true ]]; then
+    [[ -f "$store/release-manifest.json" ]] \
+      || die "release manifest missing at $store/release-manifest.json -- no fallback rebuild"
+    cp "$store/release-manifest.json" "$dest/release-manifest.json"
+    if ! scripts/release-manifest.sh copy-asset --file "$store/release-manifest.json" --helper computer-mac --asset-path "$dest"; then
+      gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'ComputerHelper.app.zip*' \
+        || die "could not reuse ComputerHelper.app.zip from v$PHNX_LATEST -- no fallback rebuild"
+    fi
+  else
+    gray "CLI-only release: no helper assets staged onto v$TARGET (pass --with-helpers to include them)"
   fi
-  # No helper assets are staged onto v$TARGET any more. Helpers resolve from their
-  # OWN tags (`menubar/v<x.y.z>`, `keychain/v<x.y.z>`, `computer-mac/v<x.y.z>`,
-  # `computer-win/v<x.y.z>` -- see cli/src/lib/helper-versions.ts), so anything
-  # published here would be an asset no client ever requests. Worse, the keychain
-  # staging wrote it as `Agents CLI.app.zip`, and GitHub rewrites that space to a
-  # dot on upload -- so every release was republishing a filename proven to 404.
   if gh release view "v$TARGET" >/dev/null 2>&1; then
     gh release upload "v$TARGET" "$dest"/* --clobber \
       || die "failed to upload attested artifacts to v$TARGET"
