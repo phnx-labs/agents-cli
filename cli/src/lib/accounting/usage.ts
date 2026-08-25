@@ -2106,6 +2106,37 @@ export function writeClaudeUsageCache(
   }
 }
 
+/** Atomically merge partial native Claude windows into the current fresh row. */
+export function mergeClaudeUsageCacheWindows(
+  usageKey: string,
+  snapshot: UsageSnapshot,
+  cachePath = getClaudeUsageCachePath(),
+): void {
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      const prior = cache[usageKey];
+      const priorSnapshot = prior
+        ? deserializeClaudeUsageSnapshot(prior, snapshot.capturedAt ?? new Date())
+        : null;
+      const windows = new Map(
+        priorSnapshot?.windows.map((window) => [window.key, window]) ?? [],
+      );
+      for (const window of snapshot.windows) windows.set(window.key, window);
+      cache[usageKey] = serializeClaudeUsageSnapshot({
+        ...snapshot,
+        windows: [...windows.values()],
+        plan: snapshot.plan ?? priorSnapshot?.plan ?? null,
+        unavailable: carryForwardUnavailable(prior?.unavailable, snapshot.unavailable),
+      });
+      atomicWriteFileSync(cachePath, JSON.stringify(cache, null, 2), 'utf-8');
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
+}
+
 /** Read the entire usage cache file from disk. */
 function readClaudeUsageCacheFile(cachePath: string): Record<string, CachedUsageSnapshot> {
   if (!fs.existsSync(cachePath)) {

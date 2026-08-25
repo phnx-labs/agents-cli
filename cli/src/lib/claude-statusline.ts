@@ -5,7 +5,7 @@ import { spawnSync } from 'child_process';
 
 import { readClaudeHomeConfig } from './agent-spec/agents.js';
 import { atomicWriteFileSync } from './fs-atomic.js';
-import { writeClaudeUsageCache, type UsageWindow } from './accounting/usage.js';
+import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usage.js';
 
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
@@ -56,7 +56,7 @@ export function ingestClaudeStatusLineUsage(
     windowFromNative('week', payload.rate_limits.seven_day),
   ].filter((value): value is UsageWindow => value !== null);
   if (windows.length === 0) return false;
-  writeClaudeUsageCache(identity.usageKey, {
+  mergeClaudeUsageCacheWindows(identity.usageKey, {
     source: 'live',
     sourceLabel: 'Claude response rate limits',
     capturedAt: new Date(),

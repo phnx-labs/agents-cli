@@ -12,6 +12,7 @@ import {
 import {
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
+  writeClaudeUsageCache,
 } from './accounting/usage.js';
 
 const dirs: string[] = [];
@@ -53,6 +54,13 @@ describe('Claude native status line', () => {
       },
     }));
     priorCachePath = setClaudeUsageCachePathForTest(path.join(home, 'usage.json'));
+    writeClaudeUsageCache('claude:org=org-1', {
+      source: 'live',
+      sourceLabel: 'prior live usage',
+      capturedAt: new Date(),
+      windows: [],
+      plan: 'Max',
+    });
 
     expect(ingestClaudeStatusLineUsage({
       rate_limits: {
@@ -65,6 +73,19 @@ describe('Claude native status line', () => {
     expect(snapshot?.source).toBe('last_seen');
     expect(snapshot?.windows.map((window) => [window.key, window.usedPercent])).toEqual([
       ['session', 12],
+      ['week', 34],
+    ]);
+
+    expect(ingestClaudeStatusLineUsage({
+      rate_limits: {
+        five_hour: { used_percentage: 56, resets_at: 1_800_200_000 },
+      },
+    }, home)).toBe(true);
+
+    const partialSnapshot = readClaudeUsageCache('claude:org=org-1');
+    expect(partialSnapshot?.plan).toBe('Max');
+    expect(partialSnapshot?.windows.map((window) => [window.key, window.usedPercent])).toEqual([
+      ['session', 56],
       ['week', 34],
     ]);
   });
