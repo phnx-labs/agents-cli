@@ -257,22 +257,52 @@ export function buildAgentLaunchCommand(
 
 /**
  * Wrap a native-mode agent launch command so the outcome decides whether the
- * tab closes. On a clean exit (status 0 — the agent ran and the user quit it,
- * or the runner otherwise finished normally) the wrapper `exit`s the shell,
- * which closes the VS Code tab automatically — mirroring the pane-died
- * behaviour tmux mode already has. On a nonzero exit (a launch failure: the
- * remote host is unreachable, the CLI rejects the invocation, the binary is
- * missing) the wrapper leaves the interactive shell running instead of
- * exiting, so the tab — and the error text already printed into it — stays on
- * screen for the user to read (RUSH-2593: an `exec`-replaced process died on a
- * bad remote launch and the terminal closed before anyone could see why).
+ * tab closes, and so a lost `--device` connection reads as recoverable rather
+ * than as a crash.
+ *
+ * The exit codes are set by `agents run --interactive --device` and mirrored
+ * from `apps/cli/src/lib/hosts/reconnect.ts` (the ext is a separate package
+ * with no cross-package import — root CLAUDE.md — so the values are duplicated
+ * here with the source cited; the CLI-side constants are authoritative):
+ *
+ * - **0** — a clean quit (the user exited the agent, or it finished). The
+ *   wrapper `exit`s the shell, which closes the VS Code tab automatically —
+ *   mirroring the pane-died behaviour tmux mode already has.
+ * - **255 / 254** — `SSH_CONN_FAILURE` / `REMOTE_EXIT_255_REMAPPED`: the SSH
+ *   link to the peer dropped and the CLI's bounded reconnect loop then gave up,
+ *   or the remote run ended unexpectedly. The agent may still be alive on the
+ *   peer, so the wrapper frames it as a recoverable reconnect and points at the
+ *   session list — not a bare "status 255" that reads like a crash (RUSH-3125,
+ *   F6). It deliberately does NOT auto-run `agents sessions resume`: a dead peer
+ *   pane silently resumes a COPY and loses the in-flight turn, which is a real
+ *   open bug (RUSH-3139), so recovery stays a deliberate user action until that
+ *   lands. `agents sessions --active` is used rather than a specific id because
+ *   only the CLI knows the resolved/launch id for a non-Claude harness, and its
+ *   own give-up notice already printed the exact `agents sessions resume <id>`
+ *   line above when one applies.
+ * - **any other nonzero** — a launch failure (the remote host is unreachable at
+ *   start, the CLI rejects the invocation, the binary is missing). There is no
+ *   session to rejoin, so the generic status line stays.
+ *
+ * In every nonzero case the interactive shell is LEFT RUNNING so the text above
+ * it stays on screen for the user to read (RUSH-2593: an `exec`-replaced process
+ * died on a bad remote launch and the terminal closed before anyone could see
+ * why).
  *
  * Shell tabs must NOT be wrapped: the user drives them interactively and
  * keeping the parent shell alive on any exit is the expected behaviour.
  */
 export function wrapNativeAgentCommand(command: string, isShell: boolean): string {
   if (!command || isShell) return command;
-  return `${command}; ec=$?; if [ "$ec" -eq 0 ]; then exit 0; else echo "Agent exited with status $ec — terminal kept open so you can read the error above."; fi`;
+  const reconnectMsg =
+    'Lost the connection to the remote agent — it may still be running on the peer. Reconnect from:  agents sessions --active';
+  const genericMsg = 'Agent exited with status $ec — terminal kept open so you can read the error above.';
+  return (
+    `${command}; ec=$?; ` +
+    `if [ "$ec" -eq 0 ]; then exit 0; ` +
+    `elif [ "$ec" -eq 255 ] || [ "$ec" -eq 254 ]; then echo "${reconnectMsg}"; ` +
+    `else echo "${genericMsg}"; fi`
+  );
 }
 
 // The launch contract (apps/ext/AGENTS.md § "Launch contract"): EVERY agent

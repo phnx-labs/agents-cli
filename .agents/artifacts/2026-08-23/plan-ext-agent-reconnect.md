@@ -486,19 +486,46 @@ Worth a timed look at the TUI before landing.
 - [x] F3 — per-tab connection for interactive streams
 - [x] F4 — patient, interruptible reconnect with countdown
 - [x] F5 — termios save/restore + stdin drain + DEC reset
-- [ ] F6 — ext renders `reconnecting`; no dead-end shell
+- [x] F6 — no dead-end shell: a lost `--device` tab frames the drop as a
+      recoverable reconnect (see the divergence note below); no auto-resume
 - [x] F7 — notices point at `agents sessions resume`
 - [x] Verified against real state: A/B on a box configured like the peers, a real
       pty for the termios restore, and a live launch-id resolution
 - [x] Docs: `specifications.md` EXEC-48..54, `apps/cli/AGENTS.md`, CHANGELOG fragments
 - [x] PR opened — [#3006](https://github.com/phnx-labs/agi-cli/pull/3006), CI green
 
-**Landed:** F1, F2, F3, F4, F5, F7. **Outstanding:** F6 (the ext-side rendering),
-which the scheduling-singularity rule keeps as pure presentation now that
-detection and action are fixed in the CLI.
+**Landed:** F1, F2, F3, F4, F5, F6, F7.
+
+### F6 divergence — frame, don't auto-resume (RUSH-3139 boundary)
+
+This plan (2026-08-23) said F6 would have `wrapNativeAgentCommand` *re-enter the
+CLI recovery verb* on a lost link. Two facts that surfaced after it was written
+make a literal auto-`agents sessions resume` the wrong build:
+
+1. **RUSH-3139 (split out of this ticket on 2026-08-24)** proved that when the
+   peer pane is dead, `agents sessions resume` silently resumes a **copy** — a
+   new session id `/continue`-ing the transcript — and loses the in-flight turn,
+   with no notice. Auto-running it on give-up would ship that known bug. RUSH-3139
+   owns the reconnect *loop's* reattach semantics (`reconnect.ts:235`); F6 owns
+   only the ext dead-end, which runs after `agents run` has fully exited.
+2. **The ext wrapper cannot know the id for a non-Claude harness** — the
+   resolved/launch id lives in the CLI (`recoveryHint`, `reconnect.ts:332`), and
+   only Claude carries `--session-id` in the ext-built command.
+
+So F6 as landed: the wrapper recognizes the reconnect-lost exit codes (255
+`SSH_CONN_FAILURE` / 254 `REMOTE_EXIT_255_REMAPPED`) and frames the tab as a
+recoverable reconnect pointing at `agents sessions --active` — never a bare
+"status 255" crash line, never a silent resume. The CLI's own give-up notice
+already printed the exact `agents sessions resume <id>` line above when one
+applies. The "tab shows reconnecting" half is covered by F4's in-terminal
+countdown, which the tab renders live; a Fleet-panel *transient*-reconnecting
+badge (distinct from the existing orphaned/crashed `reconnect` band) would need a
+CLI-side live-state emit and is deferred as polish, not a dead-end.
 
 ## Tracking
 
 - [RUSH-3125](https://linear.app/prix/issue/RUSH-3125) — Agent tabs die on a network blink: remote interactive runs are not detached on the peer
 - [PR #3006](https://github.com/phnx-labs/agi-cli/pull/3006) — F1, F2, F3, F4, F5, F7 (CI green)
-- Branch: `fix/ext-agent-reconnect`
+- PR (F6) — `fix/ext-reconnect-no-deadend`: the no-dead-end wrapper
+- [RUSH-3139](https://linear.app/prix/issue/RUSH-3139) — the reconnect-loop copy-resume, owns the auto-resume half F6 deliberately leaves alone
+- Branch: `fix/ext-agent-reconnect` (F1–F5, F7), `fix/ext-reconnect-no-deadend` (F6)

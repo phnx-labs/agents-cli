@@ -4,6 +4,23 @@ All notable changes to AGI EXT (the VS Code extension) are documented here. Form
 [Keep a Changelog](https://keepachangelog.com/); `scripts/release.sh` requires a
 `## [<version>]` section for the version being published.
 
+## [0.9.335] - 2026-08-25
+
+- **A dropped `--device` agent tab no longer dead-ends at a cryptic crash line.**
+  When the SSH link to a peer dropped and the CLI's bounded reconnect loop then
+  gave up (exit 255), or the remote run ended unexpectedly (exit 254), the tab
+  printed `Agent exited with status 255 — …`, which reads like a crash and gives
+  no path back to the agent that is likely still running on the peer. Those two
+  exit codes now render `Lost the connection to the remote agent — it may still
+  be running on the peer. Reconnect from:  agents sessions --active`, and the
+  shell stays open so the CLI's own recovery hint above it remains readable. A
+  genuine launch failure (bad host, bad invocation, missing binary) keeps the
+  plain status line — there is no session to rejoin. The wrapper deliberately
+  does not auto-run `agents sessions resume`: a dead peer pane silently resumes a
+  copy and loses the in-flight turn (RUSH-3139), so recovery stays a deliberate
+  user action. Source: `src/core/agents.ts` (`wrapNativeAgentCommand`). RUSH-3125
+  F6.
+
 ## [0.9.334] - 2026-08-23
 
 - **A device reset no longer wipes every other device's Needs-You items.** The

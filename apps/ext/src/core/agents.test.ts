@@ -607,6 +607,33 @@ describe('wrapNativeAgentCommand (RUSH-2593)', () => {
     expect(out).toContain('Agent exited with status 7');
     expect(out).toContain('MARKER_REACHED');
   });
+
+  // RUSH-3125 F6: a lost `--device` connection whose reconnect gave up
+  // (SSH_CONN_FAILURE=255) or whose remote run ended unexpectedly
+  // (REMOTE_EXIT_255_REMAPPED=254) must read as a recoverable reconnect, not a
+  // bare "status 255" crash line — and must NOT auto-resume (RUSH-3139).
+  for (const code of [255, 254]) {
+    test(`real bash: a reconnect-lost exit (${code}) prints the reconnect line, not the crash line, and keeps the shell running`, () => {
+      const wrapped = wrapNativeAgentCommand(`bash -c 'exit ${code}'`, false);
+      const out = execFileSync('bash', ['-c', `${wrapped}; echo MARKER_REACHED`], { encoding: 'utf8' });
+      expect(out).toContain('Lost the connection to the remote agent');
+      expect(out).toContain('agents sessions --active');
+      // Framed as recoverable, never as a raw status code…
+      expect(out).not.toContain(`Agent exited with status ${code}`);
+      // …never silently resumed (that is RUSH-3139's copy-of-the-session bug)…
+      expect(out).not.toContain('agents sessions resume');
+      // …and the shell survives past the message.
+      expect(out).toContain('MARKER_REACHED');
+    });
+  }
+
+  test('real bash: a plain launch failure (1) still gets the generic line, not the reconnect line — there is no session to rejoin', () => {
+    const wrapped = wrapNativeAgentCommand(`bash -c 'exit 1'`, false);
+    const out = execFileSync('bash', ['-c', `${wrapped}; echo MARKER_REACHED`], { encoding: 'utf8' });
+    expect(out).toContain('Agent exited with status 1');
+    expect(out).not.toContain('Lost the connection to the remote agent');
+    expect(out).toContain('MARKER_REACHED');
+  });
 });
 
 describe('extension tmux removal — spawn command contract', () => {
