@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "device": "test-device",
+  "syncedAt": 1787616000000,
+  "owner": "owner-1",
+  "stats": {
+    "sessionsImported": 1,
+    "medianMs": 9000,
+    "p90Ms": 9000,
+    "needAttention": 1,
+    "toolErrorRate": 0.6666666666666666
+  },
+  "needsAttention": [
+    {
+      "id": "trace-rich-fixture",
+      "title": "Fix trace sync",
+      "repo": "agents-cli",
+      "device": "test-device",
+      "agent": "codex",
+      "model": "gpt-test",
+      "severity": 3,
+      "flags": ["retry loop"]
+    }
+  ],
+  "topics": [
+    { "key": "engineering", "label": "Engineering", "count": 1, "group": "code" }
+  ],
+  "failures": {
+    "byToolError": [
+      { "tool": "exec_command", "desc": "exit 1", "cause": "real", "count": 1 },
+      { "tool": "exec_command", "desc": "git guard", "cause": "guard", "count": 1 }
+    ],
+    "byCause": { "real": 1, "guard": 1, "hook": 0 }
+  }
+}

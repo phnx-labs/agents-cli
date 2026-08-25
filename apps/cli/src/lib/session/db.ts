@@ -329,6 +329,17 @@ CREATE TABLE IF NOT EXISTS session_insights (
   facets TEXT NOT NULL
 );
 
+-- Derived topic classification for traces sync. Like session_insights, this is
+-- a lazy, stamp-validated cache and is intentionally independent of SCHEMA_VERSION.
+CREATE TABLE IF NOT EXISTS session_topics (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  topic_json TEXT NOT NULL
+);
+
 -- Normalized data behind sessions preview. Like session_insights this is a
 -- lazy, stamp-validated cache: opening one session parses only that transcript,
 -- while subsequent processes reuse the derived preview until its bytes change.
@@ -413,6 +424,7 @@ CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(st
  */
 /** Bump when facet extraction changes so cached rows recompute (stalls-by-model v6). */
 export const INSIGHTS_EXTRACTOR_VERSION = 6;
+export const SESSION_TOPIC_EXTRACTOR_VERSION = 1;
 const PREVIEW_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
@@ -3110,6 +3122,67 @@ export function writeSessionInsights<T>(
 /** Drop every cached facet row. Backs `agents insights --refresh`. */
 export function clearSessionInsights(): void {
   getDB().exec(`DELETE FROM session_insights`);
+}
+
+/** Read cached trace topics only when their transcript byte stamps still match. */
+export function readSessionTopics<T>(ids: string[]): Map<string, T> {
+  const db = getDB();
+  const out = new Map<string, T>();
+  if (ids.length === 0) return out;
+  const CHUNK = 400;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT st.session_id AS id, st.topic_json AS topicJson
+      FROM session_topics st
+      JOIN sessions s ON s.id = st.session_id
+      WHERE st.session_id IN (${placeholders})
+        AND st.extractor_version = ?
+        AND st.file_mtime_ms IS s.file_mtime_ms
+        AND st.file_size IS s.file_size
+    `).all(...chunk, SESSION_TOPIC_EXTRACTOR_VERSION) as Array<{ id: string; topicJson: string }>;
+    for (const row of rows) {
+      try {
+        out.set(row.id, JSON.parse(row.topicJson) as T);
+      } catch {
+        // Invalid derived cache data is a miss and self-heals on the next write.
+      }
+    }
+  }
+  return out;
+}
+
+/** Persist trace topics against the exact transcript bytes used to classify them. */
+export function writeSessionTopics<T>(
+  entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; topic: T }>,
+): void {
+  if (entries.length === 0) return;
+  const db = getDB();
+  const stmt = db.prepare(`
+    INSERT INTO session_topics
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, topic_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      topic_json = excluded.topic_json
+  `);
+  const now = Date.now();
+  db.transaction(() => {
+    for (const entry of entries) {
+      stmt.run(
+        entry.id,
+        entry.fileMtimeMs,
+        entry.fileSize,
+        SESSION_TOPIC_EXTRACTOR_VERSION,
+        now,
+        JSON.stringify(entry.topic),
+      );
+    }
+  })();
 }
 
 /** Read one derived preview only when it matches the transcript bytes on disk. */

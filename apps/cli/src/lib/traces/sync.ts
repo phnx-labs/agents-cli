@@ -14,13 +14,27 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { getDB } from '../session/db.js';
+import {
+  getDB,
+  readSessionInsights,
+  readSessionTopics,
+  writeSessionInsights,
+  writeSessionTopics,
+} from '../session/db.js';
 import type { SessionAgentId, SessionMeta, SessionRunMode } from '../session/types.js';
 import { parseSession } from '../session/parse.js';
 import { buildTrajectory, type SessionTrajectory } from '../session/trajectory.js';
-import { knownSecretValuesFromEnv } from '../redact.js';
+import { computeInsightFacets, type InsightFacets } from '../session/insights.js';
+import { knownSecretValuesFromEnv, redactSecrets } from '../redact.js';
 import { getRuntimeStateDir } from '../state.js';
 import { resolveTracesBackend, type TracesBackend } from './backend.js';
+import {
+  classifyCause,
+  classifyTopic,
+  type ClassifiedTopic,
+  type TraceFailureCause,
+  type TraceTopicGroup,
+} from './classify.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -94,8 +108,8 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       const allRows = db
         .prepare('SELECT * FROM sessions WHERE machine = ? OR machine IS NULL')
         .all(device) as SyncRow[];
-      const shard = buildIndexShard(allRows);
-      await putIndexShard(backend, device, shard);
+      const shard = buildIndexShard(allRows, device, backend.userId);
+      await putIndexShard(backend, device, backend.userId, shard);
     } catch {
       // index PUT failure is not fatal — the per-session data is already uploaded
     }
@@ -110,32 +124,203 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
 // ---------------------------------------------------------------------------
 
 export interface TracesIndexShard {
+  schema: 1;
   device: string;
-  syncedAt: string;
-  sessionCount: number;
-  errorRate: number;
-  sessions: IndexedSession[];
+  syncedAt: number;
+  owner: string;
+  stats: {
+    sessionsImported: number;
+    medianMs: number;
+    p90Ms: number;
+    needAttention: number;
+    toolErrorRate: number;
+  };
+  needsAttention: IndexedSession[];
+  topics: Array<{ key: string; label: string; count: number; group: TraceTopicGroup }>;
+  failures: {
+    byToolError: Array<{ tool: string; desc: string; cause: TraceFailureCause; count: number }>;
+    byCause: Record<TraceFailureCause, number>;
+  };
 }
 
 export interface IndexedSession {
   id: string;
-  timestamp: string;
-  topic?: string;
+  title: string;
+  repo: string;
+  device: string;
   agent: string;
-  machine?: string;
+  model: string;
+  severity: number;
+  flags: string[];
 }
 
-function buildIndexShard(rows: SyncRow[]): Omit<TracesIndexShard, 'device' | 'syncedAt'> {
+interface ToolCallRow {
+  session_id: string;
+  tool: string;
+  outcome: string;
+  exit_code: number | null;
+  status_code: number | null;
+  error_code: string | null;
+  error: string | null;
+  parse_error: string | null;
+}
+
+function percentile(values: number[], ratio: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
+}
+
+function failureDescription(call: ToolCallRow, cause: TraceFailureCause): string {
+  if (cause === 'guard') return /main-branch-guard/i.test(`${call.error_code ?? ''} ${call.error ?? ''}`)
+    ? 'main branch guard' : 'git guard';
+  if (cause === 'hook') return 'auto-mode hook denial';
+  if (call.status_code != null) return `HTTP ${call.status_code}`;
+  if (call.exit_code != null) return `exit ${call.exit_code}`;
+  if (call.error_code) return 'tool error code';
+  if (call.parse_error) return 'parse error';
+  return 'tool error';
+}
+
+function attentionFlags(errorCount: number, facets: InsightFacets | undefined): string[] {
+  const flags: string[] = [];
+  if (errorCount > 0) flags.push(`${errorCount} error${errorCount === 1 ? '' : 's'}`);
+  const friction = facets?.frictionSignals ?? {};
+  const corrections = facets?.correctionSignals ?? {};
+  const retryCount = Object.entries(friction)
+    .filter(([key]) => key.startsWith('failed tool loop:'))
+    .reduce((sum, [, count]) => sum + count, 0);
+  if (retryCount > 0) flags.push('retry loop');
+  const stall = Object.entries(friction).find(([key, count]) => key.startsWith('silent stall:') && count > 0);
+  if (stall) flags.push(stall[0].replace('silent stall: ', 'stalled '));
+  const correctionCount = Object.values(corrections).reduce((sum, count) => sum + count, 0);
+  if (correctionCount > 0) flags.push(`${correctionCount} correction${correctionCount === 1 ? '' : 's'}`);
+  return flags;
+}
+
+/** Build the redacted rich console shard from indexed metadata and derived caches. */
+export function buildIndexShard(rows: SyncRow[], device: string, owner: string): TracesIndexShard {
+  const db = getDB();
+  const knownSecrets = knownSecretValuesFromEnv();
+  const ids = rows.map((row) => row.id);
+  const calls: ToolCallRow[] = [];
+  for (let i = 0; i < ids.length; i += 400) {
+    const chunk = ids.slice(i, i + 400);
+    calls.push(...db.prepare(`
+      SELECT session_id, tool, outcome, exit_code, status_code, error_code, error, parse_error
+      FROM tool_calls
+      WHERE session_id IN (${chunk.map(() => '?').join(',')})
+    `).all(...chunk) as ToolCallRow[]);
+  }
+  const toolMix = new Map<string, Record<string, number>>();
+  for (const call of calls) {
+    const mix = toolMix.get(call.session_id) ?? {};
+    mix[call.tool] = (mix[call.tool] ?? 0) + 1;
+    toolMix.set(call.session_id, mix);
+  }
+
+  const topics = readSessionTopics<ClassifiedTopic>(ids);
+  const missingTopics = rows.filter((row) => !topics.has(row.id)).map((row) => {
+    const topic = classifyTopic({
+      cwd: row.cwd,
+      gitBranch: row.git_branch,
+      topic: row.topic,
+      label: row.label,
+      toolMix: toolMix.get(row.id),
+    });
+    topics.set(row.id, topic);
+    return { id: row.id, fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, topic };
+  });
+  writeSessionTopics(missingTopics);
+
+  const insights = readSessionInsights<InsightFacets>(ids);
+  const trajectoryErrors = new Map<string, number>();
+  const missingInsights: Array<{
+    id: string;
+    fileMtimeMs: number | null;
+    fileSize: number | null;
+    facets: InsightFacets;
+  }> = [];
+  for (const row of rows) {
+    try {
+      const events = parseSession(row.file_path, row.agent as SessionAgentId);
+      trajectoryErrors.set(row.id, buildTrajectory(events, rowToMeta(row), { redact: true }).errorCount);
+      if (!insights.has(row.id)) {
+        const facets = computeInsightFacets(events);
+        insights.set(row.id, facets);
+        missingInsights.push({
+          id: row.id,
+          fileMtimeMs: row.file_mtime_ms,
+          fileSize: row.file_size,
+          facets,
+        });
+      }
+    } catch {
+      trajectoryErrors.set(row.id, 0);
+    }
+  }
+  writeSessionInsights(missingInsights);
+
+  const needsAttention = rows.flatMap((row): IndexedSession[] => {
+    const facets = insights.get(row.id);
+    const errorCount = trajectoryErrors.get(row.id) ?? 0;
+    const flags = attentionFlags(errorCount, facets);
+    if (flags.length === 0) return [];
+    const friction = Object.values(facets?.frictionSignals ?? {}).reduce((sum, count) => sum + count, 0);
+    const corrections = Object.values(facets?.correctionSignals ?? {}).reduce((sum, count) => sum + count, 0);
+    return [{
+      id: row.id,
+      title: redactSecrets(
+        row.label ?? row.topic ?? topics.get(row.id)?.label ?? 'Untitled session',
+        knownSecrets,
+      ),
+      repo: row.project ?? (row.cwd ? path.basename(row.cwd) : 'unknown'),
+      device,
+      agent: row.agent,
+      model: row.model ?? 'unknown',
+      severity: errorCount * 2 + friction * 3 + corrections * 2,
+      flags,
+    }];
+  }).sort((a, b) => b.severity - a.severity || a.id.localeCompare(b.id));
+
+  const topicCounts = new Map<string, { key: string; label: string; count: number; group: TraceTopicGroup }>();
+  for (const topic of topics.values()) {
+    const current = topicCounts.get(topic.key) ?? { ...topic, count: 0 };
+    current.count++;
+    topicCounts.set(topic.key, current);
+  }
+
+  const failedCalls = calls.filter((call) => call.outcome === 'error');
+  const byCause: Record<TraceFailureCause, number> = { real: 0, guard: 0, hook: 0 };
+  const failureCounts = new Map<string, { tool: string; desc: string; cause: TraceFailureCause; count: number }>();
+  for (const call of failedCalls) {
+    const cause = classifyCause(call);
+    const desc = failureDescription(call, cause);
+    byCause[cause]++;
+    const key = `${call.tool}\u0000${desc}\u0000${cause}`;
+    const current = failureCounts.get(key) ?? { tool: call.tool, desc, cause, count: 0 };
+    current.count++;
+    failureCounts.set(key, current);
+  }
+  const durations = rows.flatMap((row) => row.duration_ms == null ? [] : [row.duration_ms]);
   return {
-    sessionCount: rows.length,
-    errorRate: 0,
-    sessions: rows.slice(0, 2000).map((r) => ({
-      id: r.id,
-      timestamp: r.timestamp,
-      topic: r.topic ?? undefined,
-      agent: r.agent,
-      machine: r.machine ?? undefined,
-    })),
+    schema: 1,
+    device,
+    syncedAt: Date.now(),
+    owner,
+    stats: {
+      sessionsImported: rows.length,
+      medianMs: percentile(durations, 0.5),
+      p90Ms: percentile(durations, 0.9),
+      needAttention: needsAttention.length,
+      toolErrorRate: calls.length === 0 ? 0 : failedCalls.length / calls.length,
+    },
+    needsAttention,
+    topics: [...topicCounts.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)),
+    failures: {
+      byToolError: [...failureCounts.values()].sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool)),
+      byCause,
+    },
   };
 }
 
@@ -183,9 +368,10 @@ async function putSessionTrace(
 async function putIndexShard(
   backend: TracesBackend,
   device: string,
-  shard: Omit<TracesIndexShard, 'device' | 'syncedAt'>,
+  owner: string,
+  shard: TracesIndexShard,
 ): Promise<void> {
-  const full: TracesIndexShard = { device, syncedAt: new Date().toISOString(), ...shard };
+  const full: TracesIndexShard = { ...shard, device, owner, syncedAt: Date.now() };
   const url = `${backend.baseUrl}/${backend.userId}/${device}/index.json`;
   const res = await fetch(url, {
     method: 'PUT',
@@ -239,7 +425,7 @@ function localDevice(): string {
 // Minimal row type for direct DB queries (SessionRow is not exported)
 // ---------------------------------------------------------------------------
 
-interface SyncRow {
+export interface SyncRow {
   id: string;
   short_id: string;
   agent: string;
@@ -271,6 +457,7 @@ interface SyncRow {
   tool_call_count: number | null;
   file_path: string;
   file_mtime_ms: number | null;
+  file_size: number | null;
   machine: string | null;
 }
 

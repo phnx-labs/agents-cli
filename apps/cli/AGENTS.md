@@ -28,6 +28,14 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
+`agents traces sync` publishes two redacted derived surfaces: the unchanged
+per-session `SessionTrajectory` at `sessions/<id>.json`, and a rich per-device
+`index.json` for Phoenix Evals. The index contains duration/error statistics,
+ranked attention flags, metadata/tool-mix topic buckets, and structured tool
+failure cause buckets (`real`, `guard`, `hook`). Topic classification is lazily
+cached in the self-healing `session_topics` table by transcript mtime + size;
+it is not part of the hot session scan or `SCHEMA_VERSION`.
+
 ## Core design choices (read this first)
 
 Break these and downstream code drifts silently.
