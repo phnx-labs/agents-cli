@@ -157,7 +157,10 @@ case "$MODE" in
   # swallows it -- leaving an unborn HEAD that surfaces later as some other
   # test's confusing failure. Verified on a worker: HEAD resolves, and the
   # box's global config is left untouched.
-  ssh "$ADDR" 'cd ~/.agents/test-runs/agents-cli && if [ ! -e .git ]; then git init -q && git add -A && git -c user.email=agents@localhost -c user.name=agents commit -q -m initial >/dev/null 2>&1 || true; fi'
+  # The remediation lives in its own script so the suite can exercise the SAME
+  # code rather than a copy that drifts (scripts/ is part of the rsync, so it is
+  # already on the worker).
+  ssh "$ADDR" 'bash ~/.agents/test-runs/agents-cli/apps/cli/scripts/bound-repo-root.sh ~/.agents/test-runs/agents-cli'
 
   green "Tree shipped. Running the suite on $DEVICE..."
     ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli/apps/cli \
