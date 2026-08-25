@@ -11,8 +11,9 @@ Read in this order:
 3. [Resources](resources.md) and [execution](execution.md) — inputs and the one launch path.
 4. [Sessions](sessions.md), [fleet](fleet.md), and [orchestration](orchestration.md).
 5. [Automation](automation.md), [interfaces](interfaces.md), and [secrets](secrets.md).
-6. [Observability](observability.md), [distribution](distribution.md), and
-   [behavioral specifications](specifications.md).
+6. [Observability](observability.md), [distribution](distribution.md),
+   [behavioral specifications](specifications.md), and [benchmarks](benchmarks.md)
+   (measured numbers; not Linear).
 
 Authored documents contain boundaries, owners, data flow, state transitions,
 invariants, failure behavior, and accepted tradeoffs. They do not contain setup
