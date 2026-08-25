@@ -287,7 +287,7 @@ export function buildPullEnvelope(
 // ---------------------------------------------------------------------------
 
 /**
- * Parse a peer's `projects pull-local --json` stdout. Fails CLOSED **and
+ * Parse a peer's `projects pull-local` stdout. Fails CLOSED **and
  * LOUD**: any structural anomaly (wrong schema version, wrong kind, machine
  * mismatch, fingerprint mismatch, non-array results, malformed rows) returns
  * `{ items: [], valid: false }` rather than silently accepting a partial or

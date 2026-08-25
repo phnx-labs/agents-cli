@@ -125,7 +125,7 @@ export function workspaceTargetsForDef(def: ProjectDef): string[] {
 }
 
 /**
- * Parse a peer's `projects probe --json` stdout, tagging each row with the
+ * Parse a peer's `projects probe` stdout, tagging each row with the
  * machine that answered. Defensive against version skew / partial output, the
  * same boundary contract as `parseRemoteActive`: non-JSON or a non-array
  * yields `[]`, and rows without a `path`/`present` core are dropped.

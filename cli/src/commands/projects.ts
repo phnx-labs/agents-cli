@@ -794,7 +794,7 @@ async function runProjectCard(
       const [probeRes, activeRes] = await Promise.all([
         fleetTargets.length > 0
           ? gatherRemoteAgentsJson({
-              args: ['projects', 'probe', '--json', ...fleetTargets],
+              args: ['projects', 'probe', ...fleetTargets],
               noFanoutEnv: PROJECTS_NO_FANOUT_ENV,
               hosts: opts.deviceFilter,
               parse: parseRemoteProbe,
