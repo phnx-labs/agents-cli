@@ -143,6 +143,23 @@ function buildIndexShard(rows: SyncRow[]): Omit<TracesIndexShard, 'device' | 'sy
 // HTTP PUT helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Strip local-machine fields that carry no analytical value and could expose
+ * filesystem paths or account PII if written to R2.
+ */
+function scrubTrajectoryForStorage(traj: SessionTrajectory): unknown {
+  const { session, ...rest } = traj;
+  const {
+    filePath: _fp,
+    cwd: _cwd,
+    account: _account,
+    accountKey: _accountKey,
+    accountOrg: _accountOrg,
+    ...cleanSession
+  } = session;
+  return { ...rest, session: cleanSession };
+}
+
 async function putSessionTrace(
   backend: TracesBackend,
   device: string,
@@ -156,7 +173,7 @@ async function putSessionTrace(
       authorization: `Bearer ${backend.token}`,
       'content-type': 'application/json; charset=utf-8',
     },
-    body: JSON.stringify(traj),
+    body: JSON.stringify(scrubTrajectoryForStorage(traj)),
   });
   if (!res.ok) {
     throw new Error(`PUT ${url} → ${res.status}`);

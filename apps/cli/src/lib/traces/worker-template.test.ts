@@ -7,9 +7,11 @@ import { renderTracesWorkerScript } from './worker-template.js';
 function makeWorker(opts: {
   verifyResult: { userId: string; email: string } | null;
   bucket?: Map<string, { body: string; httpMetadata?: Record<string, string> }>;
+  writeToken?: string;
+  tracesNamespace?: string;
 }) {
   const bucket = opts.bucket ?? new Map();
-  const env = {
+  const env: Record<string, unknown> = {
     PHOENIX_ID_BASE: 'https://id.test',
     BUCKET: {
       async get(key: string) {
@@ -42,6 +44,8 @@ function makeWorker(opts: {
       },
     },
   };
+  if (opts.writeToken !== undefined) env['WRITE_TOKEN'] = opts.writeToken;
+  if (opts.tracesNamespace !== undefined) env['TRACES_NAMESPACE'] = opts.tracesNamespace;
 
   // Evaluate the generated worker JS.
   const src = renderTracesWorkerScript();
@@ -180,5 +184,27 @@ describe('traces worker — no public cache header anywhere', () => {
     const cc = res.headers.get('cache-control') ?? '';
     expect(cc).not.toContain('public');
     expect(cc).not.toMatch(/max-age=(?!0)/i);
+  });
+});
+
+describe('traces worker — BYO static write-token namespace enforcement', () => {
+  it('PUT with BYO token to own namespace → 200', async () => {
+    const w = makeWorker({ verifyResult: null, writeToken: 'secret', tracesNamespace: 'byo' });
+    const res = await w.fetch(`https://traces/byo/device1/index.json`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it('PUT with BYO token to a foreign prefix → 403', async () => {
+    const w = makeWorker({ verifyResult: null, writeToken: 'secret', tracesNamespace: 'byo' });
+    const res = await w.fetch(`https://traces/${userId}/index.json`, {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: '{}',
+    });
+    expect(res.status).toBe(403);
   });
 });

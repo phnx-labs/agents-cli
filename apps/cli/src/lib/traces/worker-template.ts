@@ -54,11 +54,9 @@ async function handlePut(request, env, path) {
   if (auth.error) return auth.error;
 
   const segments = path.split('/').filter(Boolean);
-  if (auth.kind === 'phoenix') {
-    const expected = auth.owner;
-    if (!expected || segments[0] !== expected) {
-      return json({ error: 'namespace mismatch', owner: expected }, 403);
-    }
+  const expected = auth.owner;
+  if (!expected || segments[0] !== expected) {
+    return json({ error: 'namespace mismatch', owner: expected }, 403);
   }
 
   const contentType = request.headers.get('content-type') || 'application/json; charset=utf-8';
