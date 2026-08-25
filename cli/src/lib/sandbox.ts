@@ -16,7 +16,7 @@ import { safeJoin } from './paths.js';
 import { createLink } from './platform/index.js';
 
 function resolveRealHome(): string {
-  const home = process.env.AGENTS_REAL_HOME || os.homedir();
+  const home = os.homedir();
   try {
     return fs.realpathSync(home);
   } catch {
@@ -224,7 +224,7 @@ export function assertSandboxForwardsHostGhAuth(spawnEnv: Record<string, string>
 
 /** Link this host's Cursor login and CLI config into the disposable overlay. */
 export function generateCursorConfig(overlayHome: string): void {
-  const realCursorDir = path.join(resolveRealHome(), '.cursor');
+  const realCursorDir = path.join(process.env.AGENTS_REAL_HOME || resolveRealHome(), '.cursor');
   const realAuth = path.join(realCursorDir, 'auth.json');
   if (!fs.existsSync(realAuth)) return;
 
