@@ -39,6 +39,23 @@ export const AGENTS_TMUX_CONFIG_SCHEMA = 1;
 /** Server-scoped user-option recording which AGENTS_TMUX_CONFIG_SCHEMA is applied. */
 const CONFIG_SCHEMA_OPTION = '@ag_tmux_config_schema';
 
+/**
+ * Session-scoped user options naming WHICH agent session a wrapper session runs,
+ * so a status bar (or any tmux format) can show it without shelling out:
+ * `#{@ag_session_id}` / `#{@ag_agent}`.
+ *
+ * The session NAME cannot serve this purpose. runInTmux builds it from
+ * `(options.sessionId ?? randomUUID()).slice(0, 8)` (exec.ts), so a run with no
+ * pre-assigned id still gets 8 hex characters — indistinguishable from a real
+ * short session id but resolving to nothing. Only claude currently takes a
+ * forced `--session-id`, so on a box running both, `ag-claude-<real>` and
+ * `ag-codex-<fabricated>` look identical. These options are stamped ONLY from
+ * `labels.sessionId`, which is set only when the id is genuine — absent rather
+ * than wrong, so a consumer can fall back instead of displaying a fake handle.
+ */
+const SESSION_ID_OPTION = '@ag_session_id';
+const AGENT_NAME_OPTION = '@ag_agent';
+
 let startupConfigSequence = 0;
 
 function tmuxConfigArgument(value: string): string {
@@ -308,6 +325,21 @@ export async function createSession(opts: CreateSessionOptions): Promise<Session
   // the brief window before the pane option is stamped.
   if (pane) {
     await runTmux({ socket, args: ['set-option', '-pt', pane, 'remain-on-exit', 'on', ';', 'set-option', '-g', 'remain-on-exit', 'off'], throwOnError: false }).catch(() => {});
+  }
+
+  // Stamp the agent identity onto the session so tmux formats can read it.
+  // Best-effort: a failure here must not fail a launch that otherwise worked,
+  // and an unset option simply renders empty in a format.
+  const identityArgs: string[] = [];
+  if (opts.labels?.sessionId) {
+    identityArgs.push('set-option', '-t', opts.name, SESSION_ID_OPTION, opts.labels.sessionId);
+  }
+  if (opts.labels?.agent) {
+    if (identityArgs.length) identityArgs.push(';');
+    identityArgs.push('set-option', '-t', opts.name, AGENT_NAME_OPTION, opts.labels.agent);
+  }
+  if (identityArgs.length) {
+    await runTmux({ socket, args: identityArgs, throwOnError: false }).catch(() => {});
   }
 
   const meta: SessionMeta = {

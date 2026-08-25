@@ -110,6 +110,55 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     }
   });
 
+  it('stamps the agent identity only when the session id is genuine, so a format never shows a fabricated handle', async () => {
+    const unconfiguredHome = path.join(tempDir, 'identity-home');
+    fs.mkdirSync(unconfiguredHome);
+    const env = {
+      ...process.env,
+      HOME: unconfiguredHome,
+      XDG_CONFIG_HOME: path.join(unconfiguredHome, '.config'),
+    };
+
+    // A run WITH a pre-assigned session id (what claude gets via --session-id).
+    await createSession({
+      name: 'ag-claude-real',
+      cmd: 'sleep 30',
+      socket,
+      env,
+      labels: { agent: 'claude', sessionId: 'c8c4a2c8-1111-2222-3333-444455556666' },
+    });
+
+    // A run WITHOUT one (codex today): runInTmux still names the session from a
+    // random UUID, so the NAME carries 8 hex chars that resolve to nothing. The
+    // option must stay unset rather than repeat that fabricated handle.
+    await createSession({
+      name: 'ag-codex-fake',
+      cmd: 'sleep 30',
+      socket,
+      env,
+      labels: { agent: 'codex' },
+    });
+
+    const opt = async (session: string, option: string) =>
+      (await runTmux({ socket, args: ['show-options', '-t', session, '-qv', option] })).stdout.trim();
+
+    expect(await opt('ag-claude-real', '@ag_session_id')).toBe('c8c4a2c8-1111-2222-3333-444455556666');
+    expect(await opt('ag-claude-real', '@ag_agent')).toBe('claude');
+
+    expect(await opt('ag-codex-fake', '@ag_session_id')).toBe('');
+    expect(await opt('ag-codex-fake', '@ag_agent')).toBe('codex');
+
+    // The point of the option: a format resolves it per session, so a status bar
+    // can show a real id for one and fall back for the other.
+    const rendered = async (session: string) =>
+      (await runTmux({
+        socket,
+        args: ['display-message', '-t', session, '-p', '#{?#{@ag_session_id},#{@ag_session_id},no-id}'],
+      })).stdout.trim();
+    expect(await rendered('ag-claude-real')).toBe('c8c4a2c8-1111-2222-3333-444455556666');
+    expect(await rendered('ag-codex-fake')).toBe('no-id');
+  });
+
   it('configures mouse, OSC 52 clipboard, scrollback, and non-clearing mouse copy on its socket', async () => {
     const unconfiguredHome = path.join(tempDir, 'unconfigured-home');
     fs.mkdirSync(unconfiguredHome);

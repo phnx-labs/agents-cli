@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **A tmux status bar can now show which agent session a wrapper session is
+  running — without ever showing a fabricated one.** `agents run` wraps an
+  interactive agent in a tmux session named `ag-<agent>-<8 chars>`, where those
+  characters come from `(options.sessionId ?? randomUUID()).slice(0, 8)`. Only
+  claude currently takes a forced `--session-id`, so on a box running both
+  harnesses `ag-claude-c8c4a2c8` carries a real, resumable short id while
+  `ag-codex-364cd550` carries a random one that resolves to nothing — and the
+  two are indistinguishable. `createSession` now stamps two session-scoped tmux
+  user options, `@ag_session_id` and `@ag_agent`, from the launch labels;
+  `@ag_session_id` is set **only when the id is genuine**, so a format like
+  `#{?#{@ag_session_id},#{@ag_session_id},#{@ag_agent}}` shows a real handle when
+  there is one and falls back instead of printing a fake. Best-effort: a failed
+  stamp never fails a launch, and an unset option renders empty.
+
 ## 1.22.48
 
 - **On your own machine, every Claude run uses your normal login — not the
