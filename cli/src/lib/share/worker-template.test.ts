@@ -576,7 +576,8 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
   it('409s a second Phoenix user whose email local-part collides (handle claim)', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();
-    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'user-1', email: 'john@a.com' });
+    let who: { userId: string; email: string } = { userId: 'user-1', email: 'john@a.com' };
+    worker.hooks.verifyPhoenixToken = async () => who;
     const first = await worker.default.fetch(
       new Request('https://share.test/john/one', {
         method: 'PUT',
@@ -586,7 +587,7 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
       env,
     );
     expect(first.status).toBe(200);
-    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'user-2', email: 'john@b.com' });
+    who = { userId: 'user-2', email: 'john@b.com' };
     const second = await worker.default.fetch(
       new Request('https://share.test/john/two', {
         method: 'PUT',
@@ -598,6 +599,33 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
     expect(second.status).toBe(409);
     expect(await second.json()).toMatchObject({ error: 'handle taken', handle: 'john' });
     expect(store.has('john/two')).toBe(false);
+  });
+
+  it('409s a DELETE from the colliding local-part against the claimed handle', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    let who: { userId: string; email: string } = { userId: 'user-1', email: 'john@a.com' };
+    worker.hooks.verifyPhoenixToken = async () => who;
+    const first = await worker.default.fetch(
+      new Request('https://share.test/john/one', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer t', 'content-type': 'text/html' },
+        body: 'one',
+      }),
+      env,
+    );
+    expect(first.status).toBe(200);
+    who = { userId: 'user-2', email: 'john@b.com' };
+    const del = await worker.default.fetch(
+      new Request('https://share.test/john/one', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer t' },
+      }),
+      env,
+    );
+    expect(del.status).toBe(409);
+    expect(await del.json()).toMatchObject({ error: 'handle taken', handle: 'john' });
+    expect(store.has('john/one')).toBe(true);
   });
 
   it('404s GET of the internal handle-claim prefix', async () => {

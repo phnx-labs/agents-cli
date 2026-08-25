@@ -599,7 +599,7 @@ export function registerShareCommands(artifactsCmd: Command): void {
     .command('share')
     .description('Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.')
     .argument('[file]', 'file to publish (HTML or any static asset)')
-    .option('--slug <slug>', 'custom URL slug under your namespace (default: <project>-<feature>-<hash>)')
+    .option('--slug <slug>', 'custom URL slug under your namespace (default: <feature>-<16hex>)')
     .option('--github-user <user>', 'GitHub username for the share namespace (default: resolved from gh/git config; ignored on the managed endpoint)')
     .option('--expire <spec>', "auto-expire (default 30d). e.g. 12h, 30d, 2026-08-01, or 'never'")
     .addOption(

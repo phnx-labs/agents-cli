@@ -816,7 +816,7 @@
           "options": [
             {
               "flags": "--slug <slug>",
-              "description": "custom URL slug under your namespace (default: <project>-<feature>-<hash>)",
+              "description": "custom URL slug under your namespace (default: <feature>-<16hex>)",
               "long": "--slug",
               "required": true,
               "optional": false,

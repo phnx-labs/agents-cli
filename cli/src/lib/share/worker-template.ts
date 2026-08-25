@@ -227,7 +227,14 @@ export default {
         const delSegments = path.split('/').filter(Boolean);
         // Handle is the public namespace; userId prefix is still deletable so
         // P1 UUID-namespaced objects the same account published can be taken down.
-        if (!delSegments[0] || (delSegments[0] !== handle && delSegments[0] !== uid)) {
+        // A colliding local-part (same handle, different userId) must not be
+        // able to DELETE the claimant's pages — consult the claim the same way PUT does.
+        if (delSegments[0] && delSegments[0] === uid) {
+          // own leftover UUID prefix
+        } else if (delSegments[0] && delSegments[0] === handle) {
+          const owned = await assertHandleOwner(env.BUCKET, handle, auth.owner);
+          if (owned.error) return owned.error;
+        } else {
           return json({ error: 'namespace mismatch', owner: handle || uid }, 403);
         }
       }
@@ -455,16 +462,33 @@ function phoenixHandle(auth) {
 
 // First writer of a handle owns it. Later PUTs from the same userId are fine;
 // a different userId whose email local-part collides gets 409, not a silent overwrite.
-async function claimHandle(bucket, handle, userId) {
-  const key = '__handles/' + handle;
-  const existing = await bucket.get(key);
-  if (existing) {
-    const claimed = existing.customMetadata && existing.customMetadata.userId;
-    if (claimed && claimed !== userId) {
+async function assertHandleOwner(bucket, handle, userId) {
+  // Pages under the handle already stamp customMetadata.owner = userId.
+  // Treat that as the source of truth so a colliding local-part cannot
+  // PUT/DELETE another account's objects even if the claim object is missing.
+  const list = await bucket.list({ prefix: handle + '/', include: ['customMetadata'] });
+  for (const o of list.objects || []) {
+    const owner = o.customMetadata && o.customMetadata.owner;
+    if (owner && owner !== userId) {
       return { error: json({ error: 'handle taken', handle: handle }, 409) };
     }
-    return {};
   }
+  const key = '__handles/' + handle;
+  const existing = await bucket.get(key);
+  if (!existing) return {};
+  const claimed = existing.customMetadata && existing.customMetadata.userId;
+  if (claimed && claimed !== userId) {
+    return { error: json({ error: 'handle taken', handle: handle }, 409) };
+  }
+  return {};
+}
+
+async function claimHandle(bucket, handle, userId) {
+  const owned = await assertHandleOwner(bucket, handle, userId);
+  if (owned.error) return owned;
+  const key = '__handles/' + handle;
+  // Write (or rewrite) so a same-user republish resets object Age against the
+  // bucket's 366-day lifecycle — otherwise the claim can expire while pages stay live.
   await bucket.put(key, JSON.stringify({ userId: userId }), {
     httpMetadata: { contentType: 'application/json' },
     customMetadata: { userId: userId, visibility: 'unlisted' },
