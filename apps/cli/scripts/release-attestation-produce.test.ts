@@ -551,6 +551,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
       path.join(fx.fakebin, 'gh'),
       '#!/usr/bin/env bash\n' +
         'if [[ "$1" == release && "$2" == list ]]; then echo v9.9.8; exit 0; fi\n' +
+        'if [[ "$1" == release && "$2" == view ]]; then echo 0; exit 0; fi\n' +
         'if [[ "$1" == release && "$2" == download ]]; then\n' +
         '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
         `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${priorManifest}\nMANIFEST\n` +
@@ -628,6 +629,45 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(output).toContain('Starting a fresh helper manifest');
   });
 
+  it('skips a helper-only release and seeds from the newest one that has a manifest', () => {
+    // RUSH-3191. Not every release is a CLI release: the Windows
+    // computer-helper workflow publishes helper-only releases into the same
+    // `v<version>` tag namespace. Taking the newest release unconditionally let
+    // one of those shadow the last real CLI release — the seed missed, EVERY
+    // helper read as "changed", and computer-mac (never rebuilt here) fail-closed
+    // on every run. Live instance: v1.22.48 shadowed v1.22.47.
+    const root = tmp('attest-produce-seed-shadowed-');
+    const fx = buildManifestFixture(root);
+    const priorManifest = priorReleaseManifest(root, fx.manifestDigests['computer-mac']);
+    fs.writeFileSync(
+      path.join(fx.fakebin, 'gh'),
+      '#!/usr/bin/env bash\n' +
+        // Newest first, exactly as `gh release list` orders them.
+        'if [[ "$1" == release && "$2" == list ]]; then printf "%s\\n" v9.9.9 v9.9.8; exit 0; fi\n' +
+        // v9.9.9 is helper-only; v9.9.8 is the real CLI release.
+        'if [[ "$1" == release && "$2" == view ]]; then\n' +
+        '  if [[ "$3" == v9.9.9 ]]; then echo ""; else echo 0; fi\n' +
+        '  exit 0\n' +
+        'fi\n' +
+        'if [[ "$1" == release && "$2" == download ]]; then\n' +
+        // Fail loudly if the seed asks for the helper-only tag — that is the bug.
+        '  for a in "$@"; do [[ "$a" == v9.9.9 ]] && { echo "asked for the helper-only release" >&2; exit 1; }; done\n' +
+        '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
+        `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${priorManifest}\nMANIFEST\n` +
+        '  exit 0\n' +
+        'fi\n' +
+        'exit 1\n',
+    );
+    fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
+
+    const result = runProduce(fx);
+    const out = result.stdout + result.stderr;
+
+    expect(out, out).toContain('Seeded the helper manifest from v9.9.8');
+    expect(out).not.toContain('Starting a fresh helper manifest');
+    expect(result.status, out).toBe(0);
+  });
+
   it('still fails closed when the seeded computer-mac record does not match this tree', () => {
     const root = tmp('attest-produce-manifest-seed-drift-');
     const fx = buildManifestFixture(root);
@@ -636,6 +676,7 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
       path.join(fx.fakebin, 'gh'),
       '#!/usr/bin/env bash\n' +
         'if [[ "$1" == release && "$2" == list ]]; then echo v9.9.8; exit 0; fi\n' +
+        'if [[ "$1" == release && "$2" == view ]]; then echo 0; exit 0; fi\n' +
         'if [[ "$1" == release && "$2" == download ]]; then\n' +
         '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
         `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${staleManifest}\nMANIFEST\n` +

@@ -267,6 +267,44 @@ green "Tarball at $DEST_DIR/$TGZ_NAME"
 # drifted computer-mac digest with no prior record to carry forward fails
 # closed with the exact command to run, rather than shipping a stale or
 # missing helper record.
+# The newest release that carries a helper manifest, falling back to the newest
+# release overall.
+#
+# `gh release list --limit 1` returns whatever was published last, and not every
+# release is a CLI release: the Windows computer-helper workflow publishes
+# helper-only releases (assets `computer-helper-win.exe` + .sha256) into the same
+# `v<version>` tag namespace. One of those shadows the last real CLI release, the
+# seed misses, and EVERY helper then reads as "changed" -- hard-failing on
+# computer-mac, which this producer never rebuilds. Observed live: v1.22.48
+# (helper-only, 09:54Z) shadowed v1.22.47 and blocked a release.
+#
+# On exhaustion this deliberately echoes the NEWEST tag rather than nothing, so
+# the caller's existing per-reason diagnostics still fire unchanged: an empty
+# list keeps "no published release to seed from", and a newest-release-without-
+# the-asset keeps "<tag> carries no release-manifest.json" naming that tag.
+# Skipping is an ADDITION to the existing behaviour, not a replacement for it.
+newest_release_with_manifest() {
+  local tags tag newest=""
+  # Capture the list FIRST so gh's own failure is still reported as a gh failure.
+  # Inside `done < <(...)` the exit status is lost, and an auth/network outage
+  # would silently read as "no published release to seed from" -- erasing exactly
+  # the misconfiguration the caller's diagnostics exist to surface.
+  tags="$(gh release list --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null)" || return 1
+  while read -r tag; do
+    [[ -n "$tag" && "$tag" != "null" ]] || continue
+    [[ -n "$newest" ]] || newest="$tag"
+    # `--jq index(...)` prints an EMPTY line when the asset is absent, not the
+    # string "null" -- so require a digit. Index 0 is a valid match.
+    if gh release view "$tag" --json assets \
+         --jq '[.assets[].name] | index("release-manifest.json")' 2>/dev/null \
+         | grep -qE '^[0-9]+$'; then
+      printf '%s\n' "$tag"
+      return 0
+    fi
+  done <<< "$tags"
+  printf '%s\n' "$newest"
+}
+
 if [[ -x scripts/release-manifest.sh ]]; then
   bold "Updating the helper manifest..."
   MANIFEST_FILE="$STORE/release-manifest.json"
@@ -305,37 +343,6 @@ if [[ -x scripts/release-manifest.sh ]]; then
         > "$MANIFEST_FILE"
     fi
   fi
-
-  # The newest release that actually CARRIES a helper manifest -- not simply the
-  # newest release.
-  #
-  # `gh release list --limit 1` returns whatever was published last, and not
-  # every release is a CLI release: the Windows computer-helper workflow
-  # publishes helper-only releases (assets `computer-helper-win.exe` + .sha256)
-  # under the same `v<version>` tag namespace. One of those shadows the last real
-  # CLI release, the manifest seed silently misses, and EVERY helper then reads
-  # as "changed" -- which hard-fails on computer-mac, a helper this producer
-  # never rebuilds. Observed live: v1.22.48 (helper-only, 09:54Z) shadowed
-  # v1.22.47 and blocked the release.
-  #
-  # Walk back until a release with the asset is found, rather than trusting
-  # position. Empty output means genuinely none has one.
-  newest_release_with_manifest() {
-    local tag
-    while read -r tag; do
-      [[ -n "$tag" && "$tag" != "null" ]] || continue
-      # Match a numeric index. `--jq index(...)` prints an EMPTY line when the
-      # asset is absent, not the string "null", so a `!= null` style test accepts
-      # every release. Require a digit.
-      if gh release view "$tag" --json assets \
-           --jq '[.assets[].name] | index("release-manifest.json")' 2>/dev/null \
-           | grep -qE '^[0-9]+$'; then
-        printf '%s\n' "$tag"
-        return 0
-      fi
-    done < <(gh release list --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null)
-    return 0
-  }
 
   manifest_asset_sha256() {
     local f="$1"
