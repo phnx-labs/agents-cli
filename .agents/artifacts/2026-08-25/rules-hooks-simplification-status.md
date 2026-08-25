@@ -124,7 +124,7 @@ These are not candidates for the 14→8 guard count unless the “Next change”
 `verify-work-state.py`, `visual_readback.py`, and `verify-delivery-chain.py` are invoked by `verify-work-complete`; `check-outcome-backfill.py` is offline analysis. Counting them as separate hooks would exaggerate the runtime surface. `02-expand-prompt-skill-refs.py` is the one true orphan documented by the hook maintenance contract: register it or delete it.
 
 <figure>
-<figcaption><strong>Figure 3 — The real simplification surface.</strong> Nineteen injected rules can be consolidated as language. Twenty-seven logical hooks span context, state, advisory nudges, and enforcement; only the twelve guard/reminder entries belong in the 14→8 debate.</figcaption>
+<figcaption><strong>Figure 1 — The real simplification surface.</strong> Nineteen injected rules can be consolidated as language. Twenty-seven logical hooks span context, state, advisory nudges, and enforcement; only the twelve guard/reminder entries belong in the 14→8 debate.</figcaption>
 <svg viewBox="0 0 1120 430" role="img" aria-label="Three-lane map separating rules, lifecycle hooks, and guard simplification candidates">
   <defs><marker id="inv-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#84cc16"/></marker></defs>
   <rect x="45" y="55" width="290" height="290" rx="24" fill="#172554" stroke="#60a5fa" stroke-width="3"/>
@@ -160,7 +160,7 @@ These are not candidates for the 14→8 guard count unless the “Next change”
 ## Figure
 
 <figure>
-<figcaption><strong>Figure 1 — What an agent receives today.</strong> User rules shadow same-named system rules. The exact essence rewrite therefore reaches Muqsit's fleet without changing the shared default for everyone.</figcaption>
+<figcaption><strong>Figure 2 — What an agent receives today.</strong> User rules shadow same-named system rules. The exact essence rewrite therefore reaches Muqsit's fleet without changing the shared default for everyone.</figcaption>
 <svg viewBox="0 0 1120 470" role="img" aria-label="Layer diagram showing personal rules overriding shared system rules and hooks enforcing behavior">
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#84cc16"/></marker>
@@ -201,7 +201,7 @@ These are not candidates for the 14→8 guard count unless the “Next change”
 </figure>
 
 <figure>
-<figcaption><strong>Figure 2 — Delivery ledger.</strong> Thematic groups, not chronological order: green items are demonstrably merged; amber is the explicit missing closure.</figcaption>
+<figcaption><strong>Figure 3 — Delivery ledger.</strong> Thematic groups, not chronological order: green items are demonstrably merged; amber is the explicit missing closure.</figcaption>
 <svg viewBox="0 0 1120 390" role="img" aria-label="Thematic ledger of merged rule and hook improvements followed by the remaining closure gap">
   <line x1="90" y1="195" x2="1030" y2="195" stroke="#71717a" stroke-width="6"/>
   <g fill="#84cc16" stroke="#365314" stroke-width="3">
