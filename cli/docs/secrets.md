@@ -49,7 +49,7 @@ a different lifetime. Headless sync is configured with that transport variable.
 **Never place the master key in a shell startup file.** `AGENTS_SECRETS_PASSPHRASE`
 overrides the key file, so exporting it from `~/.zshenv`, `~/.bashrc`, or any other rc
 file leaves the plaintext key readable by every process the account starts — including
-agents — and `agents doctor` reports it as a critical `env-secret-export`. This is not
+agents — and `agents doctor` reports it as an `env-secret-export` warning. This is not
 hypothetical: it is what RUSH-1968 was, on seven machines at once, because an earlier
 revision of this page recommended it.
 <!-- /docs-hygiene:allow-master-key-discussion -->

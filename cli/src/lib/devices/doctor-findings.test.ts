@@ -15,6 +15,7 @@ import {
 } from './doctor-findings.js';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import { ALL_AGENT_IDS, supportsAccountInspection } from '../agents.js';
 import type { VersionResourceReport } from '../doctor-diff.js';
 import type { FleetHookRuntimeState, FleetVersionSignIn, FleetDivergence } from './fleet-divergence.js';
@@ -657,6 +658,31 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
     const rubric = doc.slice(start, start + 1400);
     const { critical, warning } = buckets(rubric, '**CRITICAL**', '**WARNING**');
     expect(misplaced(critical, warning)).toEqual([]);
+  });
+
+  it('no doc calls a finding by the wrong severity in prose', () => {
+    // The rubric tests above pin the LISTS. They do not pin prose elsewhere that
+    // names a kind and a severity in the same breath — which is how this branch
+    // originally shipped `docs/secrets.md` calling `env-secret-export` "critical"
+    // while its own restored `docs/observability.md` correctly listed it under
+    // WARNING, in the same commit. Two doc sections contradicting each other on
+    // one finding's severity is worse than either being silently absent.
+    const docsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs');
+    const wrong: string[] = [];
+    for (const file of fs.readdirSync(docsDir).filter((f) => f.endsWith('.md'))) {
+      const text = fs.readFileSync(path.join(docsDir, file), 'utf-8');
+      for (const kind of ALL_FINDING_KINDS) {
+        const actual = FINDING_SEVERITY[kind];
+        const other = actual === 'critical' ? 'warning' : 'critical';
+        // Both orders occur naturally: "a critical `kind`" and "an `kind` warning".
+        const before = new RegExp(`\\b${other}\\s+\`${kind}\``, 'i');
+        const after = new RegExp(`\`${kind}\`\\s+${other}\\b`, 'i');
+        if (before.test(text) || after.test(text)) {
+          wrong.push(`${file}: ${kind} called ${other}, is ${actual}`);
+        }
+      }
+    }
+    expect(wrong).toEqual([]);
   });
 
   it('the AGENTS.md rubric puts every kind in the right bucket', () => {
