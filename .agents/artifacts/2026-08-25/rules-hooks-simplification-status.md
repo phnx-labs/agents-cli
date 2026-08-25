@@ -2,7 +2,7 @@
 kind: visual
 title: Every system rule and hook, with the remaining simplification work
 summary: >
-  The 23-rule personal distillation is live, while the shared system remains at 19 rules. This dashboard now inventories every injected system rule and every registered logical hook: what it does today, what already improved, and what remains proposed.
+  The 23-rule personal distillation is live, while the shared system remains at 19 rules. This dashboard inventories every injected rule and registered hook, then audits whether each rule protects an outcome or over-prescribes the agent's exact maneuver.
 status: final
 date: 2026-08-25
 context: status of rules, subrules, and hook messaging across muqsitnawaz/.agents and phnx-labs/.agents-system
@@ -12,6 +12,7 @@ facts:
   - "Shared-system 23-rule distillation PR #381 was closed, not merged"
   - "Hook refinement: major message and guard improvements merged; full 14-to-8 target not complete"
   - "Live system inventory: 19 injected subrules and 27 registered logical hooks"
+  - "Agency audit: 7 keep, 7 loosen, 4 move to skills, 1 fold into another rule"
 ---
 
 ## Story
@@ -80,6 +81,71 @@ This is the decision sheet the earlier dashboard lacked. “Current instruction�
 | `remote-fleet-dispatch` | Preserve non-derivable remote execution traps | Use native `--device`, never raw SSH launch; probe the actual operation; reconcile detached status | **Landed:** mechanics delegated to skills in #348. **Proposed merge:** fold remaining traps into Running Agents & Teams. |
 | `unattended-verification` | Prevent silent-success automation | Assert postconditions, probe the real action class, key state per run, bound waits, fail loud only on real gaps | **Proposed consolidation/removal:** #381 removed it as a standalone rule; unique postcondition lines should survive under Foundations/F3. |
 
+### Agency audit — protect intent, not choreography
+
+The simplification question is not only “how many words?” It is whether the injected text helps an agent exercise judgment. A useful rule states the outcome, boundary, or non-derivable platform fact. A brittle rule dictates a universal command, model, teammate count, polling cadence, document shape, or test layout even when the task calls for another approach.
+
+<div class="artifact-callout"><strong>Desired center:</strong> understand the user's intended outcome; explore the environment, prior work, and available tools; choose a safe effective path; verify real progress; adapt when evidence changes; and continue until the outcome is delivered or a genuine boundary needs the user.</div>
+
+| Rule | Verdict | Instruction that constrains judgment | Recommended direction |
+|---|---|---|---|
+| `foundations` | **Loosen** | “Stop for exactly four things”; try three paths; diagnosis implies fixing; every build follows design → approval → implementation → release | Keep autonomy, scope fidelity, self-unblocking, outcome verification, and irreversible-state safety. Describe boundaries as principles rather than a closed lifecycle or attempt count. |
+| `research-discipline` | **Loosen** | Every factual claim needs a quote; read every file in the path; every research brief ends with fixed text | Scale evidence to consequence, uncertainty, novelty, and risk. Trace enough of the real path to rule out competing explanations. |
+| `fleet-delegation` | **Move to skills** | Spawn 3–7 agents from message one; diversify harnesses; select named model tiers; delegate before a third shell call | Keep one reminder that delegation is available. Let `run` and `teams` teach capabilities; delegate when independence and saved time exceed coordination cost. |
+| `code-quality` | **Loosen** | “Every fallback hides a bug”; propose a refactor whenever no canonical source exists; prose punctuation quota | Reject fallbacks that conceal inconsistent state or false success. Permit explicit product degradation and focused local changes when justified. Drop stylistic micromanagement. |
+| `testing-strict` | **Loosen** | Every source gets a 1:1 colocated test; no mocks; unit plus end-to-end for all changes | Test the highest-risk behavior at the lowest faithful level. Require real integration checks at critical boundaries; allow controlled substitutes for deterministic failure cases. |
+| `truly-agentic-git-workflow` | **Keep invariant; move mechanics** | Exact worktree recipe, commit pathspec, evidence-upload chain, watcher command, and merge sequence | Inject only primary-checkout safety, isolated changes, review, green merge, and delivery ownership. Put recipes in Git/PR skills. Remove the known-stale `--fail-fast` watcher tactic. |
+| `gh-merge-guard` | **Keep** | Asks on any review issue, test failure, or merge conflict | Preserve non-author review, green checks, and no bypass. Agents should investigate and repair ordinary failures without asking. |
+| `no-pr-footer` | **Fold** | Standalone rule for one output preference | Keep the prohibition as one line in `conventions` or enforce it mechanically. |
+| `operational` | **Loosen** | One exact wait implementation; no emojis, env credentials, local CLIs, `/tmp`, Markdown, toasts, or dev servers | Keep “ask about intent, decide implementation” and ACT → VERIFY → SHOW → CONTINUE. Move tool/file preferences to relevant skills or repo rules; scope security claims precisely. |
+| `conventions` | **Keep** | Long historical ticket-count rationale is injected with the policy | Keep canonical memory and ticket restraint in a few lines. Move the incident history and tracker mechanics to docs/skills. |
+| `agents-cli` | **Move to skills** | Always search sessions and active agents before starting/spawning | Preserve the non-derivable home-directory fact in product docs. Prompt session search when duplication or prior context is plausible, not for every task. |
+| `parallel-teams` | **Move to skills** | Three-surface threshold; mandatory plan; fixed commands and prompt paragraphs; five-minute ticks; `sleep 300`; spawned agents cannot own handoff | Inject only independent boundaries, isolated edits, verified progress, and orchestrator-owned composition. Keep all command and monitoring tactics in `teams`. |
+| `tech-stack` | **Keep** | Every web task “starts with” a browser | Retain the compact capability map. Choose the authoritative interface; require browser/computer when rendered, authenticated, or visual behavior matters. |
+| `ui-work-discipline` | **Keep** | Exact browser/screenshot commands and mandatory two-or-three design variants | Preserve the visual-readback invariant and focus safety. Move commands to UI skills; show alternatives only for genuine unresolved design choices. |
+| `plan-presentation` | **Move to skills** | Every nontrivial plan becomes Markdown + HTML + SVG + diffs + checklist + review + two themes | Plan when uncertainty, coordination, or risk benefits from it. Match depth and medium to the decision. Load `artifacts`/`plan-render` only when visual review adds value. |
+| `task-checklists` | **Loosen** | Checklist at exactly 3+ steps; mirror milestones to the ticket | Use a checklist when state, duration, or coordination risk makes losing track plausible. Track outcomes, not every mechanical step. |
+| `feed-status-posts` | **Keep principle; move mechanics** | Exact flags, levels, team exceptions, session fallbacks, and phone formatting in every prompt | Inject only “record meaningful asynchronous milestones; notify on material delivery or genuine needs-user blocks.” Put CLI syntax in the feed skill. |
+| `remote-fleet-dispatch` | **Keep facts; move mechanics** | Exact dispatch, probe, and monitoring commands appear for tasks that never dispatch | Retain native-dispatch and truthful-status traps in `run`/`teams`; default rules only remind agents the fleet exists. |
+| `unattended-verification` | **Keep and fold into F3** | One-list-per-run quota policy and GitHub REST/GraphQL tactics are universalized | Preserve postconditions, operation-faithful probes, bounded waits, run-specific state, and honest “unverified.” Move API tactics to operational skills. |
+
+<figure>
+<figcaption><strong>Figure 1 — The rule boundary.</strong> Inject the inner rings because they govern judgment and safety. Load the outer ring only when the relevant task or tool is active.</figcaption>
+<svg viewBox="0 0 1120 520" role="img" aria-label="Concentric rule boundary separating intent, invariants, platform facts, and task-specific choreography">
+  <circle cx="430" cy="260" r="205" fill="#172554" stroke="#60a5fa" stroke-width="4"/>
+  <circle cx="430" cy="260" r="150" fill="#052e16" stroke="#84cc16" stroke-width="4"/>
+  <circle cx="430" cy="260" r="92" fill="#18181b" stroke="#f4f4f5" stroke-width="4"/>
+  <text x="430" y="245" text-anchor="middle" fill="#ffffff" font-size="25" font-weight="800">USER INTENT</text>
+  <text x="430" y="278" text-anchor="middle" fill="#d4d4d8" font-size="17">desired outcome · scope</text>
+  <text x="430" y="335" text-anchor="middle" fill="#bef264" font-size="20" font-weight="700">INVARIANTS</text>
+  <text x="430" y="360" text-anchor="middle" fill="#ffffff" font-size="16">safety · evidence · verification</text>
+  <text x="430" y="117" text-anchor="middle" fill="#bfdbfe" font-size="20" font-weight="700">NON-DERIVABLE FACTS</text>
+  <text x="430" y="143" text-anchor="middle" fill="#ffffff" font-size="16">platform boundaries · irreversible traps</text>
+  <path d="M650 150 C760 145 790 115 835 105" fill="none" stroke="#fb7185" stroke-width="4"/>
+  <rect x="760" y="85" width="320" height="350" rx="24" fill="#3f0b0b" stroke="#fb7185" stroke-width="3"/>
+  <text x="920" y="125" text-anchor="middle" fill="#fecdd3" font-size="24" font-weight="800">LOAD ON DEMAND</text>
+  <text x="795" y="175" fill="#ffffff" font-size="18">exact commands</text>
+  <text x="795" y="212" fill="#ffffff" font-size="18">model and roster choices</text>
+  <text x="795" y="249" fill="#ffffff" font-size="18">polling cadence</text>
+  <text x="795" y="286" fill="#ffffff" font-size="18">artifact format and layout</text>
+  <text x="795" y="323" fill="#ffffff" font-size="18">test placement</text>
+  <text x="795" y="360" fill="#ffffff" font-size="18">CLI flags and recipes</text>
+  <text x="920" y="408" text-anchor="middle" fill="#fda4af" font-size="18" font-weight="700">skills teach tactics; rules protect outcomes</text>
+</svg>
+</figure>
+
+#### Proposed compact default corpus
+
+1. **Agency and scope** — pursue the intended outcome, act within authorization, ask only for genuine choices, and adapt while useful progress remains.
+2. **Exploration and tools** — inspect context, prior work, live state, and capabilities; choose the authoritative interface; delegate when it materially helps.
+3. **Evidence and verification** — ground consequential claims and verify the real outcome rather than proxies or exit codes.
+4. **Safety and irreversible state** — protect primary checkouts, credentials, shared history, production, external communication, and review boundaries.
+5. **Engineering quality** — fix canonical causes, avoid silent failure and accidental duplication, and test in proportion to risk.
+6. **Coordination** — give parallel work clear ownership, verify progress, and own composed integration.
+7. **Communication** — lead with outcomes, minimize human involvement, and notify only at meaningful boundaries.
+
+This is a review proposal, not a rewrite already approved or landed. Exact commands, thresholds, diagrams, model names, file layouts, and monitoring recipes remain available through the relevant skills.
+
 ### Registered hooks — lifecycle injectors and state recorders
 
 These are not candidates for the 14→8 guard count unless the “Next change” column explicitly says so.
@@ -124,7 +190,7 @@ These are not candidates for the 14→8 guard count unless the “Next change”
 `verify-work-state.py`, `visual_readback.py`, and `verify-delivery-chain.py` are invoked by `verify-work-complete`; `check-outcome-backfill.py` is offline analysis. Counting them as separate hooks would exaggerate the runtime surface. `02-expand-prompt-skill-refs.py` is the one true orphan documented by the hook maintenance contract: register it or delete it.
 
 <figure>
-<figcaption><strong>Figure 1 — The real simplification surface.</strong> Nineteen injected rules can be consolidated as language. Twenty-seven logical hooks span context, state, advisory nudges, and enforcement; only the twelve guard/reminder entries belong in the 14→8 debate.</figcaption>
+<figcaption><strong>Figure 2 — The real simplification surface.</strong> Nineteen injected rules can be consolidated as language. Twenty-seven logical hooks span context, state, advisory nudges, and enforcement; only the twelve guard/reminder entries belong in the 14→8 debate.</figcaption>
 <svg viewBox="0 0 1120 430" role="img" aria-label="Three-lane map separating rules, lifecycle hooks, and guard simplification candidates">
   <defs><marker id="inv-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="#84cc16"/></marker></defs>
   <rect x="45" y="55" width="290" height="290" rx="24" fill="#172554" stroke="#60a5fa" stroke-width="3"/>
@@ -160,7 +226,7 @@ These are not candidates for the 14→8 guard count unless the “Next change”
 ## Figure
 
 <figure>
-<figcaption><strong>Figure 2 — What an agent receives today.</strong> User rules shadow same-named system rules. The exact essence rewrite therefore reaches Muqsit's fleet without changing the shared default for everyone.</figcaption>
+<figcaption><strong>Figure 3 — What an agent receives today.</strong> User rules shadow same-named system rules. The exact essence rewrite therefore reaches Muqsit's fleet without changing the shared default for everyone.</figcaption>
 <svg viewBox="0 0 1120 470" role="img" aria-label="Layer diagram showing personal rules overriding shared system rules and hooks enforcing behavior">
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#84cc16"/></marker>
@@ -201,7 +267,7 @@ These are not candidates for the 14→8 guard count unless the “Next change”
 </figure>
 
 <figure>
-<figcaption><strong>Figure 3 — Delivery ledger.</strong> Thematic groups, not chronological order: green items are demonstrably merged; amber is the explicit missing closure.</figcaption>
+<figcaption><strong>Figure 4 — Delivery ledger.</strong> Thematic groups, not chronological order: green items are demonstrably merged; amber is the explicit missing closure.</figcaption>
 <svg viewBox="0 0 1120 390" role="img" aria-label="Thematic ledger of merged rule and hook improvements followed by the remaining closure gap">
   <line x1="90" y1="195" x2="1030" y2="195" stroke="#71717a" stroke-width="6"/>
   <g fill="#84cc16" stroke="#365314" stroke-width="3">
