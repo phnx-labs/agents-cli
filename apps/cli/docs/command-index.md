@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 557 commands._
+_69 command groups · 561 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -847,6 +847,15 @@ agents tmux split <name> <direction>  Split the active pane of a session. Direct
 
 ```
 agents trace <selectors...>  Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
+```
+
+## traces — Sync this device's derived, redacted trajectories to your Phoenix account
+
+```
+agents traces         Sync this device's derived, redacted trajectories to your Phoenix account
+agents traces open    Open the Phoenix Evals console
+agents traces status  Show last sync time for this device
+agents traces sync    Push derived, redacted trajectories (incremental)
 ```
 
 ## trash — Inspect and restore soft-deleted agent version directories
