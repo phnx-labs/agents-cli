@@ -26,12 +26,26 @@
 
 /** How a session is connected to the client that should be driving it. */
 export type HostLink =
-  /** A client is attached, or nothing indicates otherwise. The normal case. */
+  /** A client is attached — positively established, not assumed. */
   | 'connected'
   /** Alive, but nothing is viewing it — the host window is gone and the agent outlived it. */
   | 'no-client'
   /** The host window is gone AND the agent process died with it — an unclean exit. */
-  | 'host-gone';
+  | 'host-gone'
+  /**
+   * Alive, and we have NO usable signal either way — no window owns it and it is
+   * not tmux-hosted, so neither input this function keys on exists.
+   *
+   * This case used to return `connected`, which reads as "verified fine" when the
+   * truth is "nobody looked". That is the wrong default for a detector: the rows
+   * it silently blesses are precisely the ones with no observer — a bare terminal,
+   * a team spawn, a cloud task, or any session whose pane lives on another
+   * machine (this function's inputs are all local, so a `--device` session is
+   * structurally unobservable from the launching box).
+   *
+   * Callers MUST NOT render this as healthy. It means the question is open.
+   */
+  | 'unknown';
 
 /**
  * How long an IDE window's registry slice may go without a refresh before we
@@ -93,5 +107,11 @@ export function classifyHostLink(input: HostLinkInput): HostLink {
   // that owned it is gone. The agent outlived its editor.
   if (windowGone) return 'no-client';
 
-  return 'connected';
+  // Positive evidence of a client: tmux counted at least one attached client, or
+  // a window is refreshing its registry slice. Either is a real observation.
+  if (input.tmuxClients !== undefined || input.windowHeartbeatMs !== undefined) return 'connected';
+
+  // Neither input exists, so nothing here observed anything. Say so rather than
+  // reporting the healthy answer by default — see {@link HostLink}'s `unknown`.
+  return 'unknown';
 }

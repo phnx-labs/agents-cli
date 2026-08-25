@@ -44,12 +44,46 @@ describe('foldHostLink status precedence', () => {
     expect(rows[0].status).toBe('orphaned');
   });
 
-  it('leaves a WORKING session alone even with no client — that is a normal headless run', () => {
-    const rows = [row({ status: 'running', tmuxClients: 0 })];
+  it('leaves a WORKING HEADLESS run alone even with no client — that is the design', () => {
+    // The over-reporting guard this file's header is about: a headless run has
+    // no client on purpose, so orphaning it would train the user to ignore the
+    // word. Same for a teams teammate.
+    for (const context of ['headless', 'teams'] as const) {
+      const rows = [row({ context, status: 'running', tmuxClients: 0 })];
+      foldHostLink(rows);
+      expect(rows[0].status).toBe('running');
+      // The link is still recorded, so a consumer can see it; only the status is untouched.
+      expect(rows[0].hostLink).toBe('no-client');
+    }
+  });
+
+  // RUSH-3125. A `terminal` row was launched into a window a human was meant to
+  // watch. If that client is gone while the agent is still working, it is
+  // burning tokens with nobody reading the result — the case the owner hit when
+  // a remote agent outlived a closed laptop.
+  it('turns a WORKING TERMINAL session with no client into `orphaned`', () => {
+    const rows = [row({ context: 'terminal', status: 'running', tmuxClients: 0 })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('orphaned');
+    expect(rows[0].hostLink).toBe('no-client');
+  });
+
+  it('does not orphan a terminal row merely because we have NO signal', () => {
+    // No window heartbeat and no tmux client count -> `unknown`, which must not
+    // promote anything. Only a positive `no-client` does.
+    const rows = [row({ context: 'terminal', status: 'running' })];
     foldHostLink(rows);
     expect(rows[0].status).toBe('running');
-    // The link is still recorded, so a consumer can see it; only the status is untouched.
-    expect(rows[0].hostLink).toBe('no-client');
+    expect(rows[0].hostLink).toBe('unknown');
+  });
+
+  it('keeps a derived `attached` presence when the link is merely unknown', () => {
+    // A bare terminal the user is sitting in has neither input, so it classifies
+    // `unknown`. Clearing presence there would strip the marker from every
+    // plain-terminal session — only a POSITIVE loss signal may do that.
+    const rows = [row({ context: 'terminal', status: 'running', presence: 'attached' })];
+    foldHostLink(rows);
+    expect(rows[0].presence).toBe('attached');
   });
 
   it('leaves a deliberately detached session alone — no client is the point of detaching', () => {

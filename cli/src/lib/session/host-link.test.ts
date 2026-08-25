@@ -47,7 +47,31 @@ describe('classifyHostLink', () => {
   it('treats an unknown client count as unknown, not as zero', () => {
     // A tmux server too old to report `session_attached` (or a parse miss) must
     // not read as "nobody is attached" and orphan every tmux session on the box.
-    expect(classifyHostLink({ pidAlive: true, tmuxClients: undefined, nowMs: NOW })).toBe('connected');
+    // That invariant is unchanged — an absent count is still never `no-client`.
+    // What changed (RUSH-3125) is how the non-orphan case is EXPRESSED: it used
+    // to borrow `connected`, asserting health it had not observed. `unknown`
+    // says the same "do not orphan this" without the false claim.
+    const link = classifyHostLink({ pidAlive: true, tmuxClients: undefined, nowMs: NOW });
+    expect(link).not.toBe('no-client');
+    expect(link).toBe('unknown');
+  });
+
+  // RUSH-3125. This case used to return `connected`, which reads as "verified
+  // fine" when the truth is "nobody looked". Neither input exists for a bare
+  // terminal, a team spawn, a cloud task, or any session whose pane lives on
+  // another machine — every signal this function keys on is local.
+  it('says `unknown` when it has no signal at all, rather than defaulting to healthy', () => {
+    expect(classifyHostLink({ pidAlive: true, nowMs: NOW })).toBe('unknown');
+  });
+
+  it('still says `connected` on POSITIVE evidence, not on absence', () => {
+    // A counted client, or a window that is republishing, is a real observation.
+    expect(classifyHostLink({ pidAlive: true, tmuxClients: 2, nowMs: NOW })).toBe('connected');
+    expect(classifyHostLink({ pidAlive: true, windowHeartbeatMs: fresh, nowMs: NOW })).toBe('connected');
+  });
+
+  it('a deliberate detach still wins over `unknown` — no signal is not a false alarm either way', () => {
+    expect(classifyHostLink({ pidAlive: true, deliberatelyDetached: true, nowMs: NOW })).toBe('connected');
   });
 
   it('holds at the exact staleness boundary', () => {

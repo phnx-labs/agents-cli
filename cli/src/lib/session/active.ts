@@ -2494,13 +2494,42 @@ export function foldHostLink(rows: ActiveSession[]): void {
     // disproves. A stored record never yields `attached` (it is background or
     // parked), so clearing only that value drops the derived lie and leaves a
     // real detach record untouched.
-    if (link !== 'connected' && s.presence === 'attached') s.presence = undefined;
+    // Only a POSITIVE loss signal disproves a derived `attached`. `unknown` means
+    // we never looked — a bare terminal with no IDE window and no tmux has
+    // neither input — so it must not clear presence, or every plain-terminal
+    // session the user is sitting in would lose its `attached` marker.
+    if ((link === 'no-client' || link === 'host-gone') && s.presence === 'attached') {
+      s.presence = undefined;
+    }
     if (link === 'host-gone' && s.status === 'closed') s.status = 'crashed';
-    else if (link === 'no-client' && (s.status === 'idle' || s.status === 'input_required')) {
+    // `no-client` only means something went wrong if a client was EXPECTED.
+    //
+    //  - idle / input_required: always wrong, in any context. The run has stopped
+    //    and nobody is coming to answer it.
+    //  - running: wrong only for a `terminal` row, which was launched into a
+    //    window a human was meant to watch. A headless or teams run with no
+    //    client is working exactly as designed, and calling it orphaned is the
+    //    over-reporting this file's header warns makes the word worthless.
+    //
+    // Before RUSH-3125 the `running` case was excluded outright, so a remote
+    // interactive agent whose client died kept reading `running` — the most
+    // expensive miss, since it burns tokens with nobody reading the result.
+    else if (link === 'no-client' && !TERMINAL_STATUSES.has(s.status)
+      && (s.status === 'idle' || s.status === 'input_required' || s.context === 'terminal')) {
       s.status = 'orphaned';
     }
   }
 }
+
+/**
+ * Statuses that already describe an ENDED session. `no-client` cannot promote
+ * one of these to `orphaned`: an orphan is a live agent nobody is watching, and
+ * these are not live. Kept beside the promotion it guards so the two cannot
+ * drift apart.
+ */
+const TERMINAL_STATUSES: ReadonlySet<ActiveStatus> = new Set<ActiveStatus>([
+  'closed', 'crashed', 'abandoned',
+]);
 
 /** One display line, trimmed and capped, or undefined when empty. */
 function recapLine(s: string | undefined, max = 120): string | undefined {
