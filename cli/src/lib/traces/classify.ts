@@ -1,6 +1,27 @@
 export type TraceTopicGroup = 'code' | 'research' | 'review' | 'content' | 'ops';
 export type TraceFailureCause = 'real' | 'guard' | 'hook';
 
+/** Per-bucket aggregate stats for one day, stored in the rolling bucketHistory. */
+export interface BucketStats {
+  key: string;
+  date: string;
+  count: number;
+  /** Tool-error count / total tool calls in this session set (0–1). */
+  errorRate: number;
+  /** Sessions with ≥1 stall friction signal / total sessions in bucket (0–1). */
+  stallRate: number;
+}
+
+/** Movement signal for one topic bucket compared to its 7-day rolling average. */
+export interface DriftSignal {
+  bucket: string;
+  /** current errorRate − 7d average (positive = degrading). */
+  errorDelta: number;
+  /** current stallRate − 7d average (positive = degrading). */
+  stallDelta: number;
+  severity: 'degrading' | 'stable' | 'improving';
+}
+
 export interface TopicEvidence {
   cwd?: string | null;
   gitBranch?: string | null;
@@ -71,4 +92,36 @@ export function classifyCause(call: ToolCallFailure): TraceFailureCause {
     return 'hook';
   }
   return 'real';
+}
+
+const DRIFT_THRESHOLD = 0.20;
+
+/**
+ * Compare today's per-bucket stats to the last 7 days of history and return
+ * movement signals. Buckets with fewer than 3 historical days are skipped —
+ * not enough signal to distinguish noise from drift.
+ */
+export function computeDriftSignal(
+  history: BucketStats[][],
+  today: BucketStats[],
+): DriftSignal[] {
+  const signals: DriftSignal[] = [];
+  for (const stat of today) {
+    const pastStats = history
+      .flatMap((day) => day.filter((b) => b.key === stat.key))
+      .slice(-7);
+    if (pastStats.length < 3) continue;
+    const avgError = pastStats.reduce((sum, b) => sum + b.errorRate, 0) / pastStats.length;
+    const avgStall = pastStats.reduce((sum, b) => sum + b.stallRate, 0) / pastStats.length;
+    const errorDelta = stat.errorRate - avgError;
+    const stallDelta = stat.stallRate - avgStall;
+    const severity: DriftSignal['severity'] =
+      errorDelta > DRIFT_THRESHOLD || stallDelta > DRIFT_THRESHOLD
+        ? 'degrading'
+        : errorDelta < -DRIFT_THRESHOLD || stallDelta < -DRIFT_THRESHOLD
+        ? 'improving'
+        : 'stable';
+    signals.push({ bucket: stat.key, errorDelta, stallDelta, severity });
+  }
+  return signals.sort((a, b) => b.errorDelta - a.errorDelta);
 }

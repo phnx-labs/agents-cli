@@ -31,7 +31,10 @@ import { resolveTracesBackend, type TracesBackend } from './backend.js';
 import {
   classifyCause,
   classifyTopic,
+  computeDriftSignal,
+  type BucketStats,
   type ClassifiedTopic,
+  type DriftSignal,
   type TraceFailureCause,
   type TraceTopicGroup,
 } from './classify.js';
@@ -137,7 +140,15 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       const allRows = db
         .prepare('SELECT * FROM sessions WHERE machine = ? OR machine IS NULL')
         .all(device) as SyncRow[];
-      const shard = buildIndexShard(allRows, device, owner);
+      // Seed rolling bucket history from the previous shard so drift signals accumulate.
+      let prevShard: TracesIndexShard | null = null;
+      if (dryRun && outDir) {
+        const prevPath = path.join(outDir, 'index.json');
+        try {
+          prevShard = JSON.parse(fs.readFileSync(prevPath, 'utf8')) as TracesIndexShard;
+        } catch { /* first run — no prior shard */ }
+      }
+      const shard = buildIndexShard(allRows, device, owner, prevShard);
       if (dryRun && outDir) {
         fs.writeFileSync(path.join(outDir, 'index.json'), JSON.stringify(shard, null, 2));
       } else {
@@ -177,6 +188,10 @@ export interface TracesIndexShard {
     byToolError: Array<{ tool: string; desc: string; cause: TraceFailureCause; count: number }>;
     byCause: Record<TraceFailureCause, number>;
   };
+  /** Rolling 14-day window of per-bucket daily stats. Each inner array is one day. */
+  bucketHistory: BucketStats[][];
+  /** Movement signals for buckets with ≥3 days of history. */
+  driftSignals: DriftSignal[];
 }
 
 export interface IndexedSession {
@@ -235,7 +250,12 @@ function attentionFlags(errorCount: number, facets: InsightFacets | undefined): 
 }
 
 /** Build the redacted rich console shard from indexed metadata and derived caches. */
-export function buildIndexShard(rows: SyncRow[], device: string, owner: string): TracesIndexShard {
+export function buildIndexShard(
+  rows: SyncRow[],
+  device: string,
+  owner: string,
+  prevShard?: TracesIndexShard | null,
+): TracesIndexShard {
   const db = getDB();
   const knownSecrets = knownSecretValuesFromEnv();
   const ids = rows.map((row) => row.id);
@@ -339,6 +359,29 @@ export function buildIndexShard(rows: SyncRow[], device: string, owner: string):
     failureCounts.set(key, current);
   }
   const durations = rows.flatMap((row) => row.duration_ms == null ? [] : [row.duration_ms]);
+
+  // Build today's per-bucket stats for the rolling drift window.
+  const todayDate = new Date().toISOString().slice(0, 10);
+  const todayStats: BucketStats[] = [...topicCounts.values()].map(({ key }) => {
+    const sessionsInBucket = [...topics.entries()]
+      .filter(([, t]) => t.key === key)
+      .map(([id]) => id);
+    const bucketCalls = calls.filter((c) => sessionsInBucket.includes(c.session_id));
+    const bucketErrors = bucketCalls.filter((c) => c.outcome === 'error').length;
+    const errorRate = bucketCalls.length === 0 ? 0 : bucketErrors / bucketCalls.length;
+    const stallCount = sessionsInBucket.filter((id) => {
+      const facets = insights.get(id);
+      return Object.entries(facets?.frictionSignals ?? {})
+        .some(([k, v]) => k.startsWith('silent stall:') && v > 0);
+    }).length;
+    const stallRate = sessionsInBucket.length === 0 ? 0 : stallCount / sessionsInBucket.length;
+    return { key, date: todayDate, count: topicCounts.get(key)!.count, errorRate, stallRate };
+  });
+
+  const prevHistory = prevShard?.bucketHistory ?? [];
+  const bucketHistory = [...prevHistory, todayStats].slice(-14);
+  const driftSignals = computeDriftSignal(prevHistory, todayStats);
+
   return {
     schema: 1,
     device,
@@ -357,6 +400,8 @@ export function buildIndexShard(rows: SyncRow[], device: string, owner: string):
       byToolError: [...failureCounts.values()].sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool)),
       byCause,
     },
+    bucketHistory,
+    driftSignals,
   };
 }
 

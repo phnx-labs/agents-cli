@@ -31,5 +31,11 @@
       { "tool": "exec_command", "desc": "git guard", "cause": "guard", "count": 1 }
     ],
     "byCause": { "real": 1, "guard": 1, "hook": 0 }
-  }
+  },
+  "bucketHistory": [
+    [
+      { "key": "engineering", "date": "2026-08-25", "count": 1, "errorRate": 0.6666666666666666, "stallRate": 0 }
+    ]
+  ],
+  "driftSignals": []
 }
