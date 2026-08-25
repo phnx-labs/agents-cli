@@ -6,8 +6,8 @@ describe('classifyCause', () => {
     expect(classifyCause({ tool: 'exec_command', error: 'git-guard blocked git push' })).toBe('guard');
     expect(classifyCause({ tool: 'Bash', error_code: 'main-branch-guard' })).toBe('guard');
     expect(classifyCause({
-      tool: 'PreToolUse',
-      error: 'auto-mode-classifier denied this invocation',
+      tool: 'Bash',
+      error: 'Permission for this action was denied by the Claude Code auto mode classifier. The user can add a Bash permission rule.',
     })).toBe('hook');
     expect(classifyCause({ tool: 'Bash', exit_code: 1, error: 'command failed' })).toBe('real');
   });

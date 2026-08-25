@@ -213,10 +213,14 @@ export function buildIndexShard(rows: SyncRow[], device: string, owner: string):
     `).all(...chunk) as ToolCallRow[]);
   }
   const toolMix = new Map<string, Record<string, number>>();
+  const errorCounts = new Map<string, number>();
   for (const call of calls) {
     const mix = toolMix.get(call.session_id) ?? {};
     mix[call.tool] = (mix[call.tool] ?? 0) + 1;
     toolMix.set(call.session_id, mix);
+    if (call.outcome === 'error') {
+      errorCounts.set(call.session_id, (errorCounts.get(call.session_id) ?? 0) + 1);
+    }
   }
 
   const topics = readSessionTopics<ClassifiedTopic>(ids);
@@ -234,36 +238,32 @@ export function buildIndexShard(rows: SyncRow[], device: string, owner: string):
   writeSessionTopics(missingTopics);
 
   const insights = readSessionInsights<InsightFacets>(ids);
-  const trajectoryErrors = new Map<string, number>();
   const missingInsights: Array<{
     id: string;
     fileMtimeMs: number | null;
     fileSize: number | null;
     facets: InsightFacets;
   }> = [];
-  for (const row of rows) {
+  for (const row of rows.filter((candidate) => !insights.has(candidate.id))) {
     try {
       const events = parseSession(row.file_path, row.agent as SessionAgentId);
-      trajectoryErrors.set(row.id, buildTrajectory(events, rowToMeta(row), { redact: true }).errorCount);
-      if (!insights.has(row.id)) {
-        const facets = computeInsightFacets(events);
-        insights.set(row.id, facets);
-        missingInsights.push({
-          id: row.id,
-          fileMtimeMs: row.file_mtime_ms,
-          fileSize: row.file_size,
-          facets,
-        });
-      }
+      const facets = computeInsightFacets(events);
+      insights.set(row.id, facets);
+      missingInsights.push({
+        id: row.id,
+        fileMtimeMs: row.file_mtime_ms,
+        fileSize: row.file_size,
+        facets,
+      });
     } catch {
-      trajectoryErrors.set(row.id, 0);
+      continue;
     }
   }
   writeSessionInsights(missingInsights);
 
   const needsAttention = rows.flatMap((row): IndexedSession[] => {
     const facets = insights.get(row.id);
-    const errorCount = trajectoryErrors.get(row.id) ?? 0;
+    const errorCount = errorCounts.get(row.id) ?? 0;
     const flags = attentionFlags(errorCount, facets);
     if (flags.length === 0) return [];
     const friction = Object.values(facets?.frictionSignals ?? {}).reduce((sum, count) => sum + count, 0);

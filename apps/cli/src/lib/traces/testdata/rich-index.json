@@ -18,8 +18,8 @@
       "device": "test-device",
       "agent": "codex",
       "model": "gpt-test",
-      "severity": 3,
-      "flags": ["retry loop"]
+      "severity": 7,
+      "flags": ["2 errors", "retry loop"]
     }
   ],
   "topics": [

@@ -62,12 +62,12 @@ export function classifyTopic(input: TopicEvidence): ClassifiedTopic {
 
 /** Bucket a failed tool call without inspecting raw tool input or transcript text. */
 export function classifyCause(call: ToolCallFailure): TraceFailureCause {
-  const evidence = [call.tool, call.error_code, call.error, call.parse_error]
+  const evidence = [call.error_code, call.error, call.parse_error]
     .filter((value): value is string => typeof value === 'string')
     .join(' ')
     .toLowerCase();
   if (/\b(?:git-guard|main-branch-guard)\b/.test(evidence)) return 'guard';
-  if (/pretooluse/.test(evidence) && /auto-mode-classifier/.test(evidence) && /den(?:y|ied|ial)/.test(evidence)) {
+  if (/permission\b.*\bdenied\b.*\b(?:auto[- ]mode|classifier)\b/.test(evidence)) {
     return 'hook';
   }
   return 'real';
