@@ -10,7 +10,7 @@ state file, plus the lookup helpers to find "which live session is running in th
 terminal / under this pid."
 
 It is the **writer** side of live-session tracking. The reader that consumes these
-files is the VS Code extension (`apps/ext/src/core/liveSession.ts`). This is a
+files is the VS Code extension (agi-ext `src/core/liveSession.ts`). This is a
 **different** surface from the CLI's `agents sessions` command
 (`apps/cli/src/lib/session/`), which parses agent transcript logs, not these state
 files — don't conflate the two.

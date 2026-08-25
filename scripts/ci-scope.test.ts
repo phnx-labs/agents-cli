@@ -65,7 +65,6 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope(['apps/cli/src/lib/state.ts'], REPO)).toEqual({
       cli: true,
       cliDocs: false,
-      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -87,7 +86,6 @@ describe('classifyCiScope', () => {
     ], REPO)).toEqual({
       cli: true,
       cliDocs: true,
-      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -99,7 +97,6 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope(['apps/cli/docs/architecture.md'], REPO)).toEqual({
       cli: false,
       cliDocs: true,
-      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -109,12 +106,10 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope([
       'apps/cli/src/index.ts',
       'apps/cli/AGENTS.md',
-      'apps/ext/src/extension.ts',
       'packages/session-tracker/src/index.ts',
     ], REPO)).toEqual({
       cli: true,
       cliDocs: true,
-      ext: true,
       sessionTracker: true,
       windows: false,
     });
@@ -153,7 +148,6 @@ describe('classifyCiScope', () => {
     expect(classifyCiScope(['website/app/page.tsx', 'apps/ios/README.md'], REPO)).toEqual({
       cli: false,
       cliDocs: false,
-      ext: false,
       sessionTracker: false,
       windows: false,
     });
@@ -300,7 +294,7 @@ describe('selectImpact policy', () => {
     // RUSH-3062 — the invariant held, only the example went stale. Pick a group
     // whose entry in test-ownership.yaml has no budget_sec today.
     const plan = selectImpact({
-      files: ['apps/ext/src/vscode/extension.ts'],
+      files: ['packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -314,7 +308,7 @@ describe('selectImpact policy', () => {
       // sessions (240) spanning a genuinely unbudgeted group — commands/** is no
       // longer one, so pairing two command files would compare 240 against 120
       // rather than against the default, and stop testing the stated case.
-      files: ['apps/cli/src/commands/sessions.ts', 'apps/ext/src/vscode/extension.ts'],
+      files: ['apps/cli/src/commands/sessions.ts', 'packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -705,7 +699,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
   try {
     const proc = Bun.spawnSync({
       cmd: ['bun', join(import.meta.dir, 'ci-scope.ts'), output],
-      stdin: Buffer.from('apps/ext/src/extension.ts\0apps/cli/docs/README.md\0'),
+      stdin: Buffer.from('packages/session-tracker/src/index.ts\0apps/cli/docs/README.md\0'),
       cwd: REPO,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -714,8 +708,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
     expect(readFileSync(output, 'utf8')).toBe(formatGitHubOutputs({
       cli: false,
       cliDocs: true,
-      ext: true,
-      sessionTracker: false,
+      sessionTracker: true,
       windows: false,
     }, {
       unmapped: 'false',
@@ -723,7 +716,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
       suite: 'selected',
       tree: '',
       policy_digest: loadOwnershipManifest() && (selectImpact({
-        files: ['apps/ext/src/extension.ts', 'apps/cli/docs/README.md'],
+        files: ['packages/session-tracker/src/index.ts', 'apps/cli/docs/README.md'],
         repoRoot: REPO,
         related: false,
       }).policy_digest),
@@ -789,9 +782,9 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
     const mergeBase = git(repo, 'rev-parse', 'HEAD');
 
     git(repo, 'worktree', 'add', '-b', 'pr-head', headWorktree, mergeBase);
-    writeFixture(headWorktree, 'apps/ext/src/extension.ts');
-    git(headWorktree, 'add', 'apps/ext/src/extension.ts');
-    git(headWorktree, 'commit', '-m', 'ext change');
+    writeFixture(headWorktree, 'apps/cli/src/lib/head-only.ts');
+    git(headWorktree, 'add', 'apps/cli/src/lib/head-only.ts');
+    git(headWorktree, 'commit', '-m', 'head-only change');
     const head = git(headWorktree, 'rev-parse', 'HEAD');
 
     writeFixture(repo, 'apps/cli/src/lib/base-only.ts');
@@ -800,7 +793,7 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
     const updatedBase = git(repo, 'rev-parse', 'HEAD');
 
     expect(changedFilesBetween(updatedBase, head, repo)).toEqual([
-      'apps/ext/src/extension.ts',
+      'apps/cli/src/lib/head-only.ts',
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });

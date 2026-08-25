@@ -15,7 +15,7 @@ There are **two unrelated "session" surfaces** in this repo — do not conflate:
 | Trigger | `SessionStart` hook (`hook.sh`) | `agents sessions` command |
 | Data | `~/.agents/.cache/terminals/sessions/<pid>.json` | `~/.claude/projects/*.jsonl`, Codex rollouts, … |
 | `SessionState` type | `{session_id, agent, cwd, pid, terminal_id, launch_id, ts, method}` | different type (`activity`, `pr`, `worktree`, `ticket`, …) |
-| Consumer | VS Code ext (`apps/ext/src/core/liveSession.ts`) | the CLI itself |
+| Consumer | VS Code ext (agi-ext `src/core/liveSession.ts`) | the CLI itself |
 
 They share the word "session" and nothing else. The CLI does **not** import this
 package.

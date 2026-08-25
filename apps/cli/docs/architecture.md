@@ -18,7 +18,7 @@ writing; treat them as pointers, not guarantees.
   state and every mechanism: the SQLite transcript index, `sessions` / `teams` /
   `run` / `cloud`, the CLI-side pid→id registry, the audit log, and the SSH fan-out
   to peer machines.
-- **`apps/ext` — AGI EXT, the VS Code extension. A consumer.** It spawns agent
+- **`agi-ext` — AGI EXT, the VS Code extension. A consumer.** It spawns agent
   terminals as tabs and renders the Fleet dashboard. Its state layer is a
   presentation projection of CLI JSON: one elected monitor owns
   `agents sessions watch --json`, while one-shot pickers and controls invoke the
@@ -29,7 +29,7 @@ writing; treat them as pointers, not guarantees.
 flowchart LR
   subgraph machine["one machine"]
     CLI["apps/cli — the agents CLI<br/><b>the framework</b><br/>sessions index · teams · run · cloud<br/>pid-registry · events.jsonl · SSH fan-out"]
-    FAC["apps/ext — AGI EXT<br/><b>a consumer</b><br/>terminal tabs · Fleet<br/>presentation stores"]
+    FAC["agi-ext — AGI EXT<br/><b>a consumer</b><br/>terminal tabs · Fleet<br/>presentation stores"]
     CLI -- "streams: agents sessions watch --json<br/>commands: sessions · devices · teams · watchdog" --> FAC
   end
   CLI --> DB[("sessions.db<br/>SQLite + FTS5")]
@@ -43,7 +43,7 @@ how live state is computed (or cached) benefits every consumer — a terminal, t
 extension, another machine — at once. The extension is a thin reshaping layer.
 
 > AGI EXT is a **separate product** with its own publish identity
-> (publisher `swarmify`, name `swarm-ext`). See [`apps/ext/AGENTS.md`](../../ext/AGENTS.md).
+> (publisher `swarmify`, name `swarm-ext`). See the [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) repo’s `AGENTS.md`.
 
 ---
 
@@ -120,7 +120,7 @@ sequenceDiagram
   terminal, which the CLI never launched — for harnesses that expose a hook.
 
 **Reader split:** the CLI reads `by-pid/`; the **extension** reads `sessions/`
-(`apps/ext/src/core/liveSession.ts`). Same pid→id data, two writers, two readers.
+(`agi-ext/src/core/liveSession.ts`). Same pid→id data, two writers, two readers.
 The join key already exists — the hook records `terminal_id` / `launch_id` from the
 env the launcher sets (`AGENT_TERMINAL_ID`, `AGENT_LAUNCH_ID`) — so the two files can
 be merged behind one path later; today both exist because neither subsumes the other

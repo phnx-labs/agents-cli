@@ -17,7 +17,6 @@ export const IMPACT_BUDGET_SEC = 85;
 export interface CiScope {
   cli: boolean;
   cliDocs: boolean;
-  ext: boolean;
   sessionTracker: boolean;
   windows: boolean;
 }
@@ -627,7 +626,6 @@ export function scopeFromPlan(plan: ImpactPlan): CiScope {
     cli: has('typecheck') || has('binary-smoke') || has('command-index') || has('impact-tests')
       || has('sessions-bench') || testUnder('apps/cli/') || plan.suite === 'cli-full',
     cliDocs: has('docs') || has('command-index'),
-    ext: has('ext'),
     sessionTracker: has('session-tracker'),
     windows: false,
   };
@@ -644,7 +642,6 @@ export function formatGitHubOutputs(
   const rows: Record<string, string> = {
     cli: String(scope.cli),
     cli_docs: String(scope.cliDocs),
-    ext: String(scope.ext),
     session_tracker: String(scope.sessionTracker),
     windows: String(scope.windows),
     ...extra,
@@ -769,13 +766,6 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
       case 'sessions-bench':
         out.push({ cwd: cli, cmd: ['bun', 'bench/sessions-active-perf.ts'] });
         break;
-      case 'ext':
-        out.push({ cwd: join(repoRoot, 'apps/ext'), cmd: ['bun', 'run', 'compile'] });
-        out.push({
-          cwd: join(repoRoot, 'apps/ext'),
-          cmd: ['bash', '-lc', 'for t in scripts/*.test.sh; do echo "== $t"; bash "$t"; done'],
-        });
-        break;
       case 'session-tracker':
         out.push({
           cwd: join(repoRoot, 'packages/session-tracker'),
@@ -801,10 +791,6 @@ export function installCommandsForPlan(plan: ImpactPlan, repoRoot: string): RunC
     || plan.tests.some((t) => t.file.startsWith('apps/cli/'))
     || plan.checks.some((c) => ['typecheck', 'command-index', 'docs', 'binary-smoke', 'sessions-bench'].includes(c));
   if (needsCli) out.push({ cwd: join(repoRoot, 'apps/cli'), cmd: ['bun', 'install', '--frozen-lockfile'] });
-  if (plan.checks.includes('ext')) {
-    out.push({ cwd: join(repoRoot, 'apps/ext'), cmd: ['bun', 'install', '--frozen-lockfile'] });
-    out.push({ cwd: join(repoRoot, 'apps/ext/ui'), cmd: ['bun', 'install', '--frozen-lockfile'] });
-  }
   if (plan.checks.includes('session-tracker')) {
     out.push({
       cwd: join(repoRoot, 'packages/session-tracker'),

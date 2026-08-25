@@ -1,16 +1,18 @@
 # agents-cli (monorepo)
 
-A monorepo housing the `agents` CLI and AGI EXT, the VS Code extension, plus their
-shared libraries and native helpers. Install, configure, run, and dispatch AI
-coding agents (Claude, Codex, Gemini, Cursor, OpenCode, OpenClaw, Grok, Droid, …)
-from one place.
+A monorepo housing the `agents` CLI plus its shared libraries and native
+helpers. Install, configure, run, and dispatch AI coding agents (Claude, Codex,
+Cursor, OpenCode, OpenClaw, Grok, Droid, …) from one place.
 
 > Phoenix Labs · FSL-1.1-Apache-2.0.
 
-**Two main projects live here:** (a) the **agents CLI** — [`apps/cli`](apps/cli),
-the published `@phnx-labs/agents-cli` — and (b) the **CLI's VS Code extension,
-AGI EXT** — [`apps/ext`](apps/ext). Everything else (`native/computer-*`,
+**The main project here is the agents CLI** — [`apps/cli`](apps/cli), the
+published `@phnx-labs/agents-cli`. Everything else (`native/computer-*`,
 `packages/*`) is a **helper app / library for one feature**, not a main project.
+**AGI EXT, the VS Code extension, lives in its own repo:
+[phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)** (private; split out
+2026-08-25, RUSH-3189). It consumes this CLI; its thin-client contract lives in
+that repo's `AGENTS.md`.
 
 **This file is the repo map + repo-wide policy — it deliberately stays shallow.**
 **Read the nearest component `AGENTS.md` (recursively) before working in it** — for
@@ -27,7 +29,8 @@ mid-task, ask a question and idle, make a statement ("I won't continue…") and 
 to reach for the browser or a secret they already have, or hand work back instead of
 finishing it. Every reliability surface in this repo — the daemon **watchdog**,
 `needs-you` detection, **resume/restore**, session-status truth, and the AGI EXT
-**Fleet** panel — exists for one job: notice an agent that has stopped making progress
+**Fleet** panel (in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)) —
+exists for one job: notice an agent that has stopped making progress
 and get it moving again, so work lands end to end without a human babysitting every
 session.
 
@@ -47,7 +50,6 @@ to fold away, while an idle session that is unfinished is exactly the one to rai
 ```
 apps/
   cli/        @phnx-labs/agents-cli — the `agents`/`ag` CLI (the published npm package)
-  ext/        AGI EXT — the VS Code extension + its React UI + Electron app (publisher: swarmify, swarm-ext)
 native/
   computer-mac/   Swift daemon behind `agents computer` (Accessibility + screen capture)
   computer-win/   C#/.NET daemon behind `agents computer` on Windows (UI Automation)
@@ -61,7 +63,7 @@ assets/ demo/ website/   Brand, launch demo, landing (repo-root, not shipped in 
 | Component | What it is | Read |
 |---|---|---|
 | [`apps/cli`](apps/cli) | The CLI — version mgmt, config sync, sessions, teams, cloud, browser, computer, secrets | [AGENTS.md](apps/cli/AGENTS.md) · [README.md](apps/cli/README.md) |
-| [`apps/ext`](apps/ext) | AGI EXT VS Code extension — spawns agent terminals as tabs, Fleet dashboard, dispatch | [AGENTS.md](apps/ext/AGENTS.md) · [README.md](apps/ext/README.md) |
+| [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) | AGI EXT VS Code extension (own repo) — agent terminals as tabs, Fleet dashboard, dispatch | that repo's AGENTS.md |
 | [`native/computer-mac`](native/computer-mac) | macOS `agents computer` backend (Swift) | [AGENTS.md](native/computer-mac/AGENTS.md) · [README.md](native/computer-mac/README.md) |
 | [`native/computer-win`](native/computer-win) | Windows `agents computer` backend (C#/.NET) | [AGENTS.md](native/computer-win/AGENTS.md) · [README.md](native/computer-win/README.md) |
 | [`packages/session-tracker`](packages/session-tracker) | Live-session **writer** (SessionStart hook) | [AGENTS.md](packages/session-tracker/AGENTS.md) · [README.md](packages/session-tracker/README.md) |
@@ -108,7 +110,8 @@ and [`architecture.md`](apps/cli/docs/architecture.md).
   (`agents hosts`); `-D/--device <name>` routes a command to any of them. This is the
   cross-device fabric under sessions, teams, run, and cloud.
 - **One engine, many consumers.** `apps/cli` owns the state — the session index, the
-  pid→id registry, `sessions`/`teams`/`run`/`cloud`, and the SSH fan-out. `apps/ext`
+  pid→id registry, `sessions`/`teams`/`run`/`cloud`, and the SSH fan-out. AGI EXT
+  ([phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext))
   is a **consumer**: the VS Code UI layer projects `agents sessions watch --json` and
   invokes the owning CLI nouns for one-shot reads and actions. It holds presentation
   state, not duplicate session/device/team/ticket/watchdog mechanisms. Fix a mechanism
@@ -233,8 +236,7 @@ one-off command in a PR.
 | CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
 | CLI tests | [`apps/cli/scripts/test.sh`](apps/cli/scripts/test.sh) `[--device <box>] [--here]` | the full vitest suite. **Offloads by default** — crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh), or `--device <box>` for any fleet Linux box. Never runs locally unless you pass `--here`, and fails loud (naming `--device`) rather than falling back. `bun run test` is the raw in-place runner the offload targets invoke; do not call it directly on a machine someone is using |
 | CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — requires an exact-tree attestation (it runs **no** tests itself; `release-attestation-produce.sh` does, offloaded via `test.sh`), PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
-| ext build / release | [`apps/ext/scripts/build.sh`](apps/ext/scripts/build.sh) `<version>` · [`release.sh`](apps/ext/scripts/release.sh) `<x.y.z> [--confirm] [--device <name>] [--here]` | ships `swarmify.swarm-ext` to VS Code Marketplace + Open VSX (dry-run without `--confirm`). Self-routing like the CLI release: the marketplace PATs live in the `vs-marketplace` secrets bundle on one machine, and tokens never move between hosts, so invoking from a box without the bundle probes `zion` then `mac-mini` and re-runs the publish there against a clean clone of the same commit. `--device` pins the publish box, `--here` refuses to route |
-| agents-dbg app release | [`scripts/release.sh`](scripts/release.sh) `<version> [--confirm]` | root — builds/signs/notarizes the debug Mac app, uploads the GitHub release, updates the Homebrew tap |
+| ext / agents-dbg build + release | in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) `scripts/` | AGI EXT and the agents-dbg app moved with the extension repo (RUSH-3189) |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
 
 ### Never install a dev build over the user's `agents`
@@ -320,18 +322,11 @@ absolute home paths before it lands. Never scatter scratch in `/tmp` or the repo
     Do not re-enable the trigger until #1767 is resolved.
 - **The default branch is untouchable.** Every change is a git worktree + PR — never
   edit or commit on `main`. Worktrees live under `.agents/worktrees/<slug>/`.
-- **VS Code publish identity is frozen.** `apps/ext` publishes as publisher
-  `swarmify`, name `swarm-ext` (`apps/ext/package.json`). Never change either — it
-  would orphan the Marketplace listing, and the extension id `swarmify.swarm-ext`
-  is also the authority in the `swarm-ext://` URI the CLI emits into
-  (`apps/cli/src/lib/terminal/inject.ts`, `backends/vscodium-agent.ts`).
-  Everything else about the name is free to change and has: the Marketplace
-  `displayName` is **Agents**, the dashboard is **AGI EXT** with its **Fleet**
-  view, and the separate Electron debug app is `agents-dbg` / appId
-  `com.phnxlabs.agents-dbg` (`apps/ext/app/package.json`). The CLI is
-  **agents-cli**. (An earlier version of this note claimed appId
-  `com.swarmify.factory` and productName `Factory` were frozen — neither string
-  exists anywhere in the tree.)
+- **The `swarm-ext://` URI authority is the extension id `swarmify.swarm-ext`.**
+  The extension itself lives in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext)
+  (its frozen publish identity is documented there), but the CLI emits into that
+  URI (`apps/cli/src/lib/terminal/inject.ts`, `backends/vscodium-agent.ts`) — a
+  CLI change must never assume a different extension id.
 
 ## Code review conventions (the reviewer must enforce these)
 
@@ -404,7 +399,7 @@ the exception.
   soup where an object-in-path reads clearer, or ships a non-trivial tool on commander's
   default help instead of a workflow-first `setHelpSections` block.
 - **No second scheduler.** A PR that adds a timer, watcher, or polling loop in
-  `apps/ext` (or any UI surface) that *acts* — spawns, resumes, kills, injects,
+  a UI surface (the AGI EXT repo, the menubar) that *acts* — spawns, resumes, kills, injects,
   dispatches, rotates, fires a routine — rather than polling read-only state for
   rendering is a double-fire bug in waiting. Flag it with `file:line`. The action
   belongs in the CLI daemon or a CLI command; the UI may only render the state and wire
@@ -435,8 +430,8 @@ never be shared.
 Only if you touch `assets/`, `demo/`, or `website/`. Visual language is terminal-coded —
 `#0a0a0a` bg, `#a3e635` lime accent, JetBrains Mono for the wordmark + code, Inter for
 prose. Voice is direct-developer: verb + artifact, no marketing claims — closer to a
-`man` page than a landing pitch. (AGI EXT keeps its own `swarmify` publish identity — see
-[§Conventions](#conventions-repo-wide) for the frozen publish identity.)
+`man` page than a landing pitch. (AGI EXT keeps its own `swarmify` publish identity,
+documented in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext).)
 
 ## Detailed design
 

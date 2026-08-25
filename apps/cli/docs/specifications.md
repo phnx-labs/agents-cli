@@ -2848,7 +2848,7 @@ nothing but its own view cache.
 - **Executor** — whatever performs the action once decided.
 - **Thin wrapper** — a UI surface whose only relationships to a fleet-affecting
   capability are (a) rendering its state, and (b) invoking the CLI command that
-  controls it (`apps/ext/AGENTS.md`, the root `AGENTS.md` §Core concepts).
+  controls it (`agi-ext/AGENTS.md`, the root `AGENTS.md` §Core concepts).
 
 ### 3. Requirements
 
@@ -2904,7 +2904,7 @@ nothing but its own view cache.
   (`lib/usage-fleet.ts`). Given a peer whose configured primary differs from its
   machine id, when its usage tick runs, then no local provider refresh runs and
   the primary envelope is merged into its usage/headroom caches.
-- **SING-2 (MUST NOT).** A UI surface (apps/ext, the menubar app, the iOS app)
+- **SING-2 (MUST NOT).** A UI surface (agi-ext, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds
   the first-party state (sessions.db, usage snapshots, the device registry).
@@ -2983,7 +2983,7 @@ nothing but its own view cache.
 - **SING-7 (SHOULD).** Multi-instance safety SHOULD be structural, not by
   convention: pid-claimed singletons for daemon loops (the daemon's claim), leader
   election with lease handoff for any remaining UI-side coordination protocol
-  (apps/ext `src/monitor/leader.ts` — presence fan-out only, not task
+  (agi-ext `src/monitor/leader.ts` — presence fan-out only, not task
   execution), and idempotent effects so a redelivery is a no-op.
 - **SING-15 (MUST).** A single scheduled fire MUST launch a routine at most once,
   even when the same UTC occurrence is evaluated by more than one timer callback,
@@ -3227,7 +3227,7 @@ a machine-wide process sweep.)
 - **GIVEN** a limited session lives in an AGI EXT editor tab, **WHEN** the daemon
   rotates it, **THEN** the daemon drives the extension's `/inject` endpoint to act
   in that tab — the extension performs no detection or decision of its own.
-- **GIVEN** a contributor adds a `setInterval` in apps/ext, **WHEN** the
+- **GIVEN** a contributor adds a `setInterval` in agi-ext, **WHEN** the
   callback performs anything beyond read-only rendering, **THEN** code review MUST
   flag it under the root `AGENTS.md` §Code review conventions ("No second
   scheduler") and the action MUST move to the CLI before merge.
@@ -3252,7 +3252,7 @@ a machine-wide process sweep.)
   satisfies SING-9(a) via an owner pin: `agents routines devices auto-dispatch --set
   <device>`.
 - **SING-GAP-1.** The AGI EXT monitor leader/follower protocol
-  (apps/ext `src/monitor/`) still coordinates presence fan-out inside the
+  (agi-ext `src/monitor/`) still coordinates presence fan-out inside the
   extension with its own election. It performs no fleet-affecting action today
   (post-#1914 it broadcasts read-side snapshots only), so it satisfies SING-2, but
   it is a second coordination fabric where the daemon's presence tracking

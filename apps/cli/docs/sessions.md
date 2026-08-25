@@ -1430,7 +1430,7 @@ work is over. Its primary caller is AGI EXT: when a user genuinely closes an
 agent tab (Cmd+W), the extension runs `sessions stop` so the underlying agent and
 its mux shut down instead of lingering as an orphaned idle session — a window
 *reload* does not, because the extension only stops on a real user close (see
-apps/ext).
+agi-ext).
 
 Host-dispatched session rows persist the dispatch host as `machine`. Their empty
 remote `filePath` therefore cannot make the SQLite index infer the dispatching box

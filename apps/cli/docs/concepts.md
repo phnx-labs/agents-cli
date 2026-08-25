@@ -114,7 +114,7 @@ See [version-management.md](version-management.md) for install and switching det
 agents-cli is two application-layer surfaces over one shared set of on-disk state.
 **`apps/cli`** (the `agents` / `ag` CLI) is the framework: it owns the SQLite session
 index, `sessions` / `teams` / `run` / `cloud`, the pid→id registry, the audit log,
-and the SSH fan-out to peers. **`apps/ext`** (AGI EXT, the VS Code extension) is a
+and the SSH fan-out to peers. **`agi-ext`** (AGI EXT, the VS Code extension) is a
 consumer: it spawns agent terminals, renders CLI-owned state, and sends controls back
 through CLI commands. One elected extension monitor owns a long-lived
 `agents sessions watch --json` stream; Resume and Fork query transcript history only

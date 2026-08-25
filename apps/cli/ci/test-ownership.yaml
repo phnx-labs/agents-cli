@@ -23,9 +23,6 @@ areas:
   - prefix: apps/cli/
     companion: true
     related: true
-  - prefix: apps/ext/
-    companion: true
-    checks: [ext]
   - prefix: packages/session-tracker/
     checks: [session-tracker]
   - prefix: scripts/
@@ -234,11 +231,6 @@ groups:
       - .github/workflows/tests-gate.test.ts
     checks: [impact-tests, workflow-policy]
 
-  - id: ext
-    when:
-      - apps/ext/**
-    checks: [ext]
-
   - id: session-tracker
     when:
       - packages/session-tracker/**
@@ -247,6 +239,9 @@ groups:
 # Explicit reviewed exemptions. These paths do not select tests on this Linux
 # gate; native helpers and iOS have their own workflows.
 testless:
+  # AGI EXT moved to its own repo (phnx-labs/agi-ext, RUSH-3189); kept mapped so
+  # historical paths never read as unmapped.
+  - apps/ext/**
   - .agents/**
   - assets/**
   - demo/**
