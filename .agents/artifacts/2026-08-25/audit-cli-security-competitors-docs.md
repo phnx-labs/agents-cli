@@ -2,7 +2,7 @@
 kind: report
 template: report.v1
 title: agents-cli audit — security/corner-cases, competitor guarantees, doc staleness
-summary: Three-track read-only swarm audit (codex/kimi/grok) of agents-cli @ origin/main (64226735f) — one genuine high-severity hardening finding plus one medium, a five-axis competitor comparison (ahead on watchdog/secrets/scheduling, behind on cross-device session portability), and 20+ stale-doc findings led by a fully removed `agents hosts` command still taught in six places.
+summary: Three-track read-only swarm audit (codex/kimi/grok) of agents-cli @ origin/main (64226735f) — one high-severity hardening finding, a five-axis competitor comparison, and 20+ stale-doc findings led by a removed `agents hosts` command still taught live. Revised after a non-author review corrected one inverted finding and three citations.
 project: agents-cli
 repository: phnx-labs/agents-cli
 branch: main
@@ -26,7 +26,9 @@ Headline results:
 - **One high-severity finding**: Windows `%VAR%`/`!VAR!` cmd.exe expansion is
   deliberately left unescaped in `quoteWin32ExecArg`
   (`cli/src/lib/platform/exec.ts:63`) on a trust assumption that fleet/routine
-  dispatch can violate.
+  dispatch can violate. (The swarm's original second, "medium" finding about
+  the secrets fallback was factually backwards — see the correction note below
+  and "Checked and sound.")
 - **Five graded guarantee comparisons** vs. named competitors (Claude Code,
   Codex CLI, Cursor, Factory Droid, Warp, Devin, OpenHands, GitHub Copilot,
   Continue.dev, Aider, Google Antigravity/Jules) — ahead on stall
@@ -53,6 +55,19 @@ Headline results:
 The docs-staleness track shows <code>FAILED</code> above but produced a complete,
 well-formed report — verify by reading the teammate's actual output before
 writing off a track.
+</div>
+
+<div class="artifact-callout artifact-callout-warn">
+<strong>Correction (post-review).</strong> The non-author review of this report
+(<a href="https://github.com/phnx-labs/agi-cli/pull/3081#issuecomment-5417360432">PR
+#3081</a>) found the swarm's original "Medium" security finding —
+"file-backed secrets fallback co-locates key and ciphertext" — was factually
+inverted: the code deliberately keeps them apart, and cites a prior fix
+(issue #479) for exactly this class of bug. That finding has been removed and
+replaced with the correct negative-evidence read below. Two citations were
+also corrected: the SSH/remote-command quoting mechanism is single-quoted, not
+double-quoted, and the bundle-validation citation now points at the actual
+`validateEnvKey` function.
 </div>
 
 ## Findings
@@ -83,24 +98,25 @@ assumes is "the caller's own" can in practice originate from routine/cron input
 the stated trust boundary doesn't cover — and both `agents routines` and fleet
 dispatch run this code path.
 
-**Medium — file-backed secrets fallback co-locates key and ciphertext trust
-boundary.** `cli/src/lib/secrets/filestore.ts:94,144,247,285` — the
-auto-provisioned machine-local passphrase lives at
-`~/.agents/.secrets-key/passphrase` (mode `0600`), sibling to the `.enc`
-ciphertext files it decrypts. A home-directory backup, disk snapshot, or
-same-user-process compromise reads both together, at which point `0600`
-protects against other OS users but nothing else. This is the fallback path
-(used only when Keychain/libsecret/Credential Manager is unavailable) and
-should be documented as ciphertext-only obfuscation, not confidentiality under
-compromise.
-
 **Checked and sound (negative evidence):** SSH target + argv injection
 (`cli/src/lib/ssh-exec.ts:31,180` — strict target regex, argv-array spawn);
-remote command quoting (`cli/src/lib/hosts/remote-cmd.ts:199` — double-quoted);
-bundle/env-key validation (`cli/src/lib/secrets/bundles.ts:294` — rejects
+remote command quoting (`cli/src/lib/hosts/remote-cmd.ts:199` builds the
+command, actually quoted via `shellQuote` in `cli/src/lib/ssh-exec.ts:43-46` —
+POSIX single-quoted, not double-quoted); bundle/env-key validation
+(`cli/src/lib/secrets/bundles.ts:307-313`, `validateEnvKey` — rejects
 traversal and reserved loader env names before `path.join`); credential-bearing
 SSH dispatch (`cli/src/lib/hosts/dispatch.ts:344,371` — strict host-key
-verification, forced fresh connection, closing the RUSH-1767 downgrade case).
+verification, forced fresh connection, closing the RUSH-1767 downgrade case);
+**file-backed secrets key/ciphertext separation**
+(`cli/src/lib/secrets/filestore.ts:83-88` — the passphrase directory's own doc
+comment: "Kept outside `fileDir()` so a scan of the encrypted store never
+co-locates key + ciphertext"; `filestore.ts:100-101` — a prior co-located
+layout was the actual bug, fixed under issue #479, with
+`legacyPassphraseFilePath()` kept read-only for machines provisioned before
+that fix). `0600` on the passphrase
+file still only protects against other OS users, not a full home-directory
+compromise, but the design is the opposite of what the original swarm report
+claimed.
 
 ### Competitor guarantee comparison (kimi)
 
@@ -130,7 +146,8 @@ Ranked worst-first by how misleading the drift is:
    (`skills/devices/SKILL.md:116-130`, `skills/run/SKILL.md:211-212`,
    `skills/routines/SKILL.md:153`). Removed in `8948a3bbe`;
    `isKnownTopLevelCommand('hosts')` is pinned false by test
-   (`command-registry.test.ts:47`). Replacement: `agents devices` / `agents logs`.
+   (`cli/src/lib/startup/command-registry.test.ts:47`). Replacement:
+   `agents devices` / `agents logs`.
 2. **`cli/AGENTS.md` capability table understates the registry** — Codex
    `allowlist`, OpenCode `subagents`, Goose `commands`/`subagents`, Hermes
    `allowlist`/`plugins` are marked `—` in the doc but `true`/enabled in
@@ -193,5 +210,8 @@ checking the teammate's actual output.
 3. **Track `SING-GAP-3`** (durable per-slot routine claim) as the one place
    agents-cli's strongest competitive differentiator — execution singularity —
    is not yet structural.
-4. Relabel the file-backed secrets fallback (medium) as "ciphertext-only
-   obfuscation," not "confidentiality," when the OS keystore is unavailable.
+
+(A fourth recommendation in the original swarm draft — relabeling the
+file-backed secrets fallback as "obfuscation, not confidentiality" — is
+dropped: the review found the underlying finding was itself wrong. No action
+needed there.)
