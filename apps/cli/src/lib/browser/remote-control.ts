@@ -12,12 +12,14 @@
  * drives. Read-only queries are not gated.
  *
  * The authoritative gate is {@link assertRemoteControlAllowedForRequest}, called
- * inside the browser daemon at the two points that can OPEN a browser
- * (`BrowserService.start` and the create branch of `resolveOrCreateTask`). It has
- * to live there because ~18 page verbs (`navigate`, `click`, `screenshot`, …)
- * create a browser implicitly, and gating only the `browser start` command left
- * every one of them ungated. {@link assertRemoteControlAllowed} remains as a
- * fast-fail CLI-side check so a refused `start` never auto-creates a profile.
+ * inside the browser daemon at the top of `resolveOrCreateTask` — the one
+ * chokepoint every task-scoped verb resolves through — plus `BrowserService.start`
+ * for the task-less `browser start` command. It has to live there because ~18
+ * page verbs (`navigate`, `click`, `screenshot`, `tab-add`, …) launch OR attach
+ * to a browser implicitly, and gating only the `browser start` command left every
+ * one of them ungated; gating only the create branch of `resolveOrCreateTask` left
+ * the attach paths ungated (RUSH-3064). {@link assertRemoteControlAllowed} remains
+ * as a fast-fail CLI-side check so a refused `start` never auto-creates a profile.
  */
 
 import { getConfigValue } from '../device-config.js';

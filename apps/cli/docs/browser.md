@@ -452,10 +452,12 @@ consent off (RUSH-3064). Earlier the two attach early-returns and `tabAdd`
 bypassed a create-only gate, so a remote `tab-add --device <box> --task <name>`
 could drive the owner's authenticated profile with consent off (`status` is
 ungated by design, so task names are discoverable). That bypass is closed: with
-`remote-control off`, any fleet-remote verb that touches a task — drive
-(`navigate`/`click`/`tab-add`), close (`done`/`stop`), or observe
-(`console`/`tab-list`) — is refused whether or not the task already exists. Treat
-`remote-control off` as "no remote access to this browser". Local drives (no
+`remote-control off`, any fleet-remote verb that resolves a task — drive
+(`navigate`/`click`/`tab-add`), close (`done`/`stop <task>`), or observe
+(`console`/`tab-list`) — is refused whether or not the task already exists,
+because they all flow through `resolveOrCreateTask`. The one task-less mutation
+that does not — `stop --profile <name>` (terminate a whole profile's browser) —
+is a separate, pre-existing gap tracked in RUSH-3179. Local drives (no
 `--device`) remain ungated.
 
 The marker travels **on the request**, not in the daemon's environment. The
