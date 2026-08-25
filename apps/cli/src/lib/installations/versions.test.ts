@@ -537,6 +537,14 @@ describe('version resource sync path handling', () => {
     const copied = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.143', 'home', '.claude', 'hooks', 'tests', 'fixtures', 'input.json');
     expect(result.hooks).toBe(true);
     expect(fs.readFileSync(copied, 'utf-8')).toBe('{"ok":true}\n');
+    const settings = JSON.parse(fs.readFileSync(
+      path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.143', 'home', '.claude', 'settings.json'),
+      'utf-8',
+    ));
+    expect(settings.statusLine).toMatchObject({
+      type: 'command',
+      command: 'agents __claude-statusline',
+    });
 
     const second = runVersionSync(
       home,

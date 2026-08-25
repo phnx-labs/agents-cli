@@ -352,7 +352,9 @@ verdict (signed in AND not rate-limited). `harnesses` is the per-install view;
 `getAccountInfo` (identity), the daemon-warmed usage cache via
 `getUsageInfoByIdentity({ readOnly })` (quota — never blocks on a per-account
 network fetch unless `--refresh`), and `deriveUsageStatusFromSnapshot` (throttle
-state); the fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
+state). Claude's managed status-line command also writes the native five-hour
+and seven-day rate limits from normal interactive responses into that same
+identity-keyed cache; it never reads or refreshes OAuth credentials. The fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
 `devices harnesses --local --json` worker, same per-device + overall deadlines).
 Everything but the collector is pure and unit-tested
 ([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent

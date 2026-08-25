@@ -77,7 +77,6 @@ function renderDelegate(payload: string, versionHome: string): string {
     shell: true,
     input: payload,
     encoding: 'utf8',
-    timeout: 1_000,
     env: process.env,
   });
   return result.status === 0 ? result.stdout.trim() : '';
@@ -132,15 +131,22 @@ export function installClaudeStatusLine(versionHome: string): { changed: boolean
       if (!isRecord(parsed)) return { changed: false, error: 'settings.json is not an object' };
       settings = parsed;
     }
-    const existing = isRecord(settings.statusLine) && typeof settings.statusLine.command === 'string'
-      ? settings.statusLine.command.trim()
+    const priorStatusLine = isRecord(settings.statusLine) ? settings.statusLine : {};
+    const existing = typeof priorStatusLine.command === 'string'
+      ? priorStatusLine.command.trim()
       : '';
     if (existing === CLAUDE_STATUSLINE_COMMAND) return { changed: false };
     if (existing) {
       fs.mkdirSync(path.dirname(delegatePath(versionHome)), { recursive: true });
       atomicWriteFileSync(delegatePath(versionHome), `${existing}\n`);
+    } else {
+      fs.rmSync(delegatePath(versionHome), { force: true });
     }
-    settings.statusLine = { type: 'command', command: CLAUDE_STATUSLINE_COMMAND, padding: 0 };
+    settings.statusLine = {
+      ...priorStatusLine,
+      type: 'command',
+      command: CLAUDE_STATUSLINE_COMMAND,
+    };
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     atomicWriteFileSync(settingsPath, `${JSON.stringify(settings, null, 2)}\n`);
     return { changed: true };

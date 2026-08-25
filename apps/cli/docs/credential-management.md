@@ -66,14 +66,15 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    master behind. Secret bytes cross on ssh **stdin** (push) / **stdout** (resolve),
    never on argv.
 
-5. **Usage and account views read the setup-token**, not the interactive login —
-   and never a prompting keychain read. Caveat (RUSH-2392): Anthropic's
+5. **Usage probes read the setup-token**, not the interactive login — and never
+   a prompting keychain read. Caveat (RUSH-2392): Anthropic's
    `claude setup-token` is scoped `user:inference` only; the usage endpoint
-   requires `user:profile`. A setup-token therefore **cannot** populate usage
-   bars — `agents view` renders `usage unavailable (headless)` (not
-   `unverified` / `revoked`) so the gap is not mistaken for a re-mint need.
-   Interactive login (device role `personal`, RUSH-2395) is the only path to
-   live bars today. Cold/absent setup-token → "usage pending".
+   requires `user:profile`, so a setup-token cannot populate bars through that
+   endpoint. Interactive Claude sessions populate the same per-account cache
+   without exposing a credential: Claude Code sends its native five-hour and
+   seven-day rate limits to the managed status-line command after responses.
+   `agents view` reads those snapshots. A headless account that has not produced
+   a native snapshot still renders `usage unavailable (headless)`.
 
 6. **Zero Touch ID** — `ag view`, agent launch, usage, any op — across **every
    harness**, including the hard ones (Droid, Kimi). Solution decided per credential
@@ -171,9 +172,12 @@ deliberately created with `agents accounts add` and explicitly pushed with
   the box, never transports it) stays as the per-machine login path. Onboarding a
   new device syncs the needed provider account bundle (`agents accounts sync`)
   instead of copying logins.
-- **`ag view` / usage** (`usage.ts`) reads the setup-token from its named account
-  bundle. It never reads the harness's ACL-bound keychain login. No no-ACL cache of
-  the interactive token is needed because the interactive token is never read.
+- **`ag view` / usage** (`usage.ts`) reads the shared per-account usage cache.
+  Interactive Claude sessions feed that cache through Claude Code's native
+  status-line payload; explicit network probes read the setup-token from its
+  named account bundle. Neither path reads the harness's ACL-bound keychain login.
+  No no-ACL cache of the interactive token is needed because the interactive
+  token is never read.
   When Anthropic returns 403 `user:profile` on that token, the probe sets
   `reason: 'usage_scope'` so auth-health stays `unverified` (not `revoked`) and
   the row shows `usage unavailable (headless)` (RUSH-2392).
@@ -238,8 +242,8 @@ endpoint takes any `sk-ant-oat01-` bearer, `usage.ts:624,957`):
    — so the daemon's usage (~60s) and auth-health (~3min) warms can never read
    or transmit the interactive OAuth login (the transitional fallback + its
    no-ACL cache are removed). An unprovisioned account reads as `unconfigured`
-   (benign for rotation) and shows "usage pending"; seed a setup-token to
-   restore usage. Rush Cloud dispatch does not read a Claude credential at all
+   for the probe; a normal interactive response can still populate its usage
+   snapshot through the native status line. Rush Cloud dispatch does not read a Claude credential at all
    (SING-1b: the account manifest is version + email only). The leftover
    `readClaudeCredentialsBlob` helper that still read Keychain / `.credentials.json`
    — the #1767 shape — is deleted (RUSH-2359). `--lease` SING-1b detection reads

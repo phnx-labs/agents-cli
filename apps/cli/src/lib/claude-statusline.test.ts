@@ -62,8 +62,7 @@ describe('Claude native status line', () => {
     }, home)).toBe(true);
 
     const snapshot = readClaudeUsageCache('claude:org=org-1');
-    expect(snapshot?.source).toBe('live');
-    expect(snapshot?.sourceLabel).toBe('Claude response rate limits');
+    expect(snapshot?.source).toBe('last_seen');
     expect(snapshot?.windows.map((window) => [window.key, window.usedPercent])).toEqual([
       ['session', 12],
       ['week', 34],
@@ -81,16 +80,48 @@ describe('Claude native status line', () => {
     fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
     fs.writeFileSync(settingsPath, JSON.stringify({
       model: 'opus',
-      statusLine: { type: 'command', command: '/home/me/statusline.sh', padding: 2 },
+      customTopLevel: { keep: true },
+      statusLine: {
+        type: 'command',
+        command: '/home/me/statusline.sh',
+        padding: 2,
+        refreshInterval: 7,
+        customField: 'keep',
+      },
     }));
 
     expect(installClaudeStatusLine(home)).toEqual({ changed: true });
     const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
     expect(settings.model).toBe('opus');
-    expect(settings.statusLine).toEqual({ type: 'command', command: CLAUDE_STATUSLINE_COMMAND, padding: 0 });
+    expect(settings.customTopLevel).toEqual({ keep: true });
+    expect(settings.statusLine).toEqual({
+      type: 'command',
+      command: CLAUDE_STATUSLINE_COMMAND,
+      padding: 2,
+      refreshInterval: 7,
+      customField: 'keep',
+    });
     expect(fs.readFileSync(path.join(home, '.agents', 'claude-statusline-delegate'), 'utf8')).toBe(
       '/home/me/statusline.sh\n',
     );
     expect(installClaudeStatusLine(home)).toEqual({ changed: false });
+  });
+
+  it('does not resurrect a removed custom status-line command', () => {
+    const home = tempHome();
+    const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
+    const settingsPath = path.join(home, '.claude', 'settings.json');
+    fs.mkdirSync(path.dirname(delegate), { recursive: true });
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(delegate, '/home/me/removed-statusline.sh\n');
+    fs.writeFileSync(settingsPath, JSON.stringify({ statusLine: { padding: 4 } }));
+
+    expect(installClaudeStatusLine(home)).toEqual({ changed: true });
+    expect(fs.existsSync(delegate)).toBe(false);
+    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8')).statusLine).toEqual({
+      padding: 4,
+      type: 'command',
+      command: CLAUDE_STATUSLINE_COMMAND,
+    });
   });
 });
