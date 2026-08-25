@@ -234,7 +234,7 @@ one-off command in a PR.
 |---|---|---|
 | CLI build | [`apps/cli/scripts/build.sh`](apps/cli/scripts/build.sh) `[<version>] [--clean]` | builds into `apps/cli/dist` |
 | CLI dev install | [`apps/cli/scripts/install.sh`](apps/cli/scripts/install.sh) `[--bounce-daemon]` | side-by-side dev build at `~/.local/agents-cli-dev`, invoked as **`agents-dev`** (and `ag-dev`); never creates or touches `~/.local/bin/{agents,ag,browser}` |
-| CLI tests | [`apps/cli/scripts/test.sh`](apps/cli/scripts/test.sh) `[--device <box>] [--here]` | the full vitest suite. **Offloads by default** — crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh), or `--device <box>` for any fleet Linux box. Never runs locally unless you pass `--here`, and fails loud (naming `--device`) rather than falling back. **While the crabbox pool is down (RUSH-3004, Hetzner `server_limit`), `--device <box>` is the working path** — the bare form will fail, by design, rather than quietly pinning your machine. `bun run test` is the raw in-place runner the offload targets invoke; do not call it directly on a machine someone is using |
+| CLI tests | [`apps/cli/scripts/test.sh`](apps/cli/scripts/test.sh) `[--device <box>] [--here]` | the full vitest suite. **Offloads by default** — crabbox via [`sandbox.sh`](apps/cli/scripts/sandbox.sh), or `--device <box>` for an explicit fleet Linux target. Never runs locally unless you pass `--here`, and fails loud rather than falling back. `bun run test` is the raw in-place runner the offload targets invoke; do not call it directly on a machine someone is using |
 | CLI release | [`apps/cli/scripts/release.sh`](apps/cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — requires an exact-tree attestation (it runs **no** tests itself; `release-attestation-produce.sh` does, offloaded via `test.sh`), PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
 | ext / agents-dbg build + release | in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) `scripts/` | AGI EXT and the agents-dbg app moved with the extension repo (RUSH-3189) |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
@@ -252,8 +252,8 @@ To run your changes:
 ```bash
 cd apps/cli
 bun run test                      # the suite, locally
-scripts/test.sh --device mark-1   # the suite, on a fleet Linux box  <- works today
-scripts/test.sh                   # the suite, offloaded to a crabbox (pool down: RUSH-3004)
+scripts/test.sh                   # the suite, offloaded to a crabbox (default)
+scripts/test.sh --device mark-1   # the suite, on an explicit fleet Linux box
 
 scripts/install.sh --skip-tests   # build + install this working tree
 agents-dev sessions --active      # drive YOUR build
