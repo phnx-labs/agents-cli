@@ -90,6 +90,29 @@ export function getAccountProvider(provider: string): AccountProviderAdapter {
   return adapter;
 }
 
+/**
+ * Whether a provider account of kind `auth` can authenticate `agent` — i.e. the
+ * adapter has an `envFor(agent, auth)` mapping. Used both by the account UI and by
+ * the run-candidate pool so a Cursor key never enters Claude's pool and a harness
+ * with no provider adapter at all (e.g. kimi, native-login only) yields nothing.
+ * A "cannot authenticate" is a clean false; any other error (unknown provider,
+ * unsupported kind) is a real bug and re-throws rather than being swallowed.
+ */
+export function providerAuthenticatesHarness(
+  provider: string,
+  auth: AccountAuthKind,
+  agent: AgentId,
+): boolean {
+  try {
+    getAccountProvider(provider).envFor(agent, auth);
+    return true;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (message.includes('cannot authenticate')) return false;
+    throw err;
+  }
+}
+
 export function listAccountProviders(): string[] {
   return [...ADAPTERS.keys()].sort();
 }

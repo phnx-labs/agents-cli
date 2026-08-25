@@ -20,7 +20,7 @@ import { resolveRemoteOsSync } from '../lib/hosts/remote-os.js';
 import { runDevicesAccounts } from './ssh.js';
 import { discoverNativeAccounts } from '../lib/account-catalog.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
-import { getAccountProvider, listAccountProviders, type AccountAuthKind } from '../lib/account-provider-registry.js';
+import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
 
 function cleanCommandError(command: Command, err: unknown): never {
@@ -310,17 +310,6 @@ async function pickLabelIdentity(agent: AgentId, identities: LabelIdentity[]): P
     return identities.find(identity => identity.identityKey === key) ?? null;
   } catch (err) {
     if (isPromptCancelled(err)) return null;
-    throw err;
-  }
-}
-
-function providerAuthenticatesHarness(provider: string, auth: AccountAuthKind, agent: AgentId): boolean {
-  try {
-    getAccountProvider(provider).envFor(agent, auth);
-    return true;
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    if (message.includes('cannot authenticate')) return false;
     throw err;
   }
 }
