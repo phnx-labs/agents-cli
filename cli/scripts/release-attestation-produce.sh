@@ -35,6 +35,13 @@
 #   scripts/release-attestation-produce.sh <commit-ish> [--dir DIR]
 #                                           [--repo-root DIR] [--keep]
 #                                           [--with-helpers]
+#                                           [--test-device <box> | --test-here
+#                                            | --test-crabbox]
+#
+# Where the suite runs. Default auto-picks a fleet worker via `agents devices
+# pick`; --test-device <box> names one; --test-here pins THIS machine (loud);
+# --test-crabbox uses a disposable crabbox. All three forward to scripts/test.sh,
+# which owns the routing.
 #
 # --with-helpers (default OFF) additionally verifies the helper input-digest
 # manifest. Off by default for the same reason release.sh's flag is: the check
@@ -83,7 +90,12 @@ while [[ $# -gt 0 ]]; do
     --test-crabbox) TEST_TARGET=(--crabbox); shift ;;
     --with-helpers) WITH_HELPERS=true; shift ;;
     -h|--help)
-      sed -n '3,32p' "$0" | sed 's/^# \?//'
+      # Print the WHOLE docblock, not a hardcoded line range. `sed -n '3,32p'`
+      # silently truncated: --with-helpers was documented at ~line 40 and never
+      # appeared in --help at all. A magic number drifts every time the header
+      # grows, and it fails silently — the help just gets quieter. Stop at the
+      # first non-comment line instead, so the range maintains itself.
+      awk 'NR>2 { if (/^#/) { sub(/^# ?/, ""); print } else { exit } }' "$0"
       exit 0
       ;;
     --*) die "unknown flag: $1" ;;

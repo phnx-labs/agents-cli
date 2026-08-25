@@ -165,6 +165,32 @@ function runProduce(
 
 
 
+describe('release-attestation-produce.sh --help', () => {
+  it('lists every flag its parser accepts (executed, not grepped)', () => {
+    // `--help` printed a hardcoded `sed -n '3,32p'` slice, so --with-helpers —
+    // documented around line 40 — never appeared. A magic line range drifts
+    // every time the header grows and fails SILENTLY: the help just gets
+    // quieter. This derives the flag set from the parser's own case arms and
+    // compares against real --help output, so the next flag is covered without
+    // anyone remembering to extend the test.
+    const help = spawnSync('bash', [PRODUCE_SCRIPT, '--help'], { encoding: 'utf-8' });
+    expect(help.status, help.stderr).toBe(0);
+
+    const parsed = new Set<string>();
+    for (const arm of fs.readFileSync(PRODUCE_SCRIPT, 'utf-8').matchAll(/^\s{4}(--[^)]+)\)/gm)) {
+      for (const flag of arm[1].split('|')) {
+        const name = flag.trim();
+        if (name === '--*' || name === '--help') continue;
+        parsed.add(name);
+      }
+    }
+    expect(parsed.size, 'no flags parsed out of the case arms').toBeGreaterThan(3);
+
+    const missing = [...parsed].filter((f) => !help.stdout.includes(f));
+    expect(missing, `--help omits: ${missing.join(', ')}`).toEqual([]);
+  });
+});
+
 describe('release-attestation-produce.sh', () => {
   it('skips the helper manifest by default, so a helper source change cannot block a CLI attestation', () => {
     // The live failure this prevents: a one-line COMMENT fix in
