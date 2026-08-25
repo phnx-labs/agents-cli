@@ -111,6 +111,10 @@ fi
 # signing-capable Mac into a hard failure; demanding them only in `release` mode
 # is what let an un-notarized Developer-ID bundle out the door to begin with.
 #
+# Escape hatch for a signing box that wants a fast local build: set
+# `MENUBAR_HELPER_SIGN_ID=-` to skip Developer-ID signing entirely, which takes
+# the ad-hoc path below and never reaches notarization.
+#
 # Resolved HERE, before BUNDLE_ID is chosen and before Info.plist is written: a
 # late downgrade would emit an ad-hoc bundle still carrying the PRODUCTION bundle
 # id, which is precisely the Accessibility-grant poisoning the `.dev` id exists
