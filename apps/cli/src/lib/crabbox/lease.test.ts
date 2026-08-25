@@ -56,7 +56,8 @@ describe('buildBootstrapScript', () => {
     // First-run setup is gated on the SAME postcondition the run-side gate checks
     // (~/.agents/.system is a git repo, ensureInitialized in commands/setup.ts), and
     // a setup that leaves it absent aborts the bootstrap instead of being swallowed.
-    expect(script).toContain('if [ ! -d "$HOME/.agents/.system/.git" ]; then');
+    // `-e` matches isGitRepo's existsSync (a gitfile counts too).
+    expect(script).toContain('if [ ! -e "$HOME/.agents/.system/.git" ]; then');
     expect(script).toContain('setup_out=$(agents setup 2>&1)');
     expect(script).toContain(`exit ${LEASE_BOOTSTRAP_FAILED_CODE}`);
     // The old swallow (`agents setup >/dev/null 2>&1 || true`) is gone.
@@ -440,11 +441,23 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
    * warmed marker, then serves `boxes + warmedBoxes`; `status --id <slug>`
    * reports ready=true only for `readySlugs`. Every invocation is logged.
    */
-  function setupPoolFake(opts: { boxes: unknown[]; readySlugs: string[]; warmedBoxes?: unknown[]; runExit?: number }) {
+  function setupPoolFake(opts: {
+    boxes: unknown[];
+    readySlugs: string[];
+    warmedBoxes?: unknown[];
+    runExit?: number;
+    /** false = the box-side script exits BEFORE the agent marker (a pre-agent bootstrap abort). */
+    runEmitsMarker?: boolean;
+  }) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lease-pool-'));
     const log = path.join(dir, 'crabbox.log');
     const script = path.join(dir, 'remote.sh');
     const runExit = opts.runExit ?? 7;
+    // A real bootstrap abort exits BEFORE echoing LEASE_AGENT_MARKER; a run that
+    // reached the agent echoes it first. `runEmitsMarker` picks which the fake models.
+    const runBody = opts.runEmitsMarker === false
+      ? `printf "bootstrap aborted\\n" >&2; exit ${runExit}`
+      : `printf "%s\\nagent ok\\n" "${LEASE_AGENT_MARKER}"; exit ${runExit}`;
     fs.writeFileSync(path.join(dir, 'before.json'), JSON.stringify(opts.boxes), 'utf-8');
     fs.writeFileSync(
       path.join(dir, 'after.json'),
@@ -462,7 +475,7 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
         '  list) if [ -f "$CRABBOX_DIR/warmed" ]; then cat "$CRABBOX_DIR/after.json"; else cat "$CRABBOX_DIR/before.json"; fi; exit 0 ;;',
         '  status) if [ -f "$CRABBOX_DIR/ready-$3" ]; then printf "lease x\\nready=true\\n"; else printf "ready=false\\n"; fi; exit 0 ;;',
         '  warmup) touch "$CRABBOX_DIR/warmed"; echo "leased cbx_freshone"; exit 0 ;;',
-        '  run) cat > "$CRABBOX_SCRIPT"; printf "%s\\nagent ok\\n" "' + LEASE_AGENT_MARKER + `"; exit ${runExit} ;;`,
+        `  run) cat > "$CRABBOX_SCRIPT"; ${runBody} ;;`,
         '  stop) exit 0 ;;',
         '  *) echo "unexpected command: $*" >&2; exit 1 ;;',
         'esac',
@@ -609,9 +622,10 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
 
   it('stops a box THIS run provisioned when its bootstrap failed — even without --fresh or --keep-box', async () => {
     // Empty pool → warmup a fresh box; the box-side bootstrap exits
-    // LEASE_BOOTSTRAP_FAILED_CODE (agents setup did not complete). A newly created,
-    // unusable box is pure cost, so it is torn down despite a normal (non --fresh) lease.
-    const fake = setupPoolFake({ boxes: [], readySlugs: [], runExit: LEASE_BOOTSTRAP_FAILED_CODE });
+    // LEASE_BOOTSTRAP_FAILED_CODE BEFORE the agent marker (agents setup did not
+    // complete). A newly created, unusable box is pure cost, so it is torn down
+    // despite a normal (non --fresh) lease.
+    const fake = setupPoolFake({ boxes: [], readySlugs: [], runExit: LEASE_BOOTSTRAP_FAILED_CODE, runEmitsMarker: false });
     const { result, phases, calls } = await runWithPool(fake);
 
     expect(result.box.slug).toBe('fresh-one');
@@ -621,13 +635,28 @@ describe.skipIf(process.platform === 'win32')('leaseAndRun warm profile-pool reu
     expect(calls).toContain('stop fresh-one');
   });
 
-  it('never stops a REUSED box even when the run exits with the bootstrap-failed code', async () => {
+  it('KEEPS a provisioned box when the AGENT (not the bootstrap) exits with the same code', async () => {
+    // The agent ran (marker emitted) and merely happened to exit 97 — not a
+    // bootstrap abort. Teardown is gated on the marker never being seen, so the
+    // box is kept: an arbitrary agent exit code must not destroy a warm box.
+    const fake = setupPoolFake({ boxes: [], readySlugs: [], runExit: LEASE_BOOTSTRAP_FAILED_CODE, runEmitsMarker: true });
+    const { result, phases, calls } = await runWithPool(fake);
+
+    expect(result.box.slug).toBe('fresh-one');
+    expect(result.exitCode).toBe(LEASE_BOOTSTRAP_FAILED_CODE);
+    expect(result.toreDown).toBe(false);
+    expect(phases).toEqual(['warmup', 'ready']);
+    expect(calls.some((l) => l.startsWith('stop'))).toBe(false);
+  });
+
+  it('never stops a REUSED box even when its bootstrap aborts', async () => {
     // A reused pool box may be shared by a concurrent run — a failed run on it never
     // tears it down (only a box this run provisioned is auto-stopped on failure).
     const fake = setupPoolFake({
       boxes: [poolBoxJson('warm-one', { profile: 'agents-cli' })],
       readySlugs: ['warm-one'],
       runExit: LEASE_BOOTSTRAP_FAILED_CODE,
+      runEmitsMarker: false,
     });
     const { result, phases, calls } = await runWithPool(fake);
 

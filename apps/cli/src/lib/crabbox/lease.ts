@@ -202,10 +202,12 @@ const ENSURE_AGENTS_CLI = [
   // setup on that same postcondition — not a swallowed exit: capture setup's output,
   // and if the repo still isn't there afterward, print the real cause and abort so
   // the box is never run into that refusal (a swallowed `|| true` here is what left
-  // a provisioned box dying at "agents-cli is not set up").
-  'if [ ! -d "$HOME/.agents/.system/.git" ]; then',
+  // a provisioned box dying at "agents-cli is not set up"). `-e` (not `-d`) matches
+  // the gate's `isGitRepo` (git.ts), which is `existsSync('.git')` — true for a
+  // gitfile/gitlink too, so a linked-worktree `.system` never false-aborts here.
+  'if [ ! -e "$HOME/.agents/.system/.git" ]; then',
   '  setup_out=$(agents setup 2>&1)',
-  '  if [ ! -d "$HOME/.agents/.system/.git" ]; then',
+  '  if [ ! -e "$HOME/.agents/.system/.git" ]; then',
   '    echo "lease bootstrap: agents setup did not complete (~/.agents/.system is not a git repo)" >&2',
   '    printf "%s\\n" "$setup_out" >&2',
   `    exit ${LEASE_BOOTSTRAP_FAILED_CODE}`,
@@ -461,21 +463,40 @@ export async function leaseAndRun(opts: LeaseRunOptions): Promise<LeaseRunResult
   const script = buildBootstrapScript(opts);
   let exitCode: number | null = null;
   let toreDown = false;
+  // Track whether the box-side script reached the agent — the bootstrap echoes
+  // LEASE_AGENT_MARKER on its own line immediately before `agents run`, and aborts
+  // (LEASE_BOOTSTRAP_FAILED_CODE) strictly BEFORE that. So "marker never seen" is
+  // how we tell a pre-agent bootstrap abort from an agent that merely happened to
+  // exit with the same numeric code — only the former is an unusable box. A short
+  // rolling tail keeps the check robust if the marker straddles two output chunks.
+  let sawAgentMarker = false;
+  let markerTail = '';
+  const trackedOnData = (chunk: string) => {
+    if (!sawAgentMarker) {
+      const combined = markerTail + chunk;
+      if (combined.includes(LEASE_AGENT_MARKER)) sawAgentMarker = true;
+      // Keep only enough tail to catch a marker straddling the NEXT chunk boundary.
+      else markerTail = combined.slice(-(LEASE_AGENT_MARKER.length + 8));
+    }
+    opts.onData?.(chunk);
+  };
   try {
     const renewIdleTimeoutSecs = reused && !opts.reuseBox && box.idleTimeoutSecs !== null
       ? box.idleTimeoutSecs
       : undefined;
     exitCode = await crabboxRunScript(box.slug, script, {
       secretsBundle: opts.secretsBundle,
-      onData: opts.onData,
+      onData: trackedOnData,
       renewIdleTimeoutSecs,
     });
   } finally {
-    // A box this run PROVISIONED (never a reused one) whose bootstrap failed is
+    // A box this run PROVISIONED (never a reused one) whose BOOTSTRAP failed is
     // unusable capacity — keep it and it bills until the idle GC window. Stop it
     // regardless of --keep-box: the user asked to keep a working box, not a broken
-    // one. A reused box is left alone (a concurrent run may share it).
-    const bootstrapFailed = exitCode === LEASE_BOOTSTRAP_FAILED_CODE;
+    // one. A reused box is left alone (a concurrent run may share it). The
+    // failed-code check is gated on the agent never having started (marker unseen),
+    // so an agent that legitimately exits with the same code keeps its --keep-box box.
+    const bootstrapFailed = exitCode === LEASE_BOOTSTRAP_FAILED_CODE && !sawAgentMarker;
     // Normal --lease establishes or reuses the warm pool, so a healthy box outlives
     // this run; credentials are still shredded inside the script above. Only --fresh
     // requests the old one-shot lifecycle and tears its new box down.
