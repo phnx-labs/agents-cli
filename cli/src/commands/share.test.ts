@@ -676,7 +676,7 @@ describe('share status and analytics namespace display', () => {
 
     const out = loggedOutput();
     expect(out).toContain('managed');
-    expect(out).toContain('share.agents-cli.sh/alice-user-1');
+    expect(out).toContain('share.agents-cli.sh/alice');
     expect(out).not.toMatch(/Not configured/);
     expect(out).not.toMatch(/artifacts setup/);
   });
@@ -930,18 +930,18 @@ describe('runShareList', () => {
     const { DEFAULT_SHARE_DOMAIN } = await import('../lib/share/config.js');
     const seen: string[] = [];
     const result = await share.runShareList({
-      phoenixSession: { access_token: 'pid_alice', userId: 'alice-user-1', email: 'a@b.com' },
+      phoenixSession: { access_token: 'pid_alice', userId: 'alice-user-1', email: 'alice@example.com' },
       fetchListing: async (url: string) => {
         seen.push(url);
         return {
           status: 200,
           contentType: 'application/json',
           body: JSON.stringify({
-            user: 'alice-user-1',
+            user: 'alice',
             count: 1,
             objects: [{
               slug: 'plan',
-              url: `https://${DEFAULT_SHARE_DOMAIN}/alice-user-1/plan`,
+              url: `https://${DEFAULT_SHARE_DOMAIN}/alice/plan`,
               size: 5,
               contentType: 'text/html',
               publishedAt: '2026-08-08T00:00:00.000Z',
@@ -951,8 +951,8 @@ describe('runShareList', () => {
         };
       },
     });
-    expect(seen).toEqual([`https://${DEFAULT_SHARE_DOMAIN}/alice-user-1?format=json`]);
-    expect(result.user).toBe('alice-user-1');
+    expect(seen).toEqual([`https://${DEFAULT_SHARE_DOMAIN}/alice?format=json`]);
+    expect(result.user).toBe('alice');
     expect(result.count).toBe(1);
     expect(result.objects[0].slug).toBe('plan');
   });
@@ -963,7 +963,7 @@ describe('runShareList', () => {
       phoenixSession: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' },
       fetchListing: async () => ({ status: 404, contentType: 'text/plain', body: 'not found' }),
     });
-    expect(result).toEqual({ user: 'alice', count: 0, objects: [] });
+    expect(result).toEqual({ user: 'a', count: 0, objects: [] });
   });
 
   it('filters by --agent (case-insensitive, exact) and reflects it in count', async () => {
@@ -1195,7 +1195,7 @@ describe('runShareRevisions', () => {
     const { DEFAULT_SHARE_DOMAIN } = await import('../lib/share/config.js');
     const seen: string[] = [];
     const result = await share.runShareRevisions('q3-report', {
-      session: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' },
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
       fetchListing: async (url: string) => {
         seen.push(url);
         return {

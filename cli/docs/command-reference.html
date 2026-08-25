@@ -185,9 +185,12 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share join https://share.agents-cli.sh
 
       # push a worker-template.ts change out to an already-provisioned endpoint
-      agents artifacts share update signed-in users publish to the managed endpoint (share.agents-cli.sh) with the
-  phoenix session — no cloudflare account, bucket, or write token. without a
-  session, the existing byo cloudflare path still applies (setup / join).
+      agents artifacts share update signed-in users publish to the managed endpoint (share.agents-cli.sh/&lt;handle&gt;/…)
+  with the phoenix session — no cloudflare account, bucket, or write token. the
+  handle is the local-part of the signed-in email; the default slug is
+  &lt;readable&gt;-&lt;16hex&gt;. without a session, the existing byo cloudflare path still
+  applies (setup / join). html is stored as one object: local images are inlined
+  and chrome-saved file:// toc links become in-page hashes.
 
   default expiry is 30d so an accidental publish decays. pass --expire never for
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
@@ -256,9 +259,12 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share join https://share.agents-cli.sh
 
       # Push a worker-template.ts change out to an already-provisioned endpoint
-      agents artifacts share update</code></pre><h4>Notes</h4><p class="notes">Signed-in users publish to the managed endpoint (share.agents-cli.sh) with the
-  Phoenix session — no Cloudflare account, bucket, or write token. Without a
-  session, the existing BYO Cloudflare path still applies (setup / join).
+      agents artifacts share update</code></pre><h4>Notes</h4><p class="notes">Signed-in users publish to the managed endpoint (share.agents-cli.sh/&lt;handle&gt;/…)
+  with the Phoenix session — no Cloudflare account, bucket, or write token. The
+  handle is the local-part of the signed-in email; the default slug is
+  &lt;readable&gt;-&lt;16hex&gt;. Without a session, the existing BYO Cloudflare path still
+  applies (setup / join). HTML is stored as one object: local images are inlined
+  and Chrome-saved file:// TOC links become in-page hashes.
 
   Default expiry is 30d so an accidental publish decays. Pass --expire never for
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
@@ -355,7 +361,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share list --agent claude
       agents artifacts share list --label-contains &quot;fleet plan&quot; lists the active pages in your namespace — expired links and the sibling .png og
   covers are omitted (it mirrors the public gallery). signed-in users list the
-  managed endpoint (share.agents-cli.sh/&lt;userid&gt;); otherwise byo. it reads the
+  managed endpoint (share.agents-cli.sh/&lt;handle&gt;); otherwise byo. it reads the
   endpoint&#39;s json listing route, which ships with the current worker template. if
   a byo worker predates this feature the command says so and points you at &#39;agents
   artifacts share update&#39; (rush-2449) rather than returning a wrong or empty result
@@ -375,7 +381,7 @@ agents run claude</code></pre><h4>Notes</h4><p class="notes">Switch writes the e
       agents artifacts share list --agent claude
       agents artifacts share list --label-contains &quot;fleet plan&quot;</code></pre><h4>Notes</h4><p class="notes">Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
   covers are omitted (it mirrors the public gallery). Signed-in users list the
-  managed endpoint (share.agents-cli.sh/&lt;userId&gt;); otherwise BYO. It reads the
+  managed endpoint (share.agents-cli.sh/&lt;handle&gt;); otherwise BYO. It reads the
   endpoint&#39;s JSON listing route, which ships with the current Worker template. If
   a BYO Worker predates this feature the command says so and points you at &#39;agents
   artifacts share update&#39; (RUSH-2449) rather than returning a wrong or empty result

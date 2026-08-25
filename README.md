@@ -1252,7 +1252,7 @@ Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-ht
 ```bash
 # Signed in? Just publish — no Cloudflare setup.
 agents auth login
-agents artifacts share plan.html --visibility unlisted      # → https://share.agents-cli.sh/<you>/…
+agents artifacts share plan.html --visibility unlisted      # → https://share.agents-cli.sh/<handle>/<slug>-<id>
 
 # Or provision your own Cloudflare R2 (~$0).
 agents artifacts setup                                      # once: provision bucket + Worker on your CF
@@ -1268,9 +1268,12 @@ agents artifacts unshare fleet                              # take a published l
 
 `agents artifacts share` closes the loop: an agent makes work (a plan, a viz, a report),
 publishes it, and you open the link to see it. **Signed-in users** publish to the
-already-live managed endpoint (`share.agents-cli.sh`) with the Phoenix session — no
+already-live managed endpoint (`share.agents-cli.sh/<handle>/…`) with the Phoenix session — no
 Cloudflare account, bucket, or write token — and `share status` / `list` / `revisions`
-/ `unshare` talk to that same endpoint. `--visibility unlisted` (hidden aliases
+/ `unshare` talk to that same endpoint. The handle is the local-part of the signed-in
+email (`muqsitnawaz@gmail.com` → `muqsitnawaz`); the page slug is readable plus a
+short view-id. HTML is stored as one object: local images are inlined, `file://` TOC
+links become in-page hashes, so the published page is actually viewable. `--visibility unlisted` (hidden aliases
 `--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
 and the Worker sends `X-Robots-Tag: noindex`. **BYO Cloudflare** remains: `setup` reads
 a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates

@@ -6,9 +6,12 @@
 //          bearer equals env.WRITE_TOKEN. owner = env.SHARE_NAMESPACE or the
 //          path's first segment.
 //       2. Phoenix bearer — otherwise GET ${env.PHOENIX_ID_BASE}/api/v1/auth/me
-//          with that bearer → {userId,email}; 401 if absent/invalid. owner =
-//          userId. The path's first segment MUST equal the sanitized userId so
-//          one user cannot write another's prefix (403 namespace mismatch).
+//          with that bearer → {userId,email}; 401 if absent/invalid.
+//          customMetadata.owner = userId (stable). The path's first segment MUST
+//          equal handleFromEmail(email) (the public handle, e.g. muqsitnawaz),
+//          so one user cannot write another's prefix (403 namespace mismatch).
+//          A __handles/<handle> claim binds the handle to the first userId that
+//          writes it; a different userId gets 409 handle taken.
 //     A managed deployment sets PHOENIX_ID_BASE; BYO sets WRITE_TOKEN; the
 //     platform endpoint may set both. Fail loud (401) when neither authenticates.
 //     Writes the body to R2 via the BUCKET binding, storing visibility
@@ -65,6 +68,11 @@ export default {
       });
     }
 
+    const firstSeg = path.split('/').filter(Boolean)[0] || '';
+    if ((request.method === 'GET' || request.method === 'HEAD') && firstSeg.startsWith('__')) {
+      return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+    }
+
     if (request.method === 'PUT') {
       const auth = await authorizeWrite(request, env);
       if (auth.error) return auth.error;
@@ -73,10 +81,12 @@ export default {
       const visibility = vis.value;
       const segments = path.split('/').filter(Boolean);
       if (auth.kind === 'phoenix') {
-        const expected = sanitizeNamespace(auth.owner);
+        const expected = phoenixHandle(auth);
         if (!expected || segments[0] !== expected) {
           return json({ error: 'namespace mismatch', owner: expected }, 403);
         }
+        const claimed = await claimHandle(env.BUCKET, expected, auth.owner);
+        if (claimed.error) return claimed.error;
       }
       const expiresAt = request.headers.get('x-share-expires-at') || '';
       // 'unlisted' hides the page from the public gallery + JSON listing while
@@ -212,10 +222,13 @@ export default {
       const auth = await authorizeWrite(request, env);
       if (auth.error) return auth.error;
       if (auth.kind === 'phoenix') {
-        const expected = sanitizeNamespace(auth.owner);
+        const handle = phoenixHandle(auth);
+        const uid = sanitizeNamespace(auth.owner);
         const delSegments = path.split('/').filter(Boolean);
-        if (!expected || delSegments[0] !== expected) {
-          return json({ error: 'namespace mismatch', owner: expected }, 403);
+        // Handle is the public namespace; userId prefix is still deletable so
+        // P1 UUID-namespaced objects the same account published can be taken down.
+        if (!delSegments[0] || (delSegments[0] !== handle && delSegments[0] !== uid)) {
+          return json({ error: 'namespace mismatch', owner: handle || uid }, 403);
         }
       }
       await env.BUCKET.delete(path);
@@ -422,10 +435,41 @@ function safeEqual(a, b) {
   return out === 0 && la === lb;
 }
 
-// URL-safety, not collision-resistance. Phoenix userId is a UUID (sanitizes
-// losslessly); two ids that differ only in case/punctuation would share a prefix.
+// URL-safety, not collision-resistance. Two values that differ only in
+// case/punctuation share a prefix.
 function sanitizeNamespace(s) {
   return String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+// Public handle: email local-part, plus-tag stripped. Must match CLI handleFromEmail.
+function handleFromEmail(email) {
+  if (!email) return '';
+  const local = String(email).split('@')[0] || '';
+  const beforePlus = local.split('+')[0] || local;
+  return sanitizeNamespace(beforePlus);
+}
+
+function phoenixHandle(auth) {
+  return handleFromEmail(auth.email) || sanitizeNamespace(auth.owner);
+}
+
+// First writer of a handle owns it. Later PUTs from the same userId are fine;
+// a different userId whose email local-part collides gets 409, not a silent overwrite.
+async function claimHandle(bucket, handle, userId) {
+  const key = '__handles/' + handle;
+  const existing = await bucket.get(key);
+  if (existing) {
+    const claimed = existing.customMetadata && existing.customMetadata.userId;
+    if (claimed && claimed !== userId) {
+      return { error: json({ error: 'handle taken', handle: handle }, 409) };
+    }
+    return {};
+  }
+  await bucket.put(key, JSON.stringify({ userId: userId }), {
+    httpMetadata: { contentType: 'application/json' },
+    customMetadata: { userId: userId, visibility: 'unlisted' },
+  });
+  return {};
 }
 
 // P1 visibility: public | unlisted. 'org' (and anything else) is 400 — org is Phase 2.
@@ -472,7 +516,7 @@ async function authorizeWrite(request, env) {
   }
   const claims = await hooks.verifyPhoenixToken(request, env);
   if (claims && typeof claims.userId === 'string' && claims.userId) {
-    return { kind: 'phoenix', owner: claims.userId };
+    return { kind: 'phoenix', owner: claims.userId, email: typeof claims.email === 'string' ? claims.email : '' };
   }
   return { error: json({ error: 'unauthorized' }, 401) };
 }

@@ -146,7 +146,7 @@ describe('publishFile', () => {
       cover: false,
       provenance: {},
       expire: 'never',
-      session: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.test' },
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
       uploader: async (url, _body, headers) => {
         uploads.push({ url, headers });
         return { ok: true, status: 200, url };
@@ -158,6 +158,37 @@ describe('publishFile', () => {
     expect(uploads[0].url).toBe(`https://${DEFAULT_SHARE_DOMAIN}/alice/plan`);
     expect(uploads[0].headers.authorization).toBe('Bearer pid_alice');
     expect(uploads[0].headers['x-share-visibility']).toBe('public');
+  });
+
+  it('rewrites file:// TOC links and inlines sibling images before PUT (RUSH-3224)', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'share-html-prep-'));
+    const png = Buffer.from(
+      'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==',
+      'base64',
+    );
+    writeFileSync(join(dir, 'hero.png'), png);
+    const file = join(dir, 'plan.html');
+    writeFileSync(
+      file,
+      '<!doctype html><title>Plan</title><a href="file:///tmp/plan.html#purpose">Purpose</a><img src="hero.png">',
+      'utf-8',
+    );
+    let body = '';
+    await publishFile(file, {
+      slug: 'plan',
+      cover: false,
+      provenance: {},
+      expire: 'never',
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
+      uploader: async (_url, b) => {
+        body = b.toString('utf8');
+        return { ok: true, status: 200, url: _url };
+      },
+    });
+    expect(body).toContain('href="#purpose"');
+    expect(body).not.toContain('file://');
+    expect(body).toContain('data:image/png;base64,');
+    expect(body).not.toContain('src="hero.png"');
   });
 });
 
@@ -809,13 +840,13 @@ describe('detectProject / defaultSlug', () => {
     expect(detectProject(d)).toBe(expectedProject(d));
   });
 
-  it('builds <project>-<feature>-<16hex> and drops a redundant leading plan-', () => {
+  it('builds <feature>-<16hex> and drops a redundant leading plan-', () => {
     const d = mkdtempSync(join(tmpdir(), 'projx-'));
     const slug = defaultSlug('/somewhere/plan-fleet-cockpit.html', d);
     // 16 hex chars = 8 random bytes = 64-bit nonce (hardened from 24-bit, RUSH-1821).
-    expect(slug).toMatch(/-fleet-cockpit-[0-9a-f]{16}$/);
+    expect(slug).toMatch(/^fleet-cockpit-[0-9a-f]{16}$/);
     expect(slug).not.toContain('plan-fleet-cockpit');
-    expect(slug.startsWith(expectedProject(d) + '-')).toBe(true);
+    expect(slug.startsWith(expectedProject(d) + '-')).toBe(false);
   });
 
   it('the random tail is a full 64-bit (16 hex char) nonce, not the old 24-bit one', () => {

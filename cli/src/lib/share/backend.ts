@@ -35,7 +35,7 @@ export interface ShareBackend {
   baseUrl: string;
   /** Bearer sent as `Authorization`. Phoenix access_token or WRITE_TOKEN. */
   token: string;
-  /** URL namespace prefix (`<namespace>/<slug>`). Phoenix userId or GitHub username. */
+  /** URL namespace prefix (`<namespace>/<slug>`). Phoenix handle (email local-part) or GitHub username. */
   namespace: string;
 }
 
@@ -43,7 +43,7 @@ export interface ResolveShareBackendOpts {
   /** Force the BYO Cloudflare path even when signed in. */
   byo?: boolean;
   /** Override the namespace (BYO: GitHub username; ignored on managed — the
-   * worker 403s a Phoenix PUT whose first segment is not the verified userId). */
+   * worker 403s a Phoenix PUT whose first segment is not the verified handle). */
   githubUser?: string;
   /** DI seam — a static write token selects BYO. */
   writeToken?: string;
@@ -64,11 +64,30 @@ export const SHARE_BACKEND_ENV = 'AGENTS_SHARE_BACKEND';
 
 /** URL-safe namespace: lowercase `[a-z0-9-]+`. Matches the Worker's sanitize.
  *
- * Phoenix userId is expected to already be `[a-z0-9-]+` (UUIDs sanitize
- * losslessly). This is URL-safety, not collision-resistance: two ids that
- * differ only in case or punctuation would share a prefix. */
+ * This is URL-safety, not collision-resistance: two values that differ only
+ * in case or punctuation share a prefix. */
 export function sanitizeShareNamespace(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+}
+
+/**
+ * Public managed-share handle from a verified email.
+ *
+ * `muqsitnawaz@gmail.com` → `muqsitnawaz`. Plus-tags are dropped
+ * (`muqsitnawaz+dev@gmail.com` → `muqsitnawaz`) so the URL stays the
+ * account's default name. Empty / missing email → `''` (caller falls
+ * back to userId). Must match the Worker `handleFromEmail`.
+ */
+export function handleFromEmail(email: string | undefined): string {
+  if (!email) return '';
+  const local = email.split('@')[0] ?? '';
+  const beforePlus = local.split('+')[0] ?? local;
+  return sanitizeShareNamespace(beforePlus);
+}
+
+/** Managed URL namespace: email handle, else sanitized userId (never empty if either is set). */
+export function managedShareHandle(session: Pick<PhoenixSession, 'email' | 'userId'>): string {
+  return handleFromEmail(session.email) || sanitizeShareNamespace(session.userId ?? '');
 }
 
 export function managedShareBaseUrl(): string {
@@ -138,9 +157,9 @@ function resolveManagedBackend(session: PhoenixSession): ShareBackend {
   if (!session.access_token) {
     throw new Error("Not signed in. Run 'agents auth login'.");
   }
-  const namespace = sanitizeShareNamespace(session.userId ?? '');
+  const namespace = managedShareHandle(session);
   if (!namespace) {
-    throw new Error("Signed in but the session has no user id. Run 'agents auth login' again.");
+    throw new Error("Signed in but the session has no email or user id. Run 'agents auth login' again.");
   }
   return {
     kind: 'managed',

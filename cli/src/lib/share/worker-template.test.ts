@@ -527,7 +527,7 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
     expect(res.status).toBe(401);
   });
 
-  it('403s a Phoenix PUT whose first path segment is not the verified userId', async () => {
+  it('403s a Phoenix PUT whose first path segment is not the verified handle', async () => {
     const worker = await loadWorker();
     worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'a@b.com' });
     const { env, store } = makeEnv();
@@ -543,8 +543,93 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
       env,
     );
     expect(res.status).toBe(403);
-    expect(await res.json()).toMatchObject({ error: 'namespace mismatch', owner: 'alice' });
+    expect(await res.json()).toMatchObject({ error: 'namespace mismatch', owner: 'a' });
     expect(store.has('octocat/stolen')).toBe(false);
+  });
+
+  it('namespaces a Phoenix PUT under the email handle, not the userId UUID (RUSH-3224)', async () => {
+    const worker = await loadWorker();
+    worker.hooks.verifyPhoenixToken = async () => ({
+      userId: '7b28a4b7-1fb0-4abe-948d-32daf2ff7298',
+      email: 'muqsitnawaz@gmail.com',
+    });
+    const { env, store } = makeEnv();
+    const res = await worker.default.fetch(
+      new Request('https://share.test/muqsitnawaz/plan', {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix-token',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-visibility': 'public',
+        },
+        body: '<h1>ok</h1>',
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(store.get('muqsitnawaz/plan')?.customMetadata.owner).toBe(
+      '7b28a4b7-1fb0-4abe-948d-32daf2ff7298',
+    );
+    expect(store.has('7b28a4b7-1fb0-4abe-948d-32daf2ff7298/plan')).toBe(false);
+  });
+
+  it('409s a second Phoenix user whose email local-part collides (handle claim)', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'user-1', email: 'john@a.com' });
+    const first = await worker.default.fetch(
+      new Request('https://share.test/john/one', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer t', 'content-type': 'text/html' },
+        body: 'one',
+      }),
+      env,
+    );
+    expect(first.status).toBe(200);
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'user-2', email: 'john@b.com' });
+    const second = await worker.default.fetch(
+      new Request('https://share.test/john/two', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer t', 'content-type': 'text/html' },
+        body: 'two',
+      }),
+      env,
+    );
+    expect(second.status).toBe(409);
+    expect(await second.json()).toMatchObject({ error: 'handle taken', handle: 'john' });
+    expect(store.has('john/two')).toBe(false);
+  });
+
+  it('404s GET of the internal handle-claim prefix', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    const res = await worker.default.fetch(new Request('https://share.test/__handles/alice'), env);
+    expect(res.status).toBe(404);
+  });
+
+  it('lets the same Phoenix user DELETE a leftover userId-prefixed P1 object', async () => {
+    const worker = await loadWorker();
+    worker.hooks.verifyPhoenixToken = async () => ({
+      userId: '7b28a4b7-1fb0-4abe-948d-32daf2ff7298',
+      email: 'muqsitnawaz@gmail.com',
+    });
+    const { env, store } = makeEnv();
+    store.set('7b28a4b7-1fb0-4abe-948d-32daf2ff7298/old', {
+      body: Buffer.from('old'),
+      httpMetadata: { contentType: 'text/html' },
+      customMetadata: { owner: '7b28a4b7-1fb0-4abe-948d-32daf2ff7298' },
+      uploaded: new Date().toISOString(),
+      size: 3,
+    });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/7b28a4b7-1fb0-4abe-948d-32daf2ff7298/old', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer phoenix-token' },
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(store.has('7b28a4b7-1fb0-4abe-948d-32daf2ff7298/old')).toBe(false);
   });
 
   it('400s org visibility on PUT (not supported in P1)', async () => {
@@ -678,7 +763,7 @@ describe('defaultVerifyPhoenixToken real fetch/parse (RUSH-3135)', () => {
     (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
 
     stubFetch(
-      () => new Response(JSON.stringify({ userId: 'alice', email: 'a@b.com' }), { status: 200 }),
+      () => new Response(JSON.stringify({ userId: 'alice', email: 'alice@example.com' }), { status: 200 }),
     );
     const ok = await worker.default.fetch(
       new Request('https://share.test/alice/plan', {

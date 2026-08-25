@@ -11,6 +11,8 @@ import {
   resolveShareBackend,
   shouldUseManaged,
   sanitizeShareNamespace,
+  handleFromEmail,
+  managedShareHandle,
   managedShareBaseUrl,
   isManagedShareEndpoint,
   phoenixIdBaseForDeploy,
@@ -98,6 +100,21 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
     );
   });
 
+  it('handleFromEmail is the email local-part, plus-tag stripped (RUSH-3224)', () => {
+    expect(handleFromEmail('muqsitnawaz@gmail.com')).toBe('muqsitnawaz');
+    expect(handleFromEmail('muqsitnawaz+dev@gmail.com')).toBe('muqsitnawaz');
+    expect(handleFromEmail('Alice.User@example.com')).toBe('alice-user');
+    expect(handleFromEmail(undefined)).toBe('');
+    expect(handleFromEmail('')).toBe('');
+  });
+
+  it('managedShareHandle prefers the email handle over the userId UUID', () => {
+    expect(managedShareHandle({ email: 'muqsitnawaz@gmail.com', userId: '7b28a4b7-1fb0-4abe-948d-32daf2ff7298' })).toBe(
+      'muqsitnawaz',
+    );
+    expect(managedShareHandle({ userId: 'alice-user-1' })).toBe('alice-user-1');
+  });
+
   it('signed-in with no BYO override selects the managed endpoint and Phoenix token', () => {
     writeSession(ALICE);
     expect(shouldUseManaged()).toBe(true);
@@ -106,7 +123,7 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
     expect(backend.token).toBe('pid_alice_token');
     expect(backend.baseUrl).toBe(`https://${DEFAULT_SHARE_DOMAIN}`);
     expect(backend.baseUrl).toBe(managedShareBaseUrl());
-    expect(backend.namespace).toBe('alice-user-1');
+    expect(backend.namespace).toBe('alice');
   });
 
   it('signed-in via opts.session (DI) also selects managed', () => {
@@ -186,7 +203,7 @@ describe('ShareBackend chooser (RUSH-3135)', () => {
   it('managed fails loud when the session has no userId', () => {
     expect(() =>
       resolveShareBackend({ session: { access_token: 'pid_x' } }),
-    ).toThrow(/no user id/);
+    ).toThrow(/no email or user id/);
   });
 
   it('requireToken:false lets BYO list/status resolve without a WRITE_TOKEN', () => {

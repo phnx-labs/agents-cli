@@ -192,8 +192,8 @@ export function parseShareListing(user: string, body: string): ShareListResult {
   return { user, count: objects.length, objects };
 }
 
-/** Namespace for list/revisions: managed uses the verified Phoenix userId;
- * BYO still resolves GitHub username (gh / git config / --for-user). */
+/** Namespace for list/revisions: managed uses the Phoenix handle (email
+ * local-part); BYO still resolves GitHub username (gh / git config / --for-user). */
 async function namespaceForBackend(backend: ShareBackend, githubUser?: string): Promise<string> {
   if (backend.kind === 'managed') return backend.namespace;
   return resolveShareUsername({ githubUser: githubUser || backend.namespace || undefined });
@@ -702,9 +702,12 @@ ${SHARE_DELETE_EXAMPLES}
       agents artifacts share update
     `,
     notes: `
-  Signed-in users publish to the managed endpoint (share.agents-cli.sh) with the
-  Phoenix session — no Cloudflare account, bucket, or write token. Without a
-  session, the existing BYO Cloudflare path still applies (setup / join).
+  Signed-in users publish to the managed endpoint (share.agents-cli.sh/<handle>/…)
+  with the Phoenix session — no Cloudflare account, bucket, or write token. The
+  handle is the local-part of the signed-in email; the default slug is
+  <readable>-<16hex>. Without a session, the existing BYO Cloudflare path still
+  applies (setup / join). HTML is stored as one object: local images are inlined
+  and Chrome-saved file:// TOC links become in-page hashes.
 
   Default expiry is 30d so an accidental publish decays. Pass --expire never for
   a permanent link. --visibility unlisted (hidden aliases: --unlisted / --private)
@@ -885,7 +888,7 @@ ${SHARE_DELETE_NOTES}
     notes: `
   Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
   covers are omitted (it mirrors the public gallery). Signed-in users list the
-  managed endpoint (share.agents-cli.sh/<userId>); otherwise BYO. It reads the
+  managed endpoint (share.agents-cli.sh/<handle>); otherwise BYO. It reads the
   endpoint's JSON listing route, which ships with the current Worker template. If
   a BYO Worker predates this feature the command says so and points you at 'agents
   artifacts share update' (RUSH-2449) rather than returning a wrong or empty result

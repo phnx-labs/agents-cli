@@ -17,6 +17,7 @@ import { resolveShareBackend, sanitizeShareNamespace, type ResolveShareBackendOp
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
 import { injectAnalyticsBeacon } from './analytics.js';
+import { prepareShareHtml } from './html.js';
 
 export type PutFn = (
   url: string,
@@ -486,18 +487,19 @@ export function detectProject(dir: string = process.cwd()): string {
 }
 
 /**
- * Notion-style default slug: `<project>-<feature>-<16hex>`. Project scopes the link
- * to the repo the agent is in; the random tail keeps it unguessable + collision-free.
- * A leading `plan-` on the filename is dropped (it's redundant under the project).
+ * Readable slug + view id: `<feature>-<16hex>`. A leading `plan-` on the
+ * filename is dropped. The project no longer prefixes the slug — the URL
+ * namespace is already the publisher's handle (`/<you>/<slug>`).
  *
  * The tail is 8 random bytes (64-bit, 16 hex chars). Reads are public — the URL is
  * the only capability — so the nonce must be genuinely infeasible to brute-force,
  * not merely unlisted; 64 bits puts a blind guess out of reach. (See docs/distribution.md
  * §Security for the threat model and `--expire` for sensitive content.)
+ * `--slug` still publishes that exact slug, no view-id appended.
  */
-export function defaultSlug(filePath: string, dir?: string): string {
+export function defaultSlug(filePath: string, _dir?: string): string {
   const feature = slugify(filePath).replace(/^plan-/, '') || 'page';
-  return `${detectProject(dir)}-${feature}-${randomBytes(8).toString('hex')}`;
+  return `${feature}-${randomBytes(8).toString('hex')}`;
 }
 
 function guessContentType(filePath: string): string {
@@ -626,6 +628,9 @@ export async function publishToEndpoint(
   let body: Buffer = readFileSync(filePath);
   let coverUrl: string | undefined;
   const isHtml = /\.html?$/i.test(filePath);
+  if (isHtml) {
+    body = Buffer.from(prepareShareHtml(body.toString('utf8'), filePath), 'utf8');
+  }
 
   const explicitLabel = opts.label?.trim();
   // sanitizeLabel here (not just inside deriveLabel) covers an explicit
@@ -714,6 +719,11 @@ export async function publishToEndpoint(
 
   const r = await put(pageUrl, body, authHeaders(opts.contentType ?? guessContentType(filePath)));
   if (!r.ok) {
+    if (r.status === 409) {
+      throw new Error(
+        `Handle '${username}' is already claimed by another account. The public URL namespace is the email local-part; two Phoenix users cannot share it.`,
+      );
+    }
     throw new Error(
       `Publish failed (${r.status}) for ${pageUrl}. Check the write token, or that 'agents artifacts setup' completed.`,
     );

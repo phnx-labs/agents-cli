@@ -309,7 +309,7 @@ describe('deleteShare managed backend (RUSH-3135)', () => {
       `${base}/alice/plan.png`,
     ]);
     const r = await deleteShare('plan', {
-      session: { access_token: 'pid_alice', userId: 'alice', email: 'a@b.com' },
+      session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
       checker,
       deleter,
       fetchRevisions: NO_REVISIONS,
