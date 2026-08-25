@@ -2502,34 +2502,22 @@ export function foldHostLink(rows: ActiveSession[]): void {
       s.presence = undefined;
     }
     if (link === 'host-gone' && s.status === 'closed') s.status = 'crashed';
-    // `no-client` only means something went wrong if a client was EXPECTED.
-    //
-    //  - idle / input_required: always wrong, in any context. The run has stopped
-    //    and nobody is coming to answer it.
-    //  - running: wrong only for a `terminal` row, which was launched into a
-    //    window a human was meant to watch. A headless or teams run with no
-    //    client is working exactly as designed, and calling it orphaned is the
-    //    over-reporting this file's header warns makes the word worthless.
-    //
-    // Before RUSH-3125 the `running` case was excluded outright, so a remote
-    // interactive agent whose client died kept reading `running` — the most
-    // expensive miss, since it burns tokens with nobody reading the result.
-    else if (link === 'no-client' && !TERMINAL_STATUSES.has(s.status)
-      && (s.status === 'idle' || s.status === 'input_required' || s.context === 'terminal')) {
+    // Only idle/input_required are promoted — a `running` session keeps its
+    // status (SES-18a). Extending this to a running agent with no client was
+    // tried and reverted: since RUSH-3125 wraps every remote interactive run in
+    // a detached tmux pane, "running with zero attached clients" is the NORMAL
+    // steady state between check-ins, and that path writes no detach record, so
+    // `deliberatelyDetached` is false for it. Promoting it would relabel every
+    // remote agent as orphaned whenever nobody is looking — the over-reporting
+    // this file's header calls worthless. Telling a stranded agent from a
+    // healthy unattended one needs to know a client was EXPECTED and LOST, which
+    // no signal available here carries; that belongs with the peer-side pane
+    // ownership work, not this function.
+    else if (link === 'no-client' && (s.status === 'idle' || s.status === 'input_required')) {
       s.status = 'orphaned';
     }
   }
 }
-
-/**
- * Statuses that already describe an ENDED session. `no-client` cannot promote
- * one of these to `orphaned`: an orphan is a live agent nobody is watching, and
- * these are not live. Kept beside the promotion it guards so the two cannot
- * drift apart.
- */
-const TERMINAL_STATUSES: ReadonlySet<ActiveStatus> = new Set<ActiveStatus>([
-  'closed', 'crashed', 'abandoned',
-]);
 
 /** One display line, trimmed and capped, or undefined when empty. */
 function recapLine(s: string | undefined, max = 120): string | undefined {

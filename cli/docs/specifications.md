@@ -404,7 +404,15 @@ SSH access (§7); rendering sessions that no harness produced.
   tmux attached-client count of exactly zero, or whose owning IDE window has not
   republished its `live-terminals.json` slice within `HOST_HEARTBEAT_STALE_MS`,
   MUST classify as `no-client`; a dead agent under such a window MUST classify as
-  `host-gone`. An ABSENT client count MUST read as unknown, never as zero. A
+  `host-gone`. An ABSENT client count MUST read as unknown, never as zero. When
+  NEITHER signal is available — no owning window and no client count, which is
+  the case for a bare terminal, a team spawn, a cloud task, and any `--device`
+  session whose pane lives on another machine — the link MUST classify as
+  `unknown` and MUST NOT classify as `connected`: `connected` asserts an observed
+  client, and no consumer may render `unknown` as healthy. `unknown` is not a
+  loss signal, so it MUST NOT promote any status and MUST NOT clear a derived
+  `attached` presence — only a positive `no-client`/`host-gone` may do that
+  (test `host-link.test.ts`, `active.hostlink.test.ts`). A
   session whose `presence` is `background`/`parked` MUST NOT be classified as
   either — no client is the point of detaching. On the status column, `abandoned`
   MUST win outright, `host-gone` MUST replace `closed` with `crashed`, and
