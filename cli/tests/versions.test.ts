@@ -1239,7 +1239,7 @@ describe('installVersion', () => {
     }
   });
 
-  it.skipIf(IS_WINDOWS)('gracefully redirects a version-pinned external install to the current release (RUSH-1321)', async () => {
+  it.skipIf(IS_WINDOWS)('keeps a concrete self-updating install label while recording the current release', async () => {
     // A self-updating agent (no VERSION token in the installer) can't pin. A
     // network-free `true` installer stands in for the real curl/brew script.
     // A stub `agy` (antigravity's actual cliCommand — NOT the agent id) on
@@ -1262,13 +1262,15 @@ describe('installVersion', () => {
     try {
       const result = await installVersion('antigravity', '1.2.3');
 
-      // No longer a hard `does not support version-pinned installs` error — the
-      // pin is redirected to installing the current release.
       expect(result.success).toBe(true);
-      expect(result.installedVersion).toBe('1.9.9'); // the live version, not the ignored pin
+      expect(result.installedVersion).toBe('1.2.3');
       expect(result.error ?? '').not.toContain('does not support version-pinned installs');
-      // The ignored `1.2.3` pin did NOT create a fictional `1.2.3` version dir.
-      expect(fs.existsSync(path.join(AGENTS_DIR, 'versions', 'antigravity', '1.2.3'))).toBe(false);
+      const record = JSON.parse(fs.readFileSync(
+        path.join(AGENTS_DIR, 'versions', 'antigravity', '1.2.3', 'installation.json'),
+        'utf-8',
+      ));
+      expect(record.label).toBe('1.2.3');
+      expect(record.releaseVersion).toBe('1.9.9');
     } finally {
       AGENTS.antigravity.installScript = original;
       process.env.PATH = originalPath;
