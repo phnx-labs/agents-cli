@@ -324,7 +324,12 @@ main() {
   # That is the same trap 6abd4a2ea had to fix for the test:remote alias.
   local test_cmd='cd apps/cli && bun install && bun run build && bun run test'
   case "${1:-}" in
-    ''|test) cmd="$test_cmd" ;;
+    ''|test)
+      # Trailing args ride through to vitest: `sandbox.sh test --retry=2`.
+      cmd="$test_cmd"
+      if [[ $# -gt 0 ]]; then shift; fi
+      if [[ $# -gt 0 ]]; then cmd="$cmd -- $*"; fi
+      ;;
     verify)  cmd='echo "[sandbox] ready"; uname -srm; bun --version' ;;
     *)       cmd="$*" ;;
   esac

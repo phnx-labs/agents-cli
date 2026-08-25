@@ -27,21 +27,31 @@ SKIP_TESTS=false
 TEST_TARGET=()
 VERSION=""
 SEMVER_RE='^[0-9]+\.[0-9]+\.[0-9]+(-(alpha|beta)\.[0-9]+)?$'
-for arg in "$@"; do
-  case "$arg" in
-    --clean) CLEAN=true ;;
-    --skip-tests) SKIP_TESTS=true ;;
-    --device) TEST_TARGET=(--device "$2"); shift ;;
-    --here) TEST_TARGET=(--here) ;;
+# A while/shift loop, not `for arg in "$@"`: the for-loop form snapshots the
+# argument list, so `shift` cannot consume a flag's VALUE and `$2` refers to the
+# script's second positional rather than the next token. That worked only while
+# every flag here was value-less; --device takes one.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --clean) CLEAN=true; shift ;;
+    --skip-tests) SKIP_TESTS=true; shift ;;
+    --device)
+      [[ -n "${2:-}" ]] || die "--device needs a machine name"
+      TEST_TARGET=(--device "$2"); shift 2 ;;
+    --device=*)
+      TEST_TARGET=(--device "${1#*=}")
+      [[ -n "${TEST_TARGET[1]}" ]] || die "--device needs a machine name"
+      shift ;;
+    --here) TEST_TARGET=(--here); shift ;;
     -h|--help)
       sed -n '3,9p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
-    --*) die "unknown flag: $arg" ;;
+    --*) die "unknown flag: $1" ;;
     *)
-      [[ -z "$VERSION" ]] || die "unexpected argument: $arg"
-      [[ "$arg" =~ $SEMVER_RE ]] || die "invalid version '$arg' (expected MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-(alpha|beta).N)"
-      VERSION="$arg"
-      ;;
+      [[ -z "$VERSION" ]] || die "unexpected argument: $1"
+      [[ "$1" =~ $SEMVER_RE ]] || die "invalid version '$1' (expected MAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH-(alpha|beta).N)"
+      VERSION="$1"
+      shift ;;
   esac
 done
 

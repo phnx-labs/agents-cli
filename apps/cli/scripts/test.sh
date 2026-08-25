@@ -152,7 +152,11 @@ case "$MODE" in
     # Fail loud, never silently local. The crabbox pool has been down fleet-wide
     # (RUSH-3004 Hetzner 403, RUSH-2773) and that outage is exactly when someone
     # is tempted to "just run it here" -- so name the alternative in the error.
-    if ! scripts/sandbox.sh test; then
+    # VITEST_ARGS must ride through here too. The producer passes
+    # `-- --retry=2 --maxWorkers=2` and offload is its DEFAULT mode, so dropping
+    # them silently removes the mitigation that keeps a good tree from
+    # false-failing (see release-attestation-produce.sh's RUSH-3015 note).
+    if ! scripts/sandbox.sh test ${VITEST_ARGS[@]+"${VITEST_ARGS[@]}"}; then
       die "the crabbox run failed (pool outage? see RUSH-3004 / RUSH-2773).
   Run it on a fleet Linux box instead:   scripts/test.sh --device yosemite-m1
   Or, if you accept pinning THIS machine: scripts/test.sh --here"

@@ -1,6 +1,6 @@
 {
   "name": "@phnx-labs/agents-cli",
-  "version": "1.22.46",
+  "version": "1.2.3",
   "description": "One CLI for all your AI coding agents - versions, config, cloud dispatch, sessions, and teams (now with first-class Grok Build CLI support)",
   "type": "module",
   "main": "dist/index.js",
@@ -58,7 +58,7 @@
     "test": "node ./node_modules/vitest/vitest.mjs run",
     "bench": "node ./node_modules/vitest/vitest.mjs bench --run",
     "typecheck:bench": "tsc --noEmit --ignoreConfig --skipLibCheck --module esnext --moduleResolution bundler --target es2022 --strict --esModuleInterop --lib es2022 --types node src/lib/*.bench.ts src/lib/**/*.bench.ts",
-    "test:remote": "scripts/sandbox.sh 'cd apps/cli && bun install && bun run build && bun run test'",
+    "test:remote": "scripts/sandbox.sh test",
     "verify-docs": "scripts/verify-docs.sh",
     "test:watch": "node ./node_modules/vitest/vitest.mjs"
   },
