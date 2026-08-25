@@ -196,6 +196,60 @@ describe('resolveOrCreateTask — identity', () => {
   });
 });
 
+// RUSH-3064: the PR #2932 consent gate covered CREATE but not ATTACH. Every
+// page/close verb (tab-add, navigate, done, …) resolves through this method, so
+// a fleet-remote caller could drive the owner's already-running, authenticated
+// browser with `remote-control off`. remote-control is unset (off) in this test
+// HOME, so a fleetRemote request is refused unless the gate is skipped for it.
+describe('resolveOrCreateTask — remote-control gate covers attach, not just create', () => {
+  it('refuses a fleet-remote attach by --task (the reported tab-add attack)', async () => {
+    const service = new BrowserService();
+    stubConn(service, 'comet-local@endpoint-0', [
+      { id: 'victim', name: 'victim', label: 'github.com', createdAt: Date.now() - 60_000 },
+    ]);
+
+    await expect(
+      service.resolveOrCreateTask({
+        task: 'victim',
+        fleetRemote: true,
+        actor: 'yosemite-s0',
+        createIfMissing: true,
+      }),
+    ).rejects.toThrow(/remote-control on/);
+  });
+
+  it('refuses a fleet-remote lone identity match (no --task needed)', async () => {
+    const service = new BrowserService();
+    stubConn(service, 'comet-local@endpoint-0', [
+      { id: 'victim', name: 'victim', label: 'github.com', sessionId: 'sess-1', createdAt: Date.now() - 60_000 },
+    ]);
+
+    await expect(
+      service.resolveOrCreateTask({
+        sessionId: 'sess-1',
+        fleetRemote: true,
+        actor: 'yosemite-s0',
+        createIfMissing: false,
+      }),
+    ).rejects.toThrow(/remote-control on/);
+  });
+
+  it('does not gate a LOCAL attach by --task — no marker, no refusal', async () => {
+    const service = new BrowserService();
+    stubConn(service, 'comet-local@endpoint-0', [
+      { id: 'mine', name: 'mine', label: 'github.com', createdAt: Date.now() - 60_000 },
+    ]);
+
+    const resolved = await service.resolveOrCreateTask({
+      task: 'mine',
+      createIfMissing: true,
+    });
+    expect(resolved).not.toBeNull();
+    expect(resolved!.task.name).toBe('mine');
+    expect(resolved!.created).toBe(false);
+  });
+});
+
 describe('status — bare profile name', () => {
   it('lists composite-key tasks under a bare --profile name', async () => {
     writeProfile('comet-local');

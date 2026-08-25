@@ -436,24 +436,27 @@ browser is refused with a message naming how to enable it, until the owner runs
 `agents browser remote-control on` here. The key is machine-local — only this
 box can set it. Local drives (no `--device`) are never gated.
 
-The gate lives in the browser daemon, at the two points that can actually launch
-a browser (`BrowserService.start` and the create branch of `resolveOrCreateTask`),
-not on the `browser start` command. It has to: `navigate`, `click`, `screenshot`
-and the other page verbs launch a browser implicitly when the caller has no live
-task, so gating the one command left every one of them ungated. Read-only queries
-(`status`, `tabs`, `profiles list`) are not gated.
+The gate lives in the browser daemon, at the top of `resolveOrCreateTask` — the
+one chokepoint every task-scoped verb resolves through — plus `BrowserService.start`
+for the task-less `browser start` command. It has to live in the daemon, not on
+the `browser start` command: `navigate`, `click`, `screenshot`, `tab-add` and the
+other page verbs launch *or attach to* a browser implicitly, so gating the one
+command left every one of them ungated. Daemon/profile queries that resolve no
+task — `status`, `profiles list` — are not gated, so a peer can still discover
+what is running without consent.
 
-**What this does NOT cover.** The gate is on *launching*, not on *attaching*. A
-request that resolves to a task which already exists — `--task <name>`, or the
-single-match-by-caller-identity path in `resolveOrCreateTask` — returns before
-the gate and can then drive that task's tabs. So on a machine whose browser is
-already running with live tasks, a remote attach that already has a task
-(`--task <name>` after `start --device <box>`) can still act in the owner's
-authenticated profile with consent off, and `status` is ungated by design so
-task names are discoverable. This is pre-existing behaviour, not introduced or
-closed here; closing it means gating the attach path (`findTask` and its
-consumers) as well, which is tracked separately. Treat `remote-control off` as
-"no new browser", not as "no access".
+The gate covers both **launching** and **attaching**. Whether a fleet-remote
+request opens a new browser or resolves to a task that already exists —
+`--task <name>`, or the single-match-by-caller-identity path — it is refused with
+consent off (RUSH-3064). Earlier the two attach early-returns and `tabAdd`
+bypassed a create-only gate, so a remote `tab-add --device <box> --task <name>`
+could drive the owner's authenticated profile with consent off (`status` is
+ungated by design, so task names are discoverable). That bypass is closed: with
+`remote-control off`, any fleet-remote verb that touches a task — drive
+(`navigate`/`click`/`tab-add`), close (`done`/`stop`), or observe
+(`console`/`tab-list`) — is refused whether or not the task already exists. Treat
+`remote-control off` as "no remote access to this browser". Local drives (no
+`--device`) remain ungated.
 
 The marker travels **on the request**, not in the daemon's environment. The
 daemon is shared and long-lived, and one auto-started by a fleet-remote CLI

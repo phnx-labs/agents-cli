@@ -2861,6 +2861,16 @@ export class BrowserService {
     picked?: string;
     device?: string;
   } | null> {
+    // Consent gate — the one chokepoint every drive/mutate verb passes through.
+    // ipc.ts routes each PAGE_RESOLVE_VERB and CLOSE_VERB here via bindTask, so
+    // gating at the top refuses a fleet-remote ATTACH (an explicit --task, or a
+    // lone identity match) exactly as it already refused an implicit CREATE.
+    // Gating only the create branch below left tab-add/navigate/done on an
+    // already-running browser ungated, so a remote caller could drive the
+    // owner's authenticated profile with consent off (RUSH-3064). Read the
+    // per-request marker, never the daemon's env — see remote-control.ts.
+    assertRemoteControlAllowedForRequest(opts.fleetRemote, { actor: opts.actor });
+
     if (opts.task) {
       const found = await this.findTask(opts.task, opts.profile);
       return { ...found, created: false };
@@ -2906,10 +2916,10 @@ export class BrowserService {
     // Zero matches for this caller.
     if (!opts.createIfMissing) return null;
 
-    // Refuse BEFORE ensureDefaultBrowserProfile() below, which probes local
-    // browser installs and may CREATE and persist an `auto-chrome` profile — a
-    // refused request must not leave state behind on the target machine.
-    assertRemoteControlAllowedForRequest(opts.fleetRemote, { actor: opts.actor });
+    // The top-of-function consent gate already refused a fleet-remote create
+    // here — before ensureDefaultBrowserProfile() below can probe local browser
+    // installs and persist an `auto-chrome` profile — so a refused request never
+    // leaves state behind on the target machine.
 
     // Implicit start on the default / named profile.
     let profileName = opts.profile;
