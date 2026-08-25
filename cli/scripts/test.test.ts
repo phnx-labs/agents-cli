@@ -119,6 +119,6 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     const r = run(['--repo-root', empty, '--device', 'no-such-box-xyz.invalid']);
     fs.rmSync(empty, { recursive: true, force: true });
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/has no apps\/cli/);
+    expect(r.stderr).toMatch(/has no cli/);
   });
 });
