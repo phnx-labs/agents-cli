@@ -35,9 +35,26 @@ describe('publish-computer-win.sh', () => {
   it('refuses an existing tag — a helper release is immutable', () => {
     // The asset upload uses --clobber, so re-tagging would silently replace a
     // binary an installed CLI already pins to that exact version.
-    const r = run('1.0.0');
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/already exists/);
+    //
+    // Create the tag in THIS repo rather than assuming origin has
+    // computer-win/v1.0.0. `test.sh --device` and the attestation producer
+    // git-init a blank tree with no tags and no origin, so pinning 1.0.0
+    // made the suite red on every isolated run (dry-run exit 0).
+    const repoRoot = spawnSync('git', ['rev-parse', '--show-toplevel'], {
+      encoding: 'utf-8',
+    }).stdout.trim();
+    expect(repoRoot).not.toBe('');
+    const version = `0.0.${process.pid}`;
+    const tag = `computer-win/v${version}`;
+    const created = spawnSync('git', ['-C', repoRoot, 'tag', tag], { encoding: 'utf-8' });
+    expect(created.status).toBe(0);
+    try {
+      const r = run(version);
+      expect(r.status).not.toBe(0);
+      expect(r.stderr).toMatch(/already exists/);
+    } finally {
+      spawnSync('git', ['-C', repoRoot, 'tag', '-d', tag]);
+    }
   });
 
   it('refuses an unknown flag rather than ignoring it', () => {
