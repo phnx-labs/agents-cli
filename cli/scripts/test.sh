@@ -13,17 +13,25 @@
 # offload the DEFAULT, inside one entry point, is what makes that impossible
 # rather than merely discouraged.
 #
+# The default is now `auto` (RUSH-3211), not crabbox. Crabbox needs its binary
+# plus provider credentials, so a default that required them failed on any box
+# without them -- and a default that fails is a default nobody uses. `auto` draws
+# from the fleet workers the operator has already marked, through the CLI's own
+# picker, so the no-argument invocation works everywhere.
+#
 # Usage:
-#   scripts/test.sh                      # offload to a crabbox (the default)
+#   scripts/test.sh                      # auto-pick the least-loaded worker (default)
+#   scripts/test.sh --device auto        # the same thing, said explicitly
 #   scripts/test.sh --device <box>       # run on a named fleet box over ssh
+#   scripts/test.sh --crabbox            # offload to a disposable crabbox instead
 #   scripts/test.sh --here               # run on THIS machine (explicit, loud)
 #   scripts/test.sh --repo-root <dir>    # test that tree instead of this one
 #   scripts/test.sh -- --retry=2         # everything after `--` goes to vitest
 #
-# NO SILENT FALLBACK. When the crabbox pool is unreachable this script FAILS and
-# names the exact `--device` command to re-run, rather than quietly running the
-# suite locally. A fallback here would recreate the very bug it exists to stop:
-# the operator believes work was offloaded while their laptop melts.
+# NO SILENT FALLBACK. When no worker is eligible this script FAILS and names the
+# exact `--device` command to re-run, rather than quietly running the suite
+# locally. A fallback here would recreate the very bug it exists to stop: the
+# operator believes work was offloaded while their laptop melts.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -35,7 +43,12 @@ gray()  { printf '\033[2m%s\033[0m\n'  "$*"; }
 bold()  { printf '\033[1m%s\033[0m\n'  "$*"; }
 die()   { red "error: $*"; exit 1; }
 
-MODE="offload"
+# `auto` is the default (RUSH-3211). Every call site that does not name a box
+# gets a real worker without the operator having to know which boxes are free --
+# which is the whole point of test.sh existing. crabbox is still available, but
+# it is now an explicit choice: it needs the crabbox binary + provider creds,
+# so defaulting to it made the default path fail on any box without them.
+MODE="auto"
 DEVICE=""
 REPO_ROOT=""
 VITEST_ARGS=()
@@ -43,6 +56,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --device) [[ -n "${2:-}" ]] || die "--device needs a machine name"; DEVICE="$2"; MODE="device"; shift 2 ;;
     --device=*) DEVICE="${1#*=}"; MODE="device"; shift ;;
+    --crabbox) MODE="crabbox"; shift ;;
     --here|--local) MODE="here"; shift ;;
     --repo-root) [[ -n "${2:-}" ]] || die "--repo-root needs a directory"; REPO_ROOT="$2"; shift 2 ;;
     --repo-root=*) REPO_ROOT="${1#*=}"; shift ;;
@@ -51,6 +65,10 @@ while [[ $# -gt 0 ]]; do
     *) die "unexpected argument: $1 (did you mean '-- $1' to pass it to vitest?)" ;;
   esac
 done
+
+# `--device auto` is the same sentinel `agents run --device auto` uses; accept it
+# here rather than dialing a literal, nonexistent host named "auto".
+if [[ "$MODE" == "device" && "$DEVICE" == "auto" ]]; then MODE="auto"; DEVICE=""; fi
 
 # --repo-root lets the attestation producer test the isolated worktree it built
 # at an exact commit, so the bytes tested are the bytes attested.
@@ -104,12 +122,58 @@ sys.exit(1)
 ' "$1"
 }
 
+# Resolve MODE=auto to a concrete worker, then fall through to the device path.
+#
+# The eligibility rule is NOT reimplemented here. `agents devices pick` is the
+# CLI's own worker picker (lib/devices/worker-pick.ts): same auto pool as
+# `agents run --device auto`, so `role=worker` / `role=personal` marks move this
+# surface too; same live reachability+load probe; same least-loaded ranking. It
+# fails loud when no worker is eligible, and this script surfaces that verbatim
+# rather than inventing a fallback.
+if [[ "$MODE" == "auto" ]]; then
+  command -v agents >/dev/null 2>&1 \
+    || die "the 'agents' CLI is not on PATH, so a worker cannot be auto-picked.
+  Name one explicitly:  scripts/test.sh --device yosemite-m1
+  Or pin THIS machine:  scripts/test.sh --here"
+  # stdout is the name alone; the candidate/load detail goes to stderr, so let it
+  # through to the operator instead of swallowing it.
+  if ! DEVICE="$(agents devices pick)"; then
+    # Distinguish "the fleet has nothing free" from "your CLI is too old to ask".
+    # Both exit non-zero here, and conflating them sends the operator hunting a
+    # capacity problem that does not exist. This is a diagnostic, not a fallback:
+    # either way the run aborts.
+    if ! agents devices --help 2>/dev/null | grep -q '^\s*pick\b'; then
+      die "the installed 'agents' CLI has no 'devices pick' -- it predates the auto-picker.
+  Upgrade it, or name a box until you do:  scripts/test.sh --device yosemite-m1"
+    fi
+    die "no worker device is available (see the message above).
+  Name one explicitly:  scripts/test.sh --device yosemite-m1
+  Or pin THIS machine:  scripts/test.sh --here"
+  fi
+  [[ -n "$DEVICE" ]] || die "'agents devices pick' returned no device"
+  # A worker that picked ITSELF runs in place. Shipping the tree over ssh to
+  # localhost would be pure overhead, and the loud --here warning is wrong here:
+  # a box marked `worker` running the suite is the intended outcome, not a
+  # surprise. (On the interactive host this branch is unreachable -- `personal`
+  # keeps it out of the pool.)
+  if [[ "$(hostname -s 2>/dev/null || hostname)" == "$DEVICE" ]]; then
+    gray "Auto-picked THIS machine ($DEVICE) -- it is a pool worker, so running in place."
+    MODE="here-worker"
+  else
+    MODE="device"
+  fi
+fi
+
 case "$MODE" in
-  here)
-    # Deliberately loud. Running the full suite on the machine someone is using
-    # is a real cost, so it is never something that happens implicitly.
-    red "WARNING: running the full suite on THIS machine ($(hostname -s))."
-    red "         ~13k tests, several minutes of pinned CPU. Ctrl-C now to offload instead."
+  here|here-worker)
+    # `here` is deliberately loud: running the full suite on the machine someone
+    # is using is a real cost, so it never happens implicitly. `here-worker` is
+    # the auto-pick landing on a pool worker, which is the intended outcome --
+    # no warning, because nothing surprising happened.
+    if [[ "$MODE" == "here" ]]; then
+      red "WARNING: running the full suite on THIS machine ($(hostname -s))."
+      red "         ~13k tests, several minutes of pinned CPU. Ctrl-C now to offload instead."
+    fi
     cd "$CLI_DIR"
     # shellcheck disable=SC2046
     # Local exec: pass the array straight through. No command string is built,
@@ -166,12 +230,12 @@ case "$MODE" in
       && bun run test$(vitest_suffix)"
     ;;
 
-  offload)
+  crabbox)
     [[ -x scripts/sandbox.sh ]] || die "scripts/sandbox.sh missing -- cannot offload"
     if ! command -v crabbox >/dev/null 2>&1; then
-      die "crabbox is not installed on this machine, so the suite cannot be offloaded to the pool.
-  Run it on a fleet Linux box instead:   scripts/test.sh --device yosemite-m1
-  Or, if you accept pinning THIS machine: scripts/test.sh --here"
+      die "--crabbox was requested but crabbox is not installed on this machine.
+  Drop the flag to auto-pick a fleet worker: scripts/test.sh
+  Or name one:                              scripts/test.sh --device yosemite-m1"
     fi
     # Fail loud, never silently local. Name the explicit alternatives without
     # guessing whether a credential, provider, network, or crabbox operation failed.
@@ -181,8 +245,8 @@ case "$MODE" in
     # false-failing (see release-attestation-produce.sh's RUSH-3015 note).
     if ! scripts/sandbox.sh test ${VITEST_ARGS[@]+"${VITEST_ARGS[@]}"}; then
       die "the crabbox run failed; the command output above is the source of truth.
-  To target a fleet Linux box explicitly: scripts/test.sh --device yosemite-m1
-  To explicitly pin THIS machine:         scripts/test.sh --here"
+  To auto-pick a fleet worker instead: scripts/test.sh
+  To pin THIS machine:                 scripts/test.sh --here"
     fi
     ;;
 esac

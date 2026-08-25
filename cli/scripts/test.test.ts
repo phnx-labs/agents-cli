@@ -29,28 +29,43 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
-  it('fails loud and names --device when the offload target is unavailable', () => {
-    // A missing offload prerequisite must fail rather than silently run locally.
+  it('fails loud and names --device when the default auto-pick cannot run', () => {
+    // A missing prerequisite must fail rather than silently run locally. The
+    // default mode is `auto`, so the first prerequisite is the CLI that does the
+    // picking; with an empty PATH there is nothing to pick with.
     const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopath-'));
     const r = run([], { PATH: `${emptyBin}:/usr/bin:/bin` });
     fs.rmSync(emptyBin, { recursive: true, force: true });
 
     expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/crabbox is not installed/);
+    expect(r.stderr).toMatch(/not on PATH/);
     // It must hand the operator the actionable alternatives, not just die.
     expect(r.stderr).toMatch(/--device/);
     expect(r.stderr).toMatch(/--here/);
     expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
   });
 
-  it('forwards vitest args through the DEFAULT offload path (RUSH-3015 mitigation)', () => {
-    // Regression guard. The offload branch is the default mode, and it used to
+  it('fails loud when --crabbox is asked for and crabbox is missing', () => {
+    // crabbox is now an explicit choice, so its absence is only an error when
+    // the operator actually asked for it — and the message must say to drop the
+    // flag rather than leave them guessing.
+    const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nocrab-'));
+    const r = run(['--crabbox'], { PATH: `${emptyBin}:/usr/bin:/bin` });
+    fs.rmSync(emptyBin, { recursive: true, force: true });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/crabbox is not installed/);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('forwards vitest args through the crabbox path (RUSH-3015 mitigation)', () => {
+    // Regression guard. The crabbox branch used to
     // ignore VITEST_ARGS entirely -- so the attestation producer's
     // `-- --retry=2 --maxWorkers=2` was silently dropped on every ordinary run,
     // removing the very mitigation that stops a good tree from false-failing.
     // A dropped argument is invisible at runtime, so it needs a test.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-forward-'));
-    const scripts = path.join(dir, 'apps', 'cli', 'scripts');
+    const scripts = path.join(dir, 'cli', 'scripts');
     fs.mkdirSync(scripts, { recursive: true });
     fs.copyFileSync(TEST_SH, path.join(scripts, 'test.sh'));
 
@@ -68,7 +83,7 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     fs.writeFileSync(path.join(bin, 'crabbox'), '#!/usr/bin/env bash\nexit 0\n');
     fs.chmodSync(path.join(bin, 'crabbox'), 0o755);
 
-    const r = spawnSync('bash', [path.join(scripts, 'test.sh'), '--', '--retry=2', '--maxWorkers=2'], {
+    const r = spawnSync('bash', [path.join(scripts, 'test.sh'), '--crabbox', '--', '--retry=2', '--maxWorkers=2'], {
       encoding: 'utf-8',
       env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
     });
@@ -120,5 +135,79 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     fs.rmSync(empty, { recursive: true, force: true });
     expect(r.status).not.toBe(0);
     expect(r.stderr).toMatch(/has no cli/);
+  });
+  // --- the auto path (RUSH-3211) ---------------------------------------------
+  // These stand up a fake `agents` on PATH so the mode resolution can be observed
+  // without a real fleet: `devices pick` answers with a name, `devices list --json`
+  // answers with an empty registry, so the run aborts at the address lookup with a
+  // message that NAMES the picked device. That name is the proof auto resolved.
+
+  /** A fake `agents` whose `devices pick` prints `picked`. Returns its bin dir. */
+  function fakeAgents(picked: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-fakeagents-'));
+    fs.writeFileSync(
+      path.join(dir, 'agents'),
+      '#!/usr/bin/env bash\n'
+      + 'if [ "$1" = "devices" ] && [ "$2" = "pick" ]; then\n'
+      + `  echo ${JSON.stringify(picked)}\n`
+      + '  exit 0\n'
+      + 'fi\n'
+      + 'if [ "$1" = "devices" ] && [ "$2" = "list" ]; then echo "[]"; exit 0; fi\n'
+      + 'exit 0\n',
+    );
+    fs.chmodSync(path.join(dir, 'agents'), 0o755);
+    return dir;
+  }
+
+  it('defaults to auto: asks the CLI for a worker instead of running here', () => {
+    const bin = fakeAgents('picked-worker-7');
+    const r = run([], { PATH: `${bin}:${process.env.PATH}` });
+    fs.rmSync(bin, { recursive: true, force: true });
+
+    // It got as far as resolving the PICKED device's address — proof the default
+    // went through the picker, not through crabbox and not through a local run.
+    expect(r.stderr).toMatch(/picked-worker-7/);
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('treats `--device auto` as the sentinel, never as a host literally named auto', () => {
+    // Dialing a box called "auto" would hang until ConnectTimeout, which reads
+    // as a network problem rather than the mistake it is.
+    const bin = fakeAgents('picked-worker-7');
+    const r = run(['--device', 'auto'], { PATH: `${bin}:${process.env.PATH}` });
+    fs.rmSync(bin, { recursive: true, force: true });
+
+    expect(r.stderr).toMatch(/picked-worker-7/);
+    expect(r.stderr).not.toMatch(/device 'auto'/);
+  });
+
+  it('fails loud, naming --device and --here, when no worker is eligible', () => {
+    // The picker exiting non-zero means the fleet has nothing to offer. That must
+    // abort with the alternatives spelled out — never degrade into a local run.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopick-'));
+    fs.writeFileSync(path.join(dir, 'agents'), '#!/usr/bin/env bash\nexit 1\n');
+    fs.chmodSync(path.join(dir, 'agents'), 0o755);
+    const r = run([], { PATH: `${dir}:${process.env.PATH}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/no worker device is available/);
+    expect(r.stderr).toMatch(/--device/);
+    expect(r.stderr).toMatch(/--here/);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('refuses an empty pick rather than proceeding with no device', () => {
+    // `pick` exiting 0 with nothing on stdout would otherwise rsync to ":" —
+    // a confusing failure far from the cause.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-emptypick-'));
+    fs.writeFileSync(path.join(dir, 'agents'), '#!/usr/bin/env bash\nexit 0\n');
+    fs.chmodSync(path.join(dir, 'agents'), 0o755);
+    const r = run([], { PATH: `${dir}:${process.env.PATH}` });
+    fs.rmSync(dir, { recursive: true, force: true });
+
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/returned no device/);
   });
 });

@@ -2191,6 +2191,36 @@ function registerDevicesCommands(program: Command): void {
 
   const csvList = (s?: string): string[] | undefined =>
     s ? s.split(',').map((x) => x.trim()).filter(Boolean) : undefined;
+
+  devicesCmd
+    .command('pick')
+    .description('Print the device automatic placement would choose for offloaded machine work (the suite, a build) — least-loaded, reachable, POSIX, never the box you are sitting at. Writes just the name to stdout so scripts can consume it.')
+    .option('--json', 'output the pick plus every candidate and exclusion reason')
+    .option('--platform <list>', 'comma-separated platforms to allow (default: linux,macos)')
+    .action(async (opts: { json?: boolean; platform?: string }) => {
+      const { resolveWorkerDevice } = await import('../lib/devices/worker-pick.js');
+      let plan;
+      try {
+        plan = await resolveWorkerDevice({ platforms: csvList(opts.platform) });
+      } catch (err) {
+        // Fail loud with the resolver's own message. Never print a device name
+        // we did not actually pick: a caller reading stdout would ship a tree to it.
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+        return;
+      }
+      if (opts.json) {
+        console.log(JSON.stringify(plan, null, 2));
+        return;
+      }
+      // stdout is the name alone (`box="$(agents devices pick)"`); the human
+      // detail goes to stderr so it never pollutes that capture.
+      const detail = plan.candidates
+        .map((c) => `${c.device}:${c.loadPercent === undefined ? '?' : `${Math.round(c.loadPercent)}%`}`)
+        .join(' ');
+      console.error(chalk.gray(`[agents] worker=${plan.device}${plan.isLocal ? ' (this machine)' : ''}  candidates: ${detail}`));
+      console.log(plan.device);
+    });
   const harnessInvOpts = (opts: {
     agents?: string;
     device?: string;
