@@ -147,6 +147,8 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
         try {
           prevShard = JSON.parse(fs.readFileSync(prevPath, 'utf8')) as TracesIndexShard;
         } catch { /* first run — no prior shard */ }
+      } else if (backend) {
+        prevShard = await getIndexShard(backend, device);
       }
       const shard = buildIndexShard(allRows, device, owner, prevShard);
       if (dryRun && outDir) {
@@ -492,6 +494,22 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
     truncatedSteps: traj.truncatedSteps,
     whereItWentWrong: buildWhereItWentWrong(traj),
   };
+}
+
+async function getIndexShard(
+  backend: TracesBackend,
+  device: string,
+): Promise<TracesIndexShard | null> {
+  const url = `${backend.baseUrl}/${backend.userId}/${device}/index.json`;
+  try {
+    const res = await fetch(url, {
+      headers: { authorization: `Bearer ${backend.token}` },
+    });
+    if (!res.ok) return null;
+    return await res.json() as TracesIndexShard;
+  } catch {
+    return null;
+  }
 }
 
 async function putSessionTrace(
