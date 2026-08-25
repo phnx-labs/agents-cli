@@ -33,7 +33,7 @@ export default {
     if (!path) {
       return new Response(
         'agents traces — PUT /<userId>/<device>/index.json or sessions/<id>.json to upload; GET the same path to read. All routes require a Phoenix bearer.',
-        { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8' } },
+        { status: 200, headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'private, no-store' } },
       );
     }
 

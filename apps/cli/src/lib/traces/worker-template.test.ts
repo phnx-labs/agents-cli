@@ -160,6 +160,7 @@ describe('traces worker — auth on every route', () => {
     const body = await res.text();
     expect(body).toContain('agents traces');
     expect(body).not.toContain('{');
+    expect(res.headers.get('cache-control')).toBe('private, no-store');
   });
 
   it('unsupported method → 405', async () => {

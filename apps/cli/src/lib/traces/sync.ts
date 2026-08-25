@@ -44,10 +44,16 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
   const backend = resolveTracesBackend();
   const ledger = readSyncLedger();
   const db = getDB();
+  const device = localDevice();
 
+  // Scope to this machine only — the DB can contain peer rows mirrored from the
+  // fleet; uploading those under this device's prefix would corrupt the index.
+  // NULL machine rows are legacy local sessions (pre-machine-field).
   const rows = db
-    .prepare('SELECT * FROM sessions WHERE file_mtime_ms > ? ORDER BY timestamp DESC')
-    .all(ledger.lastSyncMtime ?? 0) as SyncRow[];
+    .prepare(
+      'SELECT * FROM sessions WHERE (machine = ? OR machine IS NULL) AND file_mtime_ms > ? ORDER BY file_mtime_ms ASC',
+    )
+    .all(device, ledger.lastSyncMtime ?? 0) as SyncRow[];
 
   const limited = opts.limit !== undefined ? rows.slice(0, opts.limit) : rows;
   const knownSecrets = knownSecretValuesFromEnv();
@@ -55,10 +61,14 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
   let uploaded = 0;
   let skipped = 0;
   let errors = 0;
+  // Advance the watermark only to the max mtime of successfully uploaded sessions
+  // so failures are retried on the next run.
+  let maxSuccessMtime = ledger.lastSyncMtime ?? 0;
 
   for (const row of limited) {
     if (!row.file_path) {
       skipped++;
+      maxSuccessMtime = Math.max(maxSuccessMtime, row.file_mtime_ms ?? 0);
       continue;
     }
     let traj: SessionTrajectory;
@@ -71,8 +81,9 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       continue;
     }
     try {
-      await putSessionTrace(backend, row.machine ?? localDevice(), row.id, traj);
+      await putSessionTrace(backend, device, row.id, traj);
       uploaded++;
+      maxSuccessMtime = Math.max(maxSuccessMtime, row.file_mtime_ms ?? 0);
     } catch {
       errors++;
     }
@@ -80,15 +91,17 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
 
   if (!opts.skipIndex) {
     try {
-      const allRows = db.prepare('SELECT * FROM sessions').all() as SyncRow[];
+      const allRows = db
+        .prepare('SELECT * FROM sessions WHERE machine = ? OR machine IS NULL')
+        .all(device) as SyncRow[];
       const shard = buildIndexShard(allRows);
-      await putIndexShard(backend, localDevice(), shard);
+      await putIndexShard(backend, device, shard);
     } catch {
       // index PUT failure is not fatal — the per-session data is already uploaded
     }
   }
 
-  writeSyncLedger({ lastSyncMtime: Date.now() });
+  writeSyncLedger({ lastSyncMtime: maxSuccessMtime });
   return { uploaded, skipped, errors };
 }
 
