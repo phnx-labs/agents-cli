@@ -239,6 +239,30 @@ groups:
 # Explicit reviewed exemptions. These paths do not select tests on this Linux
 # gate; native helpers and iOS have their own workflows.
 testless:
+  # Pre-existing test-less utility scripts surfaced by the apps/cli -> cli
+  # rename (RUSH-3189): the rename made every file read as newly added, so the
+  # zero-selection gate demanded tests these legacy one-off tools never had —
+  # their coverage status is unchanged from main. Listed per-file (not a glob)
+  # so a genuinely NEW script here still trips the gate.
+  - cli/scripts/backfill-changelog.ts
+  - cli/scripts/bench-browser-loop.sh
+  - cli/scripts/bench-ssh.mjs
+  - cli/scripts/bench-staleness.ts
+  - cli/scripts/build-keychain-helper.sh
+  - cli/scripts/companion-shim/bin/agents.js
+  - cli/scripts/companion-shim/scripts/postinstall.js
+  - cli/scripts/headless-sign-context.sh
+  - cli/scripts/install-helper.js
+  - cli/scripts/release-changelog.ts
+  - cli/scripts/remote-sign-mac.sh
+  - cli/scripts/scrub-orphan-branches.sh
+  - cli/scripts/setup-npm-secret.sh
+  - cli/scripts/sign-cli-binary.sh
+  - cli/scripts/verify-keychain-helper.sh
+  - cli/tests/bench-concurrent-writes.ts
+  - cli/tests/bench-concurrent-writes.worker.ts
+  - cli/tests/e2e/container-fresh-install.sh
+  - cli/tests/e2e/fresh-install-settings.sh
   # AGI EXT moved to its own repo (phnx-labs/agi-ext, RUSH-3189); kept mapped so
   # historical paths never read as unmapped.
   - apps/ext/**
