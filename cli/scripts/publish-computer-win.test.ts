@@ -35,9 +35,33 @@ describe('publish-computer-win.sh', () => {
   it('refuses an existing tag — a helper release is immutable', () => {
     // The asset upload uses --clobber, so re-tagging would silently replace a
     // binary an installed CLI already pins to that exact version.
-    const r = run('1.0.0');
-    expect(r.status).not.toBe(0);
-    expect(r.stderr).toMatch(/already exists/);
+    //
+    // Drives the guard with a LOCAL tag on a valid semver. Two earlier versions
+    // of this test were wrong in different ways, both worth recording:
+    //   1. asserting against the real published `computer-win/v1.0.0` made the
+    //      test depend on network reachability AND repo credentials — it passed
+    //      locally and failed on a fleet worker, reporting the network rather
+    //      than the behaviour;
+    //   2. using a non-semver probe version passed for the WRONG REASON, because
+    //      the version validator rejects the shape before the tag check runs.
+    const REPO = path.dirname(path.dirname(SH));
+    const probe = '0.0.1';
+    const tag = `computer-win/v${probe}`;
+    // Prove the guard is what fires: the same version passes validation and
+    // reaches DRY-RUN while the tag is absent...
+    const before = run(probe);
+    expect(before.status, before.stderr).toBe(0);
+    expect(before.stdout).toContain('DRY-RUN');
+
+    spawnSync('git', ['tag', tag], { cwd: REPO });
+    try {
+      // ...and is refused once it exists.
+      const after = run(probe);
+      expect(after.status).not.toBe(0);
+      expect(after.stderr).toMatch(/already exists/);
+    } finally {
+      spawnSync('git', ['tag', '-d', tag], { cwd: REPO });
+    }
   });
 
   it('refuses an unknown flag rather than ignoring it', () => {
