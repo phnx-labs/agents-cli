@@ -70,45 +70,73 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
    *    not ship could fail a perfectly good CLI release.
    */
   /**
-   * True when `needle` sits INSIDE an open `if [[ "$WITH_HELPERS" == true ]]`.
+   * Run `upload_release_proof` for real, with its five external dependencies
+   * stubbed as recording shims, and return what it invoked.
    *
-   * Two earlier versions were defeated, both caught by mutation rather than by
-   * reading:
-   *   1. "nearest preceding WITH_HELPERS conditional" — passed even when the
-   *      needle's own gate was deleted, because an EARLIER block's `if` remained.
-   *   2. "no `\n  fi` between" — depended on the closing `fi` being indented
-   *      exactly two spaces, so reindenting an unrelated earlier gate's `fi` by
-   *      one space made a fully un-gated needle read as gated.
-   *
-   * Both failures came from pattern-matching text. This counts BLOCK DEPTH
-   * instead: walk from the gate to the needle and track opens (`if`/`for`/`while`
-   * /`case`) against closes (`fi`/`done`/`esac`). The needle is gated only if the
-   * gate's own block never closed. Indentation is irrelevant.
+   * This replaces a text-scanning `isGated` helper that was defeated THREE times
+   * — nearest-match, then an indentation assumption, then a one-line `if ...; fi`
+   * hiding its own `fi`. Every failure came from reasoning about the script's
+   * text instead of its behaviour, so this runs the function and observes the
+   * calls. Same extract-and-run shape `home_base_wt_snippet` already uses below.
    */
-  const isGated = (needle: string): boolean => {
-    const at = RELEASE_SH.indexOf(needle);
-    expect(at, `${needle} not found`).toBeGreaterThan(-1);
-    const before = RELEASE_SH.slice(0, at);
-    const gate = before.lastIndexOf('if [[ "$WITH_HELPERS" == true ]]');
-    if (gate === -1) return false;
-    let depth = 1; // the gate's own `if`
-    for (const raw of before.slice(gate).split('\n').slice(1)) {
-      const line = raw.trim();
-      if (/^(if|for|while|case)\b/.test(line)) depth += 1;
-      else if (/^(fi|done|esac)\b/.test(line)) depth -= 1;
-      if (depth === 0) return false; // the gate closed before the needle
-    }
-    return depth > 0;
-  };
+  function runUpload(withHelpers: boolean): { calls: string[]; status: number | null; out: string } {
+    const src = RELEASE_SH.match(/upload_release_proof\(\) \{[\s\S]*?\n\}/)?.[0];
+    expect(src, 'upload_release_proof not extractable').toBeDefined();
 
-  it('stages the computer-mac asset only under --with-helpers', () => {
-    expect(isGated('--helper computer-mac --asset-path')).toBe(true);
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rel-upload-'));
+    const log = path.join(dir, 'calls.log');
+    const bin = path.join(dir, 'bin');
+    const scripts = path.join(dir, 'scripts');
+    fs.mkdirSync(bin); fs.mkdirSync(scripts);
+
+    // gh/jq are recorded; jq must still answer the tarball-path query.
+    fs.writeFileSync(path.join(bin, 'gh'),
+      `#!/usr/bin/env bash\necho "gh $*" >> ${log}\nexit 0\n`);
+    fs.writeFileSync(path.join(bin, 'jq'),
+      `#!/usr/bin/env bash\necho "jq $*" >> ${log}\ncat >/dev/null\necho "${dir}/pkg.tgz"\n`);
+    for (const name of ['release-attestation.sh', 'release-manifest.sh']) {
+      fs.writeFileSync(path.join(scripts, name),
+        `#!/usr/bin/env bash\necho "${name} $*" >> ${log}\nexit 0\n`);
+      fs.chmodSync(path.join(scripts, name), 0o755);
+    }
+    for (const f of ['gh', 'jq']) fs.chmodSync(path.join(bin, f), 0o755);
+    fs.writeFileSync(path.join(dir, 'pkg.tgz'), 'tgz');
+    // The store the function reads its manifest from.
+    fs.writeFileSync(path.join(dir, 'release-manifest.json'), '{}');
+
+    const harness = [
+      'set -uo pipefail',
+      'die() { echo "die: $*" >&2; exit 9; }',
+      'gray() { :; }; green() { :; }; bold() { :; }; yellow() { :; }; red() { :; }',
+      `attestation_store_dir() { printf '%s\\n' ${JSON.stringify(dir)}; }`,
+      `REPO_ROOT=${JSON.stringify(dir)}`,
+      'TARGET=1.2.3', 'PHNX_LATEST=1.2.2',
+      `WITH_HELPERS=${withHelpers}`,
+      src!,
+      'upload_release_proof deadbeef',
+    ].join('\n');
+
+    const r = spawnSync('bash', ['-c', harness], {
+      encoding: 'utf-8',
+      env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      cwd: dir,
+    });
+    const calls = fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').trim().split('\n') : [];
+    return { calls, status: r.status, out: `${r.stdout}${r.stderr}` };
+  }
+
+  it('does NOT touch the helper manifest on an ordinary release', () => {
+    const { calls, out } = runUpload(false);
+    expect(calls.some((c) => c.startsWith('release-manifest.sh')), out).toBe(false);
+    // …and still does the CLI work, so this is not passing by dying early.
+    expect(calls.some((c) => c.startsWith('gh release')), out).toBe(true);
   });
 
-  it('verifies the helper manifest only under --with-helpers', () => {
-    // Unguarded, this is the assertion that fails a CLI-only release for a
-    // helper source change it does not ship.
-    expect(isGated('release-manifest.sh require')).toBe(true);
+  it('DOES stage the computer-mac asset with --with-helpers', () => {
+    const { calls, out } = runUpload(true);
+    const manifest = calls.filter((c) => c.startsWith('release-manifest.sh'));
+    expect(manifest.length, out).toBeGreaterThan(0);
+    expect(manifest.join(' ')).toContain('--helper computer-mac');
   });
 
   it('defaults the flag OFF, so CLI-only is what you get without asking', () => {
