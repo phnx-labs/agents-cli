@@ -7,7 +7,7 @@
 //
 // Routes (all require Phoenix bearer + userId owner match):
 //   PUT  /<userId>/<device>/index.json            — per-device stats shard
-//   PUT  /<userId>/<device>/sessions/<id>.json    — per-session SessionTrajectory
+//   PUT  /<userId>/<device>/sessions/<id>.json    — per-session SessionDetail
 //   GET  /<userId>/...                            — returns the stored object
 //   GET  /                                        — 200 description (no data)
 //

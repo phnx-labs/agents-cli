@@ -382,6 +382,8 @@ export interface SessionDetail {
   };
   steps: SessionTrajectory['steps'];
   gaps: SessionTrajectory['gaps'];
+  /** Steps dropped from `steps` when a run was too long — surfaced so truncation is never silent. */
+  truncatedSteps: number;
   whereItWentWrong: string | null;
 }
 
@@ -442,6 +444,7 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
     },
     steps: traj.steps,
     gaps: traj.gaps,
+    truncatedSteps: traj.truncatedSteps,
     whereItWentWrong: buildWhereItWentWrong(traj),
   };
 }

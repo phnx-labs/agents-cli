@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDB, readSessionTopics } from '../session/db.js';
@@ -186,5 +187,73 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     });
     expect(clean.whereItWentWrong).toBeNull();
     expect(clean.meta.outcome).toBe('completed');
+  });
+});
+
+describe('traces sync --dry-run local export', () => {
+  const dryId = 'trace-dryrun-fixture';
+  const dryTranscript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const table of ['tool_calls', 'session_topics', 'session_insights']) {
+      db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(dryId);
+    }
+    db.prepare('DELETE FROM sessions WHERE id = ?').run(dryId);
+  });
+
+  it('requires --out', async () => {
+    await expect(syncTraces({ dryRun: true })).rejects.toThrow(/--out/);
+  });
+
+  it('writes shards locally with no backend and never touches the ledger', async () => {
+    const stat = fs.statSync(dryTranscript);
+    const db = getDB();
+    db.prepare(`
+      INSERT INTO sessions
+        (id, short_id, agent, timestamp, project, cwd, git_branch, label, duration_ms,
+         model, file_path, file_mtime_ms, file_size, machine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      dryId, 'trace-dr', 'codex', '2026-08-25T00:00:00.000Z', 'agents-cli',
+      '/home/x/agents-cli', 'main', 'Fix dry run', 9000, 'gpt-test',
+      dryTranscript, stat.mtimeMs, stat.size, 'dry-device',
+    );
+    db.prepare(`
+      INSERT INTO tool_calls
+        (call_key, session_id, ordinal, timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `).run('dry-call-1', dryId, 1, '2026-08-25T00:00:00.000Z', 'exec_command', 'error', 1, 'command failed');
+
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'traces-dry-'));
+    const ledgerPath = path.join(getRuntimeStateDir(), 'traces-sync.json');
+    fs.rmSync(ledgerPath, { force: true });
+    // No AGENTS_TRACES_BASE_URL / token set: a dry-run must NOT resolve a backend.
+    delete process.env.AGENTS_TRACES_BASE_URL;
+    delete process.env.AGENTS_TRACES_WRITE_TOKEN;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'dry-device';
+    try {
+      const result = await syncTraces({ dryRun: true, outDir });
+      expect(result.uploaded).toBeGreaterThan(0);
+
+      // index.json — rich shard, owner "local" (no Phoenix userId available).
+      const index = JSON.parse(fs.readFileSync(path.join(outDir, 'index.json'), 'utf8'));
+      expect(index.schema).toBe(1);
+      expect(index.owner).toBe('local');
+      expect(index.stats.sessionsImported).toBeGreaterThan(0);
+
+      // sessions/<id>.json — the console's SessionDetail shape.
+      const detail = JSON.parse(fs.readFileSync(path.join(outDir, 'sessions', `${dryId}.json`), 'utf8'));
+      expect(detail.schema).toBe(1);
+      expect(detail.meta).toHaveProperty('spanMs');
+      expect(detail).toHaveProperty('whereItWentWrong');
+      expect(detail.meta.repo).toBe('agents-cli');
+
+      // The ledger is untouched — a dry-run is a read-only export.
+      expect(fs.existsSync(ledgerPath)).toBe(false);
+    } finally {
+      delete process.env.AGENTS_SYNC_MACHINE_ID;
+      fs.rmSync(outDir, { recursive: true, force: true });
+    }
   });
 });
