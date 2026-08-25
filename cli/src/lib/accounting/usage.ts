@@ -37,6 +37,7 @@ import type { AgentId } from '../types.js';
 import { mapBounded } from '../concurrency.js';
 import { atomicWriteFileSync, ensureLockTarget, withFileLock } from '../fs-atomic.js';
 import { withRefreshLease } from '../refresh-coordinator.js';
+import { padToWidth } from '../session/width.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -740,6 +741,8 @@ export interface FormatUsageSummaryOpts {
    * column width; single-agent and detail views leave this unset.
    */
   maxWindows?: number;
+  /** Windows that must keep a visible slot even when the provider omits one. */
+  expectedWindows?: Array<{ key: string; shortLabel: string }>;
   /**
    * The classified cause of `usageInfo.error` (RUSH-3040), from
    * {@link classifyUsageErrorKind}. Lets the no-bars branch below name the
@@ -820,11 +823,20 @@ export function formatUsageSummary(
       0,
       snapshot.windows.filter((w) => w.key !== 'sonnet_week').length - selected.length,
     );
-    const windowParts = selected.map((window) => {
+    const expected = opts?.expectedWindows;
+    const windowsToRender = expected
+      ? expected.map(({ key, shortLabel }) => ({ window: selected.find((item) => item.key === key), shortLabel }))
+      : selected.map((window) => ({ window, shortLabel: window.shortLabel }));
+    const windowParts = windowsToRender.map(({ window, shortLabel }, index) => {
+      if (!window) {
+        const missing = chalk.red(`${shortLabel}: ${FULL.repeat(COMPACT_BAR_LEN)} --`);
+        return index < windowsToRender.length - 1 ? padToWidth(missing, 20) : missing;
+      }
       const bar = renderCompactUsageBar(window.usedPercent);
       const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
       const reset = window.resetsAt ? chalk.dim(` (${formatResetHint(window.resetsAt)})`) : '';
-      return `${chalk.gray(`${window.shortLabel}:`)} ${bar} ${pct}${reset}`;
+      const rendered = `${chalk.gray(`${shortLabel}:`)} ${bar} ${pct}${reset}`;
+      return index < windowsToRender.length - 1 ? padToWidth(rendered, 20) : rendered;
     });
     if (hidden > 0) {
       windowParts.push(chalk.dim(`+${hidden}`));

@@ -76,6 +76,19 @@ Both come from the same mistake: **agents-cli touching the interactive login.**
    `agents view` reads those snapshots. A headless account that has not produced
    a native snapshot still renders `usage unavailable (headless)`.
 
+   **Claude is event-fed, not polled.** The managed Claude settings command is
+   `agents __claude-statusline`. Resource sync merges that command into each
+   version home's existing `settings.json`, preserving every other setting and
+   delegating a prior custom status-line command. Claude Code invokes it with
+   `rate_limits` only after a real inference response; launching Claude without
+   receiving a response can therefore show host/model while leaving quota
+   unchanged. The five-hour and seven-day fields may arrive independently, so
+   ingestion merges each window into the last snapshot instead of replacing the
+   other one. `agents view claude` always reserves both `S` and `W` slots: a
+   provider-omitted window is a filled red unavailable bar, distinct from a real
+   zero-percent window. Do not restore `/api/oauth/usage` polling or read/copy the
+   interactive OAuth credential to fill these bars.
+
 6. **Zero Touch ID** — `ag view`, agent launch, usage, any op — across **every
    harness**, including the hard ones (Droid, Kimi). Solution decided per credential
    *type*, not per agent name.
@@ -178,6 +191,10 @@ deliberately created with `agents accounts add` and explicitly pushed with
   named account bundle. Neither path reads the harness's ACL-bound keychain login.
   No no-ACL cache of the interactive token is needed because the interactive
   token is never read.
+  Claude's human row ends with one unlabeled last-active timestamp. Auth-health
+  remains available in `--json` for machine consumers; it is not rendered as a
+  second timestamp beside usage because that probe age is neither activity age
+  nor usage-capture age.
   When Anthropic returns 403 `user:profile` on that token, the probe sets
   `reason: 'usage_scope'` so auth-health stays `unverified` (not `revoked`) and
   the row shows `usage unavailable (headless)` (RUSH-2392).

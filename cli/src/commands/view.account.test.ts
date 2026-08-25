@@ -21,9 +21,7 @@ import {
 import { padToWidth, stringWidth } from '../lib/session/width.js';
 
 describe('joinViewColumns — fixed multi-agent layout', () => {
-  it('keeps the auth chip at the same column when status is empty', () => {
-    // The multi-agent misalignment bug: skipping empty status mid-row shifted
-    // lastActive/auth left. Fixed columns pad empties so gutters match.
+  it('keeps the unlabeled last-active timestamp aligned when status is empty', () => {
     const wVer = 18;
     const wModel = 8;
     const wEmail = 10;
@@ -38,7 +36,6 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
       usage: string,
       status: string,
       active: string,
-      auth: string,
     ) =>
       joinViewColumns([
         padToWidth(ver, wVer),
@@ -47,7 +44,6 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
         padToWidth(usage, wUsage),
         padToWidth(status, wStatus),
         padToWidth(active, wActive),
-        auth,
       ]);
 
     const rateLimited = row(
@@ -56,8 +52,7 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
       'a@x.com',
       'Max  S: 100%',
       'rate-limited',
-      'active 8h ago',
-      '○ auth 1m ago',
+      '8h ago',
     );
     const healthy = row(
       '2.1.219',
@@ -65,16 +60,11 @@ describe('joinViewColumns — fixed multi-agent layout', () => {
       'b@y.com',
       'Max  S: 5%',
       '',
-      'active 2m ago',
-      '● auth 1m ago',
+      '2m ago',
     );
-
-    const authAt = (line: string): number => {
-      const m = line.match(/[●○◐]/);
-      return m?.index ?? -1;
-    };
-    expect(authAt(rateLimited)).toBeGreaterThan(0);
-    expect(authAt(healthy)).toBe(authAt(rateLimited));
+    expect(rateLimited.indexOf('8h ago')).toBe(healthy.indexOf('2m ago'));
+    expect(rateLimited).not.toContain('auth');
+    expect(healthy).not.toContain('auth');
     // Both rows stay within a sane terminal width after the overview meter cap.
     expect(stringWidth(rateLimited)).toBeLessThanOrEqual(120);
     expect(stringWidth(healthy)).toBe(stringWidth(rateLimited));

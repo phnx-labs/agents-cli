@@ -31,7 +31,7 @@ import type { AccountInfo, CliState } from '../lib/agents.js';
 import { ambientClaudeToken, loginHint } from '../lib/signin-badge.js';
 import type { AgentId } from '../lib/types.js';
 import { machineId } from '../lib/machine-id.js';
-import { authCacheKey, formatCheckedAge, readAuthHealthCache, type AuthHealth } from '../lib/auth-health.js';
+import { authCacheKey, readAuthHealthCache } from '../lib/auth-health.js';
 import {
   agentReportsUsage,
   classifyUsageErrorKind,
@@ -104,6 +104,9 @@ export function viewUsageSummaryOptions(
     unverified: !headless && !!usageInfo?.snapshot && !!usageInfo.error,
     headless,
     maxWindows,
+    expectedWindows: agentId === 'claude'
+      ? [{ key: 'session', shortLabel: 'S' }, { key: 'week', shortLabel: 'W' }]
+      : undefined,
     errorKind: classifyUsageErrorKind(usageInfo?.error),
     errorDetail: usageInfo?.error ?? null,
     benignState,
@@ -166,9 +169,6 @@ export function compareAccountOrderedVersions(
  * views leave the cap unset and show every blocking window.
  */
 const OVERVIEW_MAX_USAGE_WINDOWS = 2;
-
-/** Fixed width for the last-active column ("active just now", "active 8h ago"). */
-const LAST_ACTIVE_COL_WIDTH = 18;
 
 /**
  * Join fixed view columns with a consistent two-space gutter. Empty trailing
@@ -413,22 +413,6 @@ function renderHostClisSection(cwd: string): void {
   }
 }
 
-/**
- * A compact live-auth chip for a version row, read from the fleet auth-health
- * cache (written by `agents fleet ping` / the daemon). Empty when the install
- * hasn't been probed — this is the local "signed in" flag's ground-truth
- * companion: ● live, ○ revoked (re-login), ◐ unverified/limited, plus its age.
- */
-function liveAuthChip(cache: Record<string, AuthHealth>, host: string, agentId: AgentId, version: string): string {
-  const h = cache[authCacheKey(host, agentId, version)];
-  if (!h) return '';
-  const glyph = h.verdict === 'live' ? chalk.green('●')
-    : h.verdict === 'revoked' ? chalk.red('○')
-    : h.verdict === 'expired' ? chalk.yellow('○')
-    : chalk.yellow('◐');
-  return `${glyph} ${chalk.gray(`auth ${formatCheckedAge(h.checkedAt)}`)}`;
-}
-
 async function showInstalledVersions(
   filterAgentId?: AgentId,
   viewOpts?: { forceRefresh?: boolean },
@@ -491,10 +475,6 @@ async function showInstalledVersions(
     }
   }
   // Shim healing is silent — users don't need to know about internal repairs
-
-  const selfHost = machineId();
-  // Read the auth-health cache once (not per version row — see the batching note above).
-  const authCache = readAuthHealthCache();
 
   // Pre-fetch account info for all versions in parallel. Spinner stays up through
   // account + usage so a multi-account cold path doesn't leave a blank terminal
@@ -753,7 +733,7 @@ async function showInstalledVersions(
         // Only show lastActive for versions with an actual logged-in account.
         // Otherwise it reflects install time (misleading "just now" for fresh installs).
         const lastActive = vInfo && hasEmail ? formatLastActive(vInfo.lastActive) : '';
-        const activeStr = lastActive ? `active ${lastActive}` : '';
+        const activeStr = lastActive;
         const hasActive = activeStr.length > 0;
         // The model now has its own column above; keep only the run mode here.
         const runDefaults = resolveRunDefaults(agentId, version);
@@ -790,15 +770,11 @@ async function showInstalledVersions(
             const statusStr = formatUsageStatusBadge(vInfo?.usageStatus);
             parts.push(padToWidth(statusStr, maxStatusWidth));
           }
-          // Fixed-width lastActive so the auth chip (●/○/◐) lines up even when
-          // some rows have no email-derived lastActive.
-          parts.push(hasActive ? padToWidth(activeStr, LAST_ACTIVE_COL_WIDTH) : ' '.repeat(LAST_ACTIVE_COL_WIDTH));
+          if (hasActive) parts.push(activeStr);
         }
         if (runDefaultBits.length > 0) {
           parts.push(chalk.gray(`run ${runDefaultBits.join(' ')}`));
         }
-        const authChip = liveAuthChip(authCache, selfHost, agentId, version);
-        if (authChip) parts.push(authChip);
 
         console.log(joinViewColumns(parts));
         if (showPaths) {
@@ -898,7 +874,7 @@ async function showInstalledVersions(
         viewUsageSummaryOptions(agentId, !!gInfo?.signedIn, gUsage, usageWindowCap),
       );
       const gLastActive = gInfo ? formatLastActive(gInfo.lastActive) : '';
-      const gActiveStr = gLastActive ? `active ${gLastActive}` : '';
+      const gActiveStr = gLastActive;
       if (gInfo?.email || gUsageStr || gActiveStr || gInfo?.signedIn) {
         const gDisplay = accountColumnLabel(gInfo);
         parts.push(gDisplay ? chalk.cyan(padToWidth(gDisplay, gMaxEmail)) : ' '.repeat(gMaxEmail));
@@ -907,7 +883,7 @@ async function showInstalledVersions(
       if (gMaxStatusWidth > 0) {
         parts.push(padToWidth(formatUsageStatusBadge(gInfo?.usageStatus), gMaxStatusWidth));
       }
-      if (gActiveStr) parts.push(padToWidth(gActiveStr, LAST_ACTIVE_COL_WIDTH));
+      if (gActiveStr) parts.push(gActiveStr);
       console.log(joinViewColumns(parts));
       if (showPaths && cliState?.path) {
         console.log(chalk.gray(`      ${cliState.path}`));

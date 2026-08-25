@@ -1450,9 +1450,14 @@ a stable per-account key:
   is **local-only, no network**. It reads each agent's on-disk credential and
   surfaces an email when one is readable, else a stable account id, else a bare
   `signed in`.
-- **Usage bars** — a separate network pass ([`src/lib/accounting/usage.ts`](../src/lib/accounting/usage.ts))
-  fetches live quota and renders `S:`/`W:`/`M:` bars + plan, according to each
-  provider's reported window duration. It's **stale-while-revalidate**
+- **Usage bars** — provider collectors ([`src/lib/accounting/usage.ts`](../src/lib/accounting/usage.ts))
+  normalize quota and render `S:`/`W:`/`M:` bars + plan. Network-capable
+  providers use a separate live pass. Claude is the deliberate exception:
+  Claude Code sends native five-hour/seven-day `rate_limits` to the managed
+  `agents __claude-statusline` command after an inference response, and the
+  command merges whichever windows were present into the per-account cache.
+  No Claude interactive token, refresh token, Keychain item, or
+  `/api/oauth/usage` poll is involved. The cache is **stale-while-revalidate**
   (on-disk cache under `~/.agents/.cache/`, keyed per account: 2-min fresh, 24-h
   block) so `agents view` stays off the network on the hot path.
 - **Routing reads the same cache, CACHE-ONLY — never on the hot path's network
@@ -1509,7 +1514,7 @@ contains — this is a data-availability limit, not a policy choice:
 
 | Agent | Account column | Usage bars | How it's derived |
 |---|---|---|---|
-| Claude | email + plan | live (`api.anthropic.com`) | email/plan/quota from the local OAuth credential + usage API |
+| Claude | email + plan | event-fed (native status-line payload) | identity from the version home; quota from Claude Code's post-response `rate_limits`. Missing `S`/`W` fields merge with the last snapshot and render as fixed red unavailable slots when no value has ever arrived. |
 | Codex | email + plan | last-seen (session logs) | email/plan from the auth JWT; quota parsed from the newest session's rate-limit event |
 | Gemini | email | — | email read from the local auth file |
 | Grok | email + tier | last-seen (`~/.grok/logs/unified.jsonl`) | email from the local auth file; weekly window (`W`) + subscription tier parsed from the newest `billing: fetched credits config` log line, since Grok's network usage endpoints 404 |

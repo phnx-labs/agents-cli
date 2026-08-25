@@ -750,6 +750,44 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
   });
 });
 
+describe('formatUsageSummary expected window slots', () => {
+  const expectedWindows = [
+    { key: 'session', shortLabel: 'S' },
+    { key: 'week', shortLabel: 'W' },
+  ];
+  const base = {
+    source: 'cache' as const,
+    sourceLabel: 'cached',
+    capturedAt: new Date(NOW),
+  };
+
+  it('renders a red missing session slot and keeps the week column aligned', () => {
+    const weekOnly = formatUsageSummary(null, {
+      ...base,
+      windows: [{ key: 'week' as const, label: 'Week', shortLabel: 'W', usedPercent: 81, resetsAt: null, windowMinutes: 10080 }],
+    }, 3, { expectedWindows });
+    const both = formatUsageSummary(null, {
+      ...base,
+      windows: [
+        { key: 'session' as const, label: 'Session', shortLabel: 'S', usedPercent: 12, resetsAt: null, windowMinutes: 300 },
+        { key: 'week' as const, label: 'Week', shortLabel: 'W', usedPercent: 38, resetsAt: null, windowMinutes: 10080 },
+      ],
+    }, 3, { expectedWindows });
+
+    expect(weekOnly).toContain('S: █████ --');
+    expect(weekOnly.indexOf('W:')).toBe(both.indexOf('W:'));
+  });
+
+  it('distinguishes a real zero-percent window from a missing window', () => {
+    const rendered = formatUsageSummary(null, {
+      ...base,
+      windows: [{ key: 'session' as const, label: 'Session', shortLabel: 'S', usedPercent: 0, resetsAt: null, windowMinutes: 300 }],
+    }, 3, { expectedWindows });
+    expect(rendered).toContain('S: ░░░░░ 0%');
+    expect(rendered).toContain('W: █████ --');
+  });
+});
+
 describe('shared network usage failure classification', () => {
   let dir: string;
   let prevPath: string | null;
