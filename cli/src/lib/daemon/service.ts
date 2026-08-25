@@ -39,7 +39,7 @@ export interface DaemonService {
   readonly id: DaemonServiceId;
   start(ctx: DaemonContext): Promise<void>;
   stop(): Promise<void>;
-  /** `stop()` then `start()` — used by the supervisor's circuit-breaker and `daemon services restart <id>`. */
+  /** `stop()` then `start()` — used by the supervisor's circuit-breaker (and, in future, an on-demand `daemon services restart <id>` command — not wired up yet). */
   restart(): Promise<void>;
   health(): ServiceHealth;
 }

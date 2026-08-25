@@ -91,7 +91,7 @@ export class ServiceSupervisor {
     for (const id of this.registry.keys()) await this.stopOne(id);
   }
 
-  /** Force one service to restart right now, outside its normal backoff schedule (`daemon services restart <id>`). */
+  /** Force one service to restart right now, outside its normal backoff schedule. For a future on-demand `daemon services restart <id>` command — not wired up yet. */
   async restartOne(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
@@ -219,6 +219,7 @@ export class ServiceSupervisor {
     if (!entry || !ctx || entry.state === 'stopped') return;
     try {
       await entry.service.restart();
+      entry.everStarted = true; // restart() is stop()+start() on the service — a successful one means it is running again and owes a stop() at shutdown.
       entry.state = 'running';
       entry.consecutiveFailures = 0;
       entry.restartAttempts = 0;

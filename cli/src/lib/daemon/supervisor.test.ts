@@ -214,4 +214,67 @@ describe('ServiceSupervisor', () => {
     supervisor.register(new HealthyService('scheduler'));
     expect(() => supervisor.register(new HealthyService('scheduler'))).toThrow(/already registered/);
   });
+
+  it('restartOne() forces an immediate restart outside the backoff schedule', async () => {
+    const supervisor = new ServiceSupervisor();
+    const bad = new ThrowingService();
+    supervisor.register(bad);
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0); // tick #1 throws, cf=1 (parkAfterFailures default 3, not parked yet)
+
+    expect(supervisor.health()['watchdog'].state).toBe('running');
+    await supervisor.restartOne('watchdog');
+    expect(bad.restarts).toBe(1);
+    // restartOne() clears the failure streak on the restart itself, then fires an
+    // immediate tick like a fresh start — which throws again for this fixture,
+    // so the streak is back to 1 rather than 0. The state stays 'running' either
+    // way since parkAfterFailures (default 3) hasn't been reached again yet.
+    expect(supervisor.health()['watchdog'].state).toBe('running');
+    expect(supervisor.health()['watchdog'].consecutiveFailures).toBe(1);
+  });
+
+  it('a service that fails restart() after parking, then later restarts successfully, is stopped cleanly by stopAll() (everStarted set on restart, not just first start)', async () => {
+    const supervisor = new ServiceSupervisor({ parkAfterFailures: 1, backoffBaseMs: 1_000, backoffMaxMs: 1_000 });
+
+    class FlakyStartService implements PeriodicService {
+      readonly id: DaemonServiceId = 'account-state';
+      readonly intervalMs = 1_000;
+      readonly deadlineMs = 500;
+      startCalls = 0;
+      stopCalls = 0;
+
+      async start(): Promise<void> {
+        this.startCalls += 1;
+        if (this.startCalls === 1) throw new Error('first start fails');
+      }
+      async stop(): Promise<void> {
+        this.stopCalls += 1;
+      }
+      async restart(): Promise<void> {
+        await this.stop();
+        await this.start();
+      }
+      async tick(): Promise<void> {}
+      health(): ServiceHealth {
+        return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 };
+      }
+    }
+
+    const svc = new FlakyStartService();
+    supervisor.register(svc);
+    await supervisor.startAll(makeCtx()); // start() throws -> parked immediately, restart scheduled at t=1000
+
+    expect(supervisor.health()['account-state'].state).toBe('parked');
+    await vi.advanceTimersByTimeAsync(1_000); // backoff fires -> restart() succeeds this time
+    expect(supervisor.health()['account-state'].state).toBe('running');
+    expect(svc.startCalls).toBe(2);
+    const stopCallsAfterRestart = svc.stopCalls; // restart() itself calls stop() once internally (=1)
+
+    // Before the fix, `everStarted` was only set on the FIRST successful start() —
+    // never on a successful restart() — so the supervisor's OWN stopOne() would
+    // skip calling stop() again here even though the service is genuinely
+    // running (distinct from the stop() restart() already made internally).
+    await supervisor.stopAll();
+    expect(svc.stopCalls).toBe(stopCallsAfterRestart + 1);
+  });
 });
