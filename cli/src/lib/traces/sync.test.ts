@@ -150,15 +150,26 @@ describe('rich traces index shard', () => {
     process.env.AGENTS_TRACES_WRITE_TOKEN = 'test-token';
     process.env.AGENTS_SYNC_MACHINE_ID = 'test-device';
     fs.rmSync(path.join(getRuntimeStateDir(), 'traces-sync.json'), { force: true });
+    // The BYO write token bypasses Phoenix auth (backend.userId === 'byo') and must
+    // never be sent to the Prix link endpoint. Pass real calls through to the local
+    // test server; only intercept to prove no request ever targets prix.dev.
+    const realFetch = globalThis.fetch;
+    const outboundUrls: string[] = [];
+    globalThis.fetch = ((input: RequestInfo | URL, init?: RequestInit) => {
+      outboundUrls.push(typeof input === 'string' ? input : input.toString());
+      return realFetch(input, init);
+    }) as typeof fetch;
     try {
       expect(await syncTraces()).toMatchObject({ uploaded: 1, errors: 0 });
       expect(await syncTraces()).toMatchObject({ uploaded: 0, errors: 0 });
     } finally {
+      globalThis.fetch = realFetch;
       delete process.env.AGENTS_TRACES_BASE_URL;
       delete process.env.AGENTS_TRACES_WRITE_TOKEN;
       delete process.env.AGENTS_SYNC_MACHINE_ID;
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+    expect(outboundUrls.some((u) => u.includes('api.prix.dev'))).toBe(false);
     expect(requests.filter((url) => url.includes(`/sessions/${id}.json`))).toHaveLength(1);
     // Verify the GET was issued for the prior shard on each live-sync run.
     expect(reqLog.filter((r) => r.startsWith('GET') && r.includes('/index.json'))).toHaveLength(2);

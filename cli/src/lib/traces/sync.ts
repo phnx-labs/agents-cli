@@ -166,7 +166,10 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
     writeSyncLedger({ lastSyncMtime: maxSuccessMtime });
     // Register the Phoenix session with Prix so the console can fetch live data
     // (PHNX-3257). Fire-and-forget — a link failure must not block sync.
-    if (backend) {
+    // Managed backend only: the BYO path's token is a static write token that
+    // bypasses Phoenix auth (resolveTracesBackend's userId: 'byo' sentinel) —
+    // it is not a Phoenix identity credential and must never be sent to Prix.
+    if (backend && backend.userId !== 'byo') {
       fetch('https://api.prix.dev/api/v1/traces/link', {
         method: 'POST',
         headers: { Authorization: `Bearer ${backend.token}` },
