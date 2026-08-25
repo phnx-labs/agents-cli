@@ -681,9 +681,21 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
     const wrong: string[] = [];
     for (const file of fs.readdirSync(docsDir).filter((f) => f.endsWith('.md'))) {
       const text = fs.readFileSync(path.join(docsDir, file), 'utf-8');
-      for (const sentence of text.split(/(?<=[.!?])\s+|\n{2,}/)) {
-        const hasCritical = /\bcritical\b/i.test(sentence);
-        const hasWarning = /\bwarning\b/i.test(sentence);
+      // Do NOT split on a period that ends an abbreviation: `e.g.` / `i.e.` /
+      // `cf.` cut a clause in half, and the review defeated the guard that way —
+      // "the `env-secret-export` case, i.e. ... is treated as critical." became
+      // two fragments, neither holding both the kind and the wrong word.
+      // Version numbers (`1.22.48`) are safe already: the split needs whitespace
+      // after the period.
+      const sentences = text
+        .replace(/\b(e\.g|i\.e|cf|etc|vs)\./gi, '$1\u0000')
+        .split(/(?<=[.!?])\s+|\n{2,}/)
+        .map((x) => x.replace(/\u0000/g, '.'));
+      for (const sentence of sentences) {
+        // `criticals` / `warnings` must count: \b...\b missed the plural, which
+        // is ordinary prose ("the criticals are listed first").
+        const hasCritical = /\bcriticals?\b/i.test(sentence);
+        const hasWarning = /\bwarnings?\b/i.test(sentence);
         if (!hasCritical && !hasWarning) continue;
         for (const kind of ALL_FINDING_KINDS) {
           // Backtick-delimited so a kind is never credited to a longer one that
