@@ -112,11 +112,36 @@ describe('rich traces index shard', () => {
       delete process.env.AGENTS_TRACE_FIXTURE_SECRET;
     }
 
+    // Seed the test server with 7 days of low-error history so the live GET path
+    // produces a non-empty driftSignals when today's 2/3-error session lands.
+    const seededShard = JSON.stringify({
+      schema: 1, device: 'test-device', syncedAt: 0, owner: 'owner-1',
+      stats: { sessionsImported: 1, medianMs: 0, p90Ms: 0, needAttention: 0, toolErrorRate: 0.1 },
+      needsAttention: [],
+      topics: [{ key: 'engineering', label: 'Engineering', count: 10, group: 'code' }],
+      failures: { byToolError: [], byCause: { real: 0, guard: 0, hook: 0 } },
+      bucketHistory: Array.from({ length: 7 }, (_, i) => [
+        { key: 'engineering', date: `2026-08-${String(i + 18).padStart(2, '0')}`, count: 10, errorRate: 0.1, stallRate: 0 },
+      ]),
+      driftSignals: [],
+    });
     const requests: string[] = [];
+    const reqLog: string[] = [];
+    const indexPutBodies: string[] = [];
     const server = http.createServer((req, res) => {
       requests.push(req.url ?? '');
-      req.resume();
-      res.writeHead(200).end('ok');
+      reqLog.push(`${req.method} ${req.url ?? ''}`);
+      if (req.method === 'GET' && req.url?.endsWith('/index.json')) {
+        req.resume();
+        res.writeHead(200, { 'content-type': 'application/json' }).end(seededShard);
+      } else if (req.method === 'PUT' && req.url?.endsWith('/index.json')) {
+        const chunks: Buffer[] = [];
+        req.on('data', (chunk: Buffer) => chunks.push(chunk));
+        req.on('end', () => { indexPutBodies.push(Buffer.concat(chunks).toString()); res.writeHead(200).end('ok'); });
+      } else {
+        req.resume();
+        res.writeHead(200).end('ok');
+      }
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const address = server.address();
@@ -135,6 +160,14 @@ describe('rich traces index shard', () => {
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
     expect(requests.filter((url) => url.includes(`/sessions/${id}.json`))).toHaveLength(1);
+    // Verify the GET was issued for the prior shard on each live-sync run.
+    expect(reqLog.filter((r) => r.startsWith('GET') && r.includes('/index.json'))).toHaveLength(2);
+    // Verify driftSignals is non-empty: today's 2/3-error bucket (errorRate≈0.667)
+    // vs the seeded 7-day baseline (errorRate=0.1) → delta≈0.567 → degrading.
+    const indexBody = JSON.parse(indexPutBodies[0]);
+    expect(indexBody.driftSignals).toHaveLength(1);
+    expect(indexBody.driftSignals[0].bucket).toBe('engineering');
+    expect(indexBody.driftSignals[0].severity).toBe('degrading');
   });
 });
 
