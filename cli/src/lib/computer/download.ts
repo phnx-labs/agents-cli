@@ -3,10 +3,12 @@
  * ("ComputerHelper.app").
  *
  * The helper is a signed + notarized universal `.app` bundle published as a
- * GitHub release asset per tagged CLI version — the same distribution model as
- * the Windows helper (see `lib/computer/ssh-tunnel.ts`). A fresh `npm i -g` machine has
- * no local build, so `agents computer setup` / `agents setup computer` fetch the
- * asset for the running CLI version, verify its sha256 against the published
+ * GitHub release asset on its own `computer-mac/v<x.y.z>` tag (see
+ * `helper-versions.ts`). The Windows helper (`lib/computer/ssh-tunnel.ts`) does
+ * NOT yet follow this model — it still keys its exe to the CLI's own tag.
+ *
+ * A fresh `npm i -g` machine has no local build, so `agents computer setup` / `agents setup computer` fetch the
+ * asset for the pinned helper version, verify its sha256 against the published
  * `.sha256`, then verify the code signature (Developer ID Team + notarization)
  * before it is ever copied to /Applications.
  *
@@ -19,7 +21,6 @@
  */
 
 import * as os from 'node:os';
-import { getCliVersion } from '../version.js';
 import { resolveHelperApp } from './computer-rpc.js';
 import {
   EXPECTED_TEAM_ID,
@@ -86,7 +87,7 @@ export function downloadMacHelperApp(version: string): Promise<string> {
 /**
  * Resolve the helper `.app` to install from: a local build / bundled copy first
  * (repo checkout), else the checksum + signature-verified release-asset download
- * for the running CLI version. Throws with the tag it checked when neither
+ * for the pinned helper version. Throws with the tag it checked when neither
  * exists. macOS only.
  */
 export async function ensureMacHelperApp(version = helperFloor('computer-mac')): Promise<string> {

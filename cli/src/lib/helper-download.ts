@@ -1,11 +1,12 @@
 /**
  * Shared on-demand download + verification for the macOS native helper `.app`
- * bundles that ship as signed + notarized GitHub release assets per tagged CLI
- * version (`ComputerHelper.app`, `MenubarHelper.app`).
+ * bundles that ship as signed + notarized GitHub release assets on each helper's
+ * OWN tag (`ComputerHelper.app`, `MenubarHelper.app`, `Agents CLI.app`) — see
+ * `helper-versions.ts` for why they are no longer keyed to the CLI's tag.
  *
  * A `.app` is a directory, so each asset is a zip (`ditto -c -k --keepParent`);
  * a fresh `npm i -g` machine with no bundled copy fetches the asset for the
- * running CLI version, verifies its sha256 against the published `.sha256`,
+ * pinned helper version, verifies its sha256 against the published `.sha256`,
  * then verifies the code signature (Developer ID Team + notarization — and, for
  * the menu-bar helper, its designated requirement) before it is ever installed.
  *
@@ -204,12 +205,15 @@ export async function downloadHelperApp(spec: HelperSpec, version: string): Prom
     return cachedApp;
   }
 
-  const tag = `v${version}`;
+  // Name the HELPER's tag, not `v${version}`: after the per-helper split that
+  // string was a tag that does not exist, so a 404 pointed the reader at the
+  // wrong place to look.
+  const tag = helperTag(spec.helper, version);
   const { zip: zipUrl, sha256: shaUrl } = helperAssetUrls(spec, version);
   const missing = (status: number, url: string) =>
     new Error(
       `no ${spec.assetName} release asset for tag ${tag} (HTTP ${status} on ${url}). ` +
-        `The macOS helper ships as a GitHub release asset per tagged CLI version; ` +
+        `The macOS helper ships as a GitHub release asset on its own helper tag; ` +
         `from a repo checkout you can build it locally instead: ${spec.localBuildHint}`,
     );
 

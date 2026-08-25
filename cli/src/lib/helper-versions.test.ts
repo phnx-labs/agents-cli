@@ -37,6 +37,15 @@ describe('helper release tags', () => {
     expect(() => helperFloor('nope' as HelperName)).toThrow(/unknown helper/);
   });
 
+  it('the Windows helper shares the tag namespace, so no helper is left on the CLI tag', () => {
+    // The review of PR #3056 caught this: `computer-win` was omitted from
+    // HelperName, leaving `ssh-tunnel.ts` on `v${cliVersion}` -- the exact
+    // coupling the rest of this module removes.
+    expect(helperTag('computer-win', '1.0.0')).toBe('computer-win/v1.0.0');
+    expect(Object.keys(HELPER_RELEASES).sort())
+      .toEqual(['computer-mac', 'computer-win', 'keychain', 'menubar']);
+  });
+
   it('every declared helper has a usable floor', () => {
     for (const name of Object.keys(HELPER_RELEASES) as HelperName[]) {
       expect(helperFloor(name)).toMatch(/^\d+\.\d+\.\d+$/);

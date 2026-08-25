@@ -28,7 +28,7 @@
  */
 
 /** The helpers that have their own release train. */
-export type HelperName = 'menubar' | 'keychain' | 'computer-mac';
+export type HelperName = 'menubar' | 'keychain' | 'computer-mac' | 'computer-win';
 
 /** One helper's release identity. */
 export interface HelperRelease {
@@ -52,6 +52,10 @@ export const HELPER_RELEASES: Readonly<Record<HelperName, HelperRelease>> = {
   menubar: { tagPrefix: 'menubar', floor: '1.0.0' },
   keychain: { tagPrefix: 'keychain', floor: '1.0.0' },
   'computer-mac': { tagPrefix: 'computer-mac', floor: '1.0.0' },
+  // The Windows helper is a bare .exe, not an .app bundle, so it does not share
+  // helper-download.ts's zip/codesign/notarize machinery -- but it has the same
+  // URL problem, so it shares the tag namespace and the floor.
+  'computer-win': { tagPrefix: 'computer-win', floor: '1.0.0' },
 };
 
 /** The release tag for one helper at one version, e.g. `menubar/v1.0.0`. */

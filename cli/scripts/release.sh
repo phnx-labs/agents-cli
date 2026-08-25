@@ -274,8 +274,15 @@ run_home_base_phase() {
   fi
   green "Published $PHNX_PKG@$TARGET from attested $tgz"
 
-  gh release view "v$TARGET" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx 'ComputerHelper.app.zip' \
-    || die "v$TARGET is missing ComputerHelper.app.zip -- the client still downloads the per-CLI-version URL; reuse the prior zip (no rebuild)"
+  # The ComputerHelper.app.zip gate that used to live here is GONE, deliberately.
+  # It existed because the client downloaded `releases/download/v$CLI_VERSION/
+  # ComputerHelper.app.zip`, so a release without that asset shipped a broken
+  # `agents computer setup`. Helpers now resolve from their OWN tags
+  # (`computer-mac/v<x.y.z>`, see cli/src/lib/helper-versions.ts), so v$TARGET
+  # carrying the asset is neither necessary nor sufficient -- and keeping the
+  # `die` would have hard-failed an otherwise-good release over an asset nothing
+  # reads. The real gate is that the helper's own tag exists, which is asserted
+  # where the helper is released, not here.
 }
 
 # Resolve the npm publish token from the local `npmjs.com` secrets bundle and
@@ -1017,77 +1024,7 @@ attestation_store_dir() {
   printf '%s\n' "${RELEASE_ATTESTATION_DIR:-$REPO_ROOT/.release-attestations}"
 }
 
-# Stage MenubarHelper.app.zip + .sha256 into $dest so the ordinary upload pushes
-# them onto v$TARGET as the menu-bar helper's download-on-demand asset (RUSH-3100
-# Stage N). Reuse the prior release's zip when it exists (the common case -- the
-# helper rarely changes); else re-zip the EXACT signed bundle out of the attested
-# tarball with `ditto -c -k --keepParent` (matching how the download side extracts
-# with `ditto -x -k`, and how the computer-helper asset is zipped).
-# `ditto` is macOS-only, so on a Linux trigger box with no prior asset this is a
-# no-op with a warning -- SAFE because the .app still ships in the tarball this
-# release, so no install is broken; a later Mac-run release seeds the asset and
-# it rides forward via the reuse path.
-stage_menubar_download_asset() {
-  local dest="$1" tgz="$2"
-  if gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'MenubarHelper.app.zip*' 2>/dev/null; then
-    gray "reused MenubarHelper.app.zip from v$PHNX_LATEST"
-    return 0
-  fi
-  if ! command -v ditto >/dev/null 2>&1; then
-    yellow "no prior MenubarHelper.app.zip and no ditto (non-macOS trigger) -- skipping the menu-bar download asset (tarball still ships the .app)"
-    return 0
-  fi
-  local tmp app
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-menubar-zip.XXXXXX")"
-  if ! tar -xzf "$tgz" -C "$tmp" package/dist/lib/menubar/MenubarHelper.app 2>/dev/null; then
-    yellow "attested tarball has no dist/lib/menubar/MenubarHelper.app -- skipping the menu-bar download asset"
-    rm -rf "$tmp"; return 0
-  fi
-  app="$tmp/package/dist/lib/menubar/MenubarHelper.app"
-  if ! ( cd "$(dirname "$app")" && ditto -c -k --keepParent "MenubarHelper.app" "$dest/MenubarHelper.app.zip" ); then
-    yellow "ditto zip of MenubarHelper.app failed -- skipping the menu-bar download asset"
-    rm -rf "$tmp"; return 0
-  fi
-  ( cd "$dest" && shasum -a 256 "MenubarHelper.app.zip" | awk '{print $1}' > "MenubarHelper.app.zip.sha256" )
-  rm -rf "$tmp"
-  green "staged MenubarHelper.app.zip + .sha256 for v$TARGET (download-on-demand fallback)"
-}
 
-# Stage 'Agents CLI.app.zip' + .sha256 into $dest so the ordinary upload pushes
-# them onto v$TARGET as the keychain broker's download-on-demand asset (RUSH-3100
-# Stage N). Same shape as stage_menubar_download_asset: reuse the prior release's
-# zip when present (the keychain helper rarely changes), else re-zip the EXACT
-# signed bundle out of the attested tarball with `ditto -c -k --keepParent`
-# (matching the `ditto -x -k` download-side extraction). The bundle name has a
-# space, so every reference is quoted. `ditto` is macOS-only, so on a Linux
-# trigger box with no prior asset this is a no-op with a warning -- SAFE because
-# the .app still ships in the tarball this release, so no install is broken; a
-# later Mac-run release seeds the asset and it rides forward via the reuse path.
-stage_keychain_download_asset() {
-  local dest="$1" tgz="$2"
-  if gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'Agents CLI.app.zip*' 2>/dev/null; then
-    gray "reused Agents CLI.app.zip from v$PHNX_LATEST"
-    return 0
-  fi
-  if ! command -v ditto >/dev/null 2>&1; then
-    yellow "no prior Agents CLI.app.zip and no ditto (non-macOS trigger) -- skipping the keychain download asset (tarball still ships the .app)"
-    return 0
-  fi
-  local tmp app
-  tmp="$(mktemp -d "${TMPDIR:-/tmp}/agents-cli-keychain-zip.XXXXXX")"
-  if ! tar -xzf "$tgz" -C "$tmp" "package/dist/lib/secrets/Agents CLI.app" 2>/dev/null; then
-    yellow "attested tarball has no dist/lib/secrets/Agents CLI.app -- skipping the keychain download asset"
-    rm -rf "$tmp"; return 0
-  fi
-  app="$tmp/package/dist/lib/secrets/Agents CLI.app"
-  if ! ( cd "$(dirname "$app")" && ditto -c -k --keepParent "Agents CLI.app" "$dest/Agents CLI.app.zip" ); then
-    yellow "ditto zip of 'Agents CLI.app' failed -- skipping the keychain download asset"
-    rm -rf "$tmp"; return 0
-  fi
-  ( cd "$dest" && shasum -a 256 "Agents CLI.app.zip" | awk '{print $1}' > "Agents CLI.app.zip.sha256" )
-  rm -rf "$tmp"
-  green "staged Agents CLI.app.zip + .sha256 for v$TARGET (download-on-demand fallback)"
-}
 
 # Stage the attested json + tgz + manifest + reused helper zip onto v$TARGET so
 # the throwaway home-base worktree can download them. Never rebuilds a helper.
@@ -1110,19 +1047,12 @@ upload_release_proof() {
     gh release download "v$PHNX_LATEST" --dir "$dest" --pattern 'ComputerHelper.app.zip*' \
       || die "could not reuse ComputerHelper.app.zip from v$PHNX_LATEST -- no fallback rebuild"
   fi
-  # Menu-bar helper download-on-demand asset (Stage N, RUSH-3100). The .app STILL
-  # ships inside the tarball this release, so a fresh install already has it; this
-  # asset is the download FALLBACK for installs whose tarball lacks the bundle
-  # (the later stage that evicts it from the tarball depends on this being here).
-  # Reuse the prior release's zip when present, else re-zip the exact signed
-  # bundle out of the attested tarball with `ditto` (macOS trigger box only).
-  # Best-effort: never fatal while the tarball still carries the bundle.
-  stage_menubar_download_asset "$dest" "$tgz"
-  # Keychain broker download-on-demand asset (Stage N, RUSH-3100). Same
-  # bundled-first, download-fallback contract as the menu-bar helper above:
-  # the .app STILL ships inside the tarball this release, so this asset is only
-  # the fallback for installs whose tarball lacks the bundle. Best-effort.
-  stage_keychain_download_asset "$dest" "$tgz"
+  # No helper assets are staged onto v$TARGET any more. Helpers resolve from their
+  # OWN tags (`menubar/v<x.y.z>`, `keychain/v<x.y.z>`, `computer-mac/v<x.y.z>`,
+  # `computer-win/v<x.y.z>` -- see cli/src/lib/helper-versions.ts), so anything
+  # published here would be an asset no client ever requests. Worse, the keychain
+  # staging wrote it as `Agents CLI.app.zip`, and GitHub rewrites that space to a
+  # dot on upload -- so every release was republishing a filename proven to 404.
   if gh release view "v$TARGET" >/dev/null 2>&1; then
     gh release upload "v$TARGET" "$dest"/* --clobber \
       || die "failed to upload attested artifacts to v$TARGET"

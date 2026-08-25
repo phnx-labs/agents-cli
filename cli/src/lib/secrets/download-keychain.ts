@@ -4,7 +4,8 @@
  *
  * Mirrors the ComputerHelper / MenubarHelper download model
  * (`../helper-download.ts`): the helper ships as a signed + notarized `.app`
- * zipped as a GitHub release asset per tagged CLI version. A fresh `npm i -g`
+ * zipped as a GitHub release asset on the helper's own `keychain/v<x.y.z>` tag,
+ * NOT the CLI's tag (see `helper-versions.ts`). A fresh `npm i -g`
  * machine whose tarball lacks a bundled copy fetches the asset for the running
  * CLI version, verifies its sha256 + code signature before install.
  *

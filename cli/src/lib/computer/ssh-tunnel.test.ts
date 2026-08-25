@@ -206,12 +206,18 @@ describe('pickFreePort', () => {
 });
 
 describe('win helper release-asset download', () => {
-  it('builds asset URLs pinned to the exact v<version> tag', () => {
-    const u = winHelperAssetUrls('1.20.50');
+  it("builds asset URLs pinned to the HELPER's own tag, not the CLI's", () => {
+    // The Windows exe is not an .app bundle so it does not share
+    // helper-download.ts's zip/codesign machinery, but it had the identical
+    // coupling: keyed to `v${cliVersion}`, every CLI release had to re-stage a
+    // ~165MB binary or the download 404'd. Same tag namespace, same fix.
+    const u = winHelperAssetUrls('1.0.0');
     expect(u.exe).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/v1.20.50/computer-helper-win.exe',
+      'https://github.com/phnx-labs/agents-cli/releases/download/computer-win/v1.0.0/computer-helper-win.exe',
     );
     expect(u.sha256).toBe(`${u.exe}.sha256`);
+    // A bare `v<n>` tag here would be the old coupling coming back.
+    expect(u.exe).not.toMatch(/download\/v\d/);
   });
 
   it('parses sha256sum-format and bare-hex checksum assets, rejects garbage', () => {

@@ -22,7 +22,6 @@ import * as path from 'path';
 
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { downloadKeychainHelperApp } from './download-keychain.js';
-import { getCliVersion } from '../version.js';
 import { helperFloor } from '../helper-versions.js';
 
 const APP_BUNDLE_NAME = 'Agents CLI.app';

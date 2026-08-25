@@ -35,6 +35,7 @@ import { hostNameFor } from '../devices/ssh-config.js';
 import { getCacheDir } from '../state.js';
 import { getCliVersion } from '../version.js';
 import { openComputerClient, resolveTcpEndpoint, type ComputerClient } from './computer-rpc.js';
+import { helperFloor, helperTag } from '../helper-versions.js';
 
 // ---------------------------------------------------------------------------
 // 1. Generic ssh -L tunnel (shared with the browser CDP driver)
@@ -175,7 +176,12 @@ export function winHelperCacheDir(version: string): string {
 
 /** Release-asset URLs for the exe + its checksum at one exact `v<version>` tag. */
 export function winHelperAssetUrls(version: string): { exe: string; sha256: string } {
-  const base = `https://github.com/${WIN_HELPER_RELEASE_REPO}/releases/download/v${version}`;
+  // The helper's OWN tag, not the CLI's. This exe is not an .app bundle so it
+  // cannot share helper-download.ts's zip/codesign machinery, but it had the
+  // identical coupling: keyed to `v${cliVersion}`, every CLI release had to
+  // re-stage a ~165MB exe or the download 404'd, and a helper fix could not
+  // reach anyone without a CLI release. Same fix, same tag namespace.
+  const base = `https://github.com/${WIN_HELPER_RELEASE_REPO}/releases/download/${helperTag('computer-win', version)}`;
   return { exe: `${base}/${WIN_HELPER_EXE}`, sha256: `${base}/${WIN_HELPER_EXE}.sha256` };
 }
 
@@ -237,7 +243,7 @@ export async function downloadWinHelperExe(version: string): Promise<string> {
  * checkout / bundled), then the checksum-verified release-asset download for
  * the running CLI version. Throws with the tag it checked when neither exists.
  */
-export async function ensureWinHelperExe(version = getCliVersion()): Promise<string> {
+export async function ensureWinHelperExe(version = helperFloor('computer-win')): Promise<string> {
   const local = resolveWinHelperExe();
   if (local) return local;
   return downloadWinHelperExe(version);

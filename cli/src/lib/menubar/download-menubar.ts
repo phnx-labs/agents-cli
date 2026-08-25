@@ -4,8 +4,9 @@
  *
  * Mirrors the ComputerHelper download model (`../computer/download.ts`): the
  * helper ships as a signed + notarized `.app` zipped as a GitHub release asset
- * per tagged CLI version. A fresh `npm i -g` machine whose tarball lacks a
- * bundled copy fetches the asset for the running CLI version, verifies its
+ * on the helper's own `menubar/v<x.y.z>` tag, NOT the CLI's tag (see
+ * `helper-versions.ts`). A fresh `npm i -g` machine whose tarball lacks a
+ * bundled copy fetches the asset for the pinned helper version, verifies its
  * sha256 + code signature before install.
  *
  * The one difference — and the reason this is not the ComputerHelper spec — is
