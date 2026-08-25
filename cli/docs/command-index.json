@@ -15565,7 +15565,7 @@
           "negate": false
         }
       ],
-      "examples": "agents projects import --from-linear  # the projects you actually track\n      agents projects add rush --repo phnx-labs/rush --path apps/web\n      agents projects add rush --root ~/src/rush --dir ~/src/rush-infra  # bind another dir\n      agents projects set rush --add-dir ~/.agents/.system  # bind one more\n      agents projects set rush --rm-dir ~/src/rush-infra    # unbind it again\n      agents projects list                 # definitions only (no session scan)\n      agents projects list --with-agents   # opt-in local active counts\n      agents projects list --json          # machine-readable defs (AGI EXT uses this)\n      echo '{...}' | agents projects save --json  # create/update one def from stdin\n      agents projects remove rush --json   # machine-readable removal\n      agents projects status              # every project, across the whole fleet\n      agents projects status rush         # one project (same body as view/show)\n      agents projects view rush           # alias of status <name>\n      agents projects status --device s0  # scope to one device (or --devices a,b,c)\n      agents projects link rush --linear  # bind the Linear project (auto-suggest)\n      agents run --project rush           # land an agent in the project",
+      "examples": "agents projects import --from-linear  # the projects you actually track\n      agents projects add rush --repo phnx-labs/rush --path apps/web\n      agents projects add rush --root ~/src/rush --dir ~/src/rush-infra  # bind another dir\n      agents projects set rush --add-dir ~/.agents/.system  # bind one more\n      agents projects set rush --rm-dir ~/src/rush-infra    # unbind it again\n      agents projects list                 # definitions only (no session scan)\n      agents projects list --with-agents   # opt-in local active counts\n      agents projects list --json          # machine-readable defs (AGI EXT uses this)\n      echo '{...}' | agents projects save --json  # create/update one def from stdin\n      agents projects remove rush --json   # machine-readable removal\n      agents projects status              # every project, across the whole fleet\n      agents projects status rush         # one project (same body as view)\n      agents projects view rush           # alias of status <name>\n      agents projects status --device s0  # scope to one device (or --devices a,b,c)\n      agents projects link rush --linear  # bind the Linear project (auto-suggest)\n      agents run --project rush           # land an agent in the project",
       "notes": "Definitions are hand-editable YAML in ~/.agents/projects/ and sync across\n      machines with 'agents repo push user' / 'agents repo pull user'. AGI EXT\n      reads and writes only through these commands — never\n      ~/.agents/factory/projects.json.\n\n      A project may bind several directories ('--dir' / '--add-dir'). The cwd an\n      agent lands in is 'defaultPath' (else 'root') — set it with --root/--path,\n      not with --dir. Every bound directory other than that cwd rides along as\n      an --add-dir grant (Claude, Codex, Cursor, Kimi, Grok consume it; others ignore).",
       "subcommands": [
         {
@@ -16070,10 +16070,9 @@
           "name": "status",
           "path": "projects status",
           "aliases": [
-            "view",
-            "show"
+            "view"
           ],
-          "description": "Progress card for every project across the whole fleet, or one named project (aliases: view, show). Named form also prints every milestone and the stored definition.",
+          "description": "Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition.",
           "args": [
             {
               "name": "name",

@@ -533,7 +533,7 @@ agents projects pull <name>    Fast-forward every fleet checkout of a named proj
 agents projects remove <name>  Remove a project definition. Never touches the repo.
 agents projects save           Create or update one project from a complete ProjectDef JSON object on stdin.
 agents projects set <name>     Change one field on a project definition, preserving everything else.
-agents projects status [name]  Progress card for every project across the whole fleet, or one named project (aliases: view, show). Named form also prints every milestone and the stored definition.
+agents projects status [name]  Progress card for every project across the whole fleet, or one named project (alias: view). Named form also prints every milestone and the stored definition.
 ```
 
 ## prune — Uninstall agent CLI versions. Moves version data to trash for recovery.
