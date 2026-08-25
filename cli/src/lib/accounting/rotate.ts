@@ -324,7 +324,7 @@ export async function checkRunAccountReadiness(agent: AgentId, version: string):
   return readinessFromCandidate(candidate);
 }
 
-function getRoutingUsedPercent(snapshot: UsageSnapshot | null | undefined): number | null {
+export function getRoutingUsedPercent(snapshot: UsageSnapshot | null | undefined): number | null {
   if (!snapshot || snapshot.windows.length === 0) return null;
   const routingWindows = snapshot.windows.filter((window) => window.key !== 'session');
   const windows = routingWindows.length > 0 ? routingWindows : snapshot.windows;
