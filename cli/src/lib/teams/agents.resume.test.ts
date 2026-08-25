@@ -170,6 +170,46 @@ describe('resumeTeammate — resume-id guard', () => {
   });
 });
 
+describe.skipIf(IS_WINDOWS)('resumeTeammate — successful launch state', () => {
+  it('persists RUNNING without the prior attempt failure after a real local resume launch', async () => {
+    const base = tmpBase();
+    const id = `claude-agent-resume-success-${Date.now()}`;
+    fs.mkdirSync(path.join(base, id), { recursive: true });
+
+    const agent = new AgentProcess(
+      id, 'resume-success-team', 'claude', 'do a thing',
+      null, 'edit', null, AgentStatus.FAILED, new Date(), new Date(), base,
+    );
+    agent.failure = {
+      stage: 'execution',
+      code: 'process-exit-nonzero',
+      message: 'prior attempt exited 1',
+      exit_code: 1,
+      retryable: true,
+      observed_at: new Date().toISOString(),
+    };
+    await agent.saveMeta();
+
+    const mgr = new AgentManager(50, base);
+    try {
+      // Exercise the production resume + local spawn path. The harness may
+      // reject this synthetic session after launch; the invariant under test is
+      // the durable state written atomically when the replacement process has
+      // successfully spawned.
+      const resumed = await mgr.resumeTeammate(id, 'Continue the task');
+      expect(resumed.status).toBe(AgentStatus.RUNNING);
+      expect(resumed.failure).toBeNull();
+
+      const persisted = await AgentProcess.loadFromDisk(id, base);
+      expect(persisted?.status).toBe(AgentStatus.RUNNING);
+      expect(persisted?.failure).toBeNull();
+    } finally {
+      await mgr.stop(id).catch(() => false);
+      fs.rmSync(base, { recursive: true, force: true });
+    }
+  });
+});
+
 describe.skipIf(IS_WINDOWS)('resumeTeammate — launch failure', () => {
   it('terminates the replacement and restores all prior state when persistence fails after spawn', async () => {
     const base = tmpBase();
