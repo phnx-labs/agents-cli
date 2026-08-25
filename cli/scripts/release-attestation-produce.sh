@@ -53,7 +53,7 @@ COMMIT_ISH=""
 REPO_ROOT="$DEFAULT_REPO_ROOT"
 STORE=""
 KEEP=false
-# Where the suite runs. Empty = scripts/test.sh's default (offload to a crabbox).
+# Where the suite runs. Empty = scripts/test.sh's default (auto-pick a fleet worker).
 TEST_TARGET=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +62,10 @@ while [[ $# -gt 0 ]]; do
     --keep) KEEP=true; shift ;;
     --test-device) [[ -n "${2:-}" ]] || die "--test-device needs a machine name"; TEST_TARGET=(--device "$2"); shift 2 ;;
     --test-here) TEST_TARGET=(--here); shift ;;
+    # Parity with test.sh's third mode. Without it the producer could reach only
+    # two of the three lanes, and a release on a box with no fleet worker in
+    # reach had no way to ask for the disposable crabbox it can still use.
+    --test-crabbox) TEST_TARGET=(--crabbox); shift ;;
     -h|--help)
       sed -n '3,32p' "$0" | sed 's/^# \?//'
       exit 0
@@ -161,8 +165,9 @@ SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
 # signing box whenever a native helper input changed, and it used to run the
 # whole ~13k-test suite there too -- welding "sign on a Mac" to "pin a Mac for
 # ten minutes". test.sh decides WHERE the suite runs; the Mac keeps only
-# sign/notarize/pack. Default is the crabbox pool; --test-device <box> targets a
-# fleet Linux box; --test-here restores the old in-place behavior explicitly.
+# sign/notarize/pack. Default auto-picks a fleet worker; --test-device <box>
+# targets a named box; --test-crabbox uses a disposable crabbox; --test-here
+# restores the old in-place behavior explicitly.
 # bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
 # input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
 # under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.

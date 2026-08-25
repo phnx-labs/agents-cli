@@ -719,7 +719,7 @@ that the caller be on a clean `main`:
 
 ```bash
 scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
-scripts/release.sh <version> --apply              # tests on a crabbox -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
+scripts/release.sh <version> --apply              # tests on an auto-picked fleet worker -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
 scripts/release.sh <version> --apply --device <mac>  # sign/publish on <mac> when mac-mini is down -- <mac> must ALREADY be a provisioned signing home base (see below)
 ```
 
@@ -729,7 +729,7 @@ each phase labeled with the box it runs on and a ✓/✗ result:
 | Work | Runs on | How it's chosen |
 |---|---|---|
 | Orchestrate: bump, changelog, PR, tag | a detached worktree on the box you invoked it on | fresh `origin/<default>` under `.agents/worktrees/release-v<version>-<pid>` |
-| CI / tests (Linux) | a **crabbox** workspace (Hetzner Linux VM) | [`scripts/sandbox.sh`](scripts/sandbox.sh) reclaims an available warm box and syncs into `~/workspaces/<repo>-<task>`; it warms capacity only when the shared pool has none — **dynamic, never a hardcoded or release-exclusive instance** |
+| CI / tests (Linux) | an **auto-picked fleet worker** | [`scripts/test.sh`](scripts/test.sh) resolves it through `agents devices pick` — the least-loaded reachable POSIX box in the same auto pool `agents run --device auto` uses, so `role=worker`/`role=personal` marks govern it. `--test-device <box>` pins one; `--crabbox` still routes to a disposable [`sandbox.sh`](scripts/sandbox.sh) workspace. **Dynamic either way, never a hardcoded or release-exclusive instance** |
 | Promote attested tgz + npm publish + computer-helper re-attach | the **home base** (any OS — promote-only, RUSH-3026) | `--device <name>` in `release.sh`, defaulting to `mac-mini`; the script detects if it's already there (`scutil --get LocalHostName` / `hostname -s`), else reaches it over `ssh` |
 
 The home base holds the npm publish token + gh auth. It defaults to `mac-mini`
@@ -740,7 +740,7 @@ helper zip) — nothing on it signs or notarizes, so **any OS works as the home
 base**, Linux included. `assert_promote_home_base` preflights it (tools + gh
 auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
 first mutation. Helper signing is a separate, source-change-only path and still
-needs a provisioned Mac. The crabbox is **not** hardcoded.
+needs a provisioned Mac. The test worker is **not** hardcoded.
 
 **A `--device` fallback must ALREADY be a provisioned signing home base — it is
 not turnkey.** Signing + notarizing + publishing needs, on that box: the
@@ -756,7 +756,7 @@ tagged-but-**unpublished** release (RUSH-2535; npm stuck at 1.22.35 with `v1.22.
 tagged). `release.sh` now **preflights the resolved home base BEFORE any mutation**
 ([`scripts/signing-home-base-probe.sh`](scripts/signing-home-base-probe.sh), run on
 that box over `agents ssh`): an unprovisioned `--device` aborts at the preflight,
-before the crabbox/PR/merge/tag phases, naming the exact gap, so a mac-mini outage
+before the test/PR/merge/tag phases, naming the exact gap, so a mac-mini outage
 no longer risks a half-finished release. `cli/bin/embedded.provisionprofile` is a
 committed input (commit 2567004b4) that self-heals — the preflight and the
 home-base phase both recover it from a freshly fetched `origin/<default>` ref when
@@ -879,12 +879,12 @@ base** (never borrowed to the trigger box), publishes, and pushes the computer-
 helper release asset. `bun run build` copies the signed helpers into `dist/` on a
 presence gate (`[ -d bin/… ]`); `prepack`'s sha gate is sha-tool-portable.
 
-**Tests: crabbox for Linux, GH Actions for the rest.** The `--apply` flow runs the
-full suite on a crabbox before opening the PR; a failure prints the failing tests +
+**Tests: an auto-picked fleet worker for Linux, GH Actions for the rest.** The
+`--apply` flow runs the full suite on a worker before opening the PR; a failure prints the failing tests +
 the captured log path and **halts before any PR/publish**. That covers the Linux
 suite; the GH Actions CI matrix on the release PR still gates the cross-platform
 (macOS/Windows) legs (`wait_for_ci_green` blocks on them, fail-closed). `--skip-tests`
-skips only the crabbox lease.
+skips only that suite run.
 
 **Idempotent re-runs.** The script's git-scope reads use `<ref>:cli/package.json`
 (not root) since the package moved under `cli`. If a publish fails after the PR

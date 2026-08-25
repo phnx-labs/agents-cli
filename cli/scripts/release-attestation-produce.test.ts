@@ -197,6 +197,24 @@ describe('release-attestation-produce.sh', () => {
     expect(fs.existsSync(path.join(kept![1], 'cli/bin/MenubarHelper.app/Contents/MacOS/AGI Menu'))).toBe(true);
   });
 
+  it('routes --test-crabbox to test.sh\'s crabbox lane (surface parity, RUSH-3211)', () => {
+    // test.sh has three lanes and the producer used to expose only two, so a
+    // release could never ask for the disposable crabbox. runProduce passes
+    // --test-here first and extraArgs come after, so this asserts last-wins too.
+    // The fixture carries no scripts/sandbox.sh, and that prerequisite check
+    // lives INSIDE test.sh's crabbox branch -- so this message can only be
+    // reached by routing there. The negative half is what makes it proof: --here
+    // would have SUCCEEDED, since the fixture's fake `bun` is a passing suite,
+    // so a silent fallback to the default would show up as exit 0 with an
+    // attestation written.
+    const fx = buildFixture(tmp('attest-produce-crabbox-'));
+    const r = runProduce(fx, ['--test-crabbox']);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(r.status, out).not.toBe(0);
+    expect(out).toMatch(/sandbox\.sh missing -- cannot offload/);
+    expect(out).not.toMatch(/tests passed/);
+  });
+
   it('does not seed when the caller checkout has no apps (nothing to reuse; gates decide)', () => {
     const root = tmp('attest-produce-noseed-');
     const fx = buildFixture(root);
