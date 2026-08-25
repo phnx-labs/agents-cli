@@ -205,7 +205,7 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     // `cd "$WT/cli"; scripts/release.sh ...`, which needs the real CLI
     // installed) and cat the recovered file back out BEFORE the snippet's own
     // EXIT trap removes the worktree.
-    const seedOnly = `${gen.stdout.split('cd "$WT/cli"')[0]}\ncat "$WT/cli/bin/embedded.provisionprofile"`;
+    const seedOnly = `${gen.stdout.split('cd "$WT/')[0]}\ncat "$WT/cli/bin/embedded.provisionprofile"`;
     const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
     expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
     expect(run.stdout).toContain('PROFILE-BYTES');
@@ -231,10 +231,10 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     });
     expect(gen.status, gen.stderr).toBe(0);
 
-    const seedOnly = gen.stdout.split('cd "$WT/cli"')[0];
+    const seedOnly = gen.stdout.split('cd "$WT/')[0];
     const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
     expect(run.status).not.toBe(0); // fails fast, not a "warning" that limps forward
-    expect(run.stderr).toContain('embedded.provisionprofile not found');
+    expect(run.stderr).toContain('not found on the tagged tree');
     expect(run.stderr).not.toContain('Generate at developer.apple.com'); // the old, misleading advice
   });
 
@@ -279,7 +279,7 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     });
     expect(gen.status, gen.stderr).toBe(0);
 
-    const seedOnly = `${gen.stdout.split('cd "$WT/cli"')[0]}\ncat "$WT/cli/bin/embedded.provisionprofile"`;
+    const seedOnly = `${gen.stdout.split('cd "$WT/')[0]}\ncat "$WT/cli/bin/embedded.provisionprofile"`;
     const run = spawnSync('bash', ['-c', seedOnly], { cwd: repoRoot, encoding: 'utf-8' });
     expect(run.status, `${run.stdout}\n${run.stderr}`).toBe(0);
     expect(run.stdout).toContain('PROFILE-BYTES');
