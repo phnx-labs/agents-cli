@@ -146,7 +146,18 @@ case "$MODE" in
   # unrelated repository — release-manifest.test.ts went looking for
   # `~/.agents/native/computer-mac/Sources` and the suite failed 4 tests with a
   # confusing "helper input missing". An empty repo here stops the walk.
-  ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli && [ -e .git ] || git init -q"
+  #
+  # This mirrors what sandbox.sh's crabbox path has always done -- its comment
+  # reads "blank git for tests that need one" -- including the initial commit,
+  # so a test that reads HEAD finds one instead of an unborn branch. The device
+  # path reinvented the transport without carrying that across, which is how
+  # the escape appeared in the first place.
+  # Identity is passed with `-c`, not written to config: a worker generally has
+  # no git identity, and without it the commit fails and the usual `|| true`
+  # swallows it -- leaving an unborn HEAD that surfaces later as some other
+  # test's confusing failure. Verified on a worker: HEAD resolves, and the
+  # box's global config is left untouched.
+  ssh "$ADDR" 'cd ~/.agents/test-runs/agents-cli && if [ ! -e .git ]; then git init -q && git add -A && git -c user.email=agents@localhost -c user.name=agents commit -q -m initial >/dev/null 2>&1 || true; fi'
 
   green "Tree shipped. Running the suite on $DEVICE..."
     ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli/apps/cli \
