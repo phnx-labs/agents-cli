@@ -1591,6 +1591,15 @@ positively false; unknown liveness stays excluded rather than inventing a human 
 can answer. The session preview shares this one predicate, so the human-facing
 "needs you" line and the scriptable gate can never disagree about a row.
 
+**The `hostLink` field's values.** `connected` (a client was observed — a counted tmux
+client, or a window republishing its slice), `no-client` (alive, nothing attached),
+`host-gone` (the window died and took the agent with it), and `unknown` (neither signal
+was available, so the question is open). `unknown` is the case for a bare terminal, a
+team spawn, a cloud task, and any `--device` session whose pane lives on another machine
+— every input the classifier reads is local. It is **not** a loss signal: it promotes no
+status and clears no presence, and a consumer MUST NOT render it as healthy. Before
+RUSH-3125 that case returned `connected`, asserting a client nothing had observed.
+
 **Known residual — an ambient tmux session.** `provenance.mux` is stamped from the
 process env, so an agent launched inside a tmux session the *developer* owns (rather
 than one the CLI spawned for it) reads that session's client count. Detach that tmux for
