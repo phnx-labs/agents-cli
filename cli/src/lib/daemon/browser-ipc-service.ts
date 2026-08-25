@@ -6,9 +6,6 @@
  * that must happen before the BrowserService comes up (same as the comment
  * at daemon.ts:1303 — reaps browser/tunnel processes from prior daemons so
  * the new session doesn't hijack stale tunnels or fail to bind claimed ports).
- *
- * `getBrowserService()` exposes the underlying `BrowserService` so daemon.ts's
- * browser-task-reap interval can pass it to `runBrowserTaskReap`.
  */
 
 import { BaseDaemonService, type DaemonContext } from './service.js';
@@ -25,11 +22,6 @@ export class BrowserIPCService extends BaseDaemonService {
   constructor(browserService: BrowserService) {
     super();
     this.browserSvc = browserService;
-  }
-
-  /** Returns the underlying `BrowserService` (available after construction, before/after start). */
-  getBrowserService(): BrowserService {
-    return this.browserSvc;
   }
 
   protected async onStart(ctx: DaemonContext): Promise<void> {

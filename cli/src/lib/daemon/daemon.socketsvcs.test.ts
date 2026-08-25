@@ -12,9 +12,15 @@
  *    - A lifecycle service that starts successfully is `running` with lastRunMs set.
  *    - Periodic and lifecycle services coexist on the same supervisor.
  *    - `stopAll()` calls stop() on lifecycle services.
- * 3. The concrete socket services via lightweight fakes (no real sockets/processes).
- *    Their constructors are tested: if the underlying dependency rejects during
- *    onStart(), the supervisor parks the service without crashing the daemon.
+ * 3. The four REAL socket-service classes (SecretsBrokerService,
+ *    BrowserIPCService, MonitorEngineService, AccountStateDaemonService),
+ *    imported and driven through a real `ServiceSupervisor` — start/stop/health
+ *    run their actual onStart()/onStop() bodies, not a stand-in. Only the
+ *    subsystem pieces that would otherwise touch the real machine (a real
+ *    daemon's helpers dir for the browser socket, and the network/fleet calls
+ *    behind account-state's refresh ticks) are redirected/stubbed; the four
+ *    wrapper classes themselves are never mocked. Deleting a real onStart()/
+ *    onStop() body now fails this suite (verified manually while writing it).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -26,6 +32,28 @@ import { BaseDaemonService, BasePeriodicService, isPeriodicService, type DaemonC
 import type { DaemonServiceId } from '../daemon-services.js';
 
 // ---------------------------------------------------------------------------
+// Real-service test infrastructure — redirect the browser IPC socket dir out
+// of the real machine's `~/.agents/.cache/helpers`, and stub the daemon-ticks
+// account-state relies on so a real `startAccountStateService()` call never
+// hits the network/fleet. Both are declared at module scope (vi.mock factories
+// are hoisted above any `beforeEach`-scoped const) and the directory itself is
+// created/cleaned per test.
+// ---------------------------------------------------------------------------
+
+const BROWSER_HELPER_DIR = path.join(os.tmpdir(), `agents-cli-socketsvcs-browser-${process.pid}`);
+
+vi.mock('../state.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../state.js')>()),
+  getHelpersDir: vi.fn(() => BROWSER_HELPER_DIR),
+  getBrowserRuntimeDir: vi.fn(() => path.join(BROWSER_HELPER_DIR, 'runtime')),
+}));
+
+vi.mock('../daemon-ticks.js', () => ({
+  runUsageRefreshTick: vi.fn(async () => {}),
+  runFleetCacheWarmTick: vi.fn(async () => {}),
+}));
+
+// ---------------------------------------------------------------------------
 // Test infrastructure
 // ---------------------------------------------------------------------------
 
@@ -35,6 +63,8 @@ const originalDaemonDir = process.env.AGENTS_DAEMON_DIR;
 beforeEach(() => {
   testDaemonDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-socketsvcs-'));
   process.env.AGENTS_DAEMON_DIR = testDaemonDir;
+  fs.rmSync(BROWSER_HELPER_DIR, { recursive: true, force: true });
+  fs.mkdirSync(BROWSER_HELPER_DIR, { recursive: true });
   vi.useFakeTimers();
 });
 
@@ -43,6 +73,7 @@ afterEach(() => {
   if (originalDaemonDir === undefined) delete process.env.AGENTS_DAEMON_DIR;
   else process.env.AGENTS_DAEMON_DIR = originalDaemonDir;
   fs.rmSync(testDaemonDir, { recursive: true, force: true });
+  fs.rmSync(BROWSER_HELPER_DIR, { recursive: true, force: true });
 });
 
 function makeCtx(): DaemonContext {
@@ -249,6 +280,84 @@ describe('ServiceSupervisor — lifecycle-only DaemonService', () => {
     expect(all['secrets-broker']).toBeDefined();
     expect(all['secrets-broker'].consecutiveFailures).toBe(0);
     expect(all['secrets-broker'].lastOkAt).not.toBeNull();
+
+    await supervisor.stopAll();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The four REAL socket services, through a real ServiceSupervisor
+// ---------------------------------------------------------------------------
+
+describe('ServiceSupervisor — real socket services (SecretsBrokerService, BrowserIPCService, MonitorEngineService, AccountStateDaemonService)', () => {
+  it('starts, reports healthy, and cleanly stops all four real services together', async () => {
+    const { SecretsBrokerService } = await import('./secrets-broker-service.js');
+    const { BrowserIPCService } = await import('./browser-ipc-service.js');
+    const { MonitorEngineService } = await import('./monitor-engine-service.js');
+    const { AccountStateDaemonService } = await import('./account-state-daemon-service.js');
+    const { BrowserService } = await import('../browser/service.js');
+    const { getSocketPath } = await import('../browser/ipc.js');
+
+    const supervisor = new ServiceSupervisor();
+    const secrets = new SecretsBrokerService();
+    const monitors = new MonitorEngineService();
+    const accountState = new AccountStateDaemonService();
+    const browserIpc = new BrowserIPCService(new BrowserService());
+    supervisor.register(secrets);
+    supervisor.register(monitors);
+    supervisor.register(accountState);
+    supervisor.register(browserIpc);
+
+    await supervisor.startAll(makeCtx());
+
+    const health = supervisor.health();
+    expect(health['secrets-broker'].state).toBe('running');
+    expect(health['monitors'].state).toBe('running');
+    expect(health['account-state'].state).toBe('running');
+    expect(health['browser-ipc'].state).toBe('running');
+
+    // The real BrowserIPCServer actually bound a unix socket on disk.
+    expect(fs.existsSync(getSocketPath())).toBe(true);
+
+    await supervisor.stopAll();
+
+    const stopped = supervisor.health();
+    expect(stopped['secrets-broker'].state).toBe('stopped');
+    expect(stopped['monitors'].state).toBe('stopped');
+    expect(stopped['account-state'].state).toBe('stopped');
+    expect(stopped['browser-ipc'].state).toBe('stopped');
+    // The real stop() path unlinks the socket file.
+    expect(fs.existsSync(getSocketPath())).toBe(false);
+  });
+
+  it('a real service whose onStart() throws is parked and reported unhealthy, without taking down a healthy sibling', async () => {
+    const { SecretsBrokerService } = await import('./secrets-broker-service.js');
+    const { BrowserIPCService } = await import('./browser-ipc-service.js');
+    const { BrowserService } = await import('../browser/service.js');
+    const { getSocketPath } = await import('../browser/ipc.js');
+
+    // Force BrowserIPCService.onStart() to throw for real: put a plain FILE
+    // where its socket directory (getHelpersDir()/browser) must be created, so
+    // the real `fs.mkdirSync(socketDir, { recursive: true })` in ipc.ts hits
+    // ENOTDIR instead of the stub-only failure a fake service would need.
+    const blockerPath = path.dirname(getSocketPath());
+    fs.writeFileSync(blockerPath, 'not a directory');
+
+    const supervisor = new ServiceSupervisor();
+    const failingBrowserIpc = new BrowserIPCService(new BrowserService());
+    const healthySecrets = new SecretsBrokerService();
+    supervisor.register(failingBrowserIpc);
+    supervisor.register(healthySecrets);
+
+    await supervisor.startAll(makeCtx());
+
+    const health = supervisor.health();
+    expect(health['browser-ipc'].state).toBe('parked');
+    expect(health['browser-ipc'].lastError).toBeTruthy();
+    expect(health['browser-ipc'].consecutiveFailures).toBeGreaterThanOrEqual(1);
+
+    // The sibling real service kept starting and is healthy.
+    expect(health['secrets-broker'].state).toBe('running');
 
     await supervisor.stopAll();
   });
