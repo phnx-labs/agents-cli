@@ -1004,7 +1004,7 @@ describe('installVersion Grok binary relocation', () => {
     // instead of rerunning the vendor installer. Seed the previous active
     // home's real download exactly as that live installation would.
     const existingVersioned = path.join(oldConfigDir, 'downloads', 'grok-0.2.101-macos-aarch64');
-    fs.writeFileSync(existingVersioned, '#!/bin/sh\nexit 0\n', 'utf-8');
+    fs.writeFileSync(existingVersioned, Buffer.alloc(1_000_001));
     fs.chmodSync(existingVersioned, 0o755);
     fs.copyFileSync(existingVersioned, path.join(oldConfigDir, 'downloads', 'grok-macos-aarch64'));
 
@@ -1070,6 +1070,31 @@ describe('installVersion Grok binary relocation', () => {
       'downloads',
       'grok-linux-x86_64',
     ))).toBe(true);
+  });
+
+  it.skipIf(process.platform === 'win32')('ignores a release-named wrapper and copies the real versionless Grok binary', () => {
+    const home = makeTempHome();
+    const oldDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '1.0.5', 'home', '.grok', 'downloads');
+    fs.mkdirSync(oldDownloads, { recursive: true });
+    fs.symlinkSync(path.dirname(oldDownloads), path.join(home, '.grok'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.agents', 'meta.json'), JSON.stringify({ defaults: { grok: '1.0.5' } }));
+    fs.writeFileSync(path.join(oldDownloads, 'grok-1.0.5-linux-x86_64'), '#!/bin/sh\nexit 1\n');
+    const realBinary = path.join(oldDownloads, 'grok-linux-x86_64');
+    fs.writeFileSync(realBinary, Buffer.alloc(1_000_001));
+    fs.chmodSync(realBinary, 0o755);
+
+    const binDir = path.join(home, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    const stub = path.join(binDir, 'grok');
+    fs.writeFileSync(stub, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "grok 1.0.5"; exit 0; fi\nexit 0\n', 'utf-8');
+    fs.chmodSync(stub, 0o755);
+
+    const outcome = runInstallVersionWithScript(home, 'grok', '0.2.101', 'exit 0', binDir);
+    const targetDownloads = path.join(home, '.agents', '.history', 'versions', 'grok', '0.2.101', 'home', '.grok', 'downloads');
+    expect(outcome.result?.success).toBe(true);
+    expect(fs.statSync(path.join(targetDownloads, 'grok-linux-x86_64')).size).toBe(1_000_001);
+    expect(fs.existsSync(path.join(targetDownloads, 'grok-1.0.5-linux-x86_64'))).toBe(false);
   });
 
   it.skipIf(process.platform === 'win32')('fails loudly instead of creating a literal "latest" version dir when the post-install version probe never resolves (regression)', () => {

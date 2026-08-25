@@ -1173,7 +1173,6 @@ export function setIsolatedDefault(agent: AgentId, version: string | undefined):
 function transferGrokDownloads(
   sourceDownloads: string,
   targetDownloads: string,
-  installedVersion: string,
   copy: boolean,
 ): boolean {
   if (!fs.existsSync(sourceDownloads)) return false;
@@ -1182,46 +1181,22 @@ function transferGrokDownloads(
   const entries = fs.readdirSync(sourceDownloads).filter((e) => e.startsWith('grok-'));
   if (entries.length === 0) return false;
 
-  const escapedVersion = installedVersion.replace(/\./g, '\\.');
-  const versionedPattern = new RegExp(`^grok-${escapedVersion}-`);
-  const movedPaths: string[] = [];
-
-  // Move the versioned binary first — only create the target dir once we
-  // know there is something to move into it.
-  for (const entry of entries) {
-    if (!versionedPattern.test(entry)) continue;
-    const src = path.join(sourceDownloads, entry);
-    const dst = path.join(targetDownloads, entry);
-    if (fs.existsSync(dst)) continue;
-    try {
-      fs.mkdirSync(targetDownloads, { recursive: true });
-      if (copy) fs.copyFileSync(src, dst);
-      else fs.renameSync(src, dst);
-      movedPaths.push(dst);
-    } catch {
-      /* ignore per-file failures */
-    }
-  }
-
-  if (movedPaths.length === 0) {
-    const fallback = resolveGrokFallbackBinary(sourceDownloads);
-    if (!fallback) return false;
-    const dst = path.join(targetDownloads, path.basename(fallback));
-    try {
-      fs.mkdirSync(targetDownloads, { recursive: true });
-      if (copy) fs.copyFileSync(fallback, dst);
-      else fs.renameSync(fallback, dst);
-      return true;
-    } catch {
-      return false;
-    }
+  const realBinary = resolveGrokFallbackBinary(sourceDownloads);
+  if (!realBinary) return false;
+  const transferred = path.join(targetDownloads, path.basename(realBinary));
+  try {
+    fs.mkdirSync(targetDownloads, { recursive: true });
+    if (copy) fs.copyFileSync(realBinary, transferred);
+    else fs.renameSync(realBinary, transferred);
+  } catch {
+    return false;
   }
 
   // The installer also creates a generic platform binary (e.g. grok-macos-aarch64)
   // that is a copy of the versioned binary. Move it too if its size matches.
-  const movedSize = fs.statSync(movedPaths[0]).size;
+  const movedSize = fs.statSync(transferred).size;
   for (const entry of entries) {
-    if (versionedPattern.test(entry)) continue; // already handled
+    if (entry === path.basename(realBinary)) continue;
     const src = path.join(sourceDownloads, entry);
     const dst = path.join(targetDownloads, entry);
     if (fs.existsSync(dst)) continue;
@@ -1253,7 +1228,6 @@ function transferGrokDownloads(
  */
 function relocateGrokBinaryToVersionHome(
   installationLabel: string,
-  releaseVersion: string,
   copyExisting: boolean,
 ): void {
   const hostGrokLink = path.join(getHomeDir(), agentConfigDirName('grok'));
@@ -1269,13 +1243,13 @@ function relocateGrokBinaryToVersionHome(
     'downloads'
   );
 
-  if (transferGrokDownloads(sourceDownloads, targetDownloads, releaseVersion, copyExisting)) return;
+  if (transferGrokDownloads(sourceDownloads, targetDownloads, copyExisting)) return;
 
   for (const version of listInstalledVersions('grok')) {
     if (version === installationLabel) continue;
     const candidate = path.join(getVersionHomePath('grok', version), agentConfigDirName('grok'), 'downloads');
     if (path.resolve(candidate) === path.resolve(sourceDownloads)) continue; // already tried
-    if (transferGrokDownloads(candidate, targetDownloads, releaseVersion, copyExisting)) return;
+    if (transferGrokDownloads(candidate, targetDownloads, copyExisting)) return;
   }
 }
 
@@ -1423,7 +1397,7 @@ export async function installVersion(
     // resolves to the PREVIOUS default home. Move it into the target version home
     // so version isolation is correct.
     if (agent === 'grok') {
-      relocateGrokBinaryToVersionHome(installationLabel, releaseVersion, !runInstaller);
+      relocateGrokBinaryToVersionHome(installationLabel, !runInstaller);
     }
 
     // Symlink the installed binary into the version's node_modules/.bin so
