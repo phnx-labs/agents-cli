@@ -2,6 +2,13 @@
 
 ## 1.22.48
 
+- **Test guidance no longer claims the Crabbox pool is down.** `scripts/test.sh`
+  remains Crabbox-first and now reports a failed offload without guessing that
+  the pool or provider is unavailable; its preceding command output is the
+  source of truth. The repository instructions and release-attestation comments
+  likewise describe the live default path instead of the resolved RUSH-3004
+  incident.
+
 - **On your own machine, every Claude run uses your normal login — not the
   worker setup-token (RUSH-2395).** The credential now follows **device role**,
   not run mode. A device marked `config.role: personal` (your interactive box —

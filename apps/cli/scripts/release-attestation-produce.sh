@@ -157,8 +157,7 @@ SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
 # whole ~13k-test suite there too -- welding "sign on a Mac" to "pin a Mac for
 # ten minutes". test.sh decides WHERE the suite runs; the Mac keeps only
 # sign/notarize/pack. Default is the crabbox pool; --test-device <box> targets a
-# fleet Linux box (use this while RUSH-3004 keeps the pool down); --test-here
-# restores the old in-place behavior explicitly.
+# fleet Linux box; --test-here restores the old in-place behavior explicitly.
 # bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
 # input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
 # under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.

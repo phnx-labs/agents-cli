@@ -30,8 +30,7 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   });
 
   it('fails loud and names --device when the offload target is unavailable', () => {
-    // A PATH with no `crabbox` is exactly the fleet-outage case (RUSH-3004),
-    // which is when someone is most tempted to "just run it here".
+    // A missing offload prerequisite must fail rather than silently run locally.
     const emptyBin = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopath-'));
     const r = run([], { PATH: `${emptyBin}:/usr/bin:/bin` });
     fs.rmSync(emptyBin, { recursive: true, force: true });
