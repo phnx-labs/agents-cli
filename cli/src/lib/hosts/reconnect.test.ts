@@ -19,6 +19,7 @@ import {
   remoteExitNotice,
   connectionEndedNotice,
   connectionStartedNotice,
+  startConnectionTarget,
   afterInteractiveRemoteExit,
   reconnectInteractiveSession,
   reattachRemoteCommand,
@@ -358,6 +359,22 @@ describe('connectionStartedNotice — id while the connection exists (RUSH-3227 
 
   test('a launch id is not a resume handle — print nothing', () => {
     expect(connectionStartedNotice({ kind: 'launch', id: LAUNCH_ID }, 'yosemite-m2')).toBeUndefined();
+  });
+
+  test('resume uses resumeId when hostSessionId is empty (resolveHostSessionId returns undefined)', () => {
+    expect(startConnectionTarget({ agent: 'claude', resumeId: SID })).toEqual({ kind: 'session', id: SID });
+  });
+
+  test('a fresh Claude id wins', () => {
+    expect(startConnectionTarget({ agent: 'claude', hostSessionId: SID })).toEqual({ kind: 'session', id: SID });
+  });
+
+  test('run auto never prints — its forwarded --session-id is only real on a claude pick', () => {
+    expect(startConnectionTarget({ agent: 'auto', hostSessionId: SID, resumeId: SID })).toBeUndefined();
+  });
+
+  test('a non-Claude fresh launch with no id prints nothing', () => {
+    expect(startConnectionTarget({ agent: 'grok' })).toBeUndefined();
   });
 });
 

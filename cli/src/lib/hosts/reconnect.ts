@@ -370,6 +370,22 @@ export function connectionStartedNotice(target: ReconnectTarget, host: string): 
 }
 
 /**
+ * The id to print as an interactive `--device` stream starts. Resume is a
+ * real session id (`resolveHostSessionId` returns undefined on `--resume`);
+ * Claude's forced id is the other. `run auto` is excluded: its forwarded
+ * `--session-id` is only real if the remote pick is Claude.
+ */
+export function startConnectionTarget(opts: {
+  agent: string;
+  hostSessionId?: string;
+  resumeId?: string;
+}): ReconnectTarget | undefined {
+  if (opts.agent === RUN_AUTO_KEYWORD) return undefined;
+  const id = opts.hostSessionId ?? opts.resumeId;
+  return id ? { kind: 'session', id } : undefined;
+}
+
+/**
  * Decide what happens after an interactive `--device` stream returns.
  *
  * Auto-reconnect only when the link dropped (255) AND the run is tmux-hosted

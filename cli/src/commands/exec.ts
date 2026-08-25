@@ -1823,10 +1823,17 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 `[hosts] dispatch interactive ${runAgent}${runVersion ? `@${runVersion}` : ''} -> ${host.name}\n`,
               ));
             }
-            if (hostSessionId) {
-              const { connectionStartedNotice } = await import('../lib/hosts/reconnect.js');
-              const started = connectionStartedNotice({ kind: 'session', id: hostSessionId }, host.name);
-              if (started) process.stderr.write(chalk.gray(started));
+            {
+              const { connectionStartedNotice, startConnectionTarget } = await import('../lib/hosts/reconnect.js');
+              const startTarget = startConnectionTarget({
+                agent: runAgent,
+                hostSessionId,
+                resumeId,
+              });
+              if (startTarget) {
+                const started = connectionStartedNotice(startTarget, host.name);
+                if (started) process.stderr.write(chalk.gray(started));
+              }
             }
             const exitCode = await runInteractiveOnHost(host, {
               agent: runAgent,
