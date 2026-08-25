@@ -245,11 +245,11 @@ function readerPresencePath(): string {
  * the daemon warm tick can gate the expensive `ps`+`lsof` gather on reader
  * presence and skip it when no watcher has checked in recently.
  */
-export function noteActiveSessionsJournalReader(): void {
+export function noteActiveSessionsJournalReader(nowMs: number = Date.now()): void {
   try {
     const p = readerPresencePath();
     fs.mkdirSync(path.dirname(p), { recursive: true });
-    fs.writeFileSync(p, String(Date.now()));
+    fs.writeFileSync(p, String(nowMs));
   } catch { /* best-effort: a failed write does not block the caller */ }
 }
 
