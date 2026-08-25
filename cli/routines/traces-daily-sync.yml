@@ -25,7 +25,7 @@ command: |
   command -v agents >/dev/null 2>&1 || { echo "ERROR: agents not found on PATH"; exit 1; }
 
   # Verify we have a Phoenix session
-  if ! agents auth status --quiet 2>/dev/null; then
+  if ! agents auth whoami --json >/dev/null 2>&1; then
     echo "ERROR: not signed in to Phoenix — run 'agents auth login' on this device"
     exit 1
   fi
