@@ -43,10 +43,23 @@ function loadNodeSqlite(): unknown {
   }
 }
 
-// Keep Node on createRequire() so Vitest doesn't try to prebundle the built-in
-// sqlite module as a userland package during test collection.
+// Keep BOTH runtimes on createRequire() so Vitest doesn't try to prebundle the
+// built-in sqlite module as a userland package during test collection.
+//
+// The Bun arm used to be `await import('bun:sqlite' as string)`, which made this
+// a TOP-LEVEL AWAIT. esbuild cannot lower top-level await to CJS, so every test
+// that spawns a subprocess through `tsx` (CJS mode) died at transform time with
+// `Top-level await is currently not supported with the "cjs" output format` --
+// 49 failures across 7 files, none of which touch sqlite. `require` is
+// synchronous, so the await disappears and with it the whole failure class.
+//
+// The specifier is held in a variable, not written inline: a literal
+// `require('bun:sqlite')` is statically analyzable, so bundlers and Vitest's
+// collector try to resolve a module that does not exist off-Bun. That
+// indirection is what the old `as string` cast was doing for the dynamic import.
+const BUN_SQLITE = 'bun:sqlite';
 const sqliteMod = isBun
-  ? await import('bun:sqlite' as string)
+  ? (require as (id: string) => unknown)(BUN_SQLITE)
   : loadNodeSqlite();
 
 // bun:sqlite exports `Database`; node:sqlite exports `DatabaseSync`.
