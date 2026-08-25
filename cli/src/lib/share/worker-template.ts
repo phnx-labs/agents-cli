@@ -15,12 +15,17 @@
 //     A managed deployment sets PHOENIX_ID_BASE; BYO sets WRITE_TOKEN; the
 //     platform endpoint may set both. Fail loud (401) when neither authenticates.
 //     Writes the body to R2 via the BUCKET binding, storing visibility
-//     (public|unlisted; org → 400 in P1), owner, an optional expires-at, plus
-//     provenance (agent/session/host/repo/date), a label, and any `--meta`
-//     entries in object metadata. Overwriting an existing slug first copies the
-//     current object to <slug>/rev-<ts>-<rand> (revision history) unless
+//     (public|unlisted|me|org), owner, org_domain (org only), an optional
+//     expires-at, plus provenance (agent/session/host/repo/date), a label, and
+//     any `--meta` entries in object metadata. me/org require a Phoenix
+//     identity (BYO WRITE_TOKEN cannot publish them). org from a public inbox
+//     domain is 400. Overwriting an existing slug first copies the current
+//     object to <slug>/rev-<ts>-<rand> (revision history) unless
 //     x-share-no-revision is set.
-//   - GET  /<username>/<slug>  — public; streams the object from R2, 410s (and lazily
+//   - GET  /<username>/<slug>  — public|unlisted are anonymous; me requires the
+//     Phoenix owner, org requires a same-domain Phoenix identity (Bearer, then
+//     HMAC cookie, then phoenix_ticket). Unauthenticated me/org 302s to
+//     Phoenix login (or 401 JSON if PHOENIX_ID_BASE is unset). 410s (and lazily
 //     deletes) once its expiry has passed. A bucket lifecycle rule is the durable
 //     sweeper; this is the immediate gate.
 //   - GET  /<username>/<slug>?revisions=json — machine-readable history of the
@@ -79,6 +84,19 @@ export default {
       const vis = normalizeVisibility(request.headers.get('x-share-visibility'));
       if (vis.error) return vis.error;
       const visibility = vis.value;
+      if (visibility === 'me' || visibility === 'org') {
+        const phoenixBase = typeof env.PHOENIX_ID_BASE === 'string' ? env.PHOENIX_ID_BASE.replace(/\\/+$/, '') : '';
+        if (auth.kind !== 'phoenix' || !phoenixBase) {
+          return json({ error: 'visibility me/org requires Phoenix identity' }, 400);
+        }
+        if (visibility === 'org') {
+          const domain = emailDomain(auth.email);
+          if (!domain) return json({ error: 'org visibility requires a verified email domain' }, 400);
+          if (PUBLIC_INBOX_DOMAINS.indexOf(domain) !== -1) {
+            return json({ error: 'org visibility cannot use a public email domain', domain: domain }, 400);
+          }
+        }
+      }
       const segments = path.split('/').filter(Boolean);
       if (auth.kind === 'phoenix') {
         const expected = phoenixHandle(auth);
@@ -91,7 +109,8 @@ export default {
       const expiresAt = request.headers.get('x-share-expires-at') || '';
       // 'unlisted' hides the page from the public gallery + JSON listing while
       // keeping the direct URL world-readable (capability URL, not secret).
-      // GET also sends X-Robots-Tag: noindex for unlisted objects.
+      // me/org are also hidden from gallery/listing; GET is identity-gated
+      // and always sends X-Robots-Tag: noindex (same as unlisted).
       const contentType = request.headers.get('content-type') || 'text/html; charset=utf-8';
       // Provenance (RUSH-2683): captured client-side from the exec env/git/clock,
       // never invented here — a header is simply absent when the CLI had nothing
@@ -132,6 +151,7 @@ export default {
           ? auth.owner
           : (env.SHARE_NAMESPACE || segments[0] || 'byo');
       if (owner) customMetadata['owner'] = owner;
+      if (visibility === 'org') customMetadata['org_domain'] = emailDomain(auth.email);
       if (agent) customMetadata['agent'] = agent;
       if (session) customMetadata['session'] = session;
       if (host) customMetadata['host'] = host;
@@ -207,13 +227,26 @@ export default {
         await env.BUCKET.delete(path);
         return new Response('gone — this link has expired', { status: 410, headers: { 'content-type': 'text/plain' } });
       }
+      const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
+      if (visibility === 'me' || visibility === 'org') {
+        const viewer = await resolveViewer(request, env, url);
+        if (viewer.redirect) return viewer.redirect;
+        if (viewer.error) return viewer.error;
+        if (!viewer.identity) return bounceToLogin(url, env);
+        if (!viewerMayRead(visibility, obj.customMetadata, viewer.identity)) {
+          return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+        }
+      }
       const headers = new Headers();
       obj.writeHttpMetadata(headers);
       headers.set('etag', obj.httpEtag);
       if (!headers.has('content-type')) headers.set('content-type', 'text/html; charset=utf-8');
-      headers.set('cache-control', 'public, max-age=60');
-      if (obj.customMetadata && obj.customMetadata.visibility === 'unlisted') {
+      if (visibility === 'me' || visibility === 'org') {
+        headers.set('cache-control', 'private, no-store');
         headers.set('X-Robots-Tag', 'noindex');
+      } else {
+        headers.set('cache-control', 'public, max-age=60');
+        if (visibility === 'unlisted') headers.set('X-Robots-Tag', 'noindex');
       }
       return new Response(request.method === 'HEAD' ? null : obj.body, { status: 200, headers });
     }
@@ -268,8 +301,8 @@ async function renderGallery(bucket, origin, user, method) {
   const activeObjects = objects.filter(o => {
     if (isRevisionKey(o.key)) return false;
     if (o.key.endsWith('.png')) return false;
-    // Unlisted pages are reachable by direct URL only — never on the gallery.
-    if (o.customMetadata && o.customMetadata.visibility === 'unlisted') return false;
+    // Unlisted / me / org pages are reachable by direct URL only — never on the gallery.
+    if (isHiddenFromGallery(o.customMetadata && o.customMetadata.visibility)) return false;
     const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
     return !(expiresAt && Date.now() > Date.parse(expiresAt));
   });
@@ -331,10 +364,10 @@ async function renderListing(bucket, origin, user, method) {
   const items = objects
     .filter(o => {
       // Mirror the gallery: hide revisions, sibling .png OG covers, expired
-      // pages, and unlisted pages — the listing is the machine-readable public surface.
+      // pages, and unlisted/me/org pages — the listing is the machine-readable public surface.
       if (isRevisionKey(o.key)) return false;
       if (o.key.endsWith('.png')) return false;
-      if (o.customMetadata && o.customMetadata.visibility === 'unlisted') return false;
+      if (isHiddenFromGallery(o.customMetadata && o.customMetadata.visibility)) return false;
       const expiresAt = o.customMetadata && o.customMetadata['expires-at'];
       return !(expiresAt && now > Date.parse(expiresAt));
     })
@@ -405,7 +438,10 @@ async function renderRevisions(bucket, origin, key, method) {
 // before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
 // One list, reused both to strip a same-named --meta collision on write and
 // to split arbitrary --meta entries back out on read.
-var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'owner', 'agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'];
+var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'];
+var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
+var SHARE_COOKIE = '__Host-phoenix_share';
+var SHARE_COOKIE_MAX_AGE = 604800;
 
 // Everything in customMetadata that ISN'T one of the reserved provenance/label
 // keys above — i.e. the caller's own \`--meta key=value\` entries. Surfaced on
@@ -496,13 +532,168 @@ async function claimHandle(bucket, handle, userId) {
   return {};
 }
 
-// P1 visibility: public | unlisted. 'org' (and anything else) is 400 — org is Phase 2.
 function normalizeVisibility(raw) {
   const v = (raw || '').trim().toLowerCase();
   if (!v || v === 'public') return { value: 'public' };
-  if (v === 'unlisted') return { value: 'unlisted' };
-  if (v === 'org') return { error: json({ error: 'visibility org is not supported yet' }, 400) };
-  return { error: json({ error: 'visibility must be public or unlisted' }, 400) };
+  if (v === 'unlisted' || v === 'me' || v === 'org') return { value: v };
+  return { error: json({ error: 'visibility must be public, unlisted, me, or org' }, 400) };
+}
+
+function emailDomain(email) {
+  if (!email) return '';
+  const at = String(email).lastIndexOf('@');
+  if (at < 0) return '';
+  return String(email).slice(at + 1).toLowerCase();
+}
+
+function isHiddenFromGallery(visibility) {
+  return visibility === 'unlisted' || visibility === 'me' || visibility === 'org';
+}
+
+function viewerMayRead(visibility, meta, identity) {
+  if (visibility === 'me') {
+    const owner = meta && meta.owner;
+    return !!owner && owner === identity.userId;
+  }
+  if (visibility === 'org') {
+    const stamped = meta && meta.org_domain;
+    if (!stamped) return false;
+    return emailDomain(identity.email) === String(stamped).toLowerCase();
+  }
+  return true;
+}
+
+function bounceToLogin(url, env) {
+  const base = typeof env.PHOENIX_ID_BASE === 'string' ? env.PHOENIX_ID_BASE.replace(/\\/+$/, '') : '';
+  if (!base) return json({ error: 'phoenix login is not configured' }, 401);
+  return new Response(null, {
+    status: 302,
+    headers: { Location: base + '/login?return=' + encodeURIComponent(url.toString()) },
+  });
+}
+
+function readCookie(request, name) {
+  const header = request.headers.get('Cookie') || '';
+  const parts = header.split(';');
+  for (let i = 0; i < parts.length; i++) {
+    const p = parts[i];
+    const eq = p.indexOf('=');
+    if (eq < 0) continue;
+    if (p.slice(0, eq).trim() === name) return p.slice(eq + 1).trim();
+  }
+  return '';
+}
+
+function toB64Url(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+}
+
+function fromB64Url(s) {
+  const pad = s.length % 4 === 0 ? '' : '='.repeat(4 - (s.length % 4));
+  const b64 = s.replace(/-/g, '+').replace(/_/g, '/') + pad;
+  const bin = atob(b64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
+function bufToHex(buf) {
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hmacHex(secret, data) {
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, new TextEncoder().encode(data));
+  return bufToHex(sig);
+}
+
+async function signShareCookie(identity, env) {
+  const secret = typeof env.WRITE_TOKEN === 'string' ? env.WRITE_TOKEN : '';
+  if (!secret) return '';
+  const exp = Math.floor(Date.now() / 1000) + SHARE_COOKIE_MAX_AGE;
+  const payload = identity.userId + '|' + (identity.email || '') + '|' + exp;
+  const sig = await hmacHex(secret, payload);
+  const value = toB64Url(payload) + '.' + sig;
+  return SHARE_COOKIE + '=' + value + '; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=' + SHARE_COOKIE_MAX_AGE;
+}
+
+async function identityFromCookie(request, env) {
+  const secret = typeof env.WRITE_TOKEN === 'string' ? env.WRITE_TOKEN : '';
+  if (!secret) return null;
+  const raw = readCookie(request, SHARE_COOKIE);
+  if (!raw) return null;
+  const dot = raw.lastIndexOf('.');
+  if (dot < 1) return null;
+  let payload;
+  try {
+    payload = fromB64Url(raw.slice(0, dot));
+  } catch {
+    return null;
+  }
+  const sig = raw.slice(dot + 1);
+  const expected = await hmacHex(secret, payload);
+  if (!safeEqual(sig, expected)) return null;
+  const first = payload.indexOf('|');
+  const last = payload.lastIndexOf('|');
+  if (first < 0 || last <= first) return null;
+  const userId = payload.slice(0, first);
+  const email = payload.slice(first + 1, last);
+  const cookieExp = Number(payload.slice(last + 1));
+  if (!userId || !Number.isFinite(cookieExp) || Math.floor(Date.now() / 1000) > cookieExp) return null;
+  return { userId: userId, email: email };
+}
+
+async function redeemTicket(ticket, env) {
+  const base = typeof env.PHOENIX_ID_BASE === 'string' ? env.PHOENIX_ID_BASE.replace(/\\/+$/, '') : '';
+  if (!base || !ticket) return null;
+  let res;
+  try {
+    res = await fetch(base + '/api/v1/auth/ticket', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ticket: ticket }),
+    });
+  } catch {
+    return null;
+  }
+  if (!res.ok) return null;
+  let body;
+  try {
+    body = await res.json();
+  } catch {
+    return null;
+  }
+  if (!body || typeof body.userId !== 'string' || !body.userId) return null;
+  return { userId: body.userId, email: typeof body.email === 'string' ? body.email : '' };
+}
+
+async function resolveViewer(request, env, url) {
+  const claims = await hooks.verifyPhoenixToken(request, env);
+  if (claims && typeof claims.userId === 'string' && claims.userId) {
+    return { identity: { userId: claims.userId, email: typeof claims.email === 'string' ? claims.email : '' } };
+  }
+  const cookieId = await identityFromCookie(request, env);
+  if (cookieId) return { identity: cookieId };
+  const ticket = url.searchParams.get('phoenix_ticket');
+  if (!ticket) return {};
+  const redeemed = await redeemTicket(ticket, env);
+  if (!redeemed) return { error: json({ error: 'invalid ticket' }, 401) };
+  const cookie = await signShareCookie(redeemed, env);
+  if (!cookie) return { error: json({ error: 'phoenix login is not configured' }, 401) };
+  url.searchParams.delete('phoenix_ticket');
+  const headers = new Headers();
+  headers.set('Location', url.toString());
+  headers.append('Set-Cookie', cookie);
+  return { redirect: new Response(null, { status: 302, headers: headers }) };
 }
 
 async function defaultVerifyPhoenixToken(request, env) {
