@@ -238,6 +238,7 @@ one-off command in a PR.
 | CLI release | [`cli/scripts/release.sh`](cli/scripts/release.sh) `<version> [--apply]` | zero-config self-routing publish of `@phnx-labs/agents-cli` to npm: runnable from any fleet box with an empty environment — requires an exact-tree attestation (it runs **no** tests itself; `release-attestation-produce.sh` does, offloaded via `test.sh`), PR + CI, then a promote-only publish on the home base — any OS, `mac-mini` by default, overridable with `--device <name>` (RUSH-3026: the tarball no longer needs per-release signing); prints a `[n/6]` phase tracker. Legacy `@swarmify` shim built for reference, not published |
 | ext / agents-dbg build + release | in [phnx-labs/agi-ext](https://github.com/phnx-labs/agi-ext) `scripts/` | AGI EXT and the agents-dbg app moved with the extension repo (RUSH-3189) |
 | computer-mac build | [`native/computer-mac/scripts/build.sh`](native/computer-mac/scripts/build.sh) | Swift daemon |
+| computer-win release | [`cli/scripts/publish-computer-win.sh`](cli/scripts/publish-computer-win.sh) `<x.y.z> [--apply]` | cuts `computer-win/v<x.y.z>`, which is what triggers the exe build + upload. Dry-run by default; refuses an existing tag (helper releases are immutable — the upload uses `--clobber`). Symmetric with `publish-computer-helper-mac.sh`. Bump the `computer-win` floor in [`cli/src/lib/helper-versions.ts`](cli/src/lib/helper-versions.ts) afterwards — the tag makes the build downloadable, the floor makes a CLI ask for it |
 
 ### Never install a dev build over the user's `agents`
 
