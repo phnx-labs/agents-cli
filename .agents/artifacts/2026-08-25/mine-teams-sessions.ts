@@ -5,7 +5,8 @@
  *
  * Discovery uses the bounded sessions.db tool index. Evidence comes from the
  * original transcript bodies streamed by `agents sessions export` on the host
- * that owns each session. The output contains no raw transcript bodies.
+ * that owns each session. Output is permanently anonymized: raw identifiers,
+ * commands, outputs, and transcript excerpts never leave this process.
  */
 
 type ToolCall = {
@@ -119,10 +120,11 @@ const candidates = discovered.sessions
     ...session,
     calls: session.calls.filter((call) => launchPattern.test(call.input ?? "")),
   }))
-  .filter((session) => session.calls.length > 0);
+  .filter((session) => session.calls.length > 0)
+  .sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? ''));
 
 // Forked transcripts can retain the exact same historical tool call. Count the
-// operation once while preserving the earliest indexed session as its source.
+// tool call once while preserving the earliest-created session as its source.
 const seenCalls = new Set<string>();
 for (const session of candidates) {
   session.calls = session.calls.filter((call) => {
@@ -133,6 +135,14 @@ for (const session of candidates) {
   });
 }
 const uniqueCandidates = candidates.filter((session) => session.calls.length > 0);
+const machineAliases = new Map(
+  [...new Set(uniqueCandidates.map((session) => session.machine))]
+    .sort()
+    .map((machine, index) => [machine, `host-${index + 1}`]),
+);
+const sessionAliases = new Map(
+  uniqueCandidates.map((session, index) => [session.id, `S${String(index + 1).padStart(3, '0')}`]),
+);
 
 const byMachine = Map.groupBy(uniqueCandidates, (session) => session.machine);
 const exported = new Map<string, BundleRow>();
@@ -153,25 +163,21 @@ for (const [machine, sessions] of byMachine) {
   }
 }
 
-const incidents = uniqueCandidates.flatMap((session) => session.calls.map((call, callIndex) => {
+const incidents = uniqueCandidates.flatMap((session) => session.calls.map((call) => {
   const row = exported.get(session.id);
   const nearby = row?.body ? nearbyEvidence(row.body, call) : "";
   const evidence = [call.output, nearby].filter(Boolean).join("\n");
   return {
-    sessionId: session.id,
-    shortId: session.shortId,
-    machine: session.machine,
+    session: sessionAliases.get(session.id),
+    host: machineAliases.get(session.machine),
     agent: session.agent,
     version: row?.body?.match(/\"version\":\"([^\"]+)\"/)?.[1],
     transcriptAgent: row?.agent,
     timestamp: call.timestamp ?? session.timestamp,
-    project: session.project,
-    callIndex,
-    command: (call.input ?? "").slice(0, 4000),
-    immediateOutput: (call.output ?? "").slice(0, 4000),
+    launchActions: [...(call.input ?? '').matchAll(/(?:agents|ag)\s+teams\s+(create|add|start)\b(?!\s+--help)/gi)]
+      .map((match) => match[1]!.toLowerCase()),
     categories: classify(evidence),
     hasOriginalTranscript: Boolean(row?.body),
-    nearbyEvidence: nearby.slice(0, 6000),
   };
 }));
 
@@ -180,17 +186,21 @@ const report = {
   windowDays: 100,
   requestedAgents: [...wantedAgents],
   coverage: discovered.coverage,
-  queryWarnings: query.stderr.trim().split("\n").filter(Boolean),
+  unreachableOrIncompatibleHostCount: query.stderr.trim().split("\n").filter(Boolean).length,
   candidateSessions: uniqueCandidates.length,
-  launchCalls: incidents.length,
-  originalTranscriptsRecovered: new Set(incidents.filter((item) => item.hasOriginalTranscript).map((item) => item.sessionId)).size,
-  hostFailures,
+  launchBearingToolCalls: incidents.length,
+  originalTranscriptsRecovered: new Set(incidents.filter((item) => item.hasOriginalTranscript).map((item) => item.session)).size,
+  hostFailures: hostFailures.map((failure) => ({
+    host: machineAliases.get(failure.machine) ?? 'unindexed-host',
+    sessionCount: failure.sessionCount,
+    failed: true,
+  })),
   diagnosticOnlySessionsExcluded: discovered.sessions.filter((session) =>
     wantedAgents.has(session.agent) && session.calls.some((call) => diagnosticPattern.test(call.input ?? "")) &&
     !session.calls.some((call) => launchPattern.test(call.input ?? ""))
   ).length,
   byAgent: Object.fromEntries([...Map.groupBy(incidents, (item) => item.agent)].map(([agent, rows]) => [agent, rows.length])),
-  byMachine: Object.fromEntries([...Map.groupBy(incidents, (item) => item.machine)].map(([machine, rows]) => [machine, rows.length])),
+  byHost: Object.fromEntries([...Map.groupBy(incidents, (item) => item.host)].map(([host, rows]) => [host, rows.length])),
   byCategory: Object.fromEntries([...Map.groupBy(incidents.flatMap((item) => item.categories), (name) => name)].map(([name, rows]) => [name, rows.length])),
   incidents,
 };

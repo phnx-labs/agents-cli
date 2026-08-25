@@ -4,12 +4,12 @@ Tracking: RUSH-3195
 
 ## Executive result
 
-The fleet corpus contains **21 unique team-launch operations** in the last 100
+The fleet corpus contains **21 unique team-launch-bearing tool calls** in the last 100
 days after fork duplicates and help-only calls are removed. Every one of those
-21 operations was recovered from its original harness transcript. The observed
-orchestrators were Claude (14 launches across versions 2.1.186–2.1.225) and
-Codex (7 launches); no Grok, Kimi, or Cursor session in the indexed corpus
-orchestrated a launch. Those harnesses do appear as teammates, so the absence is
+21 calls was recovered from its original harness transcript. The observed
+callers were Claude (14 calls across versions 2.1.186–2.1.225) and
+Codex (7 calls); no Grok, Kimi, or Cursor session in the indexed corpus
+issued such a call. Those harnesses do appear as teammates, so the absence is
 an observation about who invoked the command, not proof that they cannot.
 
 The dominant problem is not one catastrophic spawn bug. It is that launching a
@@ -27,7 +27,7 @@ make those compensations unnecessary.
    `sessions.db` for `agents teams` calls in the last 100 days.
 2. Keeps real `create`, `add`, and `start` calls for Claude, Codex, Grok, Kimi,
    and Cursor; it excludes help/status-only calls and de-duplicates calls copied
-   into forked transcripts.
+   into forked transcripts, selecting the earliest-created source session.
 3. Streams a redacted session bundle from the owning host and reads the original
    harness body rather than treating the SQLite preview as the transcript.
 4. Captures the launch result and following native transcript records for
@@ -37,8 +37,8 @@ make those compensations unnecessary.
 At the final run, the search index reported **3,906 transcript files**, **217,120
 tool calls**, **106 size-limited files**, and **306 files still awaiting tool-call
 backfill** in the 100-day selection. One registered host was unreachable. The
-21-launch count is therefore a verified lower bound, not a claim of mathematical
-completeness. All 21 discovered launch transcripts were recovered successfully.
+21-call count is therefore a verified lower bound, not a claim of mathematical
+completeness. All 21 discovered source transcripts were recovered successfully.
 
 ## Observed failure and friction classes
 
