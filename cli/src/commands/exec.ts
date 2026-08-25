@@ -1886,7 +1886,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
             // For `run auto` prefer the join-resolved id (the harness the remote
             // ACTUALLY picked) over the explicit --session-id only claude adopts.
-            const { pickReconnectTarget, reconnectInteractiveSession, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
+            const { pickReconnectTarget, reconnectInteractiveSession, connectionEndedNotice, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
             const reconnectTarget = pickReconnectTarget({
               agent: runAgent,
               sessionId: hostSessionId,
@@ -1904,6 +1904,10 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                   }),
                 );
               }
+              // Non-255: the TTY ended (agent quit, clean detach). OpenSSH may
+              // have printed only "Shared connection … closed." — leave the
+              // session id on the shell they just landed in (RUSH-3227).
+              process.stderr.write(connectionEndedNotice(reconnectTarget, host.name));
             }
             process.exit(exitCode);
           }
@@ -2622,7 +2626,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           const peer = sessionRecoveryPeer(session);
           if (peer) {
             const { runOnPeer } = await import('../lib/session/remote-list.js');
-            const routed = await runOnPeer(sessionRecoveryRunArgs(session), peer, { tty: true });
+            const routed = await runOnPeer(sessionRecoveryRunArgs(session), peer, { tty: true, sessionId: session.id });
             if (routed === 'no-target') {
               console.error(chalk.red(
                 `Cannot recover session ${session.shortId}: origin device ${peer} is not a registered reachable peer.`,

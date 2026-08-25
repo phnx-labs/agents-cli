@@ -320,9 +320,10 @@ export function targetLabel(target: ReconnectTarget): string {
  * The command to hand a user whose reconnect gave up.
  *
  * A `session` target has a real id, so `agents sessions resume <id>` does the
- * same attach-else-recover the loop was attempting. (It used to say `agents
- * reconnect`, which is deprecated and hidden — `commands/reconnect.ts` — so the
- * advice printed at the worst possible moment was itself stale; RUSH-3125.)
+ * same attach-else-recover the loop was attempting. The full id is labeled on
+ * its own `Session` line, not only inside the command (RUSH-3227). (It used to
+ * say `agents reconnect`, which is deprecated and hidden — `commands/reconnect.ts`
+ * — so the advice printed at the worst possible moment was itself stale; RUSH-3125.)
  *
  * A `launch` target has no id a user-facing verb accepts: the mapping lives in
  * the peer's hook records, which is exactly why reconnect uses it. So point at
@@ -330,10 +331,30 @@ export function targetLabel(target: ReconnectTarget): string {
  * local command for a string no human ever types.
  */
 export function recoveryHint(target: ReconnectTarget, host: string): string {
-  return target.kind === 'session'
-    ? `  agents sessions resume ${target.id}\n`
-    : `  agents ssh ${host} 'agents sessions focus --launch-id ${target.id} --local'\n`
-      + `  or pick it:  agents sessions --active\n`;
+  // The full id is labeled on its own line: burying it only inside a command is
+  // how a dropped SSH tab used to land on a bare shell with nothing copyable
+  // (RUSH-3227). Resume still sits underneath so the user can paste one verb.
+  if (target.kind === 'session') {
+    return `  Session ${target.id}\n  Resume:  agents sessions resume ${target.id}\n`;
+  }
+  return `  Launch ${target.id}\n  agents ssh ${host} 'agents sessions focus --launch-id ${target.id} --local'\n`
+    + `  or pick it:  agents sessions --active\n`;
+}
+
+/**
+ * Notice shown when an interactive remote connection has ended and the user is
+ * back at a local shell — clean detach, agent exit, or a drop that is NOT
+ * about to auto-reconnect. The OpenSSH close line (`Shared connection to …
+ * closed.`) names the host and nothing else; this is the handle they need to
+ * get back in (RUSH-3227).
+ */
+export function connectionEndedNotice(
+  target: ReconnectTarget,
+  host: string,
+  opts: { dropped?: boolean } = {},
+): string {
+  const verb = opts.dropped ? 'dropped' : 'closed';
+  return `\nConnection to ${host} ${verb}.\n${recoveryHint(target, host)}`;
 }
 
 /** What the launcher knows about a run once its interactive stream has returned. */
@@ -501,6 +522,11 @@ export async function reconnectInteractiveSession(opts: ReconnectLoopOpts): Prom
           : exhaustedNotice(opts.target, opts.host.name));
       } else if (decision.code === REMOTE_EXIT_255_REMAPPED) {
         write(remoteExitNotice(opts.target, opts.host.name));
+      } else {
+        // Clean detach / agent exit after a reattach: the user is at a local
+        // shell and still needs the session id (RUSH-3227). Spent-budget and
+        // remapped-255 notices already carry recoveryHint.
+        write(connectionEndedNotice(opts.target, opts.host.name));
       }
       return decision.code;
     }

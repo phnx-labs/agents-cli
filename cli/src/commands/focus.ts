@@ -723,7 +723,7 @@ async function focusResolvedSession(
   const remote = sessionProcessHost(meta, self);
   if (remote) {
     console.log(chalk.gray(`Recovering ${meta.shortId} on ${remote}…`));
-    const rc = await runOnPeer(sessionRecoveryRunArgs(meta), remote, { tty: true });
+    const rc = await runOnPeer(sessionRecoveryRunArgs(meta), remote, { tty: true, sessionId: meta.id });
     if (rc === 'no-target') {
       console.error(chalk.red(`Cannot recover ${meta.shortId}: ${remote} is unreachable.`));
       process.exitCode = 1;
@@ -1006,7 +1006,7 @@ const resumeInNewTab: UnreachableFallback = async (s, remote) => {
   // it actually delivers you to the session (the peer picks the right version + HOME).
   if (remote) {
     console.log(chalk.gray(`${shortId(s)} has no live terminal on ${remote} — resuming it there over SSH…`));
-    const rc = await runOnPeer(sessionRecoveryRunArgs({ id }), remote, { tty: true });
+    const rc = await runOnPeer(sessionRecoveryRunArgs({ id }), remote, { tty: true, sessionId: id });
     if (rc === 'no-target') {
       console.log(chalk.red(`${remote} isn't reachable as a device. Try: agents devices sync`));
       console.log(chalk.gray(`  recovery must run on ${remote}, where the indexed session originated`));

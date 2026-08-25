@@ -62,7 +62,7 @@ export async function attachAction(id: string): Promise<void> {
   // process on the owning machine.
   const peer = sessionRecoveryPeer(meta);
   if (peer) {
-    const routed = await runOnPeer(attachRecoveryArgs(meta), peer, { tty: true });
+    const routed = await runOnPeer(attachRecoveryArgs(meta), peer, { tty: true, sessionId: meta.id });
     if (routed === 'no-target') {
       console.error(chalk.red(`Cannot attach ${meta.shortId}: origin device ${peer} is not a registered reachable peer.`));
       process.exitCode = 1;

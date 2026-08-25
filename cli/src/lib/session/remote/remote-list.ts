@@ -20,9 +20,11 @@ import {
   controlOpts,
   assertValidSshTarget,
   shellQuote,
+  SSH_CONN_FAILURE_CODE,
   REMOTE_STDOUT_MAX_BYTES,
   RemoteUtf8Accumulator,
 } from '../../ssh-exec.js';
+import { connectionEndedNotice } from '../../hosts/reconnect.js';
 import { sshTargetFor } from '../../devices/connect.js';
 import { resolveExplicitTargetSet } from '../../devices/resolve-target.js';
 import { loadDevices, isDialableDevice, type DeviceProfile } from '../../devices/registry.js';
@@ -672,11 +674,15 @@ export async function fetchPeerPreviewDigest(
  * that would inherit it for its whole life — `agents browser start` inside it
  * would then be refused as a cross-machine drive. A one-shot `--device` command
  * can carry the marker; a session cannot.
+ *
+ * `opts.sessionId` (with `tty`) prints the session id and resume command when
+ * the SSH hop ends, so OpenSSH's `Shared connection … closed.` is not the last
+ * thing on the local shell (RUSH-3227). Omit it for one-shot non-TTY renders.
  */
 export async function runOnPeer(
   args: string[],
   machine: string,
-  opts: { tty?: boolean; env?: Record<string, string> } = {},
+  opts: { tty?: boolean; env?: Record<string, string>; sessionId?: string } = {},
 ): Promise<'ok' | 'no-target'> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return 'no-target';
@@ -702,6 +708,17 @@ export async function runOnPeer(
       process.stderr.write(chalk.red(`Failed to reach ${machine}: ${err?.message ?? 'ssh failed to launch'}\n`));
       resolve('ok');
     });
-    child.on('close', () => resolve('ok'));
+    child.on('close', (code) => {
+      // Interactive TTY hop: OpenSSH prints "Shared connection … closed." and
+      // nothing else. Leave the session id on the local shell (RUSH-3227).
+      if (opts.tty && opts.sessionId) {
+        process.stderr.write(connectionEndedNotice(
+          { kind: 'session', id: opts.sessionId },
+          machine,
+          { dropped: code === SSH_CONN_FAILURE_CODE },
+        ));
+      }
+      resolve('ok');
+    });
   });
 }

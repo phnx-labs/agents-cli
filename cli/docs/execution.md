@@ -38,7 +38,9 @@ Placement chooses the machine after intent is normalized. Remote dispatch serial
 same command and environment contract, maps the working directory, and starts the same
 engine on the target. Interactive remote work uses a reconnectable terminal transport so
 link loss does not kill the harness. If that durability prerequisite is unavailable, the
-launch fails before doing work.
+launch fails before doing work. When the local SSH client exits — clean detach,
+agent quit, or a drop that is not auto-reconnecting — the CLI prints the full
+session id and `agents sessions resume <id>` so the shell is not a dead end.
 
 ```mermaid
 sequenceDiagram

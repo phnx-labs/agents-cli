@@ -127,7 +127,7 @@ export async function runStrictResume(
     const rc = await runOnPeer(
       buildResumeRemoteArgs(outcome.session.id, prompt, options),
       owner,
-      { tty: !!process.stdout.isTTY, env: { [RESUME_PINNED_ENV]: '1' } },
+      { tty: !!process.stdout.isTTY, env: { [RESUME_PINNED_ENV]: '1' }, sessionId: outcome.session.id },
     );
     if (rc === 'no-target') {
       console.error(chalk.red(`Session ${outcome.session.shortId} lives on ${owner}, which isn't a reachable device right now.`));

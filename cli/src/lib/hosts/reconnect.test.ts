@@ -17,6 +17,7 @@ import {
   exhaustedNotice,
   unstableNotice,
   remoteExitNotice,
+  connectionEndedNotice,
   reconnectInteractiveSession,
   reattachRemoteCommand,
   pickReconnectTarget,
@@ -308,11 +309,41 @@ describe('recoveryHint — the command printed when the loop gives up must exist
     expect(hint).not.toContain('agents reconnect');
   });
 
+  test('a session target labels the full id on its own line, not only inside the command (RUSH-3227)', () => {
+    const hint = recoveryHint(SESSION_TARGET, 'zion');
+    expect(hint).toContain(`Session ${SID}`);
+    expect(hint).toContain('Resume:');
+  });
+
   test("a launch target points at the peer's own resolver — no local verb takes a launch id", () => {
     const hint = recoveryHint({ kind: 'launch', id: LAUNCH_ID }, 'yosemite-s0');
     expect(hint).toContain('agents ssh yosemite-s0');
     expect(hint).toContain(`--launch-id ${LAUNCH_ID}`);
+    expect(hint).toContain(`Launch ${LAUNCH_ID}`);
     expect(hint).not.toContain('agents reconnect');
+  });
+});
+
+describe('connectionEndedNotice — the id left on the shell after SSH closes (RUSH-3227)', () => {
+  test('a clean close names the host, the full session id, and the resume command', () => {
+    const s = connectionEndedNotice(SESSION_TARGET, 'yosemite-m2');
+    expect(s).toContain('Connection to yosemite-m2 closed.');
+    expect(s).toContain(`Session ${SID}`);
+    expect(s).toContain(`agents sessions resume ${SID}`);
+    expect(s).not.toContain('dropped');
+  });
+
+  test('a drop (exit 255 that is not auto-reconnecting) says dropped, not closed', () => {
+    const s = connectionEndedNotice(SESSION_TARGET, 'yosemite-m2', { dropped: true });
+    expect(s).toContain('Connection to yosemite-m2 dropped.');
+    expect(s).toContain(`Session ${SID}`);
+  });
+
+  test('a launch target still points at the peer resolver', () => {
+    const s = connectionEndedNotice({ kind: 'launch', id: LAUNCH_ID }, 'yosemite-s0');
+    expect(s).toContain('Connection to yosemite-s0 closed.');
+    expect(s).toContain(`Launch ${LAUNCH_ID}`);
+    expect(s).toContain('--launch-id');
   });
 });
 
@@ -377,6 +408,9 @@ describe('reconnectInteractiveSession — the loop over the real state machine',
     expect(rc).toBe(0);
     expect(writes.some((w) => w.includes('attempt 1'))).toBe(true);
     expect(writes.some((w) => w.includes("Couldn't reconnect"))).toBe(false);
+    // Clean detach after reattach still leaves the session id on the shell.
+    expect(writes.some((w) => w.includes(`Session ${SID}`))).toBe(true);
+    expect(writes.some((w) => w.includes('Connection to zion closed.'))).toBe(true);
   });
 
   test('a SUSTAINED outage (every reattach fails to connect) gives up after MAX_ATTEMPTS with the manual hint', async () => {

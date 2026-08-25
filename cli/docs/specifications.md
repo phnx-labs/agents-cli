@@ -2594,6 +2594,17 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   before `resolveRemoteSessionId` can read it back; *Then* the run still
   reconnects. Before this, only Claude (handed `--session-id` up front)
   ever reconnected, and every other harness exited straight to a shell.
+- **EXEC-55 (MUST).** When an interactive remote connection to a session ends
+  and the user is back at a local shell, the CLI MUST print the full session
+  id and the resume command (`connectionEndedNotice`,
+  `lib/hosts/reconnect.ts:351`).
+  Auto-reconnect (exit 255 that the loop will retry) MUST NOT print it — the
+  user is not at a shell yet. A clean detach, an agent exit, a drop that is
+  not reconnecting, `sessions focus` remote tmux attach, and `runOnPeer`
+  TTY hops MUST. *Given* a remote TUI whose SSH ControlMaster closes; *When*
+  the local client exits; *Then* the shell shows `Session <uuid>` and
+  `agents sessions resume <uuid>` under OpenSSH's `Shared connection … closed.`
+  line, not a bare prompt (RUSH-3227).
 - **EXEC-43 (MUST).** A persisted tmux `SessionMeta.cmd`
   (`buildTmuxAgentCommand`) MUST redact env VALUES (`<redacted>`) while the
   live launched command keeps the real values, so a resolved secret never

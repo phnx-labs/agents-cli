@@ -42,7 +42,8 @@ import { machineId } from '../lib/session/sync/config.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
 import { ensureSessionHookRepaired, paneExitStatus } from '../lib/tmux/session.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
-import { sshExec, sshStream, assertValidSshTarget, shellQuote } from '../lib/ssh-exec.js';
+import { sshExec, sshStream, assertValidSshTarget, shellQuote, SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
+import { connectionEndedNotice } from '../lib/hosts/reconnect.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs } from '../lib/session/ghostty-tabs.js';
 
 const execFileAsync = promisify(execFile);
@@ -319,8 +320,17 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
         `sess=$(tmux ${sock}display-message -pt ${p} '#{session_name}' 2>/dev/null); ` +
         `[ -n "$w" ] && tmux ${sock}select-window -t "$w" 2>/dev/null; ` +
         `exec tmux ${sock}attach-session -t "\${sess:-${p}}"`;
-      console.log(chalk.gray(`Attaching ${shortId(s)} on ${remote} over SSH — Ctrl-b d to detach.`));
-      process.exit(sshStream(remote, remoteCmd, { tty: true }));
+      const attachId = s.sessionId || shortId(s);
+      console.log(chalk.gray(`Attaching ${attachId} on ${remote} over SSH — Ctrl-b d to detach.`));
+      const code = sshStream(remote, remoteCmd, { tty: true });
+      if (s.sessionId) {
+        process.stderr.write(connectionEndedNotice(
+          { kind: 'session', id: s.sessionId },
+          remote,
+          { dropped: code === SSH_CONN_FAILURE_CODE },
+        ));
+      }
+      process.exit(code);
     }
     // Remote, not in tmux → hand off to the fallback (go: shell; focus: resume in a tab).
     await fallback(s, remote);

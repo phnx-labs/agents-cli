@@ -4405,6 +4405,7 @@ export async function resumeOnOwnerIfRemote(session: SessionMeta): Promise<boole
   const rc = await runOnPeer(['sessions', 'resume', session.id], owner, {
     tty: true,
     env: { [RESUME_PINNED_ENV]: '1' },
+    sessionId: session.id,
   });
   if (rc === 'no-target') warnNoPeerTarget(owner, session);
   return true;
