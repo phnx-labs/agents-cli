@@ -24,7 +24,8 @@
 
 import { recordSubsystemOk, recordSubsystemError } from '../daemon-health.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import type { DaemonContext, PeriodicService, ServiceHealth, ServiceState } from './service.js';
+import type { DaemonContext, DaemonService, PeriodicService, ServiceHealth, ServiceState } from './service.js';
+import { isPeriodicService } from './service.js';
 
 export interface ServiceSupervisorOptions {
   /** Consecutive tick failures (throw or deadline breach) before a service is parked. Default 3. */
@@ -36,7 +37,7 @@ export interface ServiceSupervisorOptions {
 }
 
 interface RegisteredService {
-  service: PeriodicService;
+  service: DaemonService;
   state: ServiceState;
   lastRunMs: number;
   lastError?: string;
@@ -66,8 +67,15 @@ export class ServiceSupervisor {
     this.backoffMaxMs = opts.backoffMaxMs ?? DEFAULT_BACKOFF_MAX_MS;
   }
 
-  /** Register a service. Must be called before `startAll()`. */
-  register(service: PeriodicService): void {
+  /**
+   * Register a service. Must be called before `startAll()`.
+   *
+   * Accepts both `PeriodicService` (ticked on a fixed interval) and
+   * lifecycle-only `DaemonService` (started once, stopped at shutdown). The
+   * supervisor uses `isPeriodicService()` to decide whether to schedule a timer
+   * for each registered entry.
+   */
+  register(service: DaemonService): void {
     if (this.registry.has(service.id)) throw new Error(`service '${service.id}' is already registered`);
     this.registry.set(service.id, {
       service,
@@ -129,8 +137,14 @@ export class ServiceSupervisor {
     }
     entry.everStarted = true;
     entry.state = 'running';
-    this.scheduleTimer(id);
-    void this.runTick(id);
+    if (isPeriodicService(entry.service)) {
+      this.scheduleTimer(id);
+      void this.runTick(id);
+    } else {
+      // Lifecycle-only service: record health once on successful start (no ticks).
+      entry.lastRunMs = Date.now();
+      recordSubsystemOk(id);
+    }
   }
 
   private async stopOne(id: DaemonServiceId): Promise<void> {
@@ -155,7 +169,7 @@ export class ServiceSupervisor {
 
   private scheduleTimer(id: DaemonServiceId): void {
     const entry = this.registry.get(id);
-    if (!entry) return;
+    if (!entry || !isPeriodicService(entry.service)) return;
     entry.timer = setInterval(() => { void this.runTick(id); }, entry.service.intervalMs);
   }
 
@@ -170,16 +184,20 @@ export class ServiceSupervisor {
     const entry = this.registry.get(id);
     const ctx = this.ctx;
     if (!entry || !ctx || entry.state !== 'running' || entry.inFlight) return;
+    // runTick is only called for periodic services (from scheduleTimer and startOne).
+    // The isPeriodicService guard here keeps TypeScript narrowing correct.
+    if (!isPeriodicService(entry.service)) return;
+    const periodicService = entry.service;
     entry.inFlight = true;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     try {
       const deadline = new Promise<never>((_, reject) => {
         deadlineTimer = setTimeout(
-          () => reject(new Error(`tick exceeded deadline of ${entry.service.deadlineMs}ms`)),
-          entry.service.deadlineMs,
+          () => reject(new Error(`tick exceeded deadline of ${periodicService.deadlineMs}ms`)),
+          periodicService.deadlineMs,
         );
       });
-      await Promise.race([entry.service.tick(ctx), deadline]);
+      await Promise.race([periodicService.tick(ctx), deadline]);
       entry.consecutiveFailures = 0;
       entry.lastError = undefined;
       entry.lastRunMs = Date.now();
@@ -224,8 +242,12 @@ export class ServiceSupervisor {
       entry.consecutiveFailures = 0;
       entry.restartAttempts = 0;
       entry.lastError = undefined;
-      this.scheduleTimer(id);
-      void this.runTick(id);
+      if (isPeriodicService(entry.service)) {
+        this.scheduleTimer(id);
+        void this.runTick(id);
+      } else {
+        entry.lastRunMs = Date.now();
+      }
       recordSubsystemOk(id);
       ctx.log('INFO', `service '${id}' restarted`);
     } catch (err) {

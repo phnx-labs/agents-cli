@@ -62,6 +62,50 @@ function blankHealth(): ServiceHealth {
 }
 
 /**
+ * Convenience base for a lifecycle-only (non-periodic) daemon service.
+ *
+ * Concrete subclasses implement `onStart` and `onStop`; the base owns the
+ * `ServiceHealth` record and the `restart()` default (`stop` + `start`).
+ * Unlike `BasePeriodicService` there is no tick — the supervisor just calls
+ * `start()` once at boot, keeps the service marked `running`, and calls
+ * `stop()` at shutdown.
+ *
+ * `lastRunMs` is set to the time `start()` completed, so `supervisor.health()`
+ * carries a meaningful "last known healthy" timestamp even with no periodic ticks.
+ */
+export abstract class BaseDaemonService implements DaemonService {
+  abstract readonly id: DaemonServiceId;
+
+  protected ctx: DaemonContext | null = null;
+  private healthRecord: ServiceHealth = blankHealth();
+
+  protected abstract onStart(ctx: DaemonContext): Promise<void>;
+  protected abstract onStop(): Promise<void>;
+
+  async start(ctx: DaemonContext): Promise<void> {
+    this.ctx = ctx;
+    await this.onStart(ctx);
+    this.healthRecord = { ...this.healthRecord, state: 'running', lastRunMs: Date.now() };
+  }
+
+  async stop(): Promise<void> {
+    await this.onStop();
+    this.healthRecord = { ...this.healthRecord, state: 'stopped' };
+  }
+
+  async restart(): Promise<void> {
+    const ctx = this.ctx;
+    if (!ctx) throw new Error(`service '${this.id}' cannot restart before it has started once`);
+    await this.stop();
+    await this.start(ctx);
+  }
+
+  health(): ServiceHealth {
+    return { ...this.healthRecord };
+  }
+}
+
+/**
  * Convenience base for a periodic service: owns the `ServiceHealth` record so
  * concrete services only implement the three lifecycle hooks. `restart()`
  * defaults to `stop()` then `start()` against the last context passed to

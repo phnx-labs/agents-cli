@@ -17,26 +17,29 @@ import { isAlive, killTree, backgroundSpawnOptions, waitForExit } from '../platf
 import { listJobs as listAllJobs, type JobConfig } from '../scheduling/routines.js';
 import { syncAllProjectRoutines } from '../routines-project.js';
 import { JobScheduler } from '../scheduler.js';
-import { MonitorEngine } from '../monitors/engine.js';
+// MonitorEngine is now owned by MonitorEngineService (daemon/monitor-engine-service.ts).
 import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
 import { runCatchup } from '../catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
 import { BrowserService } from '../browser/service.js';
-import { BrowserIPCServer, getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
+import { getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
 import { startHostedWebhookReceivers, type HostedWebhookReceivers } from '../daemon-webhooks.js';
 import { secretsBrokerSocketPath, brokerPidAlive } from '../secrets/agent.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigValue, resolveBrowserTaskIdleMs } from '../device-config.js';
 import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
-import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
-import { startAccountStateService } from '../account-state-service.js';
-import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runUsageRefreshTick } from '../daemon-ticks.js';
+import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
+import { runActiveSessionsWarmTick } from '../daemon-ticks.js';
 import { watchActiveSessionsReaderPresence } from '../session/session-cache.js';
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
+import { SecretsBrokerService } from './secrets-broker-service.js';
+import { MonitorEngineService } from './monitor-engine-service.js';
+import { AccountStateDaemonService } from './account-state-daemon-service.js';
+import { BrowserIPCService } from './browser-ipc-service.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from '../daemon-services.js';
@@ -139,7 +142,7 @@ const CATCHUP_TICK_MS = 5 * 60_000;
  */
 const SELF_HEAL_TICK_MS = 6 * 60 * 60_000;
 const SELF_HEAL_KICKOFF_MS = 30_000;
-const BROKER_SELF_HEAL_TICK_MS = 60_000;
+// BROKER_SELF_HEAL_TICK_MS moved to secrets-broker-service.ts (RUSH-3193 P2).
 const KEYCHAIN_REAP_TICK_MS = 5 * 60_000;
 // RUSH-2501: reap tmux sessions whose panes are all dead every 5 minutes.
 const DEAD_PANE_REAP_TICK_MS = 5 * 60_000;
@@ -732,12 +735,10 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
 // named in stack traces, readable without scrolling through runDaemon's
 // 500-line body, and not recreated on every function invocation.
 //
-// Two functions (runBrokerSelfHeal, runStateDirSelfCheck) remain inline:
-//   • runBrokerSelfHeal closes over `hostedBroker` — a mutable runDaemon-
-//     local var also used by handleShutdown; lifting it requires both vars to
-//     be module-level, which is wider scope than this ticket.
-//   • runStateDirSelfCheck closes over `lifetimePath` and `lifetimeToken` —
-//     per-boot constants that cannot be pre-computed at module load time.
+// One function (runStateDirSelfCheck) remains inline:
+//   • It closes over `lifetimePath` and `lifetimeToken` — per-boot constants
+//     that cannot be pre-computed at module load time.
+// runBrokerSelfHeal was moved into SecretsBrokerService (RUSH-3193 P2).
 // ---------------------------------------------------------------------------
 
 // In-flight guards: each flag prevents a slow tick from being re-entered
@@ -947,32 +948,35 @@ export async function runDaemon(): Promise<void> {
     log('ERROR', `Stray daemon reaper failed: ${(err as Error).message}`);
   }
 
-  // #416: host the secrets broker socket-first — before the scheduler and the
-  // heavy browser services — so `agents secrets` resolves within
-  // ms of daemon start. Only host when no broker is already reachable, so we
-  // never orphan a live standalone broker's clients (that broker stays the
-  // server until it idle-exits or the daemon restarts). Best-effort: a failure
-  // here must not stop the daemon. Retiring the standalone launchd service is
-  // the follow-on (#416 step 2 / #417).
-  let hostedBroker: { close(): void } | null = null;
-  if (isEnabled('secrets-broker')) {
-    try {
-      const { agentPing, startHostedBroker } = await import('../secrets/agent.js');
-      if ((await agentPing()).reachable) {
-        log('INFO', 'Secrets broker already running (standalone); daemon not hosting it');
-      } else {
-        hostedBroker = await startHostedBroker();
-        if (hostedBroker) log('INFO', 'Secrets broker hosted in daemon (socket-first)');
-      }
-      recordSubsystemOk(SUBSYSTEM_SECRETS_BROKER);
-    } catch (err) {
-      const message = (err as Error).message;
-      log('WARN', `Secrets broker host skipped: ${message}`);
-      recordSubsystemError(SUBSYSTEM_SECRETS_BROKER, message);
-    }
-  } else {
-    log('INFO', 'Secrets broker service disabled; daemon not hosting it');
-  }
+  // Socket services: secrets broker, monitor engine, account-state, and
+  // browser IPC are all managed by the ServiceSupervisor (RUSH-3193 P2).
+  // The supervisor is created here — before the scheduler — so the secrets
+  // broker starts socket-first (#416) and `agents secrets` resolves within
+  // ms of daemon start, exactly as before.
+  const supervisor = new ServiceSupervisor();
+
+  if (isEnabled('secrets-broker')) supervisor.register(new SecretsBrokerService());
+  else log('INFO', 'Secrets broker service disabled; daemon not hosting it');
+
+  const monitorEngineSvc = new MonitorEngineService();
+  if (isEnabled('monitors')) supervisor.register(monitorEngineSvc);
+  else log('INFO', 'Monitor engine disabled');
+
+  if (isEnabled('account-state')) supervisor.register(new AccountStateDaemonService());
+  else log('INFO', 'Account-state service disabled');
+
+  // BrowserIPCService owns the orphan reap (previously daemon.ts:1303-1318)
+  // and the BrowserIPCServer lifecycle. BrowserService is also constructed here
+  // so daemon.ts can access it for the browser-task-reap interval (task #3).
+  const browserSvcForReap = isEnabled('browser-ipc') ? new BrowserService() : null;
+  if (browserSvcForReap) supervisor.register(new BrowserIPCService(browserSvcForReap));
+  else log('INFO', 'Browser IPC service disabled');
+
+  if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
+  else log('INFO', 'Session-index warm service disabled');
+
+  await supervisor.startAll({ log });
+  activeServiceSupervisor = supervisor;
 
   // scheduler.enabled=false in this machine's device doc means NO routines fire
   // here — the scheduler and its catchup recovery simply never start, while the
@@ -1100,18 +1104,6 @@ export async function runDaemon(): Promise<void> {
 
   if (schedulerEnabledAtBoot) bootScheduler();
 
-  // Usage and authentication are first-party device state, so the daemon owns
-  // their timers directly rather than scheduling them as built-in routines.
-  // Explicit CLI refreshes converge on the same cross-process refresh leases.
-  const accountStateService = isEnabled('account-state')
-    ? startAccountStateService({
-        refreshUsage: runUsageRefreshTick,
-        refreshAuth: runFleetCacheWarmTick,
-        onError: (area, error) => log('WARN', `${area} state refresh failed: ${(error as Error).message}`),
-      })
-    : null;
-  if (!accountStateService) log('INFO', 'Account-state service disabled');
-
   // Active-sessions publish-own: continuous journal writer for `sessions watch`.
   // Fire once immediately so a cold daemon does not leave watchers on
   // "awaiting publisher" for a full tick (RUSH-2484). This boot-time fire alone
@@ -1140,16 +1132,8 @@ export async function runDaemon(): Promise<void> {
   // next scheduled tick — a genuinely idle box with no reader still never gathers.
   const stopActiveSessionsReaderWatch = watchActiveSessionsReaderPresence(() => { void runActiveSessionsWarm(); });
 
-  // Session-index warm (RUSH-2682): keep THIS host's transcript index current so
-  // a locally-started session is discoverable within seconds. Migrated onto
-  // ServiceSupervisor (RUSH-3193 P1) as the proof-of-concept periodic
-  // service — the supervisor owns the timer, error boundary, and per-tick
-  // deadline instead of a bare setInterval + local in-flight guard.
-  const supervisor = new ServiceSupervisor();
-  if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
-  else log('INFO', 'Session-index warm service disabled');
-  await supervisor.startAll({ log });
-  activeServiceSupervisor = supervisor;
+  // Session-index warm (RUSH-2682) is registered on the supervisor above
+  // (RUSH-3193 P2) alongside the socket services.
 
   // Watchdog: nudge this host's own stalled agent sessions. Gated on the
   // `watchdog.enabled` device-config flag (`agents watchdog enable`), so the
@@ -1229,21 +1213,8 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Device-probe service disabled');
   }
 
-  // Monitor engine: event-triggered watchers, beside the cron scheduler. Same
-  // daemon, same dispatch seam — a monitor is a routine whose trigger is a
-  // watched source instead of a clock. Reloads on SIGHUP alongside the scheduler.
-  const monitorEngine = isEnabled('monitors')
-    ? new MonitorEngine((level, message) => log(level, message))
-    : null;
-  if (monitorEngine) {
-    try {
-      monitorEngine.start();
-    } catch (err) {
-      log('ERROR', `Monitor engine failed to start: ${(err as Error).message}`);
-    }
-  } else {
-    log('INFO', 'Monitor engine disabled');
-  }
+  // Monitor engine is now managed by MonitorEngineService on the supervisor
+  // (RUSH-3193 P2). Access it via monitorEngineSvc.getEngine() in handleReload.
 
   // Backlog recovery: any enabled recurring job whose most-recent expected fire
   // is older than its most-recent recorded run was missed — the laptop slept,
@@ -1311,40 +1282,10 @@ export async function runDaemon(): Promise<void> {
     }
   }
 
-  // Before the BrowserService comes up, reap browser + tunnel processes
-  // spawned by previous daemons that are no longer alive. Without this,
-  // a daemon hard-crash (SIGKILL, OOM) would leak every browser and SSH
-  // tunnel it had open — and the next session would either hijack those
-  // (cdp:// profile silently driven via stale ssh tunnel) or fail to
-  // bind because the ports are still claimed.
-  try {
-    const { reapOrphanedProcesses } = await import('../browser/runtime-state.js');
-    const result = reapOrphanedProcesses();
-    if (result.reaped > 0) {
-      log('INFO', `Reaped ${result.reaped} orphan process(es) from prior daemon(s)`);
-      for (const d of result.details) log('INFO', `  ${d}`);
-    }
-  } catch (err) {
-    log('ERROR', `Orphan reaper failed: ${(err as Error).message}`);
-  }
+  // Browser orphan reap and IPC server start are now managed by BrowserIPCService
+  // on the supervisor (RUSH-3193 P2). The orphan reap runs inside onStart().
 
-  const browserService = isEnabled('browser-ipc') ? new BrowserService() : null;
-  const browserIPC = browserService ? new BrowserIPCServer(browserService) : null;
-  if (browserIPC) {
-    try {
-      await browserIPC.start();
-      log('INFO', 'Browser IPC server started');
-      recordSubsystemOk(SUBSYSTEM_BROWSER_IPC);
-    } catch (err) {
-      const message = (err as Error).message;
-      log('ERROR', `Browser IPC failed to start: ${message}`);
-      recordSubsystemError(SUBSYSTEM_BROWSER_IPC, message);
-    }
-  } else {
-    log('INFO', 'Browser IPC service disabled');
-  }
-
-  // 5th hosted service: signed webhook receiver(s) + their funnel (RUSH-2548).
+  // Webhook receivers: signed webhook receiver(s) + their funnel (RUSH-2548).
   // Started after the broker (above) so it resolves each receiver's signing
   // secret headlessly — no AGENTS_SECRETS_PASSPHRASE, no nohup. Binds nothing
   // unless daemon/webhooks.yaml declares a receiver, so an unconfigured box no-ops.
@@ -1379,39 +1320,8 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Self-heal service disabled');
   }
 
-  // RUSH-1817: the startup host decision above is one-shot. If a standalone
-  // broker answered agentPing() at daemon start, the daemon declined to host —
-  // but should that standalone later die or crash-loop, nothing takes over and
-  // every `agents secrets unlock|export|start` fails until a manual restart
-  // (this wedged all keychain-backed secrets on zion and blocked a release).
-  // Re-probe on a cadence: whenever the daemon is NOT itself hosting AND no
-  // healthy broker answers a ping, take over hosting. startHostedBroker binds
-  // the socket only when it is free, so a take-over never races a live broker.
-  // Inline (not module-level): closes over `hostedBroker`, a mutable runDaemon-
-  // local var also closed over by handleShutdown. Lifting it would require
-  // hostedBroker to be module-level state too — wider than this refactor's scope.
-  let brokerSelfHealInterval: NodeJS.Timeout | undefined;
-  if (isEnabled('secrets-broker')) {
-    let selfHealingBroker = false;
-    const runBrokerSelfHeal = async () => {
-      if (selfHealingBroker) return;
-      selfHealingBroker = true;
-      try {
-        const { agentPing, startHostedBroker } = await import('../secrets/agent.js');
-        const reachable = (await agentPing()).reachable;
-        if (!shouldTakeOverBroker(hostedBroker != null, reachable)) return;
-        hostedBroker = await startHostedBroker();
-        if (hostedBroker) {
-          log('WARN', 'Secrets broker was unreachable; daemon took over hosting (self-heal)');
-        }
-      } catch (err) {
-        log('WARN', `Secrets broker self-heal skipped: ${(err as Error).message}`);
-      } finally {
-        selfHealingBroker = false;
-      }
-    };
-    brokerSelfHealInterval = setInterval(() => { void runBrokerSelfHeal(); }, BROKER_SELF_HEAL_TICK_MS);
-  }
+  // Broker self-heal (RUSH-1817) is now encapsulated in SecretsBrokerService
+  // (RUSH-3193 P2). The interval fires inside onStart() and is stopped in onStop().
 
   // RUSH-2232: reap orphaned keychain helpers and `agents` processes stuck on a
   // keychain call. Runs as a 5-min interval in the daemon (the single executor)
@@ -1429,13 +1339,12 @@ export async function runDaemon(): Promise<void> {
   const deadPaneReapInterval = setInterval(() => { void runDeadPaneReap(); }, DEAD_PANE_REAP_TICK_MS);
 
   // RUSH-2622: close abandoned browser-task tabs on the same 5-min cadence,
-  // reusing the daemon's own long-lived BrowserService instead of a second
-  // one. Only when browser IPC is actually up — there is no service to reap
-  // through otherwise.
+  // reusing the daemon's own long-lived BrowserService. `browserSvcForReap` is
+  // the BrowserService created for BrowserIPCService above; null when disabled.
   let browserTaskReapInterval: NodeJS.Timeout | undefined;
-  if (browserService) {
-    void runBrowserTaskReap(browserService); // kick-off on startup
-    browserTaskReapInterval = setInterval(() => { void runBrowserTaskReap(browserService); }, BROWSER_TASK_REAP_TICK_MS);
+  if (browserSvcForReap) {
+    void runBrowserTaskReap(browserSvcForReap); // kick-off on startup
+    browserTaskReapInterval = setInterval(() => { void runBrowserTaskReap(browserSvcForReap!); }, BROWSER_TASK_REAP_TICK_MS);
   }
 
   // RUSH-2367: self-terminate if this daemon's own state dir has been removed
@@ -1541,13 +1450,14 @@ export async function runDaemon(): Promise<void> {
     }
     // Monitor engine can be stopped on reload if disabled; starting it requires
     // a restart, so we only handle the off transition here.
-    if (monitorEngine) {
+    const liveMonitorEngine = monitorEngineSvc.getEngine();
+    if (liveMonitorEngine) {
       if (!reloadedEnabled('monitors')) {
         log('WARN', 'monitors service is now disabled — stopping monitor engine; restart daemon to re-enable');
-        try { monitorEngine.stop(); } catch { /* best-effort */ }
+        try { liveMonitorEngine.stop(); } catch { /* best-effort */ }
       } else {
         try {
-          monitorEngine.reload();
+          liveMonitorEngine.reload();
         } catch (err) {
           log('ERROR', `Monitor engine reload failed: ${(err as Error).message}`);
         }
@@ -1564,21 +1474,19 @@ export async function runDaemon(): Promise<void> {
   // added later has to re-earn.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
-    accountStateService?.stop();
     clearInterval(activeSessionsWarmInterval);
     stopActiveSessionsReaderWatch();
+    // supervisor.stopAll() stops: secrets-broker (closes hostedBroker + self-heal
+    // timer), monitor engine, account-state, browser IPC, and session-index.
     await supervisor.stopAll();
     activeServiceSupervisor = null;
     if (watchdogInterval) clearInterval(watchdogInterval);
     if (deviceProbeInterval) clearInterval(deviceProbeInterval);
     stopScheduler();
-    monitorEngine?.stop();
-    await browserIPC?.stop();
     await webhookReceivers?.close();
     clearInterval(monitorInterval);
     if (healInterval) clearInterval(healInterval);
     if (healKickoff) clearTimeout(healKickoff);
-    if (brokerSelfHealInterval) clearInterval(brokerSelfHealInterval);
     if (keychainReapInterval) clearInterval(keychainReapInterval);
     clearInterval(deadPaneReapInterval);
     if (browserTaskReapInterval) clearInterval(browserTaskReapInterval);
@@ -1588,7 +1496,6 @@ export async function runDaemon(): Promise<void> {
     } catch {
       // Already removed with the state dir, or replaced by a newer owner.
     }
-    hostedBroker?.close();
     removeDaemonPid();
     removeHeartbeat();
     unregisterDaemonInstance();
