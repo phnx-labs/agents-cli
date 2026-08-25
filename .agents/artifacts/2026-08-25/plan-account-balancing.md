@@ -483,6 +483,34 @@ Why this is the clean/stable shape:
 | Correct identity | Dedup + selection key on the agent-scoped `accountKey`, so `(claude, gmail)` and `(codex, gmail)` are distinct rows. |
 | Harness-parity | `injectionFor` routes through the provider registry `envFor`, uniform across the six harnesses. |
 
+## "Provisioning correctly" = matched versions + pooled accounts
+
+"Provision a worker" means two things, and only the second is new code here.
+
+**1. Matched harness versions across every device — existing tooling.** You pin one
+canonical roster and push it fleet-wide; no per-box hand-install:
+
+```bash
+agents fleet capture                          # record this machine's agent versions into agents.yaml fleet:
+agents fleet apply -y --provision-secrets     # install those exact versions on every device + push the auth bundle
+agents fleet apply --agent claude@all --device yosemite-s0 -y   # clone this box's claude versions onto one box
+agents doctor --devices                       # flags any remaining version-skew
+```
+
+**2. Accounts that actually balance — this feature (RUSH-3182).** `--provision-secrets`
+copies the setup-tokens to every box, but those accounts are **not balance-visible** until
+the pool fix lands. That is the missing half.
+
+<div class="artifact-callout">
+The two compose into the clean end state. Because the account pool decouples accounts from
+version homes, you stop needing 8 mismatched versions per box: pin <strong>one</strong>
+version per agent, identical everywhere (<code>fleet capture</code>/<code>apply</code>),
+and let the <code>(agent, account)</code> pool ride on top. Uniform versions + one shared
+account pool = the "easy to manage" fleet. Version-matching itself is not new code — it is
+<code>fleet capture</code>/<code>apply</code>; this feature only makes the synced accounts
+balance-eligible.
+</div>
+
 ## Proposed Changes
 
 Layer 1 is four edits. Layer 2 is the router change that removes the coupling.
