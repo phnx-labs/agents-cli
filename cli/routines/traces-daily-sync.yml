@@ -16,8 +16,7 @@
 #
 # Runs as a `command:` (plain shell) routine — no LLM, no token burn.
 name: traces-daily-sync
-schedule: "0 2 * * *"   # daily at 02:00 local time
-enabled: false           # pin to a device first (see above), then enable
+schedule: "0 2 * * *"   # daily at 02:00 UTC
 timeout: 30m
 command: |
   set -eu
