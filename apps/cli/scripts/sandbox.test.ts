@@ -99,3 +99,66 @@ describeSandbox('sandbox.sh credential loading (RUSH-2774)', () => {
     expect(out).toContain('HCLOUD_TOKEN is empty');
   });
 });
+
+// RUSH-3178: the `test` verb bakes in the canonical suite command so no caller
+// hand-composes it — hand-composing is exactly how build.sh and the attestation
+// producer both ended up running the suite in place. These exercise the REAL
+// sandbox.sh end to end, stubbing only the external `crabbox` binary (the same
+// boundary the producer's tests stub `bun`/`npm` at), and capture the command it
+// would have shipped to the box.
+describeSandbox('sandbox.sh test verb (RUSH-3178)', () => {
+  function composeVia(args: string[]): { cmd: string; status: number | null; out: string } {
+    const shims = fs.mkdtempSync(path.join(os.tmpdir(), 'sandbox-verb-'));
+    const runLog = path.join(shims, 'run.log');
+    fs.writeFileSync(
+      path.join(shims, 'crabbox'),
+      `#!/bin/sh
+case "$1" in
+  list)   echo '[{"status":"running","labels":{"profile":"'"\${PROFILE:-default}"'","slug":"fake-box"}}]' ;;
+  status) echo "id=fake-box ready=true" ;;
+  run)    printf '%s\\n' "$*" > "${runLog}" ;;
+  *)      exit 0 ;;
+esac
+`,
+    );
+    fs.chmodSync(path.join(shims, 'crabbox'), 0o755);
+    try {
+      const r = spawnSync('bash', [SANDBOX_SH_PATH, ...args], {
+        encoding: 'utf-8',
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          PATH: `${shims}:${process.env.PATH ?? ''}`,
+          // All tokens pre-set = the CI path, which skips the secrets chain.
+          HCLOUD_TOKEN: 'x',
+          GITHUB_TOKEN: 'x',
+          CLAUDE_CODE_OAUTH_TOKEN: 'x',
+          SANDBOX_SECRETS_EXEC: '1',
+        },
+      });
+      const cmd = fs.existsSync(runLog) ? fs.readFileSync(runLog, 'utf-8') : '';
+      return { cmd, status: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
+    } finally {
+      fs.rmSync(shims, { recursive: true, force: true });
+    }
+  }
+
+  it('bakes in the monorepo-correct suite command, not a repo-root one', () => {
+    const { cmd, out } = composeVia(['test']);
+    // The bare default used to run `bun install && bun run test` at the REPO
+    // ROOT, which has no test script — the suite lives in apps/cli.
+    expect(cmd, out).toContain('cd apps/cli');
+    expect(cmd).toContain('bun run test');
+  });
+
+  it('forwards trailing args to vitest after a `--` separator', () => {
+    const { cmd, out } = composeVia(['test', '--retry=2', '--maxWorkers=2']);
+    expect(cmd, out).toMatch(/bun run test -- --retry=2 --maxWorkers=2/);
+  });
+
+  it('preserves an argument containing a space (the command is re-parsed remotely)', () => {
+    const { cmd, out } = composeVia(['test', '--testNamePattern=a b']);
+    // %q-quoted, so the remote shell sees ONE word rather than two.
+    expect(cmd, out).toMatch(/--testNamePattern=a\\ b/);
+  });
+});
