@@ -588,7 +588,14 @@ function buildServiceRows(daemonRunning: boolean): DaemonServiceRow[] {
   return states.map((s) => {
     const h = healthById.get(s.id);
     const supervised = h?.state !== undefined;
-    const state = h?.state ?? (s.enabled ? (daemonRunning ? 'running (unsupervised)' : 'stopped') : 'stopped');
+    // A persisted supervisor state (health.json) is only trustworthy while the
+    // daemon is actually up. If it is not running (crash / kill -9 / never
+    // started), every service is stopped no matter what the last-written record
+    // says — trusting a stale 'running'/'parked'/'idle' here would print a
+    // report that contradicts the live-probed socket rows below (RUSH-2368).
+    const state = daemonRunning
+      ? (h?.state ?? (s.enabled ? 'running (unsupervised)' : 'stopped'))
+      : 'stopped';
     return {
       id: s.id,
       title: s.title,

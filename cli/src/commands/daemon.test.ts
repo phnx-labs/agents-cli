@@ -241,6 +241,27 @@ describeDaemon('agents daemon', () => {
     expect(sessionIndex!.consecutiveFailures).toBe(0);
   });
 
+  it('a stale health.json is not trusted as live when the daemon is not running (RUSH-2368)', () => {
+    const home = makeHome();
+    // Seed a supervisor record claiming session-index is "running", but no daemon
+    // is actually up in this HOME (kill -9 / crash / never relaunched).
+    const healthPath = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'health.json');
+    fs.mkdirSync(path.dirname(healthPath), { recursive: true });
+    fs.writeFileSync(healthPath, JSON.stringify({
+      'session-index': {
+        subsystem: 'session-index', state: 'running',
+        lastOkAt: new Date().toISOString(), lastError: null, lastErrorAt: null, consecutiveFailures: 0,
+      },
+    }), 'utf-8');
+    const res = run(home, ['services', '--json']);
+    expect(res.status).toBe(0);
+    const payload = JSON.parse(res.stdout) as { services: Array<{ id: string; state: string }> };
+    const si = payload.services.find((s) => s.id === 'session-index')!;
+    // The daemon is down, so the stale 'running' record must render as 'stopped' —
+    // trusting it would contradict the live-probed hosted-socket rows in the same output.
+    expect(si.state).toBe('stopped');
+  });
+
   it('services (no --json) renders a state column for every registered service', () => {
     const res = run(makeHome(), ['services']);
     expect(res.status).toBe(0);
