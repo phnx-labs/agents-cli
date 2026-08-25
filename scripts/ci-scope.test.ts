@@ -370,6 +370,26 @@ describe('selectImpact policy', () => {
     expect(plan.checks).toContain('typecheck');
   });
 
+  test('a deleted tree selects no tests and does not fail the plan', () => {
+    // The PR shape that removes a whole mapped tree (apps/ext/** moved to
+    // phnx-labs/agi-ext, RUSH-3189): deleted test files must not be queued as
+    // work, and a deleted source is not the missing-coverage signal
+    // zero_selection exists to catch. None of these paths exist at head.
+    const plan = selectImpact({
+      files: [
+        'apps/ext/app/floorData.test.ts', // testless-exempted tree, deleted
+        'scripts/release.test.sh', // mapped scripts/ area, deleted test
+        'scripts/release.sh', // mapped scripts/ area, deleted source
+      ],
+      repoRoot: REPO,
+      related: false,
+    });
+    expect(plan.tests).toEqual([]);
+    expect(plan.unmapped).toEqual([]);
+    expect(plan.zero_selection).toEqual([]);
+    expect(planIsFailing(plan)).toBe(false);
+  });
+
   test('an unmapped production path fails the plan', () => {
     const plan = selectImpact({
       files: ['secret-new-module/exploit.ts'],

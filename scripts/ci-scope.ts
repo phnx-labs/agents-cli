@@ -538,7 +538,11 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
       selectedForFile += 1;
     };
 
-    if (isTestFile(file)) {
+    // A testless-exempt path never selects tests — including its own changed
+    // test files — and a DELETED test file is a change with nothing left to
+    // run. Both cases come from the same PR shape: removing a tree (apps/ext/**
+    // moved to phnx-labs/agi-ext) must not queue its removed tests as work.
+    if (isTestFile(file) && !testless && existsSync(join(repoRoot, file))) {
       addTest(selected, mapping, file, file, 'changed-test');
       mark();
     }
@@ -592,7 +596,10 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
       continue;
     }
 
-    if (isExecutableSource(file) && selectedForFile === 0 && !testless) {
+    // A deleted source selects nothing by construction (its companions are
+    // existence-filtered and its own test may be gone with it) — that is not
+    // the missing-coverage signal zero_selection exists to catch.
+    if (isExecutableSource(file) && selectedForFile === 0 && !testless && existsSync(join(repoRoot, file))) {
       zeroSelection.push(file);
     }
   }
