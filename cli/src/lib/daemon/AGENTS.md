@@ -38,7 +38,7 @@ finally { activeSessionsWarmInFlight = false; }
 ```
 
 The session-index warm tick follows the identical shape at
-`daemon.ts:1140-1150`. Nothing outside a tick's own try/catch observes
+`daemon.ts:1118-1133`. Nothing outside a tick's own try/catch observes
 whether that tick is healthy.
 
 **The service catalog is descriptive metadata plus an enable toggle — not a
@@ -74,13 +74,13 @@ process.on('uncaughtException', crash('uncaughtException'));
 process.on('unhandledRejection', crash('unhandledRejection'));
 ```
 
-`crash()` logs and then calls `process.exit(1)` (`index.ts:103`), relying on
+`crash()` logs and then calls `process.exit(1)` (`index.ts:100`), relying on
 the OS supervisor (launchd `KeepAlive` on macOS, `systemd Restart=always` on
 Linux) to relaunch the whole process — every service restarts together, not
 just the one that threw. Only a subset of subsystems report health
 proactively: `cli/src/lib/daemon-health.ts` exposes `recordSubsystemOk`
 (`daemon-health.ts:85`) and `recordSubsystemError`
-(`daemon-health.ts:93`), called from `daemon.ts` at 9 sites covering just
+(`daemon-health.ts:93`), called from `daemon.ts` at 7 sites covering just
 the secrets broker (`daemon.ts:948`, `:952`) and browser IPC
 (`daemon.ts:1322`, `:1326`), plus daemon-start bookkeeping (`daemon.ts:1473`,
 `:1796`). The other 9 interval services have no recorded health signal
@@ -106,7 +106,7 @@ independently — there is no shared abstraction between them:**
   back to `interactive.host`, comment at `device-config.ts:579`).
 - **elected-singleton** (first-come binds, others detect and back off):
   the secrets broker binds a local socket in `startHostedBroker`
-  (`cli/src/lib/secrets/agent.ts:914`, bind call at `:925`); daemon-side
+  (`cli/src/lib/secrets/agent.ts:915`, bind call at `:925`); daemon-side
   takeover logic is `shouldTakeOverBroker`
   (`cli/src/lib/daemon/daemon.ts:182`):
 
@@ -129,7 +129,7 @@ Only 3 call sites actually use it: `cli/src/lib/session/session-cache.ts:78`
 and `cli/src/commands/sessions-picker.ts:142` / `:160`. Roughly 28 other
 files implement their own ad-hoc TTL constants plus disk-mirror files with
 little or no eviction (`fleet-status.ts`, `auth-health.ts`, `mailbox.ts`,
-`linear-cache.ts`, `stats-cache.ts`, `session/presence.ts`,
+`linear-cache.ts`, `devices/stats-cache.ts`, `session/presence.ts`,
 `secrets/vault.ts`, and others) — so roughly 3 of ~31 cache-like constructs
 in this area route through the shared bounded cache. State this as it is:
 most daemon-adjacent caching has no shared eviction policy today.
