@@ -33,7 +33,9 @@ import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, getConfigV
 import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_SECRETS_BROKER, SUBSYSTEM_BROWSER_IPC, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
 import { startAccountStateService } from '../account-state-service.js';
-import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runSessionIndexWarmTick, runUsageRefreshTick } from '../daemon-ticks.js';
+import { runActiveSessionsWarmTick, runFleetCacheWarmTick, runUsageRefreshTick } from '../daemon-ticks.js';
+import { ServiceSupervisor } from './supervisor.js';
+import { SessionIndexService } from './session-index-service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, type DaemonServiceId } from '../daemon-services.js';
 
@@ -135,10 +137,8 @@ const DEVICE_PROBE_TICK_MS = 3 * 60_000;
 // Matches DEFAULT_ACTIVE_CACHE_MAX_AGE_MS (15s) so long-lived watchers never
 // outlive the publisher (RUSH-2484 — CLI-owned continuous publish).
 const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
-// Incrementally scan this host's transcript dirs into the local index so a
-// locally-started session is indexed within seconds, not on the next unrelated
-// `agents sessions*` call (RUSH-2682 — indexing was lazy, nothing scheduled it).
-const SESSION_INDEX_WARM_TICK_MS = 20_000;
+// Session-index warm interval/deadline live in session-index-service.ts now
+// (RUSH-3193 — migrated onto ServiceSupervisor).
 const WEDGE_THRESHOLD_TICKS = 3;
 
 /**
@@ -1112,29 +1112,14 @@ export async function runDaemon(): Promise<void> {
   const activeSessionsWarmInterval = setInterval(() => { void runActiveSessionsWarm(); }, ACTIVE_SESSIONS_WARM_TICK_MS);
 
   // Session-index warm (RUSH-2682): keep THIS host's transcript index current so
-  // a locally-started session is discoverable within seconds. Incremental +
-  // single-flight (the DB scan claim), overlap-guarded so a slow scan never
-  // stacks on the next tick.
-  let sessionIndexWarmInFlight = false;
-  const runSessionIndexWarm = async (): Promise<void> => {
-    if (sessionIndexWarmInFlight) return;
-    sessionIndexWarmInFlight = true;
-    try {
-      const { indexed, claimed } = await runSessionIndexWarmTick();
-      // Log only when the tick did something. A silent tick is what let it
-      // report 0 forever unnoticed (RUSH-2691); a line on every idle 20s tick
-      // would drown the log, so the steady state (claimed, nothing changed)
-      // stays quiet and both interesting outcomes are visible.
-      if (!claimed) log('INFO', 'session-index warm: skipped, another process holds the scan claim');
-      else if (indexed > 0) log('INFO', `session-index warm: indexed ${indexed} transcript(s)`);
-    } catch (err) {
-      log('WARN', `session-index warm failed: ${(err as Error).message}`);
-    } finally {
-      sessionIndexWarmInFlight = false;
-    }
-  };
-  void runSessionIndexWarm();
-  const sessionIndexWarmInterval = setInterval(() => { void runSessionIndexWarm(); }, SESSION_INDEX_WARM_TICK_MS);
+  // a locally-started session is discoverable within seconds. Migrated onto
+  // ServiceSupervisor (RUSH-3193 P1) as the proof-of-concept periodic
+  // service — the supervisor owns the timer, error boundary, and per-tick
+  // deadline instead of a bare setInterval + local in-flight guard.
+  const supervisor = new ServiceSupervisor();
+  if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
+  else log('INFO', 'Session-index warm service disabled');
+  await supervisor.startAll({ log });
 
   // Watchdog: nudge this host's own stalled agent sessions. Gated on the
   // `watchdog.enabled` device-config flag (`agents watchdog enable`), so the
@@ -1551,7 +1536,7 @@ export async function runDaemon(): Promise<void> {
     log('INFO', 'Daemon shutting down');
     accountStateService?.stop();
     clearInterval(activeSessionsWarmInterval);
-    clearInterval(sessionIndexWarmInterval);
+    await supervisor.stopAll();
     if (watchdogInterval) clearInterval(watchdogInterval);
     if (deviceProbeInterval) clearInterval(deviceProbeInterval);
     stopScheduler();

@@ -25,7 +25,8 @@ export type DaemonServiceId =
   | 'account-state'
   | 'watchdog'
   | 'device-probe'
-  | 'state-dir-check';
+  | 'state-dir-check'
+  | 'session-index';
 
 /** Human-readable metadata for each service. */
 export interface DaemonServiceDef {
@@ -89,6 +90,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'state-dir-check',
     title: 'State-dir self-check',
     description: 'Self-terminates the daemon if its state directory is removed.',
+  },
+  {
+    id: 'session-index',
+    title: 'Session-index warm',
+    description: 'Keeps this host\'s transcript index current so a locally-started session is discoverable within seconds.',
   },
 ];
 
