@@ -679,6 +679,19 @@ export async function fetchPeerPreviewDigest(
  * the SSH hop ends, so OpenSSH's `Shared connection … closed.` is not the last
  * thing on the local shell (RUSH-3227). Omit it for one-shot non-TTY renders.
  */
+export function peerHopCloseNotice(
+  opts: { tty?: boolean; sessionId?: string },
+  machine: string,
+  code: number | null,
+): string | undefined {
+  if (!opts.tty || !opts.sessionId) return undefined;
+  return connectionEndedNotice(
+    { kind: 'session', id: opts.sessionId },
+    machine,
+    { dropped: code === SSH_CONN_FAILURE_CODE },
+  );
+}
+
 export async function runOnPeer(
   args: string[],
   machine: string,
@@ -711,13 +724,8 @@ export async function runOnPeer(
     child.on('close', (code) => {
       // Interactive TTY hop: OpenSSH prints "Shared connection … closed." and
       // nothing else. Leave the session id on the local shell (RUSH-3227).
-      if (opts.tty && opts.sessionId) {
-        process.stderr.write(connectionEndedNotice(
-          { kind: 'session', id: opts.sessionId },
-          machine,
-          { dropped: code === SSH_CONN_FAILURE_CODE },
-        ));
-      }
+      const notice = peerHopCloseNotice(opts, machine, code);
+      if (notice) process.stderr.write(notice);
       resolve('ok');
     });
   });

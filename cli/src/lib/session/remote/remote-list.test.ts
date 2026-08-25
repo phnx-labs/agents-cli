@@ -25,7 +25,9 @@ import {
   isAutomaticSessionPeer,
   remoteListCommand,
   sshCapture,
+  peerHopCloseNotice,
 } from './remote-list.js';
+import { SSH_CONN_FAILURE_CODE } from '../../ssh-exec.js';
 import type { DeviceProfile } from '../../devices/registry.js';
 import { TOOL_QUERY_MAX_CALL_ROWS } from '../tool-index.js';
 
@@ -438,5 +440,31 @@ describe('remoteListCommand', () => {
     expect(cmd).toContain('deploy');
     expect(cmd).toContain('--since');
     expect(cmd).toContain('--json');
+  });
+});
+
+describe('peerHopCloseNotice — TTY hop leaves the session id (RUSH-3227)', () => {
+  const SID = '26d69286-a323-45a0-9a63-d75b90a66730';
+
+  it('tty + sessionId on a clean close prints the full id and resume command', () => {
+    const s = peerHopCloseNotice({ tty: true, sessionId: SID }, 'yosemite-m2', 0);
+    expect(s).toContain('Connection to yosemite-m2 closed.');
+    expect(s).toContain(`Session ${SID}`);
+    expect(s).toContain(`agents sessions resume ${SID}`);
+  });
+
+  it('tty + sessionId on a 255 drop says dropped', () => {
+    const s = peerHopCloseNotice({ tty: true, sessionId: SID }, 'yosemite-m2', SSH_CONN_FAILURE_CODE);
+    expect(s).toContain('Connection to yosemite-m2 dropped.');
+    expect(s).toContain(`Session ${SID}`);
+  });
+
+  it('non-TTY renders (markdown/json one-shots) print nothing', () => {
+    expect(peerHopCloseNotice({ sessionId: SID }, 'yosemite-m2', 0)).toBeUndefined();
+    expect(peerHopCloseNotice({ tty: false, sessionId: SID }, 'yosemite-m2', 0)).toBeUndefined();
+  });
+
+  it('TTY without a session id prints nothing', () => {
+    expect(peerHopCloseNotice({ tty: true }, 'yosemite-m2', 0)).toBeUndefined();
   });
 });

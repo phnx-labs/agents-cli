@@ -2600,8 +2600,8 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   `lib/hosts/reconnect.ts:351`).
   Auto-reconnect (exit 255 that the loop will retry) MUST NOT print it — the
   user is not at a shell yet. A clean detach, an agent exit, a drop that is
-  not reconnecting, `sessions focus` remote tmux attach, and `runOnPeer`
-  TTY hops MUST. *Given* a remote TUI whose SSH ControlMaster closes; *When*
+  not reconnecting — including `--raw` (no tmux, so no reconnect) — 
+  `sessions focus` remote tmux attach, and `runOnPeer` TTY hops MUST. *Given* a remote TUI whose SSH ControlMaster closes; *When*
   the local client exits; *Then* the shell shows `Session <uuid>` and
   `agents sessions resume <uuid>` under OpenSSH's `Shared connection … closed.`
   line, not a bare prompt (RUSH-3227).

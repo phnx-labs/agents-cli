@@ -18,6 +18,7 @@ import {
   unstableNotice,
   remoteExitNotice,
   connectionEndedNotice,
+  afterInteractiveRemoteExit,
   reconnectInteractiveSession,
   reattachRemoteCommand,
   pickReconnectTarget,
@@ -344,6 +345,40 @@ describe('connectionEndedNotice — the id left on the shell after SSH closes (R
     expect(s).toContain('Connection to yosemite-s0 closed.');
     expect(s).toContain(`Launch ${LAUNCH_ID}`);
     expect(s).toContain('--launch-id');
+  });
+});
+
+describe('afterInteractiveRemoteExit — reconnect vs notice (RUSH-3227)', () => {
+  const host = 'yosemite-m2';
+
+  test('tmux-hosted 255 reconnects and prints nothing — the user is not at a shell yet', () => {
+    expect(afterInteractiveRemoteExit({
+      target: SESSION_TARGET, host, exitCode: SSH_CONN_FAILURE, willReconnect: true,
+    })).toEqual({ reconnect: true, notice: undefined });
+  });
+
+  test('--raw 255 does NOT reconnect but still prints the dropped notice (EXEC-55)', () => {
+    const next = afterInteractiveRemoteExit({
+      target: SESSION_TARGET, host, exitCode: SSH_CONN_FAILURE, willReconnect: false,
+    });
+    expect(next.reconnect).toBe(false);
+    expect(next.notice).toContain('Connection to yosemite-m2 dropped.');
+    expect(next.notice).toContain(`Session ${SID}`);
+  });
+
+  test('a clean detach (0) never reconnects and prints closed + the full id', () => {
+    const next = afterInteractiveRemoteExit({
+      target: SESSION_TARGET, host, exitCode: 0, willReconnect: false,
+    });
+    expect(next.reconnect).toBe(false);
+    expect(next.notice).toContain('Connection to yosemite-m2 closed.');
+    expect(next.notice).toContain(`Session ${SID}`);
+  });
+
+  test('no target (hookless harness) prints nothing and does not reconnect', () => {
+    expect(afterInteractiveRemoteExit({
+      host, exitCode: 0, willReconnect: false,
+    })).toEqual({ reconnect: false, notice: undefined });
   });
 });
 

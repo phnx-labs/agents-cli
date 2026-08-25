@@ -1886,7 +1886,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
             // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
             // For `run auto` prefer the join-resolved id (the harness the remote
             // ACTUALLY picked) over the explicit --session-id only claude adopts.
-            const { pickReconnectTarget, reconnectInteractiveSession, connectionEndedNotice, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
+            const { pickReconnectTarget, reconnectInteractiveSession, afterInteractiveRemoteExit, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
             const reconnectTarget = pickReconnectTarget({
               agent: runAgent,
               sessionId: hostSessionId,
@@ -1894,21 +1894,25 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
               resumeId,
               launchId: correlationLaunchId,
             });
-            if (reconnectTarget && !isRaw) {
-              if (exitCode === SSH_CONN_FAILURE) {
-                process.exit(
-                  await reconnectInteractiveSession({
-                    host,
-                    target: reconnectTarget,
-                    initialExit: exitCode,
-                  }),
-                );
-              }
-              // Non-255: the TTY ended (agent quit, clean detach). OpenSSH may
-              // have printed only "Shared connection … closed." — leave the
-              // session id on the shell they just landed in (RUSH-3227).
-              process.stderr.write(connectionEndedNotice(reconnectTarget, host.name));
+            // Raw is not tmux-wrapped, so it never auto-reconnects — but it
+            // still prints the session id (EXEC-55). Bundling the notice
+            // behind `!isRaw` left a dropped `--raw` tab as a bare shell.
+            const next = afterInteractiveRemoteExit({
+              target: reconnectTarget,
+              host: host.name,
+              exitCode,
+              willReconnect: exitCode === SSH_CONN_FAILURE && !isRaw,
+            });
+            if (next.reconnect && reconnectTarget) {
+              process.exit(
+                await reconnectInteractiveSession({
+                  host,
+                  target: reconnectTarget,
+                  initialExit: exitCode,
+                }),
+              );
             }
+            if (next.notice) process.stderr.write(next.notice);
             process.exit(exitCode);
           }
 

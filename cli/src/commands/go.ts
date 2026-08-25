@@ -220,6 +220,21 @@ function shortId(s: ActiveSession): string {
   return (s.sessionId ?? '').slice(0, 8) || '-';
 }
 
+/** What `jumpTo` writes after a remote tmux attach's SSH stream returns. Pure so
+ *  the ControlMaster close path is unit-tested without SSH (RUSH-3227). */
+export function remoteAttachEndedNotice(
+  sessionId: string | undefined,
+  host: string,
+  code: number,
+): string | undefined {
+  if (!sessionId) return undefined;
+  return connectionEndedNotice(
+    { kind: 'session', id: sessionId },
+    host,
+    { dropped: code === SSH_CONN_FAILURE_CODE },
+  );
+}
+
 /**
  * Pure, testable mirror of `jumpTo`'s path selection (jumpTo itself has side
  * effects — process.exit / ssh / osascript). Keep the branch ORDER in sync with
@@ -323,13 +338,8 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
       const attachId = s.sessionId || shortId(s);
       console.log(chalk.gray(`Attaching ${attachId} on ${remote} over SSH — Ctrl-b d to detach.`));
       const code = sshStream(remote, remoteCmd, { tty: true });
-      if (s.sessionId) {
-        process.stderr.write(connectionEndedNotice(
-          { kind: 'session', id: s.sessionId },
-          remote,
-          { dropped: code === SSH_CONN_FAILURE_CODE },
-        ));
-      }
+      const notice = remoteAttachEndedNotice(s.sessionId, remote, code);
+      if (notice) process.stderr.write(notice);
       process.exit(code);
     }
     // Remote, not in tmux → hand off to the fallback (go: shell; focus: resume in a tab).

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { describeWhere, filterLivePool, type Where } from './go.js';
+import { describeWhere, filterLivePool, remoteAttachEndedNotice, type Where } from './go.js';
+import { SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 /** Minimal ActiveSession builder — only the fields describeWhere reads. */
@@ -79,5 +80,27 @@ describe('filterLivePool — focus device + live-state scoping', () => {
   it('no filters returns the pool untouched (bare focus / focus --local unchanged)', () => {
     expect(filterLivePool(pool, {})).toBe(pool);
     expect(ids(filterLivePool(pool, {}))).toEqual(['a', 'b', 'c', 'd', 'e']);
+  });
+});
+
+describe('remoteAttachEndedNotice — ControlMaster close leaves the session id (RUSH-3227)', () => {
+  const SID = '26d69286-a323-45a0-9a63-d75b90a66730';
+
+  it('a clean detach prints closed + the full id + resume', () => {
+    const s = remoteAttachEndedNotice(SID, 'yosemite-m2', 0);
+    expect(s).toContain('Connection to yosemite-m2 closed.');
+    expect(s).toContain(`Session ${SID}`);
+    expect(s).toContain(`agents sessions resume ${SID}`);
+  });
+
+  it('a 255 drop prints dropped, not closed', () => {
+    const s = remoteAttachEndedNotice(SID, 'yosemite-m2', SSH_CONN_FAILURE_CODE);
+    expect(s).toContain('Connection to yosemite-m2 dropped.');
+    expect(s).toContain(`Session ${SID}`);
+  });
+
+  it('no session id prints nothing (nothing copyable to hand back)', () => {
+    expect(remoteAttachEndedNotice(undefined, 'yosemite-m2', 0)).toBeUndefined();
+    expect(remoteAttachEndedNotice('', 'yosemite-m2', 0)).toBeUndefined();
   });
 });

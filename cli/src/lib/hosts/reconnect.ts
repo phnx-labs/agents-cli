@@ -357,6 +357,31 @@ export function connectionEndedNotice(
   return `\nConnection to ${host} ${verb}.\n${recoveryHint(target, host)}`;
 }
 
+/**
+ * Decide what happens after an interactive `--device` stream returns.
+ *
+ * Auto-reconnect only when the link dropped (255) AND the run is tmux-hosted
+ * (`willReconnect`). `--raw` is not wrapped, so it never reconnects — but it
+ * still prints the session id: the user is at a shell, and EXEC-55 does not
+ * exempt raw (RUSH-3227). Bundling the notice behind `!isRaw` was the miss.
+ */
+export function afterInteractiveRemoteExit(opts: {
+  target?: ReconnectTarget;
+  host: string;
+  exitCode: number;
+  /** True when auto-reconnect will take over (tmux-hosted, not `--raw`). */
+  willReconnect: boolean;
+}): { reconnect: boolean; notice: string | undefined } {
+  if (!opts.target) return { reconnect: false, notice: undefined };
+  if (opts.willReconnect) return { reconnect: true, notice: undefined };
+  return {
+    reconnect: false,
+    notice: connectionEndedNotice(opts.target, opts.host, {
+      dropped: opts.exitCode === SSH_CONN_FAILURE,
+    }),
+  };
+}
+
 /** What the launcher knows about a run once its interactive stream has returned. */
 export interface ReconnectTargetInputs {
   /** The harness (or {@link RUN_AUTO_KEYWORD}) that was dispatched. */
