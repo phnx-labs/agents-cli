@@ -160,7 +160,8 @@ case "$MODE" in
   # The remediation lives in its own script so the suite can exercise the SAME
   # code rather than a copy that drifts (scripts/ is part of the rsync, so it is
   # already on the worker).
-  ssh "$ADDR" 'bash ~/.agents/test-runs/agents-cli/apps/cli/scripts/bound-repo-root.sh ~/.agents/test-runs/agents-cli'
+  ssh "$ADDR" 'bash ~/.agents/test-runs/agents-cli/apps/cli/scripts/bound-repo-root.sh ~/.agents/test-runs/agents-cli' \
+    || die "could not bound the repo root on $name -- refusing to run the suite against an unrelated repository"
 
   green "Tree shipped. Running the suite on $DEVICE..."
     ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli/apps/cli \

@@ -25,7 +25,15 @@ function bound(dir: string): void {
 describe('bound-repo-root.sh', () => {
   it('bounds a .git-less tree that would otherwise escape to a git ancestor', () => {
     const ancestor = tmp('bound-ancestor-');
-    git('init -q', ancestor); // stands in for ~/.agents
+    git('init -q', ancestor);
+    // The ancestor MUST have a real commit. `~/.agents` is a live, continuously
+    // committed repo, and `git rev-parse --verify HEAD` walks up into it just as
+    // `--show-toplevel` does. An ancestor left commit-less has an unborn HEAD —
+    // the one detail that made an earlier version of this test pass while
+    // production stayed broken. Keep the commit.
+    fs.writeFileSync(path.join(ancestor, 'ancestor.txt'), 'x');
+    git('add -A', ancestor);
+    git('-c user.email=t@t -c user.name=t commit -q -m ancestor', ancestor);
     const shipped = path.join(ancestor, 'test-runs', 'agents-cli');
     fs.mkdirSync(shipped, { recursive: true });
     fs.writeFileSync(path.join(shipped, 'marker.txt'), 'x'); // the rsynced tree, no .git
@@ -54,13 +62,20 @@ describe('bound-repo-root.sh', () => {
     fs.rmSync(shipped, { recursive: true, force: true });
   });
 
-  it('is idempotent — a bounded tree is left exactly as it was', () => {
+  it('re-running an already-bound tree does not re-initialise it', () => {
+    // Asserting HEAD is unchanged is NOT enough: `git commit` no-ops on
+    // unchanged content, so that passes even with the gate removed entirely.
+    // Pin the gate itself — the repo must be the SAME repo, not a fresh one.
     const shipped = tmp('bound-idem-');
     fs.writeFileSync(path.join(shipped, 'marker.txt'), 'x');
     bound(shipped);
     const head = git('rev-parse HEAD', shipped);
+    // A marker inside .git survives an early exit and cannot survive a re-init.
+    fs.writeFileSync(path.join(shipped, '.git', 'agents-bound-marker'), 'first');
+
     bound(shipped);
-    // Re-running must not re-init or add an empty commit on top.
+
+    expect(fs.existsSync(path.join(shipped, '.git', 'agents-bound-marker'))).toBe(true);
     expect(git('rev-parse HEAD', shipped)).toBe(head);
     fs.rmSync(shipped, { recursive: true, force: true });
   });

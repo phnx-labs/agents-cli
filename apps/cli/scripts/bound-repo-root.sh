@@ -24,7 +24,12 @@ cd "$DIR"
 # Gate on HEAD RESOLVING, not on `.git` existing. The remote path is fixed and
 # reused, so a `.git` left by an earlier run — or by a half-finished one — makes
 # an existence check skip and leaves an unborn HEAD forever.
-if git rev-parse -q --verify HEAD >/dev/null 2>&1; then
+# BOTH conditions, and `-e .git` first. `git rev-parse --verify HEAD` walks up
+# through parents exactly like `--show-toplevel` does, so on a fresh worker the
+# ANCESTOR's HEAD (~/.agents is a real, continuously-committed repo) satisfies it
+# and this script would exit having done nothing — leaving the very bug it exists
+# to fix. The `-e .git` test is what pins the question to THIS directory.
+if [[ -e .git ]] && git rev-parse -q --verify HEAD >/dev/null 2>&1; then
   exit 0
 fi
 
