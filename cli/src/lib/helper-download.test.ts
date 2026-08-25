@@ -26,6 +26,7 @@ import { getCacheDir } from './state.js';
 // A stand-in for either real helper spec; the shared URL/cache primitives are
 // spec-driven, so this proves them without pulling in a network call.
 const SAMPLE_SPEC: HelperSpec = {
+  helper: 'menubar',
   assetName: 'MenubarHelper.app.zip',
   appName: 'MenubarHelper.app',
   cacheSubdir: ['menubar', 'mac-helper'],
@@ -35,12 +36,17 @@ const SAMPLE_SPEC: HelperSpec = {
 };
 
 describe('menu-bar helper release-asset URLs', () => {
-  it('builds asset URLs pinned to the exact v<version> tag', () => {
-    const u = menubarHelperAssetUrls('1.22.50');
+  it("builds asset URLs pinned to the HELPER's own tag, not the CLI's", () => {
+    // The version here is a HELPER version. Keying these URLs to the CLI tag is
+    // what forced every CLI release to re-stage every helper asset, and made a
+    // helper fix unreachable without one — see lib/helper-versions.ts.
+    const u = menubarHelperAssetUrls('1.0.0');
     expect(u.zip).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/v1.22.50/MenubarHelper.app.zip',
+      'https://github.com/phnx-labs/agents-cli/releases/download/menubar/v1.0.0/MenubarHelper.app.zip',
     );
     expect(u.sha256).toBe(`${u.zip}.sha256`);
+    // A bare `v<n>` tag here would be the old coupling coming back.
+    expect(u.zip).not.toMatch(/download\/v\d/);
   });
 
   it('names the asset + bundle exactly what release upload + download expect (drift guard)', () => {

@@ -19,23 +19,34 @@ import { parseSha256Asset, sha256File } from '../sha256-asset.js';
 import { getCacheDir } from '../state.js';
 
 describe('keychain helper release-asset URLs', () => {
-  it('builds asset URLs pinned to the exact v<version> tag', () => {
-    const u = keychainHelperAssetUrls('1.22.50');
-    // The bundle name has a space; the URL carries it literally (GitHub encodes
-    // it on the wire — fetch handles that), matching how release.sh uploads it.
+  it("builds asset URLs pinned to the HELPER's own tag, not the CLI's", () => {
+    // The version here is a HELPER version. Keying these URLs to the CLI tag is
+    // what forced every CLI release to re-stage every helper asset, and made a
+    // helper fix unreachable without one — see lib/helper-versions.ts.
+    const u = keychainHelperAssetUrls('1.0.0');
     expect(u.zip).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/v1.22.50/Agents CLI.app.zip',
+      'https://github.com/phnx-labs/agents-cli/releases/download/keychain/v1.0.0/Agents_CLI.app.zip',
     );
     expect(u.sha256).toBe(`${u.zip}.sha256`);
+    // A bare `v<n>` tag here would be the old coupling coming back.
+    expect(u.zip).not.toMatch(/download\/v\d/);
   });
 
-  it('names the asset + bundle exactly what release upload + download expect (drift guard)', () => {
-    // release.sh's stage_keychain_download_asset zips bin/'Agents CLI.app' as
-    // 'Agents CLI.app.zip'; the client URL and extracted dir must match those
-    // names byte-for-byte, spaces included.
-    expect(KEYCHAIN_HELPER_ASSET).toBe('Agents CLI.app.zip');
+  it('the asset name is underscored while the bundle keeps its space', () => {
+    // This pair used to be asserted EQUAL (`ASSET === `${APP_NAME}.zip``), on the
+    // premise that "GitHub encodes the space on the wire — fetch handles that".
+    // That premise is false and it shipped a permanent 404: GitHub REWRITES a
+    // space in an asset name to a dot at upload time, so `Agents CLI.app.zip`
+    // was served as `Agents.CLI.app.zip` and no client ever found it.
+    //
+    // So they are deliberately DIFFERENT now, and that difference is the fix:
+    //   - the ASSET is named to survive GitHub verbatim (underscore),
+    //   - the BUNDLE keeps its space, because that is the on-disk name macOS and
+    //     the TCC/keychain grant key on and renaming it is a different change.
+    expect(KEYCHAIN_HELPER_ASSET).toBe('Agents_CLI.app.zip');
     expect(KEYCHAIN_HELPER_APP_NAME).toBe('Agents CLI.app');
-    expect(KEYCHAIN_HELPER_ASSET).toBe(`${KEYCHAIN_HELPER_APP_NAME}.zip`);
+    expect(KEYCHAIN_HELPER_ASSET).not.toContain(' ');
+    expect(KEYCHAIN_HELPER_APP_NAME).toContain(' ');
   });
 
   it('caches under ~/.agents/.cache/secrets/mac-helper/v<version>', () => {

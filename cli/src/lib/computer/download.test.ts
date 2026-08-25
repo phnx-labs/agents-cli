@@ -32,12 +32,17 @@ describe('parseTeamId (verifyMacHelper Team-ID extraction)', () => {
 });
 
 describe('mac helper release-asset download', () => {
-  it('builds asset URLs pinned to the exact v<version> tag', () => {
-    const u = macHelperAssetUrls('1.20.50');
+  it("builds asset URLs pinned to the HELPER's own tag, not the CLI's", () => {
+    // The version here is a HELPER version. Keying these URLs to the CLI tag is
+    // what forced every CLI release to re-stage every helper asset, and made a
+    // helper fix unreachable without one — see lib/helper-versions.ts.
+    const u = macHelperAssetUrls('1.0.0');
     expect(u.zip).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/v1.20.50/ComputerHelper.app.zip',
+      'https://github.com/phnx-labs/agents-cli/releases/download/computer-mac/v1.0.0/ComputerHelper.app.zip',
     );
     expect(u.sha256).toBe(`${u.zip}.sha256`);
+    // A bare `v<n>` tag here would be the old coupling coming back.
+    expect(u.zip).not.toMatch(/download\/v\d/);
   });
 
   it('names the asset + bundle exactly what build.sh emits (drift guard)', () => {
