@@ -93,8 +93,8 @@ The `plan-html-reminder` was initially treated as dangling in personal PR #291, 
 </figure>
 
 <figure>
-<figcaption><strong>Figure 2 — Delivery ledger.</strong> Green items are demonstrably merged; amber is improved but short of the originally proposed endpoint; red is the explicit missing closure.</figcaption>
-<svg viewBox="0 0 1120 390" role="img" aria-label="Timeline of merged rule and hook simplification pull requests">
+<figcaption><strong>Figure 2 — Delivery ledger.</strong> Thematic groups, not chronological order: green items are demonstrably merged; amber is the explicit missing closure.</figcaption>
+<svg viewBox="0 0 1120 390" role="img" aria-label="Thematic ledger of merged rule and hook improvements followed by the remaining closure gap">
   <line x1="90" y1="195" x2="1030" y2="195" stroke="#71717a" stroke-width="6"/>
   <g fill="#84cc16" stroke="#365314" stroke-width="3">
     <circle cx="150" cy="195" r="18"/><circle cx="330" cy="195" r="18"/><circle cx="510" cy="195" r="18"/><circle cx="690" cy="195" r="18"/><circle cx="870" cy="195" r="18"/>
