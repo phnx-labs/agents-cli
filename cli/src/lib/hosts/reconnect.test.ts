@@ -18,6 +18,7 @@ import {
   unstableNotice,
   remoteExitNotice,
   connectionEndedNotice,
+  connectionStartedNotice,
   afterInteractiveRemoteExit,
   reconnectInteractiveSession,
   reattachRemoteCommand,
@@ -345,6 +346,18 @@ describe('connectionEndedNotice — the id left on the shell after SSH closes (R
     expect(s).toContain('Connection to yosemite-s0 closed.');
     expect(s).toContain(`Launch ${LAUNCH_ID}`);
     expect(s).toContain('--launch-id');
+  });
+});
+
+describe('connectionStartedNotice — id while the connection exists (RUSH-3227 B)', () => {
+  test('a known session id names the host, the full id, and resume-later', () => {
+    const s = connectionStartedNotice(SESSION_TARGET, 'yosemite-m2');
+    expect(s).toContain(`Session ${SID} on yosemite-m2`);
+    expect(s).toContain(`Resume later:  agents sessions resume ${SID}`);
+  });
+
+  test('a launch id is not a resume handle — print nothing', () => {
+    expect(connectionStartedNotice({ kind: 'launch', id: LAUNCH_ID }, 'yosemite-m2')).toBeUndefined();
   });
 });
 

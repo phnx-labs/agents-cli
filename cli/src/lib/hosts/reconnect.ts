@@ -358,6 +358,18 @@ export function connectionEndedNotice(
 }
 
 /**
+ * Banner printed when an interactive `--device` run whose session id is already
+ * known (Claude's forced id, or a resume) is about to take the TTY. The TUI
+ * will cover this; it survives in scrollback so the id exists *while* the
+ * connection exists, not only after it dies (RUSH-3227 plan B). Launch-id
+ * targets are not a resume handle — do not print them here.
+ */
+export function connectionStartedNotice(target: ReconnectTarget, host: string): string | undefined {
+  if (target.kind !== 'session') return undefined;
+  return `Session ${target.id} on ${host}\n  Resume later:  agents sessions resume ${target.id}\n`;
+}
+
+/**
  * Decide what happens after an interactive `--device` stream returns.
  *
  * Auto-reconnect only when the link dropped (255) AND the run is tmux-hosted

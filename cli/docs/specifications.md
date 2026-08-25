@@ -2609,6 +2609,15 @@ themselves are normative in [§Secrets](#secrets) — SEC-6..SEC-14 govern.)
   the local client exits; *Then* the shell shows `Session <uuid>` and
   `agents sessions resume <uuid>` under OpenSSH's `Shared connection … closed.`
   line, not a bare prompt (RUSH-3227).
+- **EXEC-56 (MUST).** When an interactive `--device` run whose real session id
+  is known before the TTY is taken (Claude's forced id, or a resume) starts,
+  the CLI MUST print that full id and a resume-later command
+  (`connectionStartedNotice`, `lib/hosts/reconnect.ts`) so the id exists
+  *while* the connection exists, not only after it dies. A launch id MUST
+  NOT be printed as a session id. *Given* `agents run claude --device yosemite-m2`;
+  *When* the SSH stream is about to start; *Then* stderr shows
+  `Session <uuid> on yosemite-m2` and `agents sessions resume <uuid>`
+  (RUSH-3227 plan B).
 - **EXEC-43 (MUST).** A persisted tmux `SessionMeta.cmd`
   (`buildTmuxAgentCommand`) MUST redact env VALUES (`<redacted>`) while the
   live launched command keeps the real values, so a resolved secret never
