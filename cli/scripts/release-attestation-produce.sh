@@ -17,12 +17,14 @@
 #   2. On a macOS box with `agents` + the apple.com secrets bundle, signs and
 #      notarizes the CLI binary and the two helper .apps headlessly (the same
 #      steps release.sh's privileged phase ran before RUSH-2666 relocated
-#      build/sign to attestation time). Off that box, this step is skipped and
-#      `npm pack`'s own prepack gates (verify-keychain-helper.sh,
-#      verify-menubar-helper.sh) fail closed instead -- there is no unsigned
-#      fallback tarball. (The CLI binary left the tarball in RUSH-3026, so its
-#      gate left prepack; the sign step below still builds it on a Mac for the
-#      per-release GitHub-asset path.)
+#      build/sign to attestation time). Off that box the step is simply skipped,
+#      and since RUSH-3100 that costs nothing: the tarball carries no helper
+#      bundle, so there is nothing for `npm pack` to gate on and no unsigned
+#      bundle can ship from anywhere. The old prepack gates
+#      (verify-keychain-helper.sh, verify-menubar-helper.sh) are retained for
+#      cutting a HELPER release, not for packing the CLI. (The CLI binary left
+#      the tarball in RUSH-3026; the sign step below still builds it on a Mac for
+#      the per-release GitHub-asset path.)
 #   3. Packs the tarball (`npm pack`) and binds its sha256 into the record.
 #   4. Writes the attestation via release-attestation.sh write, then copies
 #      the tarball alongside it so release-attestation.sh tarball/promote can
