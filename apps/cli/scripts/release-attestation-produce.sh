@@ -288,7 +288,7 @@ if [[ -x scripts/release-manifest.sh ]]; then
     seed_note=""
     if ! command -v gh >/dev/null 2>&1; then
       seed_note="no gh on PATH"
-    elif ! PRIOR_TAG="$(gh release list --limit 1 --json tagName --jq '.[0].tagName' 2>/dev/null)"; then
+    elif ! PRIOR_TAG="$(newest_release_with_manifest)"; then
       seed_note="gh could not list releases (auth or network)"
     elif [[ -z "$PRIOR_TAG" || "$PRIOR_TAG" == "null" ]]; then
       seed_note="no published release to seed from"
@@ -305,6 +305,37 @@ if [[ -x scripts/release-manifest.sh ]]; then
         > "$MANIFEST_FILE"
     fi
   fi
+
+  # The newest release that actually CARRIES a helper manifest -- not simply the
+  # newest release.
+  #
+  # `gh release list --limit 1` returns whatever was published last, and not
+  # every release is a CLI release: the Windows computer-helper workflow
+  # publishes helper-only releases (assets `computer-helper-win.exe` + .sha256)
+  # under the same `v<version>` tag namespace. One of those shadows the last real
+  # CLI release, the manifest seed silently misses, and EVERY helper then reads
+  # as "changed" -- which hard-fails on computer-mac, a helper this producer
+  # never rebuilds. Observed live: v1.22.48 (helper-only, 09:54Z) shadowed
+  # v1.22.47 and blocked the release.
+  #
+  # Walk back until a release with the asset is found, rather than trusting
+  # position. Empty output means genuinely none has one.
+  newest_release_with_manifest() {
+    local tag
+    while read -r tag; do
+      [[ -n "$tag" && "$tag" != "null" ]] || continue
+      # Match a numeric index. `--jq index(...)` prints an EMPTY line when the
+      # asset is absent, not the string "null", so a `!= null` style test accepts
+      # every release. Require a digit.
+      if gh release view "$tag" --json assets \
+           --jq '[.assets[].name] | index("release-manifest.json")' 2>/dev/null \
+           | grep -qE '^[0-9]+$'; then
+        printf '%s\n' "$tag"
+        return 0
+      fi
+    done < <(gh release list --limit 20 --json tagName --jq '.[].tagName' 2>/dev/null)
+    return 0
+  }
 
   manifest_asset_sha256() {
     local f="$1"
