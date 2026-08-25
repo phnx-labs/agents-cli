@@ -135,7 +135,20 @@ case "$MODE" in
       --exclude '.agents/worktrees' --exclude '.release-attestations' \
       "$TREE_ROOT/" "$ADDR:.agents/test-runs/agents-cli/"
 
-    green "Tree shipped. Running the suite on $DEVICE..."
+    # Bound the repo root to the shipped tree.
+  #
+  # The tree ships WITHOUT .git — for the attestation producer's isolated
+  # worktree that file is just a `gitdir:` pointer into the origin machine's
+  # object store, meaningless here. But without any .git marker,
+  # `git rev-parse --show-toplevel` walks UP out of the shipped tree and returns
+  # the first ancestor repo it finds. On a worker that is `~/.agents` (the
+  # DotAgents repo), so every git-rooted path resolves against a completely
+  # unrelated repository — release-manifest.test.ts went looking for
+  # `~/.agents/native/computer-mac/Sources` and the suite failed 4 tests with a
+  # confusing "helper input missing". An empty repo here stops the walk.
+  ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli && [ -e .git ] || git init -q"
+
+  green "Tree shipped. Running the suite on $DEVICE..."
     ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli/apps/cli \
       && bun install --silent \
       && bun run build >/dev/null \
