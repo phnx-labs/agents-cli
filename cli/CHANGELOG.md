@@ -2,24 +2,6 @@
 
 ## 1.22.48
 
-- **`--strategy balanced` now spreads across your provider accounts, not just
-  native logins (RUSH-3182).** A setup-token or API-key account added with
-  `agents accounts add` is now a first-class balancing candidate for every
-  harness its provider can authenticate — claude, codex, grok, cursor, kimi,
-  opencode. Before, balanced only rotated across accounts that happened to sit in
-  a version home, so a worker's shared setup-tokens never participated and
-  `--account` couldn't select them. The run path folds those provider accounts
-  into the candidate list and injects the picked one through the existing
-  `--account` path (a setup-token still authenticates via
-  `CLAUDE_CODE_OAUTH_TOKEN`); the other candidate consumers — the watchdog,
-  session recovery, teams placement — keep the native-only list, so nothing else
-  changes. On a box dominated by verified native logins a usage-less provider
-  account is deprioritized until the daemon fetches its usage; on a worker
-  (setup-token majority) it participates immediately. Source:
-  `cli/src/lib/accounting/account-pool.ts`,
-  `cli/src/lib/accounting/account-pool-collect.ts`,
-  `cli/src/lib/accounting/rotate.ts`, `cli/src/commands/exec.ts`.
-
 - **On your own machine, every Claude run uses your normal login — not the
   worker setup-token (RUSH-2395).** The credential now follows **device role**,
   not run mode. A device marked `config.role: personal` (your interactive box —
