@@ -8,7 +8,7 @@
 #
 # Prerequisites:
 #   - agents auth login must have run on the pinned device
-#   - agents traces provision must have run at least once on that device
+#   - agents traces setup must have run at least once on that device
 #
 # Why daily: bucketHistory is a 14-day rolling window. driftSignals only fires
 # once ≥3 calendar days of history exist. Without this routine the index stays
