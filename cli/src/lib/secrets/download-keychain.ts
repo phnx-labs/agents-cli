@@ -33,12 +33,18 @@ import {
 import { helperFloor } from '../helper-versions.js';
 
 /** The zipped `.app` release asset name (the bundle name has a space). */
-// NOT 'Agents CLI.app.zip'. GitHub normalizes spaces in release-asset names to
-// dots on upload, so an asset staged under the spaced name is SERVED as
-// `Agents.CLI.app.zip` and a client asking for the spaced name 404s forever.
+// Underscore, and NOT a space. GitHub rewrites a space in a release-asset name
+// to a dot on upload, so an asset staged as `Agents CLI.app.zip` is SERVED as
+// `Agents.CLI.app.zip` and a client asking for the spaced name 404s forever --
+// which is exactly what shipped. The fix is to CHOOSE a name GitHub leaves
+// alone rather than to mirror its rewrite: `Agents.CLI.app.zip` would work by
+// matching an artifact of that behavior, and would silently break if the
+// normalization rule ever changed. Underscores are preserved verbatim (verified
+// against a real upload).
+//
 // The bundle DIRECTORY inside the zip keeps its space (`appName` below) -- that
-// is the on-disk bundle name and is unaffected.
-export const KEYCHAIN_HELPER_ASSET = 'Agents.CLI.app.zip';
+// is the on-disk bundle name macOS and the TCC grant key on, and it is unchanged.
+export const KEYCHAIN_HELPER_ASSET = 'Agents_CLI.app.zip';
 /** The bundle directory name once extracted. */
 export const KEYCHAIN_HELPER_APP_NAME = 'Agents CLI.app';
 

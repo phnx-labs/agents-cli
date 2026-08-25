@@ -26,7 +26,8 @@ describe('helper release tags', () => {
 
   it('refuses an asset name with a space — GitHub dot-normalizes it and the URL 404s forever', () => {
     // The live bug: `Agents CLI.app.zip` was uploaded and served as
-    // `Agents.CLI.app.zip`, so every client request missed.
+    // `Agents.CLI.app.zip`, so every client request missed. The published asset
+    // is now `Agents_CLI.app.zip` -- a name GitHub leaves alone.
     expect(() => helperAssetUrls(spec({ assetName: 'Agents CLI.app.zip' }), '1.0.0'))
       .toThrow(/contains a space/);
   });
@@ -51,7 +52,7 @@ describe('helper release tags', () => {
       expect(s.assetName, `${s.helper} asset name`).not.toContain(' ');
       expect(() => helperAssetUrls(s, helperFloor(s.helper))).not.toThrow();
     }
-    expect(KEYCHAIN_HELPER_SPEC.assetName).toBe('Agents.CLI.app.zip');
+    expect(KEYCHAIN_HELPER_SPEC.assetName).toBe('Agents_CLI.app.zip');
     // The bundle DIRECTORY keeps its space -- only the asset name changed.
     expect(KEYCHAIN_HELPER_SPEC.appName).toBe('Agents CLI.app');
   });

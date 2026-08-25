@@ -79,13 +79,14 @@ export function helperCacheDir(spec: HelperSpec, version: string): string {
  */
 export function helperAssetUrls(spec: HelperSpec, version: string): { zip: string; sha256: string } {
   const base = `https://github.com/${HELPER_RELEASE_REPO}/releases/download/${helperTag(spec.helper, version)}`;
-  // Asset names must not contain spaces: GitHub normalizes a space to a dot on
+  // Asset names must not contain spaces: GitHub rewrites a space to a dot on
   // upload, so a spaced name is requested at a URL that 404s forever. Caught on
-  // `Agents CLI.app.zip`, which GitHub serves as `Agents.CLI.app.zip`.
+  // `Agents CLI.app.zip`, which GitHub served as `Agents.CLI.app.zip`. Use an
+  // underscore -- GitHub preserves it verbatim.
   if (spec.assetName.includes(' ')) {
     throw new Error(
-      `helper asset name ${JSON.stringify(spec.assetName)} contains a space; GitHub serves it dot-normalized, `
-      + 'so this URL would always 404. Name the asset without spaces.',
+      `helper asset name ${JSON.stringify(spec.assetName)} contains a space; GitHub rewrites it to a dot on `
+      + 'upload, so this URL would always 404. Use an underscore instead.',
     );
   }
   return { zip: `${base}/${spec.assetName}`, sha256: `${base}/${spec.assetName}.sha256` };
