@@ -4,7 +4,7 @@
  * Every test spawns the real CLI against an isolated mkdtemp HOME with no
  * daemon running — no mocks. Modeled on routines.test.ts.
  *
- * EXTRACTED so the suite can live in several files. `daemon.test.ts` was 34
+ * EXTRACTED so the suite can live in several files. `daemon.test.ts` was 35
  * tests in ONE file at 159s — the slowest file in the repo and therefore the
  * SUITE'S FLOOR, because vitest parallelises across files and runs the tests
  * inside one file sequentially in a single worker. Splitting the tests across

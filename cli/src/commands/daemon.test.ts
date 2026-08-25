@@ -4,7 +4,7 @@
  * The command group itself: that it resolves, that Funnel nests under it, and
  * that status/enable/disable agree about whether this device runs a daemon.
  *
- * Split out of a single 34-test `daemon.test.ts` that ran 159s — the slowest
+ * Split out of a single 35-test `daemon.test.ts` that ran 159s — the slowest
  * file in the repo, and therefore the whole suite's floor: vitest parallelises
  * across FILES and runs one file's tests sequentially in a single worker. The
  * shared spawn harness lives in `daemon-test-harness.ts`.

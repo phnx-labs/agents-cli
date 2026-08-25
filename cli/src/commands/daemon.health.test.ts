@@ -4,26 +4,18 @@
  * The diagnosis half: `doctor`'s verdicts (including the auto-start circuit
  * breaker), `logs` with nothing logged, and the no-op paths for stop/reload.
  *
- * Split out of a single 34-test `daemon.test.ts` that ran 159s — the slowest
+ * Split out of a single 35-test `daemon.test.ts` that ran 159s — the slowest
  * file in the repo, and therefore the whole suite's floor: vitest parallelises
  * across FILES and runs one file's tests sequentially in a single worker. The
  * shared spawn harness lives in `daemon-test-harness.ts`.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
-import { spawn, spawnSync, type ChildProcess } from 'child_process';
 import {
   DAEMON_TESTS_SUPPORTED,
-  REPO_ROOT,
-  TSX_IMPORT,
-  CLI_ENTRYPOINT,
   makeHome,
   run,
-  spawnFakeRegisteredDaemon,
-  registerInstance,
-  killFakeDaemon,
 } from './daemon-test-harness.js';
 
 const describeDaemon = DAEMON_TESTS_SUPPORTED ? describe : describe.skip;
