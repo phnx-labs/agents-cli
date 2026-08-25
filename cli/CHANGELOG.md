@@ -2,19 +2,6 @@
 
 ## 1.22.48
 
-- **Usage refresh is per-device again — no more `usage.primary-host` broadcast
-  (RUSH-3193 #15).** Every host already reads its own usage directly from the
-  provider APIs (`agents view` proved this), so the daemon's usage tick no
-  longer elects one machine as a "primary" that SSH-broadcasts a token-free
-  envelope for the rest to import. Each device now refreshes only the accounts
-  it holds credentials for, on its own schedule, with no cross-host dependency.
-  `agents config set/get/unset usage.primary-host` is removed — unset it
-  before upgrading if you had it configured, there is nothing left to
-  configure. Source: `apps/cli/src/lib/daemon-ticks.ts`,
-  `apps/cli/src/lib/usage-refresh.ts`, `apps/cli/src/lib/device-config.ts`,
-  `apps/cli/src/lib/config-keys.ts`, `apps/cli/src/commands/config.ts`
-  (removes `apps/cli/src/lib/usage-fleet.ts`).
-
 - **On your own machine, every Claude run uses your normal login — not the
   worker setup-token (RUSH-2395).** The credential now follows **device role**,
   not run mode. A device marked `config.role: personal` (your interactive box —
