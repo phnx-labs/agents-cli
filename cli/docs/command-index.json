@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 562,
+  "commands": 563,
   "root": {
     "name": "agents",
     "path": "",
@@ -8760,6 +8760,44 @@
               "description": "output the final result matrix as JSON",
               "long": "--json",
               "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
+        {
+          "name": "pick",
+          "path": "devices pick",
+          "aliases": [],
+          "description": "Print the device automatic placement would choose for offloaded machine work (the suite, a build) — least-loaded, reachable, POSIX, never the box you are sitting at. Writes just the name to stdout so scripts can consume it.",
+          "args": [],
+          "options": [
+            {
+              "flags": "--json",
+              "description": "output the pick plus every candidate and exclusion reason",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--platform <list>",
+              "description": "comma-separated platforms to allow (default: linux,macos)",
+              "long": "--platform",
+              "required": true,
               "optional": false,
               "variadic": false,
               "negate": false

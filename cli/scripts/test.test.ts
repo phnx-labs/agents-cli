@@ -142,12 +142,23 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
   // answers with an empty registry, so the run aborts at the address lookup with a
   // message that NAMES the picked device. That name is the proof auto resolved.
 
+  // Every fake below answers `devices --help` with a `pick` row. Without it the
+  // fake looks like a CLI that PREDATES the verb, and the script's version
+  // diagnostic fires instead of the behavior under test — an unfaithful fixture
+  // that would make these tests pass for the wrong reason.
+  const HELP_STANZA =
+    '#!/usr/bin/env bash\n'
+    + 'if [ "$2" = "--help" ] || [ "$3" = "--help" ]; then\n'
+    + '  echo "  pick   Print the device automatic placement would choose"\n'
+    + '  exit 0\n'
+    + 'fi\n';
+
   /** A fake `agents` whose `devices pick` prints `picked`. Returns its bin dir. */
   function fakeAgents(picked: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-fakeagents-'));
     fs.writeFileSync(
       path.join(dir, 'agents'),
-      '#!/usr/bin/env bash\n'
+      HELP_STANZA
       + 'if [ "$1" = "devices" ] && [ "$2" = "pick" ]; then\n'
       + `  echo ${JSON.stringify(picked)}\n`
       + '  exit 0\n'
@@ -186,7 +197,7 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     // The picker exiting non-zero means the fleet has nothing to offer. That must
     // abort with the alternatives spelled out — never degrade into a local run.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-nopick-'));
-    fs.writeFileSync(path.join(dir, 'agents'), '#!/usr/bin/env bash\nexit 1\n');
+    fs.writeFileSync(path.join(dir, 'agents'), `${HELP_STANZA}exit 1\n`);
     fs.chmodSync(path.join(dir, 'agents'), 0o755);
     const r = run([], { PATH: `${dir}:${process.env.PATH}` });
     fs.rmSync(dir, { recursive: true, force: true });
@@ -202,7 +213,7 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     // `pick` exiting 0 with nothing on stdout would otherwise rsync to ":" —
     // a confusing failure far from the cause.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-emptypick-'));
-    fs.writeFileSync(path.join(dir, 'agents'), '#!/usr/bin/env bash\nexit 0\n');
+    fs.writeFileSync(path.join(dir, 'agents'), `${HELP_STANZA}exit 0\n`);
     fs.chmodSync(path.join(dir, 'agents'), 0o755);
     const r = run([], { PATH: `${dir}:${process.env.PATH}` });
     fs.rmSync(dir, { recursive: true, force: true });

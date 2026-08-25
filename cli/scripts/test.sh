@@ -142,7 +142,7 @@ if [[ "$MODE" == "auto" ]]; then
     # Both exit non-zero here, and conflating them sends the operator hunting a
     # capacity problem that does not exist. This is a diagnostic, not a fallback:
     # either way the run aborts.
-    if ! agents devices --help 2>/dev/null | grep -q '^\s*pick\b'; then
+    if ! agents devices --help 2>/dev/null | grep -qE '^[[:space:]]*pick([[:space:]]|$)'; then
       die "the installed 'agents' CLI has no 'devices pick' -- it predates the auto-picker.
   Upgrade it, or name a box until you do:  scripts/test.sh --device yosemite-m1"
     fi
