@@ -30,15 +30,22 @@ import {
   helperCacheDir,
   verifyHelperApp,
 } from '../helper-download.js';
+import { helperFloor } from '../helper-versions.js';
 
 /** The zipped `.app` release asset name (the bundle name has a space). */
-export const KEYCHAIN_HELPER_ASSET = 'Agents CLI.app.zip';
+// NOT 'Agents CLI.app.zip'. GitHub normalizes spaces in release-asset names to
+// dots on upload, so an asset staged under the spaced name is SERVED as
+// `Agents.CLI.app.zip` and a client asking for the spaced name 404s forever.
+// The bundle DIRECTORY inside the zip keeps its space (`appName` below) -- that
+// is the on-disk bundle name and is unaffected.
+export const KEYCHAIN_HELPER_ASSET = 'Agents.CLI.app.zip';
 /** The bundle directory name once extracted. */
 export const KEYCHAIN_HELPER_APP_NAME = 'Agents CLI.app';
 
 /** Keychain-helper identity + verification policy — Team + notarization only,
  *  no DR pin (see docblock). */
 export const KEYCHAIN_HELPER_SPEC: HelperSpec = {
+  helper: 'keychain',
   assetName: KEYCHAIN_HELPER_ASSET,
   appName: KEYCHAIN_HELPER_APP_NAME,
   cacheSubdir: ['secrets', 'mac-helper'],

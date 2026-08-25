@@ -22,6 +22,7 @@ import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { getCacheDir } from './state.js';
 import { parseSha256Asset, sha256File } from './sha256-asset.js';
+import { helperTag, type HelperName } from './helper-versions.js';
 
 /** GitHub repo whose `v<version>` releases carry the helper assets. */
 export const HELPER_RELEASE_REPO = 'phnx-labs/agents-cli';
@@ -32,6 +33,12 @@ export const EXPECTED_TEAM_ID = '2HTP252L87';
 /** One helper's identity + verification policy — everything that differs between
  *  the computer helper and the menu-bar helper. */
 export interface HelperSpec {
+  /**
+   * Which helper this is — the key into the independent release train
+   * (`helper-versions.ts`). This is what makes the download URL a function of
+   * the HELPER's version rather than the CLI's.
+   */
+  helper: HelperName;
   /** The zipped `.app` release asset name, e.g. `ComputerHelper.app.zip`. */
   assetName: string;
   /** The bundle directory name once extracted, e.g. `ComputerHelper.app`. */
@@ -59,9 +66,28 @@ export function helperCacheDir(spec: HelperSpec, version: string): string {
   return path.join(getCacheDir(), ...spec.cacheSubdir, `v${version}`);
 }
 
-/** Release-asset URLs for the helper zip + its checksum at one `v<version>` tag. */
+/**
+ * Release-asset URLs for one helper build, at that HELPER's own tag.
+ *
+ * The tag is `<helper>/v<version>` (e.g. `menubar/v1.0.0`), never the CLI's
+ * `v<cliVersion>`. Keying these to the CLI tag is what forced every CLI release
+ * to re-stage every helper asset, and simultaneously made a helper fix
+ * unreachable without a CLI release — see `helper-versions.ts` for the full why.
+ *
+ * `version` is a HELPER version. Passing a CLI version here yields a tag that
+ * does not exist; callers default it from {@link helperFloor}.
+ */
 export function helperAssetUrls(spec: HelperSpec, version: string): { zip: string; sha256: string } {
-  const base = `https://github.com/${HELPER_RELEASE_REPO}/releases/download/v${version}`;
+  const base = `https://github.com/${HELPER_RELEASE_REPO}/releases/download/${helperTag(spec.helper, version)}`;
+  // Asset names must not contain spaces: GitHub normalizes a space to a dot on
+  // upload, so a spaced name is requested at a URL that 404s forever. Caught on
+  // `Agents CLI.app.zip`, which GitHub serves as `Agents.CLI.app.zip`.
+  if (spec.assetName.includes(' ')) {
+    throw new Error(
+      `helper asset name ${JSON.stringify(spec.assetName)} contains a space; GitHub serves it dot-normalized, `
+      + 'so this URL would always 404. Name the asset without spaces.',
+    );
+  }
   return { zip: `${base}/${spec.assetName}`, sha256: `${base}/${spec.assetName}.sha256` };
 }
 

@@ -27,6 +27,7 @@ import {
   helperCacheDir,
   verifyHelperApp,
 } from '../helper-download.js';
+import { helperFloor } from '../helper-versions.js';
 
 /** The zipped `.app` release asset name. */
 export const MENUBAR_HELPER_ASSET = 'MenubarHelper.app.zip';
@@ -39,6 +40,7 @@ export const MENUBAR_HELPER_BUNDLE_ID = 'com.phnx-labs.agents-menubar';
 
 /** MenubarHelper identity + verification policy — DR-pinned (see docblock). */
 export const MENUBAR_HELPER_SPEC: HelperSpec = {
+  helper: 'menubar',
   assetName: MENUBAR_HELPER_ASSET,
   appName: MENUBAR_HELPER_APP_NAME,
   cacheSubdir: ['menubar', 'mac-helper'],

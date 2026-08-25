@@ -27,6 +27,7 @@ import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
 import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { downloadMenubarHelperApp } from './download-menubar.js';
+import { helperFloor } from '../helper-versions.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -481,7 +482,7 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
 export async function enableMenubarService(opts: { clearOptOut?: boolean } = { clearOptOut: true }): Promise<boolean> {
   if (!onDarwin()) return false;
   let src = sourceAppPath();
-  if (!src) src = await downloadMenubarHelperApp(getCliVersion());
+  if (!src) src = await downloadMenubarHelperApp(helperFloor('menubar'));
   return startMenubarServiceFromSource({ ...opts, sourceAppPath: src });
 }
 
@@ -956,7 +957,7 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   let src = sourceAppPath();
   if (!src) {
     try {
-      src = await downloadMenubarHelperApp(getCliVersion());
+      src = await downloadMenubarHelperApp(helperFloor('menubar'));
     } catch (e) {
       step('bundle', 'failed', `no AGI Menu bundle ships with this install, and the release-asset download failed: ${(e as Error).message}`);
       return { steps, configured: false, status: before };

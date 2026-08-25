@@ -23,6 +23,7 @@ import * as path from 'path';
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { downloadKeychainHelperApp } from './download-keychain.js';
 import { getCliVersion } from '../version.js';
+import { helperFloor } from '../helper-versions.js';
 
 const APP_BUNDLE_NAME = 'Agents CLI.app';
 const INSTALL_DIR_NAME = 'agents-cli';
@@ -164,7 +165,7 @@ export function ensureKeychainHelperInstalled(opts: { forceReinstall?: boolean }
 export async function ensureKeychainHelperInstalledAsync(opts: { forceReinstall?: boolean } = {}): Promise<void> {
   assertDarwin();
   const bundled = bundledSourceAppPathOrNull();
-  const src = bundled ?? (await downloadKeychainHelperApp(getCliVersion()));
+  const src = bundled ?? (await downloadKeychainHelperApp(helperFloor('keychain')));
   installKeychainHelperFromSource(src, opts);
 }
 

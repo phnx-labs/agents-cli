@@ -31,6 +31,7 @@ import {
   parseTeamId,
   verifyHelperApp,
 } from '../helper-download.js';
+import { helperFloor } from '../helper-versions.js';
 
 // Re-exported so existing importers (and download.test.ts) keep resolving these
 // names from './download.js'.
@@ -45,6 +46,7 @@ export const MAC_HELPER_APP_NAME = 'ComputerHelper.app';
  *  helper has no upgrade-stable Accessibility grant to protect, so its
  *  verification is codesign + Team + notarization exactly as before. */
 const COMPUTER_HELPER_SPEC: HelperSpec = {
+  helper: 'computer-mac',
   assetName: MAC_HELPER_ASSET,
   appName: MAC_HELPER_APP_NAME,
   cacheSubdir: ['computer', 'mac-helper'],
@@ -87,7 +89,7 @@ export function downloadMacHelperApp(version: string): Promise<string> {
  * for the running CLI version. Throws with the tag it checked when neither
  * exists. macOS only.
  */
-export async function ensureMacHelperApp(version = getCliVersion()): Promise<string> {
+export async function ensureMacHelperApp(version = helperFloor('computer-mac')): Promise<string> {
   if (os.platform() !== 'darwin') {
     throw new Error('The macOS computer helper is only available on macOS.');
   }
