@@ -166,7 +166,7 @@ case "$MODE" in
   # code rather than a copy that drifts (scripts/ is part of the rsync, so it is
   # already on the worker).
   ssh "$ADDR" 'bash ~/.cache/agents-cli/test-runs/tree/apps/cli/scripts/bound-repo-root.sh ~/.cache/agents-cli/test-runs/tree' \
-    || die "could not bound the repo root on $name -- refusing to run the suite against an unrelated repository"
+    || die "could not give the shipped tree a git repo on '$DEVICE' -- refusing to run the suite, since anything resolving a repo root would fail or escape"
 
   green "Tree shipped. Running the suite on $DEVICE..."
     ssh "$ADDR" "cd ~/.cache/agents-cli/test-runs/tree/apps/cli \

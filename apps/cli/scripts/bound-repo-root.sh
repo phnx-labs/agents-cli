@@ -1,18 +1,25 @@
 #!/usr/bin/env bash
 #
-# Bound a shipped tree's git repo root to itself.
+# Give a shipped tree its own git repo.
 #
-# `test.sh --device` rsyncs the tree WITHOUT `.git` — for the attestation
+# `test.sh --device` rsyncs the tree WITHOUT `.git` (for the attestation
 # producer's isolated worktree that file is only a `gitdir:` pointer into the
-# origin machine's object store, meaningless on the worker. But with no `.git`
-# marker, `git rev-parse --show-toplevel` walks UP out of the shipped tree and
-# returns the first ancestor repo it finds. On a worker that is `~/.agents`, the
-# DotAgents repo — so every git-rooted path in the suite resolves against a
-# completely unrelated repository (RUSH-3178).
+# origin machine's object store, meaningless on the worker). Parts of the suite
+# resolve paths from a repo root regardless -- `release-manifest.sh`'s
+# `resolve_repo_root()` calls `git -C "$REPO_ROOT" rev-parse --show-toplevel`
+# unconditionally -- so without a repo here they hard-fail with
+# `fatal: not a git repository`. This supplies one, mirroring what
+# `sandbox.sh` has always done for the crabbox path ("blank git for tests that
+# need one").
 #
-# This is its own script, rather than a line inlined into test.sh's ssh call, so
-# the test suite can exercise THE SAME code rather than a copy of it that can
-# drift. The rsync ships scripts/, so it is already on the worker.
+# HISTORY, because the justification changed. This script was first written to
+# undo an ESCAPE: the tree used to land in `~/.agents/test-runs/`, and since
+# `~/.agents` is itself a git repo, `rev-parse --show-toplevel` walked up and
+# resolved to it -- so the suite read paths out of an unrelated repository. That
+# was a self-inflicted problem and this script was a band-aid over it. The tree
+# now ships to `~/.cache/agents-cli/test-runs/tree`, which has no git ancestor,
+# so the escape is structurally impossible. What remains is the genuine
+# compatibility requirement above.
 #
 # Usage: scripts/bound-repo-root.sh <dir>
 set -euo pipefail
