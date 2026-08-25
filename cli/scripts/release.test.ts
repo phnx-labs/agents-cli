@@ -115,11 +115,35 @@ describeRelease('release.sh: an ordinary release is CLI-only', () => {
     expect(RELEASE_SH).toMatch(/^WITH_HELPERS=false$/m);
   });
 
-  it('advertises the flag in --help, so it is discoverable without reading the source', () => {
-    // Caught by running the script, not by reading it: --help listed every other
-    // flag and silently omitted this one.
-    const help = RELEASE_SH.slice(RELEASE_SH.indexOf('-h|--help)'));
-    expect(help.slice(0, 300)).toContain('--with-helpers');
+  it('lists EVERY flag its parser accepts in --help (executed, not grepped)', () => {
+    // Runs the real script. The content-assertion version of this test passed
+    // while --help silently omitted --with-helpers, because it only checked that
+    // one known string appeared. This derives the flag set from the parser and
+    // compares it against actual --help OUTPUT, so the next flag someone adds is
+    // covered without anyone remembering to extend the test.
+    const help = spawnSync('bash', [RELEASE_SH_PATH, '--help'], { encoding: 'utf-8' });
+    expect(help.status, help.stderr).toBe(0);
+
+    // Flags the `case` arms accept, minus the internal phase markers (deliberately
+    // undocumented) and --help itself.
+    const INTERNAL = new Set(['--home-base-phase', '--orchestration-phase', '-h', '--help']);
+    // Aliases are satisfied by their primary being documented — `--help` should
+    // teach one spelling, not every accepted synonym.
+    const ALIAS_OF: Record<string, string> = { '--host': '--device', '-y': '--yes' };
+    const parsed = new Set<string>();
+    for (const arm of RELEASE_SH.matchAll(/^\s{4}(-[^)]+)\)/gm)) {
+      for (const flag of arm[1].split('|')) {
+        const name = flag.trim().replace(/=\*$/, '');
+        // `--*)` is the unknown-flag catch-all, not a flag.
+        if (name === '--*' || !name.startsWith('-')) continue;
+        if (INTERNAL.has(name)) continue;
+        parsed.add(ALIAS_OF[name] ?? name);
+      }
+    }
+    expect(parsed.size, 'no flags parsed out of the case arms').toBeGreaterThan(3);
+
+    const missing = [...parsed].filter((f) => !help.stdout.includes(f));
+    expect(missing, `--help omits: ${missing.join(', ')}`).toEqual([]);
   });
 
   it('warns that a new flag is inert until merged, because the script re-execs from origin', () => {
