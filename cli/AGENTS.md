@@ -651,18 +651,20 @@ stamped by [`src/lib/hosts/session-index.ts`](src/lib/hosts/session-index.ts) fr
 the dispatch host. Any new writer of an `agents run --device`-shaped row must set it,
 or the index will claim the dispatching box.
 
-## Bundled native helpers (where the tarball's `.app`s come from)
+## Native helpers (downloaded on demand, never bundled)
 
-Two native helpers plus the standalone signed CLI binary ship **inside** this
-package's npm tarball; two more helpers are dev-only and live at repo-root `native/`.
+**No native binary ships inside this package's npm tarball** (RUSH-3100). Every helper
+is a signed + notarized GitHub release asset on its OWN tag, downloaded and verified on
+demand — see `src/lib/helper-versions.ts` for the per-helper version floors. That is what
+lets an ordinary CLI release be produced without a signing Mac.
 
 | Helper | Source | Ships in tarball? | Resolver |
 |---|---|---|---|
-| Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **Yes** (signed + notarized) — **AND** an `Agents_CLI.app.zip` GitHub **release asset** on the helper's own `keychain/v<x.y.z>` tag, fetched on demand when the tarball's copy is absent. The asset name is **underscored, not spaced**: GitHub rewrites a space to a dot at upload, so `Agents CLI.app.zip` was served as `Agents.CLI.app.zip` and every client 404'd. No DR pin (Team + notarization only, unlike the menu-bar helper): keychain items are gated by the access-group entitlement + biometry, not a DR-keyed grant. | `src/lib/secrets/install-helper.ts`, `src/lib/secrets/download-keychain.ts` (shared machinery in `src/lib/helper-download.ts`) |
-| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **Yes** (signed + notarized) — **AND** a `MenubarHelper.app.zip` GitHub **release asset** on the helper's own `menubar/v<x.y.z>` tag, fetched on demand when the tarball's copy is absent | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
+| Keychain broker | `src/lib/secrets/keychain-helper.swift` → `bin/Agents CLI.app` | **No** (RUSH-3100) — signed + notarized `Agents_CLI.app.zip` GitHub **release asset** on the helper's own `keychain/v<x.y.z>` tag, downloaded on demand. The asset name is **underscored, not spaced**: GitHub rewrites a space to a dot at upload, so `Agents CLI.app.zip` was served as `Agents.CLI.app.zip` and every client 404'd. No DR pin (Team + notarization only, unlike the menu-bar helper): keychain items are gated by the access-group entitlement + biometry, not a DR-keyed grant. | `src/lib/secrets/install-helper.ts`, `src/lib/secrets/download-keychain.ts` (shared machinery in `src/lib/helper-download.ts`) |
+| Menu-bar helper | [`menubar/`](menubar) (SwiftPM) → `bin/MenubarHelper.app` | **No** (RUSH-3100) — signed + notarized `MenubarHelper.app.zip` GitHub **release asset** on the helper's own `menubar/v<x.y.z>` tag, downloaded on demand | `src/lib/menubar/install-menubar.ts`, `src/lib/menubar/download-menubar.ts` (shared machinery in `src/lib/helper-download.ts`) |
 | Standalone CLI binary | `src/` → `bun build --compile` → `bin/agents-macos` | **No** — dropped from the tarball (RUSH-3026); macOS installs fall back to the JS entrypoint until it returns as a per-release GitHub asset | `scripts/postinstall.js` |
 | computer-mac | [`../../native/computer-mac`](../../native/computer-mac) | No — signed + notarized GitHub **release asset** on its own `computer-mac/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/computer-rpc.ts`, `src/lib/computer/download.ts` (shared machinery in `src/lib/helper-download.ts`) |
-| computer-win | [`../../native/computer-win`](../../native/computer-win) | No (staged at release) | `src/lib/computer/ssh-tunnel.ts` |
+| computer-win | [`../../native/computer-win`](../../native/computer-win) | No — `computer-helper-win.exe` GitHub **release asset** on its own `computer-win/v<x.y.z>` tag, downloaded on demand | `src/lib/computer/ssh-tunnel.ts` |
 
 Path math: compiled resolvers run from `cli/dist/lib/…`. Files still in `dist/lib/`
 reach repo-root `native/` in **4 hops** (`../../../../native/…`); files in
@@ -713,7 +715,8 @@ every `package.json#bin` entry after `tsc` emits. Newer npm preserves tarball fi
 mode and does NOT auto-chmod — 644 surfaces as `zsh: permission denied: agents`.
 
 The `files` allowlist in [`package.json`](package.json) is a **whitelist** — only
-`dist/**`, the two signed `.app`s, and the postinstall scripts + README/LICENSE ship.
+`dist/**` (JS/d.ts/JSON/sh) and the postinstall scripts + README/LICENSE ship. No native
+binary is in it (RUSH-3100).
 Nothing from `apps/`, `native/`, or sibling `packages/` can leak into the tarball.
 
 ## Releasing
@@ -919,15 +922,21 @@ read-back-verifies a keychain push and fails loudly if it didn't persist, pointi
 at this fix). `--device` / `-D` is the fleet routing flag (legacy `--host` is stripped but not registered) on the secrets remote
 commands. See [`docs/secrets.md`](docs/secrets.md) → *Pushing to a headless sign host*.
 
-**Why not CI?** The tarball bundles `dist/lib/secrets/Agents CLI.app` — a native
-keychain helper compiled with `swiftc`, codesigned (Developer ID), and notarized
-(`xcrun notarytool`). `prepack` ([`scripts/verify-keychain-helper.sh`](scripts/verify-keychain-helper.sh))
-refuses to pack unless that signed binary matches the sha pinned in
-`scripts/Agents CLI.app.sha256`. CI runners are Linux and cannot produce it. Rebuild
-the helper only when `src/lib/secrets/keychain-helper.swift` changes.
+**Why the tarball no longer needs a Mac (RUSH-3100).** It used to bundle
+`dist/lib/secrets/Agents CLI.app` — a `swiftc`-compiled keychain helper, Developer-ID
+codesigned and notarized — and `prepack`
+([`scripts/verify-keychain-helper.sh`](scripts/verify-keychain-helper.sh)) refused to pack
+unless that signed binary matched a pinned sha. Since CI runners are Linux and cannot
+produce it, **that gate, not the code, is what chained an ordinary release to a signing
+Mac.** The bundles are gone from the tarball; the helper is a release asset on its own
+tag, downloaded and verified on demand. Both `verify-*-helper.sh` scripts are retained —
+they are still the right gate for a *helper* release — they just no longer block the CLI
+tarball. Rebuild a helper only when its own sources change; the input digest in
+[`scripts/release-manifest.sh`](scripts/release-manifest.sh) is what decides that.
 
-**Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) ships the same
-way — built into `bin/`, copied to `dist/lib/menubar/` by `build`, gated in `prepack`
+**Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) is built and
+verified the same way — built into `bin/`, published as a release asset on its own
+`menubar/v<x.y.z>` tag, gated when that asset is cut by
 by [`scripts/verify-menubar-helper.sh`](scripts/verify-menubar-helper.sh) (presence +
 `codesign --verify` + a **stapled notarization ticket** + a **designated-requirement
 pin**). The DR pin is what keeps the Accessibility grant alive across upgrades:
