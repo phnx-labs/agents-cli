@@ -1492,6 +1492,32 @@ export function resolveTmuxWrap(ctx: TmuxWrapContext): TmuxWrapDecision {
  * into SessionMeta.cmd on disk (tmux/session.ts). The launched command uses the
  * real values; the stored/informational copy uses the redacted form (RUSH-1758).
  */
+/**
+ * True when `options.sessionId` is an id the HARNESS actually received, and so a
+ * real, resumable handle — rather than one the launcher generated for its own
+ * bookkeeping and the agent never saw.
+ *
+ * Mirrors exactly the two branches in buildExecCommand that put the id on the
+ * command line: a native resume (any harness with a `resume` spec) and claude's
+ * create-with-`--session-id`. Everything else — `agents run codex --session-id X`
+ * without `--resume`, or a fresh non-claude launch whose real id only shows up
+ * later via the SessionStart hook — leaves the agent with an id of its own
+ * choosing, so `options.sessionId` must not be published as if it were that id.
+ *
+ * Keep in lockstep with buildExecCommand's resume/create branches: a harness
+ * that gains a forced-session-id flag must be reflected here in the SAME change,
+ * or this reports a genuine id as fabricated.
+ */
+export function isHarnessKnownSessionId(
+  agent: AgentId,
+  sessionId: string | undefined,
+  resume: boolean | undefined,
+): boolean {
+  if (!sessionId) return false;
+  if (resume && AGENT_COMMANDS[agent]?.resume) return true;
+  return agent === 'claude';
+}
+
 export function buildTmuxAgentCommand(
   executable: string,
   args: string[],
@@ -1709,7 +1735,13 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
   const metaCmd = buildTmuxAgentCommand(executable, args, execEnv, { redactEnvValues: true });
 
   const labels: Record<string, string> = { agent: options.agent };
-  if (options.sessionId) labels.sessionId = options.sessionId;
+  // Only publish an id the harness actually received. createSession turns this
+  // label into the `@ag_session_id` tmux option that status bars read, and a
+  // launcher-internal id displayed there looks exactly like a resumable one
+  // while `ag focus <id>` rejects it.
+  if (isHarnessKnownSessionId(options.agent, options.sessionId, options.resume)) {
+    labels.sessionId = options.sessionId as string;
+  }
 
   // Only a launched pane sources-and-unlinks the env file. If createSession
   // throws, the pane never runs, so the resolved secrets (incl. the master

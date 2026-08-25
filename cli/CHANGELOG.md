@@ -11,7 +11,11 @@
   `ag-codex-364cd550` carries a random one that resolves to nothing — and the
   two are indistinguishable. `createSession` now stamps two session-scoped tmux
   user options, `@ag_session_id` and `@ag_agent`, from the launch labels;
-  `@ag_session_id` is set **only when the id is genuine**, so a format like
+  `@ag_session_id` is set **only when the harness actually received the id** —
+  a new `isHarnessKnownSessionId` predicate mirroring the two branches in
+  `buildExecCommand` that put an id on the command line (a native resume on any
+  harness with a resume spec, and claude's create-with-`--session-id`). So a
+  format like
   `#{?#{@ag_session_id},#{@ag_session_id},#{@ag_agent}}` shows a real handle when
   there is one and falls back instead of printing a fake. Best-effort: a failed
   stamp never fails a launch, and an unset option renders empty.
