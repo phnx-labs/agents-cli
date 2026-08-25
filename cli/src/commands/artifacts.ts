@@ -56,7 +56,7 @@ export function registerArtifactsCommands(program: Command): void {
   agents artifacts unshare <targets...> is the nested alias of
   agents artifacts share delete. Top-level \`agents unshare\` is gone.
 
-  Full reference: cli/docs/share.md.
+  Architecture: cli/docs/observability.md.
     `,
   });
 

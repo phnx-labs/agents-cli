@@ -6,7 +6,7 @@
  * codex/grok/gemini `auth.json`-style files — so the box booted logged-in. Every
  * one of those is a **rotating, interactive OAuth / session credential**, and
  * copying it between devices is forbidden by the fleet-auth contract
- * (`docs/specifications.md` SING-1b, `docs/credential-management.md` invariant 2):
+ * (`docs/specifications.md` SING-1b, `docs/secrets.md`):
  * a shared refresh token rotates server-side on the next refresh and invalidates
  * every other copy — the "droid collapsed 10 boxes to 1 overnight" failure.
  *

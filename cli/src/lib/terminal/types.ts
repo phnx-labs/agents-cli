@@ -5,7 +5,7 @@
  * command, in a chosen terminal backend (iTerm / Ghostty / tmux), on this
  * machine or a remote host. This is distinct from cloud providers
  * (src/lib/cloud), which dispatch autonomous headless tasks; a terminal surface
- * is attended and live. See docs/terminal-engine.md.
+ * is attended and live. See docs/interfaces.md.
  */
 
 /** An interactive terminal backend the engine can drive. */

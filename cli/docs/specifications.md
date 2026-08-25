@@ -15,8 +15,7 @@ mandatory, not optional.
 
 This doc holds the **contracts** (the guarantees). The per-feature reference docs
 — [`sessions.md`](sessions.md), [`secrets.md`](secrets.md),
-[`architecture.md`](architecture.md), [`secrets-agent-process-model.md`](secrets-agent-process-model.md),
-[`secrets-trust-boundaries.md`](secrets-trust-boundaries.md)
+[`architecture.md`](architecture.md) and [`secrets.md`](secrets.md)
 — hold the **implementation-level detail and how-to**. Read the spec for the
 guarantee, the reference for the mechanism.
 
@@ -74,15 +73,15 @@ row its surface sits in.
 |---|---|---|
 | **Specified here** | `sessions`, `secrets`, `run`, the scheduling/executor singularity, **routine execution & readiness**, `watchdog` | RFC-2119 requirements + Given/When/Then. A change that deviates is a bug in the code or in this doc. |
 | **Governed in part** | `monitors`, `doctor`, `daemon` | One requirement reaches them, no command contract does. `monitors` is bound by [§Scheduling & execution singularity](#scheduling--execution-singularity) (SING-5, SING-8, SING-9) — who may schedule and execute it. `doctor` is bound by SEC-17 for one behavior only: warning on a credential-shaped var in a shell rc file. `daemon` is bound by SING-1 (it IS the singular scheduler/executor) and SING-4a (the `daemon.enabled` kill switch); per-service toggles (`agents daemon services enable|disable`) are an operational convenience with no normative contract. The daemon's status/health rendering (`agents daemon status`/`services`/`doctor`) carries no requirement of its own. Everything else these commands do is unspecified. |
-| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | A design doc describes the mechanism — [hosts.md](hosts.md), [teams.md](teams.md), [cloud.md](cloud.md), [resource-sync.md](resource-sync.md), [version-management.md](version-management.md), … — but states **no** requirements. Verified: `hosts.md`, `teams.md` and `cloud.md` contain **zero capitalized RFC-2119 keywords**. `hosts.md` and `teams.md` do use lowercase "must" in prose ("the remote run must be bounded", `hosts.md:124`; "you must declare what each one owns", `teams.md:207`) — which reads normative but is not, per this document's own capitalization rule. That is exactly the trap: treat those docs as explanation, never as a contract. |
+| **Documented, not specified** | `hosts`, `teams`, `cloud`, `browser`, `computer`, `plugins`, `subagents`, `workflows`, `profiles`, `share`, `pty`, `menubar`, resource sync (`skills`/`rules`/`commands`/`hooks`/`mcp`/`permissions`), version management (`add`/`use`/`prune`/`import`/`export`) | The architecture spine describes these mechanisms in [fleet.md](fleet.md), [orchestration.md](orchestration.md), [execution.md](execution.md), [interfaces.md](interfaces.md), [resources.md](resources.md), and [distribution.md](distribution.md), but those decision records do not create RFC-2119 requirements. Treat them as explanation, never as a contract. |
 | **Unspecified** | `wallet`, `helper`, `sync`/`apply`/`status`, `worktree`, `webhook`, `daemon funnel`, `mailboxes`, `feed`, `message`/`send`, `budget`, `audit`, and the remaining groups | Neither a spec nor a design doc. Behavior is whatever the code does today; nothing here entitles a caller to it. |
 
 **Where the absence bites hardest.** These act on other machines, hold durable
 state, or sit next to credentials, and have no normative contract today:
 
 1. **`hosts` / `ssh` / `devices`** (`commands/hosts.ts`, `commands/ssh.ts`) — dispatches
-   arbitrary agent runs to other machines over SSH. [ssh-transport.md](ssh-transport.md)
-   and [hosts.md](hosts.md) describe the transport; no requirement pins it. Individual
+   arbitrary agent runs to other machines over SSH. [fleet.md](fleet.md)
+   describes the transport; no requirement pins it. Individual
    SSH guarantees are stated piecemeal inside the specified sections (SES-CROSS-1,
    SEC-CROSS-1, the `--device` requirements in [§Agent execution](#agent-execution)),
    which is exactly the fragmentation a `Hosts` section would resolve.
@@ -3001,7 +3000,7 @@ nothing but its own view cache.
   the catch-up path: `claimMissedFire` (`lib/catchup.ts`) creates the run directory
   with a non-recursive `mkdir` — an atomic test-and-set — so the losing caller reports
   `already claimed by the scheduler` and never spawns a second agent
-  (`docs/routines.md` §Catching up a missed fire). Status: **Current** for the
+  (see [`automation.md`](automation.md)). Status: **Current** for the
   catch-up/overlap path (the `missed`-record claim), **[Intended]** for the primary
   scheduled dispatch path (see SING-GAP-3): today the forward-timer dispatch has no
   durable per-slot claim of its own, so two live schedulers evaluating one occurrence
@@ -3335,7 +3334,7 @@ a machine-wide process sweep.)
 The normative contract for **how a routine resolves its execution context, proves it
 is runnable, and records what happened** — the reliability half of routines, distinct
 from the scheduling-singularity half above (who may fire them). The how-it-works
-companion is [routines.md](routines.md). Requirement keywords
+companion is [automation.md](automation.md). Requirement keywords
 **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are Given/When/Then.
 
 Most of this section is the target contract from the routine reliability plan
@@ -3352,8 +3351,8 @@ readiness/context fields RT-1..RT-8 describe.
 - **RT-1 (MUST).** `projects` (plural) is **grouping metadata only**: it organises a
   routine under a project group in `agents routines list` and the menu bar and MUST
   NOT affect scheduling or execution — the special value `["*"]` means "all defined
-  projects" (`lib/routines.ts` `normalizeProjects`; `docs/routines.md` §Project
-  tagging, "Tagging is **metadata-only**"). `projects[]` MUST NOT be silently promoted
+  projects" (`lib/routines.ts` `normalizeProjects`; see
+  [`automation.md`](automation.md)). `projects[]` MUST NOT be silently promoted
   into an execution context. Status: **Current**.
 - **RT-2 (MUST, [Intended]).** A routine's **execution anchor** is a distinct singular
   concept — a `project` field (one named `agents projects` entry) resolved to a base
@@ -3428,7 +3427,7 @@ readiness/context fields RT-1..RT-8 describe.
   untrusted sandbox, dead account, dispatch failure) still owns a terminal run that is
   visible in `agents routines runs`, even though it has no session. Status: **Current**
   for run-first history (`missed`/`failed` runs exist with no session,
-  `docs/routines.md` §Run State Machine); **[Intended]** for the pre-session
+  see [`automation.md`](automation.md)); **[Intended]** for the pre-session
   readiness-failure runs (RT-5) and the menu History surface that renders them.
 - **RT-7 (MUST, [Intended]).** `RunMeta.status` MUST distinguish, at minimum:
   `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`
@@ -3512,7 +3511,7 @@ readiness/context fields RT-1..RT-8 describe.
 ## Watchdog
 
 The normative contract for `agents watchdog` — the daemon-owned service that detects **idle** agents
-and steers them to completion. The how-it-works companion is [watchdog.md](watchdog.md).
+and steers them to completion. The architectural companion is [automation.md](automation.md).
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are per RFC 2119; scenarios are
 Given/When/Then so they map 1:1 to tests.
 

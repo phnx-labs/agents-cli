@@ -6,7 +6,7 @@
  * can spawn subagents freely). Every guard — `max_iterations`, `budget`, the
  * `until: signal` condition, SIGINT/SIGTERM — lives OUTSIDE the agent, so the
  * agent cannot vote past a kill-switch (the standard answer to runaway-loop and
- * runaway-cost failure modes; see docs/entrypoints-and-loops.md).
+ * runaway-cost failure modes; see docs/execution.md).
  *
  * Structure mirrors the teams supervisor (`runSupervisor` in teams/supervisor.ts):
  * a bounded for-loop with a hard cap, a SIGINT/SIGTERM trap that flips a stop
@@ -32,7 +32,7 @@ import { writeCheckpoint, type Checkpoint } from './checkpoint.js';
 import { mailboxDir } from './mailbox.js';
 import { composeWin32CommandLine } from './platform/index.js';
 
-/** Loop block config (docs/entrypoints-and-loops.md → "The loop block"). */
+/** Loop block config; see docs/execution.md. */
 export interface LoopConfig {
   /** Stop condition. `signal` reads loop-signal.json; absence is fail-closed. */
   until?: 'signal';

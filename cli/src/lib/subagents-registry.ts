@@ -27,7 +27,7 @@
  *
  * The per-agent `transform`/metadata parsers are the escape hatch: they live in
  * `subagents.ts` and are referenced by the table, so the generic engine has zero
- * per-agent branches. See the integration tiers in `docs/subagents.md`.
+ * per-agent branches. See `docs/orchestration.md`.
  */
 import * as fs from 'fs';
 import * as path from 'path';

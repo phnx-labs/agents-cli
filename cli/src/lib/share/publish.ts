@@ -95,7 +95,7 @@ export interface PublishOptions {
   /**
    * Skip revision retention on this publish — overwrite an existing slug's
    * object in place with no `<slug>/rev-<ts>` backup of the version it replaces
-   * (default: keep it; see docs/share.md §Revisions).
+   * (default: keep it; see docs/distribution.md).
    */
   noRevision?: boolean;
   /** DI seam for tests — override provenance auto-capture (agent/session/host/repo/date). */
@@ -492,7 +492,7 @@ export function detectProject(dir: string = process.cwd()): string {
  *
  * The tail is 8 random bytes (64-bit, 16 hex chars). Reads are public — the URL is
  * the only capability — so the nonce must be genuinely infeasible to brute-force,
- * not merely unlisted; 64 bits puts a blind guess out of reach. (See docs/share.md
+ * not merely unlisted; 64 bits puts a blind guess out of reach. (See docs/distribution.md
  * §Security for the threat model and `--expire` for sensitive content.)
  */
 export function defaultSlug(filePath: string, dir?: string): string {

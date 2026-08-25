@@ -31,7 +31,7 @@ import { listInstalledVersions, getVersionHomePath } from './installations/versi
 /**
  * The `loop:` block as it appears in WORKFLOW.md frontmatter (YAML, snake_case).
  * Parsed defensively and translated to the camelCase LoopConfig the driver
- * consumes (src/lib/loop.ts). See docs/entrypoints-and-loops.md.
+ * consumes (src/lib/loop.ts). See docs/execution.md.
  */
 export interface LoopConfigRaw {
   /** Stop condition. Only `signal` is supported today. */

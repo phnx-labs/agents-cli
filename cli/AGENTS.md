@@ -4,10 +4,8 @@
 versions, config, sessions, and cloud dispatch (Claude, Codex, Cursor,
 OpenCode, OpenClaw, Grok, Droid, …).
 
-> **New agent? Read [`docs/AGENT-CHEATSHEET.md`](docs/AGENT-CHEATSHEET.md) first.**
-> It covers the dozen concepts agents repeatedly need (DotAgents repos, version
-> homes, the two "session" meanings, capability gating, the execution path) in
-> one scannable page. Come back to this file for the full architecture map.
+> **New agent? Start with [`docs/README.md`](docs/README.md).** It links the
+> compact architecture, concepts, execution, and subsystem decision documents.
 
 This is the **internal architecture** map. The user-facing feature tour is
 [README.md](README.md) (pin versions, run, sessions, hosts, teams, workflows,
@@ -15,7 +13,7 @@ plugins, browser, secrets, routines, pty). This file covers the design choices,
 module map, build, and release mechanics the README does not.
 
 > Phoenix Labs OSS · Apache-2.0. Repo-wide policy (conventions, code review, security)
-> lives in the root [AGENTS.md](../../AGENTS.md).
+> lives in the root [AGENTS.md](../AGENTS.md).
 
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for
 core, browser, computer, secrets, fleet, share, watchdog, and preferences, then
@@ -548,9 +546,9 @@ src/
     installations/     # versions.ts (install, remove, syncResourcesToVersion), migrate.ts (one-shot idempotent migrations), store/resolve/strategies, shims.ts (shim generation, config symlink switching)
     hooks/             # hooks.yaml parser + per-agent registrar (install.ts), `matches:` evaluator (match.ts), cache/profile adapters
     browser/           # browser daemon service + existing CDP connection pool; registry.ts is the leaf (who declared what — never whether this machine should); resolve-target.ts is three outcomes (local / tunnel / loud undeclared); task-index.ts binds --device at start so later verbs resolve the task; ipc.ts owns one-shot and persistent socket clients, stream.ts owns the NDJSON action loop; hygiene.ts is the abandoned-task reaper (session-dead + idle, RUSH-2622) the daemon's 5-min tick and `agents browser prune` (alias `gc`) both call
-    monitors/          # `agents monitors` — event-triggered watchers (source→condition→action); native state-diff store; MonitorEngine runs in the daemon beside the cron scheduler. See docs/monitors.md
-    projects.ts        # `agents projects` — named multi-repo project defs (~/.agents/projects/*.yaml) layered above the --project convention (resolveProjectRef in project-root.ts); project-status.ts rolls live sessions + merged PRs + artifacts into the progress card. Beta-gated. See docs/projects.md
-    project-pull.ts    # `agents projects pull` — fleet fan-out logic: pullProjectTargets (sequential local fast-forward + per-target repo-slug verification), pullLocalArgs/encodePullTargets/decodePullTargets (the {path, expectedSlug} CLI-arg hop to each peer's hidden `pull-local` — bare paths would disable slug verification remotely AND break the fingerprint), buildPullEnvelope/parseProjectPullEnvelope (fail-closed AND fail-loud: a rejected envelope returns valid:false so the peer lands in parseFailed and exits non-zero, never a silent empty result set), printProjectPullSummary. Strict safe contract: dirty trees and non-default branches are blocked; missing checkouts are skipped, never cloned. See docs/projects.md §Pulling every reachable checkout
+    monitors/          # event-triggered watchers; architecture in docs/automation.md
+    projects.ts        # named multi-repo definitions and status projection; domain model in docs/concepts.md
+    project-pull.ts    # fleet pull with fast-forward, clean-tree, branch, and repository-identity guards
     session/           # `agents sessions` READER — discovery/parse/render of agent transcripts; also `migrate-targets.ts` (the `sessions migrate` target scorer); `db.ts` `queryResourceUsageStats`/`backfillResourceUsage` back `agents sessions stats` + `sessions backfill resources` (skill/command usage rollup, session_resource_usage + resource_scan_ledger); `claude-accounts.ts` attributes each Claude transcript to the account that produced it (account_key) and `insights.ts` extracts the cached multi-harness friction/correction/automation facets behind `agents sessions insights` (`agents insights` alias)
     terminal/          # Terminal launch engine — tab/split in iTerm/Ghostty/tmux/Terminal.app, local or --device;
                        #   preferred.ts resolves WHICH terminal for a GUI caller (from live sessions' host app)
@@ -1201,9 +1199,11 @@ been closed stays as a `(resolved)` entry so references never dangle.
 ## Detailed design
 
 [`docs/`](docs/README.md) is the source-grounded reference. Start with
-[`architecture.md`](docs/architecture.md) for the CLI/extension layering and the
+[`architecture.md`](docs/architecture.md) for CLI ownership boundaries and the
 session mechanisms, then [`concepts.md`](docs/concepts.md) for the resource
-model. The normative contract
+model. Extension-owned presentation design lives in the
+[AGI EXT architecture](https://github.com/phnx-labs/agi-ext/tree/main/docs).
+The normative contract
 ([`specifications.md`](docs/specifications.md)) sits
 alongside the reference docs ([sessions.md](docs/sessions.md),
 [secrets.md](docs/secrets.md)) — read the spec for the guarantee, the reference

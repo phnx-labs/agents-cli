@@ -1,0 +1,788 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Make the docs explain the system, not recite the repository</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>Make the docs explain the system, not recite the repository</h1>
+<p class="summary">The 58 Markdown files under apps/cli/docs have grown into a 27,829-line mixture of architecture, CLI manuals, setup guides, source maps, raw transcripts, implementation plans, and volatile product research. This plan keeps durable feature behavior and architectural decisions in the authored corpus, generates mechanically derivable reference, and moves task-oriented instructions into a separate user/runbook surface.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">58 Markdown files audited; 27,829 lines total<span class="meta-sep" aria-hidden="true">·</span>12 feature docs carry hand-maintained Command Reference sections<span class="meta-sep" aria-hidden="true">·</span>11 feature docs carry recipe/how-to sections<span class="meta-sep" aria-hidden="true">·</span>Two correctness contradictions surfaced during the audit</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/rush/issue/RUSH-3199" target="_blank" rel="noopener">RUSH-3199</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/3038" target="_blank" rel="noopener">PR #3038</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">plan/docs-architecture-audit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Codex</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-m3</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/01a038a9-19e3-70f2-b60e-ddbd63557ad4">01a038a9</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-25</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#story" data-toc-for="story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a class="toc-item toc-sub" href="#audit-boundary-and-evidence" data-toc-for="audit-boundary-and-evidence">Audit boundary and evidence</a><a class="toc-item" href="#data" data-toc-for="data"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Data</a><a class="toc-item toc-sub" href="#before-after" data-toc-for="before-after">Before → after</a><a class="toc-item toc-sub" href="#target-information-architecture" data-toc-for="target-information-architecture">Target information architecture</a><a class="toc-item toc-sub" href="#file-by-file-disposition" data-toc-for="file-by-file-disposition">File-by-file disposition</a><a class="toc-item" href="#figure" data-toc-for="figure"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Figure</a><a class="toc-item toc-sub" href="#implementation-sequence" data-toc-for="implementation-sequence">Implementation sequence</a><a class="toc-item toc-sub" href="#retained-architecture-template" data-toc-for="retained-architecture-template">Retained architecture template</a><a class="toc-item toc-sub" href="#acceptance-criteria" data-toc-for="acceptance-criteria">Acceptance criteria</a><a class="toc-item toc-sub" href="#tracking" data-toc-for="tracking">Tracking</a></nav><article class="artifact-body"><h2 id="story">Story</h2><p>The problem is not that the documentation is long. The problem is that a single directory is doing five incompatible jobs.</p>
+<p>Today, an agent looking for the watchdog's ownership model encounters a source-file inventory and a stale roadmap. An agent looking for browser task ownership crosses hundreds of lines of flags, setup, recipes, and mutable command behavior. A contributor can already discover those details from <code>agents &lt;group&gt; --help</code>, generated command metadata, <code>mq</code>, <code>rg</code>, and the source tree. Repeating them in authored Markdown makes the architectural signal harder to find and creates a second, drifting source of truth.</p>
+<p>The desired corpus answers five durable questions:</p>
+<ol>
+<li>What problem and feature boundary does this subsystem own?</li>
+<li>Which component owns state, scheduling, execution, and presentation?</li>
+<li>How does data and control move through the system?</li>
+<li>Which invariants and failure behaviors must survive refactors?</li>
+<li>Why were the important tradeoffs chosen?</li>
+</ol>
+<p>It does not manually enumerate commands, flags, directories, functions, setup sequences, provider model IDs, troubleshooting recipes, rollout checklists, or ticket-era roadmaps.</p>
+<h3 id="audit-boundary-and-evidence">Audit boundary and evidence</h3><ul>
+<li>Scope: every <code>*.md</code> under <code>apps/cli/docs</code>, including provider guides and the three checked-in session traces.</li>
+<li>Corpus: <strong>58 files / 27,829 lines</strong> (<code>rg --files apps/cli/docs -g '*.md'</code>; <code>wc -l</code>).</li>
+<li>Structural cross-check: <code>mq apps/cli/docs '.tree | depth(2)'</code> plus targeted searches for Setup, Command Reference, Recipes, File map, Source map, Key Functions, Roadmap, and New files.</li>
+<li>Byte-level review: parallel file-by-file reads, completed before implementation; the matrix below records the proposed disposition for every file.</li>
+<li>Concrete examples: <code>watchdog.md:177</code> is a source-file map; <code>browser.md:196–582</code> is a hand-maintained command reference; <code>sessions.md:806–904</code> is a query tutorial; <code>optimizations.md:236–250</code> and <code>:301–318</code> inventory new/modified files.</li>
+</ul>
+<h2 id="data">Data</h2><h3 id="before-after">Before → after</h3><table>
+<thead>
+<tr>
+<th>Today</th>
+<th>Why it fails the requested standard</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>One <code>docs/</code> directory mixes architecture, onboarding, manuals, runbooks, plans, research, and captured transcripts</td>
+<td>Readers cannot tell what is normative, durable, generated, historical, or user-facing</td>
+<td>Three named surfaces with an explicit ownership rule</td>
+</tr>
+<tr>
+<td>Feature docs repeat complete commands and flags</td>
+<td>Commander/help is the actual command source; Markdown drifts</td>
+<td>Generated command reference remains discoverable but is not part of architectural reading</td>
+</tr>
+<tr>
+<td>File maps and “key functions” tables name current implementation symbols</td>
+<td><code>mq</code>, <code>rg</code>, code navigation, and tests answer this more accurately</td>
+<td>Architecture names component boundaries and stable seams; a small source pointer is optional</td>
+</tr>
+<tr>
+<td>Setup, recipes, and troubleshooting sit beside invariants</td>
+<td>Task instructions dominate the mental model</td>
+<td>User guides/runbooks are separate and task-oriented</td>
+</tr>
+<tr>
+<td>Roadmaps, “not yet,” rollout phases, and ticket-era implementation diaries live in canonical docs</td>
+<td>Current behavior becomes ambiguous and stale</td>
+<td>Plans/history live in tickets and dated artifacts; docs describe current truth</td>
+</tr>
+<tr>
+<td>Capability/provider/model matrices are manually copied</td>
+<td>Registry-backed facts change faster than prose</td>
+<td>Generated tables are sourced from registries/types and visibly marked generated</td>
+</tr>
+<tr>
+<td>Raw session traces live under docs</td>
+<td>They are bulky, volatile, and may expose reasoning or sensitive context</td>
+<td>Minimal synthetic/redacted fixtures live beside tests when they protect behavior</td>
+</tr>
+</tbody></table>
+<h3 id="target-information-architecture">Target information architecture</h3><table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Owns</th>
+<th>Must not own</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>Authored architecture</strong> (<code>apps/cli/docs/architecture/</code> or a shallow equivalent)</td>
+<td>feature boundary, owners, data flow, lifecycle/state machine, invariants, failure semantics, tradeoffs, accepted ADRs</td>
+<td>command catalogs, setup, recipes, file maps, rollout status</td>
+</tr>
+<tr>
+<td><strong>Generated reference</strong> (<code>apps/cli/docs/reference/</code>, produced by scripts)</td>
+<td>command tree, flags, schemas, capability matrices, provider/model catalogs</td>
+<td>hand-edited prose or duplicated architecture</td>
+</tr>
+<tr>
+<td><strong>User guides / runbooks</strong> (website or explicitly named guide surface)</td>
+<td>install, setup, task recipes, troubleshooting, operator recovery</td>
+<td>normative architecture or implementation plans</td>
+</tr>
+<tr>
+<td><strong>Dated artifacts / tickets</strong> (<code>.agents/artifacts/</code>, Linear, PRs)</td>
+<td>research, comparisons, benchmarks, rollout plans, incident evidence</td>
+<td>claims presented as current canonical behavior</td>
+</tr>
+<tr>
+<td><strong>Testdata beside source</strong></td>
+<td>synthetic/redacted fixtures that catch parser/renderer regressions</td>
+<td>real/raw transcripts or published chain-of-thought</td>
+</tr>
+</tbody></table>
+<h3 id="file-by-file-disposition">File-by-file disposition</h3><p>The action names are intentional:</p>
+<ul>
+<li><strong>Rewrite</strong> means retain the filename/topic but reduce it to durable architecture.</li>
+<li><strong>Split</strong> means keep an architecture document and move or generate the other material.</li>
+<li><strong>Generate</strong> means the file may remain, but only as derived output with a source and regeneration command.</li>
+<li><strong>Relocate</strong> means the content is useful, but it is not canonical feature architecture.</li>
+<li><strong>Delete</strong> means it is redundant, unsafe, or has no durable role after relocation.</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>File</th>
+<th>Action</th>
+<th>Keep</th>
+<th>Remove / move / generate</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>AGENT-CHEATSHEET.md</code></td>
+<td>Delete after merge</td>
+<td>Unique execution/resource invariants</td>
+<td>File map and contributor rules; fold into architecture/AGENTS</td>
+</tr>
+<tr>
+<td><code>QUICKSTART.md</code></td>
+<td>Relocate</td>
+<td>Devices-vs-hosts and credential-custody concepts</td>
+<td>All installation/setup/smoke-test content to user onboarding</td>
+</tr>
+<tr>
+<td><code>README.md</code></td>
+<td>Rewrite</td>
+<td>Short architecture/ADR/spec index</td>
+<td>Feature catalog, onboarding order, doc-authoring procedure</td>
+</tr>
+<tr>
+<td><code>architecture.md</code></td>
+<td>Rewrite</td>
+<td>CLI-vs-UI ownership, session identity, exec/data flow, honest state</td>
+<td>Storage/file inventory, writer/function choreography</td>
+</tr>
+<tr>
+<td><code>browser.md</code></td>
+<td>Split</td>
+<td>task/profile ownership, identity routing, consent, cleanup guarantees</td>
+<td>setup, commands, flags, schemas, recipes to user/generated docs</td>
+</tr>
+<tr>
+<td><code>cloud.md</code></td>
+<td>Split</td>
+<td>provider boundary, placement, lifecycle, budget boundary</td>
+<td>provider/flag catalog and recipes</td>
+</tr>
+<tr>
+<td><code>command-index.md</code></td>
+<td>Generate</td>
+<td>discoverability</td>
+<td>hand maintenance; mark generated and exclude from architecture nav</td>
+</tr>
+<tr>
+<td><code>computer.md</code></td>
+<td>Split</td>
+<td>native-helper boundary, permissions/trust, local-vs-remote ownership</td>
+<td>setup, exhaustive verbs/options, recipes</td>
+</tr>
+<tr>
+<td><code>concepts.md</code></td>
+<td>Major rewrite</td>
+<td>5–7 canonical mental models and resolution semantics</td>
+<td>directory trees, mutable matrices, config/command inventory</td>
+</tr>
+<tr>
+<td><code>credential-management.md</code></td>
+<td>ADR rewrite</td>
+<td>custody invariants, native-vs-provider account decision</td>
+<td>migration diary, command catalog, concrete code fix</td>
+</tr>
+<tr>
+<td><code>entrypoints-and-loops.md</code></td>
+<td>ADR rewrite</td>
+<td>invocation axes, composition, fail-closed grammar, loop guards</td>
+<td>proposal-status table and CLI mechanics</td>
+</tr>
+<tr>
+<td><code>examples/sessions/claude/trace.md</code></td>
+<td>Delete/relocate</td>
+<td>only minimal fixture semantics if tested</td>
+<td>raw full conversation</td>
+</tr>
+<tr>
+<td><code>examples/sessions/codex/trace.md</code></td>
+<td>Delete/relocate</td>
+<td>only minimal fixture semantics if tested</td>
+<td>raw full conversation</td>
+</tr>
+<tr>
+<td><code>examples/sessions/gemini/trace.md</code></td>
+<td>Delete immediately</td>
+<td>synthetic event shape only if required</td>
+<td>published agent reasoning and raw conversation</td>
+</tr>
+<tr>
+<td><code>fleet.md</code></td>
+<td>Split</td>
+<td>reconciliation boundary, idempotency, credential custody</td>
+<td>YAML, flags, bootstrap recipes, source map</td>
+</tr>
+<tr>
+<td><code>hooks.md</code></td>
+<td>Split</td>
+<td>resolution/registration flow, AND semantics, dual-evaluator invariant</td>
+<td>commands, schema, cache tuning, recipes; generate event matrix</td>
+</tr>
+<tr>
+<td><code>hosts.md</code></td>
+<td>Major rewrite</td>
+<td>placement, brokerless/provider boundary, remote context and non-goals</td>
+<td>historical plan, commands, incidents, code maps, open phases</td>
+</tr>
+<tr>
+<td><code>landscape.md</code></td>
+<td>Relocate</td>
+<td>dated strategic positioning if still useful</td>
+<td>canonical technical-doc status</td>
+</tr>
+<tr>
+<td><code>menubar.md</code></td>
+<td>Split + resolve</td>
+<td>read-model/action boundary, lifecycle, single-instance behavior</td>
+<td>setup, UI spec, files table; move acting timer out of UI ownership</td>
+</tr>
+<tr>
+<td><code>mine.md</code></td>
+<td>Rewrite</td>
+<td>white-label shim/profile boundary and foreground-vs-background invariant</td>
+<td>commands, examples, licensing guidance</td>
+</tr>
+<tr>
+<td><code>model-tiers.md</code></td>
+<td>Rewrite + generate</td>
+<td>stable tier semantics, precedence, clamping</td>
+<td>mutable provider/model/price tables and source map</td>
+</tr>
+<tr>
+<td><code>monitors.md</code></td>
+<td>Split</td>
+<td>event-source → detection → claimed action architecture, ownership and idempotency</td>
+<td>commands/config recipes and key-functions table</td>
+</tr>
+<tr>
+<td><code>observability.md</code></td>
+<td>Major rewrite</td>
+<td>event model, provenance, state ownership, aggregation boundaries</td>
+<td>exhaustive schemas, commands, queries, file paths, rollout history</td>
+</tr>
+<tr>
+<td><code>optimizations.md</code></td>
+<td>Relocate/split</td>
+<td>accepted performance decisions with measured tradeoffs</td>
+<td>new/modified file inventories and implementation-plan residue</td>
+</tr>
+<tr>
+<td><code>plugins.md</code></td>
+<td>Split</td>
+<td>package boundary, layered resolution, consent/security model</td>
+<td>commands, manifest/layout reference, recipes</td>
+</tr>
+<tr>
+<td><code>product-acceptance.md</code></td>
+<td>Relocate</td>
+<td>durable product acceptance principles if still canonical</td>
+<td>templates, proof commands, copied examples; likely AGENTS/process docs</td>
+</tr>
+<tr>
+<td><code>profiles.md</code></td>
+<td>Split</td>
+<td>custom-harness identity, resolution, auth ownership, override precedence</td>
+<td>command catalog, YAML schema, presets, recipes</td>
+</tr>
+<tr>
+<td><code>profiles/INDEX.md</code></td>
+<td>Relocate/generate</td>
+<td>provider guide navigation</td>
+<td>hand-maintained provider/caveat matrix</td>
+</tr>
+<tr>
+<td><code>profiles/bedrock.md</code></td>
+<td>User guide</td>
+<td>Bedrock-specific compatibility constraints</td>
+<td>quick start/generated YAML/troubleshooting out of architecture</td>
+</tr>
+<tr>
+<td><code>profiles/deepinfra.md</code></td>
+<td>User guide</td>
+<td>provider transport/auth constraint</td>
+<td>commands/current endpoints and operational rendering</td>
+</tr>
+<tr>
+<td><code>profiles/foundry.md</code></td>
+<td>User guide</td>
+<td>Foundry-vs-TrueFoundry distinction and transport constraint</td>
+<td>setup/YAML/troubleshooting/current-version caveats</td>
+</tr>
+<tr>
+<td><code>profiles/litellm.md</code></td>
+<td>User guide</td>
+<td>gateway/tool-use compatibility boundary</td>
+<td>setup/config recipes/troubleshooting</td>
+</tr>
+<tr>
+<td><code>profiles/ollama.md</code></td>
+<td>User guide</td>
+<td>local-host and protocol compatibility constraint</td>
+<td>setup/model recommendations/troubleshooting</td>
+</tr>
+<tr>
+<td><code>profiles/openrouter.md</code></td>
+<td>User guide + generate</td>
+<td>reasoning-vs-print behavior</td>
+<td>setup, mutable preset/model list, key rotation recipes</td>
+</tr>
+<tr>
+<td><code>profiles/truefoundry.md</code></td>
+<td>User guide</td>
+<td>gateway/validation/TLS trust boundaries</td>
+<td>setup/YAML/current-version troubleshooting</td>
+</tr>
+<tr>
+<td><code>profiles/vertex.md</code></td>
+<td>User guide</td>
+<td>credential and region/model-ID constraints</td>
+<td>setup/YAML/current availability claims</td>
+</tr>
+<tr>
+<td><code>profiles/vllm.md</code></td>
+<td>User guide</td>
+<td>native Anthropic/tool-call parser boundary</td>
+<td>deployment recipe/model tuning/troubleshooting</td>
+</tr>
+<tr>
+<td><code>projects.md</code></td>
+<td>Major rewrite</td>
+<td>project identity, directory ownership, attribution, safe reconciliation</td>
+<td>YAML, output specimens, commands, cache experiments, bug history</td>
+</tr>
+<tr>
+<td><code>pty.md</code></td>
+<td>Rewrite</td>
+<td>sidecar/process boundary and normalized screen model</td>
+<td>setup, command reference, recipes</td>
+</tr>
+<tr>
+<td><code>release.md</code></td>
+<td>Split</td>
+<td>exact-artifact promotion, attestation/helper reuse, latency invariant</td>
+<td>temporary/manual producer runbook and historical workaround</td>
+</tr>
+<tr>
+<td><code>resource-sync.md</code></td>
+<td>Major rewrite</td>
+<td>layered resolution, detection, projection, prune/decline invariants</td>
+<td>selector flags, transform internals, key-functions map</td>
+</tr>
+<tr>
+<td><code>routines.md</code></td>
+<td>Major split</td>
+<td>sole scheduler, placement, readiness, isolation, state machine, catch-up</td>
+<td>YAML/webhook setup, auth runbook, commands, key-functions map</td>
+</tr>
+<tr>
+<td><code>secrets-agent-process-model.md</code></td>
+<td>ADR rewrite</td>
+<td>broker-vs-scheduler requirements, decision and consequences</td>
+<td>stale process-state diary and pid/socket incident detail</td>
+</tr>
+<tr>
+<td><code>secrets-trust-boundaries.md</code></td>
+<td>Fix + ADR rewrite</td>
+<td>storage/materialization boundary and transcript consequences</td>
+<td>copied code; resolve contradictory <code>get</code>/human-gate claims</td>
+</tr>
+<tr>
+<td><code>secrets.md</code></td>
+<td>Major split</td>
+<td>bundle/backend architecture, injection, broker, remote trust model</td>
+<td>command reference, schemas, recipes, platform setup runbooks</td>
+</tr>
+<tr>
+<td><code>self-healing.md</code></td>
+<td>Light rewrite</td>
+<td>failure model, three defenses, conservative probe, limits</td>
+<td>pseudocode, regex, source/test map</td>
+</tr>
+<tr>
+<td><code>sessions.md</code></td>
+<td>Major split</td>
+<td>transcript/live identity, indexing, lifecycle, state, remote/migration boundaries</td>
+<td>schemas, flags, tutorials, benchmark procedure</td>
+</tr>
+<tr>
+<td><code>share.md</code></td>
+<td>Split</td>
+<td>publication data flow, provenance, revisions, capability/security model</td>
+<td>walkthroughs, Worker deploy runbook, file/command maps</td>
+</tr>
+<tr>
+<td><code>specifications.md</code></td>
+<td>Split normative exception</td>
+<td>RFC behavior and Given/When/Then invariants by subsystem</td>
+<td>generated schemas/parity tables and transient known-gap ledgers</td>
+</tr>
+<tr>
+<td><code>ssh-transport.md</code></td>
+<td>Concise ADR rewrite</td>
+<td>one-engine decision, trust, multiplexing, alternatives, risks</td>
+<td>symbol walkthrough, dated measurements/rollout</td>
+</tr>
+<tr>
+<td><code>subagents.md</code></td>
+<td>Split</td>
+<td>layered projection and registry/capability lockstep</td>
+<td>file-layout map, commands, schema, recipes</td>
+</tr>
+<tr>
+<td><code>teams.md</code></td>
+<td>Major split</td>
+<td>DAG, isolation, boundary contracts, distributed placement, budgets</td>
+<td>options, resume tutorial, recipes, JSON shapes</td>
+</tr>
+<tr>
+<td><code>terminal-engine.md</code></td>
+<td>Rewrite</td>
+<td>attended-vs-autonomous boundary, backend contract, layout/selection</td>
+<td>backend file map, API examples, integration implementation detail</td>
+</tr>
+<tr>
+<td><code>toolchain-thesis.md</code></td>
+<td>Relocate</td>
+<td>dated product thesis</td>
+<td>canonical architecture status and stale market claims</td>
+</tr>
+<tr>
+<td><code>version-management.md</code></td>
+<td>Split</td>
+<td>resolution, isolation, adoption/reversal, shim process contract</td>
+<td>install tutorials, duplicate resource sync, key-functions map</td>
+</tr>
+<tr>
+<td><code>vs-gastown.md</code></td>
+<td>Relocate</td>
+<td>dated competitive research</td>
+<td>canonical architecture status</td>
+</tr>
+<tr>
+<td><code>watchdog.md</code></td>
+<td>Light rewrite</td>
+<td>scheduler ownership, state loop, decider, confirmed delivery, rotation/fleet boundary</td>
+<td>file map, commands, contradictory roadmap</td>
+</tr>
+<tr>
+<td><code>workflows.md</code></td>
+<td>Split</td>
+<td>layered resolution, composition, projection and fail-closed scoping</td>
+<td>commands, full schema, recipes/demo</td>
+</tr>
+</tbody></table>
+<h2 id="figure">Figure</h2><div class="artifact-panel">
+<svg viewBox="0 0 1200 620" role="img" width="100%">
+  <title id="docs-title">Before and after information architecture for the CLI documentation</title>
+  <desc id="docs-desc">The current mixed documentation corpus is separated into authored architecture, generated reference, user runbooks, dated artifacts, and test fixtures.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto" markerUnits="strokeWidth"><path d="M0,0 L0,6 L9,3 z" fill="#a3e635"></path></marker>
+  </defs>
+  <rect x="20" y="30" width="430" height="550" rx="8" fill="#241414" stroke="#f87171" stroke-width="2"></rect>
+  <text x="50" y="75" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#e8e8e8">BEFORE · one mixed corpus</text>
+  <text x="50" y="115" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Architecture + invariants</text>
+  <text x="50" y="150" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Commands + every flag</text>
+  <text x="50" y="185" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Install + setup + recipes</text>
+  <text x="50" y="220" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">File maps + key functions</text>
+  <text x="50" y="255" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Schemas + mutable matrices</text>
+  <text x="50" y="290" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Plans + roadmaps + gaps</text>
+  <text x="50" y="325" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Competitive research</text>
+  <text x="50" y="360" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">Raw session traces</text>
+  <line x1="50" y1="400" x2="415" y2="400" stroke="#5c2d2d"></line>
+  <text x="50" y="445" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#facc15">27,829 lines</text>
+  <text x="50" y="480" font-family="ui-monospace,monospace" font-size="16" fill="#888">The reader must infer what is</text>
+  <text x="50" y="510" font-family="ui-monospace,monospace" font-size="16" fill="#888">durable, generated, current,</text>
+  <text x="50" y="540" font-family="ui-monospace,monospace" font-size="16" fill="#888">historical, or operational.</text>
+
+  <path d="M470 305 C520 305 535 305 575 305" stroke="#a3e635" stroke-width="4" fill="none" marker-end="url(#arrow)"></path>
+  <text x="482" y="278" font-family="ui-monospace,monospace" font-size="16" fill="#a3e635">classify by ownership</text>
+
+  <rect x="595" y="30" width="585" height="102" rx="8" fill="#10190b" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="625" y="70" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#e8e8e8">AUTHORED ARCHITECTURE</text>
+  <text x="625" y="101" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">boundaries · flows · states · invariants · decisions</text>
+
+  <rect x="595" y="147" width="585" height="90" rx="8" fill="#141414" stroke="#333" stroke-width="2"></rect>
+  <text x="625" y="184" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#e8e8e8">GENERATED REFERENCE</text>
+  <text x="625" y="214" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">commands · flags · schemas · capability matrices</text>
+
+  <rect x="595" y="252" width="585" height="90" rx="8" fill="#141414" stroke="#333" stroke-width="2"></rect>
+  <text x="625" y="289" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#e8e8e8">USER GUIDES / RUNBOOKS</text>
+  <text x="625" y="319" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">install · setup · recipes · troubleshooting · recovery</text>
+
+  <rect x="595" y="357" width="585" height="90" rx="8" fill="#141414" stroke="#333" stroke-width="2"></rect>
+  <text x="625" y="394" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#e8e8e8">DATED ARTIFACTS / TICKETS</text>
+  <text x="625" y="424" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">research · benchmarks · plans · incidents · rollout</text>
+
+  <rect x="595" y="462" width="585" height="90" rx="8" fill="#141414" stroke="#333" stroke-width="2"></rect>
+  <text x="625" y="499" font-family="ui-monospace,monospace" font-size="24" font-weight="700" fill="#e8e8e8">TESTDATA BESIDE SOURCE</text>
+  <text x="625" y="529" font-family="ui-monospace,monospace" font-size="16" fill="#b8b8b8">minimal · synthetic · redacted · regression-protecting</text>
+</svg>
+<p>One authored corpus becomes five explicit ownership surfaces. The green lane is what agents read for system understanding; the other lanes remain discoverable without competing with it.</p>
+</div><h3 id="implementation-sequence">Implementation sequence</h3><ol>
+<li><p><strong>Write and enforce the documentation contract.</strong> Rewrite <code>apps/cli/docs/README.md</code> to define the three documentation surfaces, the retained architecture template, generated-file markers, and the rule that architectural docs do not carry setup, command catalogs, recipes, file maps, or transient roadmaps. Update the nearest <code>AGENTS.md</code> review guidance so regressions are reviewable.</p>
+</li>
+<li><p><strong>Fix correctness before reshaping prose.</strong> Resolve the contradictory secret-materialization claims against current code and real tests. Resolve the menubar acting-timer conflict by moving restart ownership to the CLI control plane or explicitly changing the normative singularity decision. Remove the contradictory watchdog roadmap phrasing and stale secrets process state.</p>
+</li>
+<li><p><strong>Build canonical generated reference.</strong> Make the existing Commander-derived command index visibly generated and reproducible. Extend generation only where the canonical registry/type already exists: command flags, capability matrices, provider/model tables, and stable schemas. Generated output is linked from architecture but excluded from its reading order.</p>
+</li>
+<li><p><strong>Rewrite the architectural spine first.</strong> Reduce <code>architecture.md</code>, <code>concepts.md</code>, and subsystem ownership docs (<code>sessions</code>, <code>routines</code>, <code>hosts</code>, <code>browser</code>, <code>secrets</code>, <code>resource-sync</code>, <code>teams</code>) to the retained template. Split the monolithic normative specification by subsystem without weakening its RFC requirements.</p>
+</li>
+<li><p><strong>Process the remaining feature docs by domain.</strong> In focused commits, retain architecture/ADRs, move task instructions to user/runbook surfaces, generate reference, and delete duplication. Each domain commit updates links and passes a docs link/check-generation test.</p>
+</li>
+<li><p><strong>Remove non-doc artifacts from canonical docs.</strong> Delete or relocate the raw session traces, competitive landscape/thesis files, implementation diaries, rollout matrices, and benchmark histories. Any fixture that remains must be synthetic, redacted, minimal, beside the test that consumes it, and proven by that test.</p>
+</li>
+<li><p><strong>Add drift gates.</strong> CI fails when generated reference is stale; architecture lint flags forbidden structural headings (<code>Setup</code>, <code>Command Reference</code>, <code>Recipes</code>, <code>File map</code>, <code>Key Functions</code>, <code>Roadmap</code>) unless a file is explicitly typed as user guide, generated reference, runbook, ADR, or dated artifact. The gate checks structure, not prose keywords in legitimate architectural discussion.</p>
+</li>
+<li><p><strong>Verify the result as an agent would use it.</strong> Run a cold navigation test: answer representative architecture questions using only the new docs index and authored corpus, then verify every command/schema lookup resolves to generated help/reference and every setup/recovery lookup resolves to a user guide/runbook. Check all links and render the docs surface.</p>
+</li>
+</ol>
+<h3 id="retained-architecture-template">Retained architecture template</h3><p>Every authored feature document should be recognizable without reading its filename:</p>
+<ol>
+<li><strong>Purpose and boundary</strong> — the problem owned, plus explicit non-goals.</li>
+<li><strong>Owners</strong> — who owns state, scheduling, execution, transport, and presentation.</li>
+<li><strong>Data/control flow</strong> — a small diagram or state machine where structure matters.</li>
+<li><strong>Invariants and failure behavior</strong> — what must remain true, including fail-loud semantics.</li>
+<li><strong>Decisions and tradeoffs</strong> — accepted choice, alternatives, and consequences.</li>
+<li><strong>Normative links</strong> — specifications and focused ADRs.</li>
+<li><strong>Source seam</strong> — at most a few stable component-level pointers, never a file inventory.</li>
+</ol>
+<h3 id="acceptance-criteria">Acceptance criteria</h3><ul>
+<li>Every one of the 58 current Markdown files has been rewritten, generated, relocated, or deleted according to an explicitly reviewed disposition.</li>
+<li>The authored architecture reading path contains no install/setup walkthroughs, exhaustive command/flag tables, recipes, file maps, key-function tables, rollout phases, open-ticket roadmaps, or raw transcripts.</li>
+<li>CLI command and schema details remain available from canonical generated sources and have a stale-generation CI gate.</li>
+<li>Architecture retains every durable ownership boundary, data flow, lifecycle, invariant, failure semantic, and accepted tradeoff identified in this audit.</li>
+<li><code>secrets</code> materialization semantics and menubar scheduler ownership agree with code, tests, and <code>specifications.md</code>; no contradiction is papered over.</li>
+<li>Raw session/reasoning traces are gone from public docs; any replacement fixture is synthetic, redacted, minimal, and test-bound.</li>
+<li>Docs links pass, the architecture index has a clear reading order, and an agent can answer representative architecture questions without searching command manuals.</li>
+</ul>
+<h3 id="tracking">Tracking</h3><ul>
+<li>Linear: <strong>RUSH-3199 — Refocus apps/cli/docs on architecture and durable decisions</strong></li>
+<li>Pull request: <strong>#3038 — docs(plan): reset the architecture documentation corpus</strong></li>
+<li>Delivery model: one worktree and PR for the plan plus implementation, with domain-sized commits, CI, non-author review, merge, and post-merge verification.</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0aXRsZTogIk1ha2UgdGhlIGRvY3MgZXhwbGFpbiB0aGUgc3lzdGVtLCBub3QgcmVjaXRlIHRoZSByZXBvc2l0b3J5IgpzdW1tYXJ5OiAiVGhlIDU4IE1hcmtkb3duIGZpbGVzIHVuZGVyIGFwcHMvY2xpL2RvY3MgaGF2ZSBncm93biBpbnRvIGEgMjcsODI5LWxpbmUgbWl4dHVyZSBvZiBhcmNoaXRlY3R1cmUsIENMSSBtYW51YWxzLCBzZXR1cCBndWlkZXMsIHNvdXJjZSBtYXBzLCByYXcgdHJhbnNjcmlwdHMsIGltcGxlbWVudGF0aW9uIHBsYW5zLCBhbmQgdm9sYXRpbGUgcHJvZHVjdCByZXNlYXJjaC4gVGhpcyBwbGFuIGtlZXBzIGR1cmFibGUgZmVhdHVyZSBiZWhhdmlvciBhbmQgYXJjaGl0ZWN0dXJhbCBkZWNpc2lvbnMgaW4gdGhlIGF1dGhvcmVkIGNvcnB1cywgZ2VuZXJhdGVzIG1lY2hhbmljYWxseSBkZXJpdmFibGUgcmVmZXJlbmNlLCBhbmQgbW92ZXMgdGFzay1vcmllbnRlZCBpbnN0cnVjdGlvbnMgaW50byBhIHNlcGFyYXRlIHVzZXIvcnVuYm9vayBzdXJmYWNlLiIKc3RhdHVzOiBkcmFmdApjb250ZXh0OiAiUlVTSC0zMTk5IMK3IGFwcHMvY2xpL2RvY3MgYXJjaGl0ZWN0dXJlIHJlc2V0IgpsaW5rczoKICAtIGxhYmVsOiAiUlVTSC0zMTk5IgogICAgdXJsOiAiaHR0cHM6Ly9saW5lYXIuYXBwL3J1c2gvaXNzdWUvUlVTSC0zMTk5IgogIC0gbGFiZWw6ICJQUiAjMzAzOCIKICAgIHVybDogImh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaS9wdWxsLzMwMzgiCmZhY3RzOgogIC0gIjU4IE1hcmtkb3duIGZpbGVzIGF1ZGl0ZWQ7IDI3LDgyOSBsaW5lcyB0b3RhbCIKICAtICIxMiBmZWF0dXJlIGRvY3MgY2FycnkgaGFuZC1tYWludGFpbmVkIENvbW1hbmQgUmVmZXJlbmNlIHNlY3Rpb25zIgogIC0gIjExIGZlYXR1cmUgZG9jcyBjYXJyeSByZWNpcGUvaG93LXRvIHNlY3Rpb25zIgogIC0gIlR3byBjb3JyZWN0bmVzcyBjb250cmFkaWN0aW9ucyBzdXJmYWNlZCBkdXJpbmcgdGhlIGF1ZGl0IgotLS0KCiMjIFN0b3J5CgpUaGUgcHJvYmxlbSBpcyBub3QgdGhhdCB0aGUgZG9jdW1lbnRhdGlvbiBpcyBsb25nLiBUaGUgcHJvYmxlbSBpcyB0aGF0IGEgc2luZ2xlIGRpcmVjdG9yeSBpcyBkb2luZyBmaXZlIGluY29tcGF0aWJsZSBqb2JzLgoKVG9kYXksIGFuIGFnZW50IGxvb2tpbmcgZm9yIHRoZSB3YXRjaGRvZydzIG93bmVyc2hpcCBtb2RlbCBlbmNvdW50ZXJzIGEgc291cmNlLWZpbGUgaW52ZW50b3J5IGFuZCBhIHN0YWxlIHJvYWRtYXAuIEFuIGFnZW50IGxvb2tpbmcgZm9yIGJyb3dzZXIgdGFzayBvd25lcnNoaXAgY3Jvc3NlcyBodW5kcmVkcyBvZiBsaW5lcyBvZiBmbGFncywgc2V0dXAsIHJlY2lwZXMsIGFuZCBtdXRhYmxlIGNvbW1hbmQgYmVoYXZpb3IuIEEgY29udHJpYnV0b3IgY2FuIGFscmVhZHkgZGlzY292ZXIgdGhvc2UgZGV0YWlscyBmcm9tIGBhZ2VudHMgPGdyb3VwPiAtLWhlbHBgLCBnZW5lcmF0ZWQgY29tbWFuZCBtZXRhZGF0YSwgYG1xYCwgYHJnYCwgYW5kIHRoZSBzb3VyY2UgdHJlZS4gUmVwZWF0aW5nIHRoZW0gaW4gYXV0aG9yZWQgTWFya2Rvd24gbWFrZXMgdGhlIGFyY2hpdGVjdHVyYWwgc2lnbmFsIGhhcmRlciB0byBmaW5kIGFuZCBjcmVhdGVzIGEgc2Vjb25kLCBkcmlmdGluZyBzb3VyY2Ugb2YgdHJ1dGguCgpUaGUgZGVzaXJlZCBjb3JwdXMgYW5zd2VycyBmaXZlIGR1cmFibGUgcXVlc3Rpb25zOgoKMS4gV2hhdCBwcm9ibGVtIGFuZCBmZWF0dXJlIGJvdW5kYXJ5IGRvZXMgdGhpcyBzdWJzeXN0ZW0gb3duPwoyLiBXaGljaCBjb21wb25lbnQgb3ducyBzdGF0ZSwgc2NoZWR1bGluZywgZXhlY3V0aW9uLCBhbmQgcHJlc2VudGF0aW9uPwozLiBIb3cgZG9lcyBkYXRhIGFuZCBjb250cm9sIG1vdmUgdGhyb3VnaCB0aGUgc3lzdGVtPwo0LiBXaGljaCBpbnZhcmlhbnRzIGFuZCBmYWlsdXJlIGJlaGF2aW9ycyBtdXN0IHN1cnZpdmUgcmVmYWN0b3JzPwo1LiBXaHkgd2VyZSB0aGUgaW1wb3J0YW50IHRyYWRlb2ZmcyBjaG9zZW4/CgpJdCBkb2VzIG5vdCBtYW51YWxseSBlbnVtZXJhdGUgY29tbWFuZHMsIGZsYWdzLCBkaXJlY3RvcmllcywgZnVuY3Rpb25zLCBzZXR1cCBzZXF1ZW5jZXMsIHByb3ZpZGVyIG1vZGVsIElEcywgdHJvdWJsZXNob290aW5nIHJlY2lwZXMsIHJvbGxvdXQgY2hlY2tsaXN0cywgb3IgdGlja2V0LWVyYSByb2FkbWFwcy4KCiMjIyBBdWRpdCBib3VuZGFyeSBhbmQgZXZpZGVuY2UKCi0gU2NvcGU6IGV2ZXJ5IGAqLm1kYCB1bmRlciBgYXBwcy9jbGkvZG9jc2AsIGluY2x1ZGluZyBwcm92aWRlciBndWlkZXMgYW5kIHRoZSB0aHJlZSBjaGVja2VkLWluIHNlc3Npb24gdHJhY2VzLgotIENvcnB1czogKio1OCBmaWxlcyAvIDI3LDgyOSBsaW5lcyoqIChgcmcgLS1maWxlcyBhcHBzL2NsaS9kb2NzIC1nICcqLm1kJ2A7IGB3YyAtbGApLgotIFN0cnVjdHVyYWwgY3Jvc3MtY2hlY2s6IGBtcSBhcHBzL2NsaS9kb2NzICcudHJlZSB8IGRlcHRoKDIpJ2AgcGx1cyB0YXJnZXRlZCBzZWFyY2hlcyBmb3IgU2V0dXAsIENvbW1hbmQgUmVmZXJlbmNlLCBSZWNpcGVzLCBGaWxlIG1hcCwgU291cmNlIG1hcCwgS2V5IEZ1bmN0aW9ucywgUm9hZG1hcCwgYW5kIE5ldyBmaWxlcy4KLSBCeXRlLWxldmVsIHJldmlldzogcGFyYWxsZWwgZmlsZS1ieS1maWxlIHJlYWRzLCBjb21wbGV0ZWQgYmVmb3JlIGltcGxlbWVudGF0aW9uOyB0aGUgbWF0cml4IGJlbG93IHJlY29yZHMgdGhlIHByb3Bvc2VkIGRpc3Bvc2l0aW9uIGZvciBldmVyeSBmaWxlLgotIENvbmNyZXRlIGV4YW1wbGVzOiBgd2F0Y2hkb2cubWQ6MTc3YCBpcyBhIHNvdXJjZS1maWxlIG1hcDsgYGJyb3dzZXIubWQ6MTk24oCTNTgyYCBpcyBhIGhhbmQtbWFpbnRhaW5lZCBjb21tYW5kIHJlZmVyZW5jZTsgYHNlc3Npb25zLm1kOjgwNuKAkzkwNGAgaXMgYSBxdWVyeSB0dXRvcmlhbDsgYG9wdGltaXphdGlvbnMubWQ6MjM24oCTMjUwYCBhbmQgYDozMDHigJMzMThgIGludmVudG9yeSBuZXcvbW9kaWZpZWQgZmlsZXMuCgojIyBEYXRhCgojIyMgQmVmb3JlIOKGkiBhZnRlcgoKfCBUb2RheSB8IFdoeSBpdCBmYWlscyB0aGUgcmVxdWVzdGVkIHN0YW5kYXJkIHwgQWZ0ZXIgfAp8LS0tfC0tLXwtLS18CnwgT25lIGBkb2NzL2AgZGlyZWN0b3J5IG1peGVzIGFyY2hpdGVjdHVyZSwgb25ib2FyZGluZywgbWFudWFscywgcnVuYm9va3MsIHBsYW5zLCByZXNlYXJjaCwgYW5kIGNhcHR1cmVkIHRyYW5zY3JpcHRzIHwgUmVhZGVycyBjYW5ub3QgdGVsbCB3aGF0IGlzIG5vcm1hdGl2ZSwgZHVyYWJsZSwgZ2VuZXJhdGVkLCBoaXN0b3JpY2FsLCBvciB1c2VyLWZhY2luZyB8IFRocmVlIG5hbWVkIHN1cmZhY2VzIHdpdGggYW4gZXhwbGljaXQgb3duZXJzaGlwIHJ1bGUgfAp8IEZlYXR1cmUgZG9jcyByZXBlYXQgY29tcGxldGUgY29tbWFuZHMgYW5kIGZsYWdzIHwgQ29tbWFuZGVyL2hlbHAgaXMgdGhlIGFjdHVhbCBjb21tYW5kIHNvdXJjZTsgTWFya2Rvd24gZHJpZnRzIHwgR2VuZXJhdGVkIGNvbW1hbmQgcmVmZXJlbmNlIHJlbWFpbnMgZGlzY292ZXJhYmxlIGJ1dCBpcyBub3QgcGFydCBvZiBhcmNoaXRlY3R1cmFsIHJlYWRpbmcgfAp8IEZpbGUgbWFwcyBhbmQg4oCca2V5IGZ1bmN0aW9uc+KAnSB0YWJsZXMgbmFtZSBjdXJyZW50IGltcGxlbWVudGF0aW9uIHN5bWJvbHMgfCBgbXFgLCBgcmdgLCBjb2RlIG5hdmlnYXRpb24sIGFuZCB0ZXN0cyBhbnN3ZXIgdGhpcyBtb3JlIGFjY3VyYXRlbHkgfCBBcmNoaXRlY3R1cmUgbmFtZXMgY29tcG9uZW50IGJvdW5kYXJpZXMgYW5kIHN0YWJsZSBzZWFtczsgYSBzbWFsbCBzb3VyY2UgcG9pbnRlciBpcyBvcHRpb25hbCB8CnwgU2V0dXAsIHJlY2lwZXMsIGFuZCB0cm91Ymxlc2hvb3Rpbmcgc2l0IGJlc2lkZSBpbnZhcmlhbnRzIHwgVGFzayBpbnN0cnVjdGlvbnMgZG9taW5hdGUgdGhlIG1lbnRhbCBtb2RlbCB8IFVzZXIgZ3VpZGVzL3J1bmJvb2tzIGFyZSBzZXBhcmF0ZSBhbmQgdGFzay1vcmllbnRlZCB8CnwgUm9hZG1hcHMsIOKAnG5vdCB5ZXQs4oCdIHJvbGxvdXQgcGhhc2VzLCBhbmQgdGlja2V0LWVyYSBpbXBsZW1lbnRhdGlvbiBkaWFyaWVzIGxpdmUgaW4gY2Fub25pY2FsIGRvY3MgfCBDdXJyZW50IGJlaGF2aW9yIGJlY29tZXMgYW1iaWd1b3VzIGFuZCBzdGFsZSB8IFBsYW5zL2hpc3RvcnkgbGl2ZSBpbiB0aWNrZXRzIGFuZCBkYXRlZCBhcnRpZmFjdHM7IGRvY3MgZGVzY3JpYmUgY3VycmVudCB0cnV0aCB8CnwgQ2FwYWJpbGl0eS9wcm92aWRlci9tb2RlbCBtYXRyaWNlcyBhcmUgbWFudWFsbHkgY29waWVkIHwgUmVnaXN0cnktYmFja2VkIGZhY3RzIGNoYW5nZSBmYXN0ZXIgdGhhbiBwcm9zZSB8IEdlbmVyYXRlZCB0YWJsZXMgYXJlIHNvdXJjZWQgZnJvbSByZWdpc3RyaWVzL3R5cGVzIGFuZCB2aXNpYmx5IG1hcmtlZCBnZW5lcmF0ZWQgfAp8IFJhdyBzZXNzaW9uIHRyYWNlcyBsaXZlIHVuZGVyIGRvY3MgfCBUaGV5IGFyZSBidWxreSwgdm9sYXRpbGUsIGFuZCBtYXkgZXhwb3NlIHJlYXNvbmluZyBvciBzZW5zaXRpdmUgY29udGV4dCB8IE1pbmltYWwgc3ludGhldGljL3JlZGFjdGVkIGZpeHR1cmVzIGxpdmUgYmVzaWRlIHRlc3RzIHdoZW4gdGhleSBwcm90ZWN0IGJlaGF2aW9yIHwKCiMjIyBUYXJnZXQgaW5mb3JtYXRpb24gYXJjaGl0ZWN0dXJlCgp8IFN1cmZhY2UgfCBPd25zIHwgTXVzdCBub3Qgb3duIHwKfC0tLXwtLS18LS0tfAp8ICoqQXV0aG9yZWQgYXJjaGl0ZWN0dXJlKiogKGBhcHBzL2NsaS9kb2NzL2FyY2hpdGVjdHVyZS9gIG9yIGEgc2hhbGxvdyBlcXVpdmFsZW50KSB8IGZlYXR1cmUgYm91bmRhcnksIG93bmVycywgZGF0YSBmbG93LCBsaWZlY3ljbGUvc3RhdGUgbWFjaGluZSwgaW52YXJpYW50cywgZmFpbHVyZSBzZW1hbnRpY3MsIHRyYWRlb2ZmcywgYWNjZXB0ZWQgQURScyB8IGNvbW1hbmQgY2F0YWxvZ3MsIHNldHVwLCByZWNpcGVzLCBmaWxlIG1hcHMsIHJvbGxvdXQgc3RhdHVzIHwKfCAqKkdlbmVyYXRlZCByZWZlcmVuY2UqKiAoYGFwcHMvY2xpL2RvY3MvcmVmZXJlbmNlL2AsIHByb2R1Y2VkIGJ5IHNjcmlwdHMpIHwgY29tbWFuZCB0cmVlLCBmbGFncywgc2NoZW1hcywgY2FwYWJpbGl0eSBtYXRyaWNlcywgcHJvdmlkZXIvbW9kZWwgY2F0YWxvZ3MgfCBoYW5kLWVkaXRlZCBwcm9zZSBvciBkdXBsaWNhdGVkIGFyY2hpdGVjdHVyZSB8CnwgKipVc2VyIGd1aWRlcyAvIHJ1bmJvb2tzKiogKHdlYnNpdGUgb3IgZXhwbGljaXRseSBuYW1lZCBndWlkZSBzdXJmYWNlKSB8IGluc3RhbGwsIHNldHVwLCB0YXNrIHJlY2lwZXMsIHRyb3VibGVzaG9vdGluZywgb3BlcmF0b3IgcmVjb3ZlcnkgfCBub3JtYXRpdmUgYXJjaGl0ZWN0dXJlIG9yIGltcGxlbWVudGF0aW9uIHBsYW5zIHwKfCAqKkRhdGVkIGFydGlmYWN0cyAvIHRpY2tldHMqKiAoYC5hZ2VudHMvYXJ0aWZhY3RzL2AsIExpbmVhciwgUFJzKSB8IHJlc2VhcmNoLCBjb21wYXJpc29ucywgYmVuY2htYXJrcywgcm9sbG91dCBwbGFucywgaW5jaWRlbnQgZXZpZGVuY2UgfCBjbGFpbXMgcHJlc2VudGVkIGFzIGN1cnJlbnQgY2Fub25pY2FsIGJlaGF2aW9yIHwKfCAqKlRlc3RkYXRhIGJlc2lkZSBzb3VyY2UqKiB8IHN5bnRoZXRpYy9yZWRhY3RlZCBmaXh0dXJlcyB0aGF0IGNhdGNoIHBhcnNlci9yZW5kZXJlciByZWdyZXNzaW9ucyB8IHJlYWwvcmF3IHRyYW5zY3JpcHRzIG9yIHB1Ymxpc2hlZCBjaGFpbi1vZi10aG91Z2h0IHwKCiMjIyBGaWxlLWJ5LWZpbGUgZGlzcG9zaXRpb24KClRoZSBhY3Rpb24gbmFtZXMgYXJlIGludGVudGlvbmFsOgoKLSAqKlJld3JpdGUqKiBtZWFucyByZXRhaW4gdGhlIGZpbGVuYW1lL3RvcGljIGJ1dCByZWR1Y2UgaXQgdG8gZHVyYWJsZSBhcmNoaXRlY3R1cmUuCi0gKipTcGxpdCoqIG1lYW5zIGtlZXAgYW4gYXJjaGl0ZWN0dXJlIGRvY3VtZW50IGFuZCBtb3ZlIG9yIGdlbmVyYXRlIHRoZSBvdGhlciBtYXRlcmlhbC4KLSAqKkdlbmVyYXRlKiogbWVhbnMgdGhlIGZpbGUgbWF5IHJlbWFpbiwgYnV0IG9ubHkgYXMgZGVyaXZlZCBvdXRwdXQgd2l0aCBhIHNvdXJjZSBhbmQgcmVnZW5lcmF0aW9uIGNvbW1hbmQuCi0gKipSZWxvY2F0ZSoqIG1lYW5zIHRoZSBjb250ZW50IGlzIHVzZWZ1bCwgYnV0IGl0IGlzIG5vdCBjYW5vbmljYWwgZmVhdHVyZSBhcmNoaXRlY3R1cmUuCi0gKipEZWxldGUqKiBtZWFucyBpdCBpcyByZWR1bmRhbnQsIHVuc2FmZSwgb3IgaGFzIG5vIGR1cmFibGUgcm9sZSBhZnRlciByZWxvY2F0aW9uLgoKfCBGaWxlIHwgQWN0aW9uIHwgS2VlcCB8IFJlbW92ZSAvIG1vdmUgLyBnZW5lcmF0ZSB8CnwtLS18LS0tfC0tLXwtLS18CnwgYEFHRU5ULUNIRUFUU0hFRVQubWRgIHwgRGVsZXRlIGFmdGVyIG1lcmdlIHwgVW5pcXVlIGV4ZWN1dGlvbi9yZXNvdXJjZSBpbnZhcmlhbnRzIHwgRmlsZSBtYXAgYW5kIGNvbnRyaWJ1dG9yIHJ1bGVzOyBmb2xkIGludG8gYXJjaGl0ZWN0dXJlL0FHRU5UUyB8CnwgYFFVSUNLU1RBUlQubWRgIHwgUmVsb2NhdGUgfCBEZXZpY2VzLXZzLWhvc3RzIGFuZCBjcmVkZW50aWFsLWN1c3RvZHkgY29uY2VwdHMgfCBBbGwgaW5zdGFsbGF0aW9uL3NldHVwL3Ntb2tlLXRlc3QgY29udGVudCB0byB1c2VyIG9uYm9hcmRpbmcgfAp8IGBSRUFETUUubWRgIHwgUmV3cml0ZSB8IFNob3J0IGFyY2hpdGVjdHVyZS9BRFIvc3BlYyBpbmRleCB8IEZlYXR1cmUgY2F0YWxvZywgb25ib2FyZGluZyBvcmRlciwgZG9jLWF1dGhvcmluZyBwcm9jZWR1cmUgfAp8IGBhcmNoaXRlY3R1cmUubWRgIHwgUmV3cml0ZSB8IENMSS12cy1VSSBvd25lcnNoaXAsIHNlc3Npb24gaWRlbnRpdHksIGV4ZWMvZGF0YSBmbG93LCBob25lc3Qgc3RhdGUgfCBTdG9yYWdlL2ZpbGUgaW52ZW50b3J5LCB3cml0ZXIvZnVuY3Rpb24gY2hvcmVvZ3JhcGh5IHwKfCBgYnJvd3Nlci5tZGAgfCBTcGxpdCB8IHRhc2svcHJvZmlsZSBvd25lcnNoaXAsIGlkZW50aXR5IHJvdXRpbmcsIGNvbnNlbnQsIGNsZWFudXAgZ3VhcmFudGVlcyB8IHNldHVwLCBjb21tYW5kcywgZmxhZ3MsIHNjaGVtYXMsIHJlY2lwZXMgdG8gdXNlci9nZW5lcmF0ZWQgZG9jcyB8CnwgYGNsb3VkLm1kYCB8IFNwbGl0IHwgcHJvdmlkZXIgYm91bmRhcnksIHBsYWNlbWVudCwgbGlmZWN5Y2xlLCBidWRnZXQgYm91bmRhcnkgfCBwcm92aWRlci9mbGFnIGNhdGFsb2cgYW5kIHJlY2lwZXMgfAp8IGBjb21tYW5kLWluZGV4Lm1kYCB8IEdlbmVyYXRlIHwgZGlzY292ZXJhYmlsaXR5IHwgaGFuZCBtYWludGVuYW5jZTsgbWFyayBnZW5lcmF0ZWQgYW5kIGV4Y2x1ZGUgZnJvbSBhcmNoaXRlY3R1cmUgbmF2IHwKfCBgY29tcHV0ZXIubWRgIHwgU3BsaXQgfCBuYXRpdmUtaGVscGVyIGJvdW5kYXJ5LCBwZXJtaXNzaW9ucy90cnVzdCwgbG9jYWwtdnMtcmVtb3RlIG93bmVyc2hpcCB8IHNldHVwLCBleGhhdXN0aXZlIHZlcmJzL29wdGlvbnMsIHJlY2lwZXMgfAp8IGBjb25jZXB0cy5tZGAgfCBNYWpvciByZXdyaXRlIHwgNeKAkzcgY2Fub25pY2FsIG1lbnRhbCBtb2RlbHMgYW5kIHJlc29sdXRpb24gc2VtYW50aWNzIHwgZGlyZWN0b3J5IHRyZWVzLCBtdXRhYmxlIG1hdHJpY2VzLCBjb25maWcvY29tbWFuZCBpbnZlbnRvcnkgfAp8IGBjcmVkZW50aWFsLW1hbmFnZW1lbnQubWRgIHwgQURSIHJld3JpdGUgfCBjdXN0b2R5IGludmFyaWFudHMsIG5hdGl2ZS12cy1wcm92aWRlciBhY2NvdW50IGRlY2lzaW9uIHwgbWlncmF0aW9uIGRpYXJ5LCBjb21tYW5kIGNhdGFsb2csIGNvbmNyZXRlIGNvZGUgZml4IHwKfCBgZW50cnlwb2ludHMtYW5kLWxvb3BzLm1kYCB8IEFEUiByZXdyaXRlIHwgaW52b2NhdGlvbiBheGVzLCBjb21wb3NpdGlvbiwgZmFpbC1jbG9zZWQgZ3JhbW1hciwgbG9vcCBndWFyZHMgfCBwcm9wb3NhbC1zdGF0dXMgdGFibGUgYW5kIENMSSBtZWNoYW5pY3MgfAp8IGBleGFtcGxlcy9zZXNzaW9ucy9jbGF1ZGUvdHJhY2UubWRgIHwgRGVsZXRlL3JlbG9jYXRlIHwgb25seSBtaW5pbWFsIGZpeHR1cmUgc2VtYW50aWNzIGlmIHRlc3RlZCB8IHJhdyBmdWxsIGNvbnZlcnNhdGlvbiB8CnwgYGV4YW1wbGVzL3Nlc3Npb25zL2NvZGV4L3RyYWNlLm1kYCB8IERlbGV0ZS9yZWxvY2F0ZSB8IG9ubHkgbWluaW1hbCBmaXh0dXJlIHNlbWFudGljcyBpZiB0ZXN0ZWQgfCByYXcgZnVsbCBjb252ZXJzYXRpb24gfAp8IGBleGFtcGxlcy9zZXNzaW9ucy9nZW1pbmkvdHJhY2UubWRgIHwgRGVsZXRlIGltbWVkaWF0ZWx5IHwgc3ludGhldGljIGV2ZW50IHNoYXBlIG9ubHkgaWYgcmVxdWlyZWQgfCBwdWJsaXNoZWQgYWdlbnQgcmVhc29uaW5nIGFuZCByYXcgY29udmVyc2F0aW9uIHwKfCBgZmxlZXQubWRgIHwgU3BsaXQgfCByZWNvbmNpbGlhdGlvbiBib3VuZGFyeSwgaWRlbXBvdGVuY3ksIGNyZWRlbnRpYWwgY3VzdG9keSB8IFlBTUwsIGZsYWdzLCBib290c3RyYXAgcmVjaXBlcywgc291cmNlIG1hcCB8CnwgYGhvb2tzLm1kYCB8IFNwbGl0IHwgcmVzb2x1dGlvbi9yZWdpc3RyYXRpb24gZmxvdywgQU5EIHNlbWFudGljcywgZHVhbC1ldmFsdWF0b3IgaW52YXJpYW50IHwgY29tbWFuZHMsIHNjaGVtYSwgY2FjaGUgdHVuaW5nLCByZWNpcGVzOyBnZW5lcmF0ZSBldmVudCBtYXRyaXggfAp8IGBob3N0cy5tZGAgfCBNYWpvciByZXdyaXRlIHwgcGxhY2VtZW50LCBicm9rZXJsZXNzL3Byb3ZpZGVyIGJvdW5kYXJ5LCByZW1vdGUgY29udGV4dCBhbmQgbm9uLWdvYWxzIHwgaGlzdG9yaWNhbCBwbGFuLCBjb21tYW5kcywgaW5jaWRlbnRzLCBjb2RlIG1hcHMsIG9wZW4gcGhhc2VzIHwKfCBgbGFuZHNjYXBlLm1kYCB8IFJlbG9jYXRlIHwgZGF0ZWQgc3RyYXRlZ2ljIHBvc2l0aW9uaW5nIGlmIHN0aWxsIHVzZWZ1bCB8IGNhbm9uaWNhbCB0ZWNobmljYWwtZG9jIHN0YXR1cyB8CnwgYG1lbnViYXIubWRgIHwgU3BsaXQgKyByZXNvbHZlIHwgcmVhZC1tb2RlbC9hY3Rpb24gYm91bmRhcnksIGxpZmVjeWNsZSwgc2luZ2xlLWluc3RhbmNlIGJlaGF2aW9yIHwgc2V0dXAsIFVJIHNwZWMsIGZpbGVzIHRhYmxlOyBtb3ZlIGFjdGluZyB0aW1lciBvdXQgb2YgVUkgb3duZXJzaGlwIHwKfCBgbWluZS5tZGAgfCBSZXdyaXRlIHwgd2hpdGUtbGFiZWwgc2hpbS9wcm9maWxlIGJvdW5kYXJ5IGFuZCBmb3JlZ3JvdW5kLXZzLWJhY2tncm91bmQgaW52YXJpYW50IHwgY29tbWFuZHMsIGV4YW1wbGVzLCBsaWNlbnNpbmcgZ3VpZGFuY2UgfAp8IGBtb2RlbC10aWVycy5tZGAgfCBSZXdyaXRlICsgZ2VuZXJhdGUgfCBzdGFibGUgdGllciBzZW1hbnRpY3MsIHByZWNlZGVuY2UsIGNsYW1waW5nIHwgbXV0YWJsZSBwcm92aWRlci9tb2RlbC9wcmljZSB0YWJsZXMgYW5kIHNvdXJjZSBtYXAgfAp8IGBtb25pdG9ycy5tZGAgfCBTcGxpdCB8IGV2ZW50LXNvdXJjZSDihpIgZGV0ZWN0aW9uIOKGkiBjbGFpbWVkIGFjdGlvbiBhcmNoaXRlY3R1cmUsIG93bmVyc2hpcCBhbmQgaWRlbXBvdGVuY3kgfCBjb21tYW5kcy9jb25maWcgcmVjaXBlcyBhbmQga2V5LWZ1bmN0aW9ucyB0YWJsZSB8CnwgYG9ic2VydmFiaWxpdHkubWRgIHwgTWFqb3IgcmV3cml0ZSB8IGV2ZW50IG1vZGVsLCBwcm92ZW5hbmNlLCBzdGF0ZSBvd25lcnNoaXAsIGFnZ3JlZ2F0aW9uIGJvdW5kYXJpZXMgfCBleGhhdXN0aXZlIHNjaGVtYXMsIGNvbW1hbmRzLCBxdWVyaWVzLCBmaWxlIHBhdGhzLCByb2xsb3V0IGhpc3RvcnkgfAp8IGBvcHRpbWl6YXRpb25zLm1kYCB8IFJlbG9jYXRlL3NwbGl0IHwgYWNjZXB0ZWQgcGVyZm9ybWFuY2UgZGVjaXNpb25zIHdpdGggbWVhc3VyZWQgdHJhZGVvZmZzIHwgbmV3L21vZGlmaWVkIGZpbGUgaW52ZW50b3JpZXMgYW5kIGltcGxlbWVudGF0aW9uLXBsYW4gcmVzaWR1ZSB8CnwgYHBsdWdpbnMubWRgIHwgU3BsaXQgfCBwYWNrYWdlIGJvdW5kYXJ5LCBsYXllcmVkIHJlc29sdXRpb24sIGNvbnNlbnQvc2VjdXJpdHkgbW9kZWwgfCBjb21tYW5kcywgbWFuaWZlc3QvbGF5b3V0IHJlZmVyZW5jZSwgcmVjaXBlcyB8CnwgYHByb2R1Y3QtYWNjZXB0YW5jZS5tZGAgfCBSZWxvY2F0ZSB8IGR1cmFibGUgcHJvZHVjdCBhY2NlcHRhbmNlIHByaW5jaXBsZXMgaWYgc3RpbGwgY2Fub25pY2FsIHwgdGVtcGxhdGVzLCBwcm9vZiBjb21tYW5kcywgY29waWVkIGV4YW1wbGVzOyBsaWtlbHkgQUdFTlRTL3Byb2Nlc3MgZG9jcyB8CnwgYHByb2ZpbGVzLm1kYCB8IFNwbGl0IHwgY3VzdG9tLWhhcm5lc3MgaWRlbnRpdHksIHJlc29sdXRpb24sIGF1dGggb3duZXJzaGlwLCBvdmVycmlkZSBwcmVjZWRlbmNlIHwgY29tbWFuZCBjYXRhbG9nLCBZQU1MIHNjaGVtYSwgcHJlc2V0cywgcmVjaXBlcyB8CnwgYHByb2ZpbGVzL0lOREVYLm1kYCB8IFJlbG9jYXRlL2dlbmVyYXRlIHwgcHJvdmlkZXIgZ3VpZGUgbmF2aWdhdGlvbiB8IGhhbmQtbWFpbnRhaW5lZCBwcm92aWRlci9jYXZlYXQgbWF0cml4IHwKfCBgcHJvZmlsZXMvYmVkcm9jay5tZGAgfCBVc2VyIGd1aWRlIHwgQmVkcm9jay1zcGVjaWZpYyBjb21wYXRpYmlsaXR5IGNvbnN0cmFpbnRzIHwgcXVpY2sgc3RhcnQvZ2VuZXJhdGVkIFlBTUwvdHJvdWJsZXNob290aW5nIG91dCBvZiBhcmNoaXRlY3R1cmUgfAp8IGBwcm9maWxlcy9kZWVwaW5mcmEubWRgIHwgVXNlciBndWlkZSB8IHByb3ZpZGVyIHRyYW5zcG9ydC9hdXRoIGNvbnN0cmFpbnQgfCBjb21tYW5kcy9jdXJyZW50IGVuZHBvaW50cyBhbmQgb3BlcmF0aW9uYWwgcmVuZGVyaW5nIHwKfCBgcHJvZmlsZXMvZm91bmRyeS5tZGAgfCBVc2VyIGd1aWRlIHwgRm91bmRyeS12cy1UcnVlRm91bmRyeSBkaXN0aW5jdGlvbiBhbmQgdHJhbnNwb3J0IGNvbnN0cmFpbnQgfCBzZXR1cC9ZQU1ML3Ryb3VibGVzaG9vdGluZy9jdXJyZW50LXZlcnNpb24gY2F2ZWF0cyB8CnwgYHByb2ZpbGVzL2xpdGVsbG0ubWRgIHwgVXNlciBndWlkZSB8IGdhdGV3YXkvdG9vbC11c2UgY29tcGF0aWJpbGl0eSBib3VuZGFyeSB8IHNldHVwL2NvbmZpZyByZWNpcGVzL3Ryb3VibGVzaG9vdGluZyB8CnwgYHByb2ZpbGVzL29sbGFtYS5tZGAgfCBVc2VyIGd1aWRlIHwgbG9jYWwtaG9zdCBhbmQgcHJvdG9jb2wgY29tcGF0aWJpbGl0eSBjb25zdHJhaW50IHwgc2V0dXAvbW9kZWwgcmVjb21tZW5kYXRpb25zL3Ryb3VibGVzaG9vdGluZyB8CnwgYHByb2ZpbGVzL29wZW5yb3V0ZXIubWRgIHwgVXNlciBndWlkZSArIGdlbmVyYXRlIHwgcmVhc29uaW5nLXZzLXByaW50IGJlaGF2aW9yIHwgc2V0dXAsIG11dGFibGUgcHJlc2V0L21vZGVsIGxpc3QsIGtleSByb3RhdGlvbiByZWNpcGVzIHwKfCBgcHJvZmlsZXMvdHJ1ZWZvdW5kcnkubWRgIHwgVXNlciBndWlkZSB8IGdhdGV3YXkvdmFsaWRhdGlvbi9UTFMgdHJ1c3QgYm91bmRhcmllcyB8IHNldHVwL1lBTUwvY3VycmVudC12ZXJzaW9uIHRyb3VibGVzaG9vdGluZyB8CnwgYHByb2ZpbGVzL3ZlcnRleC5tZGAgfCBVc2VyIGd1aWRlIHwgY3JlZGVudGlhbCBhbmQgcmVnaW9uL21vZGVsLUlEIGNvbnN0cmFpbnRzIHwgc2V0dXAvWUFNTC9jdXJyZW50IGF2YWlsYWJpbGl0eSBjbGFpbXMgfAp8IGBwcm9maWxlcy92bGxtLm1kYCB8IFVzZXIgZ3VpZGUgfCBuYXRpdmUgQW50aHJvcGljL3Rvb2wtY2FsbCBwYXJzZXIgYm91bmRhcnkgfCBkZXBsb3ltZW50IHJlY2lwZS9tb2RlbCB0dW5pbmcvdHJvdWJsZXNob290aW5nIHwKfCBgcHJvamVjdHMubWRgIHwgTWFqb3IgcmV3cml0ZSB8IHByb2plY3QgaWRlbnRpdHksIGRpcmVjdG9yeSBvd25lcnNoaXAsIGF0dHJpYnV0aW9uLCBzYWZlIHJlY29uY2lsaWF0aW9uIHwgWUFNTCwgb3V0cHV0IHNwZWNpbWVucywgY29tbWFuZHMsIGNhY2hlIGV4cGVyaW1lbnRzLCBidWcgaGlzdG9yeSB8CnwgYHB0eS5tZGAgfCBSZXdyaXRlIHwgc2lkZWNhci9wcm9jZXNzIGJvdW5kYXJ5IGFuZCBub3JtYWxpemVkIHNjcmVlbiBtb2RlbCB8IHNldHVwLCBjb21tYW5kIHJlZmVyZW5jZSwgcmVjaXBlcyB8CnwgYHJlbGVhc2UubWRgIHwgU3BsaXQgfCBleGFjdC1hcnRpZmFjdCBwcm9tb3Rpb24sIGF0dGVzdGF0aW9uL2hlbHBlciByZXVzZSwgbGF0ZW5jeSBpbnZhcmlhbnQgfCB0ZW1wb3JhcnkvbWFudWFsIHByb2R1Y2VyIHJ1bmJvb2sgYW5kIGhpc3RvcmljYWwgd29ya2Fyb3VuZCB8CnwgYHJlc291cmNlLXN5bmMubWRgIHwgTWFqb3IgcmV3cml0ZSB8IGxheWVyZWQgcmVzb2x1dGlvbiwgZGV0ZWN0aW9uLCBwcm9qZWN0aW9uLCBwcnVuZS9kZWNsaW5lIGludmFyaWFudHMgfCBzZWxlY3RvciBmbGFncywgdHJhbnNmb3JtIGludGVybmFscywga2V5LWZ1bmN0aW9ucyBtYXAgfAp8IGByb3V0aW5lcy5tZGAgfCBNYWpvciBzcGxpdCB8IHNvbGUgc2NoZWR1bGVyLCBwbGFjZW1lbnQsIHJlYWRpbmVzcywgaXNvbGF0aW9uLCBzdGF0ZSBtYWNoaW5lLCBjYXRjaC11cCB8IFlBTUwvd2ViaG9vayBzZXR1cCwgYXV0aCBydW5ib29rLCBjb21tYW5kcywga2V5LWZ1bmN0aW9ucyBtYXAgfAp8IGBzZWNyZXRzLWFnZW50LXByb2Nlc3MtbW9kZWwubWRgIHwgQURSIHJld3JpdGUgfCBicm9rZXItdnMtc2NoZWR1bGVyIHJlcXVpcmVtZW50cywgZGVjaXNpb24gYW5kIGNvbnNlcXVlbmNlcyB8IHN0YWxlIHByb2Nlc3Mtc3RhdGUgZGlhcnkgYW5kIHBpZC9zb2NrZXQgaW5jaWRlbnQgZGV0YWlsIHwKfCBgc2VjcmV0cy10cnVzdC1ib3VuZGFyaWVzLm1kYCB8IEZpeCArIEFEUiByZXdyaXRlIHwgc3RvcmFnZS9tYXRlcmlhbGl6YXRpb24gYm91bmRhcnkgYW5kIHRyYW5zY3JpcHQgY29uc2VxdWVuY2VzIHwgY29waWVkIGNvZGU7IHJlc29sdmUgY29udHJhZGljdG9yeSBgZ2V0YC9odW1hbi1nYXRlIGNsYWltcyB8CnwgYHNlY3JldHMubWRgIHwgTWFqb3Igc3BsaXQgfCBidW5kbGUvYmFja2VuZCBhcmNoaXRlY3R1cmUsIGluamVjdGlvbiwgYnJva2VyLCByZW1vdGUgdHJ1c3QgbW9kZWwgfCBjb21tYW5kIHJlZmVyZW5jZSwgc2NoZW1hcywgcmVjaXBlcywgcGxhdGZvcm0gc2V0dXAgcnVuYm9va3MgfAp8IGBzZWxmLWhlYWxpbmcubWRgIHwgTGlnaHQgcmV3cml0ZSB8IGZhaWx1cmUgbW9kZWwsIHRocmVlIGRlZmVuc2VzLCBjb25zZXJ2YXRpdmUgcHJvYmUsIGxpbWl0cyB8IHBzZXVkb2NvZGUsIHJlZ2V4LCBzb3VyY2UvdGVzdCBtYXAgfAp8IGBzZXNzaW9ucy5tZGAgfCBNYWpvciBzcGxpdCB8IHRyYW5zY3JpcHQvbGl2ZSBpZGVudGl0eSwgaW5kZXhpbmcsIGxpZmVjeWNsZSwgc3RhdGUsIHJlbW90ZS9taWdyYXRpb24gYm91bmRhcmllcyB8IHNjaGVtYXMsIGZsYWdzLCB0dXRvcmlhbHMsIGJlbmNobWFyayBwcm9jZWR1cmUgfAp8IGBzaGFyZS5tZGAgfCBTcGxpdCB8IHB1YmxpY2F0aW9uIGRhdGEgZmxvdywgcHJvdmVuYW5jZSwgcmV2aXNpb25zLCBjYXBhYmlsaXR5L3NlY3VyaXR5IG1vZGVsIHwgd2Fsa3Rocm91Z2hzLCBXb3JrZXIgZGVwbG95IHJ1bmJvb2ssIGZpbGUvY29tbWFuZCBtYXBzIHwKfCBgc3BlY2lmaWNhdGlvbnMubWRgIHwgU3BsaXQgbm9ybWF0aXZlIGV4Y2VwdGlvbiB8IFJGQyBiZWhhdmlvciBhbmQgR2l2ZW4vV2hlbi9UaGVuIGludmFyaWFudHMgYnkgc3Vic3lzdGVtIHwgZ2VuZXJhdGVkIHNjaGVtYXMvcGFyaXR5IHRhYmxlcyBhbmQgdHJhbnNpZW50IGtub3duLWdhcCBsZWRnZXJzIHwKfCBgc3NoLXRyYW5zcG9ydC5tZGAgfCBDb25jaXNlIEFEUiByZXdyaXRlIHwgb25lLWVuZ2luZSBkZWNpc2lvbiwgdHJ1c3QsIG11bHRpcGxleGluZywgYWx0ZXJuYXRpdmVzLCByaXNrcyB8IHN5bWJvbCB3YWxrdGhyb3VnaCwgZGF0ZWQgbWVhc3VyZW1lbnRzL3JvbGxvdXQgfAp8IGBzdWJhZ2VudHMubWRgIHwgU3BsaXQgfCBsYXllcmVkIHByb2plY3Rpb24gYW5kIHJlZ2lzdHJ5L2NhcGFiaWxpdHkgbG9ja3N0ZXAgfCBmaWxlLWxheW91dCBtYXAsIGNvbW1hbmRzLCBzY2hlbWEsIHJlY2lwZXMgfAp8IGB0ZWFtcy5tZGAgfCBNYWpvciBzcGxpdCB8IERBRywgaXNvbGF0aW9uLCBib3VuZGFyeSBjb250cmFjdHMsIGRpc3RyaWJ1dGVkIHBsYWNlbWVudCwgYnVkZ2V0cyB8IG9wdGlvbnMsIHJlc3VtZSB0dXRvcmlhbCwgcmVjaXBlcywgSlNPTiBzaGFwZXMgfAp8IGB0ZXJtaW5hbC1lbmdpbmUubWRgIHwgUmV3cml0ZSB8IGF0dGVuZGVkLXZzLWF1dG9ub21vdXMgYm91bmRhcnksIGJhY2tlbmQgY29udHJhY3QsIGxheW91dC9zZWxlY3Rpb24gfCBiYWNrZW5kIGZpbGUgbWFwLCBBUEkgZXhhbXBsZXMsIGludGVncmF0aW9uIGltcGxlbWVudGF0aW9uIGRldGFpbCB8CnwgYHRvb2xjaGFpbi10aGVzaXMubWRgIHwgUmVsb2NhdGUgfCBkYXRlZCBwcm9kdWN0IHRoZXNpcyB8IGNhbm9uaWNhbCBhcmNoaXRlY3R1cmUgc3RhdHVzIGFuZCBzdGFsZSBtYXJrZXQgY2xhaW1zIHwKfCBgdmVyc2lvbi1tYW5hZ2VtZW50Lm1kYCB8IFNwbGl0IHwgcmVzb2x1dGlvbiwgaXNvbGF0aW9uLCBhZG9wdGlvbi9yZXZlcnNhbCwgc2hpbSBwcm9jZXNzIGNvbnRyYWN0IHwgaW5zdGFsbCB0dXRvcmlhbHMsIGR1cGxpY2F0ZSByZXNvdXJjZSBzeW5jLCBrZXktZnVuY3Rpb25zIG1hcCB8CnwgYHZzLWdhc3Rvd24ubWRgIHwgUmVsb2NhdGUgfCBkYXRlZCBjb21wZXRpdGl2ZSByZXNlYXJjaCB8IGNhbm9uaWNhbCBhcmNoaXRlY3R1cmUgc3RhdHVzIHwKfCBgd2F0Y2hkb2cubWRgIHwgTGlnaHQgcmV3cml0ZSB8IHNjaGVkdWxlciBvd25lcnNoaXAsIHN0YXRlIGxvb3AsIGRlY2lkZXIsIGNvbmZpcm1lZCBkZWxpdmVyeSwgcm90YXRpb24vZmxlZXQgYm91bmRhcnkgfCBmaWxlIG1hcCwgY29tbWFuZHMsIGNvbnRyYWRpY3Rvcnkgcm9hZG1hcCB8CnwgYHdvcmtmbG93cy5tZGAgfCBTcGxpdCB8IGxheWVyZWQgcmVzb2x1dGlvbiwgY29tcG9zaXRpb24sIHByb2plY3Rpb24gYW5kIGZhaWwtY2xvc2VkIHNjb3BpbmcgfCBjb21tYW5kcywgZnVsbCBzY2hlbWEsIHJlY2lwZXMvZGVtbyB8CgojIyBGaWd1cmUKCjxkaXYgY2xhc3M9ImFydGlmYWN0LXBhbmVsIj4KPHN2ZyB2aWV3Qm94PSIwIDAgMTIwMCA2MjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbGxlZGJ5PSJkb2NzLXRpdGxlIGRvY3MtZGVzYyIgd2lkdGg9IjEwMCUiPgogIDx0aXRsZSBpZD0iZG9jcy10aXRsZSI+QmVmb3JlIGFuZCBhZnRlciBpbmZvcm1hdGlvbiBhcmNoaXRlY3R1cmUgZm9yIHRoZSBDTEkgZG9jdW1lbnRhdGlvbjwvdGl0bGU+CiAgPGRlc2MgaWQ9ImRvY3MtZGVzYyI+VGhlIGN1cnJlbnQgbWl4ZWQgZG9jdW1lbnRhdGlvbiBjb3JwdXMgaXMgc2VwYXJhdGVkIGludG8gYXV0aG9yZWQgYXJjaGl0ZWN0dXJlLCBnZW5lcmF0ZWQgcmVmZXJlbmNlLCB1c2VyIHJ1bmJvb2tzLCBkYXRlZCBhcnRpZmFjdHMsIGFuZCB0ZXN0IGZpeHR1cmVzLjwvZGVzYz4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFycm93IiBtYXJrZXJXaWR0aD0iMTAiIG1hcmtlckhlaWdodD0iMTAiIHJlZlg9IjkiIHJlZlk9IjMiIG9yaWVudD0iYXV0byIgbWFya2VyVW5pdHM9InN0cm9rZVdpZHRoIj48cGF0aCBkPSJNMCwwIEwwLDYgTDksMyB6IiBmaWxsPSIjYTNlNjM1Ii8+PC9tYXJrZXI+CiAgPC9kZWZzPgogIDxyZWN0IHg9IjIwIiB5PSIzMCIgd2lkdGg9IjQzMCIgaGVpZ2h0PSI1NTAiIHJ4PSI4IiBmaWxsPSIjMjQxNDE0IiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjUwIiB5PSI3NSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMjQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNlOGU4ZTgiPkJFRk9SRSDCtyBvbmUgbWl4ZWQgY29ycHVzPC90ZXh0PgogIDx0ZXh0IHg9IjUwIiB5PSIxMTUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjYjhiOGI4Ij5BcmNoaXRlY3R1cmUgKyBpbnZhcmlhbnRzPC90ZXh0PgogIDx0ZXh0IHg9IjUwIiB5PSIxNTAiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjYjhiOGI4Ij5Db21tYW5kcyArIGV2ZXJ5IGZsYWc8L3RleHQ+CiAgPHRleHQgeD0iNTAiIHk9IjE4NSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNiOGI4YjgiPkluc3RhbGwgKyBzZXR1cCArIHJlY2lwZXM8L3RleHQ+CiAgPHRleHQgeD0iNTAiIHk9IjIyMCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNiOGI4YjgiPkZpbGUgbWFwcyArIGtleSBmdW5jdGlvbnM8L3RleHQ+CiAgPHRleHQgeD0iNTAiIHk9IjI1NSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNiOGI4YjgiPlNjaGVtYXMgKyBtdXRhYmxlIG1hdHJpY2VzPC90ZXh0PgogIDx0ZXh0IHg9IjUwIiB5PSIyOTAiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjYjhiOGI4Ij5QbGFucyArIHJvYWRtYXBzICsgZ2FwczwvdGV4dD4KICA8dGV4dCB4PSI1MCIgeT0iMzI1IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2I4YjhiOCI+Q29tcGV0aXRpdmUgcmVzZWFyY2g8L3RleHQ+CiAgPHRleHQgeD0iNTAiIHk9IjM2MCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNiOGI4YjgiPlJhdyBzZXNzaW9uIHRyYWNlczwvdGV4dD4KICA8bGluZSB4MT0iNTAiIHkxPSI0MDAiIHgyPSI0MTUiIHkyPSI0MDAiIHN0cm9rZT0iIzVjMmQyZCIvPgogIDx0ZXh0IHg9IjUwIiB5PSI0NDUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjZmFjYzE1Ij4yNyw4MjkgbGluZXM8L3RleHQ+CiAgPHRleHQgeD0iNTAiIHk9IjQ4MCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiM4ODgiPlRoZSByZWFkZXIgbXVzdCBpbmZlciB3aGF0IGlzPC90ZXh0PgogIDx0ZXh0IHg9IjUwIiB5PSI1MTAiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjODg4Ij5kdXJhYmxlLCBnZW5lcmF0ZWQsIGN1cnJlbnQsPC90ZXh0PgogIDx0ZXh0IHg9IjUwIiB5PSI1NDAiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjODg4Ij5oaXN0b3JpY2FsLCBvciBvcGVyYXRpb25hbC48L3RleHQ+CgogIDxwYXRoIGQ9Ik00NzAgMzA1IEM1MjAgMzA1IDUzNSAzMDUgNTc1IDMwNSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjQiIGZpbGw9Im5vbmUiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIi8+CiAgPHRleHQgeD0iNDgyIiB5PSIyNzgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjYTNlNjM1Ij5jbGFzc2lmeSBieSBvd25lcnNoaXA8L3RleHQ+CgogIDxyZWN0IHg9IjU5NSIgeT0iMzAiIHdpZHRoPSI1ODUiIGhlaWdodD0iMTAyIiByeD0iOCIgZmlsbD0iIzEwMTkwYiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI2MjUiIHk9IjcwIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIyNCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2U4ZThlOCI+QVVUSE9SRUQgQVJDSElURUNUVVJFPC90ZXh0PgogIDx0ZXh0IHg9IjYyNSIgeT0iMTAxIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2I4YjhiOCI+Ym91bmRhcmllcyDCtyBmbG93cyDCtyBzdGF0ZXMgwrcgaW52YXJpYW50cyDCtyBkZWNpc2lvbnM8L3RleHQ+CgogIDxyZWN0IHg9IjU5NSIgeT0iMTQ3IiB3aWR0aD0iNTg1IiBoZWlnaHQ9IjkwIiByeD0iOCIgZmlsbD0iIzE0MTQxNCIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI2MjUiIHk9IjE4NCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMjQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNlOGU4ZTgiPkdFTkVSQVRFRCBSRUZFUkVOQ0U8L3RleHQ+CiAgPHRleHQgeD0iNjI1IiB5PSIyMTQiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjYjhiOGI4Ij5jb21tYW5kcyDCtyBmbGFncyDCtyBzY2hlbWFzIMK3IGNhcGFiaWxpdHkgbWF0cmljZXM8L3RleHQ+CgogIDxyZWN0IHg9IjU5NSIgeT0iMjUyIiB3aWR0aD0iNTg1IiBoZWlnaHQ9IjkwIiByeD0iOCIgZmlsbD0iIzE0MTQxNCIgc3Ryb2tlPSIjMzMzIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI2MjUiIHk9IjI4OSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMjQiIGZvbnQtd2VpZ2h0PSI3MDAiIGZpbGw9IiNlOGU4ZTgiPlVTRVIgR1VJREVTIC8gUlVOQk9PS1M8L3RleHQ+CiAgPHRleHQgeD0iNjI1IiB5PSIzMTkiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE2IiBmaWxsPSIjYjhiOGI4Ij5pbnN0YWxsIMK3IHNldHVwIMK3IHJlY2lwZXMgwrcgdHJvdWJsZXNob290aW5nIMK3IHJlY292ZXJ5PC90ZXh0PgoKICA8cmVjdCB4PSI1OTUiIHk9IjM1NyIgd2lkdGg9IjU4NSIgaGVpZ2h0PSI5MCIgcng9IjgiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMyIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNjI1IiB5PSIzOTQiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjI0IiBmb250LXdlaWdodD0iNzAwIiBmaWxsPSIjZThlOGU4Ij5EQVRFRCBBUlRJRkFDVFMgLyBUSUNLRVRTPC90ZXh0PgogIDx0ZXh0IHg9IjYyNSIgeT0iNDI0IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2I4YjhiOCI+cmVzZWFyY2ggwrcgYmVuY2htYXJrcyDCtyBwbGFucyDCtyBpbmNpZGVudHMgwrcgcm9sbG91dDwvdGV4dD4KCiAgPHJlY3QgeD0iNTk1IiB5PSI0NjIiIHdpZHRoPSI1ODUiIGhlaWdodD0iOTAiIHJ4PSI4IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjYyNSIgeT0iNDk5IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIyNCIgZm9udC13ZWlnaHQ9IjcwMCIgZmlsbD0iI2U4ZThlOCI+VEVTVERBVEEgQkVTSURFIFNPVVJDRTwvdGV4dD4KICA8dGV4dCB4PSI2MjUiIHk9IjUyOSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNiOGI4YjgiPm1pbmltYWwgwrcgc3ludGhldGljIMK3IHJlZGFjdGVkIMK3IHJlZ3Jlc3Npb24tcHJvdGVjdGluZzwvdGV4dD4KPC9zdmc+CjxwPk9uZSBhdXRob3JlZCBjb3JwdXMgYmVjb21lcyBmaXZlIGV4cGxpY2l0IG93bmVyc2hpcCBzdXJmYWNlcy4gVGhlIGdyZWVuIGxhbmUgaXMgd2hhdCBhZ2VudHMgcmVhZCBmb3Igc3lzdGVtIHVuZGVyc3RhbmRpbmc7IHRoZSBvdGhlciBsYW5lcyByZW1haW4gZGlzY292ZXJhYmxlIHdpdGhvdXQgY29tcGV0aW5nIHdpdGggaXQuPC9wPgo8L2Rpdj4KCiMjIyBJbXBsZW1lbnRhdGlvbiBzZXF1ZW5jZQoKMS4gKipXcml0ZSBhbmQgZW5mb3JjZSB0aGUgZG9jdW1lbnRhdGlvbiBjb250cmFjdC4qKiBSZXdyaXRlIGBhcHBzL2NsaS9kb2NzL1JFQURNRS5tZGAgdG8gZGVmaW5lIHRoZSB0aHJlZSBkb2N1bWVudGF0aW9uIHN1cmZhY2VzLCB0aGUgcmV0YWluZWQgYXJjaGl0ZWN0dXJlIHRlbXBsYXRlLCBnZW5lcmF0ZWQtZmlsZSBtYXJrZXJzLCBhbmQgdGhlIHJ1bGUgdGhhdCBhcmNoaXRlY3R1cmFsIGRvY3MgZG8gbm90IGNhcnJ5IHNldHVwLCBjb21tYW5kIGNhdGFsb2dzLCByZWNpcGVzLCBmaWxlIG1hcHMsIG9yIHRyYW5zaWVudCByb2FkbWFwcy4gVXBkYXRlIHRoZSBuZWFyZXN0IGBBR0VOVFMubWRgIHJldmlldyBndWlkYW5jZSBzbyByZWdyZXNzaW9ucyBhcmUgcmV2aWV3YWJsZS4KCjIuICoqRml4IGNvcnJlY3RuZXNzIGJlZm9yZSByZXNoYXBpbmcgcHJvc2UuKiogUmVzb2x2ZSB0aGUgY29udHJhZGljdG9yeSBzZWNyZXQtbWF0ZXJpYWxpemF0aW9uIGNsYWltcyBhZ2FpbnN0IGN1cnJlbnQgY29kZSBhbmQgcmVhbCB0ZXN0cy4gUmVzb2x2ZSB0aGUgbWVudWJhciBhY3RpbmctdGltZXIgY29uZmxpY3QgYnkgbW92aW5nIHJlc3RhcnQgb3duZXJzaGlwIHRvIHRoZSBDTEkgY29udHJvbCBwbGFuZSBvciBleHBsaWNpdGx5IGNoYW5naW5nIHRoZSBub3JtYXRpdmUgc2luZ3VsYXJpdHkgZGVjaXNpb24uIFJlbW92ZSB0aGUgY29udHJhZGljdG9yeSB3YXRjaGRvZyByb2FkbWFwIHBocmFzaW5nIGFuZCBzdGFsZSBzZWNyZXRzIHByb2Nlc3Mgc3RhdGUuCgozLiAqKkJ1aWxkIGNhbm9uaWNhbCBnZW5lcmF0ZWQgcmVmZXJlbmNlLioqIE1ha2UgdGhlIGV4aXN0aW5nIENvbW1hbmRlci1kZXJpdmVkIGNvbW1hbmQgaW5kZXggdmlzaWJseSBnZW5lcmF0ZWQgYW5kIHJlcHJvZHVjaWJsZS4gRXh0ZW5kIGdlbmVyYXRpb24gb25seSB3aGVyZSB0aGUgY2Fub25pY2FsIHJlZ2lzdHJ5L3R5cGUgYWxyZWFkeSBleGlzdHM6IGNvbW1hbmQgZmxhZ3MsIGNhcGFiaWxpdHkgbWF0cmljZXMsIHByb3ZpZGVyL21vZGVsIHRhYmxlcywgYW5kIHN0YWJsZSBzY2hlbWFzLiBHZW5lcmF0ZWQgb3V0cHV0IGlzIGxpbmtlZCBmcm9tIGFyY2hpdGVjdHVyZSBidXQgZXhjbHVkZWQgZnJvbSBpdHMgcmVhZGluZyBvcmRlci4KCjQuICoqUmV3cml0ZSB0aGUgYXJjaGl0ZWN0dXJhbCBzcGluZSBmaXJzdC4qKiBSZWR1Y2UgYGFyY2hpdGVjdHVyZS5tZGAsIGBjb25jZXB0cy5tZGAsIGFuZCBzdWJzeXN0ZW0gb3duZXJzaGlwIGRvY3MgKGBzZXNzaW9uc2AsIGByb3V0aW5lc2AsIGBob3N0c2AsIGBicm93c2VyYCwgYHNlY3JldHNgLCBgcmVzb3VyY2Utc3luY2AsIGB0ZWFtc2ApIHRvIHRoZSByZXRhaW5lZCB0ZW1wbGF0ZS4gU3BsaXQgdGhlIG1vbm9saXRoaWMgbm9ybWF0aXZlIHNwZWNpZmljYXRpb24gYnkgc3Vic3lzdGVtIHdpdGhvdXQgd2Vha2VuaW5nIGl0cyBSRkMgcmVxdWlyZW1lbnRzLgoKNS4gKipQcm9jZXNzIHRoZSByZW1haW5pbmcgZmVhdHVyZSBkb2NzIGJ5IGRvbWFpbi4qKiBJbiBmb2N1c2VkIGNvbW1pdHMsIHJldGFpbiBhcmNoaXRlY3R1cmUvQURScywgbW92ZSB0YXNrIGluc3RydWN0aW9ucyB0byB1c2VyL3J1bmJvb2sgc3VyZmFjZXMsIGdlbmVyYXRlIHJlZmVyZW5jZSwgYW5kIGRlbGV0ZSBkdXBsaWNhdGlvbi4gRWFjaCBkb21haW4gY29tbWl0IHVwZGF0ZXMgbGlua3MgYW5kIHBhc3NlcyBhIGRvY3MgbGluay9jaGVjay1nZW5lcmF0aW9uIHRlc3QuCgo2LiAqKlJlbW92ZSBub24tZG9jIGFydGlmYWN0cyBmcm9tIGNhbm9uaWNhbCBkb2NzLioqIERlbGV0ZSBvciByZWxvY2F0ZSB0aGUgcmF3IHNlc3Npb24gdHJhY2VzLCBjb21wZXRpdGl2ZSBsYW5kc2NhcGUvdGhlc2lzIGZpbGVzLCBpbXBsZW1lbnRhdGlvbiBkaWFyaWVzLCByb2xsb3V0IG1hdHJpY2VzLCBhbmQgYmVuY2htYXJrIGhpc3Rvcmllcy4gQW55IGZpeHR1cmUgdGhhdCByZW1haW5zIG11c3QgYmUgc3ludGhldGljLCByZWRhY3RlZCwgbWluaW1hbCwgYmVzaWRlIHRoZSB0ZXN0IHRoYXQgY29uc3VtZXMgaXQsIGFuZCBwcm92ZW4gYnkgdGhhdCB0ZXN0LgoKNy4gKipBZGQgZHJpZnQgZ2F0ZXMuKiogQ0kgZmFpbHMgd2hlbiBnZW5lcmF0ZWQgcmVmZXJlbmNlIGlzIHN0YWxlOyBhcmNoaXRlY3R1cmUgbGludCBmbGFncyBmb3JiaWRkZW4gc3RydWN0dXJhbCBoZWFkaW5ncyAoYFNldHVwYCwgYENvbW1hbmQgUmVmZXJlbmNlYCwgYFJlY2lwZXNgLCBgRmlsZSBtYXBgLCBgS2V5IEZ1bmN0aW9uc2AsIGBSb2FkbWFwYCkgdW5sZXNzIGEgZmlsZSBpcyBleHBsaWNpdGx5IHR5cGVkIGFzIHVzZXIgZ3VpZGUsIGdlbmVyYXRlZCByZWZlcmVuY2UsIHJ1bmJvb2ssIEFEUiwgb3IgZGF0ZWQgYXJ0aWZhY3QuIFRoZSBnYXRlIGNoZWNrcyBzdHJ1Y3R1cmUsIG5vdCBwcm9zZSBrZXl3b3JkcyBpbiBsZWdpdGltYXRlIGFyY2hpdGVjdHVyYWwgZGlzY3Vzc2lvbi4KCjguICoqVmVyaWZ5IHRoZSByZXN1bHQgYXMgYW4gYWdlbnQgd291bGQgdXNlIGl0LioqIFJ1biBhIGNvbGQgbmF2aWdhdGlvbiB0ZXN0OiBhbnN3ZXIgcmVwcmVzZW50YXRpdmUgYXJjaGl0ZWN0dXJlIHF1ZXN0aW9ucyB1c2luZyBvbmx5IHRoZSBuZXcgZG9jcyBpbmRleCBhbmQgYXV0aG9yZWQgY29ycHVzLCB0aGVuIHZlcmlmeSBldmVyeSBjb21tYW5kL3NjaGVtYSBsb29rdXAgcmVzb2x2ZXMgdG8gZ2VuZXJhdGVkIGhlbHAvcmVmZXJlbmNlIGFuZCBldmVyeSBzZXR1cC9yZWNvdmVyeSBsb29rdXAgcmVzb2x2ZXMgdG8gYSB1c2VyIGd1aWRlL3J1bmJvb2suIENoZWNrIGFsbCBsaW5rcyBhbmQgcmVuZGVyIHRoZSBkb2NzIHN1cmZhY2UuCgojIyMgUmV0YWluZWQgYXJjaGl0ZWN0dXJlIHRlbXBsYXRlCgpFdmVyeSBhdXRob3JlZCBmZWF0dXJlIGRvY3VtZW50IHNob3VsZCBiZSByZWNvZ25pemFibGUgd2l0aG91dCByZWFkaW5nIGl0cyBmaWxlbmFtZToKCjEuICoqUHVycG9zZSBhbmQgYm91bmRhcnkqKiDigJQgdGhlIHByb2JsZW0gb3duZWQsIHBsdXMgZXhwbGljaXQgbm9uLWdvYWxzLgoyLiAqKk93bmVycyoqIOKAlCB3aG8gb3ducyBzdGF0ZSwgc2NoZWR1bGluZywgZXhlY3V0aW9uLCB0cmFuc3BvcnQsIGFuZCBwcmVzZW50YXRpb24uCjMuICoqRGF0YS9jb250cm9sIGZsb3cqKiDigJQgYSBzbWFsbCBkaWFncmFtIG9yIHN0YXRlIG1hY2hpbmUgd2hlcmUgc3RydWN0dXJlIG1hdHRlcnMuCjQuICoqSW52YXJpYW50cyBhbmQgZmFpbHVyZSBiZWhhdmlvcioqIOKAlCB3aGF0IG11c3QgcmVtYWluIHRydWUsIGluY2x1ZGluZyBmYWlsLWxvdWQgc2VtYW50aWNzLgo1LiAqKkRlY2lzaW9ucyBhbmQgdHJhZGVvZmZzKiog4oCUIGFjY2VwdGVkIGNob2ljZSwgYWx0ZXJuYXRpdmVzLCBhbmQgY29uc2VxdWVuY2VzLgo2LiAqKk5vcm1hdGl2ZSBsaW5rcyoqIOKAlCBzcGVjaWZpY2F0aW9ucyBhbmQgZm9jdXNlZCBBRFJzLgo3LiAqKlNvdXJjZSBzZWFtKiog4oCUIGF0IG1vc3QgYSBmZXcgc3RhYmxlIGNvbXBvbmVudC1sZXZlbCBwb2ludGVycywgbmV2ZXIgYSBmaWxlIGludmVudG9yeS4KCiMjIyBBY2NlcHRhbmNlIGNyaXRlcmlhCgotIEV2ZXJ5IG9uZSBvZiB0aGUgNTggY3VycmVudCBNYXJrZG93biBmaWxlcyBoYXMgYmVlbiByZXdyaXR0ZW4sIGdlbmVyYXRlZCwgcmVsb2NhdGVkLCBvciBkZWxldGVkIGFjY29yZGluZyB0byBhbiBleHBsaWNpdGx5IHJldmlld2VkIGRpc3Bvc2l0aW9uLgotIFRoZSBhdXRob3JlZCBhcmNoaXRlY3R1cmUgcmVhZGluZyBwYXRoIGNvbnRhaW5zIG5vIGluc3RhbGwvc2V0dXAgd2Fsa3Rocm91Z2hzLCBleGhhdXN0aXZlIGNvbW1hbmQvZmxhZyB0YWJsZXMsIHJlY2lwZXMsIGZpbGUgbWFwcywga2V5LWZ1bmN0aW9uIHRhYmxlcywgcm9sbG91dCBwaGFzZXMsIG9wZW4tdGlja2V0IHJvYWRtYXBzLCBvciByYXcgdHJhbnNjcmlwdHMuCi0gQ0xJIGNvbW1hbmQgYW5kIHNjaGVtYSBkZXRhaWxzIHJlbWFpbiBhdmFpbGFibGUgZnJvbSBjYW5vbmljYWwgZ2VuZXJhdGVkIHNvdXJjZXMgYW5kIGhhdmUgYSBzdGFsZS1nZW5lcmF0aW9uIENJIGdhdGUuCi0gQXJjaGl0ZWN0dXJlIHJldGFpbnMgZXZlcnkgZHVyYWJsZSBvd25lcnNoaXAgYm91bmRhcnksIGRhdGEgZmxvdywgbGlmZWN5Y2xlLCBpbnZhcmlhbnQsIGZhaWx1cmUgc2VtYW50aWMsIGFuZCBhY2NlcHRlZCB0cmFkZW9mZiBpZGVudGlmaWVkIGluIHRoaXMgYXVkaXQuCi0gYHNlY3JldHNgIG1hdGVyaWFsaXphdGlvbiBzZW1hbnRpY3MgYW5kIG1lbnViYXIgc2NoZWR1bGVyIG93bmVyc2hpcCBhZ3JlZSB3aXRoIGNvZGUsIHRlc3RzLCBhbmQgYHNwZWNpZmljYXRpb25zLm1kYDsgbm8gY29udHJhZGljdGlvbiBpcyBwYXBlcmVkIG92ZXIuCi0gUmF3IHNlc3Npb24vcmVhc29uaW5nIHRyYWNlcyBhcmUgZ29uZSBmcm9tIHB1YmxpYyBkb2NzOyBhbnkgcmVwbGFjZW1lbnQgZml4dHVyZSBpcyBzeW50aGV0aWMsIHJlZGFjdGVkLCBtaW5pbWFsLCBhbmQgdGVzdC1ib3VuZC4KLSBEb2NzIGxpbmtzIHBhc3MsIHRoZSBhcmNoaXRlY3R1cmUgaW5kZXggaGFzIGEgY2xlYXIgcmVhZGluZyBvcmRlciwgYW5kIGFuIGFnZW50IGNhbiBhbnN3ZXIgcmVwcmVzZW50YXRpdmUgYXJjaGl0ZWN0dXJlIHF1ZXN0aW9ucyB3aXRob3V0IHNlYXJjaGluZyBjb21tYW5kIG1hbnVhbHMuCgojIyMgVHJhY2tpbmcKCi0gTGluZWFyOiAqKlJVU0gtMzE5OSDigJQgUmVmb2N1cyBhcHBzL2NsaS9kb2NzIG9uIGFyY2hpdGVjdHVyZSBhbmQgZHVyYWJsZSBkZWNpc2lvbnMqKgotIFB1bGwgcmVxdWVzdDogKiojMzAzOCDigJQgZG9jcyhwbGFuKTogcmVzZXQgdGhlIGFyY2hpdGVjdHVyZSBkb2N1bWVudGF0aW9uIGNvcnB1cyoqCi0gRGVsaXZlcnkgbW9kZWw6IG9uZSB3b3JrdHJlZSBhbmQgUFIgZm9yIHRoZSBwbGFuIHBsdXMgaW1wbGVtZW50YXRpb24sIHdpdGggZG9tYWluLXNpemVkIGNvbW1pdHMsIENJLCBub24tYXV0aG9yIHJldmlldywgbWVyZ2UsIGFuZCBwb3N0LW1lcmdlIHZlcmlmaWNhdGlvbi4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

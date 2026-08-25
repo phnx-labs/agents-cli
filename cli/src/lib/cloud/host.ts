@@ -6,7 +6,7 @@
  * launch as `agents run --device`, and the resulting task shows up in BOTH
  * `agents cloud ps` and `agents devices ps` — one store (the host-task sidecars
  * under ~/.agents/.cache/hosts/), two views. No new transport, no relay: SSH
- * is the only wire, exactly like the rest of the hosts design (docs/hosts.md).
+ * is the only wire, exactly like the rest of the host design (docs/fleet.md).
  *
  * Status semantics follow reconcile.ts's prime rule: completion is only ever
  * CONFIRMED from the remote `.exit` file — an unreachable host leaves a task

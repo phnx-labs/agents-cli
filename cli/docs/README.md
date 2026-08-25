@@ -1,104 +1,23 @@
-# agi-cli docs
+# Architecture and decisions
 
-Reference documentation for every feature `agents` ships.
+This directory explains how agents-cli works and which decisions must survive a
+refactor. It is not a command manual. Use `agents <group> --help` or the generated
+[command index](command-index.md) for syntax, and the product README for onboarding.
 
-## Agent onboarding (read in this order)
+Read in this order:
 
-| Doc | Why read it |
-|---|---|
-| **[`QUICKSTART.md`](QUICKSTART.md)** | New to agi-cli? Install, add harnesses, smoke-test a team, and set up a fleet — start here if you are a human getting set up. |
-| **[`AGENT-CHEATSHEET.md`](AGENT-CHEATSHEET.md)** | The dozen concepts agents repeatedly need, on one page. Start here if you are an agent touching the codebase. |
-| [`concepts.md`](concepts.md) | DotAgents repos, resource kinds, and the layered resolution model that everything else builds on. |
-| [`architecture.md`](architecture.md) | How the CLI and AGI EXT layer, and the two meanings of "session". |
-| [`command-reference.html`](command-reference.html) | Browsable + searchable API reference for every `agents` command, subcommand, argument, flag variant, default, example, and note. A sidebar tree navigates the whole surface group by group; search filters the tree and the cards together. Generated from the registered Commander tree (`npm run gen:index`). |
-| [`command-index.md`](command-index.md) | Compact index of the whole command tree. The canonical structured surface is [`command-index.json`](command-index.json). |
+1. [Architecture](architecture.md) — ownership and process boundaries.
+2. [Concepts](concepts.md) — the domain model and vocabulary.
+3. [Resources](resources.md) and [execution](execution.md) — inputs and the one launch path.
+4. [Sessions](sessions.md), [fleet](fleet.md), and [orchestration](orchestration.md).
+5. [Automation](automation.md), [interfaces](interfaces.md), and [secrets](secrets.md).
+6. [Observability](observability.md), [distribution](distribution.md), and
+   [behavioral specifications](specifications.md).
 
-Source-grounded: every command, flag, and YAML field is sourced from `src/`. If you spot a mismatch, the code wins — please file an issue.
+Authored documents contain boundaries, owners, data flow, state transitions,
+invariants, failure behavior, and accepted tradeoffs. They do not contain setup
+walkthroughs, exhaustive flags, recipes, file maps, key-function inventories,
+ticket-era roadmaps, or mutable provider/model tables.
 
----
-
-## Core
-
-How agi-cli is laid out on disk and how it decides what to load.
-
-| Doc | What it covers |
-|---|---|
-| [Concepts](concepts.md) | DotAgents repos, resource kinds, project › user › system resolution. |
-| [Version management](version-management.md) | Installing, pinning, switching, and isolating agent CLI versions. |
-| [Self-healing installs](self-healing.md) | Detect, surface, and repair a broken agent binary (gutted install / `ENOENT`) instead of dying cryptically. |
-| [Release](release.md) | Ordinary `release.sh` promotes the exact pretested tarball (tree/toolchain/lock/policy attestation). P99 ≤180s. |
-| [Resource sync](resource-sync.md) | How rules, commands, skills, hooks, etc. land in each version home. |
-| [**Specifications**](specifications.md) | **The normative contract** (MUST/SHOULD + Given/When/Then, cited to `file:line`) for the major subsystems — [Sessions](specifications.md#sessions), [Secrets](specifications.md#secrets), [Agent execution](specifications.md#agent-execution). Read the spec for the guarantee; the per-feature docs below for the how-to. |
-| [Sessions](sessions.md) | Unified transcript and tool-call search across all 12 `SESSION_AGENTS` harnesses; distinct-call queries, fleet fan-out, readable redacted Markdown rendering for Claude, Codex, Kimi, Grok, Cursor, and Droid; resume, export/import, live-session migration, and local/distributed benchmarks. |
-| [Observability](observability.md) | The three `--json` sources (sessions / cloud / teams) as a fleet view, plus `agents mailboxes` fleet comms. |
-| [SSH transport](ssh-transport.md) | The one multiplexed engine every `--device` command rides — default connection reuse, keepalive, one-round-trip follow. |
-| [Optimizations](optimizations.md) | Sync manifest, SSH transport, startup profiling, hot-path notes. |
-| [Landscape](landscape.md) | Where agents-cli sits next to similar tools. |
-| [Product acceptance](product-acceptance.md) | User stories + Product cards: stop product regressions when agents write the code. |
-| [vs Gas Town](vs-gastown.md) | How agi-cli differs from Gas Town (multi-agent factory): parallels, glossary, what users like/dislike. |
-
-## Credentials and model routing
-
-| Doc | What it covers |
-|---|---|
-| [Profiles](profiles.md) | Named (host CLI, endpoint, model, keychain auth) bundles — run Kimi / MiniMax / GLM / DeepSeek / Qwen through Claude Code with no proxy. |
-| [Model tiers](model-tiers.md) | `--model cheap\|default\|best\|ultra` on `run` / `teams` — per-harness cost tiers, the provider ranking mechanism, and the `agents models` tier map. Permission modes (`--mode`) are listed with `agents modes [agent[@version]]` (same discovery shape). |
-| [Secrets](secrets.md) | Keychain-backed env-var bundles. Inject into runs via `agents run --secrets <name>`. 1Password import/export, encrypted push/pull. |
-| [Secrets-agent process model](secrets-agent-process-model.md) | Design decision: fold the secrets broker into a hardened, always-on daemon — make the host reliable enough to carry the critical service rather than routing around it. |
-| [Secrets trust boundaries](secrets-trust-boundaries.md) | Design record: the plaintext data-flow — exactly which commands inject into a child process vs materialize a value into the agent's context/transcript. |
-| [Credential management](credential-management.md) | Design record: the fleet auth model — the interactive/rotating login is untouchable, only a deliberate account bundle (`agents accounts add`, policy `never`) is shareable across devices, and the per-harness Touch ID fix. |
-
-## Orchestration
-
-| Doc | What it covers |
-|---|---|
-| [Fleet profile sync](fleet.md) | `agents fleet apply` — reconcile every device to a declared `fleet:` profile: install agents and sync config. Native logins stay device-local; provider accounts sync explicitly. |
-| [Teams](teams.md) | Multi-agent DAG teams, boundary contracts, `--watch` supervisor, `--worktree` isolation, `--cloud` dispatch. |
-| Tickets | Use `linear` (linear-cli) for Linear, `gh issue` for GitHub. The former top-level `agents tickets` command is gone (RUSH-2932). |
-| [Cloud](cloud.md) | Unified dispatch across Rush Cloud / Codex Cloud / Factory. Multi-repo tasks, balanced routing, SSE streaming. |
-| [Hosts](hosts.md) | Offload `agents run` to your own machines over SSH (`--device`); track with `agents hosts ps` and view/follow with `agents logs`. |
-| [Share](share.md) | Publish an HTML artifact to a public link (`agents artifacts share <file>`). Signed-in → managed `share.agents-cli.sh` with zero Cloudflare setup; otherwise BYO R2. `--visibility public\|unlisted`. |
-| [Routines](routines.md) | Cron-scheduled and signed-webhook-triggered agent runs with sandboxed permissions and a long-running daemon. |
-| [Monitors](monitors.md) | Durable event-triggered watchers: watch a source, detect a change, fire an action. A routine whose trigger is a watched source instead of a clock. |
-| [Projects](projects.md) | Named multi-repo projects layered over the `--project` convention, plus the progress rollup — one card per project instead of a per-agent activity line. Beta. |
-| [Watchdog](watchdog.md) | Detect **idle** agents across the fleet and steer them to completion — one device-local daemon pass every three minutes analyzes stalled sessions and nudges them with the concrete next step (idle is its job; `waiting` belongs to the feed). |
-
-## Extensibility
-
-| Doc | What it covers |
-|---|---|
-| [Make it yours](mine.md) | White-label the CLI: `agents setup mine` mints your own personally-named binary (e.g. `jack`) with the commands you disable hidden and a curated per-brand resource profile. |
-| [Plugins](plugins.md) | Distributable bundles of skills + hooks + permissions. Exec-surface consent gate. |
-| [Workflows](workflows.md) | `WORKFLOW.md` multi-agent pipelines, auto-secrets, allowed-agents allow-list. |
-| [Subagents](subagents.md) | Focused agent definitions that parent agents can spawn via `Task()`. |
-| [Hooks](hooks.md) | Shell scripts on agent lifecycle events. Predicate matchers (`tool_name`, `cwd_includes`, `git_dirty`, …). |
-| [Entrypoints & Loops](entrypoints-and-loops.md) | Plugin packaging model, unified `run` target grammar, `loop:` block design. |
-
-## Automation
-
-| Doc | What it covers |
-|---|---|
-| [Browser](browser.md) | Drive Chrome / Brave / Edge / Electron via CDP. Profiles, screenshots, click/type/evaluate, remote endpoints. |
-| [PTY](pty.md) | Persistent pseudo-terminals for REPLs and TUIs — start, exec, screen-snapshot, signal. |
-| [Computer](computer.md) | macOS Accessibility automation — screenshot the active app, click by label. |
-| [Menu bar](menubar.md) | macOS status item — live sessions, agents awaiting input, routines, + new session. Auto-enabled, always exactly one instance; `agents menubar setup/enable/disable/status`. |
-| [Terminal engine](terminal-engine.md) | Open a command as a tab or split pane in iTerm / Ghostty / tmux, local or over `--device`. Powers `sessions resume`. |
-
----
-
-## Conventions used in these docs
-
-- **Architecture diagrams** are ASCII so they render anywhere and diff cleanly.
-- **YAML schema** blocks document the on-disk format. Field types come from the matching TypeScript interface in `src/`.
-- **Command reference** tables list every subcommand and flag. Run `agents <cmd> --help` if anything looks stale.
-- **Recipes** are numbered, copy-pasteable shell sequences. They run end-to-end, not toy snippets.
-- **Demo clips** under `assets/videos/` are 6–15s real terminal captures. The pipeline is documented in [`../../assets/videos/README.md`](../../assets/videos/README.md).
-
-## Contributing
-
-Docs live as plain Markdown so they can be edited by anyone and rendered anywhere (GitHub, VS Code preview, future MDX wrapper for agi-cli.sh). When you add or rename a command, update the matching doc in the same PR. The verification loop:
-
-```bash
-agents <cmd> --help                    # confirm every flag mentioned in the doc still prints
-rg -o '\[[^]]+\]\([^)]+\)' docs/*.md   # quick scan for broken relative links
-```
+`command-index.md`, `command-index.json`, and `command-reference.html` are generated
+from the Commander tree. Never edit them by hand.

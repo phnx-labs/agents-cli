@@ -197,7 +197,7 @@ A `loop:` block wraps the workflow in a bounded until-condition loop. `agents ru
 | `budget: <tokens>` | `budget` | Cumulative-token cap, enforced OUTSIDE the agent (the agent cannot vote past it). |
 | `interval: "<dur>"` | — | Delay between iterations. |
 
-A malformed `loop:` field (bad `until`, non-positive `max_iterations`/`budget`, non-string `interval`) is dropped defensively rather than passed to the driver — same discipline as the `tools:`/`mcpServers:` coercion. A `checkpoint.json` is written after every iteration; resume a killed run with `agents run <workflow> --resume-checkpoint <file>`. See [docs/entrypoints-and-loops.md](../../docs/entrypoints-and-loops.md) for the full loop model.
+A malformed `loop:` field (bad `until`, non-positive `max_iterations`/`budget`, non-string `interval`) is dropped defensively rather than passed to the driver — same discipline as the `tools:`/`mcpServers:` coercion. A `checkpoint.json` is written after every iteration; resume a killed run with `agents run <workflow> --resume-checkpoint <file>`. See [execution architecture](../../docs/execution.md).
 
 ### Scoping & security (enforced at run time, Claude)
 

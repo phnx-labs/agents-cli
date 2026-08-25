@@ -14,33 +14,71 @@ fail() {
   ERRORS=$((ERRORS + 1))
 }
 
-# --- 1. AGENT-CHEATSHEET exists and covers the basics ---
-CHEATSHEET="docs/AGENT-CHEATSHEET.md"
-if [[ ! -f "$CHEATSHEET" ]]; then
-  fail "$CHEATSHEET is missing"
+# --- 1. The compact architectural spine exists and is the documented entry point ---
+for doc in README architecture concepts resources execution sessions fleet orchestration automation interfaces secrets observability distribution specifications; do
+  if [[ -f "docs/$doc.md" ]]; then
+    log "✓ docs/$doc.md exists"
+  else
+    fail "docs/$doc.md is missing"
+  fi
+done
+
+if grep -qF "docs/README.md" AGENTS.md; then
+  log "✓ AGENTS.md links to the architecture index"
 else
-  log "✓ $CHEATSHEET exists"
-  for section in "The three DotAgents repos" "\`AGENTS.md\` is the canonical memory file" "Capability table gates" "Version homes" "Two unrelated things are called"; do
-    if grep -qF "$section" "$CHEATSHEET"; then
-      log "  ✓ covers: $section"
-    else
-      fail "$CHEATSHEET missing section: $section"
-    fi
-  done
+  fail "AGENTS.md should link to docs/README.md"
 fi
 
-# --- 2. Entry points reference the cheat sheet ---
-if grep -qF "AGENT-CHEATSHEET.md" AGENTS.md; then
-  log "✓ AGENTS.md links to AGENT-CHEATSHEET.md"
-else
-  fail "AGENTS.md should link to AGENT-CHEATSHEET.md"
-fi
+# The normative contract is intentionally detailed. Its stable sections and evidence
+# conventions must survive documentation cleanup.
+for heading in "Coverage inventory" "Sessions" "Secrets" "Agent execution" "Scheduling & execution singularity" "Routine execution & readiness" "Watchdog"; do
+  if grep -qF "## $heading" docs/specifications.md; then
+    log "✓ specifications.md retains $heading"
+  else
+    fail "specifications.md is missing required section: $heading"
+  fi
+done
+for marker in 'SES-' 'SEC-' 'EXEC-' 'Given/When/Then' '[Intended]' '[Drift]'; do
+  if grep -qF "$marker" docs/specifications.md; then
+    log "✓ specifications.md retains $marker evidence"
+  else
+    fail "specifications.md is missing required evidence marker: $marker"
+  fi
+done
 
-if grep -qF "AGENT-CHEATSHEET.md" docs/README.md; then
-  log "✓ docs/README.md links to AGENT-CHEATSHEET.md"
-else
-  fail "docs/README.md should link to AGENT-CHEATSHEET.md"
-fi
+for doc in architecture concepts resources execution sessions fleet orchestration automation secrets; do
+  if grep -qF '```mermaid' "docs/$doc.md"; then
+    log "✓ docs/$doc.md contains a component figure"
+  else
+    fail "docs/$doc.md should contain a Mermaid component or data-flow figure"
+  fi
+done
+
+# These entry points are outside docs/, but their specification anchors are part of
+# the contributor contract.
+for anchor in coverage-inventory sessions secrets agent-execution scheduling--execution-singularity routine-execution--readiness watchdog; do
+  case "$anchor" in
+    coverage-inventory) heading='Coverage inventory' ;;
+    sessions) heading='Sessions' ;;
+    secrets) heading='Secrets' ;;
+    agent-execution) heading='Agent execution' ;;
+    scheduling--execution-singularity) heading='Scheduling & execution singularity' ;;
+    routine-execution--readiness) heading='Routine execution & readiness' ;;
+    watchdog) heading='Watchdog' ;;
+  esac
+  if ! grep -qF "## $heading" docs/specifications.md; then
+    fail "broken specifications anchor referenced by repo entry points: #$anchor"
+  fi
+done
+
+# --- 2. Authored architecture does not grow command-manual sections ---
+FORBIDDEN_HEADING_RE='^#{2,3} (Setup|Command [Rr]eference|Recipes|File [Mm]ap|Source [Mm]ap|Key Functions|Roadmap)$'
+while IFS= read -r file; do
+  [[ "$file" == "docs/command-index.md" ]] && continue
+  if grep -Eq "$FORBIDDEN_HEADING_RE" "$file"; then
+    fail "$file contains a user/reference heading reserved outside architecture docs"
+  fi
+done < <(find docs -name '*.md')
 
 # --- 3. No broken relative markdown links in docs/*.md ---
 while IFS= read -r file; do

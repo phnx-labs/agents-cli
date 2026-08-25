@@ -385,7 +385,7 @@ export class RushCloudProvider implements CloudProvider {
             `placement does not securely inject them yet. Create and sync one with:`,
             `    agents accounts add <name> --provider anthropic --auth api-key    # or: --auth setup-token`,
             `    agents accounts sync <name> <device>`,
-            `then run locally or on that device with --account <name>. See docs/credential-management.md (SING-1b).`,
+            `then run locally or on that device with --account <name>. See docs/secrets.md (SING-1b).`,
           ].join('\n'),
         );
       }

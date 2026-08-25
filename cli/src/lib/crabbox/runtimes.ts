@@ -49,7 +49,7 @@ export const LEASE_RUNTIMES: RuntimeCred[] = [
  * copying any of them between devices — including to an ephemeral leased box —
  * because a shared refresh token rotates server-side on the next refresh and
  * invalidates every other copy (`docs/specifications.md` SING-1b,
- * `docs/credential-management.md` invariant 2). The set is derived from
+ * `docs/secrets.md`). The set is derived from
  * `LEASE_RUNTIMES` so a newly-added runtime can never be silently exempted. This
  * is the single canonical predicate; `--copy-creds` (`hosts/credentials.ts`) and
  * `--lease` (this module's `buildCredentialScript`) both refuse against it.

@@ -169,7 +169,7 @@ export interface DeleteShareOptions {
   /** Skip deleting the target's retained revisions (`<key>/rev-*`, RUSH-2683
    * revision retention) — default: delete them too. A republished-then-deleted
    * share would otherwise leave its prior world-readable versions live for up
-   * to the bucket's lifecycle max-age (see docs/share.md §Revisions). */
+   * to the bucket's lifecycle max-age (see docs/distribution.md). */
   keepRevisions?: boolean;
   /** Treat an already-missing target as a no-op success instead of an error
    * (mirrors SQL's `DROP ... IF EXISTS`). Default: missing target is an error. */

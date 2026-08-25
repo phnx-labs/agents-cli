@@ -3,7 +3,7 @@
  *
  * Bridges the devices registry (`agents devices`, ~/.agents/.history/devices/
  * registry.json) into the host pool behind the same `HostProvider` seam as
- * `local` — the "tailscale provider" fast-follow named in docs/hosts.md. With
+ * `local` — the Tailscale-backed device provider described in docs/fleet.md. With
  * it, a machine registered once via `agents devices sync` becomes a resolvable
  * `--device`/`--device` dispatch target, participates in capability routing, and
  * is enumerable by target pickers — not just resolvable by exact name.

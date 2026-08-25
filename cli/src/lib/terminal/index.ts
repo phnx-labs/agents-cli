@@ -4,7 +4,7 @@
  *
  * Public entry point. Callers typically use `openSurfaces` (a batch with a
  * layout policy) or `openSurface` (a single request), and `availableBackends` /
- * `detectCurrentBackend` to pick a target. See docs/terminal-engine.md.
+ * `detectCurrentBackend` to pick a target. See docs/interfaces.md.
  */
 export type {
   Backend,

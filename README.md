@@ -56,7 +56,8 @@ agents run claude "explain this repo"  # run any agent on your existing subscrip
 
 Everything here — and every other command in this README — is free and needs no account; the optional `agents auth login` exists only for [team spaces](#sign-in). `agents setup` is interactive and idempotent -- safe to re-run on any machine. Once core setup exists, it opens a status-aware menu for browser, computer, secrets, fleet, share, watchdog, and device preferences; each choice delegates to the same wizard available under `agents setup <capability>`. In CI or another non-TTY, bare setup prints the checklist without prompting. The `agi-cli.sh` one-liner installs this same canonical `@phnx-labs/agents-cli` package. Prefer bun? `bun install -g @phnx-labs/agents-cli` works too.
 
-Full path -- installing harnesses, logging in, smoke-testing `agents teams`, and setting up your own fleet: [`cli/docs/QUICKSTART.md`](cli/docs/QUICKSTART.md).
+The command surface teaches setup through `agents setup` and group-level `--help`.
+The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
 
 **Learn (concepts):** [Loop + graph engineering](https://agi-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agi-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agi-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agi-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agi-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
 
@@ -711,7 +712,9 @@ add `--json` for the machine-readable per-host rows.
 
 **Hosts** (`agents hosts`) are git-synced dispatch targets in `agents.yaml`; **devices** (`agents devices`) are your Tailscale machines in a local registry. Both ride SSH and feed one host pool: devices appear in `agents hosts list` and capability routing without a second enrollment. On `--device` runs every `agents run` option is either forwarded (`--effort --env --timeout --loop …`), rejected loud (`--secrets` never crosses SSH implicitly), or consumed locally — nothing silently drops. See [docs/concepts.md](cli/docs/concepts.md#devices--hosts).
 
-Every `--device` command rides one multiplexed SSH engine, tuned for driving a fleet from a small laptop: the first call to a machine opens a control socket and every later call reuses it (no repeat TCP+auth handshake), connections carry keepalive so a dropped link dies in ~45 s instead of zombying, and following a remote run polls in a single round-trip per cycle. Measured against a Tailscale-relayed host: repeated calls **~6–7× faster**, dispatch readiness **~2×**, and the follow loop **~21× faster with 50% fewer local ssh spawns**. Design: [docs/ssh-transport.md](cli/docs/ssh-transport.md) · reproduce: `node scripts/bench-ssh.mjs <host>`.
+Every `--device` command rides the shared SSH transport so host resolution,
+identity checks, environment forwarding, reconnect behavior, and multiplexing cannot
+drift between callers. See [fleet architecture](cli/docs/fleet.md).
 
 ---
 
@@ -907,7 +910,9 @@ agents setup mine toggle jack --enable teams
 agents setup mine remove jack --purge
 ```
 
-Under the hood, `init` drops a pure pass-through shim in `~/.agents/.cache/shims/<name>` (already on `PATH`) that sets `AGENTS_BRAND` and forwards every argument to the same binary — nothing is copied or forked. The brand's config lives in `~/.agents/agents.yaml` (`brands.<name>`), so it rides `agents repo push/pull` across your fleet. Disabling a command hides it **only** under that brand; plain `agents` / `ag` keep every command. Curated skills/plugins/MCP ride a per-brand [resource profile](cli/docs/profiles.md). Full reference: [Make it yours](cli/docs/mine.md).
+Under the hood, `init` creates a pass-through shim that selects a brand configuration;
+it does not fork the execution engine. Curated resources still resolve through the
+ordinary [resource architecture](cli/docs/resources.md).
 
 > Branded builds are free for personal and commercial use alike. New versions ship under FSL-1.1-Apache-2.0: every user and company may use, modify, and redistribute; only offering agents-cli itself as a competing commercial product or service is barred, and each version automatically becomes Apache-2.0 two years after release.
 
@@ -1297,7 +1302,7 @@ full URL, `<user>/<slug>`, or a bare slug (resolved against your own namespace);
 targets at once are fine. It also deletes the sibling `<slug>.png` OG cover by default
 (`--keep-cover` opts out) and verifies the page actually 404s before reporting success —
 the Worker's delete is idempotent, so `{"ok":true}` alone is never proof.
-See [docs/share.md](cli/docs/share.md).
+See the publication boundary in [observability](cli/docs/observability.md).
 
 ---
 
@@ -1624,7 +1629,10 @@ cd agi-cli/cli
 bun install && bun run build && bun test
 ```
 
-Commands in [`cli/src/commands/`](cli/src/commands/), libraries in [`cli/src/lib/`](cli/src/lib/), tests as `*.test.ts` under vitest. [CLAUDE.md](CLAUDE.md) has the full style guide. [docs/landscape.md](cli/docs/landscape.md) covers the competitive landscape.
+Commands live in [`cli/src/commands/`](cli/src/commands/), libraries in
+[`cli/src/lib/`](cli/src/lib/), and tests sit beside their sources. [AGENTS.md](AGENTS.md)
+is the canonical engineering guide; [`cli/docs/README.md`](cli/docs/README.md) is the
+architecture index.
 
 ## License
 

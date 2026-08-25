@@ -1,6 +1,6 @@
 // `agents artifacts share` — publish an HTML file to a shareable link. Signed-in
 // users hit the managed endpoint (share.agents-cli.sh) with the Phoenix bearer;
-// otherwise the existing BYO Cloudflare R2 + Worker path. See cli/docs/share.md.
+// otherwise the existing BYO Cloudflare R2 + Worker path. See cli/docs/observability.md.
 //
 // Registered under the `artifacts` group by commands/artifacts.ts; the
 // provisioning door lives beside it at `agents artifacts setup`
