@@ -64,6 +64,38 @@ vitest_suffix() {
   ((${#VITEST_ARGS[@]})) && printf ' -- %s' "${VITEST_ARGS[*]}"
 }
 
+# Resolve a device NAME to an address ssh/rsync can actually reach.
+#
+# Raw `ssh <name>` resolves against whatever the local resolver knows, which for
+# the yosemite worker pool is a 192.168.1.x LAN entry -- unroutable from off-LAN,
+# so it hangs until ConnectTimeout. The device registry carries the tailscale
+# dnsName, which works from anywhere on the tailnet. Read it rather than trusting
+# the bare hostname: the registry is the CLI's own source of truth for how to
+# reach a box (`agents devices list --json`).
+#
+# Also refuses the interactive host by name -- the machine someone is sitting at
+# is never a test target, and `--here` is the explicit way to say otherwise.
+device_addr() {
+  command -v agents >/dev/null 2>&1 \
+    || die "the 'agents' CLI is not on PATH, so device '$1' cannot be resolved"
+  agents devices list --json 2>/dev/null | python3 -c '
+import json, sys
+want = sys.argv[1]
+for r in json.load(sys.stdin):
+    if r.get("name") == want:
+        if r.get("interactive"):
+            sys.exit(2)
+        a = r.get("address") or {}
+        addr = a.get("dnsName") or a.get("ip")
+        if not addr:
+            sys.exit(3)
+        user = r.get("user")
+        print(f"{user}@{addr}" if user else addr)
+        sys.exit(0)
+sys.exit(1)
+' "$1"
+}
+
 case "$MODE" in
   here)
     # Deliberately loud. Running the full suite on the machine someone is using
@@ -78,25 +110,33 @@ case "$MODE" in
   device)
     command -v rsync >/dev/null || die "rsync not found (needed to ship the tree to $DEVICE)"
     command -v ssh   >/dev/null || die "ssh not found"
-    ssh -o BatchMode=yes -o ConnectTimeout=10 "$DEVICE" true 2>/dev/null \
-      || die "cannot reach '$DEVICE' over ssh -- check 'agents devices' for a reachable box"
+
+    ADDR="$(device_addr "$DEVICE")" || case $? in
+      2) die "'$DEVICE' is the INTERACTIVE host -- the suite is never scheduled there.
+  Pass --here if you genuinely mean to pin this machine." ;;
+      3) die "device '$DEVICE' has no reachable address in the registry (agents devices list)" ;;
+      *) die "device '$DEVICE' is not in the registry -- see 'agents devices list'" ;;
+    esac
+
+    ssh -o BatchMode=yes -o ConnectTimeout=15 "$ADDR" true 2>/dev/null \
+      || die "cannot reach '$DEVICE' ($ADDR) over ssh -- see 'agents devices list'"
 
     remote_dir="\$HOME/.agents/test-runs/agents-cli"
     bold "Offloading the suite to $DEVICE"
+    gray "  addr:   $ADDR"
     gray "  tree:   $TREE_ROOT"
-    gray "  remote: $DEVICE:~/.agents/test-runs/agents-cli"
 
-    ssh "$DEVICE" "mkdir -p $remote_dir" >/dev/null
+    ssh "$ADDR" "mkdir -p $remote_dir" >/dev/null
     # Ship the working tree, not a git clone: this must test the EXACT bytes on
     # disk (the producer's isolated worktree, or an operator's uncommitted work),
     # never whatever the remote could fetch from origin.
     rsync -az --delete \
       --exclude '.git' --exclude 'node_modules' --exclude 'dist' \
       --exclude '.agents/worktrees' --exclude '.release-attestations' \
-      "$TREE_ROOT/" "$DEVICE:.agents/test-runs/agents-cli/"
+      "$TREE_ROOT/" "$ADDR:.agents/test-runs/agents-cli/"
 
     green "Tree shipped. Running the suite on $DEVICE..."
-    ssh "$DEVICE" "cd ~/.agents/test-runs/agents-cli/apps/cli \
+    ssh "$ADDR" "cd ~/.agents/test-runs/agents-cli/apps/cli \
       && bun install --silent \
       && bun run build >/dev/null \
       && bun run test$(vitest_suffix)"

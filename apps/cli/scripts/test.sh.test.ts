@@ -55,6 +55,27 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(r.stderr).toMatch(/--device needs a machine name/);
   });
 
+  it('refuses the interactive host by name, and says how to override', () => {
+    // The registry marks exactly one device `interactive: true` — the laptop
+    // someone is sitting at. Naming it as a --device target is almost always a
+    // mistake, and silently honoring it is the bug this script exists to stop.
+    const interactive = JSON.parse(
+      spawnSync('agents', ['devices', 'list', '--json'], { encoding: 'utf-8' }).stdout || '[]',
+    ).find((d: { interactive?: boolean }) => d.interactive)?.name;
+    if (!interactive) return; // no interactive host registered on this box
+
+    const r = run(['--device', interactive]);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/is the INTERACTIVE host/);
+    expect(r.stderr).toMatch(/--here/);
+  });
+
+  it('rejects a device that is not in the registry', () => {
+    const r = run(['--device', 'not-a-real-box']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/not in the registry/);
+  });
+
   it('rejects a --repo-root that is not a repo checkout', () => {
     const empty = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-notrepo-'));
     const r = run(['--repo-root', empty, '--device', 'no-such-box-xyz.invalid']);
