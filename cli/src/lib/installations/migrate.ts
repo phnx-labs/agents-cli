@@ -2142,11 +2142,10 @@ function migrateHumans(): void {
 }
 
 /**
- * Cursor's OAuth token historically lived only in the global
- * ~/.config/cursor/auth.json, shared across every version home. Cursor runs now
- * pin XDG_CONFIG_HOME per version home (real per-account isolation — see
- * buildExecEnv), so the current login must be copied into the active account's
- * version home or it would read as logged out after upgrade. The active account
+ * An earlier agents-cli release put Cursor's file-backed OAuth token at
+ * ~/.config/cursor/auth.json. Current Cursor actually writes the file store to
+ * HOME-relative ~/.cursor/auth.json. Copy that legacy token into the active
+ * account's version home. The active account
  * is the home the ~/.cursor symlink currently targets. Idempotent: skips when
  * the home already has its own token, and a no-op for unmanaged Cursor installs
  * (where ~/.cursor is a real dir, not a symlink into a version home).
@@ -2166,7 +2165,7 @@ export function seedActiveCursorLoginPerVersion(): void {
     return; // not a symlink (unmanaged install) or unreadable — nothing to seed
   }
   if (!versionHome.includes(path.join('versions', 'cursor'))) return;
-  const dest = path.join(versionHome, '.config', 'cursor', 'auth.json');
+  const dest = path.join(versionHome, '.cursor', 'auth.json');
   try {
     if (fs.existsSync(dest)) return;
     fs.mkdirSync(path.dirname(dest), { recursive: true });

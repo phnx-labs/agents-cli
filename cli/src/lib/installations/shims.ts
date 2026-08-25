@@ -996,7 +996,10 @@ export function removeShim(agent: AgentId): boolean {
 // v17 — the claude alias env now reuses the adapter's shimConfigEnvBash (adds the
 //       Linux .oauth_token setup-token fallback the hand-copied subset had dropped),
 //       so existing alias shims must regenerate to pick it up.
-export const VERSIONED_ALIAS_SCHEMA_VERSION = 17;
+// v18 — Cursor aliases select the file credential store and swap HOME to the
+//       version home because current Cursor writes auth.json under ~/.cursor
+//       and ignores XDG_CONFIG_HOME for credential storage.
+export const VERSIONED_ALIAS_SCHEMA_VERSION = 18;
 
 /** Internal marker string used to embed the schema version in versioned alias scripts. */
 const VERSIONED_ALIAS_VERSION_MARKER = 'agents-versioned-alias-version:';
@@ -1102,10 +1105,12 @@ export XDG_DATA_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.
 `
               : agent === 'cursor'
                 ? `
-# Cursor: no config-dir env var. Its OAuth token (the login gate) lives at
-# $XDG_CONFIG_HOME/cursor/auth.json, so pin XDG_CONFIG_HOME at the version home
-# to isolate each account's login for direct aliases (parity with buildExecEnv).
-export XDG_CONFIG_HOME="$HOME/.agents/.history/versions/${agent}/${version}/home/.config"
+# Cursor defaults to one machine-global OS-keychain login on macOS. Force its
+# file store and swap HOME, so ~/.cursor/auth.json belongs to this
+# version and direct aliases cannot fall through to the shared keychain login.
+export AGENTS_REAL_HOME="\${AGENTS_REAL_HOME:-$HOME}"
+export HOME="$HOME/.agents/.history/versions/${agent}/${version}/home"
+export AGENT_CLI_CREDENTIAL_STORE="file"
 `
                 : '';
   const launchArgs = resolveHarnessAdapter(agent).shimLaunchArgs?.() ?? '';

@@ -1,22 +1,19 @@
-import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
 
 export const cursorAdapter: HarnessAdapter = {
   id: 'cursor',
 
-  // Cursor has no config-dir env var (only CURSOR_API_KEY / CURSOR_API_ENDPOINT).
-  // Its OAuth token — the login gate — lives at $XDG_CONFIG_HOME/cursor/auth.json
-  // (verified empirically: relocating XDG_CONFIG_HOME relocates the login;
-  // ~/.cursor/cli-config.json holds only account metadata, not the token). Pin
-  // XDG_CONFIG_HOME into the version home so each installed Cursor account
-  // authenticates from its own token, isolated per run — no global ~/.cursor
-  // symlink swap, so concurrent runs on different accounts never clobber one
-  // another. cli-config.json (HOME-relative) has no override and stays on the
-  // shared home; only the token is per-account, which is what gates the login.
+  // Cursor defaults to one machine-global OS-keychain login on macOS, which
+  // ignores XDG_CONFIG_HOME. Select the file credential store; Cursor writes
+  // that store to HOME-relative ~/.cursor/auth.json, and buildExecEnv already
+  // swaps HOME to the selected version home. Existing keychain credentials
+  // remain untouched.
   applyExecConfigEnv(result, ctx) {
     if (ctx.versionHome) {
-      result.XDG_CONFIG_HOME = path.join(ctx.versionHome, '.config');
+      result.AGENTS_REAL_HOME ||= result.HOME;
+      result.HOME = ctx.versionHome;
+      result.AGENT_CLI_CREDENTIAL_STORE = 'file';
     }
     stripForeignConfigDir(result);
   },

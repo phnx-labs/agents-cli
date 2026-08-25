@@ -1653,12 +1653,9 @@ const CREDENTIAL_FILE_SEGMENTS: Partial<Record<AgentId, string[][]>> = {
   // Muse Code stores OAuth / API credentials at ~/.config/muse/auth.json
   // (or META_API_KEY in the environment, which is not a file).
   muse: [['.config', 'muse', 'auth.json']],
-  // Cursor's OAuth token — the login gate — is at $XDG_CONFIG_HOME/cursor/auth.json
-  // (~/.config/cursor/auth.json by default). cli-config.json holds only account
-  // metadata; the token file is what a real launch authenticates from, so a
-  // version home with no token of its own is genuinely logged out once runs pin
-  // XDG_CONFIG_HOME per home (see buildExecEnv).
-  cursor: [['.config', 'cursor', 'auth.json']],
+  // With AGENT_CLI_CREDENTIAL_STORE=file, Cursor stores both OAuth tokens at
+  // ~/.cursor/auth.json. cli-config.json holds account metadata only.
+  cursor: [['.cursor', 'auth.json']],
 };
 
 /** Whether an agent's credential file exists under a given home. */
@@ -2333,7 +2330,7 @@ export async function getAccountInfo(
       case 'cursor': {
         // Cursor CLI keeps account metadata in ~/.cursor/cli-config.json
         // (authInfo: { email, userId, authId }) and its OAuth tokens SEPARATELY
-        // in ~/.config/cursor/auth.json ({ accessToken, refreshToken }). Presence
+        // in ~/.cursor/auth.json ({ accessToken, refreshToken }). Presence
         // of an access token is the signed-in signal; email/ids come from
         // cli-config. authId is the OAuth subject (e.g. "google-oauth2|<n>") — the
         // same value the usage endpoint keys on (see getCursorUsageInfo).
@@ -2345,7 +2342,7 @@ export async function getAccountInfo(
           const email = typeof authInfo?.email === 'string' ? authInfo.email : null;
           const accountId = normalizeIdentityPart(authInfo?.authId ?? authInfo?.userId);
           if (!email && !accountId) return { ...empty, lastActive };
-          const authPath = resolveAccountCredentialPath(base, '.config', 'cursor', 'auth.json');
+          const authPath = resolveAccountCredentialPath(base, '.cursor', 'auth.json');
           let hasToken = false;
           if (authPath) {
             try {
@@ -2353,8 +2350,12 @@ export async function getAccountInfo(
               hasToken = typeof tok?.accessToken === 'string' && tok.accessToken.length > 0;
             } catch { /* unreadable token file */ }
           }
+          // cli-config survives logout and may describe a different keychain
+          // account. Without this version's file token, its identity is stale
+          // metadata rather than a usable managed login.
+          if (!hasToken) return { ...empty, lastActive };
           const accountKey = buildIdentityKey(agentId, [['user', accountId]]);
-          return { ...empty, email, accountId, accountKey, signedIn: hasToken || !!email, lastActive };
+          return { ...empty, email, accountId, accountKey, signedIn: true, lastActive };
         } catch {}
         return { ...empty, lastActive };
       }

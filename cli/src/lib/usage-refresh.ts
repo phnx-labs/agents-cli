@@ -406,7 +406,10 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
 
     try {
       const usage = await account.fetch();
-      if (usage.snapshot?.source === 'live') {
+      if (usage.snapshot) {
+        // `source` is provenance, not freshness. A forced collection that just
+        // reread a local harness event returns `last_seen`; that is still a
+        // successful collection and belongs in the shared read cache.
         deps.writeUsageCache(account.usageKey, usage.snapshot);
         updates[account.usageKey] = nextHeadroomEntry(entry, usage.snapshot, now);
         result.refreshed += 1;

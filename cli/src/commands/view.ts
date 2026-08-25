@@ -96,6 +96,7 @@ export function viewUsageSummaryOptions(
   signedIn: boolean,
   usageInfo: UsageInfo | undefined,
   maxWindows: number | undefined,
+  version?: string,
 ): FormatUsageSummaryOpts {
   const headless = isUsageHeadlessScopeError(usageInfo?.error);
   const benignState = usageInfo ? getUsageBenignState(usageInfo) : null;
@@ -110,6 +111,9 @@ export function viewUsageSummaryOptions(
     errorKind: classifyUsageErrorKind(usageInfo?.error),
     errorDetail: usageInfo?.error ?? null,
     benignState,
+    noRecentUsageLabel: agentId === 'grok'
+      ? `run grok${version ? `@${version}` : ''} once to refresh usage`
+      : null,
   };
 }
 
@@ -657,7 +661,7 @@ async function showInstalledVersions(
           info?.plan || null,
           usageInfo?.snapshot || null,
           maxPlanWidth,
-          viewUsageSummaryOptions(agentId, !!info?.signedIn, usageInfo, usageWindowCap),
+          viewUsageSummaryOptions(agentId, !!info?.signedIn, usageInfo, usageWindowCap, v),
         );
         maxUsageWidth = Math.max(maxUsageWidth, stringWidth(usageStr));
         const statusStr = formatUsageStatusBadge(info?.usageStatus);
@@ -727,7 +731,7 @@ async function showInstalledVersions(
           vInfo?.plan || null,
           usageInfo?.snapshot || null,
           maxPlanWidth,
-          viewUsageSummaryOptions(agentId, signedIn, usageInfo, usageWindowCap),
+          viewUsageSummaryOptions(agentId, signedIn, usageInfo, usageWindowCap, version),
         );
         const hasUsage = usageStr.length > 0;
         // Only show lastActive for versions with an actual logged-in account.

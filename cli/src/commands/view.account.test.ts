@@ -88,9 +88,23 @@ describe('viewUsageSummaryOptions — truthful unavailable states', () => {
       const opts = viewUsageSummaryOptions(agentId, true, usageInfo, 2);
 
       expect(opts.unavailable).toBe(false);
-      expect(formatUsageSummary(null, usageInfo.snapshot, 3, opts)).toBe('no usage recorded yet');
+      expect(formatUsageSummary(null, usageInfo.snapshot, 3, opts)).toBe(
+        agentId === 'grok' ? 'run grok once to refresh usage' : 'no usage recorded yet',
+      );
     },
   );
+
+  it('names the exact Grok version that must emit a fresh billing event', () => {
+    const usageInfo: UsageInfo = {
+      snapshot: null,
+      error: null,
+      [USAGE_BENIGN_STATE]: 'no-recent-usage',
+    };
+    const opts = viewUsageSummaryOptions('grok', true, usageInfo, 2, '0.2.118');
+    expect(formatUsageSummary(null, null, 3, opts)).toBe(
+      'run grok@0.2.118 once to refresh usage',
+    );
+  });
 
   it('renders the specific usage error for a signed-in usage-capable harness', () => {
     const error = 'Claude credential expired; re-authentication required for usage.';

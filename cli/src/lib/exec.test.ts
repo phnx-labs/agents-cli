@@ -265,32 +265,37 @@ describe('buildExecEnv — Claude Code auto-updater suppression for pinned manag
   });
 });
 
-describe('buildExecEnv — Cursor per-account login isolation (XDG_CONFIG_HOME)', () => {
-  it('pins XDG_CONFIG_HOME at the version home so each Cursor account uses its own token', () => {
-    // Cursor has no config-dir env var; its OAuth token (the login gate) is at
-    // $XDG_CONFIG_HOME/cursor/auth.json. Pinning XDG_CONFIG_HOME per version home
-    // is what makes `agents run cursor@<v>` authenticate as that account.
+describe('buildExecEnv — Cursor per-account file-store isolation', () => {
+  it('pins Cursor to the version-local file credential store', () => {
     const env = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04' }));
-    expect(env.XDG_CONFIG_HOME).toBe(path.join(getVersionHomePath('cursor', '2026.08.04'), '.config'));
+    expect(env.HOME).toBe(getVersionHomePath('cursor', '2026.08.04'));
+    expect(env.AGENT_CLI_CREDENTIAL_STORE).toBe('file');
   });
 
   it('a different pinned Cursor version resolves to a different config home (real multi-account)', () => {
     const a = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04' }));
     const b = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.07.23' }));
-    expect(a.XDG_CONFIG_HOME).not.toBe(b.XDG_CONFIG_HOME);
-    expect(a.XDG_CONFIG_HOME).toContain(path.join('cursor', '2026.08.04'));
-    expect(b.XDG_CONFIG_HOME).toContain(path.join('cursor', '2026.07.23'));
+    expect(getVersionHomePath('cursor', '2026.08.04')).not.toBe(getVersionHomePath('cursor', '2026.07.23'));
   });
 
   it('overlays a labeled account config home without changing the binary version', () => {
     const env = buildExecEnv({ agent: 'cursor', version: '2026.8.1', configVersion: '2026.7.23', mode: 'edit', effort: 'auto' });
-    expect(env.XDG_CONFIG_HOME).toContain('/cursor/2026.7.23/home/.config');
-    expect(env.XDG_CONFIG_HOME).not.toContain('/cursor/2026.8.1/');
+    expect(env.HOME).toContain('/cursor/2026.7.23/home');
+    expect(env.HOME).not.toContain('/cursor/2026.8.1/');
   });
 
-  it('a caller-provided XDG_CONFIG_HOME override still wins', () => {
+  it('does not overwrite a caller-provided XDG_CONFIG_HOME', () => {
     const env = buildExecEnv(execOpts({ agent: 'cursor', version: '2026.08.04', env: { XDG_CONFIG_HOME: '/custom/xdg' } }));
     expect(env.XDG_CONFIG_HOME).toBe('/custom/xdg');
+  });
+
+  it('lets an explicit caller override the credential store', () => {
+    const env = buildExecEnv(execOpts({
+      agent: 'cursor',
+      version: '2026.08.04',
+      env: { AGENT_CLI_CREDENTIAL_STORE: 'keychain' },
+    }));
+    expect(env.AGENT_CLI_CREDENTIAL_STORE).toBe('keychain');
   });
 });
 

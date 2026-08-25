@@ -144,6 +144,28 @@ describe('runUsageRefresh — refreshes only due, uncapped, un-backed-off local 
     expect(entry?.nextRefreshAt).toBeGreaterThan(NOW);
   });
 
+  it('publishes a freshly collected local-event snapshot', async () => {
+    const key = 'grok:user=local-event';
+    const snapshot = {
+      ...sessionSnap(21, NOW),
+      source: 'last_seen' as const,
+      plan: 'SuperGrok Heavy',
+    };
+    const result = await runUsageRefresh({
+      now: NOW,
+      listAccounts: async () => [
+        { usageKey: key, agentId: 'grok', fetch: async () => ({ snapshot, error: null }) },
+      ],
+      writeUsageCache: writeClaudeUsageCache,
+      backoffUntil: () => null,
+    });
+
+    expect(result.refreshed).toBe(1);
+    expect(result.failed).toBe(0);
+    expect(readClaudeUsageCache(key)).toEqual(expect.objectContaining({ plan: 'SuperGrok Heavy' }));
+    expect(readClaudeUsageCache(key)?.windows[0]?.usedPercent).toBe(21);
+  });
+
   it('seeds a never-cached account before cached accounts and rotates each tick', async () => {
     const cached = 'claude:org=cached';
     const coldA = 'claude:org=cold-a';

@@ -83,19 +83,19 @@ describe('generateCursorConfig', () => {
   // uses a symlink, so the same-host behavior cannot be exercised in CI there.
   it.skipIf(process.platform === 'win32')('links the same-host Cursor auth file into the overlay', () => {
     const overlayHome = createOverlayHome();
-    const realConfigHome = createOverlayHome();
-    const cursorDir = path.join(realConfigHome, 'cursor');
+    const realHome = createOverlayHome();
+    const cursorDir = path.join(realHome, '.cursor');
     fs.mkdirSync(cursorDir, { recursive: true });
     const realAuth = path.join(cursorDir, 'auth.json');
     fs.writeFileSync(realAuth, '{}', { mode: 0o600 });
-    const previous = process.env.XDG_CONFIG_HOME;
-    process.env.XDG_CONFIG_HOME = realConfigHome;
+    const previous = process.env.AGENTS_REAL_HOME;
+    process.env.AGENTS_REAL_HOME = realHome;
     try {
       generateCursorConfig(overlayHome);
-      expect(fs.realpathSync(path.join(overlayHome, '.config', 'cursor', 'auth.json'))).toBe(fs.realpathSync(realAuth));
+      expect(fs.realpathSync(path.join(overlayHome, '.cursor', 'auth.json'))).toBe(fs.realpathSync(realAuth));
     } finally {
-      if (previous === undefined) delete process.env.XDG_CONFIG_HOME;
-      else process.env.XDG_CONFIG_HOME = previous;
+      if (previous === undefined) delete process.env.AGENTS_REAL_HOME;
+      else process.env.AGENTS_REAL_HOME = previous;
     }
   });
 });

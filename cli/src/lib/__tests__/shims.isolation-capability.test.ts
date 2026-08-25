@@ -21,10 +21,9 @@ const CONFIG_ENV_BY_AGENT: Record<(typeof CONFIG_ENV_ISOLATED_AGENTS)[number], s
   // Muse has no dedicated config env; isolation is XDG (proved: empty
   // XDG_CONFIG_HOME works; adopt symlink at ~/.config/muse fails SymlinkOrReparse).
   muse: 'XDG_CONFIG_HOME',
-  // Cursor has no dedicated config env either; its OAuth token (the login gate)
-  // is at $XDG_CONFIG_HOME/cursor/auth.json, so pinning XDG_CONFIG_HOME per
-  // version home isolates each account's login (proved empirically).
-  cursor: 'XDG_CONFIG_HOME',
+  // Cursor's file-store selector is its isolation control. The generated alias
+  // swaps HOME, so the selected version reads its own ~/.cursor/auth.json.
+  cursor: 'AGENT_CLI_CREDENTIAL_STORE',
 };
 const ALL_CONFIG_ENVS = Object.values(CONFIG_ENV_BY_AGENT);
 
@@ -43,6 +42,11 @@ describe('isolated-install capability', () => {
       const script = generateVersionedAliasScript(agent, V);
       expect(script).toContain(`export ${CONFIG_ENV_BY_AGENT[agent]}=`);
     }
+  });
+
+  it('Cursor aliases force the file credential store instead of the global macOS keychain', () => {
+    const script = generateVersionedAliasScript('cursor', V);
+    expect(script).toContain('export AGENT_CLI_CREDENTIAL_STORE="file"');
   });
 
   // The load-bearing coupling test: if someone adds (or removes) a config-dir

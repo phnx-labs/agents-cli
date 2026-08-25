@@ -822,7 +822,7 @@ describe('seedActiveCursorLoginPerVersion', () => {
     process.env.AGENTS_REAL_HOME = home;
 
     seedActiveCursorLoginPerVersion();
-    const seeded = path.join(versionHome, '.config', 'cursor', 'auth.json');
+    const seeded = path.join(versionHome, '.cursor', 'auth.json');
     expect(fs.existsSync(seeded)).toBe(true);
     expect(JSON.parse(fs.readFileSync(seeded, 'utf-8')).accessToken).toBe('global-tok');
 
@@ -848,7 +848,7 @@ describe('seedActiveCursorLoginPerVersion', () => {
     fs.symlinkSync(path.join(versionHome, '.cursor'), path.join(home, '.cursor'));
     process.env.AGENTS_REAL_HOME = home;
     seedActiveCursorLoginPerVersion();
-    expect(fs.existsSync(path.join(versionHome, '.config', 'cursor', 'auth.json'))).toBe(false);
+    expect(fs.existsSync(path.join(versionHome, '.cursor', 'auth.json'))).toBe(false);
   });
 });
 

@@ -2240,21 +2240,22 @@ schema (`--json` passes through each agent's native stream format).
 
   Status: `[Drift]` — a named deviation from EXEC-13's per-version isolation
   contract, scoped (with the two ways to close it) in EXEC-GAP-1.
-- **EXEC-16a (MUST).** Muse and Cursor have no dedicated config-dir env var, so
-  `buildExecEnv` isolates them via XDG instead: it pins `XDG_CONFIG_HOME`
-  (and `XDG_DATA_HOME` for muse) at the version home (`lib/exec.ts`, the muse
-  and cursor arms). For Cursor this is what makes multiple accounts real: the
-  OAuth token that gates login lives at `$XDG_CONFIG_HOME/cursor/auth.json`
-  (verified empirically — relocating `XDG_CONFIG_HOME` relocates the login;
-  `~/.cursor/cli-config.json` is only account metadata), so each version home is
+- **EXEC-16a (MUST).** Muse has no dedicated config-dir env var, so
+  `buildExecEnv` isolates it via `XDG_CONFIG_HOME` and `XDG_DATA_HOME`. Cursor
+  defaults to a machine-global OS-keychain store on macOS, so its exec boundary
+  MUST set `AGENT_CLI_CREDENTIAL_STORE=file`. Current Cursor builds store that
+  file credential at HOME-relative `~/.cursor/auth.json`; agents-cli swaps HOME
+  to the selected version home at the same boundary, isolating it without XDG relocation. `~/.cursor/cli-config.json` is
+  account metadata only, so each version home is
   a distinct Cursor account, authenticated from its own token, isolated per run
   (no global `~/.cursor` symlink swap — concurrent runs on different accounts do
   not clobber one another). `CREDENTIAL_FILE_SEGMENTS.cursor`
   (`lib/agents.ts`) verifies signed-in per home against that token, and
-  `seedActiveCursorLoginPerVersion` (`lib/installations/migrate.ts`) migrates the legacy
-  global token into the active account's home on upgrade. The versioned-alias
-  shim mirrors the same `XDG_CONFIG_HOME` export (`CONFIG_ENV_ISOLATED_AGENTS`
-  includes cursor). Cursor's HOME-relative `~/.cursor` (cli-config.json,
+  `seedActiveCursorLoginPerVersion` (`lib/installations/migrate.ts`) migrates only the
+  legacy misplaced `~/.config/cursor/auth.json` token into the active account's home on upgrade; it MUST NOT
+  export or delete an OS-keychain login. The versioned-alias shim mirrors both
+  file-store export (`CONFIG_ENV_ISOLATED_AGENTS` includes cursor). Cursor's
+  HOME-relative `~/.cursor` (cli-config.json,
   chats) has no env override and stays on the shared home; the routine overlay
   path (`buildRoutineSpawnEnv`) is unchanged and still seeds from the active
   login by design.
@@ -2905,15 +2906,6 @@ nothing but its own view cache.
   cross-device state is limited to safe account labels, auth verdicts, and usage
   snapshots. Named API-key/setup-token/bearer accounts retain device-local secret
   material and synchronized metadata.
-- **SING-1c (MUST).** When `usage.primary-host` is configured, only that host's
-  daemon usage tick MUST call usage providers. Every other host MUST import the
-  primary's derived usage windows and routing headroom without exporting or
-  copying credentials, access tokens, refresh tokens, or authorization headers.
-  The publisher/subscriber gate is `runUsageRefreshTick`
-  (`lib/daemon-ticks.ts`); the safe envelope is `UsageFleetExport`
-  (`lib/usage-fleet.ts`). Given a peer whose configured primary differs from its
-  machine id, when its usage tick runs, then no local provider refresh runs and
-  the primary envelope is merged into its usage/headroom caches.
 - **SING-2 (MUST NOT).** A UI surface (agi-ext, the menubar app, the iOS app)
   MUST NOT own a timer, watcher, or loop that detects a condition and performs a
   fleet-affecting action. Detection and decision MUST live in the CLI, which holds

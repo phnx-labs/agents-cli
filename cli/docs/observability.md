@@ -31,6 +31,18 @@ response. Ingestion merges whichever windows arrived into the previous per-accou
 snapshot, so one omitted window does not erase the other. No interactive OAuth or
 Keychain credential is copied or read to populate usage.
 
+Grok quota is also event-fed: Grok writes its current weekly billing meter to the
+version home's `unified.jsonl`, and the daemon or an explicit `view --refresh` publishes
+that derived snapshot. Agents-cli never invokes an upstream Grok usage API. When the
+latest billing period has expired, the row names the exact `grok@version` to run once so
+Grok can emit a current event.
+
+Managed Cursor versions select Cursor's file credential store under their isolated
+`XDG_CONFIG_HOME`. Cursor's machine-global macOS Keychain login is not imported or
+deleted; a managed version without `auth.json` is signed out until Cursor's native login
+flow authenticates that version. Usage uses the same version-local access token as the
+run, so account identity and quota cannot silently refer to different logins.
+
 Identity and plan come from version-home state. The human-facing account row exposes one
 last-active timestamp; probe age remains machine-readable health metadata rather than a
 second activity timestamp.

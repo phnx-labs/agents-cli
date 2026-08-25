@@ -288,6 +288,8 @@ export interface UsageSnapshot {
   // otherwise comes from the local auth file via AccountInfo.plan; this field
   // lets a network usage fetch surface a plan the local credential can't.
   plan?: string | null;
+  /** Action that makes an event-fed source emit a current reading. */
+  refreshHint?: string | null;
   /**
    * A refusal observed from a real harness run, independent of API windows.
    * `session_limit` recovers on a clock (`resetsAt`). `out_of_credits` is a
@@ -422,6 +424,7 @@ interface CachedUsageSnapshot {
   capturedAt: string | null;
   windows: CachedUsageWindow[];
   plan?: string | null;
+  refreshHint?: string | null;
   unavailable?: {
     reason: 'session_limit' | 'out_of_credits';
     resetsAt?: string;
@@ -763,6 +766,8 @@ export interface FormatUsageSummaryOpts {
   errorDetail?: string | null;
   /** Benign state from {@link getUsageBenignState}; never sourced from `UsageInfo.error`. */
   benignState?: UsageBenignState | null;
+  /** Provider-specific replacement for the generic no-local-event marker. */
+  noRecentUsageLabel?: string | null;
 }
 
 /** Human label for a classified usage error, for the no-bars branch of {@link formatUsageSummary}. */
@@ -843,6 +848,8 @@ export function formatUsageSummary(
     }
     if (windowParts.length > 0) {
       parts.push(windowParts.join('  '));
+    } else if (snapshot.refreshHint) {
+      parts.push(chalk.dim(snapshot.refreshHint));
     }
     // The bars came from the cache and the live read that should have confirmed
     // them failed, so they are the last thing we saw — not the current state.
@@ -859,7 +866,7 @@ export function formatUsageSummary(
     // mistaken for a missing setup-token or seeding failure (RUSH-2392).
     parts.push(chalk.dim(USAGE_HEADLESS_SCOPE_MARKER));
   } else if (opts?.benignState === 'no-recent-usage') {
-    parts.push(chalk.dim(USAGE_NO_RECENT_USAGE_MARKER));
+    parts.push(chalk.dim(opts.noRecentUsageLabel || USAGE_NO_RECENT_USAGE_MARKER));
   } else if (opts?.unavailable) {
     // Signed-in account we could NOT fetch usage for (no live token in a reachable
     // home / org mismatch / fetch error). Say so explicitly instead of drawing a
@@ -2181,6 +2188,7 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
   return {
     capturedAt: snapshot.capturedAt?.toISOString() || null,
     plan: snapshot.plan ?? null,
+    refreshHint: snapshot.refreshHint ?? null,
     unavailable: snapshot.unavailable
       ? {
           reason: snapshot.unavailable.reason,
@@ -2241,7 +2249,7 @@ function deserializeClaudeUsageSnapshot(
   // and `deriveUsageStatusFromSnapshot` still returns null for zero windows, so
   // it can never read as a 0% bar or an "available" badge (the RUSH-2858
   // property that made expired windows drop in the first place).
-  if (windows.length === 0 && !unavailable && !snapshot.plan) {
+  if (windows.length === 0 && !unavailable && !snapshot.plan && !snapshot.refreshHint) {
     return null;
   }
 
@@ -2251,6 +2259,7 @@ function deserializeClaudeUsageSnapshot(
     capturedAt,
     windows,
     plan: snapshot.plan ?? null,
+    refreshHint: snapshot.refreshHint ?? null,
     unavailable,
   };
 }
@@ -2676,10 +2685,10 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const windows = match.windows.filter((window) =>
       isCachedUsageWindowFresh(window, match.capturedAt, now)
     );
-    // NOTE: an empty `windows` here (all windows expired) still returns a real
-    // snapshot, not the no-recent-usage marker — the plan/tier is still valid
-    // and callers (e.g. `formatUsageSummary`) render "no bars" correctly from
-    // an empty array. The marker above is only for "nothing was ever recorded".
+    const version = options?.cliVersion;
+    const refreshHint = windows.length === 0
+      ? `run grok${version ? `@${version}` : ''} once to refresh usage`
+      : null;
 
     return {
       snapshot: {
@@ -2688,6 +2697,7 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         capturedAt: match.capturedAt,
         windows,
         plan: match.subscriptionTier,
+        refreshHint,
       },
       error: null,
     };
@@ -3135,7 +3145,7 @@ export function normalizeCursorUsageSummary(data: CursorUsageSummaryResponse): U
 function readCursorCredentials(base: string): { cfgSub: string | null; accessToken: string } | null {
   try {
     const cfgPath = path.join(base, '.cursor', 'cli-config.json');
-    const authPath = path.join(base, '.config', 'cursor', 'auth.json');
+    const authPath = path.join(base, '.cursor', 'auth.json');
     if (!fs.existsSync(cfgPath) || !fs.existsSync(authPath)) return null;
     const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
     const cfgSub = typeof cfg?.authInfo?.authId === 'string' ? cfg.authInfo.authId : null;

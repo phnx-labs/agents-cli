@@ -16,7 +16,7 @@ import { safeJoin } from './paths.js';
 import { createLink } from './platform/index.js';
 
 function resolveRealHome(): string {
-  const home = os.homedir();
+  const home = process.env.AGENTS_REAL_HOME || os.homedir();
   try {
     return fs.realpathSync(home);
   } catch {
@@ -224,11 +224,11 @@ export function assertSandboxForwardsHostGhAuth(spawnEnv: Record<string, string>
 
 /** Link this host's Cursor login and CLI config into the disposable overlay. */
 export function generateCursorConfig(overlayHome: string): void {
-  const realConfigHome = process.env.XDG_CONFIG_HOME || path.join(resolveRealHome(), '.config');
-  const realAuth = path.join(realConfigHome, 'cursor', 'auth.json');
+  const realCursorDir = path.join(resolveRealHome(), '.cursor');
+  const realAuth = path.join(realCursorDir, 'auth.json');
   if (!fs.existsSync(realAuth)) return;
 
-  const overlayCursorDir = path.join(overlayHome, '.config', 'cursor');
+  const overlayCursorDir = path.join(overlayHome, '.cursor');
   fs.mkdirSync(overlayCursorDir, { recursive: true });
   const overlayAuth = path.join(overlayCursorDir, 'auth.json');
   if (process.platform === 'win32') {
@@ -241,10 +241,9 @@ export function generateCursorConfig(overlayHome: string): void {
     fs.symlinkSync(realAuth, overlayAuth);
   }
 
-  // Setting XDG_CONFIG_HOME makes Cursor look for cli-config.json beside auth.json.
-  // This file carries account identity (authId, displayName, email, userId) as
-  // well as preferences, so it must remain linked rather than copied.
-  const realCliConfig = path.join(resolveRealHome(), '.cursor', 'cli-config.json');
+  // cli-config.json carries account identity alongside the file-store token, so
+  // it must remain linked rather than copied.
+  const realCliConfig = path.join(realCursorDir, 'cli-config.json');
   if (fs.existsSync(realCliConfig)) {
     const overlayCliConfig = path.join(overlayCursorDir, 'cli-config.json');
     try {

@@ -1572,9 +1572,13 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
       tier: 'SuperGrok Heavy',
     });
 
-    const info = await getUsageInfo('grok', { home });
+    const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
     expect(info.snapshot?.windows).toEqual([]);
     expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
+    expect(info.snapshot?.refreshHint).toBe('run grok@0.2.118 once to refresh usage');
+    expect(formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot)).toContain(
+      'run grok@0.2.118 once to refresh usage',
+    );
   });
 
   it('reports a benign no-recent-usage marker when no log file exists yet (RUSH-3040)', async () => {

@@ -1176,7 +1176,7 @@ describe('getAccountInfo — cursor (cli-config authInfo + separate auth.json)',
     fs.writeFileSync(path.join(home, '.cursor', 'cli-config.json'), JSON.stringify({
       authInfo: { email: 'muqsitnawaz@gmail.com', userId: 27457401, authId: 'google-oauth2|106748008124572295566' },
     }));
-    fs.writeFileSync(path.join(home, '.config', 'cursor', 'auth.json'), JSON.stringify({
+    fs.writeFileSync(path.join(home, '.cursor', 'auth.json'), JSON.stringify({
       accessToken: 'eyJ.abc.def', refreshToken: 'eyJ.ghi.jkl',
     }));
 
@@ -1190,6 +1190,17 @@ describe('getAccountInfo — cursor (cli-config authInfo + separate auth.json)',
   it('treats cursor as signed out when cli-config is absent', async () => {
     const info = await getAccountInfo('cursor', makeTempDir());
     expect(info.signedIn).toBe(false);
+  });
+
+  it('does not surface stale cli-config identity when the version token is absent', async () => {
+    const home = makeTempDir();
+    fs.mkdirSync(path.join(home, '.cursor'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.cursor', 'cli-config.json'), JSON.stringify({
+      authInfo: { email: 'stale@example.com', authId: 'google-oauth2|stale' },
+    }));
+
+    const info = await getAccountInfo('cursor', home);
+    expect(info).toEqual(expect.objectContaining({ signedIn: false, email: null, accountId: null, accountKey: null }));
   });
 });
 
