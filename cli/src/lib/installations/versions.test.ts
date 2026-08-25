@@ -1657,3 +1657,26 @@ describe('removeVersion — default reassignment when removing the pinned defaul
     expect(defaultAfter).toBe(null);
   });
 });
+
+describe('system-scoped selection includes system-layer plugins (RUSH-3207)', () => {
+  it('a `system` repo scope selects a system-layer plugin and excludes a user-layer one', () => {
+    const home = makeTempHome();
+    // One plugin in the system layer (~/.agents/.system/plugins), like `swarm`, and one
+    // in the user layer (~/.agents/plugins). A valid name+version manifest is all
+    // discoverPlugins needs to see them.
+    for (const [rel, name] of [['.system/plugins', 'swarm'], ['plugins', 'mine']] as const) {
+      const dir = path.join(home, '.agents', ...rel.split('/'), name, '.claude-plugin');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'plugin.json'), JSON.stringify({ name, version: '0.0.0' }));
+    }
+    const result = runVersionSync(
+      home,
+      `buildRepoScopedSelection('system', ${JSON.stringify(home)})`,
+    ) as { plugins?: string[] };
+    // Before the fix, resourceSourceMap hardcoded every plugin to the 'user' layer, so
+    // `system:*` expanded to zero plugins and `agents sync <agent> system` silently
+    // skipped system-layer plugins — the swarm-plugin bug.
+    expect(result.plugins ?? []).toContain('swarm');
+    expect(result.plugins ?? []).not.toContain('mine');
+  });
+});

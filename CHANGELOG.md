@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- **`agents sync <agent> system` now reconciles system-layer plugins (RUSH-3207).**
+  `resourceSourceMap` hardcoded every plugin's source layer to `'user'`, so a
+  `system:*` selection expanded to zero plugins and a `system`-scoped sync silently
+  skipped system-layer plugins (like the `swarm` plugin). A merged plugin change never
+  reached installed agents via `agents sync <agent> system`, and `agents plugins list`
+  still reported "Synced: everywhere" because the synced-status check is existence-only.
+  Plugins are now attributed to the layer they actually resolve from (system / user /
+  project / extra), the same first-wins resolution the plugins staleness checker uses,
+  so a `system` sync includes system-layer plugins and the existing content fingerprint
+  reinstalls them when their content changed even if the manifest version did not.
+
 - **Balanced rotation no longer pins every launch to one account when the usage
   refresher is throttled (RUSH-2858).** `preferVerified` narrowed the candidate
   pool to accounts with a <5-minute usage snapshot before the weighted-random

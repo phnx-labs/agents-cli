@@ -218,6 +218,22 @@ function sourceMapFromWorkflows(cwd: string): Map<string, string> {
   );
 }
 
+// A plugin is a directory whose marker is `.claude-plugin/plugin.json`. Attribute
+// each to the layer it actually resolves from (system / user / project / extra) —
+// the same first-wins resolution the plugins staleness checker uses. Hardcoding
+// 'user' here made a `system:*` selection expand to zero plugins, so
+// `agents sync <agent> system` silently skipped system-layer plugins like `swarm`
+// (RUSH-3207).
+function sourceMapFromPlugins(cwd: string): Map<string, string> {
+  return sourceMapFromLayeredDirectory(
+    cwd,
+    ['plugins'],
+    (dir) => fs.readdirSync(dir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && fs.existsSync(path.join(dir, d.name, '.claude-plugin', 'plugin.json')))
+      .map(d => d.name),
+  );
+}
+
 function sourceMapFromPluginSkills(plugins: DiscoveredPlugin[], activePluginNames: Set<string>, cwd: string): Map<string, string> {
   const sourceRank = new Map<string, number>([
     ['user', 0],
@@ -2449,8 +2465,13 @@ function resourceSourceMap(kind: SelectableKind, cwd: string, available: Availab
     }
     case 'mcp':
       return new Map(getScopedMcpResources(cwd).map(r => [r.name, r.scope]));
-    case 'plugins':
-      return new Map(available.plugins.map(n => [n, 'user']));
+    case 'plugins': {
+      const sources = sourceMapFromPlugins(cwd);
+      return new Map(available.plugins.flatMap((n) => {
+        const source = sources.get(n);
+        return source ? [[n, source] as [string, string]] : [];
+      }));
+    }
     case 'workflows': {
       const sources = sourceMapFromWorkflows(cwd);
       return new Map(available.workflows.flatMap((n) => {
