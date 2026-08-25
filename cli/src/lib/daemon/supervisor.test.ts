@@ -37,12 +37,14 @@ class HealthyService implements PeriodicService {
   readonly id: DaemonServiceId;
   readonly intervalMs = 1_000;
   readonly deadlineMs = 500;
+  readonly startupDelayMs?: number;
   ticks = 0;
   started = false;
   stopped = false;
 
-  constructor(id: DaemonServiceId) {
+  constructor(id: DaemonServiceId, startupDelayMs?: number) {
     this.id = id;
+    this.startupDelayMs = startupDelayMs;
   }
 
   async start(): Promise<void> {
@@ -213,6 +215,46 @@ describe('ServiceSupervisor', () => {
     const supervisor = new ServiceSupervisor();
     supervisor.register(new HealthyService('scheduler'));
     expect(() => supervisor.register(new HealthyService('scheduler'))).toThrow(/already registered/);
+  });
+
+  it('a service with startupDelayMs defers its FIRST tick, then ticks on the normal interval — a service with no delay still ticks immediately (RUSH-3193 #17)', async () => {
+    const supervisor = new ServiceSupervisor();
+    const delayed = new HealthyService('self-heal', 30_000);
+    const immediate = new HealthyService('scheduler');
+    supervisor.register(delayed);
+    supervisor.register(immediate);
+
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0);
+    // Undelayed sibling still fires immediately at boot — startupDelayMs is opt-in per service.
+    expect(immediate.ticks).toBe(1);
+    // Delayed service must not have ticked yet.
+    expect(delayed.ticks).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(delayed.ticks).toBe(0);
+
+    await vi.advanceTimersByTimeAsync(1); // t=30_000: the staggered first tick fires
+    expect(delayed.ticks).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(1_000); // its normal 1s interval cadence resumes from here
+    expect(delayed.ticks).toBe(2);
+
+    await supervisor.stopAll();
+  });
+
+  it('stopAll() before the startup delay elapses cancels the pending first tick', async () => {
+    const supervisor = new ServiceSupervisor();
+    const delayed = new HealthyService('self-heal', 30_000);
+    supervisor.register(delayed);
+
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(delayed.ticks).toBe(0);
+
+    await supervisor.stopAll();
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(delayed.ticks).toBe(0);
   });
 
   it('restartOne() forces an immediate restart outside the backoff schedule', async () => {

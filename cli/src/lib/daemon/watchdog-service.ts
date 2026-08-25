@@ -15,7 +15,7 @@ import { emit } from '../feed/events.js';
 
 /** Matches the historical inline interval (daemon.ts WATCHDOG_TICK_MS). */
 const WATCHDOG_TICK_MS = 3 * 60_000;
-/** Hard cap per tick — a fleet-wide nudge pass can fan out over ssh; short enough that a hang never freezes the service for long. */
+/** Hard cap per tick — `runWatchdogPass` is host-local (adds no SSH fan-out of its own, `watchdog/runner.ts:580`); short enough that a hang never freezes the service for long. */
 const WATCHDOG_DEADLINE_MS = 120_000;
 
 export class WatchdogService extends BasePeriodicService {

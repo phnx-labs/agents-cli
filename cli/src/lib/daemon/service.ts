@@ -49,6 +49,15 @@ export interface PeriodicService extends DaemonService {
   readonly intervalMs: number;
   /** Hard cap per tick. An over-budget tick is abandoned (never awaited past this) so its in-flight guard always releases. */
   readonly deadlineMs: number;
+  /**
+   * Delay before the FIRST tick after `start()`, in ms. Every later tick
+   * still fires on the normal `intervalMs` cadence — this only staggers the
+   * boot-time tick. Default (omitted) is 0, the supervisor's baseline
+   * immediate-first-tick behavior. Set this when a service's first-boot work
+   * needs something else (shims, PATH) to settle before it runs, rather than
+   * firing at daemon startup.
+   */
+  readonly startupDelayMs?: number;
   tick(ctx: DaemonContext): Promise<void>;
 }
 

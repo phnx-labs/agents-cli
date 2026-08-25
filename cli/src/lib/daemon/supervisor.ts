@@ -48,6 +48,7 @@ interface RegisteredService {
   everStarted: boolean;
   timer?: ReturnType<typeof setInterval>;
   restartTimer?: ReturnType<typeof setTimeout>;
+  startupTimer?: ReturnType<typeof setTimeout>;
 }
 
 const DEFAULT_PARK_AFTER_FAILURES = 3;
@@ -171,8 +172,20 @@ export class ServiceSupervisor {
     entry.state = 'running';
     recordSubsystemState(id, 'running');
     if (isPeriodicService(entry.service)) {
-      this.scheduleTimer(id);
-      void this.runTick(id);
+      const startupDelayMs = entry.service.startupDelayMs ?? 0;
+      if (startupDelayMs > 0) {
+        // Defer BOTH the first tick and the recurring interval's start until the
+        // delay elapses — starting the interval at t=0 would fire its own ticks
+        // on top of the staggered one instead of after it.
+        entry.startupTimer = setTimeout(() => {
+          entry.startupTimer = undefined;
+          this.scheduleTimer(id);
+          void this.runTick(id);
+        }, startupDelayMs);
+      } else {
+        this.scheduleTimer(id);
+        void this.runTick(id);
+      }
     } else {
       // Lifecycle-only service: record health once on successful start (no ticks).
       entry.lastRunMs = Date.now();
@@ -190,6 +203,10 @@ export class ServiceSupervisor {
     if (entry.restartTimer) {
       clearTimeout(entry.restartTimer);
       entry.restartTimer = undefined;
+    }
+    if (entry.startupTimer) {
+      clearTimeout(entry.startupTimer);
+      entry.startupTimer = undefined;
     }
     entry.state = 'stopped';
     recordSubsystemState(id, 'stopped');
