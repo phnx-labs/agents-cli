@@ -10,7 +10,7 @@ name: Windows-host e2e (tailnet)
 # persistent org-scoped runners labeled [crabbox-ci, tailnet], joined to the
 # tailnet with fleet SSH reach to win-mini. The vitest setup file hermetically
 # redirects AGENTS_DEVICES_DIR (RUSH-2042); the e2e seeder
-# (apps/cli/tests/seed-e2e-win-host.ts) copies win-mini from the real fleet
+# (cli/tests/seed-e2e-win-host.ts) copies win-mini from the real fleet
 # registry or synthesizes it from `ssh -G win-mini` into that private dir so
 # resolveRemoteDevice can dial. The pool is an org runner group restricted to
 # agents-cli + agi-cli.
@@ -29,12 +29,12 @@ on:
   push:
     branches: ['main']
     paths:
-      - 'apps/cli/src/lib/computer/ssh-tunnel.ts'
-      - 'apps/cli/src/lib/computer/ssh-tunnel.e2e.test.ts'
-      - 'apps/cli/src/lib/ssh-exec.ts'
-      - 'apps/cli/src/lib/computer/computer-rpc.ts'
-      - 'apps/cli/src/lib/browser/drivers/ssh.ts'
-      - 'apps/cli/src/lib/browser/drivers/ssh.e2e.test.ts'
+      - 'cli/src/lib/computer/ssh-tunnel.ts'
+      - 'cli/src/lib/computer/ssh-tunnel.e2e.test.ts'
+      - 'cli/src/lib/ssh-exec.ts'
+      - 'cli/src/lib/computer/computer-rpc.ts'
+      - 'cli/src/lib/browser/drivers/ssh.ts'
+      - 'cli/src/lib/browser/drivers/ssh.e2e.test.ts'
       - 'native/computer-win/**'
       - '.github/workflows/tests-windows-host-e2e.yml'
   schedule:
@@ -56,7 +56,7 @@ jobs:
     timeout-minutes: 30
     defaults:
       run:
-        working-directory: apps/cli
+        working-directory: cli
     env:
       AGENTS_TEST_WIN_HOST: win-mini
     steps:
@@ -80,7 +80,7 @@ jobs:
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.bun/install/cache
-          key: bun-cache-${{ runner.os }}-${{ hashFiles('apps/cli/bun.lock') }}
+          key: bun-cache-${{ runner.os }}-${{ hashFiles('cli/bun.lock') }}
           restore-keys: bun-cache-${{ runner.os }}-
 
       - run: bun install --frozen-lockfile

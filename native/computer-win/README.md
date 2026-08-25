@@ -6,7 +6,7 @@ Windows native helper that exposes UI Automation (UIA) + screen capture +
 This is the Windows backend for `agents computer` — the C#/.NET counterpart of the
 Swift [`native/computer-mac`](../computer-mac) helper. Both speak the **identical**
 wire protocol and return the identical result shapes, so one TypeScript client
-(`apps/cli/src/lib/computer/computer-rpc.ts`) drives either platform.
+(`cli/src/lib/computer/computer-rpc.ts`) drives either platform.
 
 ## Transport: loopback TCP + SSH tunnel
 
@@ -37,14 +37,14 @@ an `-AtLogOn` trigger running `-LogonType Interactive -RunLevel Highest`. Task
 Scheduler owns the process — it survives SSH disconnects and runs inside the live
 interactive desktop session, which UI Automation and `Graphics.CopyFromScreen`
 both require (they do not work from the non-interactive Session 0). `setupRemoteHelper`
-in `apps/cli/src/lib/computer/ssh-tunnel.ts` handles the whole flow: stop any running
+in `cli/src/lib/computer/ssh-tunnel.ts` handles the whole flow: stop any running
 instance, `scp` the exe to `%LOCALAPPDATA%\agents\`, verify the byte count, then
 `Register-ScheduledTask` + `Start-ScheduledTask`.
 
 ## Build
 
 ```bash
-bash ../../apps/cli/scripts/build-win.sh
+bash ../../cli/scripts/build-win.sh
 ```
 
 Under the hood (needs the **.NET 10 SDK**):

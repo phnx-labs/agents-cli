@@ -62,7 +62,7 @@ const MANIFEST = loadOwnershipManifest();
 
 describe('classifyCiScope', () => {
   test('runs only CLI checks for CLI source', () => {
-    expect(classifyCiScope(['apps/cli/src/lib/state.ts'], REPO)).toEqual({
+    expect(classifyCiScope(['cli/src/lib/state.ts'], REPO)).toEqual({
       cli: true,
       cliDocs: false,
       sessionTracker: false,
@@ -72,8 +72,8 @@ describe('classifyCiScope', () => {
 
   test('a .changelog edit brings the CLI job with it, for gen-changelog.test.ts', () => {
     // `cli` is true because the changelog-sources group selects
-    // apps/cli/scripts/gen-changelog.test.ts, and scopeFromPlan's
-    // testUnder('apps/cli/') reports "a test under apps/cli/ was selected" --
+    // cli/scripts/gen-changelog.test.ts, and scopeFromPlan's
+    // testUnder('cli/') reports "a test under cli/ was selected" --
     // the same generic derivation every other group gets. It costs nothing
     // extra: tests.yml has ONE job, driven by plan.tests/plan.checks, and
     // nothing in .github/ reads steps.plan.outputs.cli. Before this group
@@ -81,8 +81,8 @@ describe('classifyCiScope', () => {
     // no source reproduces reached main three times in one day, each caught only
     // by the full suite at release time.
     expect(classifyCiScope([
-      'apps/cli/docs/architecture.md',
-      'apps/cli/.changelog/next/ci.md',
+      'cli/docs/architecture.md',
+      'cli/.changelog/next/ci.md',
     ], REPO)).toEqual({
       cli: true,
       cliDocs: true,
@@ -94,7 +94,7 @@ describe('classifyCiScope', () => {
   test('a docs-only diff with no .changelog file still skips the CLI suite', () => {
     // The counterpart: widening must be scoped to the changelog sources, not to
     // every docs edit.
-    expect(classifyCiScope(['apps/cli/docs/architecture.md'], REPO)).toEqual({
+    expect(classifyCiScope(['cli/docs/architecture.md'], REPO)).toEqual({
       cli: false,
       cliDocs: true,
       sessionTracker: false,
@@ -104,8 +104,8 @@ describe('classifyCiScope', () => {
 
   test('runs each affected component for a mixed change', () => {
     expect(classifyCiScope([
-      'apps/cli/src/index.ts',
-      'apps/cli/AGENTS.md',
+      'cli/src/index.ts',
+      'cli/AGENTS.md',
       'packages/session-tracker/src/index.ts',
     ], REPO)).toEqual({
       cli: true,
@@ -116,14 +116,14 @@ describe('classifyCiScope', () => {
   });
 
   test.each([
-    'apps/cli/src/lib/hooks/install.ts',
-    'apps/cli/src/lib/hooks/loader.ts',
-    'apps/cli/src/lib/platform/paths.ts',
-    'apps/cli/src/lib/shims-windows.ts',
-    'apps/cli/src/lib/binary-shadow.ts',
-    'apps/cli/src/lib/binary-shadow.test.ts',
-    'apps/cli/hooks/session-start.sh',
-    'apps/cli/src/lib/hosts/dispatch.ts',
+    'cli/src/lib/hooks/install.ts',
+    'cli/src/lib/hooks/loader.ts',
+    'cli/src/lib/platform/paths.ts',
+    'cli/src/lib/shims-windows.ts',
+    'cli/src/lib/binary-shadow.ts',
+    'cli/src/lib/binary-shadow.test.ts',
+    'cli/hooks/session-start.sh',
+    'cli/src/lib/hosts/dispatch.ts',
   ])('does not require Windows for %s', (file) => {
     const scope = classifyCiScope([file], REPO);
     expect(scope.cli || scope.windows === false).toBe(true);
@@ -135,7 +135,7 @@ describe('classifyCiScope', () => {
       '.github/workflows/tests.yml',
       'scripts/ci-scope.ts',
       'scripts/ci-scope.test.ts',
-      'apps/cli/ci/test-ownership.yaml',
+      'cli/ci/test-ownership.yaml',
     ]) {
       expect(classifyCiScope([file], REPO)).toMatchObject({
         cli: true,
@@ -156,29 +156,29 @@ describe('classifyCiScope', () => {
 
 describe('ownership globs and companions', () => {
   test('matchGlob handles prefix and exact paths', () => {
-    expect(matchGlob('apps/cli/src/commands/**', 'apps/cli/src/commands/run.ts')).toBe(true);
-    expect(matchGlob('apps/cli/src/commands/**', 'apps/cli/src/commands')).toBe(true);
+    expect(matchGlob('cli/src/commands/**', 'cli/src/commands/run.ts')).toBe(true);
+    expect(matchGlob('cli/src/commands/**', 'cli/src/commands')).toBe(true);
     expect(matchGlob('LICENSE', 'LICENSE')).toBe(true);
-    expect(matchGlob('LICENSE', 'apps/cli/LICENSE')).toBe(false);
+    expect(matchGlob('LICENSE', 'cli/LICENSE')).toBe(false);
   });
 
   test('direct static imports do not fan out through the whole CLI graph', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/artifact-actions.ts'],
+      files: ['cli/src/lib/artifact-actions.ts'],
       repoRoot: REPO,
       related: true,
     });
-    expect(plan.tests.map((t) => t.file)).toEqual(['apps/cli/tests/artifact-actions.test.ts']);
+    expect(plan.tests.map((t) => t.file)).toEqual(['cli/tests/artifact-actions.test.ts']);
     expect(plan.tests[0].reason).toBe('static-import');
     expect(plan.tests.some((t) => t.file.endsWith('daemon.test.ts'))).toBe(false);
     expect(plan.tests.some((t) => t.file.endsWith('sessions.test.ts'))).toBe(false);
   });
 
   test('a leaf source file selects its companion test', () => {
-    const leaf = 'apps/cli/src/lib/state.ts';
-    expect(existingCompanions(leaf, REPO)).toContain('apps/cli/src/lib/state.test.ts');
+    const leaf = 'cli/src/lib/state.ts';
+    expect(existingCompanions(leaf, REPO)).toContain('cli/src/lib/state.test.ts');
     const plan = selectImpact({ files: [leaf], repoRoot: REPO, related: false });
-    expect(plan.tests.some((t) => t.file === 'apps/cli/src/lib/state.test.ts' && t.reason === 'companion')).toBe(true);
+    expect(plan.tests.some((t) => t.file === 'cli/src/lib/state.test.ts' && t.reason === 'companion')).toBe(true);
     expect(plan.unmapped).toEqual([]);
     expect(plan.suite).toBe('selected');
     expect(plan.tests.some((t) => t.file.includes('sessions.test.ts'))).toBe(false);
@@ -187,22 +187,22 @@ describe('ownership globs and companions', () => {
 
   test('a changed test file always selects itself', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/state.test.ts'],
+      files: ['cli/src/lib/state.test.ts'],
       repoRoot: REPO,
       related: false,
     });
-    expect(plan.tests.some((t) => t.file === 'apps/cli/src/lib/state.test.ts' && t.reason === 'changed-test')).toBe(true);
+    expect(plan.tests.some((t) => t.file === 'cli/src/lib/state.test.ts' && t.reason === 'changed-test')).toBe(true);
   });
 
   test('companion candidates include the colocated test', () => {
-    expect(companionCandidates('apps/cli/src/lib/foo.ts')).toContain('apps/cli/src/lib/foo.test.ts');
+    expect(companionCandidates('cli/src/lib/foo.ts')).toContain('cli/src/lib/foo.test.ts');
   });
 });
 
 describe('selectImpact policy', () => {
   test('a command definition selects command-index and docs, not daemon', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/commands/run.ts'],
+      files: ['cli/src/commands/run.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -212,11 +212,11 @@ describe('selectImpact policy', () => {
 
   test('a subprocess entrypoint selects non-interactive tests via ownership', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/bootstrap.ts'],
+      files: ['cli/src/bootstrap.ts'],
       repoRoot: REPO,
       related: false,
     });
-    expect(plan.tests.some((t) => t.file === 'apps/cli/tests/non-interactive.test.ts')).toBe(true);
+    expect(plan.tests.some((t) => t.file === 'cli/tests/non-interactive.test.ts')).toBe(true);
     expect(plan.checks).toEqual(expect.arrayContaining(['typecheck', 'binary-smoke']));
   });
 
@@ -225,7 +225,7 @@ describe('selectImpact policy', () => {
     // non-interactive.test.ts (54s) plus command-surface tests. PR #2826 run
     // 32431700986 measured 93s and failed the 85s gate.
     const plan = selectImpact({
-      files: ['apps/cli/src/bootstrap.ts'],
+      files: ['cli/src/bootstrap.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -241,7 +241,7 @@ describe('selectImpact policy', () => {
     // group is selected; impact was 198s and failed the previous 180s ceiling.
     // Under the flat 85s default no new `agents sessions <verb>` could merge.
     const plan = selectImpact({
-      files: ['apps/cli/src/commands/sessions.ts'],
+      files: ['cli/src/commands/sessions.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -252,7 +252,7 @@ describe('selectImpact policy', () => {
 
   test('a hooks change carries the group budget, not the 85s default', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/hooks/install.ts'],
+      files: ['cli/src/lib/hooks/install.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -265,7 +265,7 @@ describe('selectImpact policy', () => {
     // versions.ts is the install/sync hub. PR #2840 run 32436359101 measured
     // 97s of a passing vitest run and failed the 85s gate.
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/installations/versions.ts'],
+      files: ['cli/src/lib/installations/versions.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -279,7 +279,7 @@ describe('selectImpact policy', () => {
     // selects routines.test.ts (78 tests / 174s) inside a 213s impact run
     // (PR #2803, run 32395701692). Under 85s the move cannot merge.
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/daemon/runner.ts'],
+      files: ['cli/src/lib/daemon/runner.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -290,7 +290,7 @@ describe('selectImpact policy', () => {
 
   test('a group with no budget keeps the default, so the ceiling only rises where declared', () => {
     // Uses a genuinely unbudgeted group. This previously pointed at
-    // apps/cli/src/commands/** (command-surface), which acquired a budget in
+    // cli/src/commands/** (command-surface), which acquired a budget in
     // RUSH-3062 — the invariant held, only the example went stale. Pick a group
     // whose entry in test-ownership.yaml has no budget_sec today.
     const plan = selectImpact({
@@ -308,7 +308,7 @@ describe('selectImpact policy', () => {
       // sessions (240) spanning a genuinely unbudgeted group — commands/** is no
       // longer one, so pairing two command files would compare 240 against 120
       // rather than against the default, and stop testing the stated case.
-      files: ['apps/cli/src/commands/sessions.ts', 'packages/session-tracker/src/index.ts'],
+      files: ['cli/src/commands/sessions.ts', 'packages/session-tracker/src/index.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -320,18 +320,18 @@ describe('selectImpact policy', () => {
     // code: a group asking for less than IMPACT_BUDGET_SEC gets the default.
     const dir = mkdtempSync(join(tmpdir(), 'budget-floor-'));
     try {
-      mkdirSync(join(dir, 'apps/cli/ci'), { recursive: true });
-      writeFileSync(join(dir, 'apps/cli/ci/test-ownership.yaml'), [
+      mkdirSync(join(dir, 'cli/ci'), { recursive: true });
+      writeFileSync(join(dir, 'cli/ci/test-ownership.yaml'), [
         'policy_version: impact-v1',
         'areas: []',
         'testless: []',
         'groups:',
         '  - id: tiny',
-        '    when: [apps/cli/src/tiny.ts]',
+        '    when: [cli/src/tiny.ts]',
         '    budget_sec: 10',
       ].join('\n'));
-      const manifest = loadOwnershipManifest(join(dir, 'apps/cli/ci/test-ownership.yaml'));
-      const plan = selectImpact({ files: ['apps/cli/src/tiny.ts'], repoRoot: dir, related: false, manifest });
+      const manifest = loadOwnershipManifest(join(dir, 'cli/ci/test-ownership.yaml'));
+      const plan = selectImpact({ files: ['cli/src/tiny.ts'], repoRoot: dir, related: false, manifest });
       expect(plan.budget_sec).toBe(IMPACT_BUDGET_SEC);
     } finally {
       rmSync(dir, { recursive: true, force: true });
@@ -341,8 +341,8 @@ describe('selectImpact policy', () => {
   test('a malformed budget_sec fails loud instead of silently defaulting', () => {
     const dir = mkdtempSync(join(tmpdir(), 'budget-bad-'));
     try {
-      mkdirSync(join(dir, 'apps/cli/ci'), { recursive: true });
-      const path = join(dir, 'apps/cli/ci/test-ownership.yaml');
+      mkdirSync(join(dir, 'cli/ci'), { recursive: true });
+      const path = join(dir, 'cli/ci/test-ownership.yaml');
       for (const bad of ['"soon"', '-30', '0']) {
         writeFileSync(path, [
           'policy_version: impact-v1',
@@ -350,7 +350,7 @@ describe('selectImpact policy', () => {
           'testless: []',
           'groups:',
           '  - id: bad',
-          '    when: [apps/cli/src/bad.ts]',
+          '    when: [cli/src/bad.ts]',
           `    budget_sec: ${bad}`,
         ].join('\n'));
         expect(() => loadOwnershipManifest(path)).toThrow(/invalid budget_sec on group 'bad'/);
@@ -362,7 +362,7 @@ describe('selectImpact policy', () => {
 
   test('lockfile selects the explicit cli-full group', () => {
     const plan = selectImpact({
-      files: ['apps/cli/bun.lock'],
+      files: ['cli/bun.lock'],
       repoRoot: REPO,
       related: false,
     });
@@ -420,17 +420,17 @@ describe('selectImpact policy', () => {
   test('static imports select the importing test', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agents-ci-related-'));
     try {
-      writeFixture(dir, 'apps/cli/src/lib/leaf.ts', 'export const x = 1;\n');
+      writeFixture(dir, 'cli/src/lib/leaf.ts', 'export const x = 1;\n');
       writeFixture(
         dir,
-        'apps/cli/src/lib/leaf-user.test.ts',
+        'cli/src/lib/leaf-user.test.ts',
         "import { x } from './leaf';\nexport const y = x;\n",
       );
-      const related = relatedTestFiles(['apps/cli/src/lib/leaf.ts'], dir, [
-        'apps/cli/src/lib/leaf.ts',
-        'apps/cli/src/lib/leaf-user.test.ts',
+      const related = relatedTestFiles(['cli/src/lib/leaf.ts'], dir, [
+        'cli/src/lib/leaf.ts',
+        'cli/src/lib/leaf-user.test.ts',
       ]);
-      expect(related).toContain('apps/cli/src/lib/leaf-user.test.ts');
+      expect(related).toContain('cli/src/lib/leaf-user.test.ts');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -445,10 +445,10 @@ describe('selectImpact policy', () => {
   test('a runtime readFileSync of a literal script path selects the reading test (RUSH-3097)', () => {
     const dir = mkdtempSync(join(tmpdir(), 'agents-ci-runtime-read-'));
     try {
-      writeFixture(dir, 'apps/cli/scripts/thing.sh', '#!/bin/sh\necho hi\n');
+      writeFixture(dir, 'cli/scripts/thing.sh', '#!/bin/sh\necho hi\n');
       writeFixture(
         dir,
-        'apps/cli/scripts/thing-var.test.ts',
+        'cli/scripts/thing-var.test.ts',
         "import * as fs from 'node:fs';\n"
           + "import * as path from 'node:path';\n"
           + "const SCRIPT = path.resolve(__dirname, 'thing.sh');\n"
@@ -457,7 +457,7 @@ describe('selectImpact policy', () => {
       );
       writeFixture(
         dir,
-        'apps/cli/scripts/thing-inline.test.ts',
+        'cli/scripts/thing-inline.test.ts',
         "import * as fs from 'node:fs';\n"
           + "import * as path from 'node:path';\n"
           + 'const body = fs.readFileSync(path.resolve(__dirname, \'thing.sh\'), \'utf-8\');\n'
@@ -465,33 +465,33 @@ describe('selectImpact policy', () => {
       );
       writeFixture(
         dir,
-        'apps/cli/scripts/thing-unrelated.test.ts',
+        'cli/scripts/thing-unrelated.test.ts',
         "export const y = 1;\n",
       );
       const files = [
-        'apps/cli/scripts/thing.sh',
-        'apps/cli/scripts/thing-var.test.ts',
-        'apps/cli/scripts/thing-inline.test.ts',
-        'apps/cli/scripts/thing-unrelated.test.ts',
+        'cli/scripts/thing.sh',
+        'cli/scripts/thing-var.test.ts',
+        'cli/scripts/thing-inline.test.ts',
+        'cli/scripts/thing-unrelated.test.ts',
       ];
-      const related = runtimeReadTestsBySource(['apps/cli/scripts/thing.sh'], dir, files);
-      expect(related.get('apps/cli/scripts/thing.sh')).toEqual(expect.arrayContaining([
-        'apps/cli/scripts/thing-var.test.ts',
-        'apps/cli/scripts/thing-inline.test.ts',
+      const related = runtimeReadTestsBySource(['cli/scripts/thing.sh'], dir, files);
+      expect(related.get('cli/scripts/thing.sh')).toEqual(expect.arrayContaining([
+        'cli/scripts/thing-var.test.ts',
+        'cli/scripts/thing-inline.test.ts',
       ]));
-      expect(related.get('apps/cli/scripts/thing.sh')).not.toContain('apps/cli/scripts/thing-unrelated.test.ts');
+      expect(related.get('cli/scripts/thing.sh')).not.toContain('cli/scripts/thing-unrelated.test.ts');
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   test('release.sh selects every scripts/*.test.ts that reads it via readFileSync at runtime, not just its companion (RUSH-3097)', () => {
-    const plan = selectImpact({ files: ['apps/cli/scripts/release.sh'], repoRoot: REPO, manifest: MANIFEST });
+    const plan = selectImpact({ files: ['cli/scripts/release.sh'], repoRoot: REPO, manifest: MANIFEST });
     const byFile = new Map(plan.tests.map((t) => [t.file, t.reason]));
-    expect(byFile.get('apps/cli/scripts/release.test.ts')).toBe('companion');
-    expect(byFile.get('apps/cli/scripts/promote-home-base-probe.test.ts')).toBe('runtime-read');
-    expect(byFile.get('apps/cli/scripts/signing-home-base-probe.test.ts')).toBe('runtime-read');
-    expect(byFile.get('apps/cli/scripts/stuck-release.test.ts')).toBe('runtime-read');
+    expect(byFile.get('cli/scripts/release.test.ts')).toBe('companion');
+    expect(byFile.get('cli/scripts/promote-home-base-probe.test.ts')).toBe('runtime-read');
+    expect(byFile.get('cli/scripts/signing-home-base-probe.test.ts')).toBe('runtime-read');
+    expect(byFile.get('cli/scripts/stuck-release.test.ts')).toBe('runtime-read');
     expect(plan.unmapped).toEqual([]);
   });
 });
@@ -502,12 +502,12 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
     const repo = join(dir, 'repo');
     mkdirSync(repo);
     git(repo, 'init', '-b', 'main');
-    writeFixture(repo, 'apps/cli/package.json', `${JSON.stringify(before, null, 2)}\n`);
-    git(repo, 'add', 'apps/cli/package.json');
+    writeFixture(repo, 'cli/package.json', `${JSON.stringify(before, null, 2)}\n`);
+    git(repo, 'add', 'cli/package.json');
     git(repo, 'commit', '-m', 'base');
     const base = git(repo, 'rev-parse', 'HEAD');
-    writeFixture(repo, 'apps/cli/package.json', `${JSON.stringify(after, null, 2)}\n`);
-    git(repo, 'add', 'apps/cli/package.json');
+    writeFixture(repo, 'cli/package.json', `${JSON.stringify(after, null, 2)}\n`);
+    git(repo, 'add', 'cli/package.json');
     git(repo, 'commit', '-m', 'head');
     const head = git(repo, 'rev-parse', 'HEAD');
     return { repo, base, head };
@@ -519,7 +519,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
       { name: '@phnx-labs/agents-cli', version: '1.22.36', dependencies: { chalk: '^5.0.0' } },
     );
     try {
-      expect(classifyPackageJsonChange('apps/cli/package.json', repo, base, head)).toBe('version-only');
+      expect(classifyPackageJsonChange('cli/package.json', repo, base, head)).toBe('version-only');
     } finally {
       rmSync(dirname(repo), { recursive: true, force: true });
     }
@@ -531,14 +531,14 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
       { name: '@phnx-labs/agents-cli', version: '1.22.36', dependencies: { chalk: '^5.1.0' } },
     );
     try {
-      expect(classifyPackageJsonChange('apps/cli/package.json', repo, base, head)).toBe('dependency');
+      expect(classifyPackageJsonChange('cli/package.json', repo, base, head)).toBe('dependency');
     } finally {
       rmSync(dirname(repo), { recursive: true, force: true });
     }
   });
 
   test('classifyPackageJsonChange: no base/head shas fails closed to unknown', () => {
-    expect(classifyPackageJsonChange('apps/cli/package.json', REPO)).toBe('unknown');
+    expect(classifyPackageJsonChange('cli/package.json', REPO)).toBe('unknown');
   });
 
   test('a version-only package.json bump selects the minimal set, never cli-full', () => {
@@ -548,7 +548,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
     );
     try {
       const plan = selectImpact({
-        files: ['apps/cli/package.json'],
+        files: ['cli/package.json'],
         repoRoot: repo,
         manifest: MANIFEST,
         related: false,
@@ -557,7 +557,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
       });
       expect(plan.suite).toBe('selected');
       expect(plan.unmapped).toEqual([]);
-      expect(plan.tests.map((t) => t.file)).toEqual(['apps/cli/src/lib/version.test.ts']);
+      expect(plan.tests.map((t) => t.file)).toEqual(['cli/src/lib/version.test.ts']);
       expect(plan.checks).toEqual(['typecheck']);
     } finally {
       rmSync(dirname(repo), { recursive: true, force: true });
@@ -571,7 +571,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
     );
     try {
       const plan = selectImpact({
-        files: ['apps/cli/package.json'],
+        files: ['cli/package.json'],
         repoRoot: repo,
         manifest: MANIFEST,
         related: false,
@@ -586,7 +586,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
 
   test('a package.json diff with no base/head shas fails closed to cli-full', () => {
     const plan = selectImpact({
-      files: ['apps/cli/package.json'],
+      files: ['cli/package.json'],
       repoRoot: REPO,
       manifest: MANIFEST,
       related: false,
@@ -603,14 +603,14 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
     // the assertion is still that this stays `selected` -- one fast test, not
     // cli-full.
     const plan = selectImpact({
-      files: ['CHANGELOG.md', 'apps/cli/CHANGELOG.md'],
+      files: ['CHANGELOG.md', 'cli/CHANGELOG.md'],
       repoRoot: REPO,
       manifest: MANIFEST,
       related: false,
     });
     expect(plan.suite).toBe('selected');
     expect(plan.unmapped).toEqual([]);
-    expect(plan.tests.map((t) => t.file)).toEqual(['apps/cli/scripts/gen-changelog.test.ts']);
+    expect(plan.tests.map((t) => t.file)).toEqual(['cli/scripts/gen-changelog.test.ts']);
     expect(plan.checks).toEqual(['docs']);
   });
 });
@@ -618,7 +618,7 @@ describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () =>
 describe('exact-tree proof reuse', () => {
   test('reuses a passing proof only for the same tree, policy, and lockfile', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/state.ts'],
+      files: ['cli/src/lib/state.ts'],
       repoRoot: REPO,
       related: false,
       treeSha: 'tree-aaa',
@@ -632,7 +632,7 @@ describe('exact-tree proof reuse', () => {
 
   test('parent-commit evidence is not a reuse key', () => {
     const child = selectImpact({
-      files: ['apps/cli/src/lib/state.ts'],
+      files: ['cli/src/lib/state.ts'],
       repoRoot: REPO,
       related: false,
       treeSha: 'child-tree',
@@ -661,7 +661,7 @@ describe('commandsForPlan', () => {
 
   test('a session library change selects the session bench', () => {
     const plan = selectImpact({
-      files: ['apps/cli/src/lib/session/db.ts'],
+      files: ['cli/src/lib/session/db.ts'],
       repoRoot: REPO,
       related: false,
     });
@@ -675,8 +675,8 @@ describe('commandsForPlan', () => {
 
   test('selected CLI tests invoke vitest with those files only', () => {
     const cmds = commandsForPlan({
-      ...selectImpact({ files: ['apps/cli/src/lib/state.ts'], repoRoot: REPO, related: false }),
-      tests: [{ file: 'apps/cli/src/lib/state.test.ts', reason: 'companion' }],
+      ...selectImpact({ files: ['cli/src/lib/state.ts'], repoRoot: REPO, related: false }),
+      tests: [{ file: 'cli/src/lib/state.test.ts', reason: 'companion' }],
       checks: [],
       suite: 'selected',
     }, REPO);
@@ -693,14 +693,14 @@ describe('commandsForPlan', () => {
   // instead of the selected files (~13s single-file). Guard the exact
   // token shape so this regression can't sneak back in.
   test('vitest invocations never carry a bare `--` before the file list', () => {
-    const single = commandForTestFile('apps/cli/src/lib/state.test.ts', REPO);
+    const single = commandForTestFile('cli/src/lib/state.test.ts', REPO);
     expect(single.cmd).not.toContain('--');
 
     const batched = commandsForPlan({
-      ...selectImpact({ files: ['apps/cli/src/lib/state.ts'], repoRoot: REPO, related: false }),
+      ...selectImpact({ files: ['cli/src/lib/state.ts'], repoRoot: REPO, related: false }),
       tests: [
-        { file: 'apps/cli/src/lib/state.test.ts', reason: 'companion' },
-        { file: 'apps/cli/src/commands/webhook.test.ts', reason: 'companion' },
+        { file: 'cli/src/lib/state.test.ts', reason: 'companion' },
+        { file: 'cli/src/commands/webhook.test.ts', reason: 'companion' },
       ],
       checks: [],
       suite: 'selected',
@@ -719,7 +719,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
   try {
     const proc = Bun.spawnSync({
       cmd: ['bun', join(import.meta.dir, 'ci-scope.ts'), output],
-      stdin: Buffer.from('packages/session-tracker/src/index.ts\0apps/cli/docs/README.md\0'),
+      stdin: Buffer.from('packages/session-tracker/src/index.ts\0cli/docs/README.md\0'),
       cwd: REPO,
       stdout: 'pipe',
       stderr: 'pipe',
@@ -736,7 +736,7 @@ test('the executable writes GitHub outputs from NUL-delimited git paths', () => 
       suite: 'selected',
       tree: '',
       policy_digest: loadOwnershipManifest() && (selectImpact({
-        files: ['packages/session-tracker/src/index.ts', 'apps/cli/docs/README.md'],
+        files: ['packages/session-tracker/src/index.ts', 'cli/docs/README.md'],
         repoRoot: REPO,
         related: false,
       }).policy_digest),
@@ -802,18 +802,18 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
     const mergeBase = git(repo, 'rev-parse', 'HEAD');
 
     git(repo, 'worktree', 'add', '-b', 'pr-head', headWorktree, mergeBase);
-    writeFixture(headWorktree, 'apps/cli/src/lib/head-only.ts');
-    git(headWorktree, 'add', 'apps/cli/src/lib/head-only.ts');
+    writeFixture(headWorktree, 'cli/src/lib/head-only.ts');
+    git(headWorktree, 'add', 'cli/src/lib/head-only.ts');
     git(headWorktree, 'commit', '-m', 'head-only change');
     const head = git(headWorktree, 'rev-parse', 'HEAD');
 
-    writeFixture(repo, 'apps/cli/src/lib/base-only.ts');
-    git(repo, 'add', 'apps/cli/src/lib/base-only.ts');
+    writeFixture(repo, 'cli/src/lib/base-only.ts');
+    git(repo, 'add', 'cli/src/lib/base-only.ts');
     git(repo, 'commit', '-m', 'base-only change');
     const updatedBase = git(repo, 'rev-parse', 'HEAD');
 
     expect(changedFilesBetween(updatedBase, head, repo)).toEqual([
-      'apps/cli/src/lib/head-only.ts',
+      'cli/src/lib/head-only.ts',
     ]);
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -824,7 +824,7 @@ test('changedFilesBetween keeps both sides of a cross-component rename', () => {
   const repo = mkdtempSync(join(tmpdir(), 'agents-ci-rename-'));
   try {
     git(repo, 'init', '-b', 'main');
-    const oldPath = 'apps/cli/src/lib/hooks.ts';
+    const oldPath = 'cli/src/lib/hooks.ts';
     const newPath = 'website/hooks.ts';
     writeFixture(repo, oldPath);
     git(repo, 'add', oldPath);

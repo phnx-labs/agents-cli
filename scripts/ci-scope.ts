@@ -69,7 +69,7 @@ interface OwnershipGroup {
    *
    * The gate had exactly two tiers — 85s for `selected`, 1200s for `cli-full` — and a
    * legitimately medium selection had nowhere to sit. `sessions` is the case that
-   * forced it: ANY edit to `apps/cli/src/commands/sessions.ts`, a two-line subcommand
+   * forced it: ANY edit to `cli/src/commands/sessions.ts`, a two-line subcommand
    * registration included, pulls in the whole `sessions*` suite, measured at 92s of
    * vitest inside a 122s run (PR #2771, run 32032566960). It could never pass 85s, so
    * no new `agents sessions <verb>` could merge; `cli-full` would have handed a large
@@ -99,7 +99,7 @@ export interface OwnershipManifest {
   testless: string[];
 }
 
-const DEFAULT_MANIFEST = join(import.meta.dir, '..', 'apps/cli/ci/test-ownership.yaml');
+const DEFAULT_MANIFEST = join(import.meta.dir, '..', 'cli/ci/test-ownership.yaml');
 const CLI_TEST_GLOBS = [
   /\/tests\/.*\.test\.ts$/,
   /\/src\/.*\.test\.ts$/,
@@ -168,8 +168,8 @@ function sha256File(path: string): string {
 
 export function policyDigest(repoRoot: string): string {
   const parts = [
-    join(repoRoot, 'apps/cli/vitest.config.ts'),
-    join(repoRoot, 'apps/cli/ci/test-ownership.yaml'),
+    join(repoRoot, 'cli/vitest.config.ts'),
+    join(repoRoot, 'cli/ci/test-ownership.yaml'),
     join(repoRoot, 'scripts/ci-scope.ts'),
   ]
     .filter((p) => existsSync(p))
@@ -179,7 +179,7 @@ export function policyDigest(repoRoot: string): string {
 }
 
 export function lockfileDigest(repoRoot: string): string {
-  const lock = join(repoRoot, 'apps/cli/bun.lock');
+  const lock = join(repoRoot, 'cli/bun.lock');
   if (!existsSync(lock)) return '';
   return sha256File(lock);
 }
@@ -547,14 +547,14 @@ export function selectImpact(input: SelectImpactInput): ImpactPlan {
       mark();
     }
 
-    if (area?.companion || file.startsWith('apps/cli/') || file.startsWith('scripts/')) {
+    if (area?.companion || file.startsWith('cli/') || file.startsWith('scripts/')) {
       for (const companion of existingCompanions(file, repoRoot)) {
         addTest(selected, mapping, file, companion, 'companion');
         mark();
       }
     }
 
-    if ((area?.related ?? file.startsWith('apps/cli/')) && relatedByDefault) {
+    if ((area?.related ?? file.startsWith('cli/')) && relatedByDefault) {
       for (const test of relatedBySource.get(file) ?? []) {
         addTest(selected, mapping, file, test, 'static-import');
         mark();
@@ -631,7 +631,7 @@ export function scopeFromPlan(plan: ImpactPlan): CiScope {
   const testUnder = (prefix: string) => plan.tests.some((t) => t.file.startsWith(prefix));
   return {
     cli: has('typecheck') || has('binary-smoke') || has('command-index') || has('impact-tests')
-      || has('sessions-bench') || testUnder('apps/cli/') || plan.suite === 'cli-full',
+      || has('sessions-bench') || testUnder('cli/') || plan.suite === 'cli-full',
     cliDocs: has('docs') || has('command-index'),
     sessionTracker: has('session-tracker'),
     windows: false,
@@ -710,15 +710,15 @@ export function commandForTestFile(file: string, repoRoot: string): RunCommand {
   if (f.endsWith('.test.sh')) {
     return { cwd: join(repoRoot, dirname(f)), cmd: ['bash', f.split('/').pop()!] };
   }
-  if (f.startsWith('apps/cli/') && f.endsWith('.test.ts')) {
+  if (f.startsWith('cli/') && f.endsWith('.test.ts')) {
     return {
-      cwd: join(repoRoot, 'apps/cli'),
+      cwd: join(repoRoot, 'cli'),
       // No `--` before the path: vitest's CLI treats args after `--` as an
       // opaque pass-through, not a filter, so the file list is silently
       // dropped and vitest falls back to its full `include` glob. Measured
       // on PR #2770 (RUSH-2666): the plan selected 3 files, the `--`
       // invocation ran all 864, "Selected proof" took 15m21s instead of ~13s.
-      cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', f.slice('apps/cli/'.length)],
+      cmd: ['node', './node_modules/vitest/vitest.mjs', 'run', f.slice('cli/'.length)],
     };
   }
   if (f.startsWith('packages/session-tracker/') && f.endsWith('.test.ts')) {
@@ -735,14 +735,14 @@ export function commandForTestFile(file: string, repoRoot: string): RunCommand {
 
 export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[] {
   const out: RunCommand[] = [];
-  const cli = join(repoRoot, 'apps/cli');
+  const cli = join(repoRoot, 'cli');
   if (plan.suite === 'cli-full') {
     out.push({ cwd: cli, cmd: ['node', './node_modules/vitest/vitest.mjs', 'run'] });
   } else {
     const cliTests = plan.tests
       .map((t) => t.file)
-      .filter((f) => f.startsWith('apps/cli/') && f.endsWith('.test.ts'))
-      .map((f) => f.slice('apps/cli/'.length));
+      .filter((f) => f.startsWith('cli/') && f.endsWith('.test.ts'))
+      .map((f) => f.slice('cli/'.length));
     if (cliTests.length) {
       // No `--` — see commandForTestFile above for why.
       out.push({
@@ -752,7 +752,7 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
     }
   }
   for (const test of plan.tests) {
-    if (test.file.startsWith('apps/cli/') && test.file.endsWith('.test.ts')) continue;
+    if (test.file.startsWith('cli/') && test.file.endsWith('.test.ts')) continue;
     out.push(commandForTestFile(test.file, repoRoot));
   }
   for (const check of plan.checks) {
@@ -795,9 +795,9 @@ export function commandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[
 export function installCommandsForPlan(plan: ImpactPlan, repoRoot: string): RunCommand[] {
   const out: RunCommand[] = [];
   const needsCli = plan.suite === 'cli-full'
-    || plan.tests.some((t) => t.file.startsWith('apps/cli/'))
+    || plan.tests.some((t) => t.file.startsWith('cli/'))
     || plan.checks.some((c) => ['typecheck', 'command-index', 'docs', 'binary-smoke', 'sessions-bench'].includes(c));
-  if (needsCli) out.push({ cwd: join(repoRoot, 'apps/cli'), cmd: ['bun', 'install', '--frozen-lockfile'] });
+  if (needsCli) out.push({ cwd: join(repoRoot, 'cli'), cmd: ['bun', 'install', '--frozen-lockfile'] });
   if (plan.checks.includes('session-tracker')) {
     out.push({
       cwd: join(repoRoot, 'packages/session-tracker'),

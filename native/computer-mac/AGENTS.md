@@ -30,9 +30,9 @@ from its launcher and loses grants (see README §"Why a .app bundle").
 
 ## How the CLI reaches it
 
-`apps/cli/src/lib/computer/computer-rpc.ts` — `resolveHelperExec()` looks for
+`cli/src/lib/computer/computer-rpc.ts` — `resolveHelperExec()` looks for
 `native/computer-mac/dist/ComputerHelper.app/Contents/MacOS/ComputerHelper` (dev
-checkout, 5 hops up from `apps/cli/dist/lib/computer`) or the bundled npm copy. The daemon
+checkout, 5 hops up from `cli/dist/lib/computer`) or the bundled npm copy. The daemon
 runs under launchd on a Unix socket; the CLI connects locally (no tunnel).
 
 ## Security model (see README for full detail)

@@ -195,7 +195,7 @@ async function installHermes(opts: InstallOptions): Promise<InstallResult> {
   if (opts.dryRun) return { agent: 'hermes', installed: false, configPath };
   // Read-modify-write the YAML, preserving every sibling key (mcp_servers, …) —
   // mirrors the CLI's registerHooksForHermes. Hermes maps SessionStart to the
-  // `on_session_start` event (HERMES_EVENT_MAP in apps/cli/src/lib/hooks/install.ts).
+  // `on_session_start` event (HERMES_EVENT_MAP in cli/src/lib/hooks/install.ts).
   let cfg: Record<string, unknown> = {};
   try {
     const parsed = YAML.parse(await fs.promises.readFile(configPath, 'utf8'));
@@ -238,7 +238,7 @@ async function installHermes(opts: InstallOptions): Promise<InstallResult> {
  * openclaw and rush are absent from this package's {@link AgentId} entirely — the
  * former has no native SessionStart hook host, the latter is the Rush app, not a
  * hook-bearing harness — so the writer cannot reach them at all. Their headless
- * rows still surface via the discovery comm-map (apps/cli/src/lib/session/active.ts).
+ * rows still surface via the discovery comm-map (cli/src/lib/session/active.ts).
  */
 type HookSupport =
   | { install: (opts: InstallOptions) => Promise<InstallResult> }

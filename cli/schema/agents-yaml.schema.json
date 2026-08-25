@@ -1,0 +1,299 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://raw.githubusercontent.com/phnx-labs/agents-cli/main/cli/schema/agents-yaml.schema.json",
+  "title": "agents-cli agents.yaml",
+  "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. The per-device doc holds operator-owned fields (routines, device-scope config:) — conflict-free because each machine writes only its own folder. Agent pins (agents, isolatedAgents) live in neither: they are machine-local runtime state in the untracked ~/.agents/.history/devices/pins-<host>.json. Fleet-wide config defaults live centrally under fleet.defaults.config. Everything else is portable user config. Source of truth: cli/src/lib/types.ts (Meta).",
+  "type": "object",
+  "additionalProperties": true,
+  "properties": {
+    "agents": {
+      "type": "object",
+      "description": "LEGACY in yaml — per-device global version pins (agent id → version) moved to the untracked ~/.agents/.history/devices/pins-<host>.json (auto-written pins in a tracked file caused commit churn). Current code never writes this key.",
+      "additionalProperties": { "type": "string" }
+    },
+    "isolatedAgents": {
+      "type": "object",
+      "description": "LEGACY in yaml — per-device preferred isolated version per agent, moved to the untracked pins JSON beside agents (see the agents property).",
+      "additionalProperties": { "type": "string" }
+    },
+    "defaultBrowserProfile": {
+      "type": "string",
+      "description": "LEGACY as a top-level key — folded into the doc's config: block (browser.profile) by the config migration. Current value home: config.defaultBrowserProfile (`agents devices config <name> browser.profile <profile>`)."
+    },
+    "routines": {
+      "type": "array",
+      "description": "Enabled routine names on this device. Membership means enabled; device doc only.",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "config": {
+      "type": "object",
+      "description": "Typed config keys (registry: cli/src/lib/device-config.ts). In the CENTRAL file this holds user-scope keys (interactiveHost); in a per-device doc it holds device-scope keys (maxAgents, schedulerEnabled, notes, ssh*, autoLaunch*). Read order per device-scope key: built-in default < fleet.defaults.config < per-device config:. Unset keys keep default behavior.",
+      "additionalProperties": true,
+      "properties": {
+        "interactiveHost": {
+          "type": "string",
+          "description": "User scope (central only). Device that shows the user artifacts (browser opens, dashboards). Set via `agents devices config <name> interactive.host <name>`."
+        },
+        "autoPool": {
+          "type": "string",
+          "enum": ["workers", "all"],
+          "description": "User scope. Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, once any is marked) or 'all'. A device marked personal is never picked under either mode. Set via `agents config set auto.pool <mode>`."
+        },
+        "maxAgents": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Device scope. Cap on concurrent agents (agents.max-concurrent). AGI EXT auto-launch counts device-wide running agents; teams placement counts the team's roster on the device."
+        },
+        "schedulerEnabled": {
+          "type": "boolean",
+          "description": "Device scope. Whether the routines scheduler may fire here (scheduler.enabled)."
+        },
+        "daemonEnabled": {
+          "type": "boolean",
+          "description": "Device scope. Top-level kill switch: whether the daemon may run on this device at all (daemon.enabled)."
+        },
+        "watchdogEnabled": {
+          "type": "boolean",
+          "description": "Device scope. Whether the daemon runs the watchdog pass on this device (watchdog.enabled)."
+        },
+        "tmuxEnabled": {
+          "type": "boolean",
+          "description": "Device scope, machine-local. Whether an interactive `agents run` on this device is wrapped in tmux (tmux.enabled)."
+        },
+        "browserRemoteControl": {
+          "type": "boolean",
+          "description": "Device scope. Whether other fleet machines may drive THIS device's browser (browser.remote-control). Default off."
+        },
+        "defaultBrowserProfile": {
+          "type": "string",
+          "description": "Device scope. Browser profile `agents browser start` resolves to without --profile on this device (browser.profile)."
+        },
+        "browserTaskIdleMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Device scope. Minutes a browser task may sit with no IPC action before the daemon's abandoned-task reaper closes its tabs (browser.task-idle-minutes). Default 30; 0 disables idle reaping (a task whose owning agent session exited is still closed)."
+        },
+        "notes": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Device scope. Free-form operator notes (`agents devices config <name> notes <text>` appends one)."
+        },
+        "sshUser": {
+          "type": "string",
+          "description": "Device scope. SSH login user (ssh.user) — overrides the registry profile's user at dial time."
+        },
+        "sshAuth": {
+          "type": "string",
+          "enum": ["key", "password"],
+          "description": "Device scope. SSH auth method (ssh.auth): key (agent/on-disk keys) or password (from a secrets bundle)."
+        },
+        "sshBundle": {
+          "type": "string",
+          "description": "Device scope. Secrets bundle holding the SSH password (ssh.bundle). A bundle NAME — never a secret value."
+        },
+        "sshBundleKey": {
+          "type": "string",
+          "description": "Device scope. Key within the bundle whose value is the password (ssh.bundle-key; default 'password')."
+        },
+        "sshIdentityFile": {
+          "type": "string",
+          "description": "Device scope. Explicit private-key path for key auth (ssh.identity-file; passed to OpenSSH with IdentitiesOnly=yes)."
+        },
+        "platform": {
+          "type": "string",
+          "enum": ["windows", "linux", "macos", "unknown"],
+          "description": "Device scope. OS family of the device (platform) — picks PowerShell vs POSIX remotely. Overrides the discovered platform."
+        },
+        "role": {
+          "type": "string",
+          "enum": ["worker", "personal"],
+          "description": "Device scope. What this device is for, fleet-wide (`agents devices role <name> <role>`). Marking any device 'worker' makes `--device auto` an allowlist over the marked workers; a 'personal' device is never picked automatically."
+        },
+        "autoLaunchEnabled": {
+          "type": "boolean",
+          "description": "Device scope. Whether AGI EXT auto-launch may pick this device (auto-launch.enabled; default on)."
+        },
+        "autoLaunchPreferred": {
+          "type": "boolean",
+          "description": "Device scope. Boost this device in AGI EXT auto-launch ranking (auto-launch.preferred; default off)."
+        }
+      }
+    },
+    "run": {
+      "type": "object",
+      "description": "`agents run` defaults (mode, effort, fallback chains)."
+    },
+    "lease": {
+      "type": "object",
+      "properties": {
+        "secretsBundle": { "type": "string" }
+      }
+    },
+    "secrets": {
+      "type": "object",
+      "description": "macOS secrets-agent defaults (backend, prompt policy, hold window).",
+      "properties": {
+        "backend": { "type": "string", "enum": ["keychain", "file", "vault"] },
+        "policy": { "type": "string", "enum": ["always", "hold", "daily"] },
+        "agent": {
+          "type": "object",
+          "properties": {
+            "auto": { "type": "boolean" },
+            "holdMs": { "type": "integer" },
+            "durable": { "type": "boolean" }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "description": "Spend guardrails (user-global caps; project agents.yaml overrides)."
+    },
+    "feed": {
+      "type": "object",
+      "properties": {
+        "broadcast": { "type": "object" }
+      }
+    },
+    "beta": {
+      "type": "object",
+      "properties": {
+        "enabled": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "registries": {
+      "type": "object",
+      "description": "Resource registries by type (commands, skills, hooks, mcp, …)."
+    },
+    "profiles": {
+      "type": "object",
+      "description": "Top-level resource profiles filtering the resolved resource set."
+    },
+    "versions": {
+      "type": "object",
+      "description": "Per-version resource tracking. Machine-local — partitioned to ~/.agents/.history/version-resources.json on write."
+    },
+    "source": {
+      "type": "string",
+      "description": "Git remote source URL of the system repo."
+    },
+    "projectRoot": {
+      "type": "string",
+      "description": "Projects root for `agents run --project <slug>` (home-relative)."
+    },
+    "extraRepos": {
+      "type": "object",
+      "description": "Extra DotAgent repos merged after ~/.agents/."
+    },
+    "brands": {
+      "type": "object",
+      "description": "White-label brands keyed by name."
+    },
+    "actors": {
+      "type": "object",
+      "description": "Actors keyed by slug — who is behind a run."
+    },
+    "seededPresets": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Removal tombstones for seeded registry presets."
+    },
+    "hooks": {
+      "type": "object",
+      "description": "Hook manifest entries keyed by hook name."
+    },
+    "browser": {
+      "type": "object",
+      "description": "Browser profile definitions keyed by profile name (portable; syncs)."
+    },
+    "hosts": {
+      "type": "object",
+      "description": "Agent-host registry (`agents hosts`) keyed by host name."
+    },
+    "fleet": {
+      "type": "object",
+      "description": "Declarative fleet profile (`agents apply`). Shape: lib/fleet/types.ts FleetManifest. `fleet.defaults.config` is the fleet-wide config-defaults layer (`agents devices config --fleet <key> <value>`) — read between the built-in default and the per-device doc's config:. Names and non-secret values only.",
+      "properties": {
+        "defaults": {
+          "type": "object",
+          "description": "Defaults applied to every targeted device unless a per-device entry overrides.",
+          "properties": {
+            "config": {
+              "type": "object",
+              "description": "Fleet-wide config defaults (`agents devices config --fleet <key> <value>`). Every device inherits these unless its own devices/<name>/agents.yaml config: overrides the key. Inert to `agents apply` (the reconcile engine never pushes it). Keys: the device-scope entries of the top-level config property (maxAgents, schedulerEnabled, daemonEnabled, watchdogEnabled, tmuxEnabled, browserRemoteControl, defaultBrowserProfile, browserTaskIdleMinutes, notes, sshUser, sshAuth, sshBundle, sshBundleKey, sshIdentityFile, platform, role, autoLaunchEnabled, autoLaunchPreferred).",
+              "additionalProperties": true
+            }
+          }
+        },
+        "devices": {
+          "description": "The string 'all', or a map of device name → override (agents/sync/login reconcile targets). A `config` key on an override is the LEGACY #2458 store — folded into the per-device doc by the config migration, never written by current code.",
+          "additionalProperties": {
+            "type": "object"
+          }
+        },
+        "discovery": {
+          "type": "object",
+          "description": "Portable device discovery decisions. Approved devices are registered when reachable; ignored devices remain hidden on every machine after user-repo sync.",
+          "additionalProperties": {
+            "type": "string",
+            "enum": ["approved", "ignored"]
+          }
+        },
+        "ignored": {
+          "type": "array",
+          "description": "Nodes dismissed from auto-discovery (`agents devices ignore`), with provenance for `agents devices ignored`. Syncs fleet-wide; the discovery pending-diff subtracts it on every machine.",
+          "items": {
+            "type": "object",
+            "required": ["name", "ignoredAt", "ignoredOn"],
+            "properties": {
+              "name": { "type": "string", "description": "Tailscale node name that was dismissed." },
+              "ignoredAt": { "type": "string", "description": "ISO-8601 timestamp of the dismissal." },
+              "ignoredOn": { "type": "string", "description": "Machine id (hostname) that dismissed it." }
+            }
+          }
+        }
+      }
+    },
+    "share": {
+      "type": "object",
+      "description": "`agents artifacts share` endpoint (Cloudflare R2 + Worker).",
+      "properties": {
+        "baseUrl": { "type": "string" },
+        "accountId": { "type": "string" },
+        "workerName": { "type": "string" },
+        "bucketName": { "type": "string" },
+        "domain": { "type": "string" },
+        "analyticsToken": { "type": "string" }
+      }
+    },
+    "notify": {
+      "type": "object",
+      "description": "Owner/channel notification config for `agents send` / `agents notify`.",
+      "properties": {
+        "owner": {
+          "type": "object",
+          "properties": {
+            "channel": { "type": "string" },
+            "to": { "type": "string" }
+          }
+        },
+        "transports": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "routines": {
+      "type": "object",
+      "description": "Routines daemon settings.",
+      "properties": {
+        "projects": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Allowlist of project roots whose .agents/routines may fire."
+        }
+      }
+    }
+  }
+}

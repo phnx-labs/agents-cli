@@ -1,0 +1,307 @@
+# Reviewed non-static test ownership for the required Linux impact gate.
+# Policy version is part of the exact-tree proof identity (RUSH-2666).
+#
+# Selection (ordered):
+#   1. A changed test file selects itself.
+#   2. A changed source file selects companion tests + static importers.
+#   3. Groups add subprocess / filesystem / generated-doc / global-state owners.
+#   4. An explicit group named here is the only way to select a broad suite.
+#   5. Executable source with zero tests/checks fails unless listed in testless.
+#   6. A path that matches no area, group, or testless entry is unmapped and fails.
+#
+# There is no silent skip and no implicit full-suite fallback.
+
+policy_version: impact-v1
+
+areas:
+  - prefix: cli/src/
+    companion: true
+    related: true
+    checks: [typecheck]
+  - prefix: cli/scripts/
+    companion: true
+  - prefix: cli/
+    companion: true
+    related: true
+  - prefix: packages/session-tracker/
+    checks: [session-tracker]
+  - prefix: scripts/
+    companion: true
+  - prefix: .github/
+    checks: [workflow-policy]
+
+groups:
+  # 120s, not the default 85s. The grouped --help text lives in bootstrap.ts;
+  # any one-line surface edit selects non-interactive.test.ts (54s of vitest)
+  # plus command-surface tests pulled in by the same PR. PR #2826 run
+  # 32431700986 measured 93s of impact (212 tests, all passed) and failed the
+  # 85s gate. Raise this only against a measured run, and lower it when the
+  # non-interactive suite is split.
+  - id: cli-bootstrap
+    when:
+      - cli/src/bootstrap.ts
+      - cli/src/index.ts
+      - cli/src/browser.ts
+      - cli/src/computer.ts
+      - cli/scripts/build.sh
+      - cli/scripts/build-bin.sh
+      - cli/scripts/build-win.sh
+    tests:
+      - cli/tests/non-interactive.test.ts
+      - cli/src/index.command-star-routing.test.ts
+      - cli/src/index.spellcheck.test.ts
+      - cli/src/index.tombstones.test.ts
+    checks: [typecheck, binary-smoke]
+    budget_sec: 120
+
+  - id: command-surface
+    when:
+      - cli/src/commands/**
+      - cli/src/cli/**
+      - cli/scripts/gen-command-index.ts
+      - cli/scripts/gen-command-index.test.ts
+      - cli/scripts/verify-command-index.sh
+      - cli/scripts/verify-docs.sh
+      - cli/docs/command-index.md
+      - cli/docs/command-index.json
+    checks: [command-index, docs, typecheck]
+    # The devices/config command tests drive the REAL CLI as a subprocess (repo
+    # convention forbids mocking), so each case costs a process spawn — the group
+    # already sat near the 85s default before RUSH-3062 added the devices-list
+    # surface, and run 32643687531 measured 102s. Same failure mode and same
+    # remedy as cli-bootstrap above. Measured, not guessed: this branch runs the
+    # selected suite in 37s locally against 31s on main, and the CI multiplier
+    # puts it just over the default. Lower this when the devices command tests
+    # are split out of the required lane.
+    budget_sec: 120
+
+  - id: cli-docs
+    when:
+      - cli/docs/**
+      - cli/AGENTS.md
+      - cli/CHANGELOG.md
+    checks: [docs]
+
+  # CHANGELOG.md is GENERATED from .changelog/<version>.md (gen-changelog.ts), and
+  # gen-changelog.test.ts asserts the committed file still matches its sources. That
+  # test was only ever selected by a change to its companion SOURCE, so a commit
+  # touching CHANGELOG.md or a .changelog/ fragment alone never ran it -- and a
+  # hand-edit that no source reproduces reached main three separate times on
+  # 2026-08-20, each time invisible until the FULL suite ran at release time and
+  # failed closed (release-attestation-produce.sh), blocking the release. Selecting
+  # the test from the files it actually guards moves that failure to the PR that
+  # causes it.
+  - id: changelog-sources
+    when:
+      - cli/CHANGELOG.md
+      - cli/.changelog/**
+    tests:
+      - cli/scripts/gen-changelog.test.ts
+
+  # 180s, not the default 85s. Any edit to sessions.ts — a two-line subcommand
+  # registration included — selects the whole sessions* suite: 24 files, 92s of
+  # vitest inside a 122s run (PR #2771, run 32032566960), before the group's own
+  # typecheck + bench. It could never pass 85s, so no new `agents sessions <verb>`
+  # was mergeable; cli-full's 1200s would have been the opposite overcorrection.
+  # Raise this only against a measured run, and lower it when the suite is split.
+  # 240s, not 180s. Extracting width/short-id/relative-time out of session/
+  # (PR #2796, run 32392267349) still touches session/* re-export shims, so
+  # the sessions group is selected; impact was 198s of a passing vitest run
+  # and failed the 180s ceiling. Same pattern as daemon 240 / hooks 150.
+  # RUSH-2819: sessions.test.ts (2,604 lines, 172s measured — the single
+  # slowest file in CI) is split into sessions.*.test.ts slices so vitest's
+  # per-file fork parallelism spreads them across workers. The when: globs
+  # cover the slices and their shared fixture so a test-only edit inherits
+  # this budget instead of the flat 85s (editing a slow test file always
+  # landed on the default — the asymmetry called out on the ticket). The
+  # tests: list pins the subprocess-only slices that drive the CLI without
+  # statically importing sessions.ts, so a sessions.ts diff still runs its
+  # behavior suite. Lower the budget only against a measured post-split run.
+  - id: sessions
+    when:
+      - cli/src/lib/session/**
+      - cli/src/commands/sessions.ts
+      - cli/src/commands/sessions.test.ts
+      - cli/src/commands/sessions.*.test.ts
+      - cli/src/commands/sessions.test-fixture.ts
+      - cli/src/commands/__tests__/sessions-*.test.ts
+      - cli/bench/sessions-active-perf.ts
+    tests:
+      - cli/src/commands/sessions.cli-list.test.ts
+      - cli/src/commands/sessions.cli-tools.test.ts
+      - cli/src/commands/sessions.computer.test.ts
+      - cli/src/commands/sessions.render.test.ts
+    checks: [typecheck, sessions-bench]
+    budget_sec: 240
+
+  # 240s, not the default 85s. Moving runner.ts into daemon/ (PR #2803, run
+  # 32395701692) selected companion + importer tests including routines.test.ts
+  # (78 tests / 174s of vitest) inside a 213s impact run. Under the flat 85s
+  # default no runner.ts change that retargets commands/routines.ts can merge.
+  # Raise this only against a measured run, and lower it when the suite is split.
+  # RUSH-2819: lib/daemon/daemon.test.ts is split into daemon.*.test.ts slices
+  # (covered by the daemon/** glob) so vitest parallelizes them. The commands/
+  # entries fix the budget asymmetry for the daemon command surface: its test
+  # file self-selects on any edit and carries two tests measured 10-13s each
+  # under load (RUSH-2839), so it inherits this budget instead of the flat 85s.
+  - id: daemon
+    when:
+      - cli/src/lib/daemon/**
+      - cli/src/lib/daemon-ticks.ts
+      - cli/src/commands/daemon.ts
+      - cli/src/commands/daemon.test.ts
+    checks: [typecheck]
+    budget_sec: 240
+
+  # 180s, not the default 85s. scheduling/routines.ts is the JobConfig hub, so a
+  # change there selects the routines/runner/daemon/monitors companions and their
+  # importers (PR #2837, run 32434389380: 28 files / 715 tests, all passed, inside
+  # a 153s impact run). Under the flat 85s default no scheduling change can merge.
+  # Raise this only against a measured run, and lower it when the suite is split.
+  # RUSH-2819: commands/routines.test.ts (2,249 lines, 78 tests, 174s in the
+  # macOS release matrix of run 32439609875) is split into routines.*.test.ts
+  # slices sharing routines.test-fixture.ts. The commands/ entries key the
+  # routines command surface and its slices to this budget: pre-split, any
+  # edit to commands/routines.ts selected that one 174s file and could never
+  # pass the flat 85s.
+  - id: scheduling
+    when:
+      - cli/src/lib/scheduling/**
+      - cli/src/commands/routines.ts
+      - cli/src/commands/routines.test.ts
+      - cli/src/commands/routines.*.test.ts
+      - cli/src/commands/routines.test-fixture.ts
+    tests:
+      - cli/src/commands/routines.add.test.ts
+      - cli/src/commands/routines.list.test.ts
+    checks: [typecheck]
+    budget_sec: 180
+
+  # 120s, not the default 85s. versions.ts is the install/sync hub: any edit
+  # selects companion + importer tests including daemon/runner and the
+  # heal-dangling suite. PR #2840 run 32436359101 measured 97s of a passing
+  # vitest run (heal-dangling 7/7) and failed the 85s gate. Raise this only
+  # against a measured run, and lower it when the suite is split.
+  - id: installations
+    when:
+      - cli/src/lib/installations/**
+    checks: [typecheck]
+    budget_sec: 120
+
+  # 150s, not the default 85s. Moving hooks.ts into hooks/install.ts (PR #2804,
+  # run 32397180788) selected companion + importer tests inside a 129s impact
+  # run (48 files / 1099 tests, all passed). Under 85s the move cannot merge.
+  - id: hooks
+    when:
+      - cli/src/lib/hooks/**
+    checks: [typecheck]
+    budget_sec: 150
+
+  - id: toolchain
+    when:
+      - cli/bun.lock
+      - cli/vitest.config.ts
+      - cli/tsconfig.json
+      - cli/tests/setup.ts
+      - cli/tests/global-setup.ts
+    suite: cli-full
+    checks: [typecheck]
+
+  # A version-only edit (release bump) is metadata: RUSH-2666. A dependency,
+  # script, or field change in package.json still routes to cli-full because
+  # the diff itself decides — see classifyPackageJsonChange in ci-scope.ts.
+  # When base/head shas are unavailable to diff, this fails closed to
+  # cli-full too.
+  - id: toolchain-metadata
+    when:
+      - cli/package.json
+    suite: metadata-gated
+    tests:
+      - cli/src/lib/version.test.ts
+    checks: [typecheck]
+
+  - id: impact-policy
+    when:
+      - scripts/ci-scope.ts
+      - scripts/ci-scope.test.ts
+      - scripts/ci-impact-bench.ts
+      - scripts/ci-bench/**
+      - cli/ci/test-ownership.yaml
+      - .github/workflows/tests.yml
+      - .github/workflows/tests-gate.test.ts
+    checks: [impact-tests, workflow-policy]
+
+  - id: session-tracker
+    when:
+      - packages/session-tracker/**
+    checks: [session-tracker]
+
+# Explicit reviewed exemptions. These paths do not select tests on this Linux
+# gate; native helpers and iOS have their own workflows.
+testless:
+  # Pre-existing test-less utility scripts surfaced by the apps/cli -> cli
+  # rename (RUSH-3189): the rename made every file read as newly added, so the
+  # zero-selection gate demanded tests these legacy one-off tools never had —
+  # their coverage status is unchanged from main. Listed per-file (not a glob)
+  # so a genuinely NEW script here still trips the gate.
+  - cli/scripts/backfill-changelog.ts
+  - cli/scripts/bench-browser-loop.sh
+  - cli/scripts/bench-ssh.mjs
+  - cli/scripts/bench-staleness.ts
+  - cli/scripts/build-keychain-helper.sh
+  - cli/scripts/companion-shim/bin/agents.js
+  - cli/scripts/companion-shim/scripts/postinstall.js
+  - cli/scripts/headless-sign-context.sh
+  - cli/scripts/install-helper.js
+  - cli/scripts/release-changelog.ts
+  - cli/scripts/remote-sign-mac.sh
+  - cli/scripts/scrub-orphan-branches.sh
+  - cli/scripts/setup-npm-secret.sh
+  - cli/scripts/sign-cli-binary.sh
+  - cli/scripts/verify-keychain-helper.sh
+  - cli/tests/bench-concurrent-writes.ts
+  - cli/tests/bench-concurrent-writes.worker.ts
+  - cli/tests/e2e/container-fresh-install.sh
+  - cli/tests/e2e/fresh-install-settings.sh
+  # AGI EXT moved to its own repo (phnx-labs/agi-ext, RUSH-3189); kept mapped so
+  # historical paths never read as unmapped.
+  - apps/ext/**
+  # apps/cli moved up to cli/ (RUSH-3189 follow-up, the apps/ wrapper died with
+  # the ext split). The live paths are cli/** below; this old prefix is kept
+  # mapped so a historical or deleted apps/cli/... path — including this very
+  # rename, which the selector reads as delete+add — never reads as unmapped.
+  - apps/cli/**
+  - .agents/**
+  - assets/**
+  - demo/**
+  - skills/**
+  - openspec/**
+  - native/**
+  - apps/ios/**
+  - cli/menubar/**
+  - cli/bin/**
+  - cli/schema/**
+  - cli/routines/**
+  - cli/bench/**
+  - packages/agi-cli/**
+  - packages/swarmify-mirror/**
+  - website/**
+  - LICENSE
+  - README.md
+  - CHANGELOG.md
+  - SECURITY.md
+  - DESIGN.md
+  - CONTRIBUTING.md
+  - NPM_CONSOLIDATION.md
+  - AGENTS.md
+  - CLAUDE.md
+  - GEMINI.md
+  - .gitignore
+  - .gitleaks.toml
+  - agents.yaml
+  - cli/.crabbox.yaml
+  - cli/.gitignore
+  - cli/.npmignore
+  - cli/LICENSE
+  - cli/CLAUDE.md
+  - cli/GEMINI.md
