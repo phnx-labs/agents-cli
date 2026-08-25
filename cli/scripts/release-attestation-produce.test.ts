@@ -192,22 +192,6 @@ describe('release-attestation-produce.sh --help', () => {
 });
 
 describe('release-attestation-produce.sh', () => {
-  it('skips the helper manifest by default, so a helper source change cannot block a CLI attestation', () => {
-    // The live failure this prevents: a one-line COMMENT fix in
-    // native/computer-mac/scripts/build.sh (an `apps/cli/` -> `cli/` path in
-    // prose) changed computer-mac's input digest and aborted an otherwise-clean
-    // 1.22.49 attestation — for a helper the tarball no longer ships and the CLI
-    // resolves from its own tag. release.sh gained --with-helpers for exactly
-    // this; the producer had the same unconditional check and was missed.
-    const fx = buildFixture(tmp('attest-produce-nomanifest-'));
-    const result = runProduce(fx);
-    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
-    expect(result.status, out).toBe(0);
-    expect(out).toContain('CLI-only attestation: skipping the helper manifest');
-    // The attestation itself is still produced — this is a skip, not a bail.
-    expect(out).toMatch(/Wrote .*\.json/);
-  });
-
   it('does NOT seed helper apps on a non-Mac producer — the tarball ships none (RUSH-3100)', () => {
     // This replaces the RUSH-3026 seeding test, and the reversal is the point.
     //
@@ -784,5 +768,22 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status).not.toBe(0);
     expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
     expect(result.stdout + result.stderr).toContain('publish-computer-helper-mac.sh');
+  });
+
+  it('skips the helper manifest by default even when computer-mac would fail closed', () => {
+    // Pair of the fail-closed test above: same fixture (release-manifest.sh
+    // present, no seeded computer-mac digest) WITHOUT --with-helpers. This is
+    // the 1.22.49 abort — a helper SOURCE digest move killed a CLI-only
+    // attestation. buildFixture cannot reproduce it because it never copies
+    // release-manifest.sh, so `-x scripts/release-manifest.sh` is already false
+    // and deleting `WITH_HELPERS == true &&` from the producer still passes.
+    const root = tmp('attest-produce-default-skip-');
+    const fx = buildManifestFixture(root);
+    const result = runProduce(fx);
+    const out = (result.stdout + result.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('CLI-only attestation: skipping the helper manifest');
+    expect(out).toMatch(/Wrote .*\.json/);
+    expect(out).not.toContain('helper computer-mac input changed');
   });
 });
