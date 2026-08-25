@@ -667,18 +667,34 @@ describe('the severity rubric matches the code (docs cannot drift from behavior)
     // while its own restored `docs/observability.md` correctly listed it under
     // WARNING, in the same commit. Two doc sections contradicting each other on
     // one finding's severity is worse than either being silently absent.
+    // Scoped to the SENTENCE, not to adjacency. An adjacency-only match (severity
+    // word and backticked kind separated by whitespace alone) missed the review's
+    // mutation `is reported as CRITICAL when \`env-secret-export\` fires` — the
+    // same wrong claim, reworded. A sentence is the unit a reader actually binds
+    // a severity to.
+    //
+    // Flags only when the sentence carries the WRONG severity word and NOT the
+    // right one, so a sentence legitimately naming both ("criticals and warnings
+    // both appear in ...") does not fire, and neither does observability.md's own
+    // rubric, where each bucket sits in its own sentence with only its own word.
     const docsDir = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', 'docs');
     const wrong: string[] = [];
     for (const file of fs.readdirSync(docsDir).filter((f) => f.endsWith('.md'))) {
       const text = fs.readFileSync(path.join(docsDir, file), 'utf-8');
-      for (const kind of ALL_FINDING_KINDS) {
-        const actual = FINDING_SEVERITY[kind];
-        const other = actual === 'critical' ? 'warning' : 'critical';
-        // Both orders occur naturally: "a critical `kind`" and "an `kind` warning".
-        const before = new RegExp(`\\b${other}\\s+\`${kind}\``, 'i');
-        const after = new RegExp(`\`${kind}\`\\s+${other}\\b`, 'i');
-        if (before.test(text) || after.test(text)) {
-          wrong.push(`${file}: ${kind} called ${other}, is ${actual}`);
+      for (const sentence of text.split(/(?<=[.!?])\s+|\n{2,}/)) {
+        const hasCritical = /\bcritical\b/i.test(sentence);
+        const hasWarning = /\bwarning\b/i.test(sentence);
+        if (!hasCritical && !hasWarning) continue;
+        for (const kind of ALL_FINDING_KINDS) {
+          // Backtick-delimited so a kind is never credited to a longer one that
+          // contains it (`cli-missing` inside `host-cli-missing`, and two more).
+          if (!sentence.includes(`\`${kind}\``)) continue;
+          const actual = FINDING_SEVERITY[kind];
+          const saysRight = actual === 'critical' ? hasCritical : hasWarning;
+          const saysOther = actual === 'critical' ? hasWarning : hasCritical;
+          if (saysOther && !saysRight) {
+            wrong.push(`${file}: ${kind} called ${actual === 'critical' ? 'warning' : 'critical'}, is ${actual}`);
+          }
         }
       }
     }
