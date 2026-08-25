@@ -285,3 +285,62 @@ describe('release.sh: home-base provisionprofile seed recovers from origin (RUSH
     expect(run.stdout).toContain('PROFILE-BYTES');
   });
 });
+
+// RUSH-3189 flatten: pkg_version_at_ref must read the recorded version from a
+// POST-flatten ref (cli/package.json) and from a PRE-flatten tag
+// (apps/cli/package.json) — the fallback that keeps the catch-up-publish and
+// stuck-tag guards working against tags cut before the rename. Fixtures build
+// both layouts synthetically; nothing here depends on this repo's own history.
+describe('release.sh: pkg_version_at_ref resolves both layouts (RUSH-3189)', () => {
+  const fnSource = (): string => {
+    const sh = fs.readFileSync(path.join(__dirname, 'release.sh'), 'utf8');
+    const m = sh.match(/pkg_version_at_ref\(\) \{[\s\S]*?\n\}/);
+    if (!m) throw new Error('pkg_version_at_ref not found in release.sh');
+    return m[0];
+  };
+  const mkRepo = (): string => {
+    const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-flatten-ref-'));
+    const git = (...args: string[]) => {
+      const r = spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { encoding: 'utf8' });
+      if (r.status !== 0) throw new Error(r.stderr);
+      return r.stdout;
+    };
+    git('init', '-q', '-b', 'main');
+    fs.mkdirSync(path.join(repo, 'apps/cli'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'apps/cli/package.json'), JSON.stringify({ version: '1.22.40' }));
+    git('add', '-A'); git('commit', '-qm', 'pre-flatten'); git('tag', 'v-pre');
+    git('mv', 'apps/cli', 'cli');
+    fs.writeFileSync(path.join(repo, 'cli/package.json'), JSON.stringify({ version: '1.22.50'}));
+    git('add', '-A'); git('commit', '-qm', 'post-flatten'); git('tag', 'v-post');
+    return repo;
+  };
+  const readAt = (repo: string, ref: string) =>
+    spawnSync('bash', ['-c', `${fnSource()}\npkg_version_at_ref ${ref}`], { cwd: repo, encoding: 'utf8' });
+
+  it('reads cli/package.json from a post-flatten ref', () => {
+    const repo = mkRepo();
+    try {
+      const r = readAt(repo, 'v-post');
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe('1.22.50');
+    } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+  });
+
+  it('falls back to apps/cli/package.json for a pre-flatten tag', () => {
+    const repo = mkRepo();
+    try {
+      const r = readAt(repo, 'v-pre');
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe('1.22.40');
+    } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+  });
+
+  it('echoes nothing when neither layout exists at the ref', () => {
+    const repo = mkRepo();
+    try {
+      const r = spawnSync('bash', ['-c', `${fnSource()}\nexport GIT_AUTHOR_NAME=t GIT_AUTHOR_EMAIL=t@t GIT_COMMITTER_NAME=t GIT_COMMITTER_EMAIL=t@t && EMPTY=$(git hash-object -t tree /dev/null) && C=$(git commit-tree "$EMPTY" -m x) && pkg_version_at_ref "$C"`], { cwd: repo, encoding: 'utf8' });
+      expect(r.status).toBe(0);
+      expect(r.stdout.trim()).toBe('');
+    } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+  });
+});
