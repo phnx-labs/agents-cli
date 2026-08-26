@@ -1,6 +1,6 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
-  "$id": "https://raw.githubusercontent.com/phnx-labs/agents-cli/main/cli/schema/agents-yaml.schema.json",
+  "$id": "https://raw.githubusercontent.com/phnx-labs/agi-cli/main/cli/schema/agents-yaml.schema.json",
   "title": "agents-cli agents.yaml",
   "description": "agents-cli metadata file. Two tiers share this shape: the central (synced) ~/.agents/agents.yaml and each per-device ~/.agents/devices/<host>/agents.yaml. The per-device doc holds operator-owned fields (routines, device-scope config:) — conflict-free because each machine writes only its own folder. Agent pins (agents, isolatedAgents) live in neither: they are machine-local runtime state in the untracked ~/.agents/.history/devices/pins-<host>.json. Fleet-wide config defaults live centrally under fleet.defaults.config. Everything else is portable user config. Source of truth: cli/src/lib/types.ts (Meta).",
   "type": "object",

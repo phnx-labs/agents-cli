@@ -313,7 +313,7 @@ const Finale: React.FC<{ frameInScene: number; fps: number }> = ({
           color: "#555",
         }}
       >
-        <span>github.com/phnx-labs/agents-cli</span>
+        <span>github.com/phnx-labs/agi-cli</span>
         <span style={{ color: "#333" }}>·</span>
         <span>
           made by <span style={{ color: "#999" }}>phoenix</span>

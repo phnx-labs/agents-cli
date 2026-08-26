@@ -25,3 +25,6 @@
   generates. Separately, `.github/workflows/tests-windows-host-e2e.yml:54` gated on
   `github.repository == 'phnx-labs/agents-cli'`, which is permanently false after a rename
   — that job had silently stopped running on every push to main and on its daily cron.
+  The JSON Schema's own `$id` moved with it — `state.ts` and `migrate.ts` write that URL as
+  the `$schema` hint into every user's `agents.yaml`, so a mismatched `$id` would make
+  editors reject their own config.
