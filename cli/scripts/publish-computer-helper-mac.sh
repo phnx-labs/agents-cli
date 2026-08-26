@@ -1,7 +1,15 @@
 #!/usr/bin/env bash
 #
 # Build + sign + notarize the macOS `agents computer` helper and publish it as a
-# GitHub release asset for a tagged CLI version.
+# GitHub release asset on the helper's OWN tag, `computer-mac/v<x.y.z>`.
+#
+# It used to publish to the CLI's `v<version>` tag, which broke the moment the
+# client was repointed at per-helper tags (RUSH-3100): `download.ts` resolves
+# `computer-mac/v<x.y.z>` from the floor in cli/src/lib/helper-versions.ts, so a
+# helper uploaded to `v1.22.49` sat at an address nothing ever requests. That
+# left NO path to cut a new computer-mac release at all (PHNX-3228). This is now
+# the symmetric counterpart of publish-computer-win.sh: one script per helper,
+# each cutting that helper's own tag, versioned independently of the CLI.
 #
 # WHY a script and not a GitHub Actions job (unlike the Windows helper): the mac
 # helper must be Developer-ID signed AND notarized, and GitHub-hosted macOS
@@ -29,8 +37,11 @@
 # the release home base the context is a no-op (it is guarded on its pass files),
 # and an interactive run signs with the usual Touch ID prompt as before.
 #
-# `version` defaults to cli/package.json's version; the asset is uploaded to
-# the matching `v<version>` release (created if it does not exist yet).
+# `version` is the HELPER's version and is required — it is deliberately NOT
+# defaulted from cli/package.json, because the helper no longer shares the CLI's
+# version line. After publishing, bump `computer-mac`'s floor in
+# cli/src/lib/helper-versions.ts: the tag makes the build downloadable, the floor
+# is what makes a CLI ask for it.
 set -euo pipefail
 
 CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"        # cli
@@ -43,11 +54,21 @@ die()  { printf '\033[31m[publish-mac-helper] %s\033[0m\n' "$*" >&2; exit 1; }
 
 [ "$(uname -s)" = "Darwin" ] || die "macOS only — the helper must be Developer-ID signed + notarized on a Mac with the identity."
 
-VERSION="${1:-$(jq -r .version "$CLI_DIR/package.json")}"
-[ -n "$VERSION" ] && [ "$VERSION" != "null" ] || die "could not resolve version (pass it as arg 1)"
-TAG="v$VERSION"
+VERSION="${1:-}"
+[ -n "$VERSION" ] || die "usage: $(basename "$0") <x.y.z>   (the helper's own version, not the CLI's)"
+[[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] \
+  || die "version must be bare X.Y.Z (the tag prefix is added for you), got: $VERSION"
+TAG="computer-mac/v$VERSION"
 
 command -v gh >/dev/null 2>&1 || die "gh CLI not found"
+
+# Helper releases are immutable: the upload below uses --clobber, so re-cutting an
+# existing tag would silently replace a binary an installed CLI already pins to
+# that exact version. Check locally first, then the remote.
+if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 \
+  || git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+  die "$TAG already exists. Helper releases are immutable -- cut the next patch instead."
+fi
 [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] \
   || die "notary creds missing. Run under: agents secrets exec apple.com -- $0 $VERSION"
 
@@ -69,7 +90,7 @@ ASSET_SHA="$ASSET_ZIP.sha256"
 if ! gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
   log "Creating release $TAG..."
   gh release create "$TAG" --repo "$REPO_SLUG" --verify-tag --title "$TAG" \
-    --notes "agents-cli $TAG. Assets include the macOS computer-helper .app (downloaded on demand by 'agents computer setup' / 'agents setup computer')." \
+    --notes "macOS computer-helper $VERSION. Downloaded on demand by 'agents computer setup' / 'agents setup computer'; resolved from the computer-mac floor in cli/src/lib/helper-versions.ts." \
     || die "gh release create failed"
 fi
 

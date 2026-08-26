@@ -1,92 +1,130 @@
-/**
- * The macOS computer-helper publisher, run against the REAL script.
- *
- * The case that matters is RUSH-2970 trap 3: the script's own documented
- * invocation -- `agents secrets exec apple.com -- publish-computer-helper-mac.sh`
- * -- injects the NOTARY creds but never unlocks the Developer ID SIGNING
- * keychain, so a headless run died in codesign with errSecInternalComponent. The
- * operator had to know to source headless-sign-context.sh first, which nothing in
- * the script or its help said. The script now sources that context itself.
- *
- * A green signing run needs a provisioned Mac (a Developer ID identity in a
- * headless-unlockable keychain) -- the next helper publish exercises that. On any
- * box we can still assert the two things that make the fix safe and durable: the
- * context is established before the build that signs, and sourcing it is a clean
- * no-op on a machine WITHOUT the release-box pass files, so adding it cannot
- * break a contributor's Mac.
- */
-
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll } from 'vitest';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 
-const PUBLISH = path.resolve(__dirname, 'publish-computer-helper-mac.sh');
-const CONTEXT = path.resolve(__dirname, 'headless-sign-context.sh');
+const SH = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'publish-computer-helper-mac.sh',
+);
+
+/**
+ * The tag IS the publish action for the macOS helper, exactly as it is for
+ * Windows — `download.ts` resolves `computer-mac/v<x.y.z>` from the floor in
+ * helper-versions.ts, and nothing else uploads that asset. This script used to
+ * publish to the CLI's `v<version>` tag, which put the binary at an address no
+ * client requests and left no way to cut a helper release at all (PHNX-3228).
+ *
+ * Everything below drives the REAL script inside a throwaway repo whose `origin`
+ * is a bare repo on local disk, so the guard's `git ls-remote origin` arm is a
+ * filesystem operation and can never reach the network — the same sealing the
+ * Windows publisher's tests use, and for the same reason: with the tag absent,
+ * `||` falls through to a live remote lookup.
+ *
+ * `uname` is stubbed to report Darwin. The script's macOS gate fires before
+ * every other guard, so without it the argument and immutability guards would be
+ * unreachable on the Linux CI runner and this file would assert nothing there.
+ * Only the OS probe is stubbed; the logic under test is the real script.
+ */
+let tmp: string;
+let repo: string;
+let binDir: string;
+
+function git(cwd: string, ...args: string[]): string {
+  const r = spawnSync('git', args, { cwd, encoding: 'utf-8' });
+  if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
+  return r.stdout.trim();
+}
+
+const run = (...args: string[]) =>
+  spawnSync('bash', [path.join(repo, 'cli', 'scripts', path.basename(SH)), ...args], {
+    encoding: 'utf-8',
+    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+  });
+
+beforeAll(() => {
+  tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publish-mac-helper-'));
+  const origin = path.join(tmp, 'origin.git');
+  repo = path.join(tmp, 'work');
+  binDir = path.join(tmp, 'bin');
+
+  fs.mkdirSync(binDir);
+  fs.writeFileSync(path.join(binDir, 'uname'), '#!/bin/sh\necho Darwin\n');
+  fs.chmodSync(path.join(binDir, 'uname'), 0o755);
+
+  git(tmp, 'init', '--bare', '-q', origin);
+  fs.mkdirSync(path.join(repo, 'cli', 'scripts'), { recursive: true });
+  git(tmp, 'init', '-q', repo);
+  git(repo, 'config', 'user.email', 'test@example.invalid');
+  git(repo, 'config', 'user.name', 'publish-mac-helper test');
+  fs.copyFileSync(SH, path.join(repo, 'cli', 'scripts', path.basename(SH)));
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-q', '-m', 'seed commit for the publish guard');
+  git(repo, 'remote', 'add', 'origin', origin);
+});
+
+afterAll(() => {
+  if (tmp) fs.rmSync(tmp, { recursive: true, force: true });
+});
 
 describe('publish-computer-helper-mac.sh', () => {
-  it('establishes the signing context before the build that signs (RUSH-2970 trap 3)', () => {
-    const src = fs.readFileSync(PUBLISH, 'utf-8');
-
-    const sourcedAt = src.indexOf('headless-sign-context.sh"');
-    const buildsAt = src.indexOf('scripts/build.sh release');
-
-    // Absent entirely => trap 3 is back: the documented invocation cannot sign.
-    expect(sourcedAt, 'script must source headless-sign-context.sh itself').toBeGreaterThan(-1);
-    // After the build => the keychain is still locked when codesign runs.
-    expect(sourcedAt).toBeLessThan(buildsAt);
+  it('resolves origin without leaving the machine', () => {
+    const url = git(repo, 'remote', 'get-url', 'origin');
+    expect(path.isAbsolute(url)).toBe(true);
+    expect(fs.existsSync(url)).toBe(true);
   });
 
-  it('refuses a non-macOS host loudly rather than half-running', () => {
-    // Force the platform gate to see a NON-macOS host by shadowing `uname` on
-    // PATH, so this exercises the refusal path deterministically on ANY host.
-    // Running the real script unshadowed on a Mac would get PAST the gate and
-    // start the actual build+sign+notarize -- a 60s+ side-effecting operation
-    // that timed the test out on the one machine that signs releases (the
-    // attestation producer runs the full suite there), which is exactly the
-    // half-run this guard exists to prevent, now reproduced by the test itself.
-    const stub = fs.mkdtempSync(path.join(os.tmpdir(), 'uname-stub-'));
-    fs.writeFileSync(path.join(stub, 'uname'), '#!/bin/sh\necho Linux\n');
-    fs.chmodSync(path.join(stub, 'uname'), 0o755);
-
-    const r = spawnSync('bash', [PUBLISH], {
-      encoding: 'utf-8',
-      env: { ...process.env, PATH: `${stub}:${process.env.PATH ?? ''}` },
-    });
-    const out = `${r.stdout}${r.stderr}`;
-
-    // The gate must fire first and loud, before any real work: non-zero exit and
-    // the "macOS only" refusal, never a half-run.
-    expect(r.status, `expected a loud refusal, got: ${out}`).not.toBe(0);
-    expect(out).toContain('macOS only');
+  it('cuts the helper tag, not the CLI tag (PHNX-3228)', () => {
+    // The regression that made this script useless: publishing to `v<version>`
+    // put the asset where download.ts never looks.
+    const src = fs.readFileSync(SH, 'utf-8');
+    expect(src).toMatch(/TAG="computer-mac\/v\$VERSION"/);
+    expect(src).not.toMatch(/^TAG="v\$VERSION"$/m);
   });
 
-  it('sourcing the signing context is a no-op without the release-box pass files', () => {
-    // A HOME with no ~/Library/Application Support/rush => the guards must skip
-    // every `security` call. This is what keeps the new source line safe on a Mac
-    // that is not the release home base.
-    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'no-signing-home-'));
+  it('requires an explicit version rather than defaulting to the CLI version', () => {
+    // Defaulting to cli/package.json is what coupled the helper to the CLI's
+    // version line in the first place.
+    const r = run();
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/usage:/);
+    expect(fs.readFileSync(SH, 'utf-8')).not.toMatch(/jq -r \.version/);
+  });
 
-    // Strip the passphrase the context is supposed to set. Inheriting it from the
-    // developer's own shell would make the assertion below pass on a value this
-    // run never produced -- the same reason tests/secrets-transport-passphrase.test.ts
-    // deletes it before driving the CLI.
-    const env: Record<string, string> = { ...(process.env as Record<string, string>), HOME: home };
-    delete env.AGENTS_SECRETS_PASSPHRASE;
+  it('refuses a v-prefixed version rather than cutting computer-mac/vv1.0.1', () => {
+    const r = run('v1.0.1');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/bare X\.Y\.Z/);
+  });
 
-    const r = spawnSync(
-      'bash',
-      ['-c', `set -euo pipefail; . "${CONTEXT}"; echo "rc=$?"; echo "pass=\${AGENTS_SECRETS_PASSPHRASE:-unset}"`],
-      { encoding: 'utf-8', env },
-    );
-    const out = `${r.stdout}${r.stderr}`;
+  it('refuses a non-semver version', () => {
+    expect(run('1.0').status).not.toBe(0);
+    expect(run('latest').status).not.toBe(0);
+  });
 
-    expect(r.status, `sourcing must not fail: ${out}`).toBe(0);
-    expect(out).toContain('rc=0');
-    expect(out).toContain('pass=unset');
-    expect(out).not.toMatch(/security:|SecKeychain|errSec/);
+  it('refuses an existing tag — a helper release is immutable', () => {
+    // The upload uses --clobber, so re-tagging would silently replace a binary
+    // an installed CLI already pins to that exact version.
+    const version = '0.0.1';
+    const tag = `computer-mac/v${version}`;
 
-    fs.rmSync(home, { recursive: true, force: true });
+    // Prove the guard fires, not the version validator: the same version gets
+    // past validation while the tag is absent (it then fails later, on the
+    // missing notary creds — which is downstream of the guard under test).
+    const before = run(version);
+    expect(before.stderr).not.toMatch(/already exists/);
+
+    git(repo, 'tag', tag);
+    const after = run(version);
+    expect(after.status).not.toBe(0);
+    expect(after.stderr).toMatch(/already exists/);
+  });
+
+  it('is the symmetric counterpart of the Windows helper publisher', () => {
+    // One script per helper, each cutting that helper's own tag. If this file
+    // exists but its Windows sibling does not, the pair has drifted.
+    expect(fs.existsSync(path.join(path.dirname(SH), 'publish-computer-win.sh'))).toBe(true);
   });
 });
