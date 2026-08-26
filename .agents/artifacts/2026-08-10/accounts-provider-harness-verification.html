@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>agents-cli: accounts, providers &amp; custom harnesses — verification + OpenRouter and ChatGPT-subscription flows</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span></div>
+<h1>agents-cli: accounts, providers &amp; custom harnesses — verification + OpenRouter and ChatGPT-subscription flows</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/74d0c9ca-00a6-4340-80d1-d4b353bee964">74d0c9ca</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-10</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a href="#1-environment"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>1. Environment</a><a href="#2-the-three-primitives-how-to-actually-use-them"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>2. The three primitives (how to actually use them)</a><a href="#3-flow-diagram"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>3. Flow diagram</a><a href="#4-flow-a-openrouter-api-key-the-accounts-feature"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>4. Flow A — OpenRouter API key (the accounts feature)</a><a href="#5-flow-b-opencode-on-the-chatgpt-codex-subscription-no-api-key"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>5. Flow B — opencode on the ChatGPT/Codex subscription (no API key)</a><a href="#6-the-opencode-no-such-column-name-error-root-cause-fix"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>6. The opencode &quot;no such column: name&quot; error — root cause + fix</a><a href="#findings"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Findings</a><a href="#evidence"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Evidence</a><a href="#9-state-left-in-place-cleanup"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>9. State left in place / cleanup</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2>
+<ul>
+<li><strong>What this documents:</strong> a hands-on verification of the agents-cli <strong>accounts / provider / custom-harness</strong> primitives on the <em>latest</em> code, run on <strong>mac-mini</strong>, plus a second flow that runs <strong>opencode on the ChatGPT/Codex subscription with no API key</strong>.</li>
+<li><strong>Audience:</strong> maintainers of agents-cli (this is an internal verification + bug report, not end-user docs).</li>
+<li><strong>Result:</strong> the API-key account flow works end-to-end for the <strong>claude</strong> and <strong>codex</strong> hosts; the <strong>opencode</strong> harness has a <strong>model-pin bug</strong>; opencode's own DB was <strong>corrupt</strong> (fixed); and the <strong>ChatGPT-subscription (OAuth, no API key)</strong> flow for opencode <strong>works</strong>.</li>
+<li><strong>Four concrete findings/bugs</strong> are listed in §7 with <code>file:line</code> evidence.</li>
+</ul>
+<h2 id="1-environment">1. Environment</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Value</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Test box</td>
+<td><code>mac-mini</code> (<code>/Users/user</code>)</td>
+</tr>
+<tr>
+<td>Build under test</td>
+<td><code>agents-dev</code> = <code>0.0.0-dev.523eb8d52</code> (latest <code>origin/main</code> HEAD at test time)</td>
+</tr>
+<tr>
+<td>How it was built</td>
+<td>fast-forwarded the mac-mini checkout (was 412 commits behind), then <code>apps/cli/scripts/install.sh --skip-tests</code></td>
+</tr>
+<tr>
+<td>Production CLI</td>
+<td>untouched — everything ran as <code>agents-dev</code>, never <code>agents</code></td>
+</tr>
+</tbody></table>
+<p><code>agents-dev</code> is a side-by-side dev install; the shared daemon was left on production code.</p>
+<h2 id="2-the-three-primitives-how-to-actually-use-them">2. The three primitives (how to actually use them)</h2>
+<p>There is <strong>no</strong> standalone <code>agents provider</code> command. "Provider" is a value in a fixed registry, selected with <code>--provider</code> on <code>accounts add</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Primitive</th>
+<th>Command</th>
+<th>What it is</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>account</strong></td>
+<td><code>agents accounts add &lt;name&gt; --provider &lt;p&gt; --auth api-key|setup-token|bearer-token</code></td>
+<td>A durable, device-local credential bundle (policy <code>never</code>, no Touch ID).</td>
+</tr>
+<tr>
+<td><strong>provider</strong></td>
+<td>the <code>--provider</code> value (<code>openrouter</code>, <code>anthropic</code>, <code>openai</code>, <code>xai</code>, <code>deepinfra</code>, <code>google</code>, <code>proxy</code>, <code>litellm</code>, <code>vllm</code>, <code>ollama</code>, …)</td>
+<td>Registry entry that maps a credential onto each host's env vars.</td>
+</tr>
+<tr>
+<td><strong>harness</strong></td>
+<td><code>agents harness fork &lt;native&gt; &lt;name&gt; --model &lt;id&gt; [--account &lt;acct&gt;]</code></td>
+<td>A named <code>(host CLI + model)</code> combo you run with <code>agents run &lt;name&gt;</code>. Omit <code>--account</code> to use the host's <strong>native</strong> login.</td>
+</tr>
+</tbody></table>
+<p><strong>How <code>openrouter</code> maps onto hosts</strong> (<code>src/lib/account-provider-registry.ts</code>):</p>
+<table>
+<thead>
+<tr>
+<th>Host</th>
+<th>Auth env</th>
+<th>Base-URL env</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>claude</td>
+<td><code>ANTHROPIC_AUTH_TOKEN</code></td>
+<td><code>ANTHROPIC_BASE_URL=https://openrouter.ai/api</code></td>
+</tr>
+<tr>
+<td>codex</td>
+<td><code>OPENAI_API_KEY</code></td>
+<td><code>OPENAI_BASE_URL=https://openrouter.ai/api/v1</code></td>
+</tr>
+<tr>
+<td>opencode</td>
+<td><code>OPENROUTER_API_KEY</code></td>
+<td>—</td>
+</tr>
+</tbody></table>
+<h2 id="3-flow-diagram">3. Flow diagram</h2>
+<figure>
+<svg viewBox="0 0 900 210" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="account to provider to harness to run flow">
+  <defs><marker id="h" markerWidth="8" markerHeight="8" refX="7" refY="3" orient="auto"><path d="M0,0 L7,3 L0,6 Z" fill="#a3e635"></path></marker></defs>
+  <rect x="10" y="60" width="180" height="70" rx="8" fill="#0f1720" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="26" y="90" fill="#e5e7eb" font-family="ui-monospace,monospace" font-size="14">browser</text><text x="26" y="110" fill="#9ca3af" font-family="ui-monospace,monospace" font-size="11">provision OpenRouter key</text>
+  <line x1="190" y1="95" x2="235" y2="95" stroke="#a3e635" stroke-width="1.5" marker-end="url(#h)"></line>
+  <rect x="240" y="60" width="180" height="70" rx="8" fill="#0f1720" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="256" y="90" fill="#e5e7eb" font-family="ui-monospace,monospace" font-size="14">accounts add</text><text x="256" y="110" fill="#9ca3af" font-family="ui-monospace,monospace" font-size="11">--provider openrouter</text>
+  <line x1="420" y1="95" x2="465" y2="95" stroke="#a3e635" stroke-width="1.5" marker-end="url(#h)"></line>
+  <rect x="470" y="60" width="180" height="70" rx="8" fill="#0f1720" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="486" y="90" fill="#e5e7eb" font-family="ui-monospace,monospace" font-size="14">harness fork</text><text x="486" y="110" fill="#9ca3af" font-family="ui-monospace,monospace" font-size="11">--account + --model</text>
+  <line x1="650" y1="95" x2="695" y2="95" stroke="#a3e635" stroke-width="1.5" marker-end="url(#h)"></line>
+  <rect x="700" y="60" width="190" height="70" rx="8" fill="#0f1720" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="716" y="90" fill="#e5e7eb" font-family="ui-monospace,monospace" font-size="14">agents run &lt;name&gt;</text><text x="716" y="110" fill="#9ca3af" font-family="ui-monospace,monospace" font-size="11">credential injected</text>
+</svg>
+<figcaption>Provisioned credential → durable account → custom harness → run. The credential is read headlessly and injected into the host CLI's env.</figcaption>
+</figure><h2 id="4-flow-a-openrouter-api-key-the-accounts-feature">4. Flow A — OpenRouter API key (the accounts feature)</h2>
+<ol>
+<li>Provisioned a <strong>new</strong> OpenRouter key (<code>agents-cli-test-2026-08-10</code>, $5 cap) via the Comet <strong>Work</strong> profile (already logged into OpenRouter). The key was captured straight to a file, never echoed to the transcript.</li>
+<li>Loaded it into a file-backed bundle and created the account:</li>
+</ol>
+<pre><code>agents secrets create ork-file --backend file
+cat key.txt | agents secrets add ork-file KEY --value-stdin --type api-key
+agents accounts add openrouter-test --provider openrouter --auth api-key --from-secrets ork-file:KEY
+# -&gt; secretPresent: true, policy: never
+</code></pre>
+<ol>
+<li>Forked three harnesses onto that one account and ran each:</li>
+</ol>
+<table>
+<thead>
+<tr>
+<th>Harness</th>
+<th>Host · model</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>or-claude</code></td>
+<td>claude · <code>anthropic/claude-haiku-4.5</code></td>
+<td><strong>PONG</strong> — credential injected, real response</td>
+</tr>
+<tr>
+<td><code>or-codex</code></td>
+<td>codex · <code>openai/gpt-4o-mini</code></td>
+<td><strong>PONG</strong> (needs a git-repo cwd; codex refuses a non-trusted dir)</td>
+</tr>
+<tr>
+<td><code>or-opencode</code></td>
+<td>opencode · <code>anthropic/claude-haiku-4.5</code></td>
+<td>failed — see §6 (DB) and §7 (model-pin)</td>
+</tr>
+</tbody></table>
+<p>The credential is a <strong>keychain, policy <code>never</code></strong> bundle and was read <strong>headlessly over SSH</strong> — the accounts feature's core promise holds.</p>
+<h2 id="5-flow-b-opencode-on-the-chatgpt-codex-subscription-no-api-key">5. Flow B — opencode on the ChatGPT/Codex subscription (no API key)</h2>
+<p>opencode's OpenAI provider offers three login methods: <code>ChatGPT Pro/Plus (browser)</code>, <strong><code>ChatGPT Pro/Plus (headless)</code></strong>, and <code>Manually enter API Key</code>. The headless method is a <strong>device-code OAuth</strong> against <code>https://auth.openai.com/codex/device</code> — the same endpoint Codex uses.</p>
+<pre><code>opencode auth login --provider openai --method "ChatGPT Pro/Plus (headless)"
+#   Go to: https://auth.openai.com/codex/device
+#   Enter code: XXXX-XXXXX      (authorize in a browser signed into the ChatGPT account)
+</code></pre>
+<p>Authorized the device code in the Work browser (already signed into the OpenAI account <code>user@example.com</code>, which holds the subscription). Result:</p>
+<ul>
+<li><code>auth.json</code> gained an <code>openai</code> credential of <strong><code>type: oauth</code></strong> (access + refresh + accountId) — <strong>not</strong> an API key.</li>
+<li><code>opencode auth list</code> → <code>OpenAI oauth</code>.</li>
+<li>Direct run on the subscription:</li>
+</ul>
+<pre><code>opencode run --model openai/gpt-5.4-mini "Reply with exactly: PONG"   # -&gt; PONG
+</code></pre>
+<ul>
+<li>Through an agents harness (<code>oc-sub</code>, forked from opencode, <strong>no <code>--account</code></strong>), with the model set via a project <code>opencode.json</code> (to work around the bug in §7.2): <code>agents run oc-sub</code> → <code>gpt-5.4-mini</code> → <strong>PONG</strong>.</li>
+</ul>
+<p>So: <strong>yes</strong>, opencode can run on the Codex/OpenAI subscription with no API key. In agents-cli terms this is a <strong>native-login</strong> harness (auth lives in opencode's <code>auth.json</code>), distinct from a <code>--provider</code>/<code>--account</code> credential bundle.</p>
+<h2 id="6-the-opencode-no-such-column-name-error-root-cause-fix">6. The opencode "no such column: name" error — root cause + fix</h2>
+<p>The <code>or-opencode</code> run failed with <code>Error: no such column: name</code>. This was <strong>not</strong> the accounts feature — <strong><code>opencode auth list</code> itself failed the same way</strong>, so opencode's own state was broken.</p>
+<p><strong>Root cause:</strong> opencode's local DB (<code>~/.local/share/opencode/opencode.db</code>) had a schema <strong>behind</strong> the installed opencode <code>1.18.10</code> binary. The binary queries a <code>name</code> column on the OAuth-account table <code>control_account</code>, but the on-disk schema lacked it; the drizzle migration journal (<code>__drizzle_migrations</code>, 3 rows with empty hashes; opencode's own <code>migration</code> table empty) was drifted, so the adding-<code>name</code> migration never applied.</p>
+<p><strong>Fix (reversible):</strong> backed up and reset the DB so opencode recreated it at the current schema.</p>
+<pre><code>cd ~/.local/share/opencode
+cp opencode.db opencode.db.broken-2026-08-10.bak
+mv opencode.db opencode.db-shm opencode.db-wal /tmp/opencode-db-backup/
+opencode auth list      # recreates the schema -&gt; now succeeds; auth.json (Z.AI keys) preserved
+</code></pre>
+<p>This is an <strong>opencode-internal migration bug</strong>, unrelated to agents-cli. The reset loses opencode session history (backed up); <code>control_account</code>/<code>migration</code> were empty, so no OAuth accounts were lost.</p>
+<h2 id="findings">Findings</h2>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>Severity</th>
+<th>Finding</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>7.1</td>
+<td>Low</td>
+<td><code>agents accounts add --from-secrets &lt;bad-or-locked-bundle&gt;</code> and <code>accounts inspect &lt;missing&gt;</code> <strong>crash with an uncaught Node exception</strong> (raw <code>throw</code>, <code>Node.js vXX</code> stack) instead of a clean CLI error.</td>
+</tr>
+<tr>
+<td>7.2</td>
+<td>Medium</td>
+<td><strong>opencode custom-harness model pin is ignored.</strong> Models are injected via a per-host env var in <code>MODEL_ENV_KEYS</code> (<code>src/lib/profiles.ts:235</code> — <code>ANTHROPIC_MODEL</code>/<code>OPENAI_MODEL</code>/<code>GEMINI_MODEL</code>/<code>GROK_MODEL</code>). There is <strong>no opencode entry</strong>, and <code>--model</code> is not emitted for a custom harness, so <code>agents run &lt;opencode-harness&gt;</code> runs <code>opencode run --agent plan …</code> with <strong>no model</strong> and opencode falls back to its default (<code>glm-4.7</code>).</td>
+</tr>
+<tr>
+<td>7.3</td>
+<td>Info</td>
+<td><strong>Model-slug gotcha:</strong> <code>anthropic/claude-3.5-haiku</code> is not a valid OpenRouter slug (404 = model-not-found, not 401). Current slugs: <code>anthropic/claude-haiku-4.5</code>, <code>anthropic/claude-3-haiku</code>.</td>
+</tr>
+<tr>
+<td>7.4</td>
+<td>External</td>
+<td>opencode <code>1.18.10</code> ships a DB schema its migration runner didn't apply on an upgraded install → <code>no such column: name</code> breaks every opencode command (§6). opencode-side bug.</td>
+</tr>
+</tbody></table>
+<h2 id="evidence">Evidence</h2>
+<pre><code># --- Flow A: OpenRouter API-key account ---
+agents secrets create ork-file --backend file
+cat key.txt | agents secrets add ork-file KEY --value-stdin --type api-key
+agents accounts add openrouter-test --provider openrouter --auth api-key --from-secrets ork-file:KEY
+agents harness fork claude or-claude --model anthropic/claude-haiku-4.5 --account openrouter-test
+agents run or-claude "Reply with exactly: PONG"        # -&gt; PONG
+
+# --- Flow B: opencode on the ChatGPT subscription (no API key) ---
+opencode auth login --provider openai --method "ChatGPT Pro/Plus (headless)"   # authorize device code in a browser
+opencode run --model openai/gpt-5.4-mini "Reply with exactly: PONG"            # -&gt; PONG
+</code></pre>
+<h2 id="9-state-left-in-place-cleanup">9. State left in place / cleanup</h2>
+<ul>
+<li><strong>Removed:</strong> raw key files in <code>/tmp</code> on all boxes; the temp <code>ork-file</code> import bundle.</li>
+<li><strong>Kept (working):</strong> the <code>openrouter-test</code> account; harnesses <code>or-claude</code>, <code>or-codex</code>, <code>or-opencode</code>, <code>oc-sub</code>; opencode's <code>openai</code> OAuth (subscription) login; the OpenRouter key (<code>agents-cli-test-2026-08-10</code>, $5 cap); the opencode DB backup at <code>~/.local/share/opencode/opencode.db.broken-2026-08-10.bak</code>.</li>
+<li>All of the above can be torn down on request (<code>agents accounts remove</code>, <code>agents harness remove</code>, <code>opencode auth logout openai</code>, delete the OpenRouter key in the dashboard).</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogImFnZW50cy1jbGk6IGFjY291bnRzLCBwcm92aWRlcnMgJiBjdXN0b20gaGFybmVzc2VzIOKAlCB2ZXJpZmljYXRpb24gKyBPcGVuUm91dGVyIGFuZCBDaGF0R1BULXN1YnNjcmlwdGlvbiBmbG93cyIKc3VyZmFjZTogY2xpCi0tLQoKIyMgU3VtbWFyeQoKLSAqKldoYXQgdGhpcyBkb2N1bWVudHM6KiogYSBoYW5kcy1vbiB2ZXJpZmljYXRpb24gb2YgdGhlIGFnZW50cy1jbGkgKiphY2NvdW50cyAvIHByb3ZpZGVyIC8gY3VzdG9tLWhhcm5lc3MqKiBwcmltaXRpdmVzIG9uIHRoZSAqbGF0ZXN0KiBjb2RlLCBydW4gb24gKiptYWMtbWluaSoqLCBwbHVzIGEgc2Vjb25kIGZsb3cgdGhhdCBydW5zICoqb3BlbmNvZGUgb24gdGhlIENoYXRHUFQvQ29kZXggc3Vic2NyaXB0aW9uIHdpdGggbm8gQVBJIGtleSoqLgotICoqQXVkaWVuY2U6KiogbWFpbnRhaW5lcnMgb2YgYWdlbnRzLWNsaSAodGhpcyBpcyBhbiBpbnRlcm5hbCB2ZXJpZmljYXRpb24gKyBidWcgcmVwb3J0LCBub3QgZW5kLXVzZXIgZG9jcykuCi0gKipSZXN1bHQ6KiogdGhlIEFQSS1rZXkgYWNjb3VudCBmbG93IHdvcmtzIGVuZC10by1lbmQgZm9yIHRoZSAqKmNsYXVkZSoqIGFuZCAqKmNvZGV4KiogaG9zdHM7IHRoZSAqKm9wZW5jb2RlKiogaGFybmVzcyBoYXMgYSAqKm1vZGVsLXBpbiBidWcqKjsgb3BlbmNvZGUncyBvd24gREIgd2FzICoqY29ycnVwdCoqIChmaXhlZCk7IGFuZCB0aGUgKipDaGF0R1BULXN1YnNjcmlwdGlvbiAoT0F1dGgsIG5vIEFQSSBrZXkpKiogZmxvdyBmb3Igb3BlbmNvZGUgKip3b3JrcyoqLgotICoqRm91ciBjb25jcmV0ZSBmaW5kaW5ncy9idWdzKiogYXJlIGxpc3RlZCBpbiDCpzcgd2l0aCBgZmlsZTpsaW5lYCBldmlkZW5jZS4KCiMjIDEuIEVudmlyb25tZW50Cgp8IEl0ZW0gfCBWYWx1ZSB8CnwgLS0tIHwgLS0tIHwKfCBUZXN0IGJveCB8IGBtYWMtbWluaWAgKGAvVXNlcnMvbXVxc2l0YCkgfAp8IEJ1aWxkIHVuZGVyIHRlc3QgfCBgYWdlbnRzLWRldmAgPSBgMC4wLjAtZGV2LjUyM2ViOGQ1MmAgKGxhdGVzdCBgb3JpZ2luL21haW5gIEhFQUQgYXQgdGVzdCB0aW1lKSB8CnwgSG93IGl0IHdhcyBidWlsdCB8IGZhc3QtZm9yd2FyZGVkIHRoZSBtYWMtbWluaSBjaGVja291dCAod2FzIDQxMiBjb21taXRzIGJlaGluZCksIHRoZW4gYGFwcHMvY2xpL3NjcmlwdHMvaW5zdGFsbC5zaCAtLXNraXAtdGVzdHNgIHwKfCBQcm9kdWN0aW9uIENMSSB8IHVudG91Y2hlZCDigJQgZXZlcnl0aGluZyByYW4gYXMgYGFnZW50cy1kZXZgLCBuZXZlciBgYWdlbnRzYCB8CgpgYWdlbnRzLWRldmAgaXMgYSBzaWRlLWJ5LXNpZGUgZGV2IGluc3RhbGw7IHRoZSBzaGFyZWQgZGFlbW9uIHdhcyBsZWZ0IG9uIHByb2R1Y3Rpb24gY29kZS4KCiMjIDIuIFRoZSB0aHJlZSBwcmltaXRpdmVzIChob3cgdG8gYWN0dWFsbHkgdXNlIHRoZW0pCgpUaGVyZSBpcyAqKm5vKiogc3RhbmRhbG9uZSBgYWdlbnRzIHByb3ZpZGVyYCBjb21tYW5kLiAiUHJvdmlkZXIiIGlzIGEgdmFsdWUgaW4gYSBmaXhlZCByZWdpc3RyeSwgc2VsZWN0ZWQgd2l0aCBgLS1wcm92aWRlcmAgb24gYGFjY291bnRzIGFkZGAuCgp8IFByaW1pdGl2ZSB8IENvbW1hbmQgfCBXaGF0IGl0IGlzIHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8ICoqYWNjb3VudCoqIHwgYGFnZW50cyBhY2NvdW50cyBhZGQgPG5hbWU+IC0tcHJvdmlkZXIgPHA+IC0tYXV0aCBhcGkta2V5XHxzZXR1cC10b2tlblx8YmVhcmVyLXRva2VuYCB8IEEgZHVyYWJsZSwgZGV2aWNlLWxvY2FsIGNyZWRlbnRpYWwgYnVuZGxlIChwb2xpY3kgYG5ldmVyYCwgbm8gVG91Y2ggSUQpLiB8CnwgKipwcm92aWRlcioqIHwgdGhlIGAtLXByb3ZpZGVyYCB2YWx1ZSAoYG9wZW5yb3V0ZXJgLCBgYW50aHJvcGljYCwgYG9wZW5haWAsIGB4YWlgLCBgZGVlcGluZnJhYCwgYGdvb2dsZWAsIGBwcm94eWAsIGBsaXRlbGxtYCwgYHZsbG1gLCBgb2xsYW1hYCwg4oCmKSB8IFJlZ2lzdHJ5IGVudHJ5IHRoYXQgbWFwcyBhIGNyZWRlbnRpYWwgb250byBlYWNoIGhvc3QncyBlbnYgdmFycy4gfAp8ICoqaGFybmVzcyoqIHwgYGFnZW50cyBoYXJuZXNzIGZvcmsgPG5hdGl2ZT4gPG5hbWU+IC0tbW9kZWwgPGlkPiBbLS1hY2NvdW50IDxhY2N0Pl1gIHwgQSBuYW1lZCBgKGhvc3QgQ0xJICsgbW9kZWwpYCBjb21ibyB5b3UgcnVuIHdpdGggYGFnZW50cyBydW4gPG5hbWU+YC4gT21pdCBgLS1hY2NvdW50YCB0byB1c2UgdGhlIGhvc3QncyAqKm5hdGl2ZSoqIGxvZ2luLiB8CgoqKkhvdyBgb3BlbnJvdXRlcmAgbWFwcyBvbnRvIGhvc3RzKiogKGBzcmMvbGliL2FjY291bnQtcHJvdmlkZXItcmVnaXN0cnkudHNgKToKCnwgSG9zdCB8IEF1dGggZW52IHwgQmFzZS1VUkwgZW52IHwKfCAtLS0gfCAtLS0gfCAtLS0gfAp8IGNsYXVkZSB8IGBBTlRIUk9QSUNfQVVUSF9UT0tFTmAgfCBgQU5USFJPUElDX0JBU0VfVVJMPWh0dHBzOi8vb3BlbnJvdXRlci5haS9hcGlgIHwKfCBjb2RleCB8IGBPUEVOQUlfQVBJX0tFWWAgfCBgT1BFTkFJX0JBU0VfVVJMPWh0dHBzOi8vb3BlbnJvdXRlci5haS9hcGkvdjFgIHwKfCBvcGVuY29kZSB8IGBPUEVOUk9VVEVSX0FQSV9LRVlgIHwg4oCUIHwKCiMjIDMuIEZsb3cgZGlhZ3JhbQoKPGZpZ3VyZT4KPHN2ZyB2aWV3Qm94PSIwIDAgOTAwIDIxMCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9ImFjY291bnQgdG8gcHJvdmlkZXIgdG8gaGFybmVzcyB0byBydW4gZmxvdyI+CiAgPGRlZnM+PG1hcmtlciBpZD0iaCIgbWFya2VyV2lkdGg9IjgiIG1hcmtlckhlaWdodD0iOCIgcmVmWD0iNyIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEw3LDMgTDAsNiBaIiBmaWxsPSIjYTNlNjM1Ii8+PC9tYXJrZXI+PC9kZWZzPgogIDxyZWN0IHg9IjEwIiB5PSI2MCIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiMwZjE3MjAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyNiIgeT0iOTAiIGZpbGw9IiNlNWU3ZWIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij5icm93c2VyPC90ZXh0Pjx0ZXh0IHg9IjI2IiB5PSIxMTAiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5wcm92aXNpb24gT3BlblJvdXRlciBrZXk8L3RleHQ+CiAgPGxpbmUgeDE9IjE5MCIgeTE9Ijk1IiB4Mj0iMjM1IiB5Mj0iOTUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjaCkiLz4KICA8cmVjdCB4PSIyNDAiIHk9IjYwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzBmMTcyMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjI1NiIgeT0iOTAiIGZpbGw9IiNlNWU3ZWIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij5hY2NvdW50cyBhZGQ8L3RleHQ+PHRleHQgeD0iMjU2IiB5PSIxMTAiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj4tLXByb3ZpZGVyIG9wZW5yb3V0ZXI8L3RleHQ+CiAgPGxpbmUgeDE9IjQyMCIgeTE9Ijk1IiB4Mj0iNDY1IiB5Mj0iOTUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjaCkiLz4KICA8cmVjdCB4PSI0NzAiIHk9IjYwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjcwIiByeD0iOCIgZmlsbD0iIzBmMTcyMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjQ4NiIgeT0iOTAiIGZpbGw9IiNlNWU3ZWIiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij5oYXJuZXNzIGZvcms8L3RleHQ+PHRleHQgeD0iNDg2IiB5PSIxMTAiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj4tLWFjY291bnQgKyAtLW1vZGVsPC90ZXh0PgogIDxsaW5lIHgxPSI2NTAiIHkxPSI5NSIgeDI9IjY5NSIgeTI9Ijk1IiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2gpIi8+CiAgPHJlY3QgeD0iNzAwIiB5PSI2MCIgd2lkdGg9IjE5MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9IiMwZjE3MjAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI3MTYiIHk9IjkwIiBmaWxsPSIjZTVlN2ViIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCI+YWdlbnRzIHJ1biAmbHQ7bmFtZSZndDs8L3RleHQ+PHRleHQgeD0iNzE2IiB5PSIxMTAiIGZpbGw9IiM5Y2EzYWYiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj5jcmVkZW50aWFsIGluamVjdGVkPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+UHJvdmlzaW9uZWQgY3JlZGVudGlhbCDihpIgZHVyYWJsZSBhY2NvdW50IOKGkiBjdXN0b20gaGFybmVzcyDihpIgcnVuLiBUaGUgY3JlZGVudGlhbCBpcyByZWFkIGhlYWRsZXNzbHkgYW5kIGluamVjdGVkIGludG8gdGhlIGhvc3QgQ0xJJ3MgZW52LjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyA0LiBGbG93IEEg4oCUIE9wZW5Sb3V0ZXIgQVBJIGtleSAodGhlIGFjY291bnRzIGZlYXR1cmUpCgoxLiBQcm92aXNpb25lZCBhICoqbmV3KiogT3BlblJvdXRlciBrZXkgKGBhZ2VudHMtY2xpLXRlc3QtMjAyNi0wOC0xMGAsICQ1IGNhcCkgdmlhIHRoZSBDb21ldCAqKldvcmsqKiBwcm9maWxlIChhbHJlYWR5IGxvZ2dlZCBpbnRvIE9wZW5Sb3V0ZXIpLiBUaGUga2V5IHdhcyBjYXB0dXJlZCBzdHJhaWdodCB0byBhIGZpbGUsIG5ldmVyIGVjaG9lZCB0byB0aGUgdHJhbnNjcmlwdC4KMi4gTG9hZGVkIGl0IGludG8gYSBmaWxlLWJhY2tlZCBidW5kbGUgYW5kIGNyZWF0ZWQgdGhlIGFjY291bnQ6CgpgYGBiYXNoCmFnZW50cyBzZWNyZXRzIGNyZWF0ZSBvcmstZmlsZSAtLWJhY2tlbmQgZmlsZQpjYXQga2V5LnR4dCB8IGFnZW50cyBzZWNyZXRzIGFkZCBvcmstZmlsZSBLRVkgLS12YWx1ZS1zdGRpbiAtLXR5cGUgYXBpLWtleQphZ2VudHMgYWNjb3VudHMgYWRkIG9wZW5yb3V0ZXItdGVzdCAtLXByb3ZpZGVyIG9wZW5yb3V0ZXIgLS1hdXRoIGFwaS1rZXkgLS1mcm9tLXNlY3JldHMgb3JrLWZpbGU6S0VZCiMgLT4gc2VjcmV0UHJlc2VudDogdHJ1ZSwgcG9saWN5OiBuZXZlcgpgYGAKCjMuIEZvcmtlZCB0aHJlZSBoYXJuZXNzZXMgb250byB0aGF0IG9uZSBhY2NvdW50IGFuZCByYW4gZWFjaDoKCnwgSGFybmVzcyB8IEhvc3QgwrcgbW9kZWwgfCBSZXN1bHQgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgYG9yLWNsYXVkZWAgfCBjbGF1ZGUgwrcgYGFudGhyb3BpYy9jbGF1ZGUtaGFpa3UtNC41YCB8ICoqUE9ORyoqIOKAlCBjcmVkZW50aWFsIGluamVjdGVkLCByZWFsIHJlc3BvbnNlIHwKfCBgb3ItY29kZXhgIHwgY29kZXggwrcgYG9wZW5haS9ncHQtNG8tbWluaWAgfCAqKlBPTkcqKiAobmVlZHMgYSBnaXQtcmVwbyBjd2Q7IGNvZGV4IHJlZnVzZXMgYSBub24tdHJ1c3RlZCBkaXIpIHwKfCBgb3Itb3BlbmNvZGVgIHwgb3BlbmNvZGUgwrcgYGFudGhyb3BpYy9jbGF1ZGUtaGFpa3UtNC41YCB8IGZhaWxlZCDigJQgc2VlIMKnNiAoREIpIGFuZCDCpzcgKG1vZGVsLXBpbikgfAoKVGhlIGNyZWRlbnRpYWwgaXMgYSAqKmtleWNoYWluLCBwb2xpY3kgYG5ldmVyYCoqIGJ1bmRsZSBhbmQgd2FzIHJlYWQgKipoZWFkbGVzc2x5IG92ZXIgU1NIKiog4oCUIHRoZSBhY2NvdW50cyBmZWF0dXJlJ3MgY29yZSBwcm9taXNlIGhvbGRzLgoKIyMgNS4gRmxvdyBCIOKAlCBvcGVuY29kZSBvbiB0aGUgQ2hhdEdQVC9Db2RleCBzdWJzY3JpcHRpb24gKG5vIEFQSSBrZXkpCgpvcGVuY29kZSdzIE9wZW5BSSBwcm92aWRlciBvZmZlcnMgdGhyZWUgbG9naW4gbWV0aG9kczogYENoYXRHUFQgUHJvL1BsdXMgKGJyb3dzZXIpYCwgKipgQ2hhdEdQVCBQcm8vUGx1cyAoaGVhZGxlc3MpYCoqLCBhbmQgYE1hbnVhbGx5IGVudGVyIEFQSSBLZXlgLiBUaGUgaGVhZGxlc3MgbWV0aG9kIGlzIGEgKipkZXZpY2UtY29kZSBPQXV0aCoqIGFnYWluc3QgYGh0dHBzOi8vYXV0aC5vcGVuYWkuY29tL2NvZGV4L2RldmljZWAg4oCUIHRoZSBzYW1lIGVuZHBvaW50IENvZGV4IHVzZXMuCgpgYGBiYXNoCm9wZW5jb2RlIGF1dGggbG9naW4gLS1wcm92aWRlciBvcGVuYWkgLS1tZXRob2QgIkNoYXRHUFQgUHJvL1BsdXMgKGhlYWRsZXNzKSIKIyAgIEdvIHRvOiBodHRwczovL2F1dGgub3BlbmFpLmNvbS9jb2RleC9kZXZpY2UKIyAgIEVudGVyIGNvZGU6IFhYWFgtWFhYWFggICAgICAoYXV0aG9yaXplIGluIGEgYnJvd3NlciBzaWduZWQgaW50byB0aGUgQ2hhdEdQVCBhY2NvdW50KQpgYGAKCkF1dGhvcml6ZWQgdGhlIGRldmljZSBjb2RlIGluIHRoZSBXb3JrIGJyb3dzZXIgKGFscmVhZHkgc2lnbmVkIGludG8gdGhlIE9wZW5BSSBhY2NvdW50IGBtdXFzaXRuYXdhekBnbWFpbC5jb21gLCB3aGljaCBob2xkcyB0aGUgc3Vic2NyaXB0aW9uKS4gUmVzdWx0OgoKLSBgYXV0aC5qc29uYCBnYWluZWQgYW4gYG9wZW5haWAgY3JlZGVudGlhbCBvZiAqKmB0eXBlOiBvYXV0aGAqKiAoYWNjZXNzICsgcmVmcmVzaCArIGFjY291bnRJZCkg4oCUICoqbm90KiogYW4gQVBJIGtleS4KLSBgb3BlbmNvZGUgYXV0aCBsaXN0YCDihpIgYE9wZW5BSSBvYXV0aGAuCi0gRGlyZWN0IHJ1biBvbiB0aGUgc3Vic2NyaXB0aW9uOgoKYGBgYmFzaApvcGVuY29kZSBydW4gLS1tb2RlbCBvcGVuYWkvZ3B0LTUuNC1taW5pICJSZXBseSB3aXRoIGV4YWN0bHk6IFBPTkciICAgIyAtPiBQT05HCmBgYAoKLSBUaHJvdWdoIGFuIGFnZW50cyBoYXJuZXNzIChgb2Mtc3ViYCwgZm9ya2VkIGZyb20gb3BlbmNvZGUsICoqbm8gYC0tYWNjb3VudGAqKiksIHdpdGggdGhlIG1vZGVsIHNldCB2aWEgYSBwcm9qZWN0IGBvcGVuY29kZS5qc29uYCAodG8gd29yayBhcm91bmQgdGhlIGJ1ZyBpbiDCpzcuMik6IGBhZ2VudHMgcnVuIG9jLXN1YmAg4oaSIGBncHQtNS40LW1pbmlgIOKGkiAqKlBPTkcqKi4KClNvOiAqKnllcyoqLCBvcGVuY29kZSBjYW4gcnVuIG9uIHRoZSBDb2RleC9PcGVuQUkgc3Vic2NyaXB0aW9uIHdpdGggbm8gQVBJIGtleS4gSW4gYWdlbnRzLWNsaSB0ZXJtcyB0aGlzIGlzIGEgKipuYXRpdmUtbG9naW4qKiBoYXJuZXNzIChhdXRoIGxpdmVzIGluIG9wZW5jb2RlJ3MgYGF1dGguanNvbmApLCBkaXN0aW5jdCBmcm9tIGEgYC0tcHJvdmlkZXJgL2AtLWFjY291bnRgIGNyZWRlbnRpYWwgYnVuZGxlLgoKIyMgNi4gVGhlIG9wZW5jb2RlICJubyBzdWNoIGNvbHVtbjogbmFtZSIgZXJyb3Ig4oCUIHJvb3QgY2F1c2UgKyBmaXgKClRoZSBgb3Itb3BlbmNvZGVgIHJ1biBmYWlsZWQgd2l0aCBgRXJyb3I6IG5vIHN1Y2ggY29sdW1uOiBuYW1lYC4gVGhpcyB3YXMgKipub3QqKiB0aGUgYWNjb3VudHMgZmVhdHVyZSDigJQgKipgb3BlbmNvZGUgYXV0aCBsaXN0YCBpdHNlbGYgZmFpbGVkIHRoZSBzYW1lIHdheSoqLCBzbyBvcGVuY29kZSdzIG93biBzdGF0ZSB3YXMgYnJva2VuLgoKKipSb290IGNhdXNlOioqIG9wZW5jb2RlJ3MgbG9jYWwgREIgKGB+Ly5sb2NhbC9zaGFyZS9vcGVuY29kZS9vcGVuY29kZS5kYmApIGhhZCBhIHNjaGVtYSAqKmJlaGluZCoqIHRoZSBpbnN0YWxsZWQgb3BlbmNvZGUgYDEuMTguMTBgIGJpbmFyeS4gVGhlIGJpbmFyeSBxdWVyaWVzIGEgYG5hbWVgIGNvbHVtbiBvbiB0aGUgT0F1dGgtYWNjb3VudCB0YWJsZSBgY29udHJvbF9hY2NvdW50YCwgYnV0IHRoZSBvbi1kaXNrIHNjaGVtYSBsYWNrZWQgaXQ7IHRoZSBkcml6emxlIG1pZ3JhdGlvbiBqb3VybmFsIChgX19kcml6emxlX21pZ3JhdGlvbnNgLCAzIHJvd3Mgd2l0aCBlbXB0eSBoYXNoZXM7IG9wZW5jb2RlJ3Mgb3duIGBtaWdyYXRpb25gIHRhYmxlIGVtcHR5KSB3YXMgZHJpZnRlZCwgc28gdGhlIGFkZGluZy1gbmFtZWAgbWlncmF0aW9uIG5ldmVyIGFwcGxpZWQuCgoqKkZpeCAocmV2ZXJzaWJsZSk6KiogYmFja2VkIHVwIGFuZCByZXNldCB0aGUgREIgc28gb3BlbmNvZGUgcmVjcmVhdGVkIGl0IGF0IHRoZSBjdXJyZW50IHNjaGVtYS4KCmBgYGJhc2gKY2Qgfi8ubG9jYWwvc2hhcmUvb3BlbmNvZGUKY3Agb3BlbmNvZGUuZGIgb3BlbmNvZGUuZGIuYnJva2VuLTIwMjYtMDgtMTAuYmFrCm12IG9wZW5jb2RlLmRiIG9wZW5jb2RlLmRiLXNobSBvcGVuY29kZS5kYi13YWwgL3RtcC9vcGVuY29kZS1kYi1iYWNrdXAvCm9wZW5jb2RlIGF1dGggbGlzdCAgICAgICMgcmVjcmVhdGVzIHRoZSBzY2hlbWEgLT4gbm93IHN1Y2NlZWRzOyBhdXRoLmpzb24gKFouQUkga2V5cykgcHJlc2VydmVkCmBgYAoKVGhpcyBpcyBhbiAqKm9wZW5jb2RlLWludGVybmFsIG1pZ3JhdGlvbiBidWcqKiwgdW5yZWxhdGVkIHRvIGFnZW50cy1jbGkuIFRoZSByZXNldCBsb3NlcyBvcGVuY29kZSBzZXNzaW9uIGhpc3RvcnkgKGJhY2tlZCB1cCk7IGBjb250cm9sX2FjY291bnRgL2BtaWdyYXRpb25gIHdlcmUgZW1wdHksIHNvIG5vIE9BdXRoIGFjY291bnRzIHdlcmUgbG9zdC4KCiMjIEZpbmRpbmdzCgp8ICMgfCBTZXZlcml0eSB8IEZpbmRpbmcgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgNy4xIHwgTG93IHwgYGFnZW50cyBhY2NvdW50cyBhZGQgLS1mcm9tLXNlY3JldHMgPGJhZC1vci1sb2NrZWQtYnVuZGxlPmAgYW5kIGBhY2NvdW50cyBpbnNwZWN0IDxtaXNzaW5nPmAgKipjcmFzaCB3aXRoIGFuIHVuY2F1Z2h0IE5vZGUgZXhjZXB0aW9uKiogKHJhdyBgdGhyb3dgLCBgTm9kZS5qcyB2WFhgIHN0YWNrKSBpbnN0ZWFkIG9mIGEgY2xlYW4gQ0xJIGVycm9yLiB8CnwgNy4yIHwgTWVkaXVtIHwgKipvcGVuY29kZSBjdXN0b20taGFybmVzcyBtb2RlbCBwaW4gaXMgaWdub3JlZC4qKiBNb2RlbHMgYXJlIGluamVjdGVkIHZpYSBhIHBlci1ob3N0IGVudiB2YXIgaW4gYE1PREVMX0VOVl9LRVlTYCAoYHNyYy9saWIvcHJvZmlsZXMudHM6MjM1YCDigJQgYEFOVEhST1BJQ19NT0RFTGAvYE9QRU5BSV9NT0RFTGAvYEdFTUlOSV9NT0RFTGAvYEdST0tfTU9ERUxgKS4gVGhlcmUgaXMgKipubyBvcGVuY29kZSBlbnRyeSoqLCBhbmQgYC0tbW9kZWxgIGlzIG5vdCBlbWl0dGVkIGZvciBhIGN1c3RvbSBoYXJuZXNzLCBzbyBgYWdlbnRzIHJ1biA8b3BlbmNvZGUtaGFybmVzcz5gIHJ1bnMgYG9wZW5jb2RlIHJ1biAtLWFnZW50IHBsYW4g4oCmYCB3aXRoICoqbm8gbW9kZWwqKiBhbmQgb3BlbmNvZGUgZmFsbHMgYmFjayB0byBpdHMgZGVmYXVsdCAoYGdsbS00LjdgKS4gfAp8IDcuMyB8IEluZm8gfCAqKk1vZGVsLXNsdWcgZ290Y2hhOioqIGBhbnRocm9waWMvY2xhdWRlLTMuNS1oYWlrdWAgaXMgbm90IGEgdmFsaWQgT3BlblJvdXRlciBzbHVnICg0MDQgPSBtb2RlbC1ub3QtZm91bmQsIG5vdCA0MDEpLiBDdXJyZW50IHNsdWdzOiBgYW50aHJvcGljL2NsYXVkZS1oYWlrdS00LjVgLCBgYW50aHJvcGljL2NsYXVkZS0zLWhhaWt1YC4gfAp8IDcuNCB8IEV4dGVybmFsIHwgb3BlbmNvZGUgYDEuMTguMTBgIHNoaXBzIGEgREIgc2NoZW1hIGl0cyBtaWdyYXRpb24gcnVubmVyIGRpZG4ndCBhcHBseSBvbiBhbiB1cGdyYWRlZCBpbnN0YWxsIOKGkiBgbm8gc3VjaCBjb2x1bW46IG5hbWVgIGJyZWFrcyBldmVyeSBvcGVuY29kZSBjb21tYW5kICjCpzYpLiBvcGVuY29kZS1zaWRlIGJ1Zy4gfAoKIyMgRXZpZGVuY2UKCmBgYGJhc2gKIyAtLS0gRmxvdyBBOiBPcGVuUm91dGVyIEFQSS1rZXkgYWNjb3VudCAtLS0KYWdlbnRzIHNlY3JldHMgY3JlYXRlIG9yay1maWxlIC0tYmFja2VuZCBmaWxlCmNhdCBrZXkudHh0IHwgYWdlbnRzIHNlY3JldHMgYWRkIG9yay1maWxlIEtFWSAtLXZhbHVlLXN0ZGluIC0tdHlwZSBhcGkta2V5CmFnZW50cyBhY2NvdW50cyBhZGQgb3BlbnJvdXRlci10ZXN0IC0tcHJvdmlkZXIgb3BlbnJvdXRlciAtLWF1dGggYXBpLWtleSAtLWZyb20tc2VjcmV0cyBvcmstZmlsZTpLRVkKYWdlbnRzIGhhcm5lc3MgZm9yayBjbGF1ZGUgb3ItY2xhdWRlIC0tbW9kZWwgYW50aHJvcGljL2NsYXVkZS1oYWlrdS00LjUgLS1hY2NvdW50IG9wZW5yb3V0ZXItdGVzdAphZ2VudHMgcnVuIG9yLWNsYXVkZSAiUmVwbHkgd2l0aCBleGFjdGx5OiBQT05HIiAgICAgICAgIyAtPiBQT05HCgojIC0tLSBGbG93IEI6IG9wZW5jb2RlIG9uIHRoZSBDaGF0R1BUIHN1YnNjcmlwdGlvbiAobm8gQVBJIGtleSkgLS0tCm9wZW5jb2RlIGF1dGggbG9naW4gLS1wcm92aWRlciBvcGVuYWkgLS1tZXRob2QgIkNoYXRHUFQgUHJvL1BsdXMgKGhlYWRsZXNzKSIgICAjIGF1dGhvcml6ZSBkZXZpY2UgY29kZSBpbiBhIGJyb3dzZXIKb3BlbmNvZGUgcnVuIC0tbW9kZWwgb3BlbmFpL2dwdC01LjQtbWluaSAiUmVwbHkgd2l0aCBleGFjdGx5OiBQT05HIiAgICAgICAgICAgICMgLT4gUE9ORwpgYGAKCiMjIDkuIFN0YXRlIGxlZnQgaW4gcGxhY2UgLyBjbGVhbnVwCgotICoqUmVtb3ZlZDoqKiByYXcga2V5IGZpbGVzIGluIGAvdG1wYCBvbiBhbGwgYm94ZXM7IHRoZSB0ZW1wIGBvcmstZmlsZWAgaW1wb3J0IGJ1bmRsZS4KLSAqKktlcHQgKHdvcmtpbmcpOioqIHRoZSBgb3BlbnJvdXRlci10ZXN0YCBhY2NvdW50OyBoYXJuZXNzZXMgYG9yLWNsYXVkZWAsIGBvci1jb2RleGAsIGBvci1vcGVuY29kZWAsIGBvYy1zdWJgOyBvcGVuY29kZSdzIGBvcGVuYWlgIE9BdXRoIChzdWJzY3JpcHRpb24pIGxvZ2luOyB0aGUgT3BlblJvdXRlciBrZXkgKGBhZ2VudHMtY2xpLXRlc3QtMjAyNi0wOC0xMGAsICQ1IGNhcCk7IHRoZSBvcGVuY29kZSBEQiBiYWNrdXAgYXQgYH4vLmxvY2FsL3NoYXJlL29wZW5jb2RlL29wZW5jb2RlLmRiLmJyb2tlbi0yMDI2LTA4LTEwLmJha2AuCi0gQWxsIG9mIHRoZSBhYm92ZSBjYW4gYmUgdG9ybiBkb3duIG9uIHJlcXVlc3QgKGBhZ2VudHMgYWNjb3VudHMgcmVtb3ZlYCwgYGFnZW50cyBoYXJuZXNzIHJlbW92ZWAsIGBvcGVuY29kZSBhdXRoIGxvZ291dCBvcGVuYWlgLCBkZWxldGUgdGhlIE9wZW5Sb3V0ZXIga2V5IGluIHRoZSBkYXNoYm9hcmQpLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
