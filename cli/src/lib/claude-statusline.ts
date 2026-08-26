@@ -104,7 +104,7 @@ function delegatePath(versionHome: string): string {
   return path.join(versionHome, DELEGATE_FILE);
 }
 
-function renderDelegate(payload: string, versionHome: string): string {
+export function renderDelegate(payload: string, versionHome: string): string {
   // Already running as a delegate hop — never spawn another. Hard recursion stop.
   if (process.env[DELEGATE_GUARD_ENV]) return '';
   let command = '';

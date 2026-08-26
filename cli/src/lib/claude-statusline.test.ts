@@ -9,6 +9,7 @@ import {
   installClaudeStatusLine,
   isStatusLineSelfReference,
   renderClaudeStatusLine,
+  renderDelegate,
 } from './claude-statusline.js';
 import {
   readClaudeUsageCache,
@@ -179,6 +180,45 @@ describe('Claude native status line', () => {
 
     expect(installClaudeStatusLine(home)).toEqual({ changed: true });
     expect(fs.existsSync(delegate)).toBe(false);
+  });
+
+  it('renderDelegate runs a genuine external delegate and returns its output', () => {
+    const home = tempHome();
+    const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
+    fs.mkdirSync(path.dirname(delegate), { recursive: true });
+    fs.writeFileSync(delegate, 'printf custom-status\n');
+    expect(renderDelegate('', home)).toBe('custom-status');
+  });
+
+  it('renderDelegate never SPAWNS a self-referencing delegate — the read-side fork-bomb guard', () => {
+    const home = tempHome();
+    const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
+    const sentinel = path.join(home, 'delegate-was-spawned');
+    fs.mkdirSync(path.dirname(delegate), { recursive: true });
+    // A command that (a) IS a self-reference — it ends in our private subcommand
+    // — and (b) would create a sentinel file if it were ever executed. With the
+    // pre-fix exact-string guard this `agents-dev`-shaped command was spawned and
+    // recursed; the fix must return '' WITHOUT running it.
+    fs.writeFileSync(delegate, `sh -c 'touch "${sentinel}"' __claude-statusline\n`);
+    expect(renderDelegate('', home)).toBe('');
+    expect(fs.existsSync(sentinel)).toBe(false);
+  });
+
+  it('renderDelegate refuses a second hop when already running as a delegate (one-hop backstop)', () => {
+    const home = tempHome();
+    const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
+    fs.mkdirSync(path.dirname(delegate), { recursive: true });
+    // A perfectly valid external producer — but the env marker says we are
+    // ourselves a delegate, so it must NOT be spawned (hard depth-1 cap).
+    fs.writeFileSync(delegate, 'printf should-not-run\n');
+    const prior = process.env.AGENTS_CLAUDE_STATUSLINE_DELEGATED;
+    process.env.AGENTS_CLAUDE_STATUSLINE_DELEGATED = '1';
+    try {
+      expect(renderDelegate('', home)).toBe('');
+    } finally {
+      if (prior === undefined) delete process.env.AGENTS_CLAUDE_STATUSLINE_DELEGATED;
+      else process.env.AGENTS_CLAUDE_STATUSLINE_DELEGATED = prior;
+    }
   });
 
   it('does not resurrect a removed custom status-line command', () => {

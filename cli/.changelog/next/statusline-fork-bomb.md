@@ -12,4 +12,4 @@
   a command as a delegate (and deletes an already-poisoned delegate on re-install),
   a `AGENTS_CLAUDE_STATUSLINE_DELEGATED` env marker hard-caps delegation at one hop,
   and the delegate `spawnSync` now carries a 5 s timeout. Source:
-  `apps/cli/src/lib/claude-statusline.ts`.
+  `cli/src/lib/claude-statusline.ts`.
