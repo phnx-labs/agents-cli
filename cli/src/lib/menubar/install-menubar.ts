@@ -557,7 +557,7 @@ function installAndStartService(exec: string, stamp: MenubarStamp): void {
  * which is the correct outcome — a dev build must never win a version contest
  * against a release.
  */
-function stampVersionLabel(stamp: MenubarStamp | null): string | null {
+export function stampVersionLabel(stamp: MenubarStamp | null): string | null {
   if (!stamp) return null;
   if (stamp.source === 'release') return stamp.helperVersion;
   if (stamp.source === 'legacy') return null;
@@ -1122,9 +1122,18 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   // The helper axis here too: this label read "ok" only when the installed
   // helper's stamp happened to equal the CLI's version, which after this change
   // is never true on a release install.
-  const bundleStamp = stampVersionLabel(readInstalledMenubarStamp());
-  step('bundle', bundleStamp === availableHelperLabel() ? 'ok' : 'changed',
-    `${installedAppPath()} (${bundleStamp ?? 'unknown'})`);
+  //
+  // Compare the STAMPS, not their labels. `stampVersionLabel` collapses every
+  // local build to the literal 'local', discarding the mtime — so a real dev
+  // rebuild (which the surrounding logic does correctly reinstall) would print
+  // "ok" and hide that anything changed. That is the same collapse already
+  // excluded in `versionMatches` and `mayInstallMenubarHelper`; this was the
+  // third site and the only one still reading through the lossy label.
+  const bundleStamp = readInstalledMenubarStamp();
+  const bundleUnchanged =
+    bundleStamp !== null && JSON.stringify(bundleStamp) === JSON.stringify(availableStamp());
+  step('bundle', bundleUnchanged ? 'ok' : 'changed',
+    `${installedAppPath()} (${stampVersionLabel(bundleStamp) ?? 'unknown'})`);
 
   if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     step('signature', 'failed',

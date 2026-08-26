@@ -14,6 +14,7 @@ import {
   hasDeveloperIdSignature,
   installMenubarLaunchAgentOnUpgrade,
   isMenubarStale,
+  stampVersionLabel,
   LOCAL_BUILD_LABEL,
   releaseVersionOfCachedBundle,
   stampFor,
@@ -305,6 +306,49 @@ describe('isMenubarStale', () => {
     };
     expect(mayInstallMenubarHelper({ ...base, installedVersion: '1.0.0', currentVersion: LOCAL_BUILD_LABEL })).toBe(false);
     expect(mayInstallMenubarHelper({ ...base, installedVersion: LOCAL_BUILD_LABEL, currentVersion: '1.0.0' })).toBe(false);
+  });
+
+  it('a local rebuild is a real change, not two equal `local` labels', () => {
+    // Reviewer-found, third instance of one bug class: stampVersionLabel
+    // collapses EVERY local build to the literal 'local', discarding the mtime.
+    // Any comparison done through the label therefore reports "unchanged" across
+    // a genuine dev rebuild. The stamps themselves distinguish them.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-rebuild-'));
+    const app = path.join(dir, 'MenubarHelper.app');
+    fs.mkdirSync(app);
+    try {
+      const before = stampFor(app);
+      fs.utimesSync(app, new Date(), new Date(Date.now() + 60_000)); // rebuild
+      const after = stampFor(app);
+
+      // Through the lossy label the two are indistinguishable...
+      expect(stampVersionLabel(before)).toBe(stampVersionLabel(after));
+      // ...but the stamps are not, which is what the comparison must use.
+      expect(JSON.stringify(before)).not.toBe(JSON.stringify(after));
+      expect(isMenubarStale({ installed: before, available: after, execExists: true })).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("the setup bundle step compares stamps, not the lossy label", () => {
+    // Mutation-driven: the behavioural test above stays green even when the step
+    // label is computed through `stampVersionLabel`, because it exercises
+    // stampFor/isMenubarStale rather than the step itself. That step lives inside
+    // runMenubarSetup, which needs a signed bundle to reach — so the comparison
+    // is asserted at source, the same way the install/stamp composition is.
+    const src = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
+      'utf-8',
+    );
+    // Anchor on the unique symbol, not `step('bundle'` — there are three of
+    // those and indexOf finds an error path, not the comparison under test.
+    const i = src.indexOf('const bundleUnchanged');
+    expect(i).toBeGreaterThan(-1);
+    const around = src.slice(i, src.indexOf("step('bundle'", i) + 200);
+    expect(around).toContain('JSON.stringify(availableStamp())');
+    expect(around).not.toMatch(/bundleUnchanged[\s\S]{0,120}stampVersionLabel\(bundleStamp\) ===/);
+    expect(around).not.toContain('=== getCliVersion()');
   });
 
   it('never compares against the CLI version', () => {
@@ -951,11 +995,16 @@ describe('isMenubarProcessStaleAgainstBundle', () => {
  *    synthetic bundle can never reach `installAndStartService`, and a real
  *    Developer-ID-signed one is not available in CI.
  *
- * So this pins the contract that IS reachable: under a redirected HOME the
- * function completes, registers nothing with the real service manager, and
- * leaves no stamp behind. That last part is the documented "stamp only a heal
- * that actually happened" rule — stamping a no-op would spend the shared
- * cooldown and lock every other install out for an hour having fixed nothing.
+ * What this ACTUALLY verifies, stated narrowly because the first version of
+ * this comment claimed more than the assertions did: on a checkout where
+ * `sourceAppPath()` finds no bundle the function returns at its first guard, so
+ * what is pinned is that it completes without throwing, twice, and registers
+ * nothing with the real service manager under a sandbox HOME. The stamp-marker
+ * path is asserted below rather than merely claimed here.
+ *
+ * It does NOT exercise install, verification, or the stamp-on-heal rule — those
+ * need a signed bundle. The regression class itself is closed structurally (one
+ * resolved `src`, used for both install and stamp) rather than by this test.
  */
 describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
   const savedHome = process.env.HOME;
@@ -985,6 +1034,11 @@ describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
       const launchAgents = path.join(home, 'Library', 'LaunchAgents');
       const plists = fs.existsSync(launchAgents) ? fs.readdirSync(launchAgents) : [];
       expect(plists.filter((f) => f.includes('menubar'))).toEqual([]);
+      // And no stamp — claimed in the docblock above, so actually checked.
+      const stamps = fs.existsSync(path.join(home, '.agents'))
+        ? fs.readdirSync(path.join(home, '.agents'), { recursive: true }) as string[]
+        : [];
+      expect(stamps.filter((f) => String(f).includes('menubar-version'))).toEqual([]);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
