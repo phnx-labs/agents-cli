@@ -4081,7 +4081,7 @@
             },
             {
               "flags": "--device <name>",
-              "description": "Device that hosts this task; later verbs resolve it from --task (not valid on page verbs)",
+              "description": "Device that hosts this task (defaults to the browser.device hub when set; use `local` to force this machine). Later verbs resolve it from --task; not valid on page verbs",
               "long": "--device",
               "required": true,
               "optional": false,
