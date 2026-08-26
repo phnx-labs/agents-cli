@@ -1578,16 +1578,11 @@ function registerTaskCommands(browser: Command): void {
       if (!opts.device) {
         const hub = defaultBrowserHub();
         if (hub) {
-          // A named --profile must exist ON THE HUB — assert the named profile, not
-          // a locally-resolved one, since this box may not carry it at all.
-          if (opts.profile) {
-            try {
-              assertDeviceDeclaresProfile(hub, opts.profile);
-            } catch (err) {
-              console.error(err instanceof Error ? err.message : String(err));
-              process.exit(1);
-            }
-          }
+          // No local profile validation: the hub is the authority on its own
+          // profiles (including fleet-scoped ones this box can't see in
+          // `declaringDevices`), so a bad `--profile` is caught by the hub's own
+          // start and streamed back with its exit code, rather than second-guessed
+          // here against a registry that doesn't carry the hub's profiles.
           try {
             const result = await dispatchBrowserToDevice(hub, browserForwardedArgv(), 'capture');
             process.stdout.write(result.stdout);
