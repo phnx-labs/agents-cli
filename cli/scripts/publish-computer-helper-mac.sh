@@ -47,7 +47,11 @@ set -euo pipefail
 CLI_DIR="$(cd "$(dirname "$0")/.." && pwd)"        # cli
 REPO_ROOT="$(cd "$CLI_DIR/.." && pwd)"              # repo root
 HELPER_DIR="$REPO_ROOT/native/computer-mac"
-REPO_SLUG="phnx-labs/agents-cli"
+# The GitHub repo, which is NOT the npm package name: the package is still
+# @phnx-labs/agents-cli, but the repository was renamed to agi-cli. This slug
+# reaches `gh release view/create/upload` below, so it is a write path for signed
+# binaries — it worked only because GitHub redirects a renamed repo.
+REPO_SLUG="phnx-labs/agi-cli"
 
 log()  { printf '\033[36m[publish-mac-helper]\033[0m %s\n' "$*"; }
 die()  { printf '\033[31m[publish-mac-helper] %s\033[0m\n' "$*" >&2; exit 1; }

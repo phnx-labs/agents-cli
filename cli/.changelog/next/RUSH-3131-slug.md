@@ -11,3 +11,8 @@
   **The npm package name is deliberately unchanged** — it is still
   `@phnx-labs/agents-cli`, and renaming it would orphan every installed CLI. That
   distinction is now pinned by a test. Source: `cli/src/lib/helper-download.ts`.
+  `publish-computer-helper-mac.sh` carried the old slug too, and that one is a **write**
+  path: `REPO_SLUG` reaches `gh release view` (the immutability guard), `gh release create`,
+  and `gh release upload --clobber`. Publishing signed helper binaries was going through the
+  rename redirect. Found by sweeping `scripts/` and `.github/` after the source tree was
+  already clean — the source sweep alone would have missed it.

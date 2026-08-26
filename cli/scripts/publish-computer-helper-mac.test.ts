@@ -37,7 +37,7 @@ let binDir: string;
  * the immutability guard asks gh: whether the release is already published.
  *
  * gh is stubbed rather than reached because the guard queries the real
- * `phnx-labs/agents-cli` by hardcoded slug — the throwaway origin cannot answer
+ * `phnx-labs/agi-cli` by hardcoded slug — the throwaway origin cannot answer
  * for it, and a test must never depend on (or mutate) the real repo's releases.
  * Every invocation is recorded so a test can assert what the script asked for.
  */
