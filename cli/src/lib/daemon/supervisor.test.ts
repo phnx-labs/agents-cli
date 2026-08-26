@@ -172,6 +172,11 @@ describe('ServiceSupervisor', () => {
     await expect(supervisor.stop('device-probe')).rejects.toThrow(/tick is still in flight/);
     await expect(supervisor.start('device-probe')).rejects.toThrow(/tick is still in flight/);
 
+    let becameIdle = false;
+    void supervisor.awaitIdle('device-probe').then(() => { becameIdle = true; });
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(becameIdle).toBe(false);
+
     expect(good.ticks).toBeGreaterThanOrEqual(1);
     await supervisor.stopAll();
   });
