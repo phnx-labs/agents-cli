@@ -36,7 +36,7 @@ import { sendToOwner } from '../notify.js';
 import { readRunMeta } from '../scheduling/routines.js';
 
 /** How often the engine wakes to check which monitors are due. */
-const TICK_MS = 5_000;
+export const MONITOR_ENGINE_TICK_MS = 5_000;
 /** Default evaluation cadence for sources that carry no explicit interval. */
 const DEFAULT_INTERVAL_MS = 60_000;
 /**
@@ -173,10 +173,12 @@ export class MonitorEngine {
   constructor(private logFn: LogFn = () => {}) {}
 
   /** Load owned+enabled monitors and start the tick loop. */
-  start(): void {
+  start(options: { externalScheduler?: boolean } = {}): void {
     this.loadAll();
     this.logFn('INFO', `Monitor engine started (${this.monitors.length} monitor(s) on this device)`);
-    this.timer = setInterval(() => void this.tick(), TICK_MS);
+    if (!options.externalScheduler) {
+      this.timer = setInterval(() => void this.tick(), MONITOR_ENGINE_TICK_MS);
+    }
   }
 
   /** Reload monitor configs (SIGHUP). */

@@ -1,9 +1,9 @@
 /**
  * Socket-service migration (RUSH-3193 P2): each of the four socket services
  * (SecretsBrokerService, BrowserIPCService, MonitorEngineService,
- * AccountStateDaemonService) is a lifecycle-only DaemonService — start/stop
- * delegated to the underlying subsystem, no periodic tick, supervised by the
- * ServiceSupervisor.
+ * AccountStateDaemonService) is supervised by ServiceSupervisor. MonitorEngineService
+ * is periodic; the other wrappers own lifecycle resources and account-state owns
+ * its existing refresh lifecycle.
  *
  * Tests here exercise:
  * 1. `BaseDaemonService` — the convenience base for lifecycle-only services.
@@ -40,7 +40,10 @@ import type { DaemonServiceId } from '../daemon-services.js';
 // created/cleaned per test.
 // ---------------------------------------------------------------------------
 
-const BROWSER_HELPER_DIR = path.join(os.tmpdir(), `agents-cli-socketsvcs-browser-${process.pid}`);
+// Unix-domain sockets have a short platform path limit (104 bytes on macOS).
+// Keep this fixture prefix compact so the real BrowserIPCServer can bind under
+// macOS's already-long per-user os.tmpdir().
+const BROWSER_HELPER_DIR = path.join(os.tmpdir(), `a-sv-${process.pid}`);
 
 vi.mock('../state.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../state.js')>()),
@@ -332,7 +335,7 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(health['secrets-broker'].state).toBe('running');
     expect(health['monitors'].state).toBe('running');
     expect(health['account-state'].state).toBe('running');
-    expect(health['browser-ipc'].state).toBe('running');
+    expect(health['browser-ipc'].state, JSON.stringify(health['browser-ipc'])).toBe('running');
 
     // Real-EFFECT assertions, one per service. `state === 'running'` alone only
     // proves onStart() didn't throw (BaseDaemonService sets it unconditionally),

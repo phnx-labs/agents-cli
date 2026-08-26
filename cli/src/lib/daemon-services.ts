@@ -27,7 +27,11 @@ export type DaemonServiceId =
   | 'device-probe'
   | 'state-dir-check'
   | 'session-index'
-  | 'auth-sync';
+  | 'auth-sync'
+  | 'daemon-heartbeat'
+  | 'tmux-reap'
+  | 'browser-task-reap'
+  | 'session-state';
 
 /** Human-readable metadata for each service. */
 export interface DaemonServiceDef {
@@ -91,6 +95,26 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'state-dir-check',
     title: 'State-dir self-check',
     description: 'Self-terminates the daemon if its state directory is removed.',
+  },
+  {
+    id: 'daemon-heartbeat',
+    title: 'Daemon heartbeat',
+    description: 'Publishes daemon liveness and reconciles routine process state.',
+  },
+  {
+    id: 'tmux-reap',
+    title: 'Tmux reap',
+    description: 'Reaps dead managed tmux sessions and their orphaned helper processes.',
+  },
+  {
+    id: 'browser-task-reap',
+    title: 'Browser task reap',
+    description: 'Closes abandoned browser-task tabs whose owner exited or idle lease expired.',
+  },
+  {
+    id: 'session-state',
+    title: 'Live session state',
+    description: 'Publishes this host\'s active session metadata for sessions watch and fleet consumers.',
   },
   {
     id: 'session-index',
