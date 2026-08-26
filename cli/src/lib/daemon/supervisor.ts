@@ -12,9 +12,9 @@
  *  - A tick that hangs on an unbounded await (SSH, keychain) used to latch its
  *    local in-flight guard `true` forever, silently freezing that one service
  *    for the daemon's life (observed ~51h). Here, every tick races a
- *    `deadlineMs` timeout; when the deadline wins, the guard is released in
- *    `finally` regardless of whether the real tick promise ever settles, so
- *    the NEXT scheduled tick can still run.
+ *    `deadlineMs` timeout; when the deadline wins, that service is parked and
+ *    its in-flight guard stays held until the real promise settles. This keeps
+ *    a timed-out tick from overlapping another tick or lifecycle transition.
  *
  * Repeated failures (thrown or timed-out) open a circuit breaker: the service
  * is parked (its timer stopped) and retried on exponential backoff via its own
@@ -28,14 +28,12 @@ import type { DaemonContext, DaemonService, PeriodicService, ServiceHealth, Serv
 import { isPeriodicService } from './service.js';
 
 export interface ServiceSupervisorOptions {
-  /** Consecutive tick failures (throw or deadline breach) before a service is parked. Default 3. */
+  /** Consecutive thrown tick failures before a service is parked. Deadline breaches park immediately. Default 3. */
   parkAfterFailures?: number;
   /** First restart backoff delay, doubled on each further failed restart attempt. Default 5s. */
   backoffBaseMs?: number;
   /** Backoff ceiling. Default 5 minutes. */
   backoffMaxMs?: number;
-  /** Hard cap for start/stop/restart lifecycle hooks. Default 60s. */
-  lifecycleDeadlineMs?: number;
 }
 
 interface RegisteredService {
@@ -46,6 +44,7 @@ interface RegisteredService {
   consecutiveFailures: number;
   restartAttempts: number;
   inFlight: boolean;
+  activeTick?: Promise<void>;
   /** True once `start()` has completed without throwing — guards `stop()` from being called on a service that never successfully started. */
   everStarted: boolean;
   timer?: ReturnType<typeof setInterval>;
@@ -56,7 +55,6 @@ interface RegisteredService {
 const DEFAULT_PARK_AFTER_FAILURES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 5_000;
 const DEFAULT_BACKOFF_MAX_MS = 5 * 60_000;
-const DEFAULT_LIFECYCLE_DEADLINE_MS = 60_000;
 
 export class ServiceSupervisor {
   private readonly registry = new Map<DaemonServiceId, RegisteredService>();
@@ -64,13 +62,11 @@ export class ServiceSupervisor {
   private readonly parkAfterFailures: number;
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
-  private readonly lifecycleDeadlineMs: number;
 
   constructor(opts: ServiceSupervisorOptions = {}) {
     this.parkAfterFailures = opts.parkAfterFailures ?? DEFAULT_PARK_AFTER_FAILURES;
     this.backoffBaseMs = opts.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
     this.backoffMaxMs = opts.backoffMaxMs ?? DEFAULT_BACKOFF_MAX_MS;
-    this.lifecycleDeadlineMs = opts.lifecycleDeadlineMs ?? DEFAULT_LIFECYCLE_DEADLINE_MS;
   }
 
   /**
@@ -102,13 +98,16 @@ export class ServiceSupervisor {
 
   /** Stop every registered service and clear all timers. */
   async stopAll(): Promise<void> {
-    for (const id of this.registry.keys()) await this.stopOne(id);
+    for (const id of this.registry.keys()) await this.stopOne(id, true);
   }
 
   /** Force one service to restart right now, outside its normal backoff schedule. Drives `agents daemon services restart <id>` (RUSH-3193 P4). */
   async restartOne(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
+    if (entry.inFlight) {
+      throw new Error(`service '${id}' cannot restart while a tick is still in flight`);
+    }
     // A live periodic service already owns an interval. attemptRestart() installs
     // a fresh one after restart, so leaving the existing handles alive would
     // multiply the tick rate on every operator-requested restart.
@@ -160,7 +159,7 @@ export class ServiceSupervisor {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
     if (entry.state === 'stopped') return;
-    await this.stopOne(id);
+    await this.stopOne(id, false);
   }
 
   /** Request an immediate supervised tick, used by event edges that cannot wait for the regular cadence. */
@@ -188,7 +187,7 @@ export class ServiceSupervisor {
     const ctx = this.ctx;
     if (!entry || !ctx) return;
     try {
-      await this.runLifecycle(entry.service.start(ctx), id, 'start');
+      await entry.service.start(ctx);
     } catch (err) {
       this.recordFailure(entry, id, err);
       this.park(id);
@@ -219,9 +218,12 @@ export class ServiceSupervisor {
     }
   }
 
-  private async stopOne(id: DaemonServiceId): Promise<void> {
+  private async stopOne(id: DaemonServiceId, force: boolean): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) return;
+    if (entry.inFlight && !force) {
+      throw new Error(`service '${id}' cannot stop while a tick is still in flight`);
+    }
     if (entry.timer) {
       clearInterval(entry.timer);
       entry.timer = undefined;
@@ -236,9 +238,13 @@ export class ServiceSupervisor {
     }
     entry.state = 'stopped';
     recordSubsystemState(id, 'stopped');
+    // Whole-daemon shutdown must not hang forever on an unresolved tick, but it
+    // also must not tear down resources the tick may still be using. Stop its
+    // timers and mark it stopped; process exit owns final cleanup in this case.
+    if (entry.inFlight && force) return;
     if (!entry.everStarted) return; // start() never succeeded — nothing to stop.
     try {
-      await this.runLifecycle(entry.service.stop(), id, 'stop');
+      await entry.service.stop();
     } catch (err) {
       this.ctx?.log('WARN', `service '${id}' stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -253,9 +259,10 @@ export class ServiceSupervisor {
   /**
    * Run one tick under a hard deadline. The deadline is enforced with
    * `Promise.race`, not true cancellation — JS cannot abort an arbitrary
-   * in-flight await. What matters for the freeze this replaces is that
-   * `inFlight` is released in `finally` as soon as the race settles, so an
-   * abandoned tick can never block the next scheduled one again.
+   * in-flight await. A timeout parks the service immediately but deliberately
+   * keeps `inFlight` set until the REAL promise settles. Starting another tick
+   * or tearing resources down underneath the abandoned one would trade a
+   * visible parked service for duplicated side effects and lifecycle races.
    */
   private async runTick(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
@@ -267,24 +274,39 @@ export class ServiceSupervisor {
     const periodicService = entry.service;
     entry.inFlight = true;
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    let timedOut = false;
+    const tickPromise = periodicService.tick(ctx);
+    entry.activeTick = tickPromise;
     try {
       const deadline = new Promise<never>((_, reject) => {
         deadlineTimer = setTimeout(
-          () => reject(new Error(`tick exceeded deadline of ${periodicService.deadlineMs}ms`)),
+          () => {
+            timedOut = true;
+            reject(new Error(`tick exceeded deadline of ${periodicService.deadlineMs}ms`));
+          },
           periodicService.deadlineMs,
         );
       });
-      await Promise.race([periodicService.tick(ctx), deadline]);
+      await Promise.race([tickPromise, deadline]);
       entry.consecutiveFailures = 0;
       entry.lastError = undefined;
       entry.lastRunMs = Date.now();
       recordSubsystemOk(id);
     } catch (err) {
       this.recordFailure(entry, id, err);
-      if (entry.consecutiveFailures >= this.parkAfterFailures) this.park(id);
+      if (timedOut || entry.consecutiveFailures >= this.parkAfterFailures) this.park(id);
     } finally {
       if (deadlineTimer) clearTimeout(deadlineTimer);
-      entry.inFlight = false;
+      if (timedOut) {
+        // Promise.race cannot cancel arbitrary work. Keep the service parked and
+        // in-flight until the REAL tick settles; only then may backoff restart it.
+        void tickPromise.then(
+          () => this.finishTick(id, tickPromise),
+          () => this.finishTick(id, tickPromise),
+        );
+      } else {
+        this.finishTick(id, tickPromise);
+      }
     }
   }
 
@@ -298,7 +320,7 @@ export class ServiceSupervisor {
       entry.timer = undefined;
     }
     this.ctx?.log('WARN', `service '${id}' parked after ${entry.consecutiveFailures} consecutive failure(s)`);
-    this.scheduleRestart(id);
+    if (!entry.inFlight) this.scheduleRestart(id);
   }
 
   private scheduleRestart(id: DaemonServiceId): void {
@@ -314,7 +336,7 @@ export class ServiceSupervisor {
     const ctx = this.ctx;
     if (!entry || !ctx || entry.state === 'stopped') return;
     try {
-      await this.runLifecycle(entry.service.restart(), id, 'restart');
+      await entry.service.restart();
       entry.everStarted = true; // restart() is stop()+start() on the service — a successful one means it is running again and owes a stop() at shutdown.
       entry.state = 'running';
       recordSubsystemState(id, 'running');
@@ -345,20 +367,11 @@ export class ServiceSupervisor {
     this.ctx?.log('WARN', `service '${id}' failed: ${message}`);
   }
 
-  private async runLifecycle(promise: Promise<void>, id: DaemonServiceId, phase: 'start' | 'stop' | 'restart'): Promise<void> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      await Promise.race([
-        promise,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error(`service '${id}' ${phase} exceeded lifecycle deadline of ${this.lifecycleDeadlineMs}ms`)),
-            this.lifecycleDeadlineMs,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
+  private finishTick(id: DaemonServiceId, tickPromise: Promise<void>): void {
+    const entry = this.registry.get(id);
+    if (!entry || entry.activeTick !== tickPromise) return;
+    entry.activeTick = undefined;
+    entry.inFlight = false;
+    if (entry.state === 'parked' && !entry.restartTimer) this.scheduleRestart(id);
   }
 }

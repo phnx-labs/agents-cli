@@ -147,8 +147,8 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
   });
 
-  it('a hanging tick is abandoned at the deadline, releasing the in-flight guard so the NEXT tick still runs; siblings unaffected', async () => {
-    const supervisor = new ServiceSupervisor({ parkAfterFailures: 100 }); // keep it running through repeated timeouts
+  it('a hanging tick parks at the first deadline and cannot overlap a second tick or restart; siblings unaffected', async () => {
+    const supervisor = new ServiceSupervisor({ backoffBaseMs: 5_000 });
     const hanging = new HangingService();
     const good = new HealthyService('scheduler');
     supervisor.register(hanging);
@@ -158,45 +158,20 @@ describe('ServiceSupervisor', () => {
     await vi.advanceTimersByTimeAsync(0); // first immediate tick starts
 
     expect(hanging.ticksStarted).toBe(1);
-    // Advance past the 500ms deadline — the race rejects, guard releases.
+    // Advance past the 500ms deadline — the race rejects and parks immediately.
     await vi.advanceTimersByTimeAsync(500);
     let health = supervisor.health();
     expect(health['device-probe'].consecutiveFailures).toBe(1);
     expect(health['device-probe'].lastError).toMatch(/deadline/);
+    expect(health['device-probe'].state).toBe('parked');
 
-    // Advance to the next scheduled interval tick (1000ms mark) — the guard being
-    // released is what lets THIS tick start at all; before the fix it would still
-    // be latched by the abandoned first tick and this call would be silently skipped.
+    // The real promise never settled: no second tick and no restart may overlap it.
     await vi.advanceTimersByTimeAsync(500);
-    expect(hanging.ticksStarted).toBe(2);
+    expect(hanging.ticksStarted).toBe(1);
+    await expect(supervisor.restartOne('device-probe')).rejects.toThrow(/tick is still in flight/);
+    await expect(supervisor.stop('device-probe')).rejects.toThrow(/tick is still in flight/);
 
     expect(good.ticks).toBeGreaterThanOrEqual(1);
-    await supervisor.stopAll();
-  });
-
-  it('a hanging start is bounded, parked, and does not prevent the next service from starting', async () => {
-    class HangingStartService extends HealthyService {
-      override async start(): Promise<void> {
-        await new Promise<void>(() => {});
-      }
-    }
-
-    const supervisor = new ServiceSupervisor({ lifecycleDeadlineMs: 500, backoffBaseMs: 5_000 });
-    const hanging = new HangingStartService('browser-ipc');
-    const sibling = new HealthyService('session-index');
-    supervisor.register(hanging);
-    supervisor.register(sibling);
-
-    const starting = supervisor.startAll(makeCtx());
-    await vi.advanceTimersByTimeAsync(500);
-    await starting;
-    await vi.advanceTimersByTimeAsync(0);
-
-    expect(supervisor.health()['browser-ipc'].state).toBe('parked');
-    expect(supervisor.health()['browser-ipc'].lastError).toMatch(/start exceeded lifecycle deadline/);
-    expect(supervisor.health()['session-index'].state).toBe('running');
-    expect(sibling.ticks).toBe(1);
-
     await supervisor.stopAll();
   });
 
@@ -399,7 +374,7 @@ describe('ServiceSupervisor', () => {
       await supervisor.stopAll();
     });
 
-    it.each(P3_IDS)('%s: a hanging tick is abandoned at the deadline, releasing the in-flight guard for the next tick', async (id) => {
+    it.each(P3_IDS)('%s: a hanging tick parks at the deadline and never overlaps another tick', async (id) => {
       const supervisor = new ServiceSupervisor({ parkAfterFailures: 100 });
       class NamedHangingService extends HangingService {
         readonly id = id;
@@ -418,8 +393,9 @@ describe('ServiceSupervisor', () => {
       expect(health[id].consecutiveFailures).toBe(1);
       expect(health[id].lastError).toMatch(/deadline/);
 
-      await vi.advanceTimersByTimeAsync(500); // next scheduled tick — proves the guard released
-      expect(hanging.ticksStarted).toBe(2);
+      await vi.advanceTimersByTimeAsync(5_000); // no next tick or restart may overlap the unresolved promise
+      expect(hanging.ticksStarted).toBe(1);
+      expect(supervisor.health()[id].state).toBe('parked');
       expect(good.ticks).toBeGreaterThanOrEqual(1);
 
       await supervisor.stopAll();

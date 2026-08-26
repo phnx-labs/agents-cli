@@ -9,7 +9,7 @@
  * silently freezes that service for the daemon's life.
  *
  * This module defines the service shape a `ServiceSupervisor` (supervisor.ts)
- * drives instead: one contract per service, owned timer, lifecycle and per-tick deadlines,
+ * drives instead: one contract per service, owned timer, per-tick deadline,
  * and a health record the supervisor can report without the service having to
  * know it is being supervised.
  */
@@ -47,7 +47,7 @@ export interface DaemonService {
 /** A service the supervisor ticks on a fixed interval, under a hard per-tick deadline. */
 export interface PeriodicService extends DaemonService {
   readonly intervalMs: number;
-  /** Hard cap per tick. An over-budget tick is abandoned (never awaited past this) so its in-flight guard always releases. */
+  /** Hard cap per tick. An over-budget tick parks the service; its in-flight guard remains held until the real promise settles. */
   readonly deadlineMs: number;
   /**
    * Delay before the FIRST tick after `start()`, in ms. Every later tick
