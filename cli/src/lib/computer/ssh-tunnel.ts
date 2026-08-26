@@ -165,7 +165,7 @@ export function resolveWinHelperExe(): string | null {
   return null;
 }
 
-/** GitHub repo whose `v<version>` releases carry the exe as an asset. */
+/** GitHub repo whose `computer-win/v<version>` releases carry the exe as an asset. */
 export const WIN_HELPER_RELEASE_REPO = 'phnx-labs/agi-cli';
 
 /** Cache dir for downloaded helper exes, one subdir per release tag. */
@@ -173,7 +173,7 @@ export function winHelperCacheDir(version: string): string {
   return path.join(getCacheDir(), 'computer', 'win-helper', `v${version}`);
 }
 
-/** Release-asset URLs for the exe + its checksum at one exact `v<version>` tag. */
+/** Release-asset URLs for the exe + its checksum at one exact `computer-win/v<version>` tag. */
 export function winHelperAssetUrls(version: string): { exe: string; sha256: string } {
   // The helper's OWN tag, not the CLI's. This exe is not an .app bundle so it
   // cannot share helper-download.ts's zip/codesign machinery, but it had the
@@ -190,7 +190,7 @@ export function winHelperAssetUrls(version: string): { exe: string; sha256: stri
  */
 
 /**
- * Download the exe release asset for this CLI version, verify its sha256
+ * Download the exe release asset for this HELPER version, verify its sha256
  * against the published `.sha256` asset, and cache it under the agents cache
  * dir. Only the exact `computer-win/v<version>` tag is consulted — a missing
  * asset is a hard error naming that tag, never a silent fallback to another
