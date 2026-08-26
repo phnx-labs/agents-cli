@@ -605,12 +605,16 @@ export function releaseVersionOfCachedBundle(
   appPath: string,
   cacheDirFor: (v: string) => string = menubarHelperCacheDir,
 ): string | null {
-  const m = /v(\d+\.\d+\.\d+)/.exec(appPath);
-  if (!m) return null;
-  const expected = path.resolve(cacheDirFor(m[1]));
-  return path.resolve(appPath).startsWith(expected + path.sep) || path.resolve(appPath) === expected
-    ? m[1]
-    : null;
+  // Try EVERY version-shaped segment, not just the leftmost. A cached bundle
+  // under a home or mount path that itself contains an unrelated `vX.Y.Z`
+  // (an nvm dir, a versioned volume) would otherwise match that first segment,
+  // fail the prefix check, and be misclassified as a local build.
+  const resolved = path.resolve(appPath);
+  for (const m of appPath.matchAll(/v(\d+\.\d+\.\d+)/g)) {
+    const expected = path.resolve(cacheDirFor(m[1]));
+    if (resolved === expected || resolved.startsWith(expected + path.sep)) return m[1];
+  }
+  return null;
 }
 
 /**
@@ -1115,8 +1119,12 @@ export async function runMenubarSetup(): Promise<SetupResult> {
     step('bundle', 'failed', 'could not install the helper bundle');
     return { steps, configured: false, status: getMenubarStatus() };
   }
-  step('bundle', before.installedVersion === getCliVersion() ? 'ok' : 'changed',
-    `${installedAppPath()} (${getCliVersion()})`);
+  // The helper axis here too: this label read "ok" only when the installed
+  // helper's stamp happened to equal the CLI's version, which after this change
+  // is never true on a release install.
+  const bundleStamp = stampVersionLabel(readInstalledMenubarStamp());
+  step('bundle', bundleStamp === availableHelperLabel() ? 'ok' : 'changed',
+    `${installedAppPath()} (${bundleStamp ?? 'unknown'})`);
 
   if (!(codesignVerifies(installedAppPath()) && gatekeeperAssesses(installedAppPath()))) {
     step('signature', 'failed',

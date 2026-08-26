@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { menubarHelperCacheDir } from './download-menubar.js';
+import { serviceManagerRegistrationAllowed } from '../service-manifest.js';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -11,7 +12,9 @@ import {
   gatekeeperAssesses,
   generateServicePlist,
   hasDeveloperIdSignature,
+  installMenubarLaunchAgentOnUpgrade,
   isMenubarStale,
+  LOCAL_BUILD_LABEL,
   releaseVersionOfCachedBundle,
   stampFor,
   isMenubarProcessStaleAgainstBundle,
@@ -275,6 +278,33 @@ describe('isMenubarStale', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it('finds the cache match even when an earlier path segment looks like a version', () => {
+    // Reviewer-found: the classifier took the LEFTMOST version-shaped match, so
+    // a genuinely cached bundle under e.g. an nvm dir (`.../v24.15.0/...`)
+    // matched that segment, failed the prefix check, and read as a local build.
+    const cacheFor = (v: string) => `/Users/me/.nvm/versions/node/v24.15.0/cache/menubar/mac-helper/v${v}`;
+    expect(releaseVersionOfCachedBundle(`${cacheFor('1.0.1')}/MenubarHelper.app`, cacheFor)).toBe('1.0.1');
+  });
+
+  it('does not let a local build win or lose a version contest', () => {
+    // Reviewer-found: excluding LOCAL_BUILD_LABEL from the compareVersions arm
+    // had zero coverage — mutating it away killed nothing. `local` is a KIND
+    // marker; ordering it against real semver would let a dev build seize a
+    // release helper, or be refused by one, on a meaningless comparison.
+    const base = {
+      ownerEntryExists: true,
+      sourceIsDeveloperId: true,
+      plistEntry: '/a',
+      activeEntry: '/b',            // not the owner, so only a version arm could grant
+      helperExecMissing: false,
+      needsDevIdHeal: false,
+      msSinceLastHeal: 0,
+      cooldownMs: 3_600_000,
+    };
+    expect(mayInstallMenubarHelper({ ...base, installedVersion: '1.0.0', currentVersion: LOCAL_BUILD_LABEL })).toBe(false);
+    expect(mayInstallMenubarHelper({ ...base, installedVersion: LOCAL_BUILD_LABEL, currentVersion: '1.0.0' })).toBe(false);
   });
 
   it('never compares against the CLI version', () => {
@@ -905,5 +935,58 @@ describe('isMenubarProcessStaleAgainstBundle', () => {
 
   it('is still stale when the pid predates the bundle by a full second', () => {
     expect(isMenubarProcessStaleAgainstBundle(1_787_441_352_000, 1_787_441_353_700)).toBe(true);
+  });
+});
+
+/**
+ * Drives `installMenubarLaunchAgentOnUpgrade` for real — the function the
+ * #2109 storm lived in, and which had no test that executed it at all.
+ *
+ * Honest scope. Two things make a full convergence drive unreachable rather
+ * than merely awkward, and both are properties of the code, not the harness:
+ *  - `sourceAppPath()` resolves candidates relative to the MODULE's own
+ *    location, so a fake source cannot be planted via HOME; planting one would
+ *    mean writing into the source tree.
+ *  - the install path refuses any bundle that fails `codesign` + `spctl`, so a
+ *    synthetic bundle can never reach `installAndStartService`, and a real
+ *    Developer-ID-signed one is not available in CI.
+ *
+ * So this pins the contract that IS reachable: under a redirected HOME the
+ * function completes, registers nothing with the real service manager, and
+ * leaves no stamp behind. That last part is the documented "stamp only a heal
+ * that actually happened" rule — stamping a no-op would spend the shared
+ * cooldown and lock every other install out for an hour having fixed nothing.
+ */
+describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
+  const savedHome = process.env.HOME;
+  const savedRealHome = process.env.AGENTS_REAL_HOME;
+
+  afterEach(() => {
+    if (savedHome === undefined) delete process.env.HOME; else process.env.HOME = savedHome;
+    if (savedRealHome === undefined) delete process.env.AGENTS_REAL_HOME; else process.env.AGENTS_REAL_HOME = savedRealHome;
+  });
+
+  it('is a safe no-op under a sandbox HOME, and never registers a service', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-menubar-home-'));
+    fs.mkdirSync(path.join(home, '.agents'), { recursive: true });
+    process.env.HOME = home;
+    process.env.AGENTS_REAL_HOME = home;
+    try {
+      // The seam is deliberately NOT set, so registration is refused — this
+      // asserts the guard rather than opting out of it.
+      expect(serviceManagerRegistrationAllowed().allowed).toBe(false);
+
+      // Twice: a storm is non-convergence, so one call proving nothing is the
+      // point of running it again.
+      expect(() => installMenubarLaunchAgentOnUpgrade()).not.toThrow();
+      expect(() => installMenubarLaunchAgentOnUpgrade()).not.toThrow();
+
+      // Nothing was registered and nothing was stamped under the sandbox HOME.
+      const launchAgents = path.join(home, 'Library', 'LaunchAgents');
+      const plists = fs.existsSync(launchAgents) ? fs.readdirSync(launchAgents) : [];
+      expect(plists.filter((f) => f.includes('menubar'))).toEqual([]);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
   });
 });
