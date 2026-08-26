@@ -56,6 +56,8 @@ model it uses.
   every sibling service. A deadline is detection, not cancellation: the service
   parks immediately, retains its in-flight ownership until the real promise
   settles, and cannot be stopped or restarted live underneath that work.
+  SIGHUP control transitions queue on `awaitIdle()` rather than polling, so a
+  requested toggle applies after real settlement without another timer owner.
   `getServiceSupervisorHealth()` (`daemon.ts:60`)
   exposes the live in-process `supervisor.health()` map for a future
   same-process reader; a cross-process reader (`agents daemon services`, a

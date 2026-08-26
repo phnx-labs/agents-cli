@@ -141,6 +141,19 @@ export class ServiceSupervisor {
   }
 
   /**
+   * Resolve when the service's current tick has really settled. Daemon control
+   * edges use this to queue a requested live transition without polling or
+   * treating a deadline race as cancellation.
+   */
+  async awaitIdle(id: DaemonServiceId): Promise<void> {
+    const entry = this.registry.get(id);
+    if (!entry) throw new Error(`service '${id}' is not registered`);
+    const activeTick = entry.activeTick;
+    if (!activeTick) return;
+    await activeTick.catch(() => undefined);
+  }
+
+  /**
    * Start one registered service live — drives `agents daemon services enable
    * <id>` (RUSH-3193 P4). Only affects a service already registered on this
    * supervisor: one disabled at daemon boot was never constructed or

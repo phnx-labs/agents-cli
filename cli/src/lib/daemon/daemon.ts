@@ -1159,7 +1159,11 @@ export async function runDaemon(): Promise<void> {
         // never registered, so it falls through to the same "restart to
         // apply" advice as before.
         if (supervisor.isRegistered(id)) {
-          const action = now ? supervisor.start(id) : supervisor.stop(id);
+          // A periodic service may be inside a real tick when SIGHUP arrives.
+          // Queue the desired transition behind that exact promise: deadlines
+          // detect a wedge but cannot cancel arbitrary work, and polling here
+          // would create another lifecycle timer outside the supervisor.
+          const action = supervisor.awaitIdle(id).then(() => now ? supervisor.start(id) : supervisor.stop(id));
           void action
             .then(() => log('INFO', `Service '${id}' ${now ? 'started' : 'stopped'} live (SIGHUP reload)`))
             .catch((err) => log('WARN', `Service '${id}' live ${now ? 'start' : 'stop'} failed: ${(err as Error).message}`));
@@ -1174,7 +1178,7 @@ export async function runDaemon(): Promise<void> {
     // Drain queued `agents daemon services restart <id>` requests (RUSH-3193 P4).
     for (const id of drainDaemonServiceRestartQueue()) {
       if (supervisor.isRegistered(id)) {
-        void supervisor.restartOne(id)
+        void supervisor.awaitIdle(id).then(() => supervisor.restartOne(id))
           .then(() => log('INFO', `Service '${id}' restarted live (SIGHUP reload)`))
           .catch((err) => log('WARN', `Service '${id}' live restart failed: ${(err as Error).message}`));
       } else {
