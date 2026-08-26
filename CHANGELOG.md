@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+- **A fleet browser hub lets every box drive one shared logged-in browser with no `--device` (PHNX-2010).**
+  New `browser.device` config key (user scope, so a single value in the central
+  `agents.yaml` syncs fleet-wide). When set, a bare `agents browser start` forwards to
+  that hub instead of launching locally: the hub resolves its own default profile and
+  browser, and the task→device index carries every later verb (`navigate`, `screenshot`,
+  `stop`, …) to the same hub — so a headless Linux worker with no local browser drives
+  the fleet's logged-in Comet on a Mac seamlessly, without `agents ssh` or a bespoke
+  `ssh://` profile. The hub names itself, so there it short-circuits to a local run,
+  which is what makes one synced value safe. `agents browser use` surfaces the configured
+  hub; set it with `agents config set browser.device <device>`. `--device`/`--profile`
+  still override per-command.
+
 - **Self-updating Cursor and Grok installs keep account slots separate from vendor releases (PHNX-3250).** A concrete `agents add <agent>@<label>` now preserves that label as the stable version-home identity while recording the current self-updated binary in `installation.json.releaseVersion`. Multiple homes can therefore carry the same current release without sharing credentials, and `remove --isolated` can no longer target a normal install merely because both report the same vendor version.
 
 - **`agents sync <agent> system` now reconciles system-layer plugins (RUSH-3207).**

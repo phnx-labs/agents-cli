@@ -332,6 +332,22 @@ function assertDeviceDeclaresProfile(device: string, profileName: string): void 
   );
 }
 
+/**
+ * The fleet browser hub this box drives by default (`browser.device`), or
+ * undefined to drive locally. It is one fleet-synced value in the central
+ * agents.yaml, so every box reads the same hub name — but the hub itself resolves
+ * to a self-host, and a fleet-dispatched invocation is already ON its target, so
+ * both return undefined. That self short-circuit is what lets a single synced
+ * value be safe: only the boxes that are NOT the hub forward to it, and the hub
+ * never forwards to itself.
+ */
+export function defaultBrowserHub(): string | undefined {
+  if (isFleetRemoteInvocation()) return undefined;
+  const hub = getConfigValue('browser.device').value as string | undefined;
+  if (!hub || isSelfHost(hub)) return undefined;
+  return hub;
+}
+
 // Help groups — surfaces the actual mental model an agent follows
 // ("open a session / drive the page / capture evidence / rare extras")
 // instead of an alphabetical dump. Everything not listed falls into a
@@ -464,7 +480,16 @@ export async function runBrowserUse(
       console.log(current
         ? `Default browser profile (this machine): ${current}`
         : 'Default browser profile (this machine): auto-detect');
+      const hub = getConfigValue('browser.device').value as string | undefined;
+      if (hub) {
+        console.log(
+          isSelfHost(hub)
+            ? `Browser hub (browser.device): ${hub} — this machine, so drives locally`
+            : `Browser hub (browser.device): ${hub} — bare \`agents browser start\` drives ${hub}'s browser`,
+        );
+      }
       console.log('Usage: agents browser use <name>  (or --unset)');
+      console.log('Fleet hub: agents config set browser.device <device>  (drive that box\'s browser from every machine)');
       return true;
     }
 
@@ -1540,6 +1565,39 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
+      // Thin-client fast path: when this box has a fleet browser hub configured
+      // (`browser.device`) and the caller named neither a device nor a profile,
+      // forward a BARE `start` to the hub. The hub resolves ITS OWN default
+      // profile and launches/attaches ITS browser, so this box needs no local
+      // browser and no profile of its own — skipping the local profile
+      // resolution/pre-checks below entirely. Later page verbs follow the task to
+      // the hub through the task→device index bound here. An explicit --device or
+      // --profile opts out and takes the fully-resolved path (--device below,
+      // --profile still honored with the hub as the default device).
+      {
+        const hub = defaultBrowserHub();
+        if (hub && !opts.device && !opts.profile) {
+          const result = await dispatchBrowserToDevice(hub, browserForwardedArgv(), 'capture');
+          process.stdout.write(result.stdout);
+          process.stderr.write(result.stderr);
+          if (result.code !== 0) process.exit(result.code);
+          const taskName =
+            opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
+          if (!taskName) {
+            console.error(`Remote start on ${hub} produced no task name.`);
+            process.exit(1);
+          }
+          bindTask(taskName, {
+            device: hub,
+            url: opts.url,
+            sessionId: callerSessionId(),
+            launchId: callerLaunchId(),
+            createdAt: Date.now(),
+          });
+          return;
+        }
+      }
+
       // One resolution order for every command (RUSH-2709): `--profile default`
       // means the same profile here as it does in stop / status / navigate.
       // `start` is the one command that LAUNCHES, so its implicit path goes
@@ -1582,7 +1640,10 @@ function registerTaskCommands(browser: Command): void {
         }
       }
 
-      const deviceName: string | undefined = opts.device;
+      // `--profile` was named without `--device`, but a hub is configured: target
+      // the hub (the bare no-profile case already returned above). The hub must
+      // declare the named profile — asserted just below.
+      const deviceName: string | undefined = opts.device ?? defaultBrowserHub();
       if (deviceName) {
         const lowered = deviceName.toLowerCase();
         if (lowered === 'all' || lowered === 'auto') {
