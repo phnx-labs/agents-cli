@@ -33,7 +33,6 @@ import { getDevice, type DeviceProfile } from '../devices/registry.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { hostNameFor } from '../devices/ssh-config.js';
 import { getCacheDir } from '../state.js';
-import { getCliVersion } from '../version.js';
 import { openComputerClient, resolveTcpEndpoint, type ComputerClient } from './computer-rpc.js';
 import { helperFloor, helperTag } from '../helper-versions.js';
 
@@ -193,19 +192,24 @@ export function winHelperAssetUrls(version: string): { exe: string; sha256: stri
 /**
  * Download the exe release asset for this CLI version, verify its sha256
  * against the published `.sha256` asset, and cache it under the agents cache
- * dir. Only the exact `v<version>` tag is consulted — a missing asset is a
- * hard error naming that tag, never a silent fallback to another release.
+ * dir. Only the exact `computer-win/v<version>` tag is consulted — a missing
+ * asset is a hard error naming that tag, never a silent fallback to another
+ * release. The version is the HELPER's own, not the CLI's.
  */
 export async function downloadWinHelperExe(version: string): Promise<string> {
   const cached = path.join(winHelperCacheDir(version), WIN_HELPER_EXE);
   if (fs.existsSync(cached)) return cached;
 
-  const tag = `v${version}`;
+  // The SAME tag the URL is built from. This said `v${version}` — the CLI's tag
+  // shape — while winHelperAssetUrls uses helperTag('computer-win', ...), so a
+  // missing asset sent you looking for a tag that does not exist. The mac path
+  // had this fixed already; the Windows path was left behind by the tag split.
+  const tag = helperTag('computer-win', version);
   const { exe: exeUrl, sha256: shaUrl } = winHelperAssetUrls(version);
   const missing = (status: number, url: string) =>
     new Error(
       `no ${WIN_HELPER_EXE} release asset for tag ${tag} (HTTP ${status} on ${url}). ` +
-        `The Windows helper ships as a GitHub release asset per tagged CLI version; ` +
+        `The Windows helper ships as a GitHub release asset on its own helper tag; ` +
         `from a repo checkout you can build it locally instead: bash scripts/build-win.sh`,
     );
 

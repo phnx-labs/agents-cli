@@ -256,8 +256,19 @@ describe('win helper release-asset download', () => {
 
   it('fails naming the exact tag checked when the release asset does not exist', async () => {
     // Real GitHub 404 — no fallback to any other tag is attempted.
+    //
+    // The assertion is anchored on the HELPER tag, not just the version. It used
+    // to match /v0\.0\.0-.../, which passes whether the message names
+    // `v<version>` (the CLI's tag shape, which is wrong and does not exist) or
+    // `computer-win/v<version>` — the second contains the first as a substring,
+    // so the test could not tell the bug from the fix.
+    // Anchored on the "for tag " PHRASE, not just the tag text. The message also
+    // embeds the asset URL, which contains `computer-win/v<version>` no matter
+    // what the tag variable holds — so a bare tag-text match reads the URL and
+    // passes whether the tag is right or wrong. Verified by mutation: reverting
+    // the tag to `v${version}` must fail this.
     await expect(downloadWinHelperExe('0.0.0-ssh-tunnel-no-such-tag')).rejects.toThrow(
-      /v0\.0\.0-ssh-tunnel-no-such-tag/,
+      /for tag computer-win\/v0\.0\.0-ssh-tunnel-no-such-tag/,
     );
   }, 30_000);
 });
