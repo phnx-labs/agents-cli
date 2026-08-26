@@ -1089,6 +1089,38 @@ describe('me/org GET identity gate (PHNX-3260)', () => {
     expect(res.headers.get('location')).toContain('/login?return=');
   });
 
+  it('me ?revisions=json is identity-gated the same way as the page GET', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>v1</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    await putAsPhoenix(worker, env, 'alice/secret', '<h1>v2</h1>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => null;
+
+    const anon = await worker.default.fetch(new Request('https://share.test/alice/secret?revisions=json'), env);
+    expect(anon.status).toBe(302);
+    expect(anon.headers.get('location')).toContain('/login?return=');
+    expect(anon.headers.get('location')).toContain(encodeURIComponent('https://share.test/alice/secret?revisions=json'));
+
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'bob', email: 'bob@acme.com' });
+    const other = await worker.default.fetch(
+      new Request('https://share.test/alice/secret?revisions=json', { headers: { authorization: 'Bearer bob' } }),
+      env,
+    );
+    expect(other.status).toBe(404);
+    expect(await other.text()).toBe('not found');
+
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@acme.com' });
+    const ok = await worker.default.fetch(
+      new Request('https://share.test/alice/secret?revisions=json', { headers: { authorization: 'Bearer alice' } }),
+      env,
+    );
+    expect(ok.status).toBe(200);
+    expect(ok.headers.get('cache-control')).toBe('private, no-store');
+    expect(ok.headers.get('X-Robots-Tag')).toBe('noindex');
+    const payload = await ok.json();
+    expect(payload.count).toBe(1);
+  });
+
   it('me PUT without PHOENIX_ID_BASE 400s even with a Phoenix hook', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
