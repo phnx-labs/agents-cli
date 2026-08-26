@@ -164,6 +164,29 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
       'Browser profile `agents browser start` resolves to without --profile (set via `agents browser use`).',
   },
   {
+    name: 'browser.device',
+    yamlKey: 'defaultBrowserDevice',
+    // user scope, so a SINGLE value in the central agents.yaml syncs to every box:
+    // the fleet's browser hub. A worker with this set forwards its browser drives
+    // to the hub (as if `--device <hub>` was passed) with no per-command flag, so
+    // every agent shares the hub's one logged-in browser. The hub names itself, so
+    // there it resolves to a self-host and runs locally — which is why one synced
+    // value is safe. Unset = drive this box's own browser (today's behavior).
+    scope: 'user',
+    type: 'string',
+    description:
+      'Fleet browser hub: the device whose browser `agents browser` drive verbs target by default, with no --device. ' +
+      'The hub itself runs locally; every other box forwards to it. Unset = each box drives its own browser.',
+    validate: (v) => {
+      try {
+        assertValidDeviceName(v as string);
+        return null;
+      } catch (err: any) {
+        return err?.message ?? String(err);
+      }
+    },
+  },
+  {
     name: 'agents.max-concurrent',
     yamlKey: 'maxAgents',
     scope: 'device',
