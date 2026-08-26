@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Public installer for agents-dbg. Hosted from:
-# https://raw.githubusercontent.com/phnx-labs/agi-cli/main/scripts/install-agents-dbg.sh
+# https://raw.githubusercontent.com/phnx-labs/agents-cli/main/scripts/install-agents-dbg.sh
 
 set -euo pipefail
 
