@@ -1238,10 +1238,9 @@ export async function runDaemon(): Promise<void> {
   // rather than one that every step added later has to re-earn.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
-    // supervisor.stopAll() stops every registered service: secrets-broker
-    // (closes hostedBroker + self-heal timer), monitor engine, account-state,
-    // browser IPC, session-index, watchdog, device-probe, self-heal,
-    // keychain-reap, and (once registered just below) state-dir-check.
+    // supervisor.stopAll() stops every registered service, including socket
+    // hosts, session publishers/indexers, monitor/account work, and every
+    // maintenance timer; state-dir-check joins the registry just below.
     await supervisor.stopAll();
     activeServiceSupervisor = null;
     stopScheduler();
