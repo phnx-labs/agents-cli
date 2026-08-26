@@ -34,6 +34,8 @@ export interface ServiceSupervisorOptions {
   backoffBaseMs?: number;
   /** Backoff ceiling. Default 5 minutes. */
   backoffMaxMs?: number;
+  /** Hard cap for start/stop/restart lifecycle hooks. Default 60s. */
+  lifecycleDeadlineMs?: number;
 }
 
 interface RegisteredService {
@@ -54,6 +56,7 @@ interface RegisteredService {
 const DEFAULT_PARK_AFTER_FAILURES = 3;
 const DEFAULT_BACKOFF_BASE_MS = 5_000;
 const DEFAULT_BACKOFF_MAX_MS = 5 * 60_000;
+const DEFAULT_LIFECYCLE_DEADLINE_MS = 60_000;
 
 export class ServiceSupervisor {
   private readonly registry = new Map<DaemonServiceId, RegisteredService>();
@@ -61,11 +64,13 @@ export class ServiceSupervisor {
   private readonly parkAfterFailures: number;
   private readonly backoffBaseMs: number;
   private readonly backoffMaxMs: number;
+  private readonly lifecycleDeadlineMs: number;
 
   constructor(opts: ServiceSupervisorOptions = {}) {
     this.parkAfterFailures = opts.parkAfterFailures ?? DEFAULT_PARK_AFTER_FAILURES;
     this.backoffBaseMs = opts.backoffBaseMs ?? DEFAULT_BACKOFF_BASE_MS;
     this.backoffMaxMs = opts.backoffMaxMs ?? DEFAULT_BACKOFF_MAX_MS;
+    this.lifecycleDeadlineMs = opts.lifecycleDeadlineMs ?? DEFAULT_LIFECYCLE_DEADLINE_MS;
   }
 
   /**
@@ -104,10 +109,25 @@ export class ServiceSupervisor {
   async restartOne(id: DaemonServiceId): Promise<void> {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
+    // A live periodic service already owns an interval. attemptRestart() installs
+    // a fresh one after restart, so leaving the existing handles alive would
+    // multiply the tick rate on every operator-requested restart.
+    if (entry.timer) {
+      clearInterval(entry.timer);
+      entry.timer = undefined;
+    }
+    if (entry.startupTimer) {
+      clearTimeout(entry.startupTimer);
+      entry.startupTimer = undefined;
+    }
     if (entry.restartTimer) {
       clearTimeout(entry.restartTimer);
       entry.restartTimer = undefined;
     }
+    // Block a timer callback already queued in this event-loop turn while the
+    // service tears down and starts again.
+    entry.state = 'parked';
+    recordSubsystemState(id, 'parked');
     await this.attemptRestart(id);
   }
 
@@ -143,6 +163,12 @@ export class ServiceSupervisor {
     await this.stopOne(id);
   }
 
+  /** Request an immediate supervised tick, used by event edges that cannot wait for the regular cadence. */
+  runNow(id: DaemonServiceId): void {
+    if (!this.registry.has(id)) throw new Error(`service '${id}' is not registered`);
+    void this.runTick(id);
+  }
+
   /** Health for every registered service, keyed by service id. */
   health(): Record<string, ServiceHealth> {
     const out: Record<string, ServiceHealth> = {};
@@ -162,7 +188,7 @@ export class ServiceSupervisor {
     const ctx = this.ctx;
     if (!entry || !ctx) return;
     try {
-      await entry.service.start(ctx);
+      await this.runLifecycle(entry.service.start(ctx), id, 'start');
     } catch (err) {
       this.recordFailure(entry, id, err);
       this.park(id);
@@ -212,7 +238,7 @@ export class ServiceSupervisor {
     recordSubsystemState(id, 'stopped');
     if (!entry.everStarted) return; // start() never succeeded — nothing to stop.
     try {
-      await entry.service.stop();
+      await this.runLifecycle(entry.service.stop(), id, 'stop');
     } catch (err) {
       this.ctx?.log('WARN', `service '${id}' stop failed: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -288,7 +314,7 @@ export class ServiceSupervisor {
     const ctx = this.ctx;
     if (!entry || !ctx || entry.state === 'stopped') return;
     try {
-      await entry.service.restart();
+      await this.runLifecycle(entry.service.restart(), id, 'restart');
       entry.everStarted = true; // restart() is stop()+start() on the service — a successful one means it is running again and owes a stop() at shutdown.
       entry.state = 'running';
       recordSubsystemState(id, 'running');
@@ -317,5 +343,22 @@ export class ServiceSupervisor {
     entry.lastError = message;
     recordSubsystemError(id, message);
     this.ctx?.log('WARN', `service '${id}' failed: ${message}`);
+  }
+
+  private async runLifecycle(promise: Promise<void>, id: DaemonServiceId, phase: 'start' | 'stop' | 'restart'): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`service '${id}' ${phase} exceeded lifecycle deadline of ${this.lifecycleDeadlineMs}ms`)),
+            this.lifecycleDeadlineMs,
+          );
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 }

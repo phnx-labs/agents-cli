@@ -3077,8 +3077,10 @@ nothing but its own view cache.
   `setInterval`s inside `runDaemon()` at the time, then moved onto
   `ServiceSupervisor` as `WatchdogService`/`DeviceProbeService`
   (`lib/daemon/watchdog-service.ts`, `device-probe-service.ts`, RUSH-3193 P3);
-  `session-cache-warm` (`runActiveSessionsWarm`) remains a bare
-  `setInterval`. All three are invisible to `agents routines`, but still the
+  `session-cache-warm` now runs as the supervised `session-state` service
+  (`lib/daemon/session-state-service.ts`, PHNX-3265): it owns the 15-second
+  publish cadence and the reader-presence edge that requests an immediate
+  supervised tick. All three are invisible to `agents routines`, but still the
   single daemon-owned scheduler/executor SING-1 requires, since nothing else
   calls them. `auto-dispatch` and `launch-health`
   were deleted outright with no replacement. **`tmux-reconcile`** (the 5-minute
@@ -3332,11 +3334,12 @@ a machine-wide process sweep.)
   and `index.ts:255-256` adds top-level `uncaughtException`/`unhandledRejection`
   handlers so a startup crash always reaches the now-throttled supervisor rather than
   hanging (RUSH-2418, SING-GAP-6 resolved).
-- **SING-17 (MUST).** Public webhook ingress MUST be a supervised daemon-hosted
+- **SING-17 (MUST).** Public webhook ingress MUST be a `ServiceSupervisor`-managed daemon-hosted
   service, not an unsupervised process. The `webhook-receiver` service
   (`lib/daemon-services.ts`) binds one signed receiver per entry in
   `~/.agents/daemon/webhooks.yaml` (`lib/daemon-webhooks.ts`,
-  `startHostedWebhookReceivers`), hosted after the secrets broker so each
+  `startHostedWebhookReceivers`), wrapped by `WebhookReceiverService`
+  (`lib/daemon/webhook-receiver-service.ts`) and started after the secrets broker so each
   receiver's signing secret resolves headlessly through the broker
   (`resolveReceiverSecrets`, `agentOnly: true` per SEC-13) — no
   `AGENTS_SECRETS_PASSPHRASE` and no `nohup`. Every receiver MUST be torn down on

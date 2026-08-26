@@ -118,13 +118,15 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     }
   }, 20_000);
 
-  // RUSH-3193 P3: watchdog, device-probe, self-heal, keychain-reap, and
-  // state-dir-check moved off bare inline `setInterval`s onto the same
-  // supervisor. One boot checks all five together rather than five separate
-  // subprocess boots.
-  const P3_SERVICE_IDS = ['watchdog', 'device-probe', 'self-heal', 'keychain-reap', 'state-dir-check'] as const;
+  // RUSH-3193 P3 + PHNX-3265: every periodic daemon-owned maintenance loop
+  // migrated out of runDaemon() and onto the same supervisor. One real boot
+  // checks the composed set rather than isolated wrapper stand-ins.
+  const PERIODIC_SERVICE_IDS = [
+    'watchdog', 'device-probe', 'self-heal', 'keychain-reap', 'state-dir-check',
+    'session-state', 'daemon-heartbeat', 'tmux-reap', 'browser-task-reap',
+  ] as const;
 
-  it('registers watchdog/device-probe/self-heal/keychain-reap/state-dir-check on the supervisor and each reports healthy shortly after boot', async () => {
+  it('registers every periodic maintenance service on the supervisor and each reports healthy shortly after boot', async () => {
     if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
 
     const tmpHome = freshHome();
@@ -142,12 +144,12 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
       };
 
       let all: Record<string, { consecutiveFailures?: number }> = {};
-      for (let i = 0; i < 200 && P3_SERVICE_IDS.some((id) => !all[id]); i++) {
+      for (let i = 0; i < 200 && PERIODIC_SERVICE_IDS.some((id) => !all[id]); i++) {
         all = readHealth();
-        if (P3_SERVICE_IDS.some((id) => !all[id])) await new Promise((r) => setTimeout(r, 100));
+        if (PERIODIC_SERVICE_IDS.some((id) => !all[id])) await new Promise((r) => setTimeout(r, 100));
       }
 
-      for (const id of P3_SERVICE_IDS) {
+      for (const id of PERIODIC_SERVICE_IDS) {
         expect(all[id], `expected a health record for '${id}'`).toBeDefined();
         expect(all[id]?.consecutiveFailures).toBe(0);
       }
@@ -157,13 +159,13 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
     }
   }, 30_000);
 
-  it('disabling all five P3 services means none of them register, so none report a health record', async () => {
+  it('disabling every periodic maintenance service means none register or report health', async () => {
     if (!fs.existsSync(DIST_ENTRY)) execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
 
     const tmpHome = freshHome();
     const servicesConfigDir = path.join(tmpHome, '.agents', 'daemon');
     fs.mkdirSync(servicesConfigDir, { recursive: true });
-    const disabledYaml = `services:\n${P3_SERVICE_IDS.map((id) => `  ${id}: false`).join('\n')}\n`;
+    const disabledYaml = `services:\n${PERIODIC_SERVICE_IDS.map((id) => `  ${id}: false`).join('\n')}\n`;
     fs.writeFileSync(path.join(servicesConfigDir, 'services.yaml'), disabledYaml, 'utf-8');
 
     const runtimeDir = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon');
@@ -183,6 +185,10 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
         'Self-heal service disabled',
         'Keychain-reap service disabled',
         'State-dir self-check disabled',
+        'Live session-state service disabled',
+        'Daemon heartbeat service disabled',
+        'Tmux reap service disabled',
+        'Browser-task reap service disabled',
       ];
       let sawAll = false;
       for (let i = 0; i < 100 && !sawAll; i++) {
@@ -198,7 +204,7 @@ describe('runDaemon() supervisor wiring (integration: real daemon subprocess)', 
       // confirm no health record was ever written for any of the five.
       await new Promise((r) => setTimeout(r, 500));
       const all = fs.existsSync(healthPath) ? JSON.parse(fs.readFileSync(healthPath, 'utf-8')) : {};
-      for (const id of P3_SERVICE_IDS) expect(all[id]).toBeUndefined();
+      for (const id of PERIODIC_SERVICE_IDS) expect(all[id]).toBeUndefined();
     } finally {
       if (pid) await killAndWait(pid);
       fs.rmSync(tmpHome, { recursive: true, force: true });

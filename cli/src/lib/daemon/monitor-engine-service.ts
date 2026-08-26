@@ -2,20 +2,23 @@
  * MonitorEngine lifecycle as a `DaemonService` (RUSH-3193 P2).
  *
  * Wraps the `MonitorEngine` (event-triggered watchers) under the
- * `ServiceSupervisor` contract. This is a lifecycle-only service — the engine
- * runs its own internal event loop; the supervisor just calls `start()` at
- * boot and `stop()` at shutdown.
+ * `ServiceSupervisor` contract. The engine can own a timer when embedded by a
+ * foreground caller, but the daemon starts it in external-scheduler mode so
+ * every evaluation cycle receives the supervisor's deadline, health, and
+ * circuit-breaker semantics.
  *
  * `getEngine()` exposes the underlying `MonitorEngine` so `daemon.ts`'s
  * SIGHUP handler can call `engine.reload()` when needed.
  */
 
-import { BaseDaemonService, type DaemonContext } from './service.js';
+import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import { MonitorEngine } from '../monitors/engine.js';
+import { MONITOR_ENGINE_TICK_MS, MonitorEngine } from '../monitors/engine.js';
 
-export class MonitorEngineService extends BaseDaemonService {
+export class MonitorEngineService extends BasePeriodicService {
   readonly id: DaemonServiceId = 'monitors';
+  readonly intervalMs = MONITOR_ENGINE_TICK_MS;
+  readonly deadlineMs = 2 * 60_000;
 
   private engine: MonitorEngine | null = null;
 
@@ -26,11 +29,16 @@ export class MonitorEngineService extends BaseDaemonService {
 
   protected async onStart(ctx: DaemonContext): Promise<void> {
     this.engine = new MonitorEngine((level, message) => ctx.log(level, message));
-    this.engine.start();
+    this.engine.start({ externalScheduler: true });
   }
 
   protected async onStop(): Promise<void> {
     this.engine?.stop();
     this.engine = null;
+  }
+
+  protected async onTick(_ctx: DaemonContext): Promise<void> {
+    if (!this.engine) throw new Error('monitor engine tick requested before start');
+    await this.engine.tick();
   }
 }

@@ -1,7 +1,7 @@
 /**
  * DaemonService contract (RUSH-3193 P1).
  *
- * Today the daemon's ~13 background services are bare `setInterval` closures
+ * Historically the daemon's background services were bare `setInterval` closures
  * inside one long `runDaemon()` (daemon.ts), sharing one event loop with no
  * per-service error boundary or deadline. A throw escaping a tick's local
  * try/catch hits the process-wide handler and kills every service; a tick that
@@ -9,7 +9,7 @@
  * silently freezes that service for the daemon's life.
  *
  * This module defines the service shape a `ServiceSupervisor` (supervisor.ts)
- * drives instead: one contract per service, owned timer, per-tick deadline,
+ * drives instead: one contract per service, owned timer, lifecycle and per-tick deadlines,
  * and a health record the supervisor can report without the service having to
  * know it is being supervised.
  */

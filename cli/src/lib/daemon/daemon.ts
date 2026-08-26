@@ -18,23 +18,19 @@ import { listJobs as listAllJobs, type JobConfig } from '../scheduling/routines.
 import { syncAllProjectRoutines } from '../routines-project.js';
 import { JobScheduler } from '../scheduler.js';
 // MonitorEngine is now owned by MonitorEngineService (daemon/monitor-engine-service.ts).
-import { executeJobDetached, monitorRunningJobs, listLiveRoutineChildren } from './runner.js';
+import { executeJobDetached, listLiveRoutineChildren } from './runner.js';
 import { detectOverdueJobs, notifyOverdue } from '../overdue.js';
 import { runCatchup } from '../catchup.js';
 import { notifyRoutineStart, notifyRoutineFinish, notifyRoutineStartFailed } from '../routine-notify.js';
 import { notifyOwnerRoutineFinish, notifyOwnerRoutineStartFailed } from '../routine-notify-owner.js';
 import { BrowserService } from '../browser/service.js';
 import { getSocketPath as getBrowserIpcSocketPath } from '../browser/ipc.js';
-import { startHostedWebhookReceivers, type HostedWebhookReceivers } from '../daemon-webhooks.js';
 import { secretsBrokerSocketPath, brokerPidAlive } from '../secrets/agent.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
 import { localBinDir } from '../platform/posixpath.js';
-import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, resolveBrowserTaskIdleMs } from '../device-config.js';
-import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
+import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled } from '../device-config.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
-import { runActiveSessionsWarmTick } from '../daemon-ticks.js';
-import { watchActiveSessionsReaderPresence } from '../session/session-cache.js';
 import { ServiceSupervisor } from './supervisor.js';
 import { SessionIndexService } from './session-index-service.js';
 import { SecretsBrokerService } from './secrets-broker-service.js';
@@ -47,6 +43,11 @@ import { SelfHealService } from './self-heal-service.js';
 import { KeychainReapService } from './keychain-reap-service.js';
 import { AuthSyncService } from './auth-sync-service.js';
 import { StateDirCheckService } from './state-dir-check-service.js';
+import { SessionStateService } from './session-state-service.js';
+import { WebhookReceiverService } from './webhook-receiver-service.js';
+import { HeartbeatService } from './heartbeat-service.js';
+import { TmuxReapService } from './tmux-reap-service.js';
+import { BrowserTaskReapService } from './browser-task-reap-service.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
@@ -121,7 +122,6 @@ export function daemonSystemdUnitName(): string {
   return suffix ? `agents-daemon-sandbox-${suffix}.service` : SYSTEMD_UNIT;
 }
 
-const MONITOR_TICK_MS = 60_000;
 /**
  * How often to re-scan for missed fires. Deliberately slower than the monitor
  * tick: detection walks a week of cron occurrences per routine
@@ -146,17 +146,10 @@ const CATCHUP_TICK_MS = 5 * 60_000;
  *   from wedges every keychain-backed secret on the box, so it runs minutely.
  */
 // BROKER_SELF_HEAL_TICK_MS moved to secrets-broker-service.ts (RUSH-3193 P2).
-// RUSH-2501: reap tmux sessions whose panes are all dead every 5 minutes.
-const DEAD_PANE_REAP_TICK_MS = 5 * 60_000;
-// RUSH-2622: close abandoned browser-task tabs every 5 minutes.
-const BROWSER_TASK_REAP_TICK_MS = 5 * 60_000;
-// Keep the active-session cache/journal fresh for sessions watch + Factory.
-// Matches DEFAULT_ACTIVE_CACHE_MAX_AGE_MS (15s) so long-lived watchers never
-// outlive the publisher (RUSH-2484 — CLI-owned continuous publish).
-const ACTIVE_SESSIONS_WARM_TICK_MS = 15_000;
 // Session-index warm interval/deadline live in session-index-service.ts now
 // (RUSH-3193 — migrated onto ServiceSupervisor).
 const WEDGE_THRESHOLD_TICKS = 3;
+const DAEMON_HEARTBEAT_TICK_MS = 60_000;
 
 /**
  * Crash-loop prevention (RUSH-2418). Three layers, because none of them alone
@@ -380,7 +373,7 @@ export function removeHeartbeat(): void {
  */
 function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
   const elapsed = Date.now() - Date.parse(hb.lastTick);
-  return elapsed <= WEDGE_THRESHOLD_TICKS * MONITOR_TICK_MS;
+  return elapsed <= WEDGE_THRESHOLD_TICKS * DAEMON_HEARTBEAT_TICK_MS;
 }
 
 export function isDaemonWedged(): boolean {
@@ -738,80 +731,6 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
 // below. runBrokerSelfHeal was moved into SecretsBrokerService (RUSH-3193 P2).
 // ---------------------------------------------------------------------------
 
-// In-flight guards: each flag prevents a slow tick from being re-entered
-// by the next timer fire before the previous one finishes.
-let reapingDeadPanes = false;
-let reapingBrowserTasks = false;
-
-/**
- * RUSH-2501: kill tmux sessions on the helper socket whose panes are ALL dead.
- * RUSH-2521: and terminate the helper processes (MCP servers, harness background
- * daemons) whose owning agent has exited — killing the pane only SIGHUPs its
- * foreground process group, so anything that left that group outlives it.
- *
- * Runs every DEAD_PANE_REAP_TICK_MS (5 min). The daemon is the single executor
- * so no UI surface can race it.
- */
-async function runDeadPaneReap(): Promise<void> {
-  if (reapingDeadPanes) return;
-  reapingDeadPanes = true;
-  try {
-    const { reapDeadTmuxPanes } = await import('../tmux/session.js');
-    const { getDefaultSocketPath } = await import('../tmux/paths.js');
-    const result = await reapDeadTmuxPanes(getDefaultSocketPath());
-    for (const w of result.warnings) log('WARN', `Dead-pane reaper: ${w}`);
-    if (result.processes > 0) {
-      log('INFO', `Dead-pane reaper: terminated ${result.processes} orphaned helper process(es)`);
-      for (const d of result.processDetails) log('INFO', `  ${d}`);
-    }
-    if (result.reaped > 0) {
-      log('INFO', `Dead-pane reaper: reaped ${result.reaped} session(s)`);
-      for (const d of result.details) log('INFO', `  killed ${d}`);
-    }
-  } catch (err) {
-    log('ERROR', `Dead-pane reaper failed: ${(err as Error).message}`);
-  } finally {
-    reapingDeadPanes = false;
-  }
-}
-
-/**
- * RUSH-2622: close abandoned browser-task tabs — a task whose owning agent
- * session has exited, or one idle past `browser.task-idle-minutes` (default 30,
- * 0 disables idle reaping only). Same policy `agents browser prune` triggers on
- * demand; this is the periodic side, and the daemon is the single executor so
- * no UI surface can race it. `service` is the daemon's own long-lived
- * BrowserService — the browser IPC server it started earlier in `runDaemon()`.
- *
- * Runs every BROWSER_TASK_REAP_TICK_MS (5 min).
- */
-async function runBrowserTaskReap(service: BrowserService): Promise<void> {
-  if (reapingBrowserTasks) return;
-  reapingBrowserTasks = true;
-  try {
-    const result = await service.reapAbandoned({ idleMs: resolveBrowserTaskIdleMs() });
-    if (result.closed.length > 0) {
-      log('INFO', `Browser-task reaper: closed ${result.closed.length} task(s)`);
-      for (const c of result.closed) log('INFO', `  ${c.task} (${c.reason}, profile ${c.profile})`);
-    }
-  } catch (err) {
-    log('ERROR', `Browser-task reaper failed: ${(err as Error).message}`);
-  } finally {
-    reapingBrowserTasks = false;
-  }
-}
-
-/**
- * One monitor tick: write heartbeat + drain the running-job monitor + reap
- * stale terminal routine process groups. Runs on MONITOR_TICK_MS.
- */
-function runMonitorTick(): void {
-  writeHeartbeat();
-  monitorRunningJobs();
-  const reaped = reapTerminalRoutineProcesses();
-  if (reaped.length > 0) log('WARN', `Reaped ${reaped.length} terminal routine process group(s): ${reaped.join(', ')}`);
-}
-
 export async function runDaemon(): Promise<void> {
   // Single-instance guard (last-wins, SING-11): a direct `agents __daemon-run`
   // (manual, or a service-manager restart racing a live predecessor) EVICTS the
@@ -900,6 +819,10 @@ export async function runDaemon(): Promise<void> {
   // ms of daemon start, exactly as before.
   const supervisor = new ServiceSupervisor();
 
+  if (isEnabled('session-state')) {
+    supervisor.register(new SessionStateService(() => supervisor.runNow('session-state')));
+  } else log('INFO', 'Live session-state service disabled');
+
   if (isEnabled('secrets-broker')) supervisor.register(new SecretsBrokerService());
   else log('INFO', 'Secrets broker service disabled; daemon not hosting it');
 
@@ -910,11 +833,12 @@ export async function runDaemon(): Promise<void> {
   if (isEnabled('account-state')) supervisor.register(new AccountStateDaemonService());
   else log('INFO', 'Account-state service disabled');
 
-  // BrowserIPCService owns the orphan reap (previously daemon.ts:1303-1318)
-  // and the BrowserIPCServer lifecycle. BrowserService is also constructed here
-  // so daemon.ts can access it for the browser-task-reap interval (task #3).
-  const browserSvcForReap = isEnabled('browser-ipc') ? new BrowserService() : null;
-  if (browserSvcForReap) supervisor.register(new BrowserIPCService(browserSvcForReap));
+  // BrowserIPCService and BrowserTaskReapService share one long-lived
+  // BrowserService when both are enabled. Either service can run independently.
+  const browserService = isEnabled('browser-ipc') || isEnabled('browser-task-reap')
+    ? new BrowserService()
+    : null;
+  if (isEnabled('browser-ipc') && browserService) supervisor.register(new BrowserIPCService(browserService));
   else log('INFO', 'Browser IPC service disabled');
 
   if (isEnabled('session-index')) supervisor.register(new SessionIndexService());
@@ -938,6 +862,21 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('auth-sync')) supervisor.register(new AuthSyncService());
   else log('INFO', 'Auth-sync service disabled');
+
+  if (isEnabled('webhook-receiver')) supervisor.register(new WebhookReceiverService());
+  else log('INFO', 'Webhook receiver service disabled');
+
+  if (isEnabled('daemon-heartbeat')) supervisor.register(new HeartbeatService(() => writeHeartbeat()));
+  else log('INFO', 'Daemon heartbeat service disabled');
+
+  if (isEnabled('tmux-reap')) supervisor.register(new TmuxReapService());
+  else log('INFO', 'Tmux reap service disabled');
+
+  if (isEnabled('browser-task-reap') && browserService) {
+    supervisor.register(new BrowserTaskReapService(browserService));
+  } else {
+    log('INFO', 'Browser-task reap service disabled');
+  }
 
   await supervisor.startAll({ log });
   activeServiceSupervisor = supervisor;
@@ -1068,33 +1007,9 @@ export async function runDaemon(): Promise<void> {
 
   if (schedulerEnabledAtBoot) bootScheduler();
 
-  // Active-sessions publish-own: continuous journal writer for `sessions watch`.
-  // Fire once immediately so a cold daemon does not leave watchers on
-  // "awaiting publisher" for a full tick (RUSH-2484). This boot-time fire alone
-  // no-ops on a genuinely cold boot (no reader has connected yet) — the
-  // presence watch below is what actually closes the gap for a watcher that
-  // connects later, whether at cold boot or after the reader-idle window.
-  let activeSessionsWarmInFlight = false;
-  const runActiveSessionsWarm = async (): Promise<void> => {
-    if (activeSessionsWarmInFlight) return;
-    activeSessionsWarmInFlight = true;
-    try {
-      await runActiveSessionsWarmTick();
-    } catch (err) {
-      log('WARN', `active-sessions warm failed: ${(err as Error).message}`);
-    } finally {
-      activeSessionsWarmInFlight = false;
-    }
-  };
-  void runActiveSessionsWarm();
-  const activeSessionsWarmInterval = setInterval(() => { void runActiveSessionsWarm(); }, ACTIVE_SESSIONS_WARM_TICK_MS);
-  // Out-of-band trigger (RUSH-2484): a reader connecting only writes a presence
-  // timestamp (noteActiveSessionsJournalReader in watch.ts) with no path back to
-  // this timer, so on its own the interval above leaves a fresh connection
-  // waiting up to ACTIVE_SESSIONS_WARM_TICK_MS for its first rows. This watches
-  // for the idle->recent edge and gathers immediately instead of waiting for the
-  // next scheduled tick — a genuinely idle box with no reader still never gathers.
-  const stopActiveSessionsReaderWatch = watchActiveSessionsReaderPresence(() => { void runActiveSessionsWarm(); });
+  // Live-session metadata publishing is owned by SessionStateService. Its
+  // presence watcher requests an immediate supervised tick when a reader
+  // connects; callers consume the journal instead of duplicating the gather.
 
   // Session-index warm (RUSH-2682) is registered on the supervisor above
   // (RUSH-3193 P2) alongside the socket services.
@@ -1182,25 +1097,8 @@ export async function runDaemon(): Promise<void> {
   // Started after the broker (above) so it resolves each receiver's signing
   // secret headlessly — no AGENTS_SECRETS_PASSPHRASE, no nohup. Binds nothing
   // unless daemon/webhooks.yaml declares a receiver, so an unconfigured box no-ops.
-  let webhookReceivers: HostedWebhookReceivers | null = null;
-  if (isEnabled('webhook-receiver')) {
-    try {
-      webhookReceivers = await startHostedWebhookReceivers({ log });
-      log(
-        'INFO',
-        webhookReceivers.count > 0
-          ? `Webhook receiver hosting ${webhookReceivers.count} receiver(s)`
-          : 'Webhook receiver service enabled; no receivers declared in daemon/webhooks.yaml',
-      );
-    } catch (err) {
-      log('WARN', `Webhook receiver host skipped: ${(err as Error).message}`);
-    }
-  } else {
-    log('INFO', 'Webhook receiver service disabled');
-  }
-
-  runMonitorTick();
-  const monitorInterval = setInterval(runMonitorTick, MONITOR_TICK_MS);
+  // Signed webhook ingress is owned by WebhookReceiverService, including
+  // per-service failure isolation, measured health, and shutdown cleanup.
 
   // Resource self-heal is now managed by SelfHealService on the supervisor
   // (RUSH-3193 P3), registered above alongside the socket services. The
@@ -1215,17 +1113,12 @@ export async function runDaemon(): Promise<void> {
 
   // RUSH-2501: reap tmux sessions whose panes are all dead. Runs on the same
   // 5-min cadence as the keychain reaper. Daemon-only (single executor).
-  void runDeadPaneReap(); // kick-off on startup so the backlog clears immediately
-  const deadPaneReapInterval = setInterval(() => { void runDeadPaneReap(); }, DEAD_PANE_REAP_TICK_MS);
+  // Dead managed panes and their orphan helpers are reaped by TmuxReapService.
 
   // RUSH-2622: close abandoned browser-task tabs on the same 5-min cadence,
-  // reusing the daemon's own long-lived BrowserService. `browserSvcForReap` is
-  // the BrowserService created for BrowserIPCService above; null when disabled.
-  let browserTaskReapInterval: NodeJS.Timeout | undefined;
-  if (browserSvcForReap) {
-    void runBrowserTaskReap(browserSvcForReap); // kick-off on startup
-    browserTaskReapInterval = setInterval(() => { void runBrowserTaskReap(browserSvcForReap!); }, BROWSER_TASK_REAP_TICK_MS);
-  }
+  // reusing the daemon's long-lived BrowserService when browser IPC is enabled.
+  // Abandoned browser tasks are reaped by BrowserTaskReapService, sharing the
+  // same BrowserService instance as BrowserIPCService.
 
   // RUSH-2367 / RUSH-3193 P3: state-dir-check (self-terminate guard) is
   // registered on the supervisor further below, once `handleShutdown` exists
@@ -1345,8 +1238,6 @@ export async function runDaemon(): Promise<void> {
   // rather than one that every step added later has to re-earn.
   const handleShutdown = singleShot(async () => {
     log('INFO', 'Daemon shutting down');
-    clearInterval(activeSessionsWarmInterval);
-    stopActiveSessionsReaderWatch();
     // supervisor.stopAll() stops every registered service: secrets-broker
     // (closes hostedBroker + self-heal timer), monitor engine, account-state,
     // browser IPC, session-index, watchdog, device-probe, self-heal,
@@ -1354,10 +1245,6 @@ export async function runDaemon(): Promise<void> {
     await supervisor.stopAll();
     activeServiceSupervisor = null;
     stopScheduler();
-    await webhookReceivers?.close();
-    clearInterval(monitorInterval);
-    clearInterval(deadPaneReapInterval);
-    if (browserTaskReapInterval) clearInterval(browserTaskReapInterval);
     try {
       if (fs.readFileSync(lifetimePath, 'utf-8') === lifetimeToken) fs.unlinkSync(lifetimePath);
     } catch {

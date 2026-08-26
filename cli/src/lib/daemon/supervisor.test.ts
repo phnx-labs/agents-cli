@@ -174,6 +174,32 @@ describe('ServiceSupervisor', () => {
     await supervisor.stopAll();
   });
 
+  it('a hanging start is bounded, parked, and does not prevent the next service from starting', async () => {
+    class HangingStartService extends HealthyService {
+      override async start(): Promise<void> {
+        await new Promise<void>(() => {});
+      }
+    }
+
+    const supervisor = new ServiceSupervisor({ lifecycleDeadlineMs: 500, backoffBaseMs: 5_000 });
+    const hanging = new HangingStartService('browser-ipc');
+    const sibling = new HealthyService('session-index');
+    supervisor.register(hanging);
+    supervisor.register(sibling);
+
+    const starting = supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(500);
+    await starting;
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(supervisor.health()['browser-ipc'].state).toBe('parked');
+    expect(supervisor.health()['browser-ipc'].lastError).toMatch(/start exceeded lifecycle deadline/);
+    expect(supervisor.health()['session-index'].state).toBe('running');
+    expect(sibling.ticks).toBe(1);
+
+    await supervisor.stopAll();
+  });
+
   it('health() returns a record for every registered service', async () => {
     const supervisor = new ServiceSupervisor();
     const a = new HealthyService('scheduler');
@@ -273,6 +299,26 @@ describe('ServiceSupervisor', () => {
     // way since parkAfterFailures (default 3) hasn't been reached again yet.
     expect(supervisor.health()['watchdog'].state).toBe('running');
     expect(supervisor.health()['watchdog'].consecutiveFailures).toBe(1);
+  });
+
+  it('restartOne() replaces a periodic timer instead of multiplying its tick rate', async () => {
+    const supervisor = new ServiceSupervisor();
+    const svc = new HealthyService('session-index');
+    supervisor.register(svc);
+    await supervisor.startAll(makeCtx());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(svc.ticks).toBe(1);
+
+    await supervisor.restartOne('session-index');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(svc.ticks).toBe(2); // one immediate post-restart tick
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(svc.ticks).toBe(3); // exactly one recurring timer remains
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(svc.ticks).toBe(4);
+
+    await supervisor.stopAll();
   });
 
   it('a service that fails restart() after parking, then later restarts successfully, is stopped cleanly by stopAll() (everStarted set on restart, not just first start)', async () => {
