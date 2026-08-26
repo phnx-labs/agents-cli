@@ -8,12 +8,7 @@
  * `device-config-test-harness.ts`.
  */
 import { describe, expect, it } from 'vitest';
-import * as fs from 'fs';
-import * as path from 'path';
 import {
-  HOME,
-  REPO_ROOT,
-  INDEX,
   guardedHome,
   run,
   centralDoc,
