@@ -23,7 +23,8 @@
 #   scripts/test.sh                      # auto-pick the least-loaded worker (default)
 #   scripts/test.sh --device auto        # the same thing, said explicitly
 #   scripts/test.sh --device <box>       # run on a named fleet box over ssh
-#   scripts/test.sh --shard 6            # fan out across 6 fleet workers (fastest)
+#   scripts/test.sh --shard 6            # fan out across 6 auto-picked workers (fastest)
+#   scripts/test.sh --devices m1,m2,m3   # fan out across named workers
 #   scripts/test.sh --crabbox            # offload to a disposable crabbox instead
 #   scripts/test.sh --here               # run on THIS machine (explicit, loud)
 #   scripts/test.sh --repo-root <dir>    # test that tree instead of this one
@@ -50,21 +51,53 @@ die()   { red "error: $*"; exit 1; }
 # it is now an explicit choice: it needs the crabbox binary + provider creds,
 # so defaulting to it made the default path fail on any box without them.
 MODE="auto"
+# Which flag chose MODE. Empty means "still the default", so the first
+# target-selecting flag always wins and a SECOND, different one is a conflict
+# rather than a silent overwrite: `--shard 6 --device box` used to drop one of
+# the two purely on argument order, with no warning.
+MODE_FLAG=""
 DEVICE=""
 SHARDS=0
+SHARD_LIST=""
 REPO_ROOT=""
 VITEST_ARGS=()
+
+# Every flag that picks WHERE the suite runs goes through this, so two of them
+# can never quietly disagree. Same-mode repeats are fine (--shard with
+# --devices, or --device twice); a different mode dies naming both flags.
+# A shard count below 2 is never what the caller wants: 0 ran nothing at all and
+# still printed "All 0 shards passed." with exit 0 -- a false green -- and 1 is
+# `--device auto` reached through the whole fan-out apparatus.
+shard_count_ok() {
+  [[ "$1" =~ ^[0-9]+$ ]] || die "--shard needs a worker count, e.g. --shard 6"
+  (( $1 >= 2 )) || die "--shard needs at least 2 workers (got $1). For a single worker use: scripts/test.sh --device auto"
+}
+
+set_mode() {
+  local want="$1" flag="$2"
+  if [[ -n "$MODE_FLAG" && "$MODE" != "$want" ]]; then
+    die "$flag conflicts with $MODE_FLAG -- each picks a different place to run the suite. Pass one."
+  fi
+  MODE="$want"; MODE_FLAG="$flag"
+}
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --device) [[ -n "${2:-}" ]] || die "--device needs a machine name"; DEVICE="$2"; MODE="device"; shift 2 ;;
-    --device=*) DEVICE="${1#*=}"; MODE="device"; shift ;;
-    --crabbox) MODE="crabbox"; shift ;;
+    --device) [[ -n "${2:-}" ]] || die "--device needs a machine name"; DEVICE="$2"; set_mode device --device; shift 2 ;;
+    --device=*) DEVICE="${1#*=}"; set_mode device --device; shift ;;
+    --crabbox) set_mode crabbox --crabbox; shift ;;
     # Fan out across N workers. This is the lever that hits the release-time
     # target: the suite is throughput-bound (3079s CPU / 11.5x on one box), so
     # dividing the CPU across machines is what shortens it.
-    --shard) [[ "${2:-}" =~ ^[0-9]+$ ]] || die "--shard needs a worker count, e.g. --shard 6"; SHARDS="$2"; MODE="shard"; shift 2 ;;
-    --shard=*) SHARDS="${1#*=}"; [[ "$SHARDS" =~ ^[0-9]+$ ]] || die "--shard needs a worker count"; MODE="shard"; shift ;;
-    --here|--local) MODE="here"; shift ;;
+    --shard) shard_count_ok "${2:-}"; SHARDS="$2"; set_mode shard --shard; shift 2 ;;
+    # Name the workers explicitly instead of auto-picking them. Two reasons this
+    # exists rather than being auto-only: it lets an operator pin the fan-out to
+    # known-idle boxes, and it removes the `devices pick --json` (>= 1.22.49)
+    # dependency, so sharding works on a machine whose installed CLI predates it.
+    --devices) [[ -n "${2:-}" ]] || die "--devices needs a comma-separated list, e.g. --devices m1,m2,m3"; SHARD_LIST="$2"; set_mode shard --devices; shift 2 ;;
+    --devices=*) SHARD_LIST="${1#*=}"; set_mode shard --devices; shift ;;
+    --shard=*) SHARDS="${1#*=}"; shard_count_ok "$SHARDS"; set_mode shard --shard; shift ;;
+    --here|--local) set_mode here --here; shift ;;
     --repo-root) [[ -n "${2:-}" ]] || die "--repo-root needs a directory"; REPO_ROOT="$2"; shift 2 ;;
     --repo-root=*) REPO_ROOT="${1#*=}"; shift ;;
     --) shift; VITEST_ARGS=("$@"); break ;;
@@ -248,6 +281,15 @@ case "$MODE" in
     # prerequisite for sharding.
     command -v rsync >/dev/null || die "rsync not found"
     command -v ssh   >/dev/null || die "ssh not found"
+    SHARD_DEVICES=()
+    if [[ -n "$SHARD_LIST" ]]; then
+      # Explicit list: split on commas, no CLI version dependency at all.
+      _IFS_SAVE="$IFS"; IFS=','
+      for _d in $SHARD_LIST; do [[ -n "$_d" ]] && SHARD_DEVICES+=("$_d"); done
+      IFS="$_IFS_SAVE"
+      (( ${#SHARD_DEVICES[@]} )) || die "--devices parsed to nothing: '$SHARD_LIST'"
+      (( SHARDS )) || SHARDS=${#SHARD_DEVICES[@]}
+    else
     command -v agents >/dev/null 2>&1 || die "the 'agents' CLI is not on PATH, so workers cannot be picked"
     # `devices pick --json` is how the fan-out gets its candidate list WITH loads,
     # from the same auto pool a single run uses. It landed in 1.22.49; an older
@@ -277,8 +319,8 @@ for c in cands: print(c["device"])
 '
     )
     (( ${#SHARD_DEVICES[@]} )) || die "could not enumerate workers ('agents devices pick --json')"
+    fi
 
-    (( ${#SHARD_DEVICES[@]} )) || die "no eligible workers to shard across -- see 'agents devices list'"
     if (( SHARDS > ${#SHARD_DEVICES[@]} )); then
       gray "Only ${#SHARD_DEVICES[@]} eligible workers; sharding across those instead of $SHARDS."
       SHARDS=${#SHARD_DEVICES[@]}
