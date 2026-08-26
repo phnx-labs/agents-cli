@@ -319,6 +319,14 @@ function* listCentralConfigEntries(): Generator<{ key: string; value: unknown; h
     const key = 'browser.viewer';
     yield { key, value: browserViewer, hint: configKeyStorageHint(parseConfigKey(key)) };
   }
+
+  // Fleet browser hub — user scope, so it belongs in the central listing next to
+  // its siblings. Omitting it repeats the browser.viewer invisibility bug.
+  const browserDevice = getConfigValue('browser.device').value;
+  if (browserDevice !== undefined) {
+    const key = 'browser.device';
+    yield { key, value: browserDevice, hint: configKeyStorageHint(parseConfigKey(key)) };
+  }
 }
 
 /** Collect device-scope config entries. */

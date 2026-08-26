@@ -120,6 +120,21 @@ describe('config command', () => {
     expect(runAgents(home, ['config', 'get', 'browser.profile'])).toContain('comet-local');
   });
 
+  it('sets, gets, lists and unsets the fleet browser hub (browser.device)', () => {
+    runAgents(home, ['config', 'set', 'browser.device', 'mac-mini']);
+    expect(runAgents(home, ['config', 'get', 'browser.device'])).toContain('mac-mini');
+
+    // Must be enumerated, not just get-able — the browser.viewer invisibility bug.
+    expect(runAgents(home, ['config', 'list'])).toContain('browser.device');
+
+    // Lands in the fleet-synced central config block (user scope).
+    const yaml = fs.readFileSync(path.join(home, '.agents', 'agents.yaml'), 'utf-8');
+    expect(yaml).toContain('defaultBrowserDevice');
+
+    runAgents(home, ['config', 'unset', 'browser.device']);
+    expect(runAgents(home, ['config', 'get', 'browser.device'])).toContain('(unset)');
+  });
+
   it('lists configured values', () => {
     runAgents(home, ['config', 'set', 'run.claude@*.model', 'best']);
     runAgents(home, ['config', 'set', 'run.claude@*.tier.best', 'claude-opus-4-8']);

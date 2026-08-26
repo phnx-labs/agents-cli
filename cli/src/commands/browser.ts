@@ -1545,7 +1545,7 @@ function registerTaskCommands(browser: Command): void {
     .option('--title <label>', 'Human label shown in `browser status` (defaults to first navigated host)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
     .option('-u, --url <url>', 'Open URL in first tab')
-    .option('--device <name>', 'Device that hosts this task; later verbs resolve it from --task (not valid on page verbs)')
+    .option('--device <name>', 'Device that hosts this task (defaults to the browser.device hub when set; use `local` to force this machine). Later verbs resolve it from --task; not valid on page verbs')
     .option('--fresh', 'Always open a new tab, skipping the reclaim of a tab an abandoned task is holding on that URL')
     .option('--no-skills', 'Skip auto-discovery of site-specific SKILL.md from ~/.agents/skills/browser/domain-skills/')
     .option('--record', 'Start recording right after the tab opens (shorthand for `agents browser record start` as a follow-up)')
@@ -1565,35 +1565,55 @@ function registerTaskCommands(browser: Command): void {
         process.exit(1);
       }
 
-      // Thin-client fast path: when this box has a fleet browser hub configured
-      // (`browser.device`) and the caller named neither a device nor a profile,
-      // forward a BARE `start` to the hub. The hub resolves ITS OWN default
-      // profile and launches/attaches ITS browser, so this box needs no local
-      // browser and no profile of its own — skipping the local profile
-      // resolution/pre-checks below entirely. Later page verbs follow the task to
-      // the hub through the task→device index bound here. An explicit --device or
-      // --profile opts out and takes the fully-resolved path (--device below,
-      // --profile still honored with the hub as the default device).
-      {
+      // Thin-client hub (PHNX-2010): when this box has a fleet browser hub
+      // (`browser.device`) and the caller gave no explicit --device, forward the
+      // WHOLE start there — bare OR --profile — and skip the local profile/browser
+      // resolution below. The hub owns its profiles, browser, and consent, so this
+      // box needs no local browser and need not carry the named profile; forwarding
+      // the local pre-checks here would reject a profile that lives only on the hub.
+      // Later page verbs follow the task to the hub via the task→device index bound
+      // here. `--device local`/`--device self` (below) force a local run instead;
+      // `defaultBrowserHub()` is undefined on the hub itself and on a fleet-remote
+      // re-exec, so neither forwards to itself.
+      if (!opts.device) {
         const hub = defaultBrowserHub();
-        if (hub && !opts.device && !opts.profile) {
-          const result = await dispatchBrowserToDevice(hub, browserForwardedArgv(), 'capture');
-          process.stdout.write(result.stdout);
-          process.stderr.write(result.stderr);
-          if (result.code !== 0) process.exit(result.code);
-          const taskName =
-            opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
-          if (!taskName) {
-            console.error(`Remote start on ${hub} produced no task name.`);
+        if (hub) {
+          // A named --profile must exist ON THE HUB — assert the named profile, not
+          // a locally-resolved one, since this box may not carry it at all.
+          if (opts.profile) {
+            try {
+              assertDeviceDeclaresProfile(hub, opts.profile);
+            } catch (err) {
+              console.error(err instanceof Error ? err.message : String(err));
+              process.exit(1);
+            }
+          }
+          try {
+            const result = await dispatchBrowserToDevice(hub, browserForwardedArgv(), 'capture');
+            process.stdout.write(result.stdout);
+            process.stderr.write(result.stderr);
+            if (result.code !== 0) process.exit(result.code);
+            const taskName =
+              opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
+            if (!taskName) {
+              console.error(`Remote start on ${hub} produced no task name.`);
+              process.exit(1);
+            }
+            bindTask(taskName, {
+              device: hub,
+              // Only what the caller named; the hub's own default (bare start) is
+              // opaque here. Name-based `done`/`stop --task` and the post-stop
+              // unbind GC these regardless.
+              profile: opts.profile,
+              url: opts.url,
+              sessionId: callerSessionId(),
+              launchId: callerLaunchId(),
+              createdAt: Date.now(),
+            });
+          } catch (err) {
+            console.error(err instanceof Error ? err.message : String(err));
             process.exit(1);
           }
-          bindTask(taskName, {
-            device: hub,
-            url: opts.url,
-            sessionId: callerSessionId(),
-            launchId: callerLaunchId(),
-            createdAt: Date.now(),
-          });
           return;
         }
       }
@@ -1640,10 +1660,11 @@ function registerTaskCommands(browser: Command): void {
         }
       }
 
-      // `--profile` was named without `--device`, but a hub is configured: target
-      // the hub (the bare no-profile case already returned above). The hub must
-      // declare the named profile — asserted just below.
-      const deviceName: string | undefined = opts.device ?? defaultBrowserHub();
+      // The `browser.device` hub default is applied above (bare/--profile, no
+      // --device). Here only an EXPLICIT --device remains — with `local`/`self` as
+      // the escape that forces a local run when a hub is configured.
+      const deviceName: string | undefined =
+        opts.device === 'local' || opts.device === 'self' ? undefined : opts.device;
       if (deviceName) {
         const lowered = deviceName.toLowerCase();
         if (lowered === 'all' || lowered === 'auto') {
