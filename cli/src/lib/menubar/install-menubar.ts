@@ -26,7 +26,7 @@ import { getCliVersion, resolveAgentsBin, resolveInstalledLayout } from '../vers
 import { copyAppBundle, withInstallLock } from '../app-bundle-install.js';
 import { compareVersions } from '../agent-spec/primitives.js';
 import { namespacedServiceLabel, serviceManifestHomeEnv, serviceManagerRegistrationAllowed } from '../service-manifest.js';
-import { downloadMenubarHelperApp } from './download-menubar.js';
+import { downloadMenubarHelperApp, menubarHelperCacheDir } from './download-menubar.js';
 import { helperFloor } from '../helper-versions.js';
 
 const APP_BUNDLE_NAME = 'MenubarHelper.app';
@@ -107,6 +107,9 @@ function installedVersionMarkerPath(): string {
  * dev build has none (menubar/scripts/build.sh hardcodes CFBundleShortVersionString),
  * so it is identified by the source path + mtime it was copied from.
  */
+/** Version label for a bundle that has none of its own (a local dev build). */
+export const LOCAL_BUILD_LABEL = 'local';
+
 export type MenubarStamp =
   | { source: 'release'; helperVersion: string }
   | { source: 'local'; sourceStamp: string }
@@ -471,7 +474,16 @@ export function restartMenubarHelperAfterSwap(
  */
 function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppPath?: string } = {}): boolean {
   if (!onDarwin()) return false;
-  const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: opts.sourceAppPath });
+  // Resolve the source HERE, once, and hand the SAME value to the installer and
+  // the stamp. Passing `opts.sourceAppPath` to both let them disagree: the
+  // installer falls back to `sourceAppPath()` internally, so on the self-heal
+  // path (which passes nothing) it would install a LOCAL build while the stamp
+  // recorded a release version. The next invocation then computed `local`, saw a
+  // kind mismatch, and reinstalled — every time, forever. That is the #2109
+  // storm this whole change exists to stop, so the two must read one variable.
+  const src = opts.sourceAppPath ?? sourceAppPath();
+  if (!src) return false;
+  const exec = ensureMenubarAppInstalled({ forceReinstall: true, sourceAppPath: src });
   if (!exec) return false;
 
   // Never bootstrap a helper macOS will reject at launch: an invalid signature
@@ -489,7 +501,7 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
   }
 
   if (opts.clearOptOut) clearMenubarOptOut();
-  installAndStartService(exec, stampFor(opts.sourceAppPath));
+  installAndStartService(exec, stampFor(src));
   return true;
 }
 
@@ -549,24 +561,56 @@ function stampVersionLabel(stamp: MenubarStamp | null): string | null {
   if (!stamp) return null;
   if (stamp.source === 'release') return stamp.helperVersion;
   if (stamp.source === 'legacy') return null;
-  return 'local';
+  return LOCAL_BUILD_LABEL;
 }
 
-/** The helper version this install would put on disk right now. */
+/** What this install would put on disk right now, as a stamp. */
+function availableStamp(): MenubarStamp {
+  const src = sourceAppPath();
+  // No local bundle means the release path: what would be installed is the
+  // helper version the floor names.
+  return src ? stampFor(src) : { source: 'release', helperVersion: helperFloor('menubar') };
+}
+
+/** The helper version this install would put on disk right now, for display. */
 function availableHelperLabel(): string {
-  return stampVersionLabel(stampFor(sourceAppPath() ?? undefined)) ?? 'local';
+  return stampVersionLabel(availableStamp()) ?? LOCAL_BUILD_LABEL;
 }
 
-/** Identify the bundle about to be installed, for the stamp. */
-function stampFor(sourceAppPath: string | undefined): MenubarStamp {
-  if (!sourceAppPath) return { source: 'release', helperVersion: helperFloor('menubar') };
-  // A cache path under the helper cache dir IS a release bundle; anything else
-  // is a local build with no meaningful version of its own.
-  const m = /[/\\]v(\d+\.\d+\.\d+)[/\\]/.exec(sourceAppPath);
-  if (m) return { source: 'release', helperVersion: m[1] };
+/**
+ * Identify the bundle about to be installed, for the stamp.
+ *
+ * A bundle is a RELEASE iff it sits under the helper's own download cache —
+ * asked of `menubarHelperCacheDir`, not pattern-matched out of the path. A regex
+ * for `/v<x.y.z>/` gets this wrong in both directions: a checkout living under
+ * any directory that happens to contain a version-shaped segment reads as a
+ * release, and a release cache laid out differently reads as local. Either
+ * misclassification flips `source` between invocations, and a kind change is
+ * unconditionally stale — which is a reinstall loop.
+ */
+export function stampFor(resolvedSourceAppPath: string): MenubarStamp {
+  const version = releaseVersionOfCachedBundle(resolvedSourceAppPath);
+  if (version) return { source: 'release', helperVersion: version };
   let mtime = 0;
-  try { mtime = fs.statSync(sourceAppPath).mtimeMs; } catch { /* best effort */ }
-  return { source: 'local', sourceStamp: `${sourceAppPath}@${mtime}` };
+  try { mtime = fs.statSync(resolvedSourceAppPath).mtimeMs; } catch { /* best effort */ }
+  return { source: 'local', sourceStamp: `${resolvedSourceAppPath}@${mtime}` };
+}
+
+/**
+ * The helper version a path denotes, iff it is inside that version's cache dir.
+ * Returns null for anything else — including a version-shaped path that is not
+ * actually the cache.
+ */
+export function releaseVersionOfCachedBundle(
+  appPath: string,
+  cacheDirFor: (v: string) => string = menubarHelperCacheDir,
+): string | null {
+  const m = /v(\d+\.\d+\.\d+)/.exec(appPath);
+  if (!m) return null;
+  const expected = path.resolve(cacheDirFor(m[1]));
+  return path.resolve(appPath).startsWith(expected + path.sep) || path.resolve(appPath) === expected
+    ? m[1]
+    : null;
 }
 
 /**
@@ -606,7 +650,7 @@ export function isMenubarStale(opts: {
 function menubarSetupStale(): boolean {
   return isMenubarStale({
     installed: readInstalledMenubarStamp(),
-    available: stampFor(sourceAppPath() ?? undefined),
+    available: availableStamp(),
     execExists: fs.existsSync(installedExecutablePath()),
   });
 }
@@ -776,8 +820,16 @@ export function mayInstallMenubarHelper(opts: {
   // plist of a helper that is already present and working — the menu bar keeps
   // running, nothing deadlocks.
   if (!opts.ownerEntryExists) return opts.sourceIsDeveloperId;
-  if (opts.installedVersion && opts.currentVersion) {
-    const versionOrder = compareVersions(opts.currentVersion, opts.installedVersion);
+  // `local` is a KIND marker, not a version — a dev build has none. Comparing it
+  // with compareVersions would order it against real semver arbitrarily and let a
+  // dev build win (or lose) a contest it should not enter. When either side is a
+  // local build the version arm is skipped entirely and the owner arm decides,
+  // which is the correct outcome: ownership, not version, distinguishes them.
+  const comparableVersions =
+    opts.installedVersion && opts.currentVersion &&
+    opts.installedVersion !== LOCAL_BUILD_LABEL && opts.currentVersion !== LOCAL_BUILD_LABEL;
+  if (comparableVersions) {
+    const versionOrder = compareVersions(opts.currentVersion!, opts.installedVersion!);
     if (versionOrder > 0) return opts.sourceIsDeveloperId;
     if (versionOrder < 0) return false;
     return opts.plistEntry === opts.activeEntry;
@@ -1339,7 +1391,13 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
     installedVersion: status.installedVersion,
     currentVersion: status.currentVersion,
     cliVersion: status.cliVersion,
-    versionMatches: status.installedVersion === status.currentVersion,
+    // Two local builds are not a version "mismatch" — neither carries a version.
+    // Reporting one told the user to run `setup` for a difference that does not
+    // exist, which is what made the old hint fire forever.
+    versionMatches:
+      status.installedVersion === LOCAL_BUILD_LABEL && status.currentVersion === LOCAL_BUILD_LABEL
+        ? true
+        : status.installedVersion === status.currentVersion,
     signingIdentity,
     running: status.running,
     staleRunningProcess,

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { menubarHelperCacheDir } from './download-menubar.js';
 import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -11,6 +12,8 @@ import {
   generateServicePlist,
   hasDeveloperIdSignature,
   isMenubarStale,
+  releaseVersionOfCachedBundle,
+  stampFor,
   isMenubarProcessStaleAgainstBundle,
   menubarHealReplacedBundle,
   menubarPlistNeedsRepoint,
@@ -188,6 +191,59 @@ describe('isMenubarStale', () => {
     expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: LOC('/src/MenubarHelper.app@222'), execExists: true })).toBe(true);
   });
 
+  it('stamps from the SAME resolved source the installer uses', () => {
+    // The blocker this replaces: startMenubarServiceFromSource stamped
+    // `stampFor(opts.sourceAppPath)` — the UNRESOLVED parameter — while
+    // ensureMenubarAppInstalled resolved `opts.sourceAppPath ?? sourceAppPath()`
+    // itself. On the self-heal path (which passes nothing) that installed a
+    // LOCAL build while stamping a RELEASE version; the next invocation saw a
+    // kind mismatch and reinstalled, forever. Asserted on the source because the
+    // composition, not either function alone, is what was wrong.
+    const src = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
+      'utf-8',
+    );
+    const start = src.indexOf('function startMenubarServiceFromSource');
+    expect(start).toBeGreaterThan(-1);
+    const fn = src.slice(start, src.indexOf('\nfunction ', start + 10));
+    expect(fn.length).toBeGreaterThan(200);
+    // One resolution, reused — never the raw option in either position.
+    expect(fn).toContain('const src = opts.sourceAppPath ?? sourceAppPath()');
+    expect(fn).toContain('sourceAppPath: src');
+    expect(fn).toContain('stampFor(src)');
+    expect(fn).not.toContain('stampFor(opts.sourceAppPath)');
+  });
+
+  it('classifies a release only when the bundle is really in its cache dir', () => {
+    // A path regex got this wrong both ways: a checkout under any directory with
+    // a version-shaped segment read as a release, and vice versa.
+    const cacheFor = (v: string) => `/cache/menubar/mac-helper/v${v}`;
+    expect(releaseVersionOfCachedBundle('/cache/menubar/mac-helper/v1.0.1/MenubarHelper.app', cacheFor)).toBe('1.0.1');
+    // Version-shaped, but not the cache — a checkout, not a release.
+    expect(releaseVersionOfCachedBundle('/Users/me/src/v1.0.1/menubar/MenubarHelper.app', cacheFor)).toBeNull();
+    // No version at all.
+    expect(releaseVersionOfCachedBundle('/Users/me/src/agents-cli/cli/menubar/MenubarHelper.app', cacheFor)).toBeNull();
+  });
+
+  it('stampFor uses the real cache dir, not a path pattern', () => {
+    // Mutation-driven: making stampFor always return `local` killed no test,
+    // because the classifier was only exercised through an injected cache
+    // function. This drives stampFor itself against the REAL cache path.
+    const inCache = path.join(menubarHelperCacheDir('1.0.1'), 'MenubarHelper.app');
+    expect(stampFor(inCache)).toEqual({ source: 'release', helperVersion: '1.0.1' });
+
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-v1.0.1-'));
+    const local = path.join(dir, 'MenubarHelper.app');
+    fs.mkdirSync(local);
+    try {
+      const st = stampFor(local);
+      expect(st.source).toBe('local');
+      if (st.source === 'local') expect(st.sourceStamp.startsWith(`${local}@`)).toBe(true);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('never compares against the CLI version', () => {
     // The bug this replaces: an unchanged helper looked stale on every CLI
     // release (the #2109 restart storm), and a newer helper at the same CLI
@@ -196,7 +252,15 @@ describe('isMenubarStale', () => {
       path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
       'utf-8',
     );
-    const fn = src.slice(src.indexOf('export function isMenubarStale'), src.indexOf('function menubarSetupStale'));
+    const start = src.indexOf('export function isMenubarStale');
+    const end = src.indexOf('function menubarSetupStale');
+    // Guard the guard: if either marker is ever renamed the slice silently
+    // becomes empty or inverted, and `not.toContain` passes vacuously — the
+    // assertion would survive the very regression it exists to catch.
+    expect(start).toBeGreaterThan(-1);
+    expect(end).toBeGreaterThan(start);
+    const fn = src.slice(start, end);
+    expect(fn.length).toBeGreaterThan(200);
     expect(fn).not.toContain('getCliVersion');
   });
 });
