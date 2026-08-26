@@ -83,8 +83,18 @@ command -v gh >/dev/null 2>&1 || die "gh CLI not found"
 #   - tag pushed, release/upload failed  -> tag push is a no-op, release created
 # Treating the tag as the signal made both permanently uncuttable from that
 # checkout, over a transient network error, with nothing ever published.
-if gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
+# FAIL CLOSED. A non-zero `gh` is not evidence of absence: an unauthenticated,
+# offline, or rate-limited gh also exits non-zero, and treating that as "not
+# published" would walk straight into `gh release upload --clobber` over a live
+# binary -- the exact catastrophe this guard exists to prevent. Only an explicit
+# not-found is allowed to mean not-found; anything else stops the release.
+GH_VIEW_ERR="$(gh release view "$TAG" --repo "$REPO_SLUG" 2>&1 >/dev/null)" && GH_VIEW_RC=0 || GH_VIEW_RC=$?
+if [ "$GH_VIEW_RC" -eq 0 ]; then
   die "$TAG is already published. Helper releases are immutable -- cut the next patch instead."
+elif ! printf '%s' "$GH_VIEW_ERR" | grep -qiE 'release not found|not found|HTTP 404'; then
+  die "could not determine whether $TAG is already published, so refusing to continue.
+  gh said: ${GH_VIEW_ERR:-<no output>}
+  Fix that (auth, network, or rate limit) and re-run -- publishing blind risks clobbering a live release."
 fi
 if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 \
   || git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then

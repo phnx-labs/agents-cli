@@ -41,11 +41,17 @@ let binDir: string;
  * for it, and a test must never depend on (or mutate) the real repo's releases.
  * Every invocation is recorded so a test can assert what the script asked for.
  */
-function stubGh(releaseExists: boolean, logPath: string): void {
+function stubGh(mode: boolean | 'ratelimited', logPath: string): void {
+  const view =
+    mode === 'ratelimited'
+      ? 'echo "error: API rate limit exceeded" >&2; exit 1'
+      : mode
+        ? 'exit 0'
+        : 'echo "release not found" >&2; exit 1';
   fs.writeFileSync(
     path.join(binDir, 'gh'),
     `#!/bin/sh\necho "$@" >> ${JSON.stringify(logPath)}\n` +
-      `case "$1 $2" in "release view") exit ${releaseExists ? 0 : 1} ;; esac\nexit 0\n`,
+      `case "$1 $2" in "release view") ${view} ;; esac\nexit 0\n`,
   );
   fs.chmodSync(path.join(binDir, 'gh'), 0o755);
 }
@@ -254,6 +260,24 @@ describe('publish-computer-helper-mac.sh', () => {
     expect(r.stderr).not.toMatch(/already published/);
     expect(`${r.stdout}${r.stderr}`).toMatch(/resuming an interrupted publish/);
     expect(r.status, r.stderr).toBe(0);
+  });
+
+  it('refuses to publish when it cannot tell whether the release exists', () => {
+    // The dangerous direction, and a regression this PR introduced before it was
+    // caught: keying the guard on `gh release view` made a NON-ZERO gh read as
+    // "not published". An unauthenticated, offline, or rate-limited gh exits
+    // non-zero too — so the script would have carried on to
+    // `gh release upload --clobber` over a live binary. This session hit the
+    // GitHub rate limit twice, so it is not hypothetical.
+    //
+    // Only an explicit not-found may mean not-found; anything else stops.
+    const version = '0.3.0';
+    stubGh('ratelimited', path.join(tmp, `gh-${version}.log`));
+    const r = run(version);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/could not determine whether/);
+    expect(r.stderr).toMatch(/rate limit/);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/resuming an interrupted publish/);
   });
 
   it('creates and pushes the tag itself — gh release create --verify-tag will not', () => {
