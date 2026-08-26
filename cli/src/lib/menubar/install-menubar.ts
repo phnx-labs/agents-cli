@@ -1130,8 +1130,13 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   // excluded in `versionMatches` and `mayInstallMenubarHelper`; this was the
   // third site and the only one still reading through the lossy label.
   const bundleStamp = readInstalledMenubarStamp();
+  // Reuse the file's canonical comparator rather than a second, serialization
+  // -based one: `JSON.stringify` was sound only because both stamps come from
+  // `stampFor`, which is an implicit key-order dependency with no reason to
+  // exist when isMenubarStale already answers exactly this question.
   const bundleUnchanged =
-    bundleStamp !== null && JSON.stringify(bundleStamp) === JSON.stringify(availableStamp());
+    bundleStamp !== null &&
+    !isMenubarStale({ installed: bundleStamp, available: availableStamp(), execExists: true });
   step('bundle', bundleUnchanged ? 'ok' : 'changed',
     `${installedAppPath()} (${stampVersionLabel(bundleStamp) ?? 'unknown'})`);
 

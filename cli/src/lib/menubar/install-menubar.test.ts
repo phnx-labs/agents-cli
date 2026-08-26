@@ -346,7 +346,9 @@ describe('isMenubarStale', () => {
     const i = src.indexOf('const bundleUnchanged');
     expect(i).toBeGreaterThan(-1);
     const around = src.slice(i, src.indexOf("step('bundle'", i) + 200);
-    expect(around).toContain('JSON.stringify(availableStamp())');
+    // Must go through the canonical comparator on the full stamps...
+    expect(around).toContain('isMenubarStale({');
+    expect(around).toContain('available: availableStamp()');
     expect(around).not.toMatch(/bundleUnchanged[\s\S]{0,120}stampVersionLabel\(bundleStamp\) ===/);
     expect(around).not.toContain('=== getCliVersion()');
   });
@@ -1034,11 +1036,13 @@ describe('installMenubarLaunchAgentOnUpgrade (driven, sandboxed)', () => {
       const launchAgents = path.join(home, 'Library', 'LaunchAgents');
       const plists = fs.existsSync(launchAgents) ? fs.readdirSync(launchAgents) : [];
       expect(plists.filter((f) => f.includes('menubar'))).toEqual([]);
-      // And no stamp — claimed in the docblock above, so actually checked.
-      const stamps = fs.existsSync(path.join(home, '.agents'))
-        ? fs.readdirSync(path.join(home, '.agents'), { recursive: true }) as string[]
-        : [];
-      expect(stamps.filter((f) => String(f).includes('menubar-version'))).toEqual([]);
+      // And no stamp. Reviewer-found: this checked `<HOME>/.agents/`, which is
+      // not where the stamp goes at all — `installedVersionMarkerPath()` writes
+      // `<HOME>/Library/Application Support/agents-cli/.menubar-version`. The
+      // assertion passed because nothing is stamped here either way, i.e. for
+      // the wrong reason. Point it at the real path.
+      const marker = path.join(home, 'Library', 'Application Support', 'agents-cli', '.menubar-version');
+      expect(fs.existsSync(marker)).toBe(false);
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
