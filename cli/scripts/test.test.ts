@@ -289,10 +289,23 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
 // immediate "rsync not found", so a regression fails in milliseconds instead of
 // hanging or hijacking the machine.
 describe('scripts/test.sh — the shard flags cannot silently do the wrong thing', () => {
+  // Resolve bash rather than hardcoding /bin/bash: the sealed PATH has to still
+  // contain the interpreter, and a wrong path makes spawnSync fail to launch at
+  // all, which surfaces as `undefined` stderr and assertions that pass or fail
+  // for reasons unrelated to the script.
+  const BASH = (() => {
+    const found = spawnSync('sh', ['-c', 'command -v bash'], { encoding: 'utf-8' }).stdout?.trim();
+    if (found && fs.existsSync(found)) return found;
+    for (const c of ['/bin/bash', '/usr/bin/bash', '/usr/local/bin/bash', '/opt/homebrew/bin/bash']) {
+      if (fs.existsSync(c)) return c;
+    }
+    throw new Error('no bash on this machine — scripts/test.sh cannot be exercised');
+  })();
+
   /** Run test.sh with nothing on PATH but bash, so it can never dispatch. */
   function runSealed(args: string[]) {
     const onlyBash = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-sealed-'));
-    fs.symlinkSync('/bin/bash', path.join(onlyBash, 'bash'));
+    fs.symlinkSync(BASH, path.join(onlyBash, 'bash'));
     try {
       return run(args, { PATH: onlyBash });
     } finally {
