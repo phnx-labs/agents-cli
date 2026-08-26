@@ -50,10 +50,13 @@ model it uses.
   an immediate first tick on registration, and `state-dir-check`'s tick calls
   `handleShutdown` on a marker mismatch, so registering it before that const
   exists would reference it in its temporal dead zone. The supervisor gives
-  each service a per-tick deadline race plus a lifecycle-hook deadline, a per-service try/catch that never
+  each periodic service a per-tick deadline race, a per-service try/catch that never
   escapes to the process-wide crash handler, and a park/backoff circuit
   breaker (`parkAfterFailures`, default 3) that retries independently of
-  every sibling service. `getServiceSupervisorHealth()` (`daemon.ts:60`)
+  every sibling service. A deadline is detection, not cancellation: the service
+  parks immediately, retains its in-flight ownership until the real promise
+  settles, and cannot be stopped or restarted live underneath that work.
+  `getServiceSupervisorHealth()` (`daemon.ts:60`)
   exposes the live in-process `supervisor.health()` map for a future
   same-process reader; a cross-process reader (`agents daemon services`, a
   separate CLI invocation) instead reads the persisted mirror below.
@@ -187,7 +190,7 @@ services — `watchdog`, `device-probe`, `self-heal`, `keychain-reap`,
 `state-dir-check` — migrated onto the supervisor too (P3), bringing the
 supervised total to 10. PHNX-3265 moved live-session publishing and webhook
 ingress plus every fixed-cadence maintenance loop onto the same supervisor,
-bounded lifecycle hooks, and fixed manual periodic restarts so they
+and fixed manual periodic restarts so they
 replace, rather than duplicate, the timer. `agents daemon services` now reports
 measured health for 15 of 16 declared services and infers only `scheduler`.
 This doc's Current architecture section
