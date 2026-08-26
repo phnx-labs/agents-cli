@@ -347,6 +347,7 @@ describe('listConfig', () => {
       'auto-launch.enabled',
       'auto-launch.preferred',
       'auto.pool',
+      'browser.device',
       'browser.profile',
       'browser.remote-control',
       'browser.task-idle-minutes',
