@@ -251,9 +251,18 @@ describe('isMenubarStale', () => {
     // never settled. Whatever the source, stamping it and then asking about the
     // same source must say "not stale", or the self-heal reinstalls forever.
     //
-    // This is the testable core of installMenubarLaunchAgentOnUpgrade. Driving
-    // that function end to end would need codesign/spctl/launchctl stubbed,
-    // which this repo forbids — so the invariant is asserted where it lives.
+    // Scope, stated honestly: this does NOT catch the original blocker. That bug
+    // lived in the CALLER's composition — install stamped one input while the
+    // check derived from another — and is caught by the source assertion in
+    // `stamps from the SAME resolved source the installer uses`. Verified by
+    // mutation: making stampFor return a constant leaves THIS test green,
+    // because both sides then agree on the same wrong value.
+    //
+    // What it does pin is that stampFor is deterministic for a given input —
+    // the other half of convergence. A stampFor that varied run to run (a
+    // timestamp, a random temp path) would storm even with the caller correct.
+    // Driving installMenubarLaunchAgentOnUpgrade end to end would need
+    // codesign/spctl/launchctl stubbed, which this repo forbids.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-converge-'));
     const local = path.join(dir, 'MenubarHelper.app');
     fs.mkdirSync(local);
