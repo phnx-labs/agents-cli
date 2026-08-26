@@ -7,6 +7,7 @@ import {
   CLAUDE_STATUSLINE_COMMAND,
   ingestClaudeStatusLineUsage,
   installClaudeStatusLine,
+  isStatusLineSelfReference,
   renderClaudeStatusLine,
 } from './claude-statusline.js';
 import {
@@ -126,6 +127,58 @@ describe('Claude native status line', () => {
       '/home/me/statusline.sh\n',
     );
     expect(installClaudeStatusLine(home)).toEqual({ changed: false });
+  });
+
+  it('recognizes our own subcommand under any binary name as a self-reference', () => {
+    // The exact production command, and the fork-bomb seeds: the same private
+    // subcommand under a different binary name or an absolute path.
+    expect(isStatusLineSelfReference(CLAUDE_STATUSLINE_COMMAND)).toBe(true);
+    expect(isStatusLineSelfReference('agents-dev __claude-statusline')).toBe(true);
+    expect(isStatusLineSelfReference('ag __claude-statusline')).toBe(true);
+    expect(isStatusLineSelfReference('/Users/me/.local/bin/agents-dev __claude-statusline')).toBe(true);
+    expect(isStatusLineSelfReference('  agents   __claude-statusline  ')).toBe(true);
+    // A genuine third-party producer is NOT a self-reference.
+    expect(isStatusLineSelfReference('/home/me/statusline.sh')).toBe(false);
+    expect(isStatusLineSelfReference('starship prompt')).toBe(false);
+    expect(isStatusLineSelfReference('')).toBe(false);
+  });
+
+  it('never saves our own command (under a dev binary name) as a delegate — the fork bomb', () => {
+    // Reproduces the seed of the fork bomb: settings.json points the status line
+    // at `agents-dev __claude-statusline`. installClaudeStatusLine must NOT
+    // preserve that as a delegate, or every render would spawn a copy that reads
+    // the same delegate and spawns another, without bound.
+    const home = tempHome();
+    const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
+    const settingsPath = path.join(home, '.claude', 'settings.json');
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      statusLine: { type: 'command', command: 'agents-dev __claude-statusline' },
+    }));
+
+    expect(installClaudeStatusLine(home)).toEqual({ changed: true });
+    // No recursive delegate was written.
+    expect(fs.existsSync(delegate)).toBe(false);
+    // The command was canonicalized to the production entrypoint.
+    expect(JSON.parse(fs.readFileSync(settingsPath, 'utf8')).statusLine.command)
+      .toBe(CLAUDE_STATUSLINE_COMMAND);
+  });
+
+  it('deletes a pre-existing recursive delegate on re-install', () => {
+    // A box already poisoned by the bomb: the delegate file itself holds our own
+    // subcommand. Re-installing must remove it, not leave it to keep recursing.
+    const home = tempHome();
+    const delegate = path.join(home, '.agents', 'claude-statusline-delegate');
+    const settingsPath = path.join(home, '.claude', 'settings.json');
+    fs.mkdirSync(path.dirname(delegate), { recursive: true });
+    fs.mkdirSync(path.dirname(settingsPath), { recursive: true });
+    fs.writeFileSync(delegate, 'agents-dev __claude-statusline\n');
+    fs.writeFileSync(settingsPath, JSON.stringify({
+      statusLine: { type: 'command', command: 'agents-dev __claude-statusline' },
+    }));
+
+    expect(installClaudeStatusLine(home)).toEqual({ changed: true });
+    expect(fs.existsSync(delegate)).toBe(false);
   });
 
   it('does not resurrect a removed custom status-line command', () => {

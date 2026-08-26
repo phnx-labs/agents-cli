@@ -10,6 +10,41 @@ import { mergeClaudeUsageCacheWindows, type UsageWindow } from './accounting/usa
 export const CLAUDE_STATUSLINE_COMMAND = 'agents __claude-statusline';
 const DELEGATE_FILE = path.join('.agents', 'claude-statusline-delegate');
 
+// The private subcommand this feature runs. It is only ever invoked internally,
+// so ANY command that contains it — under any binary name or path (`agents`,
+// `agents-dev`, `ag`, an absolute path, a wrapper) — IS this status-line
+// producer, and delegating to it recurses without bound. Match the subcommand,
+// not the exact `agents __claude-statusline` string, or a delegate seeded with a
+// differently-named binary (e.g. `agents-dev __claude-statusline`) fork-bombs the
+// machine: each render spawns a copy that reads the same delegate and spawns
+// another, forever.
+const STATUSLINE_SUBCOMMAND = '__claude-statusline';
+
+// Set on the child env before spawning a delegate. If it is already present we
+// are ourselves running as someone's delegate, so we refuse to delegate again —
+// a hard depth-1 backstop that bounds the blast radius even if a self-reference
+// somehow slips past isStatusLineSelfReference(). One hop is the contract:
+// installClaudeStatusLine only ever preserves a single prior command.
+const DELEGATE_GUARD_ENV = 'AGENTS_CLAUDE_STATUSLINE_DELEGATED';
+
+// A hung or slow delegate must never pin a status-line render open — the render
+// is re-invoked on every refresh, so an unbounded delegate accumulates processes.
+const DELEGATE_TIMEOUT_MS = 5_000;
+
+/**
+ * True when `command` re-invokes THIS status-line producer (our private
+ * `__claude-statusline` subcommand) under any binary name or path. Delegating to
+ * such a command is the fork bomb, so both the read side (renderDelegate) and the
+ * write side (installClaudeStatusLine) treat it as "not a real external
+ * producer" and never chain to it.
+ */
+export function isStatusLineSelfReference(command: string): boolean {
+  const trimmed = command.trim();
+  if (!trimmed) return false;
+  if (trimmed === CLAUDE_STATUSLINE_COMMAND) return true;
+  return new RegExp(`(^|\\s)${STATUSLINE_SUBCOMMAND}(\\s|$)`).test(trimmed);
+}
+
 interface ClaudeStatusLinePayload {
   cwd?: string;
   workspace?: { current_dir?: string };
@@ -70,14 +105,17 @@ function delegatePath(versionHome: string): string {
 }
 
 function renderDelegate(payload: string, versionHome: string): string {
+  // Already running as a delegate hop — never spawn another. Hard recursion stop.
+  if (process.env[DELEGATE_GUARD_ENV]) return '';
   let command = '';
   try { command = fs.readFileSync(delegatePath(versionHome), 'utf8').trim(); } catch { return ''; }
-  if (!command || command === CLAUDE_STATUSLINE_COMMAND) return '';
+  if (!command || isStatusLineSelfReference(command)) return '';
   const result = spawnSync(command, {
     shell: true,
     input: payload,
     encoding: 'utf8',
-    env: process.env,
+    env: { ...process.env, [DELEGATE_GUARD_ENV]: '1' },
+    timeout: DELEGATE_TIMEOUT_MS,
   });
   return result.status === 0 ? result.stdout.trim() : '';
 }
@@ -136,10 +174,14 @@ export function installClaudeStatusLine(versionHome: string): { changed: boolean
       ? priorStatusLine.command.trim()
       : '';
     if (existing === CLAUDE_STATUSLINE_COMMAND) return { changed: false };
-    if (existing) {
+    if (existing && !isStatusLineSelfReference(existing)) {
+      // A genuine third-party status-line command → preserve it as a delegate.
       fs.mkdirSync(path.dirname(delegatePath(versionHome)), { recursive: true });
       atomicWriteFileSync(delegatePath(versionHome), `${existing}\n`);
     } else {
+      // Empty, or our own subcommand under a different binary name
+      // (`agents-dev __claude-statusline`, an absolute path, …). Saving that as a
+      // delegate is the fork bomb — never persist it. Drop any prior delegate.
       fs.rmSync(delegatePath(versionHome), { force: true });
     }
     settings.statusLine = {
