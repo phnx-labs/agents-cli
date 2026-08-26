@@ -1,0 +1,232 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Review · production</title>
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --panel: #111114;
+    --line: #2a2a32;
+    --ink: #ecece8;
+    --mut: #8b8b86;
+    --gold: #c9a962;
+    --gold-dim: rgba(201,169,98,.12);
+    --a: #7cc5ff;
+    --b: #6ee7b7;
+    --bad: #fb7185;
+    --sans: Inter, ui-sans-serif, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+  button { font: inherit; cursor: pointer; }
+  .app { display: grid; grid-template-rows: 52px 1fr; height: 100%; }
+
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 20px; border-bottom: 1px solid var(--line); font-size: 13px;
+  }
+  .word { font-family: var(--mono); font-size: 11px; letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+  .slash { color: var(--mut); }
+  .live { display: flex; align-items: center; gap: 6px; font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--b); }
+  .live i { width: 6px; height: 6px; border-radius: 99px; background: var(--b); }
+  .sp { flex: 1; }
+  .note { font-size: 12px; color: var(--mut); }
+
+  main { display: grid; grid-template-rows: auto 1fr auto; min-height: 0; }
+  .split {
+    display: grid; grid-template-columns: 1fr 1fr;
+    border-bottom: 1px solid var(--line);
+  }
+  .col { padding: 20px 22px 18px; min-width: 0; }
+  .col + .col { border-left: 1px solid var(--line); }
+  .col-h { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 6px; }
+  .name { font-size: 15px; font-weight: 560; letter-spacing: -.02em; }
+  .tag { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+  .tag.a { color: var(--a); }
+  .tag.b { color: var(--b); }
+  .cfg { font-family: var(--mono); font-size: 12px; color: var(--mut); margin-bottom: 16px; }
+  .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+  .n .k { font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); margin-bottom: 4px; }
+  .n .v { font-size: 22px; font-weight: 550; letter-spacing: -.03em; font-variant-numeric: tabular-nums; }
+  .n .v small { font-size: 12px; color: var(--mut); font-weight: 400; margin-left: 3px; }
+  .n .v.warn { color: var(--bad); }
+
+  .bar-wrap { margin: 8px 0 16px; }
+  .bar { height: 4px; background: var(--line); border-radius: 99px; overflow: hidden; display: flex; }
+  .bar .fa { background: var(--a); width: 72%; }
+  .bar .fb { background: var(--b); width: 28%; }
+  .bar-lab { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; color: var(--mut); margin-top: 6px; }
+
+  .act { display: flex; gap: 8px; }
+  .act button {
+    border: 1px solid var(--line); background: transparent; color: var(--ink);
+    padding: 8px 12px; border-radius: 6px; font-size: 12px;
+  }
+  .act .pri { background: var(--gold); color: #111; border-color: var(--gold); font-weight: 600; }
+  .act button:hover { filter: brightness(1.08); }
+
+  .feed { overflow: auto; padding: 8px 0 0; }
+  .feed-h { padding: 10px 22px 8px; font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--mut); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; font-family: var(--mono); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); font-weight: 500; padding: 6px 22px; border-bottom: 1px solid var(--line); }
+  td { padding: 10px 22px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  tr:hover td { background: #0e0e12; }
+  .lane { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; }
+  .lane.a { color: var(--a); }
+  .lane.b { color: var(--b); }
+  .ok { color: var(--b); font-family: var(--mono); font-size: 11px; }
+  .fail { color: var(--bad); font-family: var(--mono); font-size: 11px; }
+  .mono { font-family: var(--mono); font-size: 12px; color: var(--mut); }
+
+  footer {
+    display: flex; align-items: center; gap: 16px;
+    padding: 10px 22px; border-top: 1px solid var(--line);
+    font-size: 12px; color: var(--mut);
+  }
+  footer b { color: var(--ink); font-weight: 500; }
+  .pill { font-family: var(--mono); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; border: 1px solid var(--line); padding: 4px 8px; border-radius: 4px; color: var(--gold); background: var(--gold-dim); }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <span class="word">Prix</span>
+    <span class="slash">/</span>
+    <span>Review tables</span>
+    <span class="live"><i></i> Production</span>
+    <span class="sp"></span>
+    <span class="note">Live traffic. Not a playground.</span>
+  </header>
+
+  <main>
+    <section>
+      <div class="col" style="padding-bottom: 8px; padding-top: 16px;">
+        <div class="bar-wrap" style="max-width: none; margin: 0 22px 4px;">
+          <div class="bar"><span class="fa"></span><span class="fb"></span></div>
+          <div class="bar-lab"><span>A · 72% of live jobs</span><span>B · 28% of live jobs</span></div>
+        </div>
+      </div>
+      <div class="split">
+        <div class="col">
+          <div class="col-h">
+            <div class="name">Sonnet 4.6</div>
+            <span class="tag a">Config A · control</span>
+          </div>
+          <div class="cfg">claude-sonnet-4-6 · harness v12 · 200 turn cap</div>
+          <div class="nums">
+            <div class="n"><div class="k">Jobs / 1h</div><div class="v">41</div></div>
+            <div class="n"><div class="k">Cost / 1h</div><div class="v">$186</div></div>
+            <div class="n"><div class="k">Client send-back</div><div class="v">2<small>/41</small></div></div>
+          </div>
+          <div class="act">
+            <button type="button" disabled style="opacity:.45">Already control</button>
+          </div>
+        </div>
+        <div class="col">
+          <div class="col-h">
+            <div class="name">Tenet / GLM-5.2</div>
+            <span class="tag b">Config B · candidate</span>
+          </div>
+          <div class="cfg">glm-5.2-legal · harness v12 · same sandbox · ZDR on</div>
+          <div class="nums">
+            <div class="n"><div class="k">Jobs / 1h</div><div class="v">16</div></div>
+            <div class="n"><div class="k">Cost / 1h</div><div class="v">$19</div></div>
+            <div class="n"><div class="k">Client send-back</div><div class="v warn">3<small>/16</small></div></div>
+          </div>
+          <div class="act">
+            <button type="button">Hold at 28%</button>
+            <button type="button" class="pri" id="promote">Promote B to 100%</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="feed">
+      <div class="feed-h">This hour · each row is a real user job</div>
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Matter</th>
+            <th>Lane</th>
+            <th>Duration</th>
+            <th>Cost</th>
+            <th>Out</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="mono">00:41:12</td>
+            <td>Northwind · red-flag review</td>
+            <td class="lane a">A</td>
+            <td class="mono">11m</td>
+            <td class="mono">$4.20</td>
+            <td class="ok">sent</td>
+          </tr>
+          <tr>
+            <td class="mono">00:38:04</td>
+            <td>Helios · SPA issues list</td>
+            <td class="lane b">B</td>
+            <td class="mono">9m</td>
+            <td class="mono">$0.61</td>
+            <td class="ok">sent</td>
+          </tr>
+          <tr>
+            <td class="mono">00:33:51</td>
+            <td>Northwind · 10k-doc table</td>
+            <td class="lane a">A</td>
+            <td class="mono">47m</td>
+            <td class="mono">$41.00</td>
+            <td class="ok">sent</td>
+          </tr>
+          <tr>
+            <td class="mono">00:29:10</td>
+            <td>Meridian · disclosure chart</td>
+            <td class="lane b">B</td>
+            <td class="mono">8m</td>
+            <td class="mono">$0.54</td>
+            <td class="fail">sent back · cite miss</td>
+          </tr>
+          <tr>
+            <td class="mono">00:21:44</td>
+            <td>Apex · NDA stack</td>
+            <td class="lane a">A</td>
+            <td class="mono">6m</td>
+            <td class="mono">$1.10</td>
+            <td class="ok">sent</td>
+          </tr>
+          <tr>
+            <td class="mono">00:18:02</td>
+            <td>Lineage · data room pass 1</td>
+            <td class="lane b">B</td>
+            <td class="mono">22m</td>
+            <td class="mono">$1.80</td>
+            <td class="ok">sent</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <footer>
+      <span class="pill">ZDR · matter files not retained</span>
+      <span>Promote uses the last 24h of live jobs. It does not run an offline eval set.</span>
+      <span class="sp"></span>
+      <span>Sandbox shared · only the model + price change</span>
+    </footer>
+  </main>
+</div>
+<script>
+  document.getElementById("promote").onclick = function () {
+    this.textContent = "B is control · 100%";
+    this.disabled = true;
+    this.style.opacity = "0.55";
+    document.querySelector(".fa").style.width = "0%";
+    document.querySelector(".fb").style.width = "100%";
+    document.querySelector(".bar-lab").innerHTML = "<span>A · 0%</span><span>B · 100% of live jobs</span>";
+  };
+</script>
+</body>
+</html>
