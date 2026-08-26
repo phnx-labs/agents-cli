@@ -91,11 +91,11 @@ agi-cli is a **terminal-first tool that also wears a web face**. The same brand 
 
 The through-line across both surfaces is **quiet, dense, high-signal**. The tool is mostly gray — secondary text, paths, hints — so that the rare colored element (a lime success, a red failure, a lime call-to-action) carries real weight. The brand personality is a *developer-first performance instrument*: the landing headline is "The meta harness engineering system for agents," and the hero stat is "4.3× FASTER." Nothing is decorative; every glyph and color is a status signal.
 
-![agi-cli.sh landing — the live web surface: lime "agi-cli" wordmark on #0a0a0a, monospace throughout, and the parallel-speedup panel with the 4.3× lime badge](assets/design/landing.png)
+![agi-cli.sh landing — the live web surface: lime "agi-cli" wordmark on #0a0a0a, monospace throughout, and the parallel-speedup panel with the 4.3× lime badge](../../../assets/design/landing.png)
 
 *The live [agi-cli.sh](https://agi-cli.sh) hero (captured in Brave). Tokens below are computed from this page.*
 
-![agi-cli brand tokens — accent, surfaces, text hierarchy, CLI terminal semantic palette, and type](assets/design/brand.png)
+![agi-cli brand tokens — accent, surfaces, text hierarchy, CLI terminal semantic palette, and type](../../../assets/design/brand.png)
 
 ## Colors
 
@@ -121,7 +121,7 @@ The CLI never hardcodes hex — it uses `chalk`'s semantic ANSI names, so output
 
 `magenta` and `blue` appear rarely (~24× / ~22×) as one-off accents; reach for them almost never. The dominance of gray is the point: **the terminal is calm by default, and color is the exception that means something.**
 
-![agi-cli terminal — a representative session showing each semantic color role in context](assets/design/terminal.png)
+![agi-cli terminal — a representative session showing each semantic color role in context](../../../assets/design/terminal.png)
 
 *Representative render (JetBrains Mono; role hexes from `demo/src` — lime success, cyan names, gray hints, red/yellow status). Actual colors resolve to the user's terminal theme.*
 
