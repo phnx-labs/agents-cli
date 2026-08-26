@@ -138,6 +138,32 @@ describe('publish-computer-helper-mac.sh', () => {
     expect(after.stderr).toMatch(/already exists/);
   });
 
+  it('creates and pushes the tag itself — gh release create --verify-tag will not', () => {
+    // The gap this pins: `gh release create --verify-tag` refuses to invent a
+    // tag that is absent on the remote, and nothing else pushes
+    // `computer-mac/v<x.y.z>` — release.sh delegates helper tagging to "where
+    // the helper is released", which is this script. Without its own `git tag` +
+    // `git push` the script ran green through build + notarize and then died at
+    // the release step, so no new helper version could be cut at all.
+    //
+    // Asserted against the source because the success path cannot be executed
+    // here: reaching it means really building, notarizing, and publishing.
+    const src = fs.readFileSync(SH, 'utf-8');
+    const tagLine = src.search(/git -C "\$REPO_ROOT" tag -a "\$TAG"/);
+    const pushLine = src.search(/git -C "\$REPO_ROOT" push origin "\$TAG"/);
+    const buildLine = src.search(/bash scripts\/build\.sh release/);
+    const releaseLine = src.search(/gh release create "\$TAG"/);
+
+    expect(tagLine, 'script must create the tag').toBeGreaterThan(-1);
+    expect(pushLine, 'script must push the tag').toBeGreaterThan(-1);
+    // Order matters twice over: the tag must exist before gh is asked to verify
+    // it, and must NOT be pushed before the build, or a failed notarization
+    // leaves a published address with nothing behind it — unreusable, since
+    // helper tags are immutable.
+    expect(buildLine).toBeLessThan(tagLine);
+    expect(pushLine).toBeLessThan(releaseLine);
+  });
+
   it('is the symmetric counterpart of the Windows helper publisher', () => {
     // One script per helper, each cutting that helper's own tag. If this file
     // exists but its Windows sibling does not, the pair has drifted.

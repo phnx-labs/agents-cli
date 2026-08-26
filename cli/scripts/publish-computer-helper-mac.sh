@@ -27,7 +27,7 @@
 # the notary creds in env — APPLE_ID / APPLE_APP_SPECIFIC_PASSWORD /
 # APPLE_TEAM_ID. Run under the bundle so they are injected:
 #
-#   agents secrets exec apple.com -- cli/scripts/publish-computer-helper-mac.sh [version]
+#   agents secrets exec apple.com -- cli/scripts/publish-computer-helper-mac.sh <x.y.z>
 #
 # That invocation injects the NOTARY creds but does not unlock the Developer ID
 # SIGNING keychain, so on a headless run codesign used to die with
@@ -85,8 +85,27 @@ ASSET_SHA="$ASSET_ZIP.sha256"
 [ -f "$ASSET_ZIP" ] || die "expected asset not produced: $ASSET_ZIP (was the build notarized?)"
 [ -f "$ASSET_SHA" ] || die "expected checksum not produced: $ASSET_SHA"
 
-# Create the release for the tag on first touch (release.sh pushes only the tag),
-# then attach the assets. --clobber keeps a re-run idempotent.
+# Cut the tag, THEN the release. `gh release create --verify-tag` refuses to
+# invent a tag that does not exist on the remote, and nothing else pushes
+# `computer-mac/v<x.y.z>`: release.sh delegates helper tagging to "where the
+# helper is released", which is here. Without this the whole script ran green
+# through build + notarize and then died at the release step, so the practical
+# effect was that no new computer-mac version could be cut at all.
+#
+# Deliberately AFTER the build: a tag pushed before a failed notarization is a
+# published address with nothing behind it, and helper tags are immutable so it
+# could not be reused. The tag is annotated and pinned to the exact commit whose
+# native/computer-mac/ produced the asset above.
+SHA="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+if ! git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+  log "Tagging $TAG at ${SHA:0:12}..."
+  git -C "$REPO_ROOT" tag -a "$TAG" -m "macOS computer-helper $VERSION" "$SHA" \
+    || die "git tag failed"
+fi
+git -C "$REPO_ROOT" push origin "$TAG" || die "git push of $TAG failed"
+
+# Create the release for the tag on first touch, then attach the assets.
+# --clobber keeps a re-run idempotent.
 if ! gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
   log "Creating release $TAG..."
   gh release create "$TAG" --repo "$REPO_SLUG" --verify-tag --title "$TAG" \
