@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Unblock git pull: 41 untracked .agents/memories files vs the redacted committed versions</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:5px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span></div>
+<h1>Unblock git pull: 41 untracked .agents/memories files vs the redacted committed versions</h1>
+
+<div class="meta" aria-label="Artifact metadata"><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s0</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-15</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a href="#focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a href="#purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a href="#current-state"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current state</a><a href="#proposed-changes"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a href="#risks"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Risks</a><a href="#public-interface"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Public Interface</a><a href="#validation"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Validation</a><a href="#checklist"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Checklist</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2>
+<ul>
+<li>The redacted committed versions win in the working tree; the unredacted local originals move to gitignored scratch — confirm that direction is right.</li>
+<li>Backup location: <code>.agents/scratch/memories-local-2026-08-15/</code> (gitignored, stays on this box). Nothing is deleted.</li>
+<li>No code, no commits, no branch changes — this only completes the fast-forward you already started.</li>
+</ul>
+<h2 id="purpose">Purpose</h2>
+<p>You ran <code>git pull</code> on the agents-cli checkout and it aborted: <em>"The following untracked working tree files would be overwritten by merge"</em> — 41 files under <code>.agents/memories/</code>. The task is to complete that pull without losing anything.</p>
+<h2 id="current-state">Current state</h2>
+<p>origin/main (<code>70dafd0a6..e38f58464</code>, a plain fast-forward) now <strong>tracks</strong> <code>.agents/memories/*.md</code>. The committed copies are deliberately <strong>redacted</strong> — session shortids and branch names replaced with <code>—</code>, headers normalized (commits <code>f11d5c167</code>, <code>32f78392c</code>, <code>811951fbf</code>) — per the repo policy that committed <code>.agents/</code> content is public and anonymized. The 41 local untracked copies are the <strong>unredacted originals</strong> written by agents on this box: they carry real session ids and branch names. Every one of the 41 differs from its committed counterpart, which is why git refuses to overwrite them.</p>
+<svg viewBox="0 0 920 250" role="img" aria-label="Resolution flow: back up local originals, fast-forward, redacted versions land">
+  <defs>
+    <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"></path>
+    </marker>
+  </defs>
+  <g fill="currentColor">
+    <rect x="20" y="30" width="270" height="70" rx="8" fill="none" stroke="currentColor" opacity="0.9"></rect>
+    <text x="35" y="55">.agents/memories/*.md (41)</text>
+    <text x="35" y="78">untracked · unredacted originals</text>
+    <rect x="20" y="160" width="270" height="70" rx="8" fill="none" stroke="#a3e635" stroke-width="2"></rect>
+    <text x="35" y="185">.agents/scratch/</text>
+    <text x="35" y="208">memories-local-2026-08-15/ · kept</text>
+    <line x1="155" y1="100" x2="155" y2="155" stroke="currentColor" marker-end="url(#arr)"></line>
+    <text x="170" y="133">1. mv (backup)</text>
+    <rect x="380" y="30" width="250" height="70" rx="8" fill="none" stroke="currentColor" opacity="0.9"></rect>
+    <text x="395" y="55">origin/main e38f58464</text>
+    <text x="395" y="78">tracks redacted memories</text>
+    <rect x="680" y="30" width="220" height="70" rx="8" fill="none" stroke="#a3e635" stroke-width="2"></rect>
+    <text x="695" y="55">working tree</text>
+    <text x="695" y="78">redacted versions land</text>
+    <line x1="630" y1="65" x2="675" y2="65" stroke="currentColor" marker-end="url(#arr)"></line>
+    <text x="380" y="130">2. git pull → fast-forward 70dafd0a6..e38f58464 (no merge commit)</text>
+    <text x="380" y="160">3. verify: HEAD, status, 41 files in backup</text>
+  </g>
+</svg><h2 id="proposed-changes">Proposed Changes</h2>
+<ol>
+<li>Back up the 41 conflicting local originals into the gitignored scratch dir (confirmed ignored at <code>.gitignore:52</code>):</li>
+</ol>
+<pre><code>mkdir -p .agents/scratch/memories-local-2026-08-15
+for f in .agents/memories/*.md; do
+  git cat-file -e "origin/main:$f" 2&gt;/dev/null &amp;&amp; mv "$f" .agents/scratch/memories-local-2026-08-15/
+done
+</code></pre>
+<ol>
+<li>Complete the pull (fast-forward, no merge commit):</li>
+</ol>
+<pre><code>git pull
+</code></pre>
+<ol>
+<li>Verify:</li>
+</ol>
+<pre><code>git rev-parse HEAD                     # expect e38f58464
+git status --short | grep memories     # expect nothing
+ls .agents/scratch/memories-local-2026-08-15 | wc -l   # expect 41
+</code></pre>
+<div class="artifact-callout"><strong>Nothing is deleted:</strong> the unredacted originals are moved, not removed, and the scratch dir is gitignored so they can never be committed by accident.</div><h2 id="risks">Risks</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Action</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>.agents/memories/*.md</code> (41)</td>
+<td>mv to <code>.agents/scratch/memories-local-2026-08-15/</code></td>
+<td>none — reversible move</td>
+</tr>
+<tr>
+<td><code>.agents/memories/</code> after pull</td>
+<td>tracked redacted versions from origin/main</td>
+<td>intended state</td>
+</tr>
+<tr>
+<td>checkout branch/HEAD</td>
+<td>fast-forward <code>70dafd0a6..e38f58464</code></td>
+<td>none — the pull you already ran</td>
+</tr>
+</tbody></table>
+<h2 id="public-interface">Public Interface</h2>
+<p>No public surface changes — no commands, flags, or APIs touched. This is a working-tree operation on one checkout: untracked files moved to a gitignored dir, then a fast-forward <code>git pull</code>.</p>
+<h2 id="validation">Validation</h2>
+<pre><code>git rev-parse HEAD                     # expect e38f58464
+git status --short | grep memories     # expect nothing
+ls .agents/scratch/memories-local-2026-08-15 | wc -l   # expect 41
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Expected</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>git rev-parse HEAD</code></td>
+<td><code>e38f58464</code></td>
+</tr>
+<tr>
+<td><code>git status --short | grep memories</code></td>
+<td>empty</td>
+</tr>
+<tr>
+<td>backup file count</td>
+<td>41</td>
+</tr>
+<tr>
+<td>spot-check a pulled file</td>
+<td>redacted (<code>—</code> shortids)</td>
+</tr>
+</tbody></table>
+<h2 id="checklist">Checklist</h2>
+<div class="checklist"><div class="checklist-head">0 / 3 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Back up 41 local unredacted memory files to <code>.agents/scratch/memories-local-2026-08-15/</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Re-run <code>git pull</code> (fast-forward to <code>e38f58464</code>)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Verify HEAD, clean status, and backup intact (41 files)</span></li></ul></div>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGl0bGU6ICJVbmJsb2NrIGdpdCBwdWxsOiA0MSB1bnRyYWNrZWQgLmFnZW50cy9tZW1vcmllcyBmaWxlcyB2cyB0aGUgcmVkYWN0ZWQgY29tbWl0dGVkIHZlcnNpb25zIgpzdXJmYWNlOiBpbnRlcm5hbAotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCi0gVGhlIHJlZGFjdGVkIGNvbW1pdHRlZCB2ZXJzaW9ucyB3aW4gaW4gdGhlIHdvcmtpbmcgdHJlZTsgdGhlIHVucmVkYWN0ZWQgbG9jYWwgb3JpZ2luYWxzIG1vdmUgdG8gZ2l0aWdub3JlZCBzY3JhdGNoIOKAlCBjb25maXJtIHRoYXQgZGlyZWN0aW9uIGlzIHJpZ2h0LgotIEJhY2t1cCBsb2NhdGlvbjogYC5hZ2VudHMvc2NyYXRjaC9tZW1vcmllcy1sb2NhbC0yMDI2LTA4LTE1L2AgKGdpdGlnbm9yZWQsIHN0YXlzIG9uIHRoaXMgYm94KS4gTm90aGluZyBpcyBkZWxldGVkLgotIE5vIGNvZGUsIG5vIGNvbW1pdHMsIG5vIGJyYW5jaCBjaGFuZ2VzIOKAlCB0aGlzIG9ubHkgY29tcGxldGVzIHRoZSBmYXN0LWZvcndhcmQgeW91IGFscmVhZHkgc3RhcnRlZC4KCiMjIFB1cnBvc2UKCllvdSByYW4gYGdpdCBwdWxsYCBvbiB0aGUgYWdlbnRzLWNsaSBjaGVja291dCBhbmQgaXQgYWJvcnRlZDogKiJUaGUgZm9sbG93aW5nIHVudHJhY2tlZCB3b3JraW5nIHRyZWUgZmlsZXMgd291bGQgYmUgb3ZlcndyaXR0ZW4gYnkgbWVyZ2UiKiDigJQgNDEgZmlsZXMgdW5kZXIgYC5hZ2VudHMvbWVtb3JpZXMvYC4gVGhlIHRhc2sgaXMgdG8gY29tcGxldGUgdGhhdCBwdWxsIHdpdGhvdXQgbG9zaW5nIGFueXRoaW5nLgoKIyMgQ3VycmVudCBzdGF0ZQoKb3JpZ2luL21haW4gKGA3MGRhZmQwYTYuLmUzOGY1ODQ2NGAsIGEgcGxhaW4gZmFzdC1mb3J3YXJkKSBub3cgKip0cmFja3MqKiBgLmFnZW50cy9tZW1vcmllcy8qLm1kYC4gVGhlIGNvbW1pdHRlZCBjb3BpZXMgYXJlIGRlbGliZXJhdGVseSAqKnJlZGFjdGVkKiog4oCUIHNlc3Npb24gc2hvcnRpZHMgYW5kIGJyYW5jaCBuYW1lcyByZXBsYWNlZCB3aXRoIGDigJRgLCBoZWFkZXJzIG5vcm1hbGl6ZWQgKGNvbW1pdHMgYGYxMWQ1YzE2N2AsIGAzMmY3ODM5MmNgLCBgODExOTUxZmJmYCkg4oCUIHBlciB0aGUgcmVwbyBwb2xpY3kgdGhhdCBjb21taXR0ZWQgYC5hZ2VudHMvYCBjb250ZW50IGlzIHB1YmxpYyBhbmQgYW5vbnltaXplZC4gVGhlIDQxIGxvY2FsIHVudHJhY2tlZCBjb3BpZXMgYXJlIHRoZSAqKnVucmVkYWN0ZWQgb3JpZ2luYWxzKiogd3JpdHRlbiBieSBhZ2VudHMgb24gdGhpcyBib3g6IHRoZXkgY2FycnkgcmVhbCBzZXNzaW9uIGlkcyBhbmQgYnJhbmNoIG5hbWVzLiBFdmVyeSBvbmUgb2YgdGhlIDQxIGRpZmZlcnMgZnJvbSBpdHMgY29tbWl0dGVkIGNvdW50ZXJwYXJ0LCB3aGljaCBpcyB3aHkgZ2l0IHJlZnVzZXMgdG8gb3ZlcndyaXRlIHRoZW0uCgo8c3ZnIHZpZXdCb3g9IjAgMCA5MjAgMjUwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlJlc29sdXRpb24gZmxvdzogYmFjayB1cCBsb2NhbCBvcmlnaW5hbHMsIGZhc3QtZm9yd2FyZCwgcmVkYWN0ZWQgdmVyc2lvbnMgbGFuZCI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhcnIiIHZpZXdCb3g9IjAgMCAxMCAxMCIgcmVmWD0iOSIgcmVmWT0iNSIgbWFya2VyV2lkdGg9IjciIG1hcmtlckhlaWdodD0iNyIgb3JpZW50PSJhdXRvLXN0YXJ0LXJldmVyc2UiPgogICAgICA8cGF0aCBkPSJNIDAgMCBMIDEwIDUgTCAwIDEwIHoiIGZpbGw9ImN1cnJlbnRDb2xvciIvPgogICAgPC9tYXJrZXI+CiAgPC9kZWZzPgogIDxnIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZmlsbD0iY3VycmVudENvbG9yIj4KICAgIDxyZWN0IHg9IjIwIiB5PSIzMCIgd2lkdGg9IjI3MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjkiLz4KICAgIDx0ZXh0IHg9IjM1IiB5PSI1NSI+LmFnZW50cy9tZW1vcmllcy8qLm1kICg0MSk8L3RleHQ+CiAgICA8dGV4dCB4PSIzNSIgeT0iNzgiIG9wYWNpdHk9IjAuNyI+dW50cmFja2VkIMK3IHVucmVkYWN0ZWQgb3JpZ2luYWxzPC90ZXh0PgogICAgPHJlY3QgeD0iMjAiIHk9IjE2MCIgd2lkdGg9IjI3MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgICA8dGV4dCB4PSIzNSIgeT0iMTg1Ij4uYWdlbnRzL3NjcmF0Y2gvPC90ZXh0PgogICAgPHRleHQgeD0iMzUiIHk9IjIwOCI+bWVtb3JpZXMtbG9jYWwtMjAyNi0wOC0xNS8gwrcga2VwdDwvdGV4dD4KICAgIDxsaW5lIHgxPSIxNTUiIHkxPSIxMDAiIHgyPSIxNTUiIHkyPSIxNTUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBtYXJrZXItZW5kPSJ1cmwoI2FycikiLz4KICAgIDx0ZXh0IHg9IjE3MCIgeT0iMTMzIiBvcGFjaXR5PSIwLjgiPjEuIG12IChiYWNrdXApPC90ZXh0PgogICAgPHJlY3QgeD0iMzgwIiB5PSIzMCIgd2lkdGg9IjI1MCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iY3VycmVudENvbG9yIiBvcGFjaXR5PSIwLjkiLz4KICAgIDx0ZXh0IHg9IjM5NSIgeT0iNTUiPm9yaWdpbi9tYWluIGUzOGY1ODQ2NDwvdGV4dD4KICAgIDx0ZXh0IHg9IjM5NSIgeT0iNzgiIG9wYWNpdHk9IjAuNyI+dHJhY2tzIHJlZGFjdGVkIG1lbW9yaWVzPC90ZXh0PgogICAgPHJlY3QgeD0iNjgwIiB5PSIzMCIgd2lkdGg9IjIyMCIgaGVpZ2h0PSI3MCIgcng9IjgiIGZpbGw9Im5vbmUiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgICA8dGV4dCB4PSI2OTUiIHk9IjU1Ij53b3JraW5nIHRyZWU8L3RleHQ+CiAgICA8dGV4dCB4PSI2OTUiIHk9Ijc4IiBvcGFjaXR5PSIwLjciPnJlZGFjdGVkIHZlcnNpb25zIGxhbmQ8L3RleHQ+CiAgICA8bGluZSB4MT0iNjMwIiB5MT0iNjUiIHgyPSI2NzUiIHkyPSI2NSIgc3Ryb2tlPSJjdXJyZW50Q29sb3IiIG1hcmtlci1lbmQ9InVybCgjYXJyKSIvPgogICAgPHRleHQgeD0iMzgwIiB5PSIxMzAiIG9wYWNpdHk9IjAuOCI+Mi4gZ2l0IHB1bGwg4oaSIGZhc3QtZm9yd2FyZCA3MGRhZmQwYTYuLmUzOGY1ODQ2NCAobm8gbWVyZ2UgY29tbWl0KTwvdGV4dD4KICAgIDx0ZXh0IHg9IjM4MCIgeT0iMTYwIiBvcGFjaXR5PSIwLjgiPjMuIHZlcmlmeTogSEVBRCwgc3RhdHVzLCA0MSBmaWxlcyBpbiBiYWNrdXA8L3RleHQ+CiAgPC9nPgo8L3N2Zz4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCjEuIEJhY2sgdXAgdGhlIDQxIGNvbmZsaWN0aW5nIGxvY2FsIG9yaWdpbmFscyBpbnRvIHRoZSBnaXRpZ25vcmVkIHNjcmF0Y2ggZGlyIChjb25maXJtZWQgaWdub3JlZCBhdCBgLmdpdGlnbm9yZTo1MmApOgoKYGBgYmFzaApta2RpciAtcCAuYWdlbnRzL3NjcmF0Y2gvbWVtb3JpZXMtbG9jYWwtMjAyNi0wOC0xNQpmb3IgZiBpbiAuYWdlbnRzL21lbW9yaWVzLyoubWQ7IGRvCiAgZ2l0IGNhdC1maWxlIC1lICJvcmlnaW4vbWFpbjokZiIgMj4vZGV2L251bGwgJiYgbXYgIiRmIiAuYWdlbnRzL3NjcmF0Y2gvbWVtb3JpZXMtbG9jYWwtMjAyNi0wOC0xNS8KZG9uZQpgYGAKCjIuIENvbXBsZXRlIHRoZSBwdWxsIChmYXN0LWZvcndhcmQsIG5vIG1lcmdlIGNvbW1pdCk6CgpgYGBiYXNoCmdpdCBwdWxsCmBgYAoKMy4gVmVyaWZ5OgoKYGBgYmFzaApnaXQgcmV2LXBhcnNlIEhFQUQgICAgICAgICAgICAgICAgICAgICAjIGV4cGVjdCBlMzhmNTg0NjQKZ2l0IHN0YXR1cyAtLXNob3J0IHwgZ3JlcCBtZW1vcmllcyAgICAgIyBleHBlY3Qgbm90aGluZwpscyAuYWdlbnRzL3NjcmF0Y2gvbWVtb3JpZXMtbG9jYWwtMjAyNi0wOC0xNSB8IHdjIC1sICAgIyBleHBlY3QgNDEKYGBgCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij48c3Ryb25nPk5vdGhpbmcgaXMgZGVsZXRlZDo8L3N0cm9uZz4gdGhlIHVucmVkYWN0ZWQgb3JpZ2luYWxzIGFyZSBtb3ZlZCwgbm90IHJlbW92ZWQsIGFuZCB0aGUgc2NyYXRjaCBkaXIgaXMgZ2l0aWdub3JlZCBzbyB0aGV5IGNhbiBuZXZlciBiZSBjb21taXR0ZWQgYnkgYWNjaWRlbnQuPC9kaXY+CgojIyBSaXNrcwoKfCBJdGVtIHwgQWN0aW9uIHwgUmlzayB8CnwgLS0tIHwgLS0tIHwgLS0tIHwKfCBgLmFnZW50cy9tZW1vcmllcy8qLm1kYCAoNDEpIHwgbXYgdG8gYC5hZ2VudHMvc2NyYXRjaC9tZW1vcmllcy1sb2NhbC0yMDI2LTA4LTE1L2AgfCBub25lIOKAlCByZXZlcnNpYmxlIG1vdmUgfAp8IGAuYWdlbnRzL21lbW9yaWVzL2AgYWZ0ZXIgcHVsbCB8IHRyYWNrZWQgcmVkYWN0ZWQgdmVyc2lvbnMgZnJvbSBvcmlnaW4vbWFpbiB8IGludGVuZGVkIHN0YXRlIHwKfCBjaGVja291dCBicmFuY2gvSEVBRCB8IGZhc3QtZm9yd2FyZCBgNzBkYWZkMGE2Li5lMzhmNTg0NjRgIHwgbm9uZSDigJQgdGhlIHB1bGwgeW91IGFscmVhZHkgcmFuIHwKCiMjIFB1YmxpYyBJbnRlcmZhY2UKCk5vIHB1YmxpYyBzdXJmYWNlIGNoYW5nZXMg4oCUIG5vIGNvbW1hbmRzLCBmbGFncywgb3IgQVBJcyB0b3VjaGVkLiBUaGlzIGlzIGEgd29ya2luZy10cmVlIG9wZXJhdGlvbiBvbiBvbmUgY2hlY2tvdXQ6IHVudHJhY2tlZCBmaWxlcyBtb3ZlZCB0byBhIGdpdGlnbm9yZWQgZGlyLCB0aGVuIGEgZmFzdC1mb3J3YXJkIGBnaXQgcHVsbGAuCgojIyBWYWxpZGF0aW9uCgpgYGBiYXNoCmdpdCByZXYtcGFyc2UgSEVBRCAgICAgICAgICAgICAgICAgICAgICMgZXhwZWN0IGUzOGY1ODQ2NApnaXQgc3RhdHVzIC0tc2hvcnQgfCBncmVwIG1lbW9yaWVzICAgICAjIGV4cGVjdCBub3RoaW5nCmxzIC5hZ2VudHMvc2NyYXRjaC9tZW1vcmllcy1sb2NhbC0yMDI2LTA4LTE1IHwgd2MgLWwgICAjIGV4cGVjdCA0MQpgYGAKCnwgQ2hlY2sgfCBFeHBlY3RlZCB8CnwgLS0tIHwgLS0tIHwKfCBgZ2l0IHJldi1wYXJzZSBIRUFEYCB8IGBlMzhmNTg0NjRgIHwKfCBgZ2l0IHN0YXR1cyAtLXNob3J0IFx8IGdyZXAgbWVtb3JpZXNgIHwgZW1wdHkgfAp8IGJhY2t1cCBmaWxlIGNvdW50IHwgNDEgfAp8IHNwb3QtY2hlY2sgYSBwdWxsZWQgZmlsZSB8IHJlZGFjdGVkIChg4oCUYCBzaG9ydGlkcykgfAoKIyMgQ2hlY2tsaXN0CgotIFsgXSBCYWNrIHVwIDQxIGxvY2FsIHVucmVkYWN0ZWQgbWVtb3J5IGZpbGVzIHRvIGAuYWdlbnRzL3NjcmF0Y2gvbWVtb3JpZXMtbG9jYWwtMjAyNi0wOC0xNS9gCi0gWyBdIFJlLXJ1biBgZ2l0IHB1bGxgIChmYXN0LWZvcndhcmQgdG8gYGUzOGY1ODQ2NGApCi0gWyBdIFZlcmlmeSBIRUFELCBjbGVhbiBzdGF0dXMsIGFuZCBiYWNrdXAgaW50YWN0ICg0MSBmaWxlcykK"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script>
+</body>
+</html>
