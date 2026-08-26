@@ -29,7 +29,7 @@ describe('agents feedback', () => {
       console.log = origLog;
     }
     expect(out.length).toBe(1);
-    expect(out[0]).toMatch(/^https:\/\/github\.com\/phnx-labs\/agents-cli\/discussions\/new\?category=q-a&/);
+    expect(out[0]).toMatch(/^https:\/\/github\.com\/phnx-labs\/agi-cli\/discussions\/new\?category=q-a&/);
     expect(out[0]).toContain('title=how%20do%20I%20X');
     expect(out[0]).toContain('body=');
   });

@@ -11,8 +11,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 
 const REPO_ROOT = path.resolve(__dirname, '..');
+// These two are deliberately DIFFERENT and must not be unified. The npm package
+// keeps its original name — renaming it would orphan every installed CLI — while
+// the GitHub repository was renamed agents-cli -> agi-cli. Code that conflates
+// them ends up depending on GitHub's rename redirect for binary downloads.
 const NPM_PACKAGE = '@phnx-labs/agents-cli';
-const GITHUB_REPO = 'github.com/phnx-labs/agents-cli';
+const GITHUB_REPO = 'github.com/phnx-labs/agi-cli';
 
 function read(rel: string): string {
   return fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
@@ -22,6 +26,8 @@ describe('package-name consistency (@phnx-labs canonical)', () => {
   it('package.json declares the canonical npm name', () => {
     const pkg = JSON.parse(read('package.json'));
     expect(pkg.name).toBe(NPM_PACKAGE);
+    // The package name must NOT follow the repository rename.
+    expect(pkg.name).not.toContain('agi-cli');
   });
 
   it('package.json repository.url points to the real github repo', () => {
