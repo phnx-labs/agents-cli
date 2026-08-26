@@ -11,7 +11,7 @@ import type { Command } from 'commander';
 import chalk from 'chalk';
 import { showUrl } from '../lib/open-url.js';
 
-const REPO = 'phnx-labs/agents-cli';
+const REPO = 'phnx-labs/agi-cli';
 const DISCUSSION_BASE = `https://github.com/${REPO}/discussions/new`;
 const ISSUE_BASE = `https://github.com/${REPO}/issues/new`;
 

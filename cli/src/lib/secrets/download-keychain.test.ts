@@ -25,7 +25,7 @@ describe('keychain helper release-asset URLs', () => {
     // helper fix unreachable without one — see lib/helper-versions.ts.
     const u = keychainHelperAssetUrls('1.0.0');
     expect(u.zip).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/keychain/v1.0.0/Agents_CLI.app.zip',
+      'https://github.com/phnx-labs/agi-cli/releases/download/keychain/v1.0.0/Agents_CLI.app.zip',
     );
     expect(u.sha256).toBe(`${u.zip}.sha256`);
     // A bare `v<n>` tag here would be the old coupling coming back.
@@ -56,7 +56,7 @@ describe('keychain helper release-asset URLs', () => {
   });
 
   it('shares the release repo + cache primitives with the generic spec', () => {
-    expect(HELPER_RELEASE_REPO).toBe('phnx-labs/agents-cli');
+    expect(HELPER_RELEASE_REPO).toBe('phnx-labs/agi-cli');
     expect(helperAssetUrls(KEYCHAIN_HELPER_SPEC, '1.0.0').zip).toBe(keychainHelperAssetUrls('1.0.0').zip);
     expect(helperCacheDir(KEYCHAIN_HELPER_SPEC, '1.0.0')).toBe(keychainHelperCacheDir('1.0.0'));
   });

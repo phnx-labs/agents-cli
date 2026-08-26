@@ -27,7 +27,7 @@ export const FACTORY_PROJECTS = [
   { name: 'Prix', repo: 'phnx-labs/prix' },
   { name: 'Rush App', repo: 'phnx-labs/rush' },
   { name: 'Rush CLI', repo: 'phnx-labs/rush-cli' },
-  { name: 'Agents CLI', repo: 'phnx-labs/agents-cli' },
+  { name: 'Agents CLI', repo: 'phnx-labs/agi-cli' },
   { name: 'Linear CLI', repo: 'phnx-labs/linear-cli' },
 ] as const;
 

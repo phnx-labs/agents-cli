@@ -286,7 +286,7 @@ function foldUserHooksYamlIntoAgentsYaml(): void {
 
   const header = `# agents-cli metadata
 # Auto-generated - do not edit manually
-# https://github.com/phnx-labs/agents-cli
+# https://github.com/phnx-labs/agi-cli
 
 `;
   try {
@@ -398,7 +398,7 @@ function foldBrowserProfilesIntoAgentsYaml(): void {
 
   const header = `# agents-cli metadata
 # Auto-generated - do not edit manually
-# https://github.com/phnx-labs/agents-cli
+# https://github.com/phnx-labs/agi-cli
 
 `;
   try {
@@ -1507,7 +1507,7 @@ function migrateVersionResourcesToPatterns(): void {
   }
 
   if (changed) {
-    const META_HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agents-cli\n# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agents-cli/main/cli/schema/agents-yaml.schema.json\n\n';
+    const META_HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agi-cli\n# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agi-cli/main/cli/schema/agents-yaml.schema.json\n\n';
     fs.writeFileSync(metaFile, META_HEADER + yaml.stringify(meta), 'utf-8');
     console.error('Migrated agents.yaml versions: entries to pattern format');
   }
@@ -1535,7 +1535,7 @@ function migrateSplitDeviceLocalMeta(): void {
   const hasLocal =
     (!!agents && Object.keys(agents).length > 0) || (!!versions && Object.keys(versions).length > 0);
 
-  const HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agents-cli\n\n';
+  const HEADER = '# agents-cli metadata\n# Auto-generated - do not edit manually\n# https://github.com/phnx-labs/agi-cli\n\n';
 
   // Only rewrite central when it actually carries machine-local fields — a
   // machine whose agents.yaml is already portable-only is left untouched.

@@ -213,7 +213,7 @@ describe('win helper release-asset download', () => {
     // ~165MB binary or the download 404'd. Same tag namespace, same fix.
     const u = winHelperAssetUrls('1.0.0');
     expect(u.exe).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/computer-win/v1.0.0/computer-helper-win.exe',
+      'https://github.com/phnx-labs/agi-cli/releases/download/computer-win/v1.0.0/computer-helper-win.exe',
     );
     expect(u.sha256).toBe(`${u.exe}.sha256`);
     // A bare `v<n>` tag here would be the old coupling coming back.

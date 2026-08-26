@@ -38,7 +38,7 @@ describe('mac helper release-asset download', () => {
     // helper fix unreachable without one — see lib/helper-versions.ts.
     const u = macHelperAssetUrls('1.0.0');
     expect(u.zip).toBe(
-      'https://github.com/phnx-labs/agents-cli/releases/download/computer-mac/v1.0.0/ComputerHelper.app.zip',
+      'https://github.com/phnx-labs/agi-cli/releases/download/computer-mac/v1.0.0/ComputerHelper.app.zip',
     );
     expect(u.sha256).toBe(`${u.zip}.sha256`);
     // A bare `v<n>` tag here would be the old coupling coming back.

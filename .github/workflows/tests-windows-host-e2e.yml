@@ -51,7 +51,7 @@ concurrency:
 jobs:
   win-host-e2e:
     # Belt-and-braces with the trigger list above: never run from a fork context.
-    if: github.repository == 'phnx-labs/agents-cli'
+    if: github.repository == 'phnx-labs/agi-cli'
     runs-on: [self-hosted, crabbox-ci, tailnet]
     timeout-minutes: 30
     defaults:

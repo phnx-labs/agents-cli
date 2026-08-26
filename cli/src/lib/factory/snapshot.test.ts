@@ -55,10 +55,10 @@ describe('factory snapshot', () => {
         { state: { name: 'Blocked', type: 'started' } },
       ] },
     )).toEqual({ todo: 2, inProgress: 1, blocked: 1 });
-    expect(parsePullRequests('phnx-labs/agents-cli', [{
+    expect(parsePullRequests('phnx-labs/agi-cli', [{
       number: 7, reviewDecision: 'APPROVED', mergeable: 'MERGEABLE',
       statusCheckRollup: [{ conclusion: 'SUCCESS' }],
-    }])).toEqual([{ repo: 'phnx-labs/agents-cli', number: 7, ci: 'passing', review: 'approved', mergeable: 'mergeable' }]);
+    }])).toEqual([{ repo: 'phnx-labs/agi-cli', number: 7, ci: 'passing', review: 'approved', mergeable: 'mergeable' }]);
     expect(parseDevices([{ name: 'box', loadPercent: 12 }])).toEqual([{ name: 'box', load: 12, idle: true }]);
   });
 

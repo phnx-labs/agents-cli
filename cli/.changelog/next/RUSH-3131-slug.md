@@ -16,3 +16,12 @@
   and `gh release upload --clobber`. Publishing signed helper binaries was going through the
   rename redirect. Found by sweeping `scripts/` and `.github/` after the source tree was
   already clean — the source sweep alone would have missed it.
+  Three further live paths carried the old slug and were missed by the first sweep:
+  `ssh-tunnel.ts:170` `WIN_HELPER_RELEASE_REPO` (a **separately hardcoded** constant — the
+  download URL for `computer-helper-win.exe`, the fourth signed asset, which the first
+  version of this change claimed to cover and did not); `commands/feedback.ts:14`, which
+  opens real GitHub issues; and `factory/snapshot.ts:30`, which polls this repo's PRs.
+  `installations/migrate.ts` also wrote the old URL into the `agents.yaml` header it
+  generates. Separately, `.github/workflows/tests-windows-host-e2e.yml:54` gated on
+  `github.repository == 'phnx-labs/agents-cli'`, which is permanently false after a rename
+  — that job had silently stopped running on every push to main and on its daily cron.

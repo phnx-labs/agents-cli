@@ -1027,7 +1027,7 @@ notify:
     const raw = fs.readFileSync(path.join(dir, 'devices', 'zion', 'agents.yaml'), 'utf-8');
     expect(raw).toContain('# agents-cli metadata');
     expect(raw).toContain('# Auto-generated - do not edit manually');
-    expect(raw).toContain('# https://github.com/phnx-labs/agents-cli');
+    expect(raw).toContain('# https://github.com/phnx-labs/agi-cli');
     expect(raw).toContain('# yaml-language-server: $schema=');
   });
 

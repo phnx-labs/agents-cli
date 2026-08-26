@@ -167,7 +167,7 @@ export function resolveWinHelperExe(): string | null {
 }
 
 /** GitHub repo whose `v<version>` releases carry the exe as an asset. */
-export const WIN_HELPER_RELEASE_REPO = 'phnx-labs/agents-cli';
+export const WIN_HELPER_RELEASE_REPO = 'phnx-labs/agi-cli';
 
 /** Cache dir for downloaded helper exes, one subdir per release tag. */
 export function winHelperCacheDir(version: string): string {
