@@ -3,6 +3,7 @@ import { execFileSync } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   EXPECTED_TEAM_ID,
   HELPER_RELEASE_REPO,
@@ -70,8 +71,11 @@ describe('menu-bar helper release-asset URLs', () => {
   });
 });
 
-// cli/ — this file lives at cli/src/lib/, so two levels up.
-const REPO_ROOT_FOR_PKG = path.resolve(__dirname, '..', '..');
+// cli/ — this file lives at cli/src/lib/, so two levels up. Resolved from
+// import.meta.url, not __dirname: the package is "type": "module", so __dirname
+// exists only because vite injects it, and every other test file here uses the
+// ESM form.
+const REPO_ROOT_FOR_PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 describe('the release repo slug is the GitHub repo, not the npm package', () => {
   // These are two different names and conflating them breaks something either
