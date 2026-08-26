@@ -170,6 +170,7 @@ describe('ServiceSupervisor', () => {
     expect(hanging.ticksStarted).toBe(1);
     await expect(supervisor.restartOne('device-probe')).rejects.toThrow(/tick is still in flight/);
     await expect(supervisor.stop('device-probe')).rejects.toThrow(/tick is still in flight/);
+    await expect(supervisor.start('device-probe')).rejects.toThrow(/tick is still in flight/);
 
     expect(good.ticks).toBeGreaterThanOrEqual(1);
     await supervisor.stopAll();
