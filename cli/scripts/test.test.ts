@@ -275,3 +275,110 @@ describe('scripts/test.sh — the suite never runs locally by accident', () => {
     expect(r.stderr).toMatch(/returned no device/);
   });
 });
+
+// Every assertion below reproduces a bug that shipped in the first revision of
+// --shard and was caught in review.
+//
+// They all run through `runSealed`, which puts ONLY a bash symlink on PATH. That
+// is not decoration: each of these cases is asserting that a guard fires, and if
+// the guard regresses the script proceeds to the thing the guard was preventing.
+// Measured while mutation-testing this file: deleting the conflict check made
+// `--shard 2 --device box` rsync/ssh at a host called "box" and the run hung
+// until it was killed, and `--here` would have run the full ~13k-test suite on
+// whatever machine CI is using. A sealed PATH turns every one of those into an
+// immediate "rsync not found", so a regression fails in milliseconds instead of
+// hanging or hijacking the machine.
+describe('scripts/test.sh — the shard flags cannot silently do the wrong thing', () => {
+  /** Run test.sh with nothing on PATH but bash, so it can never dispatch. */
+  function runSealed(args: string[]) {
+    const onlyBash = fs.mkdtempSync(path.join(os.tmpdir(), 'testsh-sealed-'));
+    fs.symlinkSync('/bin/bash', path.join(onlyBash, 'bash'));
+    try {
+      return run(args, { PATH: onlyBash });
+    } finally {
+      fs.rmSync(onlyBash, { recursive: true, force: true });
+    }
+  }
+
+  // Regression: `--shard 0` passed the numeric regex, hit no floor, ran the
+  // fan-out loop zero times, and printed "All 0 shards passed." with exit 0.
+  // A green result having executed no tests is the worst failure a test runner
+  // has, so the floor is pinned on BOTH spellings.
+  it.each([
+    ['--shard', '0'],
+    ['--shard', '1'],
+    ['--shard=0'],
+    ['--shard=1'],
+  ])('refuses a shard count below 2 (%s %s)', (...args: string[]) => {
+    const r = runSealed(args);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/needs at least 2 workers/);
+    // Never a false green, and never a local run.
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/All 0 shards passed/);
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('refuses a non-numeric shard count', () => {
+    const r = runSealed(['--shard', 'abc']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/needs a worker count/);
+  });
+
+  // Regression: `--devices onebox` derived SHARDS from the list length and
+  // bypassed the floor entirely, because shard_count_ok was only wired into the
+  // --shard arms. It ran a one-shard fan-out — `--device auto` through far more
+  // machinery — with no warning.
+  it('applies the same floor when the count comes from --devices', () => {
+    const r = runSealed(['--devices', 'onebox']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/needs at least 2 workers/);
+    // The message names the flag the caller actually passed.
+    expect(r.stderr).toMatch(/--devices/);
+  });
+
+  it('refuses a --devices list that parses to nothing', () => {
+    const r = runSealed(['--devices', '']);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/--devices needs a comma-separated list/);
+  });
+
+  // Regression: MODE was last-write-wins with no cross-flag validation, so one
+  // of the two flags was dropped purely on argument order, silently. Both
+  // orders are pinned because argument order was the whole bug.
+  it.each([
+    [['--shard', '2', '--device', 'box'], '--device', '--shard'],
+    [['--device', 'box', '--shard', '2'], '--shard', '--device'],
+    [['--shard', '2', '--here'], '--here', '--shard'],
+    [['--here', '--shard', '2'], '--shard', '--here'],
+    [['--shard', '3', '--crabbox'], '--crabbox', '--shard'],
+    [['--crabbox', '--shard', '3'], '--shard', '--crabbox'],
+  ])('refuses conflicting target flags (%j)', (args, named, other) => {
+    const r = runSealed(args as string[]);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toMatch(/conflicts with/);
+    // Naming BOTH flags is the point: the operator has to know which two
+    // disagreed, not just that something did.
+    expect(r.stderr).toContain(named as string);
+    expect(r.stderr).toContain(other as string);
+    // A conflict must never resolve into a local run.
+    expect(`${r.stdout}${r.stderr}`).not.toMatch(/running the full suite on THIS machine/i);
+  });
+
+  it('still allows --devices together with --shard — same mode, not a conflict', () => {
+    // Guards the guard: set_mode must not be so strict that the legitimate
+    // pairing (name the workers AND state the count) starts failing.
+    //
+    // Run with a PATH that has no rsync, so the script dies at the very first
+    // prerequisite check INSIDE the shard branch. That proves parsing accepted
+    // the combination, without dispatching: naming two real-looking hosts and
+    // letting it proceed would rsync/ssh at them for real.
+    // bash itself must stay reachable — a PATH with nothing on it means
+    // spawnSync cannot launch the interpreter and every assertion below reads
+    // `undefined` instead of failing honestly.
+    const r = runSealed(['--devices', 'a,b', '--shard', '2']);
+
+    expect(r.stderr).not.toMatch(/conflicts with/);
+    // Reached the shard branch — so the flags were accepted together.
+    expect(r.stderr).toMatch(/rsync not found/);
+  });
+});

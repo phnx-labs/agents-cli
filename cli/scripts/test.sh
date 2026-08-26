@@ -69,8 +69,9 @@ VITEST_ARGS=()
 # still printed "All 0 shards passed." with exit 0 -- a false green -- and 1 is
 # `--device auto` reached through the whole fan-out apparatus.
 shard_count_ok() {
-  [[ "$1" =~ ^[0-9]+$ ]] || die "--shard needs a worker count, e.g. --shard 6"
-  (( $1 >= 2 )) || die "--shard needs at least 2 workers (got $1). For a single worker use: scripts/test.sh --device auto"
+  local n="$1" flag="${2:---shard}"
+  [[ "$n" =~ ^[0-9]+$ ]] || die "--shard needs a worker count, e.g. --shard 6"
+  (( n >= 2 )) || die "$flag needs at least 2 workers (got $n). For a single worker use: scripts/test.sh --device auto"
 }
 
 set_mode() {
@@ -109,6 +110,23 @@ done
 # `--device auto` is the same sentinel `agents run --device auto` uses; accept it
 # here rather than dialing a literal, nonexistent host named "auto".
 if [[ "$MODE" == "device" && "$DEVICE" == "auto" ]]; then MODE="auto"; DEVICE=""; fi
+
+# Resolve an explicit --devices list here, BEFORE any prerequisite check, so a
+# bad invocation fails on its own merits. Validating it down in the dispatch
+# branch meant `--devices onebox` on a box without rsync died reporting the
+# missing rsync, hiding the real problem.
+SHARD_DEVICES=()
+if [[ "$MODE" == "shard" && -n "$SHARD_LIST" ]]; then
+  _IFS_SAVE="$IFS"; IFS=','
+  for _d in $SHARD_LIST; do [[ -n "$_d" ]] && SHARD_DEVICES+=("$_d"); done
+  IFS="$_IFS_SAVE"
+  (( ${#SHARD_DEVICES[@]} )) || die "--devices parsed to nothing: '$SHARD_LIST'"
+  # An explicit list sets the count when --shard did not. Route it through the
+  # SAME floor: `--devices onebox` otherwise slipped past the >= 2 rule --shard
+  # enforces and ran a one-shard fan-out, which is `--device auto` through a
+  # great deal more machinery.
+  (( SHARDS )) || { SHARDS=${#SHARD_DEVICES[@]}; shard_count_ok "$SHARDS" --devices; }
+fi
 
 # --repo-root lets the attestation producer test the isolated worktree it built
 # at an exact commit, so the bytes tested are the bytes attested.
@@ -281,15 +299,10 @@ case "$MODE" in
     # prerequisite for sharding.
     command -v rsync >/dev/null || die "rsync not found"
     command -v ssh   >/dev/null || die "ssh not found"
-    SHARD_DEVICES=()
-    if [[ -n "$SHARD_LIST" ]]; then
-      # Explicit list: split on commas, no CLI version dependency at all.
-      _IFS_SAVE="$IFS"; IFS=','
-      for _d in $SHARD_LIST; do [[ -n "$_d" ]] && SHARD_DEVICES+=("$_d"); done
-      IFS="$_IFS_SAVE"
-      (( ${#SHARD_DEVICES[@]} )) || die "--devices parsed to nothing: '$SHARD_LIST'"
-      (( SHARDS )) || SHARDS=${#SHARD_DEVICES[@]}
-    else
+    # SHARD_DEVICES is already populated when --devices was passed (resolved and
+    # floor-checked right after argument parsing). Only the auto-pick path has
+    # work left to do here.
+    if (( ${#SHARD_DEVICES[@]} )); then :; else
     command -v agents >/dev/null 2>&1 || die "the 'agents' CLI is not on PATH, so workers cannot be picked"
     # `devices pick --json` is how the fan-out gets its candidate list WITH loads,
     # from the same auto pool a single run uses. It landed in 1.22.49; an older

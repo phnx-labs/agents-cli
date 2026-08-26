@@ -19,3 +19,8 @@
   was last-write-wins with no cross-flag validation, so `--shard 6 --device box` silently
   dropped one of the two purely on argument order; conflicting target flags now die naming
   both. Source: `cli/scripts/test.sh`.
+- **`--devices` obeys the same 2-worker floor, and is validated before prerequisites (RUSH-3230).**
+  `--devices onebox` derived the shard count from the list length and skipped the floor
+  entirely, running a one-shard fan-out. The list is now resolved and checked immediately
+  after argument parsing rather than inside the dispatch branch, so a bad invocation reports
+  its own problem instead of dying on a missing `rsync` first. Source: `cli/scripts/test.sh`.
