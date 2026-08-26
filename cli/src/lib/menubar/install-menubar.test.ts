@@ -244,6 +244,30 @@ describe('isMenubarStale', () => {
     }
   });
 
+  it('converges: what an install stamps is not stale on the next invocation', () => {
+    // THE property a reinstall storm violates, stated directly. #2109 was not
+    // "the wrong version was compared" — it was that the value written at
+    // install time and the value computed at check time disagreed, so the check
+    // never settled. Whatever the source, stamping it and then asking about the
+    // same source must say "not stale", or the self-heal reinstalls forever.
+    //
+    // This is the testable core of installMenubarLaunchAgentOnUpgrade. Driving
+    // that function end to end would need codesign/spctl/launchctl stubbed,
+    // which this repo forbids — so the invariant is asserted where it lives.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'mb-converge-'));
+    const local = path.join(dir, 'MenubarHelper.app');
+    fs.mkdirSync(local);
+    try {
+      for (const source of [local, path.join(menubarHelperCacheDir('1.0.1'), 'MenubarHelper.app')]) {
+        const written = stampFor(source);        // what install persists
+        const computed = stampFor(source);       // what the next check derives
+        expect(isMenubarStale({ installed: written, available: computed, execExists: true })).toBe(false);
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it('never compares against the CLI version', () => {
     // The bug this replaces: an unchanged helper looked stale on every CLI
     // release (the #2109 restart storm), and a newer helper at the same CLI
