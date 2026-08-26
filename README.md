@@ -1281,6 +1281,8 @@ agents artifacts share plan.html --slug fleet --expire 30d  # → https://<base>
 agents artifacts share plan.html --label "Q3 fleet plan" --meta kind=plan   # human title + structured metadata
 agents artifacts share plan.html --json                     # URL object for plan-render hooks
 agents artifacts share list --agent claude                  # everything published, filterable
+agents artifacts share list --meta kind=plan                # exact, repeatable metadata filters
+agents artifacts share edit fleet --label "Final fleet plan" --meta status=final
 agents artifacts share revisions fleet                      # prior versions kept under a slug
 agents artifacts share status                               # show the endpoint
 agents artifacts unshare fleet                              # take a published link (+ its OG cover) down
@@ -1314,8 +1316,12 @@ captured automatically from the exec env and git — never invented, only sent w
 present. `--label`/`--title` names a share (else one is derived from the HTML
 `<title>`, frontmatter, or filename, with a nudge — never a blocking prompt); `--meta
 key=value` attaches structured metadata (`kind`, `project`, `ticket`, `status`, ...).
-`agents artifacts share list --agent <name> | --session <id> | --label-contains <substr>` filters
-by any of it, so the listing is a real "what have I shared" gallery, not just slugs.
+`agents artifacts share list --agent <name> | --session <id> | --label-contains <substr>
+| --meta <key=value>` filters by provenance, title, or exact structured metadata, so
+the listing is a real "what have I shared" gallery, not just slugs. `agents artifacts
+share edit <slug>` changes only the label/arbitrary metadata in place: the URL, exact
+body, HTTP metadata, publication time, visibility, expiry, provenance, cover, and revision history stay
+unchanged.
 Republishing an existing slug keeps the prior version as a revision by default
 (`--no-revision` to skip); `agents artifacts share revisions <slug>` shows the retained
 history, newest first.

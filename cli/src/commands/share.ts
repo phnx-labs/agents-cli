@@ -43,6 +43,7 @@ import {
   publishFile,
   resolveShareUsername,
   parseMetaEntries,
+  sanitizeLabel,
   resolveShareVisibility,
   type PublishResult,
   type ShareVisibility,
@@ -134,6 +135,41 @@ export interface ShareListResult {
 /** DI seam for tests — override the real HTTP GET of the JSON listing route. */
 export type ListingFetchFn = (url: string) => Promise<{ status: number; contentType: string; body: string }>;
 
+export interface ShareEditResult {
+  ok: true;
+  url: string;
+  label: string | null;
+  meta: Record<string, string>;
+}
+
+export async function runShareEdit(
+  target: string,
+  opts: {
+    githubUser?: string; config?: ShareConfig; writeToken?: string; byo?: boolean;
+    session?: PhoenixSession | null; label?: string | null; meta?: Record<string, string>;
+    metaMode?: 'merge' | 'replace'; removeMeta?: string[];
+    fetchEdit?: typeof fetch;
+  },
+): Promise<ShareEditResult> {
+  const backend = resolveShareBackend({ githubUser: opts.githubUser, config: opts.config, writeToken: opts.writeToken, byo: opts.byo, session: opts.session });
+  const { key } = await resolveDeleteTarget(target, { githubUser: backend.kind === 'managed' ? backend.namespace : opts.githubUser || backend.namespace });
+  const res = await (opts.fetchEdit ?? fetch)(`${backend.baseUrl.replace(/\/+$/, '')}/${key}`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${backend.token}`, 'content-type': 'application/json' },
+    body: JSON.stringify({
+      ...(opts.label !== undefined ? { label: opts.label } : {}),
+      meta: opts.meta ?? {}, metaMode: opts.metaMode ?? 'merge', removeMeta: opts.removeMeta ?? [],
+    }),
+  });
+  const body = await res.text();
+  if (!res.ok) {
+    let detail = body;
+    try { detail = String((JSON.parse(body) as { error?: unknown }).error ?? body); } catch { /* keep body */ }
+    throw new Error(`Share metadata edit failed (${res.status}): ${detail || 'unknown error'}`);
+  }
+  return JSON.parse(body) as ShareEditResult;
+}
+
 /** Shown whenever the deployed Worker has no `?format=json` listing route — an
  * endpoint provisioned before this feature. Points at the RUSH-2449 update path
  * (`agents artifacts share update`) instead of letting the caller hit a 404 or an
@@ -224,6 +260,7 @@ export async function runShareList(
     session?: string;
     /** Only shares whose label contains this text (case-insensitive substring). */
     label?: string;
+    meta?: Record<string, string>;
   } = {},
 ): Promise<ShareListResult> {
   const backend = resolveShareBackend({
@@ -287,9 +324,9 @@ export async function runShareList(
  * Worker has no query surface for this, so it narrows the fetched set instead
  * of a second round trip. `count` reflects the FILTERED set, matching what the
  * caller actually sees. */
-function applyShareListFilters(
+export function applyShareListFilters(
   result: ShareListResult,
-  filters: { agent?: string; session?: string; label?: string },
+  filters: { agent?: string; session?: string; label?: string; meta?: Record<string, string> },
 ): ShareListResult {
   let objects = result.objects;
   if (filters.agent) {
@@ -302,6 +339,9 @@ function applyShareListFilters(
   if (filters.label) {
     const needle = filters.label.toLowerCase();
     objects = objects.filter((o) => (o.label ?? '').toLowerCase().includes(needle));
+  }
+  if (filters.meta) {
+    objects = objects.filter((o) => Object.entries(filters.meta!).every(([key, value]) => o.meta[key] === value));
   }
   return { user: result.user, count: objects.length, objects };
 }
@@ -600,6 +640,10 @@ const SHARE_DELETE_NOTES = `
 export function registerShareCommands(artifactsCmd: Command): void {
   const shareCmd = artifactsCmd
     .command('share')
+    // Child task commands intentionally reuse publish vocabulary (`edit --label`,
+    // `list --meta`). Keep option ownership positional within this subtree so
+    // Commander does not silently resolve those flags to the parent publisher.
+    .enablePositionalOptions()
     .description('Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.')
     .argument('[file]', 'file to publish (HTML or any static asset)')
     .option('--slug <slug>', 'URL slug override (default: stable slug of the artifact title, then filename)')
@@ -861,14 +905,17 @@ ${SHARE_DELETE_NOTES}
     // Named --label-contains, not --label: `share <file>` (the parent) already owns
     // `--label`/`--title`, same collision class as --for-user/--list-json above.
     .option('--label-contains <substr>', 'filter to shares whose label contains this text (case-insensitive)')
+    .option('--meta <key=value>', 'filter by an exact arbitrary metadata entry (repeatable)', (v: string, p: string[]) => [...p, v], [] as string[])
     .option('--list-json', 'emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)')
-    .action(async (opts: { forUser?: string; agent?: string; session?: string; labelContains?: string; listJson?: boolean }) => {
+    .action(async (opts: { forUser?: string; agent?: string; session?: string; labelContains?: string; meta: string[]; listJson?: boolean }) => {
       try {
+        const parentMeta = shareCmd.opts<{ meta?: string[] }>().meta ?? [];
         const result = await runShareList({
           githubUser: opts.forUser,
           agent: opts.agent,
           session: opts.session,
           label: opts.labelContains,
+          meta: parseMetaEntries(opts.meta.length ? opts.meta : parentMeta),
         });
         console.log(formatShareList(result, Boolean(opts.listJson)));
       } catch (e) {
@@ -891,6 +938,7 @@ ${SHARE_DELETE_NOTES}
       # Narrow by who/what published it
       agents artifacts share list --agent claude
       agents artifacts share list --label-contains "fleet plan"
+      agents artifacts share list --meta kind=plan --meta status=final
     `,
     notes: `
   Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG
@@ -901,8 +949,56 @@ ${SHARE_DELETE_NOTES}
   artifacts share update' (RUSH-2449) rather than returning a wrong or empty result
   — see 'agents artifacts share status' for whether an update is due.
 
-  --agent/--session/--label-contains filter the fetched listing client-side;
+  --agent/--session/--label-contains/--meta filter the fetched listing client-side;
   --list-json's count reflects the filtered set.
+    `,
+  });
+
+  const shareEditCmd = shareCmd
+    .command('edit <target>')
+    .description('Edit a published share\'s label or arbitrary metadata without republishing its body.')
+    .option('--for-user <user>', 'namespace for resolving a bare slug (default: your namespace)')
+    .option('--label <text>', 'set or replace the display label')
+    .option('--remove-label', 'remove the display label')
+    .option('--meta <key=value>', 'merge a metadata entry (repeatable)', (v: string, p: string[]) => [...p, v], [] as string[])
+    .option('--replace-meta <key=value>', 'replace all arbitrary metadata with these entries (repeatable)', (v: string, p: string[]) => [...p, v], [] as string[])
+    .option('--remove-meta <key>', 'remove an arbitrary metadata key (repeatable)', (v: string, p: string[]) => [...p, v], [] as string[])
+    .option('--edit-json', 'emit the machine-readable edit result')
+    .action(async (target: string, opts: { forUser?: string; label?: string; removeLabel?: boolean; meta: string[]; replaceMeta: string[]; removeMeta: string[]; editJson?: boolean }) => {
+      try {
+        const parent = shareCmd.opts<{ label?: string; meta?: string[] }>();
+        const label = opts.label ?? parent.label;
+        const mergeMeta = opts.meta.length ? opts.meta : (parent.meta ?? []);
+        if (label !== undefined && opts.removeLabel) throw new Error('--label and --remove-label are mutually exclusive.');
+        if (mergeMeta.length && opts.replaceMeta.length) throw new Error('--meta and --replace-meta are mutually exclusive.');
+        if (opts.replaceMeta.length && opts.removeMeta.length) throw new Error('--replace-meta and --remove-meta are mutually exclusive.');
+        if (label === undefined && !opts.removeLabel && !mergeMeta.length && !opts.replaceMeta.length && !opts.removeMeta.length) throw new Error('Nothing to edit. Pass --label, --remove-label, --meta, --replace-meta, or --remove-meta.');
+        const removeMeta = opts.removeMeta.map((key) => Object.keys(parseMetaEntries([`${key}=x`]))[0]!);
+        const result = await runShareEdit(target, {
+          githubUser: opts.forUser,
+          label: opts.removeLabel ? null : label === undefined ? undefined : sanitizeLabel(label),
+          meta: parseMetaEntries(opts.replaceMeta.length ? opts.replaceMeta : mergeMeta),
+          metaMode: opts.replaceMeta.length ? 'replace' : 'merge',
+          removeMeta,
+        });
+        console.log(opts.editJson ? JSON.stringify(result, null, 2) : chalk.green(`updated ${result.url}`));
+      } catch (e) { console.error(chalk.red((e as Error).message)); process.exitCode = 1; }
+    });
+  setHelpSections(shareEditCmd, {
+    examples: `
+      # Change only the gallery/list title
+      agents artifacts share edit q3-plan --label "Q3 fleet plan"
+
+      # Merge metadata, or deliberately replace/remove it
+      agents artifacts share edit q3-plan --meta status=final --meta ticket=PHNX-3278
+      agents artifacts share edit q3-plan --replace-meta kind=plan --replace-meta status=final
+      agents artifacts share edit q3-plan --remove-meta status
+    `,
+    notes: `
+  Metadata edits preserve the exact published body, content type/HTTP metadata,
+  publication time, visibility, expiry, provenance, cover, and retained revisions. --meta merges;
+  --replace-meta replaces all arbitrary metadata; --remove-meta deletes named keys.
+  Reserved Worker/provenance keys cannot be changed through metadata flags.
     `,
   });
 

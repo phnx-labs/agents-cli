@@ -31,9 +31,13 @@ function makeEnv() {
         // The Worker forwards request.body (a ReadableStream) — consume it so the
         // fake records a real byte size, exactly as R2 would.
         const buf = body == null ? Buffer.alloc(0) : Buffer.from(await new Response(body as BodyInit).arrayBuffer());
+        const rawHttp = opts.httpMetadata as { contentType?: string } | Headers | undefined;
+        const httpMetadata = rawHttp instanceof Headers
+          ? { contentType: rawHttp.get('content-type') ?? undefined }
+          : (rawHttp ?? {});
         store.set(key, {
           body: buf,
-          httpMetadata: opts.httpMetadata ?? {},
+          httpMetadata,
           customMetadata: opts.customMetadata ?? {},
           uploaded: new Date().toISOString(),
           size: buf.length,
@@ -45,6 +49,7 @@ function makeEnv() {
         return {
           body: item.body,
           customMetadata: item.customMetadata,
+          uploaded: new Date(item.uploaded),
           httpEtag: '"etag"',
           // R2 objects expose text()/arrayBuffer(); the Worker reads text() to
           // inject the attribution bar, so the fake must too.
@@ -339,6 +344,73 @@ describe('worker JSON listing route (GET /<user>?format=json)', () => {
     const html = await gallery.text();
     expect(html).toContain('public-page');
     expect(html).not.toContain('secret-report');
+  });
+});
+
+describe('worker metadata edit route (PATCH /<user>/<slug>)', () => {
+  it('preserves exact body and reserved metadata, changes only requested metadata, and creates no revision', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    const body = '<html>\n<body>exact bytes</body>\n</html>';
+    await put(worker, env, 'octocat/plan', body, {
+      'content-type': 'text/html; charset=iso-8859-1',
+      'x-share-visibility': 'unlisted',
+      'x-share-expires-at': '2099-01-01T00:00:00.000Z',
+      'x-share-agent': 'claude',
+      'x-share-label': 'Old',
+      'x-share-meta': JSON.stringify({ kind: 'plan', status: 'draft' }),
+    });
+    store.get('octocat/plan')!.uploaded = '2026-08-01T00:00:00.000Z';
+    const before = Buffer.from(store.get('octocat/plan')!.body);
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'New', metaMode: 'merge', meta: { status: 'final' }, removeMeta: ['kind'] }),
+    }), env);
+    expect(res.status).toBe(200);
+    const saved = store.get('octocat/plan')!;
+    expect(saved.body.equals(before)).toBe(true);
+    expect(saved.httpMetadata.contentType).toBe('text/html; charset=iso-8859-1');
+    expect(saved.customMetadata).toMatchObject({ visibility: 'unlisted', 'expires-at': '2099-01-01T00:00:00.000Z', 'published-at': '2026-08-01T00:00:00.000Z', agent: 'claude', label: 'New', status: 'final' });
+    expect(saved.customMetadata.kind).toBeUndefined();
+    expect(Array.from(store.keys()).filter((key) => key.includes('/rev-'))).toEqual([]);
+  });
+
+  it('fails loud for a missing target and reserved metadata key', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    const missing = await worker.default.fetch(new Request('https://share.test/octocat/missing', { method: 'PATCH', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: '{}' }), env);
+    expect(missing.status).toBe(404);
+    await put(worker, env, 'octocat/plan', 'body');
+    const reserved = await worker.default.fetch(new Request('https://share.test/octocat/plan', { method: 'PATCH', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: JSON.stringify({ meta: { visibility: 'public' } }) }), env);
+    expect(reserved.status).toBe(400);
+  });
+
+  it('lets the endpoint-owner WRITE_TOKEN repair metadata across historical managed owners', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/legacy', 'exact');
+    store.get('octocat/legacy')!.customMetadata.owner = 'old-phoenix-user-id';
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/legacy', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ meta: { project: 'AGI' } }),
+    }), env);
+    expect(res.status).toBe(200);
+    expect(store.get('octocat/legacy')!.customMetadata).toMatchObject({ owner: 'old-phoenix-user-id', project: 'AGI' });
+  });
+
+  it('enforces label and metadata limits at the Worker boundary', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/plan', 'body');
+    const longLabel = await worker.default.fetch(new Request('https://share.test/octocat/plan', { method: 'PATCH', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: JSON.stringify({ label: 'x'.repeat(201) }) }), env);
+    expect(longLabel.status).toBe(400);
+    const largeMeta = await worker.default.fetch(new Request('https://share.test/octocat/plan', { method: 'PATCH', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: JSON.stringify({ meta: { note: 'x'.repeat(2100) } }) }), env);
+    expect(largeMeta.status).toBe(400);
+    await put(worker, env, 'octocat/existing-meta', 'body', { 'x-share-meta': JSON.stringify({ note: 'x'.repeat(2000) }) });
+    const largeMergedMeta = await worker.default.fetch(new Request('https://share.test/octocat/existing-meta', { method: 'PATCH', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: JSON.stringify({ meta: { second: 'y'.repeat(100) } }) }), env);
+    expect(largeMergedMeta.status).toBe(400);
   });
 });
 

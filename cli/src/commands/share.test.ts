@@ -1054,8 +1054,8 @@ describe('agents artifacts share list (CLI)', () => {
     installFakeGh('gh-default-user');
 
     const objects = [
-      { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'Fleet Plan', agent: 'claude', session: 'sess-1', host: null, repo: null, revisionCount: 0 },
-      { slug: 'b', url: 'https://s/octocat/b', size: 1, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: null, label: 'Other', agent: 'codex', session: 'sess-2', host: null, repo: null, revisionCount: 0 },
+      { slug: 'a', url: 'https://s/octocat/a', size: 1, contentType: null, publishedAt: '2026-08-08T00:00:00.000Z', expiresAt: null, label: 'Fleet Plan', agent: 'claude', session: 'sess-1', host: null, repo: null, revisionCount: 0, meta: { kind: 'plan' } },
+      { slug: 'b', url: 'https://s/octocat/b', size: 1, contentType: null, publishedAt: '2026-08-07T00:00:00.000Z', expiresAt: null, label: 'Other', agent: 'codex', session: 'sess-2', host: null, repo: null, revisionCount: 0, meta: { kind: 'report' } },
     ];
     const seenUrls: string[] = [];
     const originalFetch = globalThis.fetch;
@@ -1071,7 +1071,7 @@ describe('agents artifacts share list (CLI)', () => {
       const program = programWithArtifacts(artifacts);
       await program.parseAsync([
         'node', 'agents', 'artifacts', 'share', 'list',
-        '--agent', 'claude', '--label-contains', 'fleet', '--for-user', 'octocat', '--list-json',
+        '--agent', 'claude', '--label-contains', 'fleet', '--meta', 'kind=plan', '--for-user', 'octocat', '--list-json',
       ]);
       const out = loggedOutput();
       expect(seenUrls.length).toBe(1);
@@ -1086,6 +1086,66 @@ describe('agents artifacts share list (CLI)', () => {
     } finally {
       globalThis.fetch = originalFetch;
     }
+  });
+});
+
+describe('share metadata edit/filter (PHNX-3278)', () => {
+  it('real CLI parsing delivers edit flags to the authenticated PATCH', async () => {
+    const { artifacts, config } = await freshShareModules();
+    config.writeShareConfig({ baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' });
+    process.env.SHARE_WRITE_TOKEN = 'secret';
+    process.env.AGENTS_SHARE_BACKEND = 'byo';
+    installFakeGh('octocat');
+    let init: RequestInit | undefined;
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async (_url: string | URL | Request, requestInit?: RequestInit) => {
+      init = requestInit;
+      return new Response(JSON.stringify({ ok: true, url: 'https://share.test/octocat/plan', label: 'Final', meta: { status: 'final' } }), { status: 200 });
+    }) as typeof fetch;
+    try {
+      const program = programWithArtifacts(artifacts);
+      await program.parseAsync(['node', 'agents', 'artifacts', 'share', 'edit', 'plan', '--label', 'Final', '--meta', 'status=final', '--edit-json']);
+      expect(init?.method).toBe('PATCH');
+      expect(JSON.parse(String(init?.body))).toMatchObject({ label: 'Final', meta: { status: 'final' }, metaMode: 'merge' });
+      expect(JSON.parse(loggedOutput()).label).toBe('Final');
+    } finally {
+      globalThis.fetch = originalFetch;
+      delete process.env.SHARE_WRITE_TOKEN;
+      delete process.env.AGENTS_SHARE_BACKEND;
+    }
+  });
+
+  it('applies repeatable exact metadata filters with JSON-count parity', async () => {
+    const { share } = await freshShareModules();
+    const base = {
+      user: 'octocat', count: 2,
+      objects: [
+        { slug: 'a', url: 'https://s/a', size: 1, contentType: null, publishedAt: '', expiresAt: null, label: null, agent: null, session: null, host: null, repo: null, revisionCount: 0, meta: { kind: 'plan', status: 'final' } },
+        { slug: 'b', url: 'https://s/b', size: 1, contentType: null, publishedAt: '', expiresAt: null, label: null, agent: null, session: null, host: null, repo: null, revisionCount: 0, meta: { kind: 'plan', status: 'draft' } },
+      ],
+    };
+    const result = share.applyShareListFilters(base, { meta: { kind: 'plan', status: 'final' } });
+    expect(result.count).toBe(1);
+    expect(result.objects.map((o) => o.slug)).toEqual(['a']);
+    expect(JSON.parse(share.formatShareList(result, true)).count).toBe(1);
+  });
+
+  it('PATCHes the resolved target with bearer auth and the deliberate edit model', async () => {
+    const { share } = await freshShareModules();
+    let request: RequestInit | undefined;
+    const result = await share.runShareEdit('plan', {
+      githubUser: 'octocat', writeToken: 'secret',
+      config: { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' },
+      label: 'Final', meta: { status: 'final' }, metaMode: 'merge', removeMeta: ['draft'],
+      fetchEdit: (async (_url: string | URL | Request, init?: RequestInit) => {
+        request = init;
+        return new Response(JSON.stringify({ ok: true, url: 'https://share.test/octocat/plan', label: 'Final', meta: { status: 'final' } }), { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(request?.method).toBe('PATCH');
+    expect((request?.headers as Record<string, string>).authorization).toBe('Bearer secret');
+    expect(JSON.parse(String(request?.body))).toEqual({ label: 'Final', meta: { status: 'final' }, metaMode: 'merge', removeMeta: ['draft'] });
+    expect(result.label).toBe('Final');
   });
 });
 

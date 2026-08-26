@@ -161,8 +161,10 @@ export interface ShareProvenance {
  */
 export const RESERVED_META_KEYS = [
   'expires-at',
+  'published-at',
   'visibility',
   'owner',
+  'org_domain',
   'agent',
   'session',
   'host',
@@ -234,14 +236,14 @@ export function parseMetaEntries(pairs: string[]): Record<string, string> {
     }
     const key = pair.slice(0, eq).trim();
     const value = pair.slice(eq + 1);
-    if (!META_KEY_RE.test(key)) {
-      throw new Error(
-        `Bad --meta key '${key}'. Keys are lowercase letters, digits, and hyphens, up to 64 characters.`,
-      );
-    }
     if ((RESERVED_META_KEYS as readonly string[]).includes(key)) {
       throw new Error(
         `--meta ${key}=… is reserved (Worker-stamped, or set automatically from your session/git) — pass a different key.`,
+      );
+    }
+    if (!META_KEY_RE.test(key)) {
+      throw new Error(
+        `Bad --meta key '${key}'. Keys are lowercase letters, digits, and hyphens, up to 64 characters.`,
       );
     }
     meta[key] = value;

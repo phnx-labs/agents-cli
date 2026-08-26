@@ -22,6 +22,9 @@
 //     domain is 400. Overwriting an existing slug first copies the current
 //     object to <slug>/rev-<ts>-<rand> (revision history) unless
 //     x-share-no-revision is set.
+//   - PATCH /<username>/<slug> — authenticated metadata-only edit. Rewrites the
+//     exact existing body with all HTTP/custom metadata preserved except the
+//     explicitly requested label/arbitrary metadata changes; never revisions.
 //   - GET  /<username>/<slug>  — public|unlisted are anonymous; me requires the
 //     Phoenix owner, org requires a same-domain Phoenix identity (Bearer, then
 //     HMAC cookie, then phoenix_ticket). Unauthenticated me/org 302s to
@@ -192,6 +195,62 @@ export default {
       return json({ ok: true, url: url.origin + '/' + path, expiresAt: expiresAt || null, unlisted: visibility === 'unlisted', visibility }, 200);
     }
 
+    if (request.method === 'PATCH') {
+      const auth = await authorizeWrite(request, env);
+      if (auth.error) return auth.error;
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length < 2) return json({ error: 'metadata edit requires /<username>/<slug>' }, 400);
+      if (auth.kind === 'phoenix') {
+        const expected = phoenixHandle(auth);
+        if (!expected || segments[0] !== expected) return json({ error: 'namespace mismatch', owner: expected }, 403);
+      }
+      const existing = await env.BUCKET.get(path);
+      if (!existing) return json({ error: 'share not found', key: path }, 404);
+      const owner = existing.customMetadata && existing.customMetadata.owner;
+      // WRITE_TOKEN is the endpoint owner/admin credential (the same authority
+      // the DELETE path grants it). Only a Phoenix bearer is constrained to the
+      // per-object owner stamped by managed publishing.
+      if (auth.kind === 'phoenix' && owner && owner !== auth.owner) return json({ error: 'forbidden' }, 403);
+
+      let edit;
+      try { edit = await request.json(); } catch { return json({ error: 'PATCH body must be JSON' }, 400); }
+      if (!edit || typeof edit !== 'object') return json({ error: 'PATCH body must be an object' }, 400);
+      const metadata = { ...(existing.customMetadata || {}) };
+      if (Object.prototype.hasOwnProperty.call(edit, 'label')) {
+        if (edit.label !== null && typeof edit.label !== 'string') return json({ error: 'label must be a string or null' }, 400);
+        if (typeof edit.label === 'string' && (edit.label.trim() !== edit.label || !edit.label || edit.label.length > 200)) return json({ error: 'label must be 1-200 trimmed characters' }, 400);
+        if (edit.label === null) { delete metadata.label; delete metadata['label-source']; }
+        else { metadata.label = edit.label; metadata['label-source'] = 'explicit'; }
+      }
+      const mode = edit.metaMode || 'merge';
+      if (mode !== 'merge' && mode !== 'replace') return json({ error: 'metaMode must be merge or replace' }, 400);
+      const incoming = edit.meta || {};
+      if (!incoming || typeof incoming !== 'object' || Array.isArray(incoming)) return json({ error: 'meta must be an object' }, 400);
+      for (const key in incoming) {
+        if (RESERVED_METADATA_KEYS.indexOf(key) !== -1) return json({ error: 'reserved metadata key', key: key }, 400);
+        if (!/^[a-z0-9-]{1,64}$/.test(key) || typeof incoming[key] !== 'string') return json({ error: 'invalid metadata entry', key: key }, 400);
+      }
+      if (mode === 'replace') {
+        for (const key in metadata) if (RESERVED_METADATA_KEYS.indexOf(key) === -1) delete metadata[key];
+      }
+      for (const key in incoming) metadata[key] = incoming[key];
+      const remove = edit.removeMeta || [];
+      if (!Array.isArray(remove)) return json({ error: 'removeMeta must be an array' }, 400);
+      for (const key of remove) {
+        if (typeof key !== 'string' || RESERVED_METADATA_KEYS.indexOf(key) !== -1 || !/^[a-z0-9-]{1,64}$/.test(key)) return json({ error: 'invalid removable metadata key', key: key }, 400);
+        delete metadata[key];
+      }
+      if (new TextEncoder().encode(JSON.stringify(extraMetaOf(metadata))).length > 2048) return json({ error: 'metadata exceeds 2048 bytes' }, 400);
+      // R2 assigns a fresh uploaded timestamp to every put. Preserve the
+      // canonical publication time before this metadata-only rewrite so gallery
+      // ordering and list JSON do not pretend the page was republished today.
+      if (!metadata['published-at']) metadata['published-at'] = new Date(existing.uploaded).toISOString();
+      const httpHeaders = new Headers();
+      if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(httpHeaders);
+      await env.BUCKET.put(path, existing.body, { httpMetadata: httpHeaders, customMetadata: metadata });
+      return json({ ok: true, url: url.origin + '/' + path, label: metadata.label || null, meta: extraMetaOf(metadata) }, 200);
+    }
+
     if (request.method === 'GET' || request.method === 'HEAD') {
       // Single-segment path may be a user gallery/listing OR a legacy flat slug.
       // The disambiguator is whether the <seg>/ prefix holds any object: only a
@@ -326,6 +385,10 @@ function isRevisionKey(key) {
   return key.split('/').length > 2;
 }
 
+function publishedAtOf(object) {
+  return (object.customMetadata && object.customMetadata['published-at']) || object.uploaded;
+}
+
 async function renderGallery(bucket, origin, user, method) {
   const objects = [];
   let cursor;
@@ -348,7 +411,7 @@ async function renderGallery(bucket, origin, user, method) {
     const url = origin + '/' + o.key;
     const label = (o.customMetadata && o.customMetadata['label']) || '';
     const agent = (o.customMetadata && o.customMetadata['agent']) || '';
-    return { slug, url, updated: o.uploaded, label, agent };
+    return { slug, url, updated: publishedAtOf(o), label, agent };
   });
 
   if (method === 'HEAD') {
@@ -413,7 +476,7 @@ async function renderListing(bucket, origin, user, method) {
       url: origin + '/' + o.key,
       size: typeof o.size === 'number' ? o.size : 0,
       contentType: (o.httpMetadata && o.httpMetadata.contentType) || null,
-      publishedAt: new Date(o.uploaded).toISOString(),
+      publishedAt: new Date(publishedAtOf(o)).toISOString(),
       expiresAt: (o.customMetadata && o.customMetadata['expires-at']) || null,
       label: (o.customMetadata && o.customMetadata['label']) || null,
       agent: (o.customMetadata && o.customMetadata['agent']) || null,
@@ -478,7 +541,7 @@ async function renderRevisions(bucket, origin, key, method, identityGated) {
 // before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
 // One list, reused both to strip a same-named --meta collision on write and
 // to split arbitrary --meta entries back out on read.
-var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source'];
+var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source'];
 var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
 var SHARE_COOKIE = '__Host-phoenix_share';
 var SHARE_COOKIE_MAX_AGE = 604800;
