@@ -352,7 +352,7 @@ async function showWhatsNew(fromVersion: string, toVersion: string): Promise<voi
       for (const line of relevantChanges) {
         console.log(line);
       }
-      console.log(chalk.gray('\nFull notes: https://github.com/phnx-labs/agents-cli/blob/main/CHANGELOG.md'));
+      console.log(chalk.gray('\nFull notes: https://github.com/phnx-labs/agi-cli/blob/main/CHANGELOG.md'));
       console.log();
     }
   } catch {

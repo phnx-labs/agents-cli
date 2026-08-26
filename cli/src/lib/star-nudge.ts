@@ -14,8 +14,8 @@ import * as path from 'path';
 import chalk from 'chalk';
 import { getRuntimeStateDir } from './state.js';
 
-/** Canonical GitHub repo the nudge points at. */
-export const REPO_URL = 'https://github.com/phnx-labs/agents-cli';
+/** Canonical GitHub repo the nudge points at (renamed from agents-cli). */
+export const REPO_URL = 'https://github.com/phnx-labs/agi-cli';
 
 /** Sentinel written the first (and only) time the nudge is shown. */
 function nudgeSentinelPath(): string {

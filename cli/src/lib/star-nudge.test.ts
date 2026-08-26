@@ -93,7 +93,7 @@ describe('maybeShowStarNudge one-time behavior', () => {
     const third = captureLog(() => mod.maybeShowStarNudge());
 
     expect(first).toHaveLength(1);
-    expect(first[0]).toContain('github.com/phnx-labs/agents-cli');
+    expect(first[0]).toContain('github.com/phnx-labs/agi-cli');
     expect(second).toHaveLength(0);
     expect(third).toHaveLength(0);
     expect(mod.hasShownStarNudge()).toBe(true);

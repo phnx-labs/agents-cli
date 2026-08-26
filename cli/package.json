@@ -36,11 +36,11 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/phnx-labs/agents-cli.git"
+    "url": "git+https://github.com/phnx-labs/agi-cli.git"
   },
   "homepage": "https://agents-cli.sh",
   "bugs": {
-    "url": "https://github.com/phnx-labs/agents-cli/issues"
+    "url": "https://github.com/phnx-labs/agi-cli/issues"
   },
   "scripts": {
     "build": "tsc && rm -rf 'dist/lib/secrets/AgentsKeychain.app' 'dist/lib/secrets/Agents CLI.app' 'dist/lib/menubar/MenubarHelper.app' && ([ -f 'bin/agents-macos' ] && mkdir -p dist/bin && cp -f 'bin/agents-macos' 'dist/bin/agents' && chmod 755 'dist/bin/agents' || true)",

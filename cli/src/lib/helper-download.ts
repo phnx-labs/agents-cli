@@ -25,8 +25,18 @@ import { getCacheDir } from './state.js';
 import { parseSha256Asset, sha256File } from './sha256-asset.js';
 import { helperTag, type HelperName } from './helper-versions.js';
 
-/** GitHub repo whose `v<version>` releases carry the helper assets. */
-export const HELPER_RELEASE_REPO = 'phnx-labs/agents-cli';
+/**
+ * GitHub repo whose `<helper>/v<version>` releases carry the helper assets.
+ *
+ * This is the SLUG, which is not the npm package name: the package is still
+ * `@phnx-labs/agents-cli`, but the repository was renamed to `agi-cli`. The old
+ * slug kept working only because GitHub redirects a renamed repo, which is a
+ * poor thing to hang signed-binary delivery on — a redirect is one re-created
+ * repo away from resolving somewhere else. What actually protects the download
+ * is the sha256 + codesign + designated-requirement + Team ID verification
+ * below; this just stops relying on the redirect.
+ */
+export const HELPER_RELEASE_REPO = 'phnx-labs/agi-cli';
 /** Apple Developer ID Team every helper must be signed by ("Developer ID
  *  Application: Muqit Nawaz"). Defense in depth on top of `spctl` notarization. */
 export const EXPECTED_TEAM_ID = '2HTP252L87';

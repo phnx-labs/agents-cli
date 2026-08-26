@@ -190,8 +190,8 @@ const USER_PROMPTCUTS_FILE = path.join(USER_AGENTS_DIR, 'hooks', 'promptcuts.yam
  */
 export const META_HEADER = `# agents-cli metadata
 # Auto-generated - do not edit manually
-# https://github.com/phnx-labs/agents-cli
-# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agents-cli/main/cli/schema/agents-yaml.schema.json
+# https://github.com/phnx-labs/agi-cli
+# yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agi-cli/main/cli/schema/agents-yaml.schema.json
 
 `;
 
