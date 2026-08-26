@@ -40,8 +40,9 @@ function printStatus(s: MenubarStatus, opts: { brief?: boolean } = {}): void {
     return;
   }
   console.log(`  app installed      ${s.installedApp ? chalk.gray(s.installedApp) : chalk.gray('no')}`);
-  console.log(`  installed version  ${s.installedVersion ? chalk.gray(s.installedVersion) : chalk.gray('unknown')}`);
-  console.log(`  current version    ${chalk.gray(s.currentVersion)}`);
+  console.log(`  helper installed   ${s.installedVersion ? chalk.gray(s.installedVersion) : chalk.gray('unknown')}`);
+  console.log(`  helper available   ${chalk.gray(s.currentVersion)}`);
+  console.log(`  CLI version        ${chalk.gray(s.cliVersion)}`);
   console.log(`  bundle source      ${s.source ? chalk.gray(s.source) : chalk.red('missing (cannot enable)')}`);
   console.log(`  disabled by user   ${yn(s.disabledByUser)}`);
 
@@ -92,8 +93,9 @@ function printSetupResult(r: SetupResult): void {
 function printDoctorReport(r: MenubarDoctorReport): void {
   console.log(chalk.bold('AGI Menu doctor\n'));
   console.log(`  install path       ${r.installPath ? chalk.gray(r.installPath) : chalk.red('not installed')}`);
-  console.log(`  installed version  ${r.installedVersion ? chalk.gray(r.installedVersion) : chalk.gray('unknown')}`);
-  console.log(`  CLI version        ${chalk.gray(r.currentVersion)}${r.versionMatches ? '' : chalk.yellow('  (mismatch — `agents menubar setup` updates it)')}`);
+  console.log(`  helper installed   ${r.installedVersion ? chalk.gray(r.installedVersion) : chalk.gray('unknown')}`);
+  console.log(`  helper available   ${chalk.gray(r.currentVersion)}${r.versionMatches ? '' : chalk.yellow('  (newer helper available — `agents menubar setup` installs it)')}`);
+  console.log(`  CLI version        ${chalk.gray(r.cliVersion)}`);
 
   const identity = r.signingIdentity === 'developer-id'
     ? chalk.green('Developer ID (update-stable)')

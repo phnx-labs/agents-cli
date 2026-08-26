@@ -3,6 +3,7 @@ import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { fileURLToPath } from 'url';
 import {
   classifyMenubarProcesses,
   codesignVerifies,
@@ -141,20 +142,62 @@ describe('processesToEnd', () => {
 // running the previous release's binary. isMenubarStale is the decision that
 // must flag an upgraded/missing install for reinstall.
 describe('isMenubarStale', () => {
+  const REL = (v: string) => ({ source: 'release' as const, helperVersion: v });
+  const LOC = (stamp: string) => ({ source: 'local' as const, sourceStamp: stamp });
+
   it('is stale when the helper binary is gone (App Support cleared)', () => {
-    expect(isMenubarStale({ installedVersion: '1.20.24', currentVersion: '1.20.24', execExists: false })).toBe(true);
+    expect(isMenubarStale({ installed: REL('1.0.0'), available: REL('1.0.0'), execExists: false })).toBe(true);
   });
 
-  it('is stale after an upgrade (installed version != current)', () => {
-    expect(isMenubarStale({ installedVersion: '1.20.24', currentVersion: '1.20.25', execExists: true })).toBe(true);
+  it('is stale when a NEWER helper is available', () => {
+    expect(isMenubarStale({ installed: REL('1.0.0'), available: REL('1.0.1'), execExists: true })).toBe(true);
   });
 
-  it('is stale on a pre-stamp install (no version marker yet)', () => {
-    expect(isMenubarStale({ installedVersion: null, currentVersion: '1.20.25', execExists: true })).toBe(true);
+  it('is NOT stale when the installed helper is newer than the floor', () => {
+    // The resolver may legitimately have installed ahead of the floor; a lower
+    // available version must never trigger a downgrade-reinstall.
+    expect(isMenubarStale({ installed: REL('1.1.0'), available: REL('1.0.0'), execExists: true })).toBe(false);
   });
 
-  it('is NOT stale when version matches and the binary is present', () => {
-    expect(isMenubarStale({ installedVersion: '1.20.25', currentVersion: '1.20.25', execExists: true })).toBe(false);
+  it('is NOT stale when the helper version matches and the binary is present', () => {
+    expect(isMenubarStale({ installed: REL('1.0.0'), available: REL('1.0.0'), execExists: true })).toBe(false);
+  });
+
+  it('is stale on a pre-stamp install (no marker yet)', () => {
+    expect(isMenubarStale({ installed: null, available: REL('1.0.0'), execExists: true })).toBe(true);
+  });
+
+  it('is stale exactly once on a legacy bare-string stamp, then re-stamped', () => {
+    // Old installs wrote the CLI's version as a bare string. That cannot be
+    // compared on the helper axis at all, so it is stale once — the reinstall
+    // rewrites it as JSON and the next call compares normally.
+    expect(isMenubarStale({ installed: { source: 'legacy', raw: '1.22.49' }, available: REL('1.0.0'), execExists: true })).toBe(true);
+  });
+
+  it('is stale when the install KIND changes (local <-> release)', () => {
+    // A dev build and a release bundle are not interchangeable, whatever their
+    // version strings say.
+    expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: REL('1.0.0'), execExists: true })).toBe(true);
+    expect(isMenubarStale({ installed: REL('1.0.0'), available: LOC('/src/MenubarHelper.app@111'), execExists: true })).toBe(true);
+  });
+
+  it('tracks a local build by source path + mtime, since it carries no version', () => {
+    // menubar/scripts/build.sh hardcodes CFBundleShortVersionString, so a local
+    // rebuild is only detectable by its source stamp changing.
+    expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: LOC('/src/MenubarHelper.app@111'), execExists: true })).toBe(false);
+    expect(isMenubarStale({ installed: LOC('/src/MenubarHelper.app@111'), available: LOC('/src/MenubarHelper.app@222'), execExists: true })).toBe(true);
+  });
+
+  it('never compares against the CLI version', () => {
+    // The bug this replaces: an unchanged helper looked stale on every CLI
+    // release (the #2109 restart storm), and a newer helper at the same CLI
+    // version never looked stale at all.
+    const src = fs.readFileSync(
+      path.join(path.dirname(fileURLToPath(import.meta.url)), 'install-menubar.ts'),
+      'utf-8',
+    );
+    const fn = src.slice(src.indexOf('export function isMenubarStale'), src.indexOf('function menubarSetupStale'));
+    expect(fn).not.toContain('getCliVersion');
   });
 });
 

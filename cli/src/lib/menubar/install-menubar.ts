@@ -99,12 +99,41 @@ function installedVersionMarkerPath(): string {
   return path.join(installDir(), '.menubar-version');
 }
 
-function readInstalledMenubarVersion(): string | null {
+/**
+ * What the installed helper IS — deliberately not the CLI's version.
+ *
+ * `source` matters because the two install paths have different notions of
+ * "changed": a release bundle is identified by its helper version, while a local
+ * dev build has none (menubar/scripts/build.sh hardcodes CFBundleShortVersionString),
+ * so it is identified by the source path + mtime it was copied from.
+ */
+export type MenubarStamp =
+  | { source: 'release'; helperVersion: string }
+  | { source: 'local'; sourceStamp: string }
+  | { source: 'legacy'; raw: string };
+
+/**
+ * Read the stamp, tolerating the pre-JSON format.
+ *
+ * Older installs wrote a bare version string — and wrote the CLI's version into
+ * it, which is the bug this replaces. Such a stamp cannot be compared on the
+ * helper axis at all, so it reports `legacy` and is treated as stale exactly
+ * once, which re-stamps it in the new format. That mirrors the existing
+ * null-is-stale rule and is why the migration cannot loop.
+ */
+function readInstalledMenubarStamp(): MenubarStamp | null {
+  let raw: string;
   try {
-    return fs.readFileSync(installedVersionMarkerPath(), 'utf-8').trim() || null;
+    raw = fs.readFileSync(installedVersionMarkerPath(), 'utf-8').trim();
   } catch {
     return null;
   }
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as MenubarStamp;
+    if (parsed && (parsed.source === 'release' || parsed.source === 'local')) return parsed;
+  } catch { /* fall through to legacy */ }
+  return { source: 'legacy', raw };
 }
 
 /** Executable inside the installed bundle. */
@@ -460,7 +489,7 @@ function startMenubarServiceFromSource(opts: { clearOptOut?: boolean; sourceAppP
   }
 
   if (opts.clearOptOut) clearMenubarOptOut();
-  installAndStartService(exec);
+  installAndStartService(exec, stampFor(opts.sourceAppPath));
   return true;
 }
 
@@ -498,35 +527,86 @@ function clearMenubarOptOut(): void {
  * particular is what the upgrade self-heal reads to decide staleness, and a
  * path that skipped it would make every later `agents` invocation reinstall.
  */
-function installAndStartService(exec: string): void {
+function installAndStartService(exec: string, stamp: MenubarStamp): void {
   const plist = servicePlistPath();
   fs.mkdirSync(path.dirname(plist), { recursive: true });
   fs.writeFileSync(plist, generateServicePlist(exec));
   restartMenubarLaunchAgent(process.getuid?.() ?? 0, plist);
-  try { fs.writeFileSync(installedVersionMarkerPath(), getCliVersion()); } catch { /* best effort */ }
+  try {
+    fs.writeFileSync(installedVersionMarkerPath(), JSON.stringify(stamp));
+  } catch { /* best effort */ }
 }
 
 /**
- * Pure staleness decision (no I/O) so the truth table is unit-testable. The
- * installed service is stale when the helper binary is gone, or when it was
- * installed by a different CLI version than the one now running — a version
- * change is the signal that the plist's baked interpreter/entry/bundle paths
- * and the helper binary itself may have drifted. A null installedVersion
- * (pre-stamp install) counts as stale so old installs get re-stamped once.
+ * Render a stamp as a comparable/displayable version string.
+ *
+ * A local build has no version of its own, so it reports `local`; the ownership
+ * contest treats that as "not comparable" and falls through to its owner arm,
+ * which is the correct outcome — a dev build must never win a version contest
+ * against a release.
+ */
+function stampVersionLabel(stamp: MenubarStamp | null): string | null {
+  if (!stamp) return null;
+  if (stamp.source === 'release') return stamp.helperVersion;
+  if (stamp.source === 'legacy') return null;
+  return 'local';
+}
+
+/** The helper version this install would put on disk right now. */
+function availableHelperLabel(): string {
+  return stampVersionLabel(stampFor(sourceAppPath() ?? undefined)) ?? 'local';
+}
+
+/** Identify the bundle about to be installed, for the stamp. */
+function stampFor(sourceAppPath: string | undefined): MenubarStamp {
+  if (!sourceAppPath) return { source: 'release', helperVersion: helperFloor('menubar') };
+  // A cache path under the helper cache dir IS a release bundle; anything else
+  // is a local build with no meaningful version of its own.
+  const m = /[/\\]v(\d+\.\d+\.\d+)[/\\]/.exec(sourceAppPath);
+  if (m) return { source: 'release', helperVersion: m[1] };
+  let mtime = 0;
+  try { mtime = fs.statSync(sourceAppPath).mtimeMs; } catch { /* best effort */ }
+  return { source: 'local', sourceStamp: `${sourceAppPath}@${mtime}` };
+}
+
+/**
+ * Pure staleness decision (no I/O) so the truth table is unit-testable.
+ *
+ * This compares the HELPER axis, not the CLI's. It used to compare the installed
+ * stamp against `getCliVersion()`, which was wrong in both directions once the
+ * helpers gained their own version line: every CLI release made an unchanged
+ * helper look stale and reinstalled it (the #2109 restart storm), while a
+ * genuinely newer helper at the same CLI version never looked stale at all.
+ *
+ * Stale when: the executable is gone; nothing is stamped; the stamp predates the
+ * JSON format (`legacy` — re-stamped once); the install KIND changed
+ * (local <-> release), since a dev build and a release bundle are not
+ * interchangeable; a release install whose available helper version is newer;
+ * or a local install whose source path or mtime moved.
  */
 export function isMenubarStale(opts: {
-  installedVersion: string | null;
-  currentVersion: string;
+  installed: MenubarStamp | null;
+  available: MenubarStamp;
   execExists: boolean;
 }): boolean {
   if (!opts.execExists) return true;
-  return opts.installedVersion !== opts.currentVersion;
+  const { installed, available } = opts;
+  if (!installed) return true;
+  if (installed.source === 'legacy') return true;
+  if (installed.source !== available.source) return true;
+  if (installed.source === 'release' && available.source === 'release') {
+    return compareVersions(available.helperVersion, installed.helperVersion) > 0;
+  }
+  if (installed.source === 'local' && available.source === 'local') {
+    return installed.sourceStamp !== available.sourceStamp;
+  }
+  return true;
 }
 
 function menubarSetupStale(): boolean {
   return isMenubarStale({
-    installedVersion: readInstalledMenubarVersion(),
-    currentVersion: getCliVersion(),
+    installed: readInstalledMenubarStamp(),
+    available: stampFor(sourceAppPath() ?? undefined),
     execExists: fs.existsSync(installedExecutablePath()),
   });
 }
@@ -762,8 +842,8 @@ function mayHealMenubar(needsDevIdHeal: boolean): boolean {
     ownerEntryExists: Boolean(plistEntry) && fs.existsSync(plistEntry as string),
     helperExecMissing: !fs.existsSync(installedExecutablePath()),
     needsDevIdHeal,
-    installedVersion: readInstalledMenubarVersion(),
-    currentVersion: getCliVersion(),
+    installedVersion: stampVersionLabel(readInstalledMenubarStamp()),
+    currentVersion: availableHelperLabel(),
     msSinceLastHeal: msSinceLastMenubarHeal(),
     cooldownMs: MENUBAR_TAKEOVER_COOLDOWN_MS,
     sourceIsDeveloperId: Boolean(src) && hasDeveloperIdSignature(src as string),
@@ -998,7 +1078,7 @@ export async function runMenubarSetup(): Promise<SetupResult> {
   // menu bar, so a stale `menubar disable` must not silently win.
   clearMenubarOptOut();
 
-  installAndStartService(exec);
+  installAndStartService(exec, stampFor(src ?? undefined));
   step('login item', before.serviceInstalled ? 'ok' : 'changed',
     `${serviceLabel()} — starts at login, restarts if it dies`);
 
@@ -1096,8 +1176,12 @@ export interface MenubarStatus {
   platform: string;
   source: string | null;
   installedApp: string | null;
+  /** The installed HELPER's version — not the CLI's. `local` for a dev build. */
   installedVersion: string | null;
+  /** The helper version this install would put on disk right now. */
   currentVersion: string;
+  /** The CLI's own version, reported separately so the two are never conflated. */
+  cliVersion: string;
   stale: boolean;
   serviceInstalled: boolean;
   running: boolean;
@@ -1127,8 +1211,9 @@ export function getMenubarStatus(): MenubarStatus {
     platform: process.platform,
     source: sourceAppPath(),
     installedApp: fs.existsSync(dest) ? dest : null,
-    installedVersion: readInstalledMenubarVersion(),
-    currentVersion: getCliVersion(),
+    installedVersion: stampVersionLabel(readInstalledMenubarStamp()),
+    currentVersion: availableHelperLabel(),
+    cliVersion: getCliVersion(),
     stale: onDarwin() && serviceInstalled && menubarSetupStale(),
     serviceInstalled,
     running: own.length > 0,
@@ -1142,8 +1227,13 @@ export function getMenubarStatus(): MenubarStatus {
 export interface MenubarDoctorReport {
   platform: string;
   installPath: string | null;
+  /** The installed HELPER's version — not the CLI's. `local` for a dev build. */
   installedVersion: string | null;
+  /** The helper version this install would put on disk right now. */
   currentVersion: string;
+  /** The CLI's own version, reported separately so the two are never conflated. */
+  cliVersion: string;
+  /** installed helper vs available helper. Never compares the CLI's version. */
   versionMatches: boolean;
   /** `unknown` on non-darwin or when nothing is installed to inspect. */
   signingIdentity: 'developer-id' | 'ad-hoc' | 'unknown';
@@ -1214,6 +1304,7 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
       installPath: null,
       installedVersion: null,
       currentVersion: getCliVersion(),
+      cliVersion: getCliVersion(),
       versionMatches: false,
       signingIdentity: 'unknown',
       running: false,
@@ -1247,6 +1338,7 @@ export function buildMenubarDoctorReport(): MenubarDoctorReport {
     installPath: appPath,
     installedVersion: status.installedVersion,
     currentVersion: status.currentVersion,
+    cliVersion: status.cliVersion,
     versionMatches: status.installedVersion === status.currentVersion,
     signingIdentity,
     running: status.running,
