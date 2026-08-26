@@ -32,6 +32,24 @@ let tmp: string;
 let repo: string;
 let binDir: string;
 
+/**
+ * Install a `gh` stub on the sealed PATH. `releaseExists` drives the ONE thing
+ * the immutability guard asks gh: whether the release is already published.
+ *
+ * gh is stubbed rather than reached because the guard queries the real
+ * `phnx-labs/agents-cli` by hardcoded slug — the throwaway origin cannot answer
+ * for it, and a test must never depend on (or mutate) the real repo's releases.
+ * Every invocation is recorded so a test can assert what the script asked for.
+ */
+function stubGh(releaseExists: boolean, logPath: string): void {
+  fs.writeFileSync(
+    path.join(binDir, 'gh'),
+    `#!/bin/sh\necho "$@" >> ${JSON.stringify(logPath)}\n` +
+      `case "$1 $2" in "release view") exit ${releaseExists ? 0 : 1} ;; esac\nexit 0\n`,
+  );
+  fs.chmodSync(path.join(binDir, 'gh'), 0o755);
+}
+
 function git(cwd: string, ...args: string[]): string {
   const r = spawnSync('git', args, { cwd, encoding: 'utf-8' });
   if (r.status !== 0) throw new Error(`git ${args.join(' ')} failed: ${r.stderr}`);
@@ -127,9 +145,10 @@ describe('publish-computer-helper-mac.sh', () => {
     const version = '0.0.9';
     const tag = `computer-mac/v${version}`;
     git(repo, 'tag', tag); // local only — never pushed to the bare origin
+    stubGh(false, path.join(tmp, `gh-${version}.log`));
 
     const r = run(version);
-    expect(r.stderr).not.toMatch(/already exists/);
+    expect(r.stderr).not.toMatch(/already published/);
     expect(`${r.stdout}${r.stderr}`).toMatch(/resuming an interrupted publish/);
     // Still stops before the publish path, as every case in this file must.
     expect(r.stderr).toMatch(/notary creds missing/);
@@ -144,20 +163,97 @@ describe('publish-computer-helper-mac.sh', () => {
     // Prove the guard fires, not the version validator: the same version gets
     // past validation while the tag is absent (it then fails later, on the
     // missing notary creds — which is downstream of the guard under test).
+    stubGh(false, path.join(tmp, `gh-${version}-before.log`));
     const before = run(version);
-    expect(before.stderr).not.toMatch(/already exists/);
+    expect(before.stderr).not.toMatch(/already published/);
     // ...and it stops at the creds check, which is what keeps this file from
     // ever reaching the build/notarize/publish path below it.
     expect(before.stderr).toMatch(/notary creds missing/);
 
-    // Push it: ORIGIN is what makes a release immutable. A local-only tag means
-    // an interrupted publish and is resumable (covered by the case above), so
-    // tagging without pushing would assert the wrong thing here.
+    // A PUBLISHED RELEASE is what makes the version un-recuttable — not the tag.
+    // A tag with no release is an interrupted run and resumes (cases above).
     git(repo, 'tag', tag);
     git(repo, 'push', '-q', 'origin', tag);
+    stubGh(true, path.join(tmp, `gh-${version}.log`));
     const after = run(version);
     expect(after.status).not.toBe(0);
-    expect(after.stderr).toMatch(/already exists on origin/);
+    expect(after.stderr).toMatch(/already published/);
+  });
+
+  /**
+   * Run the script all the way THROUGH a successful publish, with every external
+   * effect replaced by a local stand-in: `gh` is a stub that records its argv,
+   * the helper build is a stub that emits the two expected artifacts, the signing
+   * context is a no-op, and `origin` is a bare repo on disk. Nothing is signed,
+   * notarized, uploaded, or pushed anywhere real.
+   *
+   * This exists because a source-regex assertion cannot catch a tag pointing at
+   * the wrong commit, which is exactly the defect that would silently ship the
+   * wrong helper.
+   */
+  function runFullPublish(version: string) {
+    const ghLog = path.join(tmp, `gh-${version}.log`);
+    stubGh(false, ghLog); // no existing release -> take the create path
+
+    const helperScripts = path.join(repo, 'native', 'computer-mac', 'scripts');
+    fs.mkdirSync(helperScripts, { recursive: true });
+    fs.writeFileSync(
+      path.join(helperScripts, 'build.sh'),
+      '#!/bin/sh\nset -e\nmkdir -p "$(dirname "$0")/../dist"\n' +
+        'printf fake > "$(dirname "$0")/../dist/ComputerHelper.app.zip"\n' +
+        'printf fakesha > "$(dirname "$0")/../dist/ComputerHelper.app.zip.sha256"\n',
+    );
+    fs.chmodSync(path.join(helperScripts, 'build.sh'), 0o755);
+    // Real one would unlock this machine's signing keychain; the publish logic
+    // under test does not need it.
+    fs.writeFileSync(path.join(repo, 'cli', 'scripts', 'headless-sign-context.sh'), ': # no-op\n');
+
+    const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH}` };
+    env.APPLE_ID = 'stub@example.invalid';
+    env.APPLE_APP_SPECIFIC_PASSWORD = 'stub';
+    env.APPLE_TEAM_ID = 'STUBTEAM99';
+    const r = spawnSync(
+      'bash',
+      [path.join(repo, 'cli', 'scripts', path.basename(SH)), version],
+      { encoding: 'utf-8', env },
+    );
+    return { r, ghArgs: fs.existsSync(ghLog) ? fs.readFileSync(ghLog, 'utf-8') : '' };
+  }
+
+  it('pushes the tag at the built commit, then creates the release', () => {
+    const version = '0.1.0';
+    const tag = `computer-mac/v${version}`;
+    const { r, ghArgs } = runFullPublish(version);
+    expect(r.status, r.stderr).toBe(0);
+
+    // The tag reached origin — which is what `gh release create --verify-tag`
+    // requires and what a regex assertion cannot demonstrate.
+    const onOrigin = git(repo, 'ls-remote', '--tags', 'origin', tag);
+    expect(onOrigin).toContain(tag);
+
+    // ...and points at the exact commit whose tree produced the asset. A tag on
+    // the wrong commit ships a helper built from something else entirely.
+    const head = git(repo, 'rev-parse', 'HEAD');
+    expect(git(repo, 'rev-list', '-n', '1', tag)).toBe(head);
+
+    // The release was created for that tag and the assets attached.
+    expect(ghArgs).toMatch(new RegExp(`release create ${tag.replace('/', '\\/')}`));
+    expect(ghArgs).toMatch(/release upload/);
+    expect(ghArgs).toMatch(/ComputerHelper\.app\.zip/);
+  });
+
+  it('resumes when the tag is already on origin but no release exists', () => {
+    // The second wedge: tag pushed, then release creation failed. Nothing was
+    // published, so the version must stay cuttable.
+    const version = '0.2.0';
+    const tag = `computer-mac/v${version}`;
+    git(repo, 'tag', tag);
+    git(repo, 'push', '-q', 'origin', tag);
+
+    const { r } = runFullPublish(version);
+    expect(r.stderr).not.toMatch(/already published/);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/resuming an interrupted publish/);
+    expect(r.status, r.stderr).toBe(0);
   });
 
   it('creates and pushes the tag itself — gh release create --verify-tag will not', () => {

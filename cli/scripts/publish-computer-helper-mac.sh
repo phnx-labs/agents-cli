@@ -72,11 +72,23 @@ command -v gh >/dev/null 2>&1 || die "gh CLI not found"
 # burn a version number over a transient network error, and (because this guard
 # runs before the build) would make that version permanently uncuttable from this
 # checkout without a manual `git tag -d`. Resume instead; the push below retries.
-if git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-  die "$TAG already exists on origin. Helper releases are immutable -- cut the next patch instead."
+# What makes a version un-recuttable is a PUBLISHED RELEASE, not a tag. The asset
+# is what an installed CLI downloads, so the GitHub release is the thing that
+# must never be replaced -- the upload below uses --clobber and would overwrite a
+# binary someone already pins.
+#
+# A tag without a release is an INTERRUPTED run, in either of two ways, and both
+# must resume rather than burn the version:
+#   - tagged locally, push failed        -> push retries below
+#   - tag pushed, release/upload failed  -> tag push is a no-op, release created
+# Treating the tag as the signal made both permanently uncuttable from that
+# checkout, over a transient network error, with nothing ever published.
+if gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
+  die "$TAG is already published. Helper releases are immutable -- cut the next patch instead."
 fi
-if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
-  log "$TAG exists locally but not on origin -- resuming an interrupted publish."
+if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 \
+  || git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+  log "$TAG is tagged but has no release -- resuming an interrupted publish."
 fi
 [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] \
   || die "notary creds missing. Run under: agents secrets exec apple.com -- $0 $VERSION"
