@@ -38,11 +38,24 @@ function git(cwd: string, ...args: string[]): string {
   return r.stdout.trim();
 }
 
-const run = (...args: string[]) =>
-  spawnSync('bash', [path.join(repo, 'cli', 'scripts', path.basename(SH)), ...args], {
+const run = (...args: string[]) => {
+  // Strip the notary credentials, ALWAYS. The script's creds check is the last
+  // thing standing between a guard test and the real publish path: with the tag
+  // absent, `0.0.1` clears the immutability guard and, if APPLE_* happen to be
+  // in the environment, goes on to source the signing context, build + notarize
+  // the helper, and `gh release create` + upload for real. The release flow runs
+  // under `agents secrets exec apple.com`, so inheriting the ambient env would
+  // make that a live possibility rather than a theoretical one. Deleting them
+  // here makes publishing structurally unreachable from this file.
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH}` };
+  delete env.APPLE_ID;
+  delete env.APPLE_APP_SPECIFIC_PASSWORD;
+  delete env.APPLE_TEAM_ID;
+  return spawnSync('bash', [path.join(repo, 'cli', 'scripts', path.basename(SH)), ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, PATH: `${binDir}:${process.env.PATH}` },
+    env,
   });
+};
 
 beforeAll(() => {
   tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'publish-mac-helper-'));
@@ -115,6 +128,9 @@ describe('publish-computer-helper-mac.sh', () => {
     // missing notary creds — which is downstream of the guard under test).
     const before = run(version);
     expect(before.stderr).not.toMatch(/already exists/);
+    // ...and it stops at the creds check, which is what keeps this file from
+    // ever reaching the build/notarize/publish path below it.
+    expect(before.stderr).toMatch(/notary creds missing/);
 
     git(repo, 'tag', tag);
     const after = run(version);
