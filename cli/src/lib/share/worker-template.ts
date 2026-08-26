@@ -215,9 +215,22 @@ export default {
 
       // Revision history for one canonical <user>/<slug> key (RUSH-2683). Checked
       // before the plain object GET below so the query param routes even though
-      // the canonical key itself resolves to a real object.
+      // the canonical key itself resolves to a real object. me/org use the same
+      // identity gate as the page GET — listing session/host/repo on an unauthed
+      // ?revisions=json must not leak that the page exists.
       if (segments.length === 2 && url.searchParams.get('revisions') === 'json') {
-        return renderRevisions(env.BUCKET, url.origin, path, request.method);
+        const canonical = await env.BUCKET.get(path);
+        if (canonical) {
+          const denied = await gateRestrictedGet(request, env, url, canonical);
+          if (denied) return denied;
+        }
+        return renderRevisions(
+          env.BUCKET,
+          url.origin,
+          path,
+          request.method,
+          canonical && isIdentityGated((canonical.customMetadata && canonical.customMetadata.visibility) || 'public'),
+        );
       }
 
       const obj = await env.BUCKET.get(path);
@@ -227,16 +240,9 @@ export default {
         await env.BUCKET.delete(path);
         return new Response('gone — this link has expired', { status: 410, headers: { 'content-type': 'text/plain' } });
       }
+      const denied = await gateRestrictedGet(request, env, url, obj);
+      if (denied) return denied;
       const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
-      if (visibility === 'me' || visibility === 'org') {
-        const viewer = await resolveViewer(request, env, url);
-        if (viewer.redirect) return viewer.redirect;
-        if (viewer.error) return viewer.error;
-        if (!viewer.identity) return bounceToLogin(url, env);
-        if (!viewerMayRead(visibility, obj.customMetadata, viewer.identity)) {
-          return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-        }
-      }
       const headers = new Headers();
       obj.writeHttpMetadata(headers);
       headers.set('etag', obj.httpEtag);
@@ -398,7 +404,7 @@ async function renderListing(bucket, origin, user, method) {
   });
 }
 
-async function renderRevisions(bucket, origin, key, method) {
+async function renderRevisions(bucket, origin, key, method, identityGated) {
   const objects = [];
   let cursor;
   do {
@@ -424,12 +430,15 @@ async function renderRevisions(bucket, origin, key, method) {
   // Newest first — the most recently replaced version leads.
   items.sort((a, b) => (a.uploadedAt < b.uploadedAt ? 1 : a.uploadedAt > b.uploadedAt ? -1 : 0));
 
+  const cacheHeaders = identityGated
+    ? { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'private, no-store', 'X-Robots-Tag': 'noindex' }
+    : { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' };
   if (method === 'HEAD') {
-    return new Response(null, { status: 200, headers: { 'content-type': 'application/json; charset=utf-8' } });
+    return new Response(null, { status: 200, headers: cacheHeaders });
   }
   return new Response(JSON.stringify({ key, count: items.length, revisions: items }), {
     status: 200,
-    headers: { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'public, max-age=30' },
+    headers: cacheHeaders,
   });
 }
 
@@ -548,6 +557,23 @@ function emailDomain(email) {
 
 function isHiddenFromGallery(visibility) {
   return visibility === 'unlisted' || visibility === 'me' || visibility === 'org';
+}
+
+function isIdentityGated(visibility) {
+  return visibility === 'me' || visibility === 'org';
+}
+
+async function gateRestrictedGet(request, env, url, obj) {
+  const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
+  if (!isIdentityGated(visibility)) return null;
+  const viewer = await resolveViewer(request, env, url);
+  if (viewer.redirect) return viewer.redirect;
+  if (viewer.error) return viewer.error;
+  if (!viewer.identity) return bounceToLogin(url, env);
+  if (!viewerMayRead(visibility, obj.customMetadata, viewer.identity)) {
+    return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+  }
+  return null;
 }
 
 function viewerMayRead(visibility, meta, identity) {
