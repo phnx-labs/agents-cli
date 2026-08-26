@@ -151,6 +151,9 @@ export class ServiceSupervisor {
     const entry = this.registry.get(id);
     if (!entry) throw new Error(`service '${id}' is not registered`);
     if (entry.state === 'running') return;
+    if (entry.inFlight) {
+      throw new Error(`service '${id}' cannot start while a tick is still in flight`);
+    }
     await this.startOne(id);
   }
 
