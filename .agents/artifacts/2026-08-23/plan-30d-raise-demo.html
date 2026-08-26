@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>30 days to a demo, not a new company</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Phoenix Horizon</div><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>30 days to a demo, not a new company</h1>
+<p class="summary">Raise next month. Freeze the story, demo software you already have, talk to a handful of AI services firms, and collect pilots or LOIs. Do not rebuild Prix or sell tokens or deliverables.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=byphoenix.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://byphoenix.com" target="_blank" rel="noopener">byphoenix.com</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=prix.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://prix.dev" target="_blank" rel="noopener">prix.dev</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/RUSH-2650" target="_blank" rel="noopener">RUSH-2650</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">main</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Grok</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-23</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ol>
+<li><strong>Two audiences, two sentences.</strong> Investors hear the thesis. A firm hears a tool they can try this month. Mixing those is why the site feels confusing.</li>
+<li><strong>Do not sell tokens. Do not sell “the finished work.”</strong> Those are not the purchase. The purchase, if it exists, is operator software for a firm that already has Claude.</li>
+<li><strong>The 30-day artifact is a demo + conversations, not a product rewrite.</strong> prix.dev still contradicts the homepage; hide or re-label that path. Do not spend the month on an SDK.</li>
+<li><strong>Three named conversations beat a category slide.</strong> Foaster, flowscope, Fed10 (research/diligence). Ask how they get paid today. The LOI comes from that, or it does not come.</li>
+</ol>
+<h2 id="purpose">Purpose</h2><p>You have about 30 days before a raise. You need something a partner can watch and a firm can sign. This plan is that month: freeze the money story, film a demo from Rush + AGI CLI as they exist, talk to a short list, paper a one-page pilot. It is not a new runtime, not a registry relaunch, and not outcome billing.</p>
+<h2 id="current-architecture">Current architecture</h2><p>Two live sites, two buyers, one raise. Money stories got stacked on top of each other.</p>
+<figure class="artifact-figure artifact-figure-wide artifact-figure-diagram">
+<svg viewBox="0 0 940 420" role="img" aria-label="Three money stories that got mixed, and which one can exist this month" xmlns="http://www.w3.org/2000/svg">
+  <text x="24" y="28" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">WHO PAYS WHOM</text>
+
+  <rect x="20" y="48" width="280" height="150" rx="12" fill="#1a0e0e" stroke="#fb7185" stroke-width="1.5"></rect>
+  <text x="40" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#fb7185">1 · TOKENS</text>
+  <text x="40" y="102" font-family="Inter, system-ui, sans-serif" font-size="14" fill="#e9edf0">Labs get paid to run</text>
+  <text x="40" y="124" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Anthropic / OpenAI / OpenRouter</text>
+  <text x="40" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Not your business. Site already</text>
+  <text x="40" y="168" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">says bring-your-own compute.</text>
+
+  <rect x="330" y="48" width="280" height="150" rx="12" fill="#16120a" stroke="#f5c451" stroke-width="1.5"></rect>
+  <text x="350" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#f5c451">2 · DELIVERABLES</text>
+  <text x="350" y="102" font-family="Inter, system-ui, sans-serif" font-size="14" fill="#e9edf0">Thesis, not a checkout</text>
+  <text x="350" y="124" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Homepage table: client buys</text>
+  <text x="350" y="142" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">“the finished work.” Firms today</text>
+  <text x="350" y="160" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">bill retainers, cases, hours.</text>
+  <text x="350" y="178" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Do not productize this in 30d.</text>
+
+  <rect x="640" y="48" width="280" height="150" rx="12" fill="#0f160a" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="660" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">3 · TOOLS  ← this month</text>
+  <text x="660" y="102" font-family="Inter, system-ui, sans-serif" font-size="14" fill="#e9edf0">A firm pays for software</text>
+  <text x="660" y="124" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">They already pay Anthropic</text>
+  <text x="660" y="142" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">and maybe Cursor / Modal.</text>
+  <text x="660" y="160" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Phoenix can only charge for</text>
+  <text x="660" y="178" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">a tool they do not have yet.</text>
+
+  <line x1="160" y1="198" x2="160" y2="230" stroke="#fb7185" stroke-width="1.5" opacity="0.5"></line>
+  <line x1="470" y1="198" x2="470" y2="230" stroke="#f5c451" stroke-width="1.5" opacity="0.5"></line>
+  <line x1="780" y1="198" x2="780" y2="230" stroke="#a3e635" stroke-width="1.5"></line>
+
+  <rect x="20" y="230" width="900" height="168" rx="12" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="40" y="258" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">WHAT EXISTS ON DISK TODAY</text>
+  <text x="40" y="286" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">Rush — Mac app. You run agents, approve, get a file out. Built for a person.</text>
+  <text x="40" y="310" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">AGI CLI — live. Fleet, sessions, browser, secrets. Built for a person running many agents.</text>
+  <text x="40" y="334" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">Prix — registry + proxy + cloud run. Live site still says sealed containers and a waitlist.</text>
+  <text x="40" y="368" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#9aa4ad">byphoenix.com describes firms and finished work. The software is still operator tools. That split is the raise risk, and also the demo: show the tools, tell the thesis, do not pretend they are the same purchase.</text>
+</svg>
+<figcaption>Investors can hear box 2 as destination. A pilot will only pay for box 3. Box 1 is someone else’s meter.</figcaption>
+</figure><p>The market around those tools is already taken in the layers a firm already bought.</p>
+<figure class="artifact-figure artifact-figure-wide artifact-figure-diagram">
+<svg viewBox="0 0 940 340" role="img" aria-label="Occupied layers versus the leftover a services firm might still lack" xmlns="http://www.w3.org/2000/svg">
+  <text x="24" y="28" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">OCCUPIED  ·  THEY ALREADY HAVE THIS</text>
+
+  <rect x="20" y="48" width="170" height="88" rx="8" fill="#16120a" stroke="#5a636b" stroke-width="1.5"></rect>
+  <text x="36" y="74" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">Models</text>
+  <text x="36" y="96" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Anthropic · OpenAI</text>
+  <text x="36" y="114" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">direct</text>
+
+  <rect x="204" y="48" width="170" height="88" rx="8" fill="#16120a" stroke="#5a636b" stroke-width="1.5"></rect>
+  <text x="220" y="74" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">The loop</text>
+  <text x="220" y="96" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">they wrote it, or</text>
+  <text x="220" y="114" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Claude Code</text>
+
+  <rect x="388" y="48" width="170" height="88" rx="8" fill="#16120a" stroke="#5a636b" stroke-width="1.5"></rect>
+  <text x="404" y="74" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">Compute</text>
+  <text x="404" y="96" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">laptop · VPS</text>
+  <text x="404" y="114" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Modal · E2B</text>
+
+  <rect x="572" y="48" width="170" height="88" rx="8" fill="#16120a" stroke="#5a636b" stroke-width="1.5"></rect>
+  <text x="588" y="74" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">Coding delivery</text>
+  <text x="588" y="96" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Cursor · Codex</text>
+  <text x="588" y="114" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Factory · Cognition</text>
+
+  <rect x="756" y="48" width="164" height="88" rx="8" fill="#16120a" stroke="#5a636b" stroke-width="1.5"></rect>
+  <text x="772" y="74" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#e9edf0">Chat / tickets</text>
+  <text x="772" y="96" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Slack · Linear</text>
+  <text x="772" y="114" font-family="JetBrains Mono, monospace" font-size="10" fill="#8a8a8a">Google Docs</text>
+
+  <rect x="20" y="168" width="900" height="148" rx="12" fill="#0f160a" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="40" y="198" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">UNTESTED LEFTOVER  ·  NOT A STACK REPLACEMENT</text>
+  <text x="40" y="228" font-family="Inter, system-ui, sans-serif" font-size="15" fill="#e9edf0">Work from their agents, for one client, that a person can stand behind.</text>
+  <text x="40" y="256" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#9aa4ad">Not “replace Modal.” Not “pay per PDF.” A place the run, the file, and the approval live together so the next job for that client is not another Slack dump.</text>
+  <text x="40" y="288" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#9aa4ad">Rush already shows runs and approvals. Artifact share already hands someone a file. That is the demo. Per-client isolation and a signed pilot come after someone wants it.</text>
+</svg>
+<figcaption>Do not enter occupied boxes. The leftover is a hypothesis until two firms say it out loud.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2><p>No code this month except what the demo forces (a Prix link that does not dump a partner onto a waitlist). The change is what you show and what you ask.</p>
+<figure class="artifact-figure artifact-figure-wide artifact-figure-diagram">
+<svg viewBox="0 0 940 360" role="img" aria-label="Thirty calendar days from freeze to raise materials" xmlns="http://www.w3.org/2000/svg">
+  <text x="24" y="28" font-family="JetBrains Mono, monospace" font-size="11" fill="#8a8a8a">30 DAYS</text>
+
+  <rect x="20" y="48" width="220" height="280" rx="12" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="40" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">DAYS 1–4</text>
+  <text x="40" y="104" font-family="Inter, system-ui, sans-serif" font-size="16" fill="#e9edf0">Freeze + film</text>
+  <text x="40" y="132" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Two sentences, written down.</text>
+  <text x="40" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Record a 8–12 min demo</text>
+  <text x="40" y="168" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">on Rush + AGI CLI as they sit.</text>
+  <text x="40" y="196" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Phoenix “Explore Prix” must</text>
+  <text x="40" y="214" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">not open the old waitlist pitch.</text>
+  <text x="40" y="242" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">One-page pilot terms.</text>
+  <text x="40" y="260" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">List of 8 people to mail.</text>
+
+  <rect x="256" y="48" width="220" height="280" rx="12" fill="#0e1418" stroke="#c9a962" stroke-width="1.5"></rect>
+  <text x="276" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#c9a962">DAYS 5–14</text>
+  <text x="276" y="104" font-family="Inter, system-ui, sans-serif" font-size="16" fill="#e9edf0">Talk</text>
+  <text x="276" y="132" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">8 conversations. Not 25.</text>
+  <text x="276" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Foaster · flowscope · Fed10</text>
+  <text x="276" y="168" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">plus warm 1st-degrees.</text>
+  <text x="276" y="196" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Ask only: what do you sell,</text>
+  <text x="276" y="214" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">how are you paid, where do</text>
+  <text x="276" y="232" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">agents sit, would you pay</text>
+  <text x="276" y="250" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">for anything that is not a</text>
+  <text x="276" y="268" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">model and not a sandbox.</text>
+
+  <rect x="492" y="48" width="220" height="280" rx="12" fill="#0e1418" stroke="#6ee7b7" stroke-width="1.5"></rect>
+  <text x="512" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#6ee7b7">DAYS 15–22</text>
+  <text x="512" y="104" font-family="Inter, system-ui, sans-serif" font-size="16" fill="#e9edf0">Concierge</text>
+  <text x="512" y="132" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">If someone leans in: run</text>
+  <text x="512" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">one real job on their stack.</text>
+  <text x="512" y="168" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">You operate. They watch.</text>
+  <text x="512" y="196" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">If nobody leans in: do not</text>
+  <text x="512" y="214" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">invent a customer. Tighten</text>
+  <text x="512" y="232" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">the demo with what they said</text>
+  <text x="512" y="250" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">and keep meeting.</text>
+
+  <rect x="728" y="48" width="192" height="280" rx="12" fill="#0f160a" stroke="#a3e635" stroke-width="2"></rect>
+  <text x="748" y="76" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">DAYS 23–30</text>
+  <text x="748" y="104" font-family="Inter, system-ui, sans-serif" font-size="16" fill="#e9edf0">Paper</text>
+  <text x="748" y="132" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Pilot one-pager or LOI.</text>
+  <text x="748" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Same 12 min for investors.</text>
+  <text x="748" y="168" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Deck: thesis + demo +</text>
+  <text x="748" y="186" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">named conversations.</text>
+  <text x="748" y="214" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">No fabricated MRR.</text>
+  <text x="748" y="250" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">Founding team is still</text>
+  <text x="748" y="268" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#9aa4ad">an open ticket (2650).</text>
+</svg>
+<figcaption>The month is conversations and a tape, not a Prix rewrite.</figcaption>
+</figure><div class="artifact-callout artifact-callout-warn">
+<strong>Write these two sentences on day 1 and do not mix them.</strong>
+<p><em>Investor:</em> Services firms will run on infrastructure. We are building that.</p>
+<p><em>Firm:</em> You already have Claude. This is the Mac + CLI we use to run a fleet, keep the session, and hand a person a file they can approve. Try it on one job.</p>
+</div><h2 id="public-interface">Public Interface</h2><p>What a partner sees in twelve minutes. All of it already runs.</p>
+<pre><code>0:00  Homepage thesis, 20 seconds. Then: "here is the software, not the slide."
+0:30  AGI CLI: agents run / sessions --active on a real fleet. BYO model.
+3:00  Rush: one research run (Rabbit Hole or equivalent) on a named topic.
+7:00  Artifact out — a share link, not a chat transcript.
+9:00  Approval in Rush (needs-you / approve). Operator stands behind it.
+11:00 Stop. Ask them how they get paid today. Do not pitch outcomes billing.
+</code></pre>
+<p>The only product edit this month is the Phoenix Prix path. Everything else is a meeting and a tape.</p>
+<details class="code-diff" open><summary class="code-diff-file">phoenix/web/app/page.tsx</summary><pre class="code-diff-pre"><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@ Explore Prix CTA @@</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">&lt;a href="https://prix.dev"&gt;Explore Prix →&lt;/a&gt;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">&lt;a href="/prix"&gt;Runtime, memory, BYO model →&lt;/a&gt;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">// /prix on byphoenix.com: one screen, no waitlist, no Lovable comparison.</span></span></pre></details><p>What they must not see:</p>
+<table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Problem</th>
+<th>30-day move</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>prix.dev waitlist / sealed containers</td>
+<td>App-store buyer, contradicts Phoenix</td>
+<td>Phoenix CTA goes to a one-screen “runtime + memory, BYO model” note, or is removed</td>
+</tr>
+<tr>
+<td>“Clients buy the finished work” as a SKU</td>
+<td>Not how firms invoice</td>
+<td>Keep it on the thesis slide only</td>
+</tr>
+<tr>
+<td>Token markup</td>
+<td>Not the business</td>
+<td>Do not mention OpenRouter margin</td>
+</tr>
+<tr>
+<td>Software-delivery beachhead</td>
+<td>Cursor / Factory / Cognition</td>
+<td>Do not demo “merged PRs as the product”</td>
+</tr>
+</tbody></table>
+<p>Pilot paper, if anyone asks, is one page:</p>
+<pre><code>Pilot: 2 weeks, one client job, we operate.
+You keep Anthropic. We do not resell tokens.
+You do not pay until you want a second job.
+LOI: "we will run a paid pilot of $X / month if the first job is usable."
+X is whatever they say. $0 LOIs still count as named demand if they name a date.
+</code></pre>
+<h2 id="plan">Plan</h2><div class="checklist"><div class="checklist-head">0 / 7 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 1.</strong> Write the two sentences. Stop using “deliverable checkout” and “token resale” in customer copy.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 1–2.</strong> Film the 12-minute demo on zion from Rush + AGI CLI. Real run, real share link, real approve.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 2.</strong> Phoenix “Explore Prix” no longer lands on the waitlist / Lovable comparison. Smallest possible page or unlink.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 3.</strong> One-page pilot terms. Mail list of 8: Foaster, flowscope, Fed10, plus five 1st-degree warm names. No 1,221-contact blast.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 5–14.</strong> Eight calls. Same four questions every time. Log answers in one place.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 15–22.</strong> At most one concierge job. If zero interest, do not fake a design partner.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><strong>Day 23–30.</strong> Investor cut of the same tape. Deck traction slide = conversations + any LOI, not catalog installs. Decide RUSH-2650 before Sequoia-facing paper.</span></li></ul></div>
+<h2 id="validation">Validation</h2><p>A raise packet is real if all of these are true:</p>
+<pre><code># Demo is a file you can play without a live cluster gamble
+ls ~/Desktop/phoenix-12min.* 
+
+# Prix path from the company site does not waitlist
+curl -sL https://byphoenix.com/prix | grep -i waitlist   # expect empty
+
+# Conversations exist as notes, not intent
+# 8 rows: firm, paid-how-today, agents-where, would-pay-for
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Gate</th>
+<th>Pass</th>
+<th>Fail</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Tape</td>
+<td>12 min, software on screen, one approval</td>
+<td>Slide-only, or Prix waitlist</td>
+</tr>
+<tr>
+<td>Calls</td>
+<td>≥5 completed, answers written</td>
+<td>“We should talk to 25 later”</td>
+</tr>
+<tr>
+<td>LOI / pilot</td>
+<td>Signed paper or a dated “yes to a second job”</td>
+<td>Verbal “cool”</td>
+</tr>
+<tr>
+<td>Story</td>
+<td>Investor sentence ≠ customer sentence</td>
+<td>Homepage table sold as the product</td>
+</tr>
+</tbody></table>
+<h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Why it hits a 30-day raise</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Nobody wants operator tools</td>
+<td>Then the leftover is not a purchase. That is data.</td>
+<td>Put it on the deck as learning, not as fake traction</td>
+</tr>
+<tr>
+<td>You spend the month on Prix/SDK</td>
+<td>Zero calls, zero tape</td>
+<td>No Prix features except the CTA fix</td>
+</tr>
+<tr>
+<td>Founding team still open</td>
+<td>Solo + $0 MRR caps the story (existing valuation notes)</td>
+<td>RUSH-2650 is a founder call this week, not a slide</td>
+</tr>
+<tr>
+<td>prix.dev stays the old product</td>
+<td>First diligence click kills the thesis</td>
+<td>Unlink it from Phoenix until copy matches</td>
+</tr>
+<tr>
+<td>Software-delivery demo</td>
+<td>Looks like a worse Factory</td>
+<td>Research-firm job only</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2><ul>
+<li><a class="link-pill" href="https://byphoenix.com" title="https://byphoenix.com" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=byphoenix.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">byphoenix.com</span></a> — thesis site, three firm types, stack diagram</li>
+<li><a class="link-pill" href="https://prix.dev" title="https://prix.dev" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=prix.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">prix.dev</span></a> — still sealed-container / waitlist (fix or unlink)</li>
+<li><a class="link-pill" href="https://linear.app/getrush/issue/RUSH-2650" title="https://linear.app/getrush/issue/RUSH-2650" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">RUSH-2650</span></a> — founding team before Sequoia-facing docs</li>
+<li>Aug 14 refocus brief — buyer moved; evaluator-facing product did not</li>
+<li>This session — positioning reset: tokens and deliverable-pricing are not the 30-day sale</li>
+</ul>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://byphoenix.com" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=byphoenix.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">byphoenix.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://prix.dev" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=prix.dev&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">prix.dev</span></a></li><li class="reference-item"><a class="reference-link" href="https://linear.app/getrush/issue/RUSH-2650" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">RUSH-2650</span><span class="reference-host">linear.app</span></a></li></ol></article>
+<footer class="document-footer">Internal · 30-day raise</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4KdGVtcGxhdGU6IHBsYW4udjEKc3VyZmFjZTogaW50ZXJuYWwKdGl0bGU6IDMwIGRheXMgdG8gYSBkZW1vLCBub3QgYSBuZXcgY29tcGFueQpzdW1tYXJ5OiBSYWlzZSBuZXh0IG1vbnRoLiBGcmVlemUgdGhlIHN0b3J5LCBkZW1vIHNvZnR3YXJlIHlvdSBhbHJlYWR5IGhhdmUsIHRhbGsgdG8gYSBoYW5kZnVsIG9mIEFJIHNlcnZpY2VzIGZpcm1zLCBhbmQgY29sbGVjdCBwaWxvdHMgb3IgTE9Jcy4gRG8gbm90IHJlYnVpbGQgUHJpeCBvciBzZWxsIHRva2VucyBvciBkZWxpdmVyYWJsZXMuCnN0YXR1czogZHJhZnQKaGVhZGVyOiBQaG9lbml4IEhvcml6b24KZm9vdGVyOiBJbnRlcm5hbCDCtyAzMC1kYXkgcmFpc2UKbGlua3M6CiAgLSB1cmw6IGh0dHBzOi8vYnlwaG9lbml4LmNvbQogICAgbGFiZWw6IGJ5cGhvZW5peC5jb20KICAtIHVybDogaHR0cHM6Ly9wcml4LmRldgogICAgbGFiZWw6IHByaXguZGV2CiAgLSB1cmw6IGh0dHBzOi8vbGluZWFyLmFwcC9nZXRydXNoL2lzc3VlL1JVU0gtMjY1MAogICAgbGFiZWw6IFJVU0gtMjY1MAotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCjEuICoqVHdvIGF1ZGllbmNlcywgdHdvIHNlbnRlbmNlcy4qKiBJbnZlc3RvcnMgaGVhciB0aGUgdGhlc2lzLiBBIGZpcm0gaGVhcnMgYSB0b29sIHRoZXkgY2FuIHRyeSB0aGlzIG1vbnRoLiBNaXhpbmcgdGhvc2UgaXMgd2h5IHRoZSBzaXRlIGZlZWxzIGNvbmZ1c2luZy4KMi4gKipEbyBub3Qgc2VsbCB0b2tlbnMuIERvIG5vdCBzZWxsIOKAnHRoZSBmaW5pc2hlZCB3b3JrLuKAnSoqIFRob3NlIGFyZSBub3QgdGhlIHB1cmNoYXNlLiBUaGUgcHVyY2hhc2UsIGlmIGl0IGV4aXN0cywgaXMgb3BlcmF0b3Igc29mdHdhcmUgZm9yIGEgZmlybSB0aGF0IGFscmVhZHkgaGFzIENsYXVkZS4KMy4gKipUaGUgMzAtZGF5IGFydGlmYWN0IGlzIGEgZGVtbyArIGNvbnZlcnNhdGlvbnMsIG5vdCBhIHByb2R1Y3QgcmV3cml0ZS4qKiBwcml4LmRldiBzdGlsbCBjb250cmFkaWN0cyB0aGUgaG9tZXBhZ2U7IGhpZGUgb3IgcmUtbGFiZWwgdGhhdCBwYXRoLiBEbyBub3Qgc3BlbmQgdGhlIG1vbnRoIG9uIGFuIFNESy4KNC4gKipUaHJlZSBuYW1lZCBjb252ZXJzYXRpb25zIGJlYXQgYSBjYXRlZ29yeSBzbGlkZS4qKiBGb2FzdGVyLCBmbG93c2NvcGUsIEZlZDEwIChyZXNlYXJjaC9kaWxpZ2VuY2UpLiBBc2sgaG93IHRoZXkgZ2V0IHBhaWQgdG9kYXkuIFRoZSBMT0kgY29tZXMgZnJvbSB0aGF0LCBvciBpdCBkb2VzIG5vdCBjb21lLgoKIyMgUHVycG9zZQoKWW91IGhhdmUgYWJvdXQgMzAgZGF5cyBiZWZvcmUgYSByYWlzZS4gWW91IG5lZWQgc29tZXRoaW5nIGEgcGFydG5lciBjYW4gd2F0Y2ggYW5kIGEgZmlybSBjYW4gc2lnbi4gVGhpcyBwbGFuIGlzIHRoYXQgbW9udGg6IGZyZWV6ZSB0aGUgbW9uZXkgc3RvcnksIGZpbG0gYSBkZW1vIGZyb20gUnVzaCArIEFHSSBDTEkgYXMgdGhleSBleGlzdCwgdGFsayB0byBhIHNob3J0IGxpc3QsIHBhcGVyIGEgb25lLXBhZ2UgcGlsb3QuIEl0IGlzIG5vdCBhIG5ldyBydW50aW1lLCBub3QgYSByZWdpc3RyeSByZWxhdW5jaCwgYW5kIG5vdCBvdXRjb21lIGJpbGxpbmcuCgojIyBDdXJyZW50IGFyY2hpdGVjdHVyZQoKVHdvIGxpdmUgc2l0ZXMsIHR3byBidXllcnMsIG9uZSByYWlzZS4gTW9uZXkgc3RvcmllcyBnb3Qgc3RhY2tlZCBvbiB0b3Agb2YgZWFjaCBvdGhlci4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtd2lkZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSI+Cjxzdmcgdmlld0JveD0iMCAwIDk0MCA0MjAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iVGhyZWUgbW9uZXkgc3RvcmllcyB0aGF0IGdvdCBtaXhlZCwgYW5kIHdoaWNoIG9uZSBjYW4gZXhpc3QgdGhpcyBtb250aCIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8dGV4dCB4PSIyNCIgeT0iMjgiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjOGE4YThhIiBsZXR0ZXItc3BhY2luZz0iMC4wOGVtIj5XSE8gUEFZUyBXSE9NPC90ZXh0PgoKICA8cmVjdCB4PSIyMCIgeT0iNDgiIHdpZHRoPSIyODAiIGhlaWdodD0iMTUwIiByeD0iMTIiIGZpbGw9IiMxYTBlMGUiIHN0cm9rZT0iI2ZiNzE4NSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0MCIgeT0iNzYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjZmI3MTg1Ij4xIMK3IFRPS0VOUzwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMTAyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iI2U5ZWRmMCI+TGFicyBnZXQgcGFpZCB0byBydW48L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjEyNCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPkFudGhyb3BpYyAvIE9wZW5BSSAvIE9wZW5Sb3V0ZXI8L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjE1MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPk5vdCB5b3VyIGJ1c2luZXNzLiBTaXRlIGFscmVhZHk8L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjE2OCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPnNheXMgYnJpbmcteW91ci1vd24gY29tcHV0ZS48L3RleHQ+CgogIDxyZWN0IHg9IjMzMCIgeT0iNDgiIHdpZHRoPSIyODAiIGhlaWdodD0iMTUwIiByeD0iMTIiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1YzQ1MSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIzNTAiIHk9Ijc2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Y1YzQ1MSI+MiDCtyBERUxJVkVSQUJMRVM8L3RleHQ+CiAgPHRleHQgeD0iMzUwIiB5PSIxMDIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE0IiBmaWxsPSIjZTllZGYwIj5UaGVzaXMsIG5vdCBhIGNoZWNrb3V0PC90ZXh0PgogIDx0ZXh0IHg9IjM1MCIgeT0iMTI0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+SG9tZXBhZ2UgdGFibGU6IGNsaWVudCBidXlzPC90ZXh0PgogIDx0ZXh0IHg9IjM1MCIgeT0iMTQyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+4oCcdGhlIGZpbmlzaGVkIHdvcmsu4oCdIEZpcm1zIHRvZGF5PC90ZXh0PgogIDx0ZXh0IHg9IjM1MCIgeT0iMTYwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+YmlsbCByZXRhaW5lcnMsIGNhc2VzLCBob3Vycy48L3RleHQ+CiAgPHRleHQgeD0iMzUwIiB5PSIxNzgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5EbyBub3QgcHJvZHVjdGl6ZSB0aGlzIGluIDMwZC48L3RleHQ+CgogIDxyZWN0IHg9IjY0MCIgeT0iNDgiIHdpZHRoPSIyODAiIGhlaWdodD0iMTUwIiByeD0iMTIiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNjYwIiB5PSI3NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPjMgwrcgVE9PTFMgIOKGkCB0aGlzIG1vbnRoPC90ZXh0PgogIDx0ZXh0IHg9IjY2MCIgeT0iMTAyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNCIgZmlsbD0iI2U5ZWRmMCI+QSBmaXJtIHBheXMgZm9yIHNvZnR3YXJlPC90ZXh0PgogIDx0ZXh0IHg9IjY2MCIgeT0iMTI0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+VGhleSBhbHJlYWR5IHBheSBBbnRocm9waWM8L3RleHQ+CiAgPHRleHQgeD0iNjYwIiB5PSIxNDIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5hbmQgbWF5YmUgQ3Vyc29yIC8gTW9kYWwuPC90ZXh0PgogIDx0ZXh0IHg9IjY2MCIgeT0iMTYwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+UGhvZW5peCBjYW4gb25seSBjaGFyZ2UgZm9yPC90ZXh0PgogIDx0ZXh0IHg9IjY2MCIgeT0iMTc4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+YSB0b29sIHRoZXkgZG8gbm90IGhhdmUgeWV0LjwvdGV4dD4KCiAgPGxpbmUgeDE9IjE2MCIgeTE9IjE5OCIgeDI9IjE2MCIgeTI9IjIzMCIgc3Ryb2tlPSIjZmI3MTg1IiBzdHJva2Utd2lkdGg9IjEuNSIgb3BhY2l0eT0iMC41Ii8+CiAgPGxpbmUgeDE9IjQ3MCIgeTE9IjE5OCIgeDI9IjQ3MCIgeTI9IjIzMCIgc3Ryb2tlPSIjZjVjNDUxIiBzdHJva2Utd2lkdGg9IjEuNSIgb3BhY2l0eT0iMC41Ii8+CiAgPGxpbmUgeDE9Ijc4MCIgeTE9IjE5OCIgeDI9Ijc4MCIgeTI9IjIzMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgoKICA8cmVjdCB4PSIyMCIgeT0iMjMwIiB3aWR0aD0iOTAwIiBoZWlnaHQ9IjE2OCIgcng9IjEyIiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDAiIHk9IjI1OCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiMzOGJkZjgiPldIQVQgRVhJU1RTIE9OIERJU0sgVE9EQVk8L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjI4NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlOWVkZjAiPlJ1c2gg4oCUIE1hYyBhcHAuIFlvdSBydW4gYWdlbnRzLCBhcHByb3ZlLCBnZXQgYSBmaWxlIG91dC4gQnVpbHQgZm9yIGEgcGVyc29uLjwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMzEwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2U5ZWRmMCI+QUdJIENMSSDigJQgbGl2ZS4gRmxlZXQsIHNlc3Npb25zLCBicm93c2VyLCBzZWNyZXRzLiBCdWlsdCBmb3IgYSBwZXJzb24gcnVubmluZyBtYW55IGFnZW50cy48L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjMzNCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlOWVkZjAiPlByaXgg4oCUIHJlZ2lzdHJ5ICsgcHJveHkgKyBjbG91ZCBydW4uIExpdmUgc2l0ZSBzdGlsbCBzYXlzIHNlYWxlZCBjb250YWluZXJzIGFuZCBhIHdhaXRsaXN0LjwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMzY4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iIzlhYTRhZCI+YnlwaG9lbml4LmNvbSBkZXNjcmliZXMgZmlybXMgYW5kIGZpbmlzaGVkIHdvcmsuIFRoZSBzb2Z0d2FyZSBpcyBzdGlsbCBvcGVyYXRvciB0b29scy4gVGhhdCBzcGxpdCBpcyB0aGUgcmFpc2UgcmlzaywgYW5kIGFsc28gdGhlIGRlbW86IHNob3cgdGhlIHRvb2xzLCB0ZWxsIHRoZSB0aGVzaXMsIGRvIG5vdCBwcmV0ZW5kIHRoZXkgYXJlIHRoZSBzYW1lIHB1cmNoYXNlLjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPkludmVzdG9ycyBjYW4gaGVhciBib3ggMiBhcyBkZXN0aW5hdGlvbi4gQSBwaWxvdCB3aWxsIG9ubHkgcGF5IGZvciBib3ggMy4gQm94IDEgaXMgc29tZW9uZSBlbHNl4oCZcyBtZXRlci48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKVGhlIG1hcmtldCBhcm91bmQgdGhvc2UgdG9vbHMgaXMgYWxyZWFkeSB0YWtlbiBpbiB0aGUgbGF5ZXJzIGEgZmlybSBhbHJlYWR5IGJvdWdodC4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtd2lkZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSI+Cjxzdmcgdmlld0JveD0iMCAwIDk0MCAzNDAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iT2NjdXBpZWQgbGF5ZXJzIHZlcnN1cyB0aGUgbGVmdG92ZXIgYSBzZXJ2aWNlcyBmaXJtIG1pZ2h0IHN0aWxsIGxhY2siIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRleHQgeD0iMjQiIHk9IjI4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzhhOGE4YSIgbGV0dGVyLXNwYWNpbmc9IjAuMDhlbSI+T0NDVVBJRUQgIMK3ICBUSEVZIEFMUkVBRFkgSEFWRSBUSElTPC90ZXh0PgoKICA8cmVjdCB4PSIyMCIgeT0iNDgiIHdpZHRoPSIxNzAiIGhlaWdodD0iODgiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiM1YTYzNmIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzYiIHk9Ijc0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2U5ZWRmMCI+TW9kZWxzPC90ZXh0PgogIDx0ZXh0IHg9IjM2IiB5PSI5NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPkFudGhyb3BpYyDCtyBPcGVuQUk8L3RleHQ+CiAgPHRleHQgeD0iMzYiIHk9IjExNCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmRpcmVjdDwvdGV4dD4KCiAgPHJlY3QgeD0iMjA0IiB5PSI0OCIgd2lkdGg9IjE3MCIgaGVpZ2h0PSI4OCIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iIzVhNjM2YiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyMjAiIHk9Ijc0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2U5ZWRmMCI+VGhlIGxvb3A8L3RleHQ+CiAgPHRleHQgeD0iMjIwIiB5PSI5NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnRoZXkgd3JvdGUgaXQsIG9yPC90ZXh0PgogIDx0ZXh0IHg9IjIyMCIgeT0iMTE0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Q2xhdWRlIENvZGU8L3RleHQ+CgogIDxyZWN0IHg9IjM4OCIgeT0iNDgiIHdpZHRoPSIxNzAiIGhlaWdodD0iODgiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiM1YTYzNmIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDA0IiB5PSI3NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlOWVkZjAiPkNvbXB1dGU8L3RleHQ+CiAgPHRleHQgeD0iNDA0IiB5PSI5NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmxhcHRvcCDCtyBWUFM8L3RleHQ+CiAgPHRleHQgeD0iNDA0IiB5PSIxMTQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5Nb2RhbCDCtyBFMkI8L3RleHQ+CgogIDxyZWN0IHg9IjU3MiIgeT0iNDgiIHdpZHRoPSIxNzAiIGhlaWdodD0iODgiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiM1YTYzNmIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTg4IiB5PSI3NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlOWVkZjAiPkNvZGluZyBkZWxpdmVyeTwvdGV4dD4KICA8dGV4dCB4PSI1ODgiIHk9Ijk2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Q3Vyc29yIMK3IENvZGV4PC90ZXh0PgogIDx0ZXh0IHg9IjU4OCIgeT0iMTE0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+RmFjdG9yeSDCtyBDb2duaXRpb248L3RleHQ+CgogIDxyZWN0IHg9Ijc1NiIgeT0iNDgiIHdpZHRoPSIxNjQiIGhlaWdodD0iODgiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiM1YTYzNmIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNzcyIiB5PSI3NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiNlOWVkZjAiPkNoYXQgLyB0aWNrZXRzPC90ZXh0PgogIDx0ZXh0IHg9Ijc3MiIgeT0iOTYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5TbGFjayDCtyBMaW5lYXI8L3RleHQ+CiAgPHRleHQgeD0iNzcyIiB5PSIxMTQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5Hb29nbGUgRG9jczwvdGV4dD4KCiAgPHJlY3QgeD0iMjAiIHk9IjE2OCIgd2lkdGg9IjkwMCIgaGVpZ2h0PSIxNDgiIHJ4PSIxMiIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI0MCIgeT0iMTk4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2EzZTYzNSI+VU5URVNURUQgTEVGVE9WRVIgIMK3ICBOT1QgQSBTVEFDSyBSRVBMQUNFTUVOVDwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMjI4IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNSIgZmlsbD0iI2U5ZWRmMCI+V29yayBmcm9tIHRoZWlyIGFnZW50cywgZm9yIG9uZSBjbGllbnQsIHRoYXQgYSBwZXJzb24gY2FuIHN0YW5kIGJlaGluZC48L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjI1NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTMiIGZpbGw9IiM5YWE0YWQiPk5vdCDigJxyZXBsYWNlIE1vZGFsLuKAnSBOb3Qg4oCccGF5IHBlciBQREYu4oCdIEEgcGxhY2UgdGhlIHJ1biwgdGhlIGZpbGUsIGFuZCB0aGUgYXBwcm92YWwgbGl2ZSB0b2dldGhlciBzbyB0aGUgbmV4dCBqb2IgZm9yIHRoYXQgY2xpZW50IGlzIG5vdCBhbm90aGVyIFNsYWNrIGR1bXAuPC90ZXh0PgogIDx0ZXh0IHg9IjQwIiB5PSIyODgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjOWFhNGFkIj5SdXNoIGFscmVhZHkgc2hvd3MgcnVucyBhbmQgYXBwcm92YWxzLiBBcnRpZmFjdCBzaGFyZSBhbHJlYWR5IGhhbmRzIHNvbWVvbmUgYSBmaWxlLiBUaGF0IGlzIHRoZSBkZW1vLiBQZXItY2xpZW50IGlzb2xhdGlvbiBhbmQgYSBzaWduZWQgcGlsb3QgY29tZSBhZnRlciBzb21lb25lIHdhbnRzIGl0LjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPkRvIG5vdCBlbnRlciBvY2N1cGllZCBib3hlcy4gVGhlIGxlZnRvdmVyIGlzIGEgaHlwb3RoZXNpcyB1bnRpbCB0d28gZmlybXMgc2F5IGl0IG91dCBsb3VkLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyBQcm9wb3NlZCBDaGFuZ2VzCgpObyBjb2RlIHRoaXMgbW9udGggZXhjZXB0IHdoYXQgdGhlIGRlbW8gZm9yY2VzIChhIFByaXggbGluayB0aGF0IGRvZXMgbm90IGR1bXAgYSBwYXJ0bmVyIG9udG8gYSB3YWl0bGlzdCkuIFRoZSBjaGFuZ2UgaXMgd2hhdCB5b3Ugc2hvdyBhbmQgd2hhdCB5b3UgYXNrLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS13aWRlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTQwIDM2MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJUaGlydHkgY2FsZW5kYXIgZGF5cyBmcm9tIGZyZWV6ZSB0byByYWlzZSBtYXRlcmlhbHMiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRleHQgeD0iMjQiIHk9IjI4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzhhOGE4YSIgbGV0dGVyLXNwYWNpbmc9IjAuMDhlbSI+MzAgREFZUzwvdGV4dD4KCiAgPHJlY3QgeD0iMjAiIHk9IjQ4IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjI4MCIgcng9IjEyIiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNDAiIHk9Ijc2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzM4YmRmOCI+REFZUyAx4oCTNDwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMTA0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2U5ZWRmMCI+RnJlZXplICsgZmlsbTwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMTMyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+VHdvIHNlbnRlbmNlcywgd3JpdHRlbiBkb3duLjwvdGV4dD4KICA8dGV4dCB4PSI0MCIgeT0iMTUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+UmVjb3JkIGEgOOKAkzEyIG1pbiBkZW1vPC90ZXh0PgogIDx0ZXh0IHg9IjQwIiB5PSIxNjgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5vbiBSdXNoICsgQUdJIENMSSBhcyB0aGV5IHNpdC48L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjE5NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPlBob2VuaXgg4oCcRXhwbG9yZSBQcml44oCdIG11c3Q8L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjIxNCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPm5vdCBvcGVuIHRoZSBvbGQgd2FpdGxpc3QgcGl0Y2guPC90ZXh0PgogIDx0ZXh0IHg9IjQwIiB5PSIyNDIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5PbmUtcGFnZSBwaWxvdCB0ZXJtcy48L3RleHQ+CiAgPHRleHQgeD0iNDAiIHk9IjI2MCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPkxpc3Qgb2YgOCBwZW9wbGUgdG8gbWFpbC48L3RleHQ+CgogIDxyZWN0IHg9IjI1NiIgeT0iNDgiIHdpZHRoPSIyMjAiIGhlaWdodD0iMjgwIiByeD0iMTIiIGZpbGw9IiMwZTE0MTgiIHN0cm9rZT0iI2M5YTk2MiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyNzYiIHk9Ijc2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2M5YTk2MiI+REFZUyA14oCTMTQ8L3RleHQ+CiAgPHRleHQgeD0iMjc2IiB5PSIxMDQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjE2IiBmaWxsPSIjZTllZGYwIj5UYWxrPC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iMTMyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+OCBjb252ZXJzYXRpb25zLiBOb3QgMjUuPC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iMTUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+Rm9hc3RlciDCtyBmbG93c2NvcGUgwrcgRmVkMTA8L3RleHQ+CiAgPHRleHQgeD0iMjc2IiB5PSIxNjgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5wbHVzIHdhcm0gMXN0LWRlZ3JlZXMuPC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iMTk2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+QXNrIG9ubHk6IHdoYXQgZG8geW91IHNlbGwsPC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iMjE0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+aG93IGFyZSB5b3UgcGFpZCwgd2hlcmUgZG88L3RleHQ+CiAgPHRleHQgeD0iMjc2IiB5PSIyMzIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5hZ2VudHMgc2l0LCB3b3VsZCB5b3UgcGF5PC90ZXh0PgogIDx0ZXh0IHg9IjI3NiIgeT0iMjUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+Zm9yIGFueXRoaW5nIHRoYXQgaXMgbm90IGE8L3RleHQ+CiAgPHRleHQgeD0iMjc2IiB5PSIyNjgiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5tb2RlbCBhbmQgbm90IGEgc2FuZGJveC48L3RleHQ+CgogIDxyZWN0IHg9IjQ5MiIgeT0iNDgiIHdpZHRoPSIyMjAiIGhlaWdodD0iMjgwIiByeD0iMTIiIGZpbGw9IiMwZTE0MTgiIHN0cm9rZT0iIzZlZTdiNyIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MTIiIHk9Ijc2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzZlZTdiNyI+REFZUyAxNeKAkzIyPC90ZXh0PgogIDx0ZXh0IHg9IjUxMiIgeT0iMTA0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxNiIgZmlsbD0iI2U5ZWRmMCI+Q29uY2llcmdlPC90ZXh0PgogIDx0ZXh0IHg9IjUxMiIgeT0iMTMyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+SWYgc29tZW9uZSBsZWFucyBpbjogcnVuPC90ZXh0PgogIDx0ZXh0IHg9IjUxMiIgeT0iMTUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+b25lIHJlYWwgam9iIG9uIHRoZWlyIHN0YWNrLjwvdGV4dD4KICA8dGV4dCB4PSI1MTIiIHk9IjE2OCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPllvdSBvcGVyYXRlLiBUaGV5IHdhdGNoLjwvdGV4dD4KICA8dGV4dCB4PSI1MTIiIHk9IjE5NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPklmIG5vYm9keSBsZWFucyBpbjogZG8gbm90PC90ZXh0PgogIDx0ZXh0IHg9IjUxMiIgeT0iMjE0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+aW52ZW50IGEgY3VzdG9tZXIuIFRpZ2h0ZW48L3RleHQ+CiAgPHRleHQgeD0iNTEyIiB5PSIyMzIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj50aGUgZGVtbyB3aXRoIHdoYXQgdGhleSBzYWlkPC90ZXh0PgogIDx0ZXh0IHg9IjUxMiIgeT0iMjUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+YW5kIGtlZXAgbWVldGluZy48L3RleHQ+CgogIDxyZWN0IHg9IjcyOCIgeT0iNDgiIHdpZHRoPSIxOTIiIGhlaWdodD0iMjgwIiByeD0iMTIiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIyIi8+CiAgPHRleHQgeD0iNzQ4IiB5PSI3NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPkRBWVMgMjPigJMzMDwvdGV4dD4KICA8dGV4dCB4PSI3NDgiIHk9IjEwNCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTYiIGZpbGw9IiNlOWVkZjAiPlBhcGVyPC90ZXh0PgogIDx0ZXh0IHg9Ijc0OCIgeT0iMTMyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+UGlsb3Qgb25lLXBhZ2VyIG9yIExPSS48L3RleHQ+CiAgPHRleHQgeD0iNzQ4IiB5PSIxNTAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjOWFhNGFkIj5TYW1lIDEyIG1pbiBmb3IgaW52ZXN0b3JzLjwvdGV4dD4KICA8dGV4dCB4PSI3NDgiIHk9IjE2OCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPkRlY2s6IHRoZXNpcyArIGRlbW8gKzwvdGV4dD4KICA8dGV4dCB4PSI3NDgiIHk9IjE4NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPm5hbWVkIGNvbnZlcnNhdGlvbnMuPC90ZXh0PgogIDx0ZXh0IHg9Ijc0OCIgeT0iMjE0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+Tm8gZmFicmljYXRlZCBNUlIuPC90ZXh0PgogIDx0ZXh0IHg9Ijc0OCIgeT0iMjUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzlhYTRhZCI+Rm91bmRpbmcgdGVhbSBpcyBzdGlsbDwvdGV4dD4KICA8dGV4dCB4PSI3NDgiIHk9IjI2OCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiM5YWE0YWQiPmFuIG9wZW4gdGlja2V0ICgyNjUwKS48L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5UaGUgbW9udGggaXMgY29udmVyc2F0aW9ucyBhbmQgYSB0YXBlLCBub3QgYSBQcml4IHJld3JpdGUuPC9maWdjYXB0aW9uPgo8L2ZpZ3VyZT4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQgYXJ0aWZhY3QtY2FsbG91dC13YXJuIj4KPHN0cm9uZz5Xcml0ZSB0aGVzZSB0d28gc2VudGVuY2VzIG9uIGRheSAxIGFuZCBkbyBub3QgbWl4IHRoZW0uPC9zdHJvbmc+CjxwPjxlbT5JbnZlc3Rvcjo8L2VtPiBTZXJ2aWNlcyBmaXJtcyB3aWxsIHJ1biBvbiBpbmZyYXN0cnVjdHVyZS4gV2UgYXJlIGJ1aWxkaW5nIHRoYXQuPC9wPgo8cD48ZW0+RmlybTo8L2VtPiBZb3UgYWxyZWFkeSBoYXZlIENsYXVkZS4gVGhpcyBpcyB0aGUgTWFjICsgQ0xJIHdlIHVzZSB0byBydW4gYSBmbGVldCwga2VlcCB0aGUgc2Vzc2lvbiwgYW5kIGhhbmQgYSBwZXJzb24gYSBmaWxlIHRoZXkgY2FuIGFwcHJvdmUuIFRyeSBpdCBvbiBvbmUgam9iLjwvcD4KPC9kaXY+CgojIyBQdWJsaWMgSW50ZXJmYWNlCgpXaGF0IGEgcGFydG5lciBzZWVzIGluIHR3ZWx2ZSBtaW51dGVzLiBBbGwgb2YgaXQgYWxyZWFkeSBydW5zLgoKYGBgdGV4dAowOjAwICBIb21lcGFnZSB0aGVzaXMsIDIwIHNlY29uZHMuIFRoZW46ICJoZXJlIGlzIHRoZSBzb2Z0d2FyZSwgbm90IHRoZSBzbGlkZS4iCjA6MzAgIEFHSSBDTEk6IGFnZW50cyBydW4gLyBzZXNzaW9ucyAtLWFjdGl2ZSBvbiBhIHJlYWwgZmxlZXQuIEJZTyBtb2RlbC4KMzowMCAgUnVzaDogb25lIHJlc2VhcmNoIHJ1biAoUmFiYml0IEhvbGUgb3IgZXF1aXZhbGVudCkgb24gYSBuYW1lZCB0b3BpYy4KNzowMCAgQXJ0aWZhY3Qgb3V0IOKAlCBhIHNoYXJlIGxpbmssIG5vdCBhIGNoYXQgdHJhbnNjcmlwdC4KOTowMCAgQXBwcm92YWwgaW4gUnVzaCAobmVlZHMteW91IC8gYXBwcm92ZSkuIE9wZXJhdG9yIHN0YW5kcyBiZWhpbmQgaXQuCjExOjAwIFN0b3AuIEFzayB0aGVtIGhvdyB0aGV5IGdldCBwYWlkIHRvZGF5LiBEbyBub3QgcGl0Y2ggb3V0Y29tZXMgYmlsbGluZy4KYGBgCgpUaGUgb25seSBwcm9kdWN0IGVkaXQgdGhpcyBtb250aCBpcyB0aGUgUGhvZW5peCBQcml4IHBhdGguIEV2ZXJ5dGhpbmcgZWxzZSBpcyBhIG1lZXRpbmcgYW5kIGEgdGFwZS4KCmBgYGRpZmYgdGl0bGU9cGhvZW5peC93ZWIvYXBwL3BhZ2UudHN4CkBAIEV4cGxvcmUgUHJpeCBDVEEgQEAKLTxhIGhyZWY9Imh0dHBzOi8vcHJpeC5kZXYiPkV4cGxvcmUgUHJpeCDihpI8L2E+Cis8YSBocmVmPSIvcHJpeCI+UnVudGltZSwgbWVtb3J5LCBCWU8gbW9kZWwg4oaSPC9hPgogLy8gL3ByaXggb24gYnlwaG9lbml4LmNvbTogb25lIHNjcmVlbiwgbm8gd2FpdGxpc3QsIG5vIExvdmFibGUgY29tcGFyaXNvbi4KYGBgCgpXaGF0IHRoZXkgbXVzdCBub3Qgc2VlOgoKfCBTdXJmYWNlIHwgUHJvYmxlbSB8IDMwLWRheSBtb3ZlIHwKfC0tLXwtLS18LS0tfAp8IHByaXguZGV2IHdhaXRsaXN0IC8gc2VhbGVkIGNvbnRhaW5lcnMgfCBBcHAtc3RvcmUgYnV5ZXIsIGNvbnRyYWRpY3RzIFBob2VuaXggfCBQaG9lbml4IENUQSBnb2VzIHRvIGEgb25lLXNjcmVlbiDigJxydW50aW1lICsgbWVtb3J5LCBCWU8gbW9kZWzigJ0gbm90ZSwgb3IgaXMgcmVtb3ZlZCB8Cnwg4oCcQ2xpZW50cyBidXkgdGhlIGZpbmlzaGVkIHdvcmvigJ0gYXMgYSBTS1UgfCBOb3QgaG93IGZpcm1zIGludm9pY2UgfCBLZWVwIGl0IG9uIHRoZSB0aGVzaXMgc2xpZGUgb25seSB8CnwgVG9rZW4gbWFya3VwIHwgTm90IHRoZSBidXNpbmVzcyB8IERvIG5vdCBtZW50aW9uIE9wZW5Sb3V0ZXIgbWFyZ2luIHwKfCBTb2Z0d2FyZS1kZWxpdmVyeSBiZWFjaGhlYWQgfCBDdXJzb3IgLyBGYWN0b3J5IC8gQ29nbml0aW9uIHwgRG8gbm90IGRlbW8g4oCcbWVyZ2VkIFBScyBhcyB0aGUgcHJvZHVjdOKAnSB8CgpQaWxvdCBwYXBlciwgaWYgYW55b25lIGFza3MsIGlzIG9uZSBwYWdlOgoKYGBgdGV4dApQaWxvdDogMiB3ZWVrcywgb25lIGNsaWVudCBqb2IsIHdlIG9wZXJhdGUuCllvdSBrZWVwIEFudGhyb3BpYy4gV2UgZG8gbm90IHJlc2VsbCB0b2tlbnMuCllvdSBkbyBub3QgcGF5IHVudGlsIHlvdSB3YW50IGEgc2Vjb25kIGpvYi4KTE9JOiAid2Ugd2lsbCBydW4gYSBwYWlkIHBpbG90IG9mICRYIC8gbW9udGggaWYgdGhlIGZpcnN0IGpvYiBpcyB1c2FibGUuIgpYIGlzIHdoYXRldmVyIHRoZXkgc2F5LiAkMCBMT0lzIHN0aWxsIGNvdW50IGFzIG5hbWVkIGRlbWFuZCBpZiB0aGV5IG5hbWUgYSBkYXRlLgpgYGAKCiMjIFBsYW4KCi0gWyBdICoqRGF5IDEuKiogV3JpdGUgdGhlIHR3byBzZW50ZW5jZXMuIFN0b3AgdXNpbmcg4oCcZGVsaXZlcmFibGUgY2hlY2tvdXTigJ0gYW5kIOKAnHRva2VuIHJlc2FsZeKAnSBpbiBjdXN0b21lciBjb3B5LgotIFsgXSAqKkRheSAx4oCTMi4qKiBGaWxtIHRoZSAxMi1taW51dGUgZGVtbyBvbiB6aW9uIGZyb20gUnVzaCArIEFHSSBDTEkuIFJlYWwgcnVuLCByZWFsIHNoYXJlIGxpbmssIHJlYWwgYXBwcm92ZS4KLSBbIF0gKipEYXkgMi4qKiBQaG9lbml4IOKAnEV4cGxvcmUgUHJpeOKAnSBubyBsb25nZXIgbGFuZHMgb24gdGhlIHdhaXRsaXN0IC8gTG92YWJsZSBjb21wYXJpc29uLiBTbWFsbGVzdCBwb3NzaWJsZSBwYWdlIG9yIHVubGluay4KLSBbIF0gKipEYXkgMy4qKiBPbmUtcGFnZSBwaWxvdCB0ZXJtcy4gTWFpbCBsaXN0IG9mIDg6IEZvYXN0ZXIsIGZsb3dzY29wZSwgRmVkMTAsIHBsdXMgZml2ZSAxc3QtZGVncmVlIHdhcm0gbmFtZXMuIE5vIDEsMjIxLWNvbnRhY3QgYmxhc3QuCi0gWyBdICoqRGF5IDXigJMxNC4qKiBFaWdodCBjYWxscy4gU2FtZSBmb3VyIHF1ZXN0aW9ucyBldmVyeSB0aW1lLiBMb2cgYW5zd2VycyBpbiBvbmUgcGxhY2UuCi0gWyBdICoqRGF5IDE14oCTMjIuKiogQXQgbW9zdCBvbmUgY29uY2llcmdlIGpvYi4gSWYgemVybyBpbnRlcmVzdCwgZG8gbm90IGZha2UgYSBkZXNpZ24gcGFydG5lci4KLSBbIF0gKipEYXkgMjPigJMzMC4qKiBJbnZlc3RvciBjdXQgb2YgdGhlIHNhbWUgdGFwZS4gRGVjayB0cmFjdGlvbiBzbGlkZSA9IGNvbnZlcnNhdGlvbnMgKyBhbnkgTE9JLCBub3QgY2F0YWxvZyBpbnN0YWxscy4gRGVjaWRlIFJVU0gtMjY1MCBiZWZvcmUgU2VxdW9pYS1mYWNpbmcgcGFwZXIuCgojIyBWYWxpZGF0aW9uCgpBIHJhaXNlIHBhY2tldCBpcyByZWFsIGlmIGFsbCBvZiB0aGVzZSBhcmUgdHJ1ZToKCmBgYGJhc2gKIyBEZW1vIGlzIGEgZmlsZSB5b3UgY2FuIHBsYXkgd2l0aG91dCBhIGxpdmUgY2x1c3RlciBnYW1ibGUKbHMgfi9EZXNrdG9wL3Bob2VuaXgtMTJtaW4uKiAKCiMgUHJpeCBwYXRoIGZyb20gdGhlIGNvbXBhbnkgc2l0ZSBkb2VzIG5vdCB3YWl0bGlzdApjdXJsIC1zTCBodHRwczovL2J5cGhvZW5peC5jb20vcHJpeCB8IGdyZXAgLWkgd2FpdGxpc3QgICAjIGV4cGVjdCBlbXB0eQoKIyBDb252ZXJzYXRpb25zIGV4aXN0IGFzIG5vdGVzLCBub3QgaW50ZW50CiMgOCByb3dzOiBmaXJtLCBwYWlkLWhvdy10b2RheSwgYWdlbnRzLXdoZXJlLCB3b3VsZC1wYXktZm9yCmBgYAoKfCBHYXRlIHwgUGFzcyB8IEZhaWwgfAp8LS0tfC0tLXwtLS18CnwgVGFwZSB8IDEyIG1pbiwgc29mdHdhcmUgb24gc2NyZWVuLCBvbmUgYXBwcm92YWwgfCBTbGlkZS1vbmx5LCBvciBQcml4IHdhaXRsaXN0IHwKfCBDYWxscyB8IOKJpTUgY29tcGxldGVkLCBhbnN3ZXJzIHdyaXR0ZW4gfCDigJxXZSBzaG91bGQgdGFsayB0byAyNSBsYXRlcuKAnSB8CnwgTE9JIC8gcGlsb3QgfCBTaWduZWQgcGFwZXIgb3IgYSBkYXRlZCDigJx5ZXMgdG8gYSBzZWNvbmQgam9i4oCdIHwgVmVyYmFsIOKAnGNvb2zigJ0gfAp8IFN0b3J5IHwgSW52ZXN0b3Igc2VudGVuY2Ug4omgIGN1c3RvbWVyIHNlbnRlbmNlIHwgSG9tZXBhZ2UgdGFibGUgc29sZCBhcyB0aGUgcHJvZHVjdCB8CgojIyBSaXNrcwoKfCBSaXNrIHwgV2h5IGl0IGhpdHMgYSAzMC1kYXkgcmFpc2UgfCBNaXRpZ2F0aW9uIHwKfC0tLXwtLS18LS0tfAp8IE5vYm9keSB3YW50cyBvcGVyYXRvciB0b29scyB8IFRoZW4gdGhlIGxlZnRvdmVyIGlzIG5vdCBhIHB1cmNoYXNlLiBUaGF0IGlzIGRhdGEuIHwgUHV0IGl0IG9uIHRoZSBkZWNrIGFzIGxlYXJuaW5nLCBub3QgYXMgZmFrZSB0cmFjdGlvbiB8CnwgWW91IHNwZW5kIHRoZSBtb250aCBvbiBQcml4L1NESyB8IFplcm8gY2FsbHMsIHplcm8gdGFwZSB8IE5vIFByaXggZmVhdHVyZXMgZXhjZXB0IHRoZSBDVEEgZml4IHwKfCBGb3VuZGluZyB0ZWFtIHN0aWxsIG9wZW4gfCBTb2xvICsgJDAgTVJSIGNhcHMgdGhlIHN0b3J5IChleGlzdGluZyB2YWx1YXRpb24gbm90ZXMpIHwgUlVTSC0yNjUwIGlzIGEgZm91bmRlciBjYWxsIHRoaXMgd2Vlaywgbm90IGEgc2xpZGUgfAp8IHByaXguZGV2IHN0YXlzIHRoZSBvbGQgcHJvZHVjdCB8IEZpcnN0IGRpbGlnZW5jZSBjbGljayBraWxscyB0aGUgdGhlc2lzIHwgVW5saW5rIGl0IGZyb20gUGhvZW5peCB1bnRpbCBjb3B5IG1hdGNoZXMgfAp8IFNvZnR3YXJlLWRlbGl2ZXJ5IGRlbW8gfCBMb29rcyBsaWtlIGEgd29yc2UgRmFjdG9yeSB8IFJlc2VhcmNoLWZpcm0gam9iIG9ubHkgfAoKIyMgVHJhY2tpbmcKCi0gW2J5cGhvZW5peC5jb21dKGh0dHBzOi8vYnlwaG9lbml4LmNvbSkg4oCUIHRoZXNpcyBzaXRlLCB0aHJlZSBmaXJtIHR5cGVzLCBzdGFjayBkaWFncmFtCi0gW3ByaXguZGV2XShodHRwczovL3ByaXguZGV2KSDigJQgc3RpbGwgc2VhbGVkLWNvbnRhaW5lciAvIHdhaXRsaXN0IChmaXggb3IgdW5saW5rKQotIFtSVVNILTI2NTBdKGh0dHBzOi8vbGluZWFyLmFwcC9nZXRydXNoL2lzc3VlL1JVU0gtMjY1MCkg4oCUIGZvdW5kaW5nIHRlYW0gYmVmb3JlIFNlcXVvaWEtZmFjaW5nIGRvY3MKLSBBdWcgMTQgcmVmb2N1cyBicmllZiDigJQgYnV5ZXIgbW92ZWQ7IGV2YWx1YXRvci1mYWNpbmcgcHJvZHVjdCBkaWQgbm90Ci0gVGhpcyBzZXNzaW9uIOKAlCBwb3NpdGlvbmluZyByZXNldDogdG9rZW5zIGFuZCBkZWxpdmVyYWJsZS1wcmljaW5nIGFyZSBub3QgdGhlIDMwLWRheSBzYWxlCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>

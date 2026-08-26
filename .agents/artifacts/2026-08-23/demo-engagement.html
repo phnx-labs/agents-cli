@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Helios · Meridian Partners</title>
+<style>
+  :root {
+    --bg: #0a0a0c;
+    --bg2: #111114;
+    --bg3: #18181c;
+    --line: #2a2a30;
+    --ink: #ecece8;
+    --mut: #8a8a84;
+    --gold: #c9a962;
+    --gold-dim: rgba(201,169,98,.14);
+    --ok: #6ee7b7;
+    --run: #f5c451;
+    --sans: Inter, ui-sans-serif, system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--ink); font-family: var(--sans); }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  a { color: var(--gold); text-decoration: none; }
+
+  .app { display: grid; grid-template-rows: 52px 1fr; height: 100%; }
+  header {
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 20px; border-bottom: 1px solid var(--line);
+    font-size: 13px;
+  }
+  .brand { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+  .crumb { color: var(--mut); }
+  .crumb b { color: var(--ink); font-weight: 550; }
+  .spacer { flex: 1; }
+  .view-toggle { display: flex; background: var(--bg3); border: 1px solid var(--line); border-radius: 6px; padding: 2px; }
+  .view-toggle button { padding: 6px 12px; border-radius: 4px; font-size: 12px; color: var(--mut); }
+  .view-toggle button.on { background: var(--bg); color: var(--ink); }
+  .status { font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--gold); background: var(--gold-dim); padding: 5px 8px; border-radius: 4px; }
+
+  main { display: grid; grid-template-columns: 280px 1fr 320px; min-height: 0; }
+  main.client { grid-template-columns: 1fr minmax(0, 720px) 1fr; }
+  main.client .rail, main.client .fleet { display: none; }
+  main.client .doc-wrap { grid-column: 2; border-left: 0; max-width: 720px; margin: 0 auto; width: 100%; }
+
+  .rail, .fleet { border-right: 1px solid var(--line); overflow: auto; padding: 20px 16px; }
+  .fleet { border-right: 0; border-left: 1px solid var(--line); }
+  .k { font-family: var(--mono); font-size: 10px; letter-spacing: .14em; text-transform: uppercase; color: var(--mut); margin-bottom: 10px; }
+  .job h1 { font-size: 18px; font-weight: 550; letter-spacing: -.02em; line-height: 1.25; margin: 8px 0 12px; }
+  .meta { font-size: 12px; color: var(--mut); line-height: 1.7; }
+  .meta b { color: var(--ink); font-weight: 500; }
+
+  .agent { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .agent:last-child { border-bottom: 0; }
+  .dot { width: 7px; height: 7px; border-radius: 99px; margin-top: 6px; flex-shrink: 0; }
+  .dot.run { background: var(--run); }
+  .dot.ok { background: var(--ok); }
+  .an { font-size: 13px; font-weight: 500; }
+  .as { font-size: 12px; color: var(--mut); margin-top: 2px; }
+
+  .doc-wrap { overflow: auto; padding: 28px 40px 80px; border-left: 1px solid var(--line); }
+  .doc { max-width: 640px; }
+  .doc .who { font-size: 12px; color: var(--mut); margin-bottom: 6px; }
+  .doc h2 { font-size: 26px; font-weight: 550; letter-spacing: -.03em; line-height: 1.2; margin: 0 0 8px; }
+  .doc .sub { font-size: 14px; color: var(--mut); margin-bottom: 28px; }
+  .doc h3 { font-size: 13px; font-weight: 600; margin: 28px 0 8px; letter-spacing: -.01em; }
+  .doc p, .doc li { font-size: 14.5px; line-height: 1.65; color: #d4d4ce; }
+  .doc ul { padding-left: 18px; margin: 8px 0; }
+  .doc li { margin: 6px 0; }
+  .cite { font-family: var(--mono); font-size: 10px; color: var(--gold); }
+
+  .event { font-size: 12.5px; padding: 8px 0; border-bottom: 1px solid var(--line); color: var(--mut); }
+  .event b { color: var(--ink); font-weight: 500; }
+  .event .t { font-family: var(--mono); font-size: 10px; float: right; color: #5a5a56; }
+
+  .bar {
+    position: sticky; bottom: 0; display: flex; gap: 8px; justify-content: flex-end;
+    padding: 14px 40px; border-top: 1px solid var(--line); background: var(--bg);
+  }
+  .bar .ghost { border: 1px solid var(--line); padding: 10px 16px; border-radius: 6px; font-size: 13px; }
+  .bar .go { background: var(--gold); color: #111; padding: 10px 16px; border-radius: 6px; font-size: 13px; font-weight: 600; }
+  .bar .go:hover { filter: brightness(1.08); }
+  .signed { font-family: var(--mono); font-size: 12px; color: var(--ok); align-self: center; margin-right: auto; }
+
+  .client-top { text-align: left; margin-bottom: 32px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+  .client-top .firm { font-family: var(--mono); font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); }
+  .hint { display: none; }
+  main.client .hint { display: block; font-size: 12px; color: var(--mut); padding: 10px 0 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="brand">Helios</div>
+    <div class="crumb">Engagements / <b>Meridian Partners</b></div>
+    <span class="status" id="st">Ready for sign-off</span>
+    <div class="spacer"></div>
+    <div class="view-toggle" role="tablist" aria-label="View">
+      <button type="button" id="btn-op" class="on" data-view="op">Operator</button>
+      <button type="button" id="btn-cl" data-view="cl">What the client sees</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <aside class="rail">
+      <div class="k">Job</div>
+      <div class="job">
+        <h1>Q3 map of industrial automation M&amp;A</h1>
+        <div class="meta">
+          Client <b>Meridian Partners</b><br/>
+          Due <b>Friday</b> · Started 11:40<br/>
+          Retention <b>this client only</b>
+        </div>
+      </div>
+      <div class="k" style="margin-top:28px">Fleet</div>
+      <div class="agent"><i class="dot ok"></i><div><div class="an">Scout</div><div class="as">41 filings, 12 expert notes · done</div></div></div>
+      <div class="agent"><i class="dot ok"></i><div><div class="an">Writer</div><div class="as">Brief v3 · done</div></div></div>
+      <div class="agent"><i class="dot ok"></i><div><div class="an">Reviewer</div><div class="as">3 claims challenged, 1 cut · done</div></div></div>
+    </aside>
+
+    <section class="doc-wrap">
+      <article class="doc">
+        <div class="client-top" id="client-chrome" hidden>
+          <div class="firm">Helios Diligence</div>
+          <div class="hint">This is the page you send Meridian. Not a chat. Not a Google Doc with comments from six people.</div>
+        </div>
+        <div class="who">Prepared for Meridian Partners · 23 Aug 2026 · 14 pages equivalent, condensed here</div>
+        <h2>Industrial automation M&amp;A, Q3: who is actually buying, and at what quality of asset.</h2>
+        <p class="sub">Three platforms are in-market. Two look busy and are not. One is quiet and will set the print.</p>
+
+        <h3>What changed this quarter</h3>
+        <p>Deal announcements in factory software and motion-control ran 18% above Q2 by count and <em>down</em> 11% by disclosed value. The volume is tuck-ins under $80M. Strategic buyers (Siemens, Rockwell, Schneider) are present on every banker list and have closed nothing material since April. <span class="cite">Scout · PitchBook Q3 pull</span></p>
+
+        <h3>The three names that matter</h3>
+        <ul>
+          <li><b>Apex Motion</b> — private, profitable, founder-led. Two inbound processes declined in June. This is the asset everyone wants and cannot get. Do not waste a letter.</li>
+          <li><b>Lineage MES</b> — growth-equity owned, hired Qatalyst in July (not announced). This is the live process. Quality is mixed: product is real, sales execution is not. <span class="cite">Scout · two former AE notes</span></li>
+          <li><b>Harbor Controls</b> — banker-run, widely shopped. Price will not clear. Pass unless it re-trades in 2027.</li>
+        </ul>
+
+        <h3>Recommendation</h3>
+        <p>Meridian should be in the Lineage process this week, with a thesis on sales rebuild, not product. Skip Harbor. Do not chase Apex. We have intro paths to the Lineage chair via two limiteds; say the word.</p>
+      </article>
+    </section>
+
+    <aside class="fleet">
+      <div class="k">Audit · this engagement</div>
+      <div class="event"><span class="t">11:40</span><b>You</b> opened the job. Memory scoped to Meridian.</div>
+      <div class="event"><span class="t">11:41</span><b>Scout</b> pulled 41 filings, 8 13Fs, 12 expert notes.</div>
+      <div class="event"><span class="t">12:06</span><b>Writer</b> drafted v1 from Scout’s packet.</div>
+      <div class="event"><span class="t">12:18</span><b>Reviewer</b> cut the Apex “rumored PE process” claim — single-source.</div>
+      <div class="event"><span class="t">12:22</span><b>Writer</b> v3. Status → ready for you.</div>
+      <div class="event"><span class="t">12:24</span><b>You</b> have not sent this to Meridian yet.</div>
+    </aside>
+  </main>
+
+  <div class="bar" id="bar-op">
+    <button class="ghost" type="button">Keep internally</button>
+    <button class="go" type="button" id="send">Send to Meridian</button>
+  </div>
+  <div class="bar" id="bar-cl" hidden>
+    <span class="signed" id="signed" hidden>Accepted · Meridian Partners · 23 Aug 2026</span>
+    <button class="ghost" type="button">Request changes</button>
+    <button class="go" type="button" id="accept">Accept this brief</button>
+  </div>
+</div>
+<script>
+  const main = document.getElementById("main");
+  const btnOp = document.getElementById("btn-op");
+  const btnCl = document.getElementById("btn-cl");
+  const barOp = document.getElementById("bar-op");
+  const barCl = document.getElementById("bar-cl");
+  const chrome = document.getElementById("client-chrome");
+  const st = document.getElementById("st");
+  function show(view) {
+    const client = view === "cl";
+    main.classList.toggle("client", client);
+    btnOp.classList.toggle("on", !client);
+    btnCl.classList.toggle("on", client);
+    barOp.hidden = client;
+    barCl.hidden = !client;
+    chrome.hidden = !client;
+  }
+  btnOp.onclick = () => show("op");
+  btnCl.onclick = () => show("cl");
+  document.getElementById("send").onclick = () => {
+    st.textContent = "Sent · waiting on client";
+    show("cl");
+  };
+  document.getElementById("accept").onclick = () => {
+    document.getElementById("signed").hidden = false;
+    document.getElementById("accept").hidden = true;
+    st.textContent = "Signed";
+    st.style.color = "#6ee7b7";
+    st.style.background = "rgba(110,231,183,.12)";
+  };
+</script>
+</body>
+</html>
