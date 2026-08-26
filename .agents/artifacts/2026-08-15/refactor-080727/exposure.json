@@ -1,0 +1,2019 @@
+{
+  "meta": {
+    "repo": "/home/user/src/github.com/muqsitnawaz/agents-cli",
+    "scope": [
+      "apps/cli"
+    ],
+    "window_days": 90,
+    "source_files": 1676,
+    "total_loc": 482894,
+    "holdable_threshold_loc": 1500,
+    "files_over_threshold": 43,
+    "hot_and_huge": 43,
+    "top_file_loc": 6256,
+    "formula": "(2*agent_edits + agent_reads + commits) * clamp(loc/500, 1, 4)",
+    "degraded": []
+  },
+  "files": [
+    {
+      "file": "apps/cli/src/commands/sessions.ts",
+      "loc": 6256,
+      "commits": 138,
+      "agent_reads": 83,
+      "agent_edits": 99,
+      "size_penalty": 4,
+      "agent_cost": 1676,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/exec.ts",
+      "loc": 3538,
+      "commits": 115,
+      "agent_reads": 31,
+      "agent_edits": 25,
+      "size_penalty": 4,
+      "agent_cost": 784,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/session/db.ts",
+      "loc": 4195,
+      "commits": 64,
+      "agent_reads": 44,
+      "agent_edits": 43,
+      "size_penalty": 4,
+      "agent_cost": 776,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/runner.ts",
+      "loc": 2498,
+      "commits": 60,
+      "agent_reads": 43,
+      "agent_edits": 34,
+      "size_penalty": 4,
+      "agent_cost": 684,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/agents.ts",
+      "loc": 3386,
+      "commits": 91,
+      "agent_reads": 34,
+      "agent_edits": 19,
+      "size_penalty": 4,
+      "agent_cost": 652,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/daemon.ts",
+      "loc": 2378,
+      "commits": 90,
+      "agent_reads": 20,
+      "agent_edits": 24,
+      "size_penalty": 4,
+      "agent_cost": 632,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/ssh.ts",
+      "loc": 2405,
+      "commits": 75,
+      "agent_reads": 22,
+      "agent_edits": 30,
+      "size_penalty": 4,
+      "agent_cost": 628,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/versions.ts",
+      "loc": 3936,
+      "commits": 48,
+      "agent_reads": 21,
+      "agent_edits": 35,
+      "size_penalty": 4,
+      "agent_cost": 556,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/exec.ts",
+      "loc": 2565,
+      "commits": 74,
+      "agent_reads": 31,
+      "agent_edits": 11,
+      "size_penalty": 4,
+      "agent_cost": 508,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/routines.ts",
+      "loc": 2421,
+      "commits": 55,
+      "agent_reads": 16,
+      "agent_edits": 24,
+      "size_penalty": 4,
+      "agent_cost": 476,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/teams.ts",
+      "loc": 3063,
+      "commits": 45,
+      "agent_reads": 21,
+      "agent_edits": 25,
+      "size_penalty": 4,
+      "agent_cost": 464,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/session/active.ts",
+      "loc": 2520,
+      "commits": 65,
+      "agent_reads": 12,
+      "agent_edits": 16,
+      "size_penalty": 4,
+      "agent_cost": 436,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/usage.ts",
+      "loc": 3119,
+      "commits": 53,
+      "agent_reads": 24,
+      "agent_edits": 12,
+      "size_penalty": 4,
+      "agent_cost": 404,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/view.ts",
+      "loc": 2086,
+      "commits": 33,
+      "agent_reads": 22,
+      "agent_edits": 22,
+      "size_penalty": 4,
+      "agent_cost": 396,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/session/discover.ts",
+      "loc": 5555,
+      "commits": 65,
+      "agent_reads": 14,
+      "agent_edits": 8,
+      "size_penalty": 4,
+      "agent_cost": 380,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/bundles.ts",
+      "loc": 2049,
+      "commits": 52,
+      "agent_reads": 15,
+      "agent_edits": 12,
+      "size_penalty": 4,
+      "agent_cost": 364,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/routines.ts",
+      "loc": 2086,
+      "commits": 57,
+      "agent_reads": 7,
+      "agent_edits": 13,
+      "size_penalty": 4,
+      "agent_cost": 360,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/menubar/Sources/MenubarHelper/StatusItemController.swift",
+      "loc": 2072,
+      "commits": 39,
+      "agent_reads": 4,
+      "agent_edits": 20,
+      "size_penalty": 4,
+      "agent_cost": 332,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/secrets.ts",
+      "loc": 3174,
+      "commits": 71,
+      "agent_reads": 4,
+      "agent_edits": 3,
+      "size_penalty": 4,
+      "agent_cost": 324,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/sessions.test.ts",
+      "loc": 2604,
+      "commits": 33,
+      "agent_reads": 12,
+      "agent_edits": 15,
+      "size_penalty": 4,
+      "agent_cost": 300,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/doctor.ts",
+      "loc": 2058,
+      "commits": 43,
+      "agent_reads": 10,
+      "agent_edits": 9,
+      "size_penalty": 4,
+      "agent_cost": 284,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/routines.test.ts",
+      "loc": 2145,
+      "commits": 43,
+      "agent_reads": 11,
+      "agent_edits": 8,
+      "size_penalty": 4,
+      "agent_cost": 280,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/index.ts",
+      "loc": 1722,
+      "commits": 25,
+      "agent_reads": 19,
+      "agent_edits": 18,
+      "size_penalty": 3.44,
+      "agent_cost": 275.5,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/scripts/release.sh",
+      "loc": 1316,
+      "commits": 40,
+      "agent_reads": 18,
+      "agent_edits": 23,
+      "size_penalty": 2.63,
+      "agent_cost": 273.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/types.ts",
+      "loc": 1260,
+      "commits": 64,
+      "agent_reads": 10,
+      "agent_edits": 8,
+      "size_penalty": 2.52,
+      "agent_cost": 226.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/teams/agents.ts",
+      "loc": 3109,
+      "commits": 34,
+      "agent_reads": 6,
+      "agent_edits": 7,
+      "size_penalty": 4,
+      "agent_cost": 216,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/hooks.ts",
+      "loc": 3768,
+      "commits": 45,
+      "agent_reads": 3,
+      "agent_edits": 1,
+      "size_penalty": 4,
+      "agent_cost": 200,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/devices/doctor-findings.ts",
+      "loc": 1253,
+      "commits": 26,
+      "agent_reads": 14,
+      "agent_edits": 17,
+      "size_penalty": 2.51,
+      "agent_cost": 185.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/daemon.test.ts",
+      "loc": 1876,
+      "commits": 41,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 3.75,
+      "agent_cost": 183.8,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/shims.ts",
+      "loc": 3125,
+      "commits": 26,
+      "agent_reads": 2,
+      "agent_edits": 8,
+      "size_penalty": 4,
+      "agent_cost": 176,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/browser.ts",
+      "loc": 2335,
+      "commits": 18,
+      "agent_reads": 4,
+      "agent_edits": 11,
+      "size_penalty": 4,
+      "agent_cost": 176,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/__tests__/exec.test.ts",
+      "loc": 1589,
+      "commits": 22,
+      "agent_reads": 11,
+      "agent_edits": 10,
+      "size_penalty": 3.18,
+      "agent_cost": 168.4,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-picker.ts",
+      "loc": 1185,
+      "commits": 20,
+      "agent_reads": 12,
+      "agent_edits": 17,
+      "size_penalty": 2.37,
+      "agent_cost": 156.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/migrate.ts",
+      "loc": 2345,
+      "commits": 27,
+      "agent_reads": 0,
+      "agent_edits": 5,
+      "size_penalty": 4,
+      "agent_cost": 148,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/index.ts",
+      "loc": 115,
+      "commits": 90,
+      "agent_reads": 13,
+      "agent_edits": 17,
+      "size_penalty": 1,
+      "agent_cost": 137,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/state.ts",
+      "loc": 1434,
+      "commits": 44,
+      "agent_reads": 2,
+      "agent_edits": 0,
+      "size_penalty": 2.87,
+      "agent_cost": 131.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/startup/command-registry.ts",
+      "loc": 345,
+      "commits": 72,
+      "agent_reads": 13,
+      "agent_edits": 23,
+      "size_penalty": 1,
+      "agent_cost": 131,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/events.ts",
+      "loc": 1535,
+      "commits": 29,
+      "agent_reads": 6,
+      "agent_edits": 3,
+      "size_penalty": 3.07,
+      "agent_cost": 125.9,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/passthrough.ts",
+      "loc": 726,
+      "commits": 33,
+      "agent_reads": 11,
+      "agent_edits": 20,
+      "size_penalty": 1.45,
+      "agent_cost": 122,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/rotate.ts",
+      "loc": 1034,
+      "commits": 16,
+      "agent_reads": 14,
+      "agent_edits": 14,
+      "size_penalty": 2.07,
+      "agent_cost": 119.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/browser/service.ts",
+      "loc": 2825,
+      "commits": 15,
+      "agent_reads": 1,
+      "agent_edits": 6,
+      "size_penalty": 4,
+      "agent_cost": 112,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/session/parse.ts",
+      "loc": 2188,
+      "commits": 23,
+      "agent_reads": 3,
+      "agent_edits": 1,
+      "size_penalty": 4,
+      "agent_cost": 112,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/__tests__/hooks.test.ts",
+      "loc": 2404,
+      "commits": 27,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 4,
+      "agent_cost": 108,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/inspect.ts",
+      "loc": 2379,
+      "commits": 25,
+      "agent_reads": 2,
+      "agent_edits": 0,
+      "size_penalty": 4,
+      "agent_cost": 108,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/agent.ts",
+      "loc": 1547,
+      "commits": 33,
+      "agent_reads": 1,
+      "agent_edits": 0,
+      "size_penalty": 3.09,
+      "agent_cost": 105.2,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/runner.test.ts",
+      "loc": 906,
+      "commits": 27,
+      "agent_reads": 6,
+      "agent_edits": 12,
+      "size_penalty": 1.81,
+      "agent_cost": 103.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/sync.ts",
+      "loc": 1063,
+      "commits": 14,
+      "agent_reads": 6,
+      "agent_edits": 14,
+      "size_penalty": 2.13,
+      "agent_cost": 102,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/tmux/orphan-reap.ts",
+      "loc": 731,
+      "commits": 6,
+      "agent_reads": 11,
+      "agent_edits": 26,
+      "size_penalty": 1.46,
+      "agent_cost": 100.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/focus.ts",
+      "loc": 978,
+      "commits": 15,
+      "agent_reads": 10,
+      "agent_edits": 13,
+      "size_penalty": 1.96,
+      "agent_cost": 99.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/picker.ts",
+      "loc": 915,
+      "commits": 10,
+      "agent_reads": 9,
+      "agent_edits": 17,
+      "size_penalty": 1.83,
+      "agent_cost": 97,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/agents.test.ts",
+      "loc": 1274,
+      "commits": 25,
+      "agent_reads": 4,
+      "agent_edits": 4,
+      "size_penalty": 2.55,
+      "agent_cost": 94.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/daemon.ts",
+      "loc": 936,
+      "commits": 19,
+      "agent_reads": 0,
+      "agent_edits": 15,
+      "size_penalty": 1.87,
+      "agent_cost": 91.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-migrate.ts",
+      "loc": 729,
+      "commits": 7,
+      "agent_reads": 5,
+      "agent_edits": 24,
+      "size_penalty": 1.46,
+      "agent_cost": 87.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/activity.ts",
+      "loc": 1818,
+      "commits": 24,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 3.64,
+      "agent_cost": 87.3,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/git.ts",
+      "loc": 1662,
+      "commits": 24,
+      "agent_reads": 2,
+      "agent_edits": 0,
+      "size_penalty": 3.32,
+      "agent_cost": 86.4,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/exec.test.ts",
+      "loc": 1107,
+      "commits": 30,
+      "agent_reads": 3,
+      "agent_edits": 3,
+      "size_penalty": 2.21,
+      "agent_cost": 86.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/projects.ts",
+      "loc": 1316,
+      "commits": 32,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.63,
+      "agent_cost": 84.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/usage.test.ts",
+      "loc": 1025,
+      "commits": 29,
+      "agent_reads": 4,
+      "agent_edits": 4,
+      "size_penalty": 2.05,
+      "agent_cost": 84,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/dispatch.ts",
+      "loc": 689,
+      "commits": 36,
+      "agent_reads": 9,
+      "agent_edits": 7,
+      "size_penalty": 1.38,
+      "agent_cost": 81.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/models.ts",
+      "loc": 1301,
+      "commits": 15,
+      "agent_reads": 4,
+      "agent_edits": 6,
+      "size_penalty": 2.6,
+      "agent_cost": 80.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/routines.test.ts",
+      "loc": 1180,
+      "commits": 33,
+      "agent_reads": 1,
+      "agent_edits": 0,
+      "size_penalty": 2.36,
+      "agent_cost": 80.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/share.ts",
+      "loc": 743,
+      "commits": 17,
+      "agent_reads": 4,
+      "agent_edits": 15,
+      "size_penalty": 1.49,
+      "agent_cost": 75.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/monitors.ts",
+      "loc": 970,
+      "commits": 14,
+      "agent_reads": 3,
+      "agent_edits": 11,
+      "size_penalty": 1.94,
+      "agent_cost": 75.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/keychain-helper.swift",
+      "loc": 1009,
+      "commits": 14,
+      "agent_reads": 11,
+      "agent_edits": 6,
+      "size_penalty": 2.02,
+      "agent_cost": 74.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/tmux/session.ts",
+      "loc": 856,
+      "commits": 17,
+      "agent_reads": 6,
+      "agent_edits": 10,
+      "size_penalty": 1.71,
+      "agent_cost": 73.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/remote-list.ts",
+      "loc": 707,
+      "commits": 16,
+      "agent_reads": 11,
+      "agent_edits": 12,
+      "size_penalty": 1.41,
+      "agent_cost": 72.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/plugins.test.ts",
+      "loc": 2131,
+      "commits": 18,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 4,
+      "agent_cost": 72,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/index.bench.ts",
+      "loc": 1478,
+      "commits": 23,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.96,
+      "agent_cost": 68,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/devices/doctor-findings.test.ts",
+      "loc": 994,
+      "commits": 24,
+      "agent_reads": 2,
+      "agent_edits": 4,
+      "size_penalty": 1.99,
+      "agent_cost": 67.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/menubar/Sources/MenubarHelper/PromptPanel.swift",
+      "loc": 1292,
+      "commits": 17,
+      "agent_reads": 1,
+      "agent_edits": 4,
+      "size_penalty": 2.58,
+      "agent_cost": 67.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/feed.ts",
+      "loc": 1046,
+      "commits": 32,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.09,
+      "agent_cost": 66.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-browser.ts",
+      "loc": 855,
+      "commits": 17,
+      "agent_reads": 3,
+      "agent_edits": 9,
+      "size_penalty": 1.71,
+      "agent_cost": 65,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/permissions.ts",
+      "loc": 2330,
+      "commits": 16,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 4,
+      "agent_cost": 64,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/devices/harness-inventory.ts",
+      "loc": 352,
+      "commits": 4,
+      "agent_reads": 8,
+      "agent_edits": 26,
+      "size_penalty": 1,
+      "agent_cost": 64,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/bootstrap.ts",
+      "loc": 1307,
+      "commits": 13,
+      "agent_reads": 3,
+      "agent_edits": 4,
+      "size_penalty": 2.61,
+      "agent_cost": 62.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/menubar/Sources/MenubarHelper/AgentsCLI.swift",
+      "loc": 859,
+      "commits": 31,
+      "agent_reads": 2,
+      "agent_edits": 1,
+      "size_penalty": 1.72,
+      "agent_cost": 60.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/plugins.ts",
+      "loc": 2014,
+      "commits": 15,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 4,
+      "agent_cost": 60,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/lib/menubar/install-menubar.ts",
+      "loc": 908,
+      "commits": 24,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 1.82,
+      "agent_cost": 58.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/cloud/rush.ts",
+      "loc": 627,
+      "commits": 7,
+      "agent_reads": 14,
+      "agent_edits": 12,
+      "size_penalty": 1.25,
+      "agent_cost": 56.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/versions.test.ts",
+      "loc": 1651,
+      "commits": 17,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 3.3,
+      "agent_cost": 56.1,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/secrets.test.ts",
+      "loc": 982,
+      "commits": 28,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.96,
+      "agent_cost": 55,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/menubar/Sources/MenubarHelper/IssueSelfTest.swift",
+      "loc": 884,
+      "commits": 31,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.77,
+      "agent_cost": 54.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/remote-agents-json.ts",
+      "loc": 284,
+      "commits": 11,
+      "agent_reads": 11,
+      "agent_edits": 16,
+      "size_penalty": 1,
+      "agent_cost": 54,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/agent.test.ts",
+      "loc": 1028,
+      "commits": 26,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.06,
+      "agent_cost": 53.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/__tests__/usage.test.ts",
+      "loc": 1012,
+      "commits": 19,
+      "agent_reads": 3,
+      "agent_edits": 2,
+      "size_penalty": 2.02,
+      "agent_cost": 52.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/device-config.ts",
+      "loc": 770,
+      "commits": 16,
+      "agent_reads": 4,
+      "agent_edits": 7,
+      "size_penalty": 1.54,
+      "agent_cost": 52.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/git.test.ts",
+      "loc": 1138,
+      "commits": 23,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.28,
+      "agent_cost": 52.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/account-registry.ts",
+      "loc": 255,
+      "commits": 3,
+      "agent_reads": 9,
+      "agent_edits": 20,
+      "size_penalty": 1,
+      "agent_cost": 52,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/lease.test.ts",
+      "loc": 628,
+      "commits": 20,
+      "agent_reads": 7,
+      "agent_edits": 7,
+      "size_penalty": 1.26,
+      "agent_cost": 51.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/feed.ts",
+      "loc": 1060,
+      "commits": 24,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.12,
+      "agent_cost": 50.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/activity.test.ts",
+      "loc": 1209,
+      "commits": 19,
+      "agent_reads": 0,
+      "agent_edits": 1,
+      "size_penalty": 2.42,
+      "agent_cost": 50.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/__tests__/capabilities.test.ts",
+      "loc": 457,
+      "commits": 32,
+      "agent_reads": 4,
+      "agent_edits": 7,
+      "size_penalty": 1,
+      "agent_cost": 50,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/accounts.ts",
+      "loc": 165,
+      "commits": 4,
+      "agent_reads": 8,
+      "agent_edits": 19,
+      "size_penalty": 1,
+      "agent_cost": 50,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/state.ts",
+      "loc": 774,
+      "commits": 18,
+      "agent_reads": 2,
+      "agent_edits": 6,
+      "size_penalty": 1.55,
+      "agent_cost": 49.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/repo.ts",
+      "loc": 1444,
+      "commits": 17,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.89,
+      "agent_cost": 49.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/lease.ts",
+      "loc": 448,
+      "commits": 18,
+      "agent_reads": 11,
+      "agent_edits": 10,
+      "size_penalty": 1,
+      "agent_cost": 49,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/render.ts",
+      "loc": 1162,
+      "commits": 14,
+      "agent_reads": 3,
+      "agent_edits": 2,
+      "size_penalty": 2.32,
+      "agent_cost": 48.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/mcp.ts",
+      "loc": 1154,
+      "commits": 11,
+      "agent_reads": 2,
+      "agent_edits": 4,
+      "size_penalty": 2.31,
+      "agent_cost": 48.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/versions.ts",
+      "loc": 1098,
+      "commits": 11,
+      "agent_reads": 3,
+      "agent_edits": 4,
+      "size_penalty": 2.2,
+      "agent_cost": 48.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/remote.ts",
+      "loc": 506,
+      "commits": 14,
+      "agent_reads": 5,
+      "agent_edits": 14,
+      "size_penalty": 1.01,
+      "agent_cost": 47.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/migrate.test.ts",
+      "loc": 1071,
+      "commits": 18,
+      "agent_reads": 0,
+      "agent_edits": 2,
+      "size_penalty": 2.14,
+      "agent_cost": 47.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/types.ts",
+      "loc": 383,
+      "commits": 29,
+      "agent_reads": 11,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 46,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/resume.ts",
+      "loc": 164,
+      "commits": 7,
+      "agent_reads": 7,
+      "agent_edits": 16,
+      "size_penalty": 1,
+      "agent_cost": 46,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/auth-health.ts",
+      "loc": 547,
+      "commits": 10,
+      "agent_reads": 12,
+      "agent_edits": 10,
+      "size_penalty": 1.09,
+      "agent_cost": 45.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/bundles.test.ts",
+      "loc": 729,
+      "commits": 27,
+      "agent_reads": 2,
+      "agent_edits": 1,
+      "size_penalty": 1.46,
+      "agent_cost": 45.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/tests/agents.test.ts",
+      "loc": 669,
+      "commits": 24,
+      "agent_reads": 3,
+      "agent_edits": 3,
+      "size_penalty": 1.34,
+      "agent_cost": 44.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/resources.ts",
+      "loc": 545,
+      "commits": 16,
+      "agent_reads": 5,
+      "agent_edits": 9,
+      "size_penalty": 1.09,
+      "agent_cost": 42.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/exec.test.ts",
+      "loc": 678,
+      "commits": 19,
+      "agent_reads": 4,
+      "agent_edits": 4,
+      "size_penalty": 1.36,
+      "agent_cost": 42,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/push.ts",
+      "loc": 309,
+      "commits": 7,
+      "agent_reads": 4,
+      "agent_edits": 15,
+      "size_penalty": 1,
+      "agent_cost": 41,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/cli.ts",
+      "loc": 704,
+      "commits": 20,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 1.41,
+      "agent_cost": 39.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/scripts/install.sh",
+      "loc": 358,
+      "commits": 10,
+      "agent_reads": 1,
+      "agent_edits": 14,
+      "size_penalty": 1,
+      "agent_cost": 39,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/watchdog/runner.ts",
+      "loc": 1213,
+      "commits": 8,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 2.43,
+      "agent_cost": 38.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/__tests__/db.test.ts",
+      "loc": 804,
+      "commits": 18,
+      "agent_reads": 4,
+      "agent_edits": 1,
+      "size_penalty": 1.61,
+      "agent_cost": 38.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/reaper.test.ts",
+      "loc": 644,
+      "commits": 5,
+      "agent_reads": 7,
+      "agent_edits": 9,
+      "size_penalty": 1.29,
+      "agent_cost": 38.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/smart-launch.ts",
+      "loc": 385,
+      "commits": 8,
+      "agent_reads": 4,
+      "agent_edits": 13,
+      "size_penalty": 1,
+      "agent_cost": 38,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-export.ts",
+      "loc": 450,
+      "commits": 8,
+      "agent_reads": 3,
+      "agent_edits": 13,
+      "size_penalty": 1,
+      "agent_cost": 37,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/active.live-session-id.test.ts",
+      "loc": 212,
+      "commits": 6,
+      "agent_reads": 5,
+      "agent_edits": 13,
+      "size_penalty": 1,
+      "agent_cost": 37,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/harness.ts",
+      "loc": 658,
+      "commits": 15,
+      "agent_reads": 1,
+      "agent_edits": 6,
+      "size_penalty": 1.32,
+      "agent_cost": 36.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/remote-cmd.ts",
+      "loc": 397,
+      "commits": 24,
+      "agent_reads": 4,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 36,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/dispatch.test.ts",
+      "loc": 659,
+      "commits": 25,
+      "agent_reads": 0,
+      "agent_edits": 1,
+      "size_penalty": 1.32,
+      "agent_cost": 35.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/team-filter.ts",
+      "loc": 326,
+      "commits": 5,
+      "agent_reads": 4,
+      "agent_edits": 13,
+      "size_penalty": 1,
+      "agent_cost": 35,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/scripts/release.test.ts",
+      "loc": 235,
+      "commits": 8,
+      "agent_reads": 6,
+      "agent_edits": 10,
+      "size_penalty": 1,
+      "agent_cost": 34,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/workflows.ts",
+      "loc": 1413,
+      "commits": 12,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.83,
+      "agent_cost": 33.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/index.test.ts",
+      "loc": 637,
+      "commits": 16,
+      "agent_reads": 4,
+      "agent_edits": 3,
+      "size_penalty": 1.27,
+      "agent_cost": 33.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/tmux/orphan-reap.test.ts",
+      "loc": 490,
+      "commits": 5,
+      "agent_reads": 4,
+      "agent_edits": 12,
+      "size_penalty": 1,
+      "agent_cost": 33,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/remote.test.ts",
+      "loc": 533,
+      "commits": 11,
+      "agent_reads": 5,
+      "agent_edits": 7,
+      "size_penalty": 1.07,
+      "agent_cost": 32,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/browser/sessions-list.ts",
+      "loc": 464,
+      "commits": 5,
+      "agent_reads": 3,
+      "agent_edits": 12,
+      "size_penalty": 1,
+      "agent_cost": 32,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/tests/versions.test.ts",
+      "loc": 1553,
+      "commits": 10,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 3.11,
+      "agent_cost": 31.1,
+      "holdable": false
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-resume.ts",
+      "loc": 380,
+      "commits": 11,
+      "agent_reads": 4,
+      "agent_edits": 8,
+      "size_penalty": 1,
+      "agent_cost": 31,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/triggers/webhook.test.ts",
+      "loc": 799,
+      "commits": 13,
+      "agent_reads": 0,
+      "agent_edits": 3,
+      "size_penalty": 1.6,
+      "agent_cost": 30.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/daemon.test.ts",
+      "loc": 649,
+      "commits": 16,
+      "agent_reads": 1,
+      "agent_edits": 3,
+      "size_penalty": 1.3,
+      "agent_cost": 29.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/fleet/apply.ts",
+      "loc": 615,
+      "commits": 8,
+      "agent_reads": 4,
+      "agent_edits": 6,
+      "size_penalty": 1.23,
+      "agent_cost": 29.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/reaper.ts",
+      "loc": 376,
+      "commits": 5,
+      "agent_reads": 6,
+      "agent_edits": 9,
+      "size_penalty": 1,
+      "agent_cost": 29,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/account-registry.test.ts",
+      "loc": 229,
+      "commits": 3,
+      "agent_reads": 4,
+      "agent_edits": 11,
+      "size_penalty": 1,
+      "agent_cost": 29,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/passthrough.test.ts",
+      "loc": 549,
+      "commits": 17,
+      "agent_reads": 1,
+      "agent_edits": 4,
+      "size_penalty": 1.1,
+      "agent_cost": 28.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/inspect.test.ts",
+      "loc": 877,
+      "commits": 16,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.75,
+      "agent_cost": 28.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/ssh-exec.ts",
+      "loc": 412,
+      "commits": 10,
+      "agent_reads": 8,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 28,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/teams/scheduler.ts",
+      "loc": 396,
+      "commits": 7,
+      "agent_reads": 7,
+      "agent_edits": 7,
+      "size_penalty": 1,
+      "agent_cost": 28,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/ready.ts",
+      "loc": 334,
+      "commits": 10,
+      "agent_reads": 6,
+      "agent_edits": 6,
+      "size_penalty": 1,
+      "agent_cost": 28,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/commands.ts",
+      "loc": 920,
+      "commits": 7,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 1.84,
+      "agent_cost": 27.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/cloud.ts",
+      "loc": 594,
+      "commits": 17,
+      "agent_reads": 2,
+      "agent_edits": 2,
+      "size_penalty": 1.19,
+      "agent_cost": 27.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/computer/sessions-list.ts",
+      "loc": 461,
+      "commits": 7,
+      "agent_reads": 0,
+      "agent_edits": 10,
+      "size_penalty": 1,
+      "agent_cost": 27,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/apply.ts",
+      "loc": 437,
+      "commits": 7,
+      "agent_reads": 4,
+      "agent_edits": 8,
+      "size_penalty": 1,
+      "agent_cost": 27,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-picker.test.ts",
+      "loc": 659,
+      "commits": 12,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 1.32,
+      "agent_cost": 26.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/feed.test.ts",
+      "loc": 934,
+      "commits": 14,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.87,
+      "agent_cost": 26.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/rotate.test.ts",
+      "loc": 809,
+      "commits": 12,
+      "agent_reads": 2,
+      "agent_edits": 1,
+      "size_penalty": 1.62,
+      "agent_cost": 25.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/menubar/install-menubar.test.ts",
+      "loc": 451,
+      "commits": 15,
+      "agent_reads": 2,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 25,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/share.test.ts",
+      "loc": 770,
+      "commits": 11,
+      "agent_reads": 1,
+      "agent_edits": 2,
+      "size_penalty": 1.54,
+      "agent_cost": 24.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/menubar/Sources/MenubarHelper/LocalState.swift",
+      "loc": 759,
+      "commits": 14,
+      "agent_reads": 0,
+      "agent_edits": 1,
+      "size_penalty": 1.52,
+      "agent_cost": 24.3,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/__tests__/runner.test.ts",
+      "loc": 494,
+      "commits": 19,
+      "agent_reads": 1,
+      "agent_edits": 2,
+      "size_penalty": 1,
+      "agent_cost": 24,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/go.ts",
+      "loc": 390,
+      "commits": 13,
+      "agent_reads": 3,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 24,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/session/active.test.ts",
+      "loc": 376,
+      "commits": 16,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 24,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/runtimes.ts",
+      "loc": 305,
+      "commits": 8,
+      "agent_reads": 6,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 24,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/setup-copy.ts",
+      "loc": 194,
+      "commits": 5,
+      "agent_reads": 3,
+      "agent_edits": 8,
+      "size_penalty": 1,
+      "agent_cost": 24,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/setup.ts",
+      "loc": 480,
+      "commits": 21,
+      "agent_reads": 2,
+      "agent_edits": 0,
+      "size_penalty": 1,
+      "agent_cost": 23,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/share/worker-template.ts",
+      "loc": 225,
+      "commits": 7,
+      "agent_reads": 4,
+      "agent_edits": 6,
+      "size_penalty": 1,
+      "agent_cost": 23,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/subagents.ts",
+      "loc": 717,
+      "commits": 16,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.43,
+      "agent_cost": 22.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/tests/permissions.test.ts",
+      "loc": 1263,
+      "commits": 9,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 2.53,
+      "agent_cost": 22.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/tests/non-interactive.test.ts",
+      "loc": 863,
+      "commits": 13,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.73,
+      "agent_cost": 22.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/picker.test.ts",
+      "loc": 466,
+      "commits": 7,
+      "agent_reads": 5,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 22,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/message.ts",
+      "loc": 383,
+      "commits": 16,
+      "agent_reads": 0,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 22,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/remote-agents-json.test.ts",
+      "loc": 194,
+      "commits": 5,
+      "agent_reads": 3,
+      "agent_edits": 7,
+      "size_penalty": 1,
+      "agent_cost": 22,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/session-index.ts",
+      "loc": 142,
+      "commits": 10,
+      "agent_reads": 2,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 22,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/attach.ts",
+      "loc": 93,
+      "commits": 7,
+      "agent_reads": 5,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 22,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/browser/ipc.ts",
+      "loc": 913,
+      "commits": 9,
+      "agent_reads": 1,
+      "agent_edits": 1,
+      "size_penalty": 1.83,
+      "agent_cost": 21.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/computer-actions.ts",
+      "loc": 894,
+      "commits": 6,
+      "agent_reads": 0,
+      "agent_edits": 3,
+      "size_penalty": 1.79,
+      "agent_cost": 21.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/devices/connect.test.ts",
+      "loc": 323,
+      "commits": 8,
+      "agent_reads": 1,
+      "agent_edits": 6,
+      "size_penalty": 1,
+      "agent_cost": 21,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/cli.test.ts",
+      "loc": 647,
+      "commits": 10,
+      "agent_reads": 2,
+      "agent_edits": 2,
+      "size_penalty": 1.29,
+      "agent_cost": 20.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/feed-broadcast.ts",
+      "loc": 610,
+      "commits": 11,
+      "agent_reads": 2,
+      "agent_edits": 2,
+      "size_penalty": 1.22,
+      "agent_cost": 20.7,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/events.test.ts",
+      "loc": 792,
+      "commits": 13,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.58,
+      "agent_cost": 20.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/tmux/session.test.ts",
+      "loc": 602,
+      "commits": 17,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.2,
+      "agent_cost": 20.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/profiles.test.ts",
+      "loc": 680,
+      "commits": 15,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.36,
+      "agent_cost": 20.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/sessions-import.ts",
+      "loc": 365,
+      "commits": 3,
+      "agent_reads": 1,
+      "agent_edits": 8,
+      "size_penalty": 1,
+      "agent_cost": 20,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/teams/worktree.test.ts",
+      "loc": 302,
+      "commits": 8,
+      "agent_reads": 4,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 20,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/menubar/Sources/MenubarHelper/main.swift",
+      "loc": 187,
+      "commits": 15,
+      "agent_reads": 1,
+      "agent_edits": 2,
+      "size_penalty": 1,
+      "agent_cost": 20,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/scripts/build-keychain-helper.sh",
+      "loc": 153,
+      "commits": 7,
+      "agent_reads": 3,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 20,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/daemon-ticks.ts",
+      "loc": 149,
+      "commits": 10,
+      "agent_reads": 4,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 20,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/resources/types.ts",
+      "loc": 99,
+      "commits": 12,
+      "agent_reads": 2,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 20,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/doctor.test.ts",
+      "loc": 664,
+      "commits": 13,
+      "agent_reads": 0,
+      "agent_edits": 1,
+      "size_penalty": 1.33,
+      "agent_cost": 19.9,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/triggers/handlers.test.ts",
+      "loc": 699,
+      "commits": 5,
+      "agent_reads": 1,
+      "agent_edits": 4,
+      "size_penalty": 1.4,
+      "agent_cost": 19.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/projects.ts",
+      "loc": 613,
+      "commits": 16,
+      "agent_reads": 0,
+      "agent_edits": 0,
+      "size_penalty": 1.23,
+      "agent_cost": 19.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/profiles.ts",
+      "loc": 739,
+      "commits": 12,
+      "agent_reads": 1,
+      "agent_edits": 0,
+      "size_penalty": 1.48,
+      "agent_cost": 19.2,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/secrets/install-helper.ts",
+      "loc": 231,
+      "commits": 6,
+      "agent_reads": 5,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 19,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/device-config.test.ts",
+      "loc": 580,
+      "commits": 13,
+      "agent_reads": 1,
+      "agent_edits": 1,
+      "size_penalty": 1.16,
+      "agent_cost": 18.6,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/browser/profiles.test.ts",
+      "loc": 712,
+      "commits": 7,
+      "agent_reads": 2,
+      "agent_edits": 2,
+      "size_penalty": 1.42,
+      "agent_cost": 18.5,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/triggers/webhook.ts",
+      "loc": 695,
+      "commits": 9,
+      "agent_reads": 2,
+      "agent_edits": 1,
+      "size_penalty": 1.39,
+      "agent_cost": 18.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/models.ts",
+      "loc": 421,
+      "commits": 9,
+      "agent_reads": 3,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 18,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/monitors/engine.ts",
+      "loc": 351,
+      "commits": 4,
+      "agent_reads": 2,
+      "agent_edits": 6,
+      "size_penalty": 1,
+      "agent_cost": 18,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/scripts/install.test.ts",
+      "loc": 286,
+      "commits": 4,
+      "agent_reads": 0,
+      "agent_edits": 7,
+      "size_penalty": 1,
+      "agent_cost": 18,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/crabbox/runtimes.test.ts",
+      "loc": 277,
+      "commits": 8,
+      "agent_reads": 2,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 18,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/devices/connect.ts",
+      "loc": 261,
+      "commits": 9,
+      "agent_reads": 1,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 18,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/hosts/ready.test.ts",
+      "loc": 244,
+      "commits": 9,
+      "agent_reads": 3,
+      "agent_edits": 3,
+      "size_penalty": 1,
+      "agent_cost": 18,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/skills.ts",
+      "loc": 991,
+      "commits": 4,
+      "agent_reads": 1,
+      "agent_edits": 2,
+      "size_penalty": 1.98,
+      "agent_cost": 17.8,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/fleet/apply.test.ts",
+      "loc": 511,
+      "commits": 6,
+      "agent_reads": 3,
+      "agent_edits": 4,
+      "size_penalty": 1.02,
+      "agent_cost": 17.4,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/teams/parsers.ts",
+      "loc": 1427,
+      "commits": 3,
+      "agent_reads": 1,
+      "agent_edits": 1,
+      "size_penalty": 2.85,
+      "agent_cost": 17.1,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/commands/events.ts",
+      "loc": 466,
+      "commits": 14,
+      "agent_reads": 1,
+      "agent_edits": 1,
+      "size_penalty": 1,
+      "agent_cost": 17,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/teams/scheduler.test.ts",
+      "loc": 388,
+      "commits": 6,
+      "agent_reads": 1,
+      "agent_edits": 5,
+      "size_penalty": 1,
+      "agent_cost": 17,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/auth-health.test.ts",
+      "loc": 324,
+      "commits": 7,
+      "agent_reads": 2,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 17,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/cloud/rush.test.ts",
+      "loc": 296,
+      "commits": 4,
+      "agent_reads": 5,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 17,
+      "holdable": true
+    },
+    {
+      "file": "apps/cli/src/lib/model-tiers.test.ts",
+      "loc": 265,
+      "commits": 7,
+      "agent_reads": 2,
+      "agent_edits": 4,
+      "size_penalty": 1,
+      "agent_cost": 17,
+      "holdable": true
+    }
+  ]
+}

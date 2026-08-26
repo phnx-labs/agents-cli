@@ -1,0 +1,1842 @@
+{
+  "meta": {
+    "repo": "/home/user/src/github.com/muqsitnawaz/agents-cli",
+    "scope": "apps/cli",
+    "module_depth": 3,
+    "modules": 49,
+    "files_parsed": 747,
+    "files_unparsed": 363,
+    "coverage": 1,
+    "module_edges": 206,
+    "cycles": 1,
+    "god_modules": 3,
+    "extraction_candidates": 3,
+    "upward_imports": 0,
+    "caveats": [
+      "Layer inference is name-based (commands/cli=top, lib/core=middle, utils=bottom) — verify before calling an upward import a violation.",
+      "Package-specifier imports (non-relative) are not edges; a monorepo cross-package dep via its published name is invisible here.",
+      "Module granularity is a directory at --depth; a repo whose architecture does not follow its directory tree will produce a graph that flatters it."
+    ]
+  },
+  "modules": [
+    {
+      "module": "src/lib",
+      "files": 195,
+      "loc": 90059,
+      "fan_in": 1117,
+      "fan_out": 176,
+      "depends_on": 28,
+      "depended_on_by": 40,
+      "internal_edges": 619,
+      "cohesion": 0.78,
+      "api_files": 164,
+      "api_ratio": 0.84,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/session",
+      "files": 61,
+      "loc": 28983,
+      "fan_in": 251,
+      "fan_out": 101,
+      "depends_on": 11,
+      "depended_on_by": 19,
+      "internal_edges": 114,
+      "cohesion": 0.53,
+      "api_files": 50,
+      "api_ratio": 0.82,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/devices",
+      "files": 26,
+      "loc": 6532,
+      "fan_in": 110,
+      "fan_out": 55,
+      "depends_on": 9,
+      "depended_on_by": 12,
+      "internal_edges": 37,
+      "cohesion": 0.4,
+      "api_files": 26,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/commands",
+      "files": 128,
+      "loc": 74776,
+      "fan_in": 97,
+      "fan_out": 1111,
+      "depends_on": 38,
+      "depended_on_by": 7,
+      "internal_edges": 161,
+      "cohesion": 0.13,
+      "api_files": 85,
+      "api_ratio": 0.66,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/hosts",
+      "files": 24,
+      "loc": 5001,
+      "fan_in": 93,
+      "fan_out": 46,
+      "depends_on": 5,
+      "depended_on_by": 9,
+      "internal_edges": 46,
+      "cohesion": 0.5,
+      "api_files": 19,
+      "api_ratio": 0.79,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/secrets",
+      "files": 31,
+      "loc": 11806,
+      "fan_in": 76,
+      "fan_out": 31,
+      "depends_on": 6,
+      "depended_on_by": 11,
+      "internal_edges": 51,
+      "cohesion": 0.62,
+      "api_files": 24,
+      "api_ratio": 0.77,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/platform",
+      "files": 8,
+      "loc": 905,
+      "fan_in": 41,
+      "fan_out": 1,
+      "depends_on": 1,
+      "depended_on_by": 8,
+      "internal_edges": 6,
+      "cohesion": 0.86,
+      "api_files": 7,
+      "api_ratio": 0.88,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/browser",
+      "files": 23,
+      "loc": 9140,
+      "fan_in": 31,
+      "fan_out": 29,
+      "depends_on": 5,
+      "depended_on_by": 4,
+      "internal_edges": 56,
+      "cohesion": 0.66,
+      "api_files": 15,
+      "api_ratio": 0.65,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/teams",
+      "files": 17,
+      "loc": 8872,
+      "fan_in": 26,
+      "fan_out": 40,
+      "depends_on": 7,
+      "depended_on_by": 7,
+      "internal_edges": 30,
+      "cohesion": 0.43,
+      "api_files": 12,
+      "api_ratio": 0.71,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/cloud",
+      "files": 12,
+      "loc": 3262,
+      "fan_in": 23,
+      "fan_out": 31,
+      "depends_on": 6,
+      "depended_on_by": 6,
+      "internal_edges": 21,
+      "cohesion": 0.4,
+      "api_files": 6,
+      "api_ratio": 0.5,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/staleness",
+      "files": 39,
+      "loc": 3214,
+      "fan_in": 23,
+      "fan_out": 86,
+      "depends_on": 2,
+      "depended_on_by": 5,
+      "internal_edges": 111,
+      "cohesion": 0.56,
+      "api_files": 15,
+      "api_ratio": 0.38,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/tmux",
+      "files": 5,
+      "loc": 1877,
+      "fan_in": 23,
+      "fan_out": 1,
+      "depends_on": 1,
+      "depended_on_by": 4,
+      "internal_edges": 8,
+      "cohesion": 0.89,
+      "api_files": 4,
+      "api_ratio": 0.8,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/agent-spec",
+      "files": 5,
+      "loc": 451,
+      "fan_in": 15,
+      "fan_out": 5,
+      "depends_on": 1,
+      "depended_on_by": 7,
+      "internal_edges": 7,
+      "cohesion": 0.58,
+      "api_files": 2,
+      "api_ratio": 0.4,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/rules",
+      "files": 4,
+      "loc": 1224,
+      "fan_in": 15,
+      "fan_out": 15,
+      "depends_on": 2,
+      "depended_on_by": 3,
+      "internal_edges": 1,
+      "cohesion": 0.06,
+      "api_files": 4,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/terminal",
+      "files": 17,
+      "loc": 1636,
+      "fan_in": 15,
+      "fan_out": 9,
+      "depends_on": 3,
+      "depended_on_by": 4,
+      "internal_edges": 47,
+      "cohesion": 0.84,
+      "api_files": 6,
+      "api_ratio": 0.35,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/budget",
+      "files": 6,
+      "loc": 1085,
+      "fan_in": 14,
+      "fan_out": 10,
+      "depends_on": 4,
+      "depended_on_by": 4,
+      "internal_edges": 8,
+      "cohesion": 0.44,
+      "api_files": 6,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/channels",
+      "files": 9,
+      "loc": 714,
+      "fan_in": 12,
+      "fan_out": 8,
+      "depends_on": 2,
+      "depended_on_by": 3,
+      "internal_edges": 15,
+      "cohesion": 0.65,
+      "api_files": 5,
+      "api_ratio": 0.56,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/pricing",
+      "files": 3,
+      "loc": 257,
+      "fan_in": 12,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 4,
+      "internal_edges": 3,
+      "cohesion": 1,
+      "api_files": 2,
+      "api_ratio": 0.67,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/crabbox",
+      "files": 6,
+      "loc": 1959,
+      "fan_in": 11,
+      "fan_out": 10,
+      "depends_on": 3,
+      "depended_on_by": 3,
+      "internal_edges": 7,
+      "cohesion": 0.41,
+      "api_files": 5,
+      "api_ratio": 0.83,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/share",
+      "files": 8,
+      "loc": 1732,
+      "fan_in": 11,
+      "fan_out": 5,
+      "depends_on": 3,
+      "depended_on_by": 2,
+      "internal_edges": 6,
+      "cohesion": 0.55,
+      "api_files": 6,
+      "api_ratio": 0.75,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/startup",
+      "files": 4,
+      "loc": 460,
+      "fan_in": 10,
+      "fan_out": 83,
+      "depends_on": 1,
+      "depended_on_by": 6,
+      "internal_edges": 1,
+      "cohesion": 0.01,
+      "api_files": 4,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/fleet",
+      "files": 6,
+      "loc": 2153,
+      "fan_in": 9,
+      "fan_out": 16,
+      "depends_on": 6,
+      "depended_on_by": 3,
+      "internal_edges": 6,
+      "cohesion": 0.27,
+      "api_files": 6,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/menubar",
+      "files": 3,
+      "loc": 1175,
+      "fan_in": 9,
+      "fan_out": 14,
+      "depends_on": 6,
+      "depended_on_by": 4,
+      "internal_edges": 1,
+      "cohesion": 0.07,
+      "api_files": 3,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/hooks",
+      "files": 3,
+      "loc": 964,
+      "fan_in": 8,
+      "fan_out": 5,
+      "depends_on": 1,
+      "depended_on_by": 2,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 2,
+      "api_ratio": 0.67,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/computer",
+      "files": 5,
+      "loc": 1151,
+      "fan_in": 7,
+      "fan_out": 11,
+      "depends_on": 4,
+      "depended_on_by": 1,
+      "internal_edges": 2,
+      "cohesion": 0.15,
+      "api_files": 5,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/watchdog",
+      "files": 9,
+      "loc": 2547,
+      "fan_in": 7,
+      "fan_out": 24,
+      "depends_on": 3,
+      "depended_on_by": 3,
+      "internal_edges": 11,
+      "cohesion": 0.31,
+      "api_files": 5,
+      "api_ratio": 0.56,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/analytics",
+      "files": 4,
+      "loc": 1056,
+      "fan_in": 6,
+      "fan_out": 6,
+      "depends_on": 2,
+      "depended_on_by": 5,
+      "internal_edges": 5,
+      "cohesion": 0.45,
+      "api_files": 2,
+      "api_ratio": 0.5,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/monitors",
+      "files": 15,
+      "loc": 1886,
+      "fan_in": 6,
+      "fan_out": 20,
+      "depends_on": 3,
+      "depended_on_by": 2,
+      "internal_edges": 31,
+      "cohesion": 0.61,
+      "api_files": 5,
+      "api_ratio": 0.33,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/serve",
+      "files": 6,
+      "loc": 1091,
+      "fan_in": 5,
+      "fan_out": 9,
+      "depends_on": 3,
+      "depended_on_by": 1,
+      "internal_edges": 5,
+      "cohesion": 0.36,
+      "api_files": 3,
+      "api_ratio": 0.5,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/perf",
+      "files": 3,
+      "loc": 500,
+      "fan_in": 4,
+      "fan_out": 7,
+      "depends_on": 2,
+      "depended_on_by": 3,
+      "internal_edges": 3,
+      "cohesion": 0.3,
+      "api_files": 2,
+      "api_ratio": 0.67,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/self-heal",
+      "files": 7,
+      "loc": 400,
+      "fan_in": 4,
+      "fan_out": 9,
+      "depends_on": 1,
+      "depended_on_by": 2,
+      "internal_edges": 11,
+      "cohesion": 0.55,
+      "api_files": 2,
+      "api_ratio": 0.29,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/triggers",
+      "files": 2,
+      "loc": 1194,
+      "fan_in": 4,
+      "fan_out": 12,
+      "depends_on": 2,
+      "depended_on_by": 2,
+      "internal_edges": 2,
+      "cohesion": 0.14,
+      "api_files": 2,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/deeplink",
+      "files": 2,
+      "loc": 378,
+      "fan_in": 3,
+      "fan_out": 2,
+      "depends_on": 2,
+      "depended_on_by": 1,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 2,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/installations",
+      "files": 6,
+      "loc": 1035,
+      "fan_in": 3,
+      "fan_out": 16,
+      "depends_on": 2,
+      "depended_on_by": 2,
+      "internal_edges": 13,
+      "cohesion": 0.45,
+      "api_files": 3,
+      "api_ratio": 0.5,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/acp",
+      "files": 3,
+      "loc": 317,
+      "fan_in": 2,
+      "fan_out": 5,
+      "depends_on": 1,
+      "depended_on_by": 1,
+      "internal_edges": 2,
+      "cohesion": 0.29,
+      "api_files": 2,
+      "api_ratio": 0.67,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/audit",
+      "files": 1,
+      "loc": 193,
+      "fan_in": 2,
+      "fan_out": 4,
+      "depends_on": 2,
+      "depended_on_by": 1,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 1,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/bench",
+      "files": 5,
+      "loc": 341,
+      "fan_in": 1,
+      "fan_out": 2,
+      "depends_on": 1,
+      "depended_on_by": 1,
+      "internal_edges": 8,
+      "cohesion": 0.8,
+      "api_files": 1,
+      "api_ratio": 0.2,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/factory",
+      "files": 1,
+      "loc": 236,
+      "fan_in": 1,
+      "fan_out": 4,
+      "depends_on": 4,
+      "depended_on_by": 1,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 1,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/output",
+      "files": 1,
+      "loc": 277,
+      "fan_in": 1,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 1,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 1,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/resources",
+      "files": 10,
+      "loc": 2058,
+      "fan_in": 1,
+      "fan_out": 24,
+      "depends_on": 1,
+      "depended_on_by": 1,
+      "internal_edges": 9,
+      "cohesion": 0.27,
+      "api_files": 1,
+      "api_ratio": 0.1,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/tickets",
+      "files": 1,
+      "loc": 207,
+      "fan_in": 1,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 1,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 1,
+      "api_ratio": 1,
+      "layer": 2
+    },
+    {
+      "module": "bench",
+      "files": 5,
+      "loc": 1244,
+      "fan_in": 0,
+      "fan_out": 14,
+      "depends_on": 5,
+      "depended_on_by": 0,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "scripts",
+      "files": 9,
+      "loc": 1784,
+      "fan_in": 0,
+      "fan_out": 15,
+      "depends_on": 6,
+      "depended_on_by": 0,
+      "internal_edges": 1,
+      "cohesion": 0.06,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "scripts/companion-shim/bin",
+      "files": 1,
+      "loc": 3,
+      "fan_in": 0,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 0,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "scripts/companion-shim/scripts",
+      "files": 1,
+      "loc": 6,
+      "fan_in": 0,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 0,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "src",
+      "files": 4,
+      "loc": 1454,
+      "fan_in": 0,
+      "fan_out": 37,
+      "depends_on": 10,
+      "depended_on_by": 0,
+      "internal_edges": 2,
+      "cohesion": 0.05,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "src/commands/testdata",
+      "files": 1,
+      "loc": 156,
+      "fan_in": 0,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 0,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/testdata",
+      "files": 1,
+      "loc": 23,
+      "fan_in": 0,
+      "fan_out": 1,
+      "depends_on": 1,
+      "depended_on_by": 0,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    },
+    {
+      "module": "(root)",
+      "files": 1,
+      "loc": 32,
+      "fan_in": 0,
+      "fan_out": 0,
+      "depends_on": 0,
+      "depended_on_by": 0,
+      "internal_edges": 0,
+      "cohesion": 0,
+      "api_files": 0,
+      "api_ratio": 0,
+      "layer": 2
+    }
+  ],
+  "god_modules": [
+    {
+      "module": "src/lib",
+      "files": 195,
+      "loc": 90059,
+      "fan_in": 1117,
+      "fan_out": 176,
+      "depends_on": 28,
+      "depended_on_by": 40,
+      "internal_edges": 619,
+      "cohesion": 0.78,
+      "api_files": 164,
+      "api_ratio": 0.84,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/session",
+      "files": 61,
+      "loc": 28983,
+      "fan_in": 251,
+      "fan_out": 101,
+      "depends_on": 11,
+      "depended_on_by": 19,
+      "internal_edges": 114,
+      "cohesion": 0.53,
+      "api_files": 50,
+      "api_ratio": 0.82,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/devices",
+      "files": 26,
+      "loc": 6532,
+      "fan_in": 110,
+      "fan_out": 55,
+      "depends_on": 9,
+      "depended_on_by": 12,
+      "internal_edges": 37,
+      "cohesion": 0.4,
+      "api_files": 26,
+      "api_ratio": 1,
+      "layer": 2
+    }
+  ],
+  "cycles": [
+    [
+      "src/commands",
+      "src/lib",
+      "src/lib/acp",
+      "src/lib/agent-spec",
+      "src/lib/analytics",
+      "src/lib/audit",
+      "src/lib/bench",
+      "src/lib/browser",
+      "src/lib/budget",
+      "src/lib/channels",
+      "src/lib/cloud",
+      "src/lib/computer",
+      "src/lib/crabbox",
+      "src/lib/deeplink",
+      "src/lib/devices",
+      "src/lib/factory",
+      "src/lib/fleet",
+      "src/lib/hooks",
+      "src/lib/hosts",
+      "src/lib/installations",
+      "src/lib/menubar",
+      "src/lib/monitors",
+      "src/lib/perf",
+      "src/lib/platform",
+      "src/lib/resources",
+      "src/lib/rules",
+      "src/lib/secrets",
+      "src/lib/self-heal",
+      "src/lib/serve",
+      "src/lib/session",
+      "src/lib/share",
+      "src/lib/staleness",
+      "src/lib/startup",
+      "src/lib/teams",
+      "src/lib/terminal",
+      "src/lib/tmux",
+      "src/lib/triggers",
+      "src/lib/watchdog"
+    ]
+  ],
+  "extraction_candidates": [
+    {
+      "module": "src/lib/terminal",
+      "files": 17,
+      "loc": 1636,
+      "fan_in": 15,
+      "fan_out": 9,
+      "depends_on": 3,
+      "depended_on_by": 4,
+      "internal_edges": 47,
+      "cohesion": 0.84,
+      "api_files": 6,
+      "api_ratio": 0.35,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/monitors",
+      "files": 15,
+      "loc": 1886,
+      "fan_in": 6,
+      "fan_out": 20,
+      "depends_on": 3,
+      "depended_on_by": 2,
+      "internal_edges": 31,
+      "cohesion": 0.61,
+      "api_files": 5,
+      "api_ratio": 0.33,
+      "layer": 2
+    },
+    {
+      "module": "src/lib/self-heal",
+      "files": 7,
+      "loc": 400,
+      "fan_in": 4,
+      "fan_out": 9,
+      "depends_on": 1,
+      "depended_on_by": 2,
+      "internal_edges": 11,
+      "cohesion": 0.55,
+      "api_files": 2,
+      "api_ratio": 0.29,
+      "layer": 2
+    }
+  ],
+  "upward_imports": [],
+  "edges": [
+    {
+      "from": "src/commands",
+      "to": "src/lib",
+      "count": 610
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/session",
+      "count": 176
+    },
+    {
+      "from": "src/lib/staleness",
+      "to": "src/lib",
+      "count": 84
+    },
+    {
+      "from": "src/lib/startup",
+      "to": "src/commands",
+      "count": 83
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib",
+      "count": 71
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/devices",
+      "count": 51
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/hosts",
+      "count": 48
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/secrets",
+      "count": 44
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib",
+      "count": 43
+    },
+    {
+      "from": "src/lib/hosts",
+      "to": "src/lib",
+      "count": 29
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/session",
+      "count": 25
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/browser",
+      "count": 24
+    },
+    {
+      "from": "src/lib/resources",
+      "to": "src/lib",
+      "count": 24
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/platform",
+      "count": 23
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/devices",
+      "count": 22
+    },
+    {
+      "from": "src/lib/secrets",
+      "to": "src/lib",
+      "count": 19
+    },
+    {
+      "from": "src/lib/browser",
+      "to": "src/lib",
+      "count": 18
+    },
+    {
+      "from": "src/lib/teams",
+      "to": "src/lib",
+      "count": 18
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/secrets",
+      "count": 17
+    },
+    {
+      "from": "src/lib/cloud",
+      "to": "src/lib",
+      "count": 17
+    },
+    {
+      "from": "src/lib/monitors",
+      "to": "src/lib",
+      "count": 17
+    },
+    {
+      "from": "src",
+      "to": "src/lib",
+      "count": 16
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/teams",
+      "count": 16
+    },
+    {
+      "from": "src/lib/watchdog",
+      "to": "src/lib",
+      "count": 15
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/cloud",
+      "count": 14
+    },
+    {
+      "from": "src/lib/installations",
+      "to": "src/lib",
+      "count": 14
+    },
+    {
+      "from": "src/lib/rules",
+      "to": "src/lib",
+      "count": 12
+    },
+    {
+      "from": "src/lib/hosts",
+      "to": "src/lib/devices",
+      "count": 11
+    },
+    {
+      "from": "src/lib/triggers",
+      "to": "src/lib",
+      "count": 11
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/share",
+      "count": 10
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/tmux",
+      "count": 10
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/terminal",
+      "count": 10
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/hosts",
+      "count": 10
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/devices",
+      "count": 10
+    },
+    {
+      "from": "scripts",
+      "to": "src/lib/staleness",
+      "count": 9
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/crabbox",
+      "count": 9
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/staleness",
+      "count": 9
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/channels",
+      "count": 9
+    },
+    {
+      "from": "src/lib/self-heal",
+      "to": "src/lib",
+      "count": 9
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/platform",
+      "count": 8
+    },
+    {
+      "from": "src/lib/browser",
+      "to": "src/lib/session",
+      "count": 8
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/tmux",
+      "count": 8
+    },
+    {
+      "from": "src/lib/teams",
+      "to": "src/lib/hosts",
+      "count": 8
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/fleet",
+      "count": 7
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/computer",
+      "count": 7
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/rules",
+      "count": 7
+    },
+    {
+      "from": "src/lib/channels",
+      "to": "src/lib",
+      "count": 7
+    },
+    {
+      "from": "src/lib/crabbox",
+      "to": "src/lib",
+      "count": 7
+    },
+    {
+      "from": "src/lib/menubar",
+      "to": "src/lib",
+      "count": 7
+    },
+    {
+      "from": "bench",
+      "to": "src/lib",
+      "count": 6
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/pricing",
+      "count": 6
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/hooks",
+      "count": 6
+    },
+    {
+      "from": "src/lib/cloud",
+      "to": "src/lib/hosts",
+      "count": 6
+    },
+    {
+      "from": "src/lib/computer",
+      "to": "src/lib",
+      "count": 6
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/rules",
+      "count": 6
+    },
+    {
+      "from": "src/lib/fleet",
+      "to": "src/lib",
+      "count": 6
+    },
+    {
+      "from": "src/lib/secrets",
+      "to": "src/lib/hosts",
+      "count": 6
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/hosts",
+      "count": 6
+    },
+    {
+      "from": "src/lib/watchdog",
+      "to": "src/lib/session",
+      "count": 6
+    },
+    {
+      "from": "src",
+      "to": "src/commands",
+      "count": 5
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/budget",
+      "count": 5
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/monitors",
+      "count": 5
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/serve",
+      "count": 5
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/watchdog",
+      "count": 5
+    },
+    {
+      "from": "src/lib/acp",
+      "to": "src/lib",
+      "count": 5
+    },
+    {
+      "from": "src/lib/agent-spec",
+      "to": "src/lib",
+      "count": 5
+    },
+    {
+      "from": "src/lib/analytics",
+      "to": "src/lib",
+      "count": 5
+    },
+    {
+      "from": "src/lib/budget",
+      "to": "src/lib",
+      "count": 5
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/agent-spec",
+      "count": 5
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/browser",
+      "count": 5
+    },
+    {
+      "from": "src/lib/fleet",
+      "to": "src/lib/devices",
+      "count": 5
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/menubar",
+      "count": 5
+    },
+    {
+      "from": "src/lib/hooks",
+      "to": "src/lib",
+      "count": 5
+    },
+    {
+      "from": "src/lib/perf",
+      "to": "src/lib",
+      "count": 5
+    },
+    {
+      "from": "bench",
+      "to": "src/lib/session",
+      "count": 4
+    },
+    {
+      "from": "src",
+      "to": "src/lib/startup",
+      "count": 4
+    },
+    {
+      "from": "src",
+      "to": "src/lib/secrets",
+      "count": 4
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/agent-spec",
+      "count": 4
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/hosts",
+      "count": 4
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/budget",
+      "count": 4
+    },
+    {
+      "from": "src/lib/hosts",
+      "to": "src/lib/session",
+      "count": 4
+    },
+    {
+      "from": "src/lib/serve",
+      "to": "src/lib",
+      "count": 4
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/tmux",
+      "count": 4
+    },
+    {
+      "from": "src/lib/teams",
+      "to": "src/lib/session",
+      "count": 4
+    },
+    {
+      "from": "src/lib/teams",
+      "to": "src/lib/devices",
+      "count": 4
+    },
+    {
+      "from": "src/lib/terminal",
+      "to": "src/lib",
+      "count": 4
+    },
+    {
+      "from": "src/lib/terminal",
+      "to": "src/lib/session",
+      "count": 4
+    },
+    {
+      "from": "src",
+      "to": "src/lib/hosts",
+      "count": 3
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/deeplink",
+      "count": 3
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/triggers",
+      "count": 3
+    },
+    {
+      "from": "src/lib/audit",
+      "to": "src/lib",
+      "count": 3
+    },
+    {
+      "from": "src/lib/budget",
+      "to": "src/lib/pricing",
+      "count": 3
+    },
+    {
+      "from": "src/lib/cloud",
+      "to": "src/lib/session",
+      "count": 3
+    },
+    {
+      "from": "src/lib/computer",
+      "to": "src/lib/session",
+      "count": 3
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/self-heal",
+      "count": 3
+    },
+    {
+      "from": "src/lib/rules",
+      "to": "src/lib/staleness",
+      "count": 3
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/cloud",
+      "count": 3
+    },
+    {
+      "from": "src/lib/serve",
+      "to": "src/lib/teams",
+      "count": 3
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/platform",
+      "count": 3
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/teams",
+      "count": 3
+    },
+    {
+      "from": "src/lib",
+      "to": "src/commands",
+      "count": 3
+    },
+    {
+      "from": "src/lib/teams",
+      "to": "src/lib/budget",
+      "count": 3
+    },
+    {
+      "from": "src/lib/watchdog",
+      "to": "src/lib/terminal",
+      "count": 3
+    },
+    {
+      "from": "bench",
+      "to": "src/commands",
+      "count": 2
+    },
+    {
+      "from": "scripts",
+      "to": "src/lib/session",
+      "count": 2
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/audit",
+      "count": 2
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/channels",
+      "count": 2
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/acp",
+      "count": 2
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/analytics",
+      "count": 2
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/menubar",
+      "count": 2
+    },
+    {
+      "from": "src/lib/bench",
+      "to": "src/lib",
+      "count": 2
+    },
+    {
+      "from": "src/lib/cloud",
+      "to": "src/lib/secrets",
+      "count": 2
+    },
+    {
+      "from": "src/lib/cloud",
+      "to": "src/lib/budget",
+      "count": 2
+    },
+    {
+      "from": "src/lib/crabbox",
+      "to": "src/lib/secrets",
+      "count": 2
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/session",
+      "count": 2
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/perf",
+      "count": 2
+    },
+    {
+      "from": "src/lib/fleet",
+      "to": "src/lib/hosts",
+      "count": 2
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/hooks",
+      "count": 2
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/startup",
+      "count": 2
+    },
+    {
+      "from": "src/lib/installations",
+      "to": "src/lib/agent-spec",
+      "count": 2
+    },
+    {
+      "from": "src/lib/menubar",
+      "to": "src/commands",
+      "count": 2
+    },
+    {
+      "from": "src/lib/menubar",
+      "to": "src/lib/session",
+      "count": 2
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/pricing",
+      "count": 2
+    },
+    {
+      "from": "src/lib/monitors",
+      "to": "src/lib/devices",
+      "count": 2
+    },
+    {
+      "from": "src/lib/perf",
+      "to": "src/lib/session",
+      "count": 2
+    },
+    {
+      "from": "src/lib/secrets",
+      "to": "src/lib/platform",
+      "count": 2
+    },
+    {
+      "from": "src/lib/secrets",
+      "to": "src/lib/session",
+      "count": 2
+    },
+    {
+      "from": "src/lib/serve",
+      "to": "src/lib/cloud",
+      "count": 2
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/cloud",
+      "count": 2
+    },
+    {
+      "from": "src/lib/share",
+      "to": "src/lib",
+      "count": 2
+    },
+    {
+      "from": "src/lib/share",
+      "to": "src/lib/secrets",
+      "count": 2
+    },
+    {
+      "from": "src/lib/staleness",
+      "to": "src/lib/rules",
+      "count": 2
+    },
+    {
+      "from": "src/lib/teams",
+      "to": "src/lib/platform",
+      "count": 2
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/installations",
+      "count": 2
+    },
+    {
+      "from": "bench",
+      "to": "src/lib/agent-spec",
+      "count": 1
+    },
+    {
+      "from": "bench",
+      "to": "src/lib/teams",
+      "count": 1
+    },
+    {
+      "from": "scripts",
+      "to": "src/lib/agent-spec",
+      "count": 1
+    },
+    {
+      "from": "scripts",
+      "to": "src/lib",
+      "count": 1
+    },
+    {
+      "from": "scripts",
+      "to": "src/lib/startup",
+      "count": 1
+    },
+    {
+      "from": "scripts",
+      "to": "src/lib/devices",
+      "count": 1
+    },
+    {
+      "from": "src",
+      "to": "src/lib/platform",
+      "count": 1
+    },
+    {
+      "from": "src",
+      "to": "src/lib/analytics",
+      "count": 1
+    },
+    {
+      "from": "src",
+      "to": "src/lib/perf",
+      "count": 1
+    },
+    {
+      "from": "src",
+      "to": "src/lib/self-heal",
+      "count": 1
+    },
+    {
+      "from": "src",
+      "to": "src/lib/menubar",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/bench",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/staleness",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/factory",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/startup",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/output",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/perf",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/tickets",
+      "count": 1
+    },
+    {
+      "from": "src/commands",
+      "to": "src/lib/installations",
+      "count": 1
+    },
+    {
+      "from": "src/lib/analytics",
+      "to": "src/lib/session",
+      "count": 1
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/terminal",
+      "count": 1
+    },
+    {
+      "from": "src/lib/audit",
+      "to": "src/lib/staleness",
+      "count": 1
+    },
+    {
+      "from": "src/lib/browser",
+      "to": "src/lib/secrets",
+      "count": 1
+    },
+    {
+      "from": "src/lib/browser",
+      "to": "src/lib/platform",
+      "count": 1
+    },
+    {
+      "from": "src/lib/browser",
+      "to": "src/lib/analytics",
+      "count": 1
+    },
+    {
+      "from": "src/lib/budget",
+      "to": "src/lib/cloud",
+      "count": 1
+    },
+    {
+      "from": "src/lib/budget",
+      "to": "src/lib/teams",
+      "count": 1
+    },
+    {
+      "from": "src/lib/channels",
+      "to": "src/lib/menubar",
+      "count": 1
+    },
+    {
+      "from": "src/lib/cloud",
+      "to": "src/lib/share",
+      "count": 1
+    },
+    {
+      "from": "src/lib/computer",
+      "to": "src/commands",
+      "count": 1
+    },
+    {
+      "from": "src/lib/computer",
+      "to": "src/lib/browser",
+      "count": 1
+    },
+    {
+      "from": "src/lib/crabbox",
+      "to": "src/lib/cloud",
+      "count": 1
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/monitors",
+      "count": 1
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/watchdog",
+      "count": 1
+    },
+    {
+      "from": "src/lib/deeplink",
+      "to": "src/lib",
+      "count": 1
+    },
+    {
+      "from": "src/lib/deeplink",
+      "to": "src/lib/session",
+      "count": 1
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/fleet",
+      "count": 1
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/platform",
+      "count": 1
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/secrets",
+      "count": 1
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/channels",
+      "count": 1
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/agent-spec",
+      "count": 1
+    },
+    {
+      "from": "src/lib/devices",
+      "to": "src/lib/startup",
+      "count": 1
+    },
+    {
+      "from": "src/lib/factory",
+      "to": "src/lib/session",
+      "count": 1
+    },
+    {
+      "from": "src/lib/factory",
+      "to": "src/commands",
+      "count": 1
+    },
+    {
+      "from": "src/lib/factory",
+      "to": "src/lib",
+      "count": 1
+    },
+    {
+      "from": "src/lib/factory",
+      "to": "src/lib/devices",
+      "count": 1
+    },
+    {
+      "from": "src/lib/fleet",
+      "to": "src/lib/secrets",
+      "count": 1
+    },
+    {
+      "from": "src/lib/fleet",
+      "to": "src/lib/teams",
+      "count": 1
+    },
+    {
+      "from": "src/lib/fleet",
+      "to": "src/lib/session",
+      "count": 1
+    },
+    {
+      "from": "src/lib/hosts",
+      "to": "src/lib/crabbox",
+      "count": 1
+    },
+    {
+      "from": "src/lib/hosts",
+      "to": "src/lib/startup",
+      "count": 1
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/analytics",
+      "count": 1
+    },
+    {
+      "from": "src/lib/menubar",
+      "to": "src/lib/agent-spec",
+      "count": 1
+    },
+    {
+      "from": "src/lib/menubar",
+      "to": "src/lib/devices",
+      "count": 1
+    },
+    {
+      "from": "src/lib/menubar",
+      "to": "src/lib/watchdog",
+      "count": 1
+    },
+    {
+      "from": "src/lib/monitors",
+      "to": "src/lib/triggers",
+      "count": 1
+    },
+    {
+      "from": "src/lib/platform",
+      "to": "src/lib",
+      "count": 1
+    },
+    {
+      "from": "src/lib",
+      "to": "src/lib/resources",
+      "count": 1
+    },
+    {
+      "from": "src/lib/secrets",
+      "to": "src/lib/devices",
+      "count": 1
+    },
+    {
+      "from": "src/lib/secrets",
+      "to": "src/lib/analytics",
+      "count": 1
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/teams",
+      "count": 1
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/pricing",
+      "count": 1
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/terminal",
+      "count": 1
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/crabbox",
+      "count": 1
+    },
+    {
+      "from": "src/lib/session",
+      "to": "src/lib/secrets",
+      "count": 1
+    },
+    {
+      "from": "src/lib/share",
+      "to": "src/lib/browser",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,6958 @@
+{
+  "meta": {
+    "repo": "/home/user/src/github.com/muqsitnawaz/agents-cli",
+    "scope": "apps/cli",
+    "files_scanned": 747,
+    "files_unparsed": 363,
+    "families": 103,
+    "exemplars": 2,
+    "partial": 52,
+    "bypassed": 10,
+    "missing": 39,
+    "collapsible_arms": 1943,
+    "thresholds": {
+      "min_members": 3,
+      "min_arms": 4
+    },
+    "caveats": [
+      "CANDIDATES, not verdicts. A family whose variants genuinely diverge in contract is not a provider family; `same_contract` stays null until an agent or human judges it.",
+      "Detection is textual: a discriminator reached only through a helper (`isClaude(x)`) or a table lookup is invisible here.",
+      "An `exemplar` in this repo is the pattern the codebase already chose — prefer it over any external pattern when proposing a fix.",
+      "Families are keyed by VARIABLE NAME, so two unrelated concepts that share one (a terminal `backend` and a secrets `backend`) merge into a single polluted row. Check `top_sites` before trusting a member list.",
+      "`capability_holes` compares exported names only; a capability reached through a shared base class, or one whose implementation differs in name, is invisible. Treat holes as candidates.",
+      "`generic_name: true` marks a discriminator whose name alone (kind/mode/type) is weak evidence — it cleared a higher member and arm bar to appear at all."
+    ]
+  },
+  "families": [
+    {
+      "discriminator": "kind",
+      "generic_name": true,
+      "members": [
+        "1password",
+        "active",
+        "add-agent",
+        "agent",
+        "agent-version-missing-local",
+        "agent-version-missing-remote",
+        "all",
+        "allow_always",
+        "allow_once",
+        "ambiguous",
+        "assistant_message_committed",
+        "binary",
+        "binary-shadow",
+        "bug",
+        "bundle",
+        "candidates",
+        "ci-fix",
+        "claude",
+        "cli",
+        "cloud",
+        "cmd",
+        "codex",
+        "command",
+        "commands",
+        "conflict",
+        "control",
+        "cross",
+        "declared",
+        "device",
+        "dir",
+        "dispatch",
+        "done",
+        "dormant",
+        "download",
+        "downloads",
+        "drift",
+        "due-soon",
+        "edit",
+        "env",
+        "env-secret-export",
+        "ephemeral",
+        "error",
+        "escalate",
+        "exec",
+        "exec-policy",
+        "extra",
+        "file",
+        "finished",
+        "fleet",
+        "fleet-resource-gap",
+        "gemini",
+        "hooks",
+        "host-cli-missing",
+        "human",
+        "icloud",
+        "idea",
+        "init",
+        "install-cli",
+        "iterm",
+        "keychain",
+        "lease",
+        "leave-foreign",
+        "leave-real",
+        "literal",
+        "local",
+        "locked",
+        "locked-keychain",
+        "logged-out",
+        "logout-unprovable",
+        "mailbox",
+        "match",
+        "mcp",
+        "memory",
+        "meta",
+        "missing-resource",
+        "model_completed",
+        "model_request_configured",
+        "msg",
+        "named",
+        "need-message",
+        "needs-human",
+        "needs-login",
+        "needs-secret",
+        "no-dates",
+        "noTeam",
+        "none",
+        "not-found",
+        "not-started",
+        "nudge",
+        "ok",
+        "operations",
+        "orphan",
+        "overdue",
+        "owner-sink-unreachable",
+        "partial",
+        "permissions",
+        "plan",
+        "plugins",
+        "project",
+        "promptcuts",
+        "pty",
+        "push-login",
+        "push-secret",
+        "rate_limited",
+        "rc-secret-export",
+        "read",
+        "ready",
+        "refuse",
+        "remote",
+        "remove-dangling",
+        "rendered",
+        "repo-behind",
+        "repo-drift",
+        "reroute",
+        "resolved",
+        "resource-missing-local",
+        "resource-missing-remote",
+        "restore-backup",
+        "restore-version-home",
+        "resume",
+        "reuse",
+        "review-fix",
+        "routines",
+        "rules",
+        "scheduled",
+        "screen",
+        "secrets",
+        "setup-token",
+        "skill",
+        "skills",
+        "skip",
+        "ssh",
+        "stale-cli",
+        "steer",
+        "subagent",
+        "subagents",
+        "sync-config",
+        "system",
+        "task",
+        "tasks",
+        "team",
+        "teardown",
+        "tick",
+        "tmux",
+        "todos",
+        "tool.called",
+        "tool_call",
+        "tunnel",
+        "turn",
+        "turn_submit",
+        "unassigned",
+        "unknown",
+        "untracked",
+        "upgrade-cli",
+        "url",
+        "user",
+        "version-skew",
+        "vision_switch",
+        "warmup",
+        "which",
+        "workflow",
+        "workflows",
+        "write"
+      ],
+      "member_count": 163,
+      "arms": 362,
+      "files": 76,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/inspect.ts",
+          "arms": 36
+        },
+        {
+          "file": "apps/cli/src/lib/devices/doctor-findings.ts",
+          "arms": 22
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 21
+        },
+        {
+          "file": "apps/cli/src/commands/teams.ts",
+          "arms": 17
+        },
+        {
+          "file": "apps/cli/src/commands/secrets.ts",
+          "arms": 16
+        },
+        {
+          "file": "apps/cli/src/commands/message.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/lib/resources.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/commands/apply.ts",
+          "arms": 13
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 176
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 95
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 25
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 24
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 12
+        }
+      ],
+      "area_concentration": 0.49,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/browser-sessions-picker.ts:62",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/browser-sessions-picker.ts:62",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "cli",
+        "cloud",
+        "commands",
+        "exec",
+        "hooks",
+        "lease",
+        "mcp",
+        "memory",
+        "permissions",
+        "plugins",
+        "pty",
+        "resume",
+        "routines",
+        "rules",
+        "secrets",
+        "skills",
+        "ssh",
+        "subagents",
+        "tmux",
+        "workflows"
+      ],
+      "provider_coverage": 0.12,
+      "capability_holes": [],
+      "arms_per_member": 2.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "type",
+      "generic_name": true,
+      "members": [
+        "AndOr",
+        "AnsiCQuoted",
+        "ArithmeticBinary",
+        "ArithmeticCommand",
+        "ArithmeticCommandExpansion",
+        "ArithmeticExpansion",
+        "ArithmeticFor",
+        "ArithmeticGroup",
+        "ArithmeticTernary",
+        "ArithmeticUnary",
+        "ArithmeticWord",
+        "BraceExpansion",
+        "BraceGroup",
+        "CallExpression",
+        "Case",
+        "Command",
+        "CommandExpansion",
+        "CompoundList",
+        "Coproc",
+        "DoubleQuoted",
+        "ExtendedGlob",
+        "For",
+        "Function",
+        "Identifier",
+        "If",
+        "Literal",
+        "LocaleString",
+        "MemberExpression",
+        "ObjectExpression",
+        "ParameterExpansion",
+        "Pipeline",
+        "ProcessSubstitution",
+        "Property",
+        "Select",
+        "SingleQuoted",
+        "Statement",
+        "Subshell",
+        "TemplateLiteral",
+        "TestBinary",
+        "TestCommand",
+        "TestGroup",
+        "TestLogical",
+        "TestNot",
+        "TestUnary",
+        "While",
+        "ai-title",
+        "api",
+        "assistant",
+        "attachment",
+        "base64",
+        "bash",
+        "bool",
+        "command",
+        "command_succeeds",
+        "commands",
+        "completed",
+        "context.append_loop_event",
+        "context.append_message",
+        "custom-title",
+        "custom_tool_call",
+        "custom_tool_call_output",
+        "device",
+        "document",
+        "done",
+        "error",
+        "event_msg",
+        "exit_zero",
+        "file",
+        "file_exists",
+        "flow",
+        "function",
+        "function_call",
+        "function_call_output",
+        "gemini",
+        "git",
+        "github_event",
+        "hook",
+        "hooks",
+        "image",
+        "init",
+        "input_text",
+        "int",
+        "interrupt",
+        "linear_event",
+        "load",
+        "local",
+        "mcp",
+        "message",
+        "needs-human",
+        "notify",
+        "oauth",
+        "output_text",
+        "page",
+        "plugin",
+        "plugins",
+        "poll",
+        "poll-http",
+        "raw",
+        "reasoning",
+        "remote",
+        "response_item",
+        "result",
+        "routine",
+        "run",
+        "selector",
+        "session_meta",
+        "session_start",
+        "skill",
+        "skills",
+        "spawned",
+        "started",
+        "status",
+        "stdout_contains",
+        "string",
+        "string-list",
+        "subagents",
+        "text",
+        "thinking",
+        "thread.completed",
+        "time",
+        "token_count",
+        "tool_call",
+        "tool_result",
+        "tool_use",
+        "turn.completed",
+        "turn_context",
+        "turn_ended",
+        "unknown",
+        "url",
+        "usage",
+        "usage.record",
+        "user",
+        "warning",
+        "web_search_end",
+        "webhook",
+        "webhook-out",
+        "weekday",
+        "wellknown",
+        "ws"
+      ],
+      "member_count": 139,
+      "arms": 356,
+      "files": 49,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/shell-programs.ts",
+          "arms": 41
+        },
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 38
+        },
+        {
+          "file": "apps/cli/src/lib/session/discover.ts",
+          "arms": 29
+        },
+        {
+          "file": "apps/cli/src/lib/session/state.ts",
+          "arms": 29
+        },
+        {
+          "file": "apps/cli/src/lib/session/tool-calls.ts",
+          "arms": 22
+        },
+        {
+          "file": "apps/cli/src/lib/session/render.ts",
+          "arms": 20
+        },
+        {
+          "file": "apps/cli/src/commands/monitors.ts",
+          "arms": 12
+        },
+        {
+          "file": "apps/cli/src/lib/browser/service.ts",
+          "arms": 11
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 204
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 45
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 34
+        },
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 20
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 18
+        }
+      ],
+      "area_concentration": 0.57,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/teams.ts:104",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/teams.ts:104",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "commands",
+        "hooks",
+        "mcp",
+        "message",
+        "plugins",
+        "skills",
+        "status",
+        "subagents",
+        "usage",
+        "webhook"
+      ],
+      "provider_coverage": 0.07,
+      "capability_holes": [],
+      "arms_per_member": 2.6,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "status",
+      "generic_name": true,
+      "members": [
+        "abandoned",
+        "allocating",
+        "blocked",
+        "cancelled",
+        "closed",
+        "completed",
+        "conflict",
+        "connected",
+        "crashed",
+        "created",
+        "current",
+        "deleted",
+        "diff",
+        "disconnected",
+        "done",
+        "dup",
+        "error",
+        "exists",
+        "extra",
+        "failed",
+        "fresh",
+        "idle",
+        "imported",
+        "in_progress",
+        "input_required",
+        "missed",
+        "missing",
+        "needs_review",
+        "never-synced",
+        "new",
+        "next",
+        "no-version",
+        "not-signed-in",
+        "offline",
+        "ok",
+        "orphaned",
+        "out_of_credits",
+        "partial",
+        "passed",
+        "pending",
+        "pr_open",
+        "queued",
+        "rate_limited",
+        "running",
+        "skipped",
+        "stale",
+        "stopped",
+        "success",
+        "synced",
+        "timeout",
+        "unknown",
+        "unsupported",
+        "updated",
+        "waiting",
+        "working",
+        "would-import"
+      ],
+      "member_count": 56,
+      "arms": 346,
+      "files": 71,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 61
+        },
+        {
+          "file": "apps/cli/src/commands/doctor.ts",
+          "arms": 18
+        },
+        {
+          "file": "apps/cli/src/commands/ssh.ts",
+          "arms": 15
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/commands/teams.ts",
+          "arms": 13
+        },
+        {
+          "file": "apps/cli/src/lib/teams/summarizer.ts",
+          "arms": 10
+        },
+        {
+          "file": "apps/cli/src/lib/cloud/stream.ts",
+          "arms": 9
+        },
+        {
+          "file": "apps/cli/src/commands/cloud.ts",
+          "arms": 8
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 195
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 47
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 29
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 25
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 17
+        }
+      ],
+      "area_concentration": 0.56,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/project-pull.ts:416",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/project-pull.ts:416",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 6.2,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "agent",
+      "generic_name": false,
+      "members": [
+        "...",
+        "antigravity",
+        "auto",
+        "claude",
+        "codex",
+        "copilot",
+        "cursor",
+        "droid",
+        "gemini",
+        "goose",
+        "grok",
+        "hermes",
+        "kimi",
+        "kiro",
+        "muse",
+        "openclaw",
+        "opencode",
+        "pi",
+        "rush",
+        "warp"
+      ],
+      "member_count": 20,
+      "arms": 287,
+      "files": 40,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/models.ts",
+          "arms": 26
+        },
+        {
+          "file": "apps/cli/src/lib/exec.ts",
+          "arms": 25
+        },
+        {
+          "file": "apps/cli/src/lib/shims.ts",
+          "arms": 23
+        },
+        {
+          "file": "apps/cli/src/lib/plugins.ts",
+          "arms": 20
+        },
+        {
+          "file": "apps/cli/src/lib/workflows.ts",
+          "arms": 19
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 18
+        },
+        {
+          "file": "apps/cli/src/lib/session/discover.ts",
+          "arms": 18
+        },
+        {
+          "file": "apps/cli/src/lib/resources/mcp.ts",
+          "arms": 14
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 175
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 42
+        },
+        {
+          "area": "apps/cli/src/lib/resources",
+          "arms": 25
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 19
+        },
+        {
+          "area": "apps/cli/src/lib/staleness/writers",
+          "arms": 14
+        }
+      ],
+      "area_concentration": 0.61,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/types.ts:11",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/add-dir.ts:32",
+      "provider_dir": "apps/cli/src/lib/cloud",
+      "provider_covered": [
+        "antigravity",
+        "codex",
+        "cursor",
+        "rush"
+      ],
+      "provider_coverage": 0.2,
+      "capability_holes": [],
+      "arms_per_member": 14.3,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "platform",
+      "generic_name": false,
+      "members": [
+        "darwin",
+        "linux",
+        "macos",
+        "win32",
+        "windows"
+      ],
+      "member_count": 5,
+      "arms": 189,
+      "files": 84,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/daemon.ts",
+          "arms": 15
+        },
+        {
+          "file": "apps/cli/src/lib/deeplink/register.ts",
+          "arms": 12
+        },
+        {
+          "file": "apps/cli/src/commands/secrets.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/exec.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/runner.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/fleet/apply.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/platform/process.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/versions.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 73
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 28
+        },
+        {
+          "area": "apps/cli/src/lib/platform",
+          "arms": 14
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 13
+        },
+        {
+          "area": "apps/cli/src/lib/deeplink",
+          "arms": 12
+        }
+      ],
+      "area_concentration": 0.39,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/devices/registry.ts:24",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/browser/chrome.ts:22",
+      "provider_dir": "apps/cli/src/lib/secrets",
+      "provider_covered": [
+        "linux",
+        "windows"
+      ],
+      "provider_coverage": 0.4,
+      "capability_holes": [
+        {
+          "member": "linux",
+          "missing": [
+            "CRED_MAX_CREDENTIAL_BLOB_SIZE",
+            "hasCredManToken",
+            "getCredManToken",
+            "setCredManToken",
+            "deleteCredManToken",
+            "listCredManItems",
+            "parseWindowsCredList",
+            "importNativeCredManItems",
+            "windowsBackend"
+          ]
+        },
+        {
+          "member": "windows",
+          "missing": [
+            "hasSecretToolToken",
+            "getSecretToolToken",
+            "setSecretToolToken",
+            "deleteSecretToolToken",
+            "parseSecretToolItems",
+            "listSecretToolItems",
+            "importNativeSecretToolItems",
+            "linuxBackend"
+          ]
+        }
+      ],
+      "arms_per_member": 37.8,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "agentId",
+      "generic_name": false,
+      "members": [
+        "amp",
+        "antigravity",
+        "claude",
+        "codex",
+        "copilot",
+        "cursor",
+        "droid",
+        "gemini",
+        "goose",
+        "grok",
+        "hermes",
+        "kimi",
+        "kiro",
+        "muse",
+        "openclaw",
+        "opencode",
+        "pi",
+        "warp"
+      ],
+      "member_count": 18,
+      "arms": 168,
+      "files": 9,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/agents.ts",
+          "arms": 82
+        },
+        {
+          "file": "apps/cli/src/lib/mcp.ts",
+          "arms": 35
+        },
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 25
+        },
+        {
+          "file": "apps/cli/src/lib/hooks.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/lib/signin-badge.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/commands/permissions.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/import.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/commands/run-cloud.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 162
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 0.96,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/types.ts:11",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/add-dir.ts:32",
+      "provider_dir": "apps/cli/src/lib/cloud",
+      "provider_covered": [
+        "antigravity",
+        "codex",
+        "cursor"
+      ],
+      "provider_coverage": 0.17,
+      "capability_holes": [],
+      "arms_per_member": 9.3,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "name",
+      "generic_name": true,
+      "members": [
+        ".",
+        "..",
+        ".git",
+        "@phnx-labs/agents-cli",
+        "AGENTS",
+        "BrowserCdpConnectionError",
+        "BrowserDaemonNotRunningError",
+        "DeviceOffloadUnsupportedError",
+        "ExitPlanMode",
+        "ExitPromptError",
+        "ExperimentalWarning",
+        "MEMORY",
+        "SKILL.md",
+        "TaskCreate",
+        "Y",
+        "__askpass",
+        "__pycache__",
+        "_internal",
+        "_legacy",
+        "account_key",
+        "account_org",
+        "actor",
+        "agents",
+        "agents.max-concurrent",
+        "archived_at",
+        "browser.profile",
+        "browser.remote-control",
+        "browser.task-idle-minutes",
+        "check",
+        "claude-usage.json",
+        "cmd",
+        "cmd.exe",
+        "config.json",
+        "content_text",
+        "cost_usd",
+        "cron",
+        "daemon.enabled",
+        "describe",
+        "done",
+        "duration_ms",
+        "error",
+        "escape",
+        "evidence_bytes",
+        "exec",
+        "exec_command",
+        "hq",
+        "initiated_by",
+        "is_team_origin",
+        "jobs",
+        "label",
+        "last_activity",
+        "linear_project",
+        "linear_project_url",
+        "machine",
+        "message",
+        "model",
+        "name",
+        "node_modules",
+        "notes",
+        "origin",
+        "output",
+        "output_tokens",
+        "parser_state",
+        "perms",
+        "plan",
+        "powershell",
+        "powershell.exe",
+        "pr_number",
+        "pr_url",
+        "pwsh",
+        "pwsh.exe",
+        "recent_directories_touched",
+        "registry.json",
+        "resources",
+        "routine_name",
+        "routine_run_id",
+        "scheduler.enabled",
+        "session.jsonl",
+        "sessions",
+        "sessions.db",
+        "sessions.db-shm",
+        "sessions.db-wal",
+        "spawned_team",
+        "status",
+        "subagent",
+        "tab",
+        "text",
+        "thinking",
+        "ticket_id",
+        "tmux.enabled",
+        "todos",
+        "tool_call_count",
+        "tool_result",
+        "tool_use",
+        "tools",
+        "upgrade",
+        "upstream",
+        "usage",
+        "used_browser",
+        "used_computer",
+        "watchdog.enabled",
+        "worktree_slug",
+        "y"
+      ],
+      "member_count": 103,
+      "arms": 130,
+      "files": 30,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/db.ts",
+          "arms": 36
+        },
+        {
+          "file": "apps/cli/src/bootstrap.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/lib/migrate.ts",
+          "arms": 13
+        },
+        {
+          "file": "apps/cli/src/lib/cloud/stream.ts",
+          "arms": 10
+        },
+        {
+          "file": "apps/cli/src/commands/config.ts",
+          "arms": 9
+        },
+        {
+          "file": "apps/cli/src/lib/git.ts",
+          "arms": 8
+        },
+        {
+          "file": "apps/cli/src/lib/pty-server.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/picker.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 43
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 42
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 17
+        },
+        {
+          "area": "apps/cli/src",
+          "arms": 14
+        },
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 10
+        }
+      ],
+      "area_concentration": 0.33,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/beta.ts:11",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/beta.ts:11",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "exec",
+        "message",
+        "output",
+        "sessions",
+        "status",
+        "upgrade",
+        "usage"
+      ],
+      "provider_coverage": 0.07,
+      "capability_holes": [],
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "scope",
+      "generic_name": false,
+      "members": [
+        "all",
+        "auto",
+        "browser",
+        "device",
+        "extra",
+        "interactive",
+        "project",
+        "run",
+        "system",
+        "usage",
+        "user"
+      ],
+      "member_count": 11,
+      "arms": 102,
+      "files": 23,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/config.ts",
+          "arms": 28
+        },
+        {
+          "file": "apps/cli/src/lib/config-keys.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/commands/hooks.ts",
+          "arms": 11
+        },
+        {
+          "file": "apps/cli/src/commands/view.ts",
+          "arms": 10
+        },
+        {
+          "file": "apps/cli/src/commands/rules.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/device-config.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/mcp.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 61
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 33
+        },
+        {
+          "area": "apps/cli/src/lib/staleness/checkers",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/rules",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib/monitors",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.6,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/config-keys.ts:12",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/session/session-cache.ts:62",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "browser",
+        "usage"
+      ],
+      "provider_coverage": 0.18,
+      "capability_holes": [
+        {
+          "member": "browser",
+          "missing": [
+            "registerUsageCommand",
+            "formatAgentUsage"
+          ]
+        },
+        {
+          "member": "usage",
+          "missing": [
+            "buildBrowserPreview",
+            "buildBrowserLabel",
+            "browserTaskPicker"
+          ]
+        }
+      ],
+      "arms_per_member": 9.3,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "mode",
+      "generic_name": true,
+      "members": [
+        "all",
+        "append",
+        "auto",
+        "cards",
+        "chooser",
+        "cloud",
+        "cold",
+        "default-branch-fast-forward",
+        "drop",
+        "edit",
+        "every",
+        "full",
+        "host",
+        "incremental",
+        "input",
+        "interactive",
+        "join",
+        "json",
+        "local",
+        "markdown",
+        "match",
+        "merge",
+        "native",
+        "old-peer",
+        "on-change",
+        "plan",
+        "provision",
+        "pull",
+        "refresh",
+        "replace",
+        "resume",
+        "run",
+        "search",
+        "skip",
+        "summary",
+        "view"
+      ],
+      "member_count": 36,
+      "arms": 96,
+      "files": 37,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/runner.ts",
+          "arms": 20
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/mcp.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/session/tool-store.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/codex-policy.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/session/discover.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/teams/agents.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/browser/service.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 48
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 18
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 10
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/agent-modes.ts:17",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/agent-modes.ts:17",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "cloud",
+        "resume",
+        "view"
+      ],
+      "provider_coverage": 0.08,
+      "capability_holes": [],
+      "arms_per_member": 2.7,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "eventType",
+      "generic_name": false,
+      "members": [
+        "assistant",
+        "bash",
+        "content.part",
+        "directory_list",
+        "end",
+        "error",
+        "file_create",
+        "file_delete",
+        "file_read",
+        "file_write",
+        "init",
+        "item.completed",
+        "message",
+        "result",
+        "session_start",
+        "step-finish",
+        "step-start",
+        "step_finish",
+        "step_start",
+        "system",
+        "text",
+        "thinking",
+        "thought",
+        "thread.started",
+        "tool.call",
+        "tool.result",
+        "tool_call",
+        "tool_result",
+        "tool_use",
+        "turn.completed",
+        "turn.started",
+        "user",
+        "warning"
+      ],
+      "member_count": 33,
+      "arms": 76,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 33
+        },
+        {
+          "file": "apps/cli/src/lib/teams/summarizer.ts",
+          "arms": 33
+        },
+        {
+          "file": "apps/cli/src/lib/teams/api.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 73
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.96,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/events.ts:246",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/events.ts:246",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "action",
+      "generic_name": true,
+      "members": [
+        "activated",
+        "all",
+        "allow",
+        "click",
+        "console",
+        "decrypt",
+        "deny",
+        "done",
+        "encrypt",
+        "errors",
+        "evaluate",
+        "exec",
+        "focus",
+        "gc",
+        "getAppLogs",
+        "history",
+        "hover",
+        "keep",
+        "list",
+        "navigate",
+        "nudge",
+        "pause",
+        "paused",
+        "pdf",
+        "ping",
+        "press",
+        "read",
+        "reconfigure",
+        "record-start",
+        "record-stop",
+        "refs",
+        "requests",
+        "resize",
+        "response-body",
+        "resume",
+        "screen",
+        "screenshot",
+        "scroll",
+        "set-device",
+        "set-download-path",
+        "set-viewport",
+        "signal",
+        "skip",
+        "start",
+        "status",
+        "stop",
+        "tab-add",
+        "tab-close",
+        "tab-focus",
+        "tab-list",
+        "type",
+        "update",
+        "upload",
+        "version",
+        "view",
+        "wait",
+        "wait-download",
+        "write"
+      ],
+      "member_count": 58,
+      "arms": 67,
+      "files": 15,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/browser/ipc.ts",
+          "arms": 34
+        },
+        {
+          "file": "apps/cli/src/lib/pty-server.ts",
+          "arms": 10
+        },
+        {
+          "file": "apps/cli/src/commands/artifacts-setup.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/feed.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/permissions.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/vault-age-helper.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 35
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 14
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 12
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.52,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/repo.ts:222",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/repo.ts:222",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "exec",
+        "focus",
+        "resume",
+        "status",
+        "update",
+        "view"
+      ],
+      "provider_coverage": 0.1,
+      "capability_holes": [],
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "role",
+      "generic_name": false,
+      "members": [
+        "assistant",
+        "developer",
+        "generic",
+        "meta",
+        "none",
+        "personal",
+        "stage",
+        "system",
+        "textbox",
+        "tool",
+        "user",
+        "worker"
+      ],
+      "member_count": 12,
+      "arms": 66,
+      "files": 14,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 11
+        },
+        {
+          "file": "apps/cli/src/lib/session/render.ts",
+          "arms": 11
+        },
+        {
+          "file": "apps/cli/src/lib/session/discover.ts",
+          "arms": 10
+        },
+        {
+          "file": "apps/cli/src/lib/watchdog/watchdogTail.ts",
+          "arms": 8
+        },
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/lib/session/state.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/ssh.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/browser/refs.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 39
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 8
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 8
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.59,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 5.5,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "backend",
+      "generic_name": false,
+      "members": [
+        "cancel",
+        "file",
+        "ghostty",
+        "inplace",
+        "iterm",
+        "keychain",
+        "pty",
+        "terminal",
+        "tmux",
+        "vault",
+        "vscodium"
+      ],
+      "member_count": 11,
+      "arms": 61,
+      "files": 8,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/secrets/bundles.ts",
+          "arms": 21
+        },
+        {
+          "file": "apps/cli/src/commands/secrets.ts",
+          "arms": 19
+        },
+        {
+          "file": "apps/cli/src/lib/terminal/inject.ts",
+          "arms": 9
+        },
+        {
+          "file": "apps/cli/src/commands/sessions-resume.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/setup-secrets.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/answer-router.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/focus.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/icloud-import.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 27
+        },
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 22
+        },
+        {
+          "area": "apps/cli/src/lib/terminal",
+          "arms": 9
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.44,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/terminal/backends/index.ts:19",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/terminal/backends/index.ts:19",
+      "provider_dir": "apps/cli/src/lib/terminal/backends",
+      "provider_covered": [
+        "ghostty",
+        "iterm",
+        "tmux",
+        "vscodium"
+      ],
+      "provider_coverage": 0.36,
+      "capability_holes": [],
+      "arms_per_member": 5.5,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "tool",
+      "generic_name": false,
+      "members": [
+        "Agent",
+        "Bash",
+        "Edit",
+        "ExitPlanMode",
+        "Glob",
+        "Grep",
+        "Read",
+        "SlashCommand",
+        "Task",
+        "TodoList",
+        "TodoWrite",
+        "WebFetch",
+        "WebSearch",
+        "Write",
+        "bash",
+        "create_file",
+        "edit",
+        "edit_file",
+        "exec_command",
+        "feed.post",
+        "ffmpeg",
+        "gh",
+        "git",
+        "mcp",
+        "read",
+        "read_file",
+        "run_shell_command",
+        "search_file_content",
+        "update_plan",
+        "webfetch",
+        "websearch",
+        "write",
+        "write_file"
+      ],
+      "member_count": 33,
+      "arms": 54,
+      "files": 9,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 19
+        },
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 18
+        },
+        {
+          "file": "apps/cli/src/lib/session/stream-render.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/session/bash-command.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/session/render.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/activity.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/sandbox.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 32
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 20
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.59,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/lib",
+      "provider_covered": [
+        "git",
+        "mcp"
+      ],
+      "provider_coverage": 0.06,
+      "capability_holes": [
+        {
+          "member": "git",
+          "missing": [
+            "parseMcpServerConfig",
+            "validateMcpServerName",
+            "getMcpTrustStorePath",
+            "isProjectMcpTrusted",
+            "trustProjectMcp",
+            "untrustProjectMcp",
+            "listMcpServerConfigs",
+            "parseMcpConfigForScan",
+            "discoverMcpConfigsFromRepo",
+            "installMcpConfigCentrally",
+            "getMcpServersByName",
+            "buildWorkflowMcpConfig",
+            "registerMcpCommandToTargets",
+            "writeMcpConfig",
+            "installMcpServers",
+            "writeMcpServerConfig",
+            "removeMcpServerConfig"
+          ]
+        },
+        {
+          "member": "mcp",
+          "missing": [
+            "assertSafeGitTransport",
+            "assertValidBranchName",
+            "pushOrigin",
+            "parseSource",
+            "cloneOrPull",
+            "cloneRepo",
+            "clonePackage",
+            "getRepoCommit",
+            "readRepoState",
+            "resolveSnapshotSha",
+            "_resetSnapshotShaCacheForTest",
+            "getGitHubUsername",
+            "resolveGitHubUsernameSync",
+            "resolveGitHubUsername",
+            "getRemoteUrl",
+            "getCurrentBranch",
+            "canonicalGitRemote",
+            "sameGitRemote",
+            "setRemoteUrl",
+            "checkGitHubRepoExists",
+            "commitAndPush",
+            "hasUncommittedChanges",
+            "isGitRepo",
+            "getGitRoot",
+            "getMainRepoRoot",
+            "initRepo",
+            "cloneIntoExisting",
+            "adoptRepo",
+            "isSystemRepoOrigin",
+            "hasLocalChanges",
+            "displayHomePath",
+            "pullRepo",
+            "syncRepoGit",
+            "getGitSyncStatus",
+            "getTrackedFiles",
+            "hasUpstreamRemote",
+            "getUpstreamUrl",
+            "setUpstreamRemote",
+            "pullFromUpstream",
+            "tryAutoPull",
+            "commitsBehindUpstream"
+          ]
+        }
+      ],
+      "arms_per_member": 1.6,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "code",
+      "generic_name": false,
+      "members": [
+        "EADDRINUSE",
+        "ECONNREFUSED",
+        "EEXIST",
+        "EINVAL",
+        "ENOENT",
+        "ENOSYS",
+        "EPERM",
+        "EPIPE",
+        "ERR_USE_AFTER_CLOSE",
+        "ESRCH",
+        "ETIMEDOUT",
+        "api_key_not_found",
+        "plan_required",
+        "unauthorized"
+      ],
+      "member_count": 14,
+      "arms": 51,
+      "files": 33,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/browser/ipc.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/teams/agents.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/cloud/cursor.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/devices/registry.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/projects.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/hooks.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/platform/links.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/agent.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 19
+        },
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 0.37,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 3.6,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "toolName",
+      "generic_name": false,
+      "members": [
+        "Bash",
+        "Create",
+        "Delete",
+        "Edit",
+        "Execute",
+        "MultiEdit",
+        "Read",
+        "Remove",
+        "Shell",
+        "SlashCommand",
+        "Write",
+        "bash",
+        "create_file",
+        "delete_file",
+        "edit_file",
+        "execute",
+        "read_file",
+        "remove_file",
+        "shell",
+        "view_file",
+        "write_file"
+      ],
+      "member_count": 21,
+      "arms": 43,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 34
+        },
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 9
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 34
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 9
+        }
+      ],
+      "area_concentration": 0.79,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "strategy",
+      "generic_name": false,
+      "members": [
+        "ask-per-file",
+        "available",
+        "balanced",
+        "cloud",
+        "copy-if-absent",
+        "dir-entries",
+        "fleet",
+        "grok-sandbox",
+        "host",
+        "json-merge",
+        "keep-dest",
+        "local",
+        "native-flag",
+        "overwrite",
+        "pinned",
+        "toml-merge"
+      ],
+      "member_count": 16,
+      "arms": 41,
+      "files": 10,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/routines.ts",
+          "arms": 8
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/settings-manifest.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/placement.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/routines-placement.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/rotate.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/runner.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/shims.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 33
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.8,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.6,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "raw",
+      "generic_name": false,
+      "members": [
+        "all",
+        "all@all",
+        "always",
+        "any",
+        "api-key",
+        "auto.pool",
+        "bearer-token",
+        "biometry",
+        "browser.profile",
+        "daily",
+        "default",
+        "false",
+        "file",
+        "handsoff",
+        "hold",
+        "interactive.host",
+        "keychain",
+        "latest",
+        "never",
+        "none",
+        "off",
+        "oldest",
+        "on",
+        "pinned",
+        "project.root",
+        "rules",
+        "session",
+        "setup-token",
+        "true",
+        "usage.primary-host",
+        "vault"
+      ],
+      "member_count": 31,
+      "arms": 39,
+      "files": 9,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/versions.ts",
+          "arms": 12
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/bundles.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/lib/config-keys.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/commands/ssh.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/accounts.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/secrets.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/utils.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/watchdog/runner.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 17
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 13
+        },
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.44,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "transport",
+      "generic_name": false,
+      "members": [
+        "http",
+        "pipe",
+        "sse",
+        "ssh",
+        "stdio",
+        "streamable-http"
+      ],
+      "member_count": 6,
+      "arms": 39,
+      "files": 13,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/mcp.ts",
+          "arms": 17
+        },
+        {
+          "file": "apps/cli/src/commands/mcp.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/agents.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/resources/mcp.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/registry.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/events.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/commands/inspect.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 24
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 8
+        },
+        {
+          "area": "apps/cli/src/lib/resources",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.62,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/types.ts:259",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 6.5,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "source",
+      "generic_name": true,
+      "members": [
+        "--box",
+        "1password",
+        "active-session",
+        "agent",
+        "available",
+        "central",
+        "current-terminal",
+        "default",
+        "entrypoint",
+        "env",
+        "extra",
+        "forced",
+        "github",
+        "inline",
+        "linear",
+        "live",
+        "manifest",
+        "meta",
+        "none",
+        "official",
+        "override",
+        "project",
+        "session",
+        "ssh-config",
+        "system",
+        "teams",
+        "user"
+      ],
+      "member_count": 27,
+      "arms": 37,
+      "files": 19,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/triggers/webhook.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/terminal/preferred.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/triggers/handlers.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/setup-secrets.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/view.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/mcp.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/codex-policy.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/unlock-hints.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 10
+        },
+        {
+          "area": "apps/cli/src/lib/triggers",
+          "arms": 9
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/terminal",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.27,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "reason",
+      "generic_name": false,
+      "members": [
+        "agent_excluded",
+        "already-adopted",
+        "capped",
+        "control",
+        "drift",
+        "duplicate",
+        "error",
+        "expired",
+        "modified",
+        "no-address",
+        "no-shadow",
+        "not-a-symlink",
+        "not-installed",
+        "offline",
+        "out_of_credits",
+        "revoked",
+        "rush-not-on-path",
+        "rush-signed-out",
+        "signed_out",
+        "stop",
+        "too_new",
+        "too_old",
+        "unreachable",
+        "unreconcilable",
+        "unsupported",
+        "usage_scope"
+      ],
+      "member_count": 26,
+      "arms": 36,
+      "files": 16,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/doctor.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/commands.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/teams.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/devices/fleet.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/teams/scheduler.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/run-account-picker.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/auth-health.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/devices/doctor-findings.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 13
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 10
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/lib/self-heal/checks",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.36,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "state",
+      "generic_name": true,
+      "members": [
+        "ALIVE",
+        "EXITED",
+        "MERGED",
+        "alive",
+        "authorized",
+        "completed",
+        "disabled",
+        "done",
+        "driving",
+        "error",
+        "missing",
+        "n/a",
+        "offline",
+        "online",
+        "pending",
+        "ready",
+        "running",
+        "skipped",
+        "wedged"
+      ],
+      "member_count": 19,
+      "arms": 35,
+      "files": 12,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/ssh.ts",
+          "arms": 9
+        },
+        {
+          "file": "apps/cli/src/commands/setup.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/commands/daemon.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/fleet/remote-login.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/sessions-picker.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/linear-autoclose.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/teams/agents.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 24
+        },
+        {
+          "area": "apps/cli/src/lib/fleet",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.69,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.8,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "value",
+      "generic_name": true,
+      "members": [
+        "1",
+        "1password",
+        "all",
+        "api-key",
+        "auto",
+        "bearer-token",
+        "browser",
+        "cmd",
+        "complete",
+        "cost",
+        "domcontentloaded",
+        "duration",
+        "edit",
+        "env",
+        "file",
+        "fold",
+        "icloud",
+        "include",
+        "key",
+        "keychain",
+        "load",
+        "missing",
+        "networkidle",
+        "none",
+        "omit",
+        "password",
+        "plan",
+        "recent",
+        "rotate",
+        "setup-token",
+        "skip",
+        "vault"
+      ],
+      "member_count": 32,
+      "arms": 34,
+      "files": 13,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/setup-secrets.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/lib/browser/service.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/session/db.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/focus.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/sessions-render.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/account-schema.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/setup-fleet.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/go.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 16
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/lib/analytics",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.47,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "browser",
+        "cost"
+      ],
+      "provider_coverage": 0.06,
+      "capability_holes": [
+        {
+          "member": "browser",
+          "missing": [
+            "registerCostCommand"
+          ]
+        },
+        {
+          "member": "cost",
+          "missing": [
+            "buildBrowserPreview",
+            "buildBrowserLabel",
+            "browserTaskPicker"
+          ]
+        }
+      ],
+      "arms_per_member": 1.1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "method",
+      "generic_name": false,
+      "members": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "POST",
+        "PUT",
+        "already-running",
+        "copy",
+        "initialize",
+        "initialized",
+        "key",
+        "none",
+        "notifications/initialized",
+        "password",
+        "ping",
+        "symlink",
+        "tools/call",
+        "tools/list"
+      ],
+      "member_count": 17,
+      "arms": 31,
+      "files": 14,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/share/worker-template.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/mcp.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/serve/control.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/skills.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/commands.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/devices/connect.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/daemon.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/share",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/serve",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.23,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.8,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "key",
+      "generic_name": true,
+      "members": [
+        "/",
+        "MODEL",
+        "__cloud__",
+        "__unknown__",
+        "args",
+        "binary",
+        "brew",
+        "cloud",
+        "disabled",
+        "event",
+        "fleet",
+        "hostname",
+        "memory",
+        "model",
+        "month",
+        "npm",
+        "port",
+        "script",
+        "session",
+        "sonnet_week",
+        "this-machine",
+        "ts",
+        "user",
+        "week"
+      ],
+      "member_count": 24,
+      "arms": 29,
+      "files": 12,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/usage.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/cli-resources.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/hosts/ssh-config.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/events-ingest.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/scripts/gen-command-index.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/events.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 18
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib/hosts",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/scripts",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.62,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "cloud",
+        "memory"
+      ],
+      "provider_coverage": 0.08,
+      "capability_holes": [
+        {
+          "member": "cloud",
+          "missing": [
+            "registerMemoryCommands"
+          ]
+        },
+        {
+          "member": "memory",
+          "missing": [
+            "statusColor",
+            "registerCloudCommands"
+          ]
+        }
+      ],
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "loginShape",
+      "generic_name": false,
+      "members": [
+        "binary-shadow",
+        "cli-missing",
+        "content-drift",
+        "duplicate-hook",
+        "duplicate-hook-drift",
+        "env-secret-export",
+        "exec-policy",
+        "fleet-resource-gap",
+        "hook-runtime-broken",
+        "hook-runtime-visibility-unavailable",
+        "host-cli-invalid",
+        "host-cli-missing",
+        "in-tui",
+        "missing-hook",
+        "missing-plugin",
+        "missing-resource",
+        "never-synced",
+        "on-launch",
+        "orphan",
+        "owner-sink-unreachable",
+        "rc-secret-export",
+        "repo-behind",
+        "repo-drift",
+        "ssh-key-enrollment",
+        "stale",
+        "stale-cli",
+        "subcommand",
+        "unwired-hook",
+        "version-skew"
+      ],
+      "member_count": 29,
+      "arms": 29,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/devices/doctor-findings.ts",
+          "arms": 29
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 29
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/devices/doctor-findings.ts:147",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "property",
+      "generic_name": false,
+      "members": [
+        "browser.profile",
+        "browser.remote-control",
+        "browser.task-idle-minutes",
+        "daemon",
+        "max-agents",
+        "mode",
+        "model",
+        "notes",
+        "role",
+        "scheduler",
+        "tier",
+        "tmux",
+        "watchdog"
+      ],
+      "member_count": 13,
+      "arms": 28,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/config.ts",
+          "arms": 16
+        },
+        {
+          "file": "apps/cli/src/lib/config-keys.ts",
+          "arms": 12
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 16
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 12
+        }
+      ],
+      "area_concentration": 0.57,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/config-keys.ts:73",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "daemon",
+        "tmux",
+        "watchdog"
+      ],
+      "provider_coverage": 0.23,
+      "capability_holes": [],
+      "arms_per_member": 2.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "verdict",
+      "generic_name": false,
+      "members": [
+        "error",
+        "expired",
+        "live",
+        "on-target",
+        "rate_limited",
+        "revoked",
+        "unconfigured",
+        "unverified"
+      ],
+      "member_count": 8,
+      "arms": 28,
+      "files": 5,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/auth-health.ts",
+          "arms": 18
+        },
+        {
+          "file": "apps/cli/src/commands/ssh.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/view.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/fleet/remote-login.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/devices/rollout-verify.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 18
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib/fleet",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.64,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/auth-health.ts:49",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/auth-health.ts:105",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 3.5,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "agentType",
+      "generic_name": false,
+      "members": [
+        "antigravity",
+        "claude",
+        "codex",
+        "cursor",
+        "droid",
+        "gemini",
+        "grok",
+        "kimi",
+        "opencode"
+      ],
+      "member_count": 9,
+      "arms": 21,
+      "files": 5,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 9
+        },
+        {
+          "file": "apps/cli/src/lib/runner.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/teams/agents.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/watchdog/watchdogTail.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/teams/api.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 14
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.67,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/parse.ts:177",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/teams.ts:104",
+      "provider_dir": "apps/cli/src/lib/cloud",
+      "provider_covered": [
+        "antigravity",
+        "codex",
+        "cursor"
+      ],
+      "provider_coverage": 0.33,
+      "capability_holes": [],
+      "arms_per_member": 2.3,
+      "same_contract": null,
+      "verdict": "exemplar"
+    },
+    {
+      "discriminator": "context",
+      "generic_name": false,
+      "members": [
+        "cloud",
+        "headless",
+        "teams",
+        "terminal"
+      ],
+      "member_count": 4,
+      "arms": 20,
+      "files": 6,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 12
+        },
+        {
+          "file": "apps/cli/src/commands/detach-core.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/answer-router.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/session/active.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/go.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/presence.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 15
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.75,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/active.ts:171",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/hosts/remote-cmd.ts:86",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "cloud",
+        "teams"
+      ],
+      "provider_coverage": 0.5,
+      "capability_holes": [
+        {
+          "member": "cloud",
+          "missing": [
+            "formatTeamRow",
+            "buildTeamPreview",
+            "printTeamTable",
+            "teamPicker"
+          ]
+        },
+        {
+          "member": "teams",
+          "missing": [
+            "statusColor",
+            "registerCloudCommands"
+          ]
+        }
+      ],
+      "arms_per_member": 5,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "host",
+      "generic_name": false,
+      "members": [
+        "127.0.0.1",
+        "::1",
+        "ghostty",
+        "local",
+        "localhost",
+        "pty"
+      ],
+      "member_count": 6,
+      "arms": 19,
+      "files": 11,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/browser/cdp.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/browser/profiles.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/serve/server.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/go.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/answer-router.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/ghostty-tabs.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/viewing-in.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/serve",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/terminal",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.37,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/fleet-status.ts:25",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/fleet-status.ts:25",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 3.2,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "field",
+      "generic_name": false,
+      "members": [
+        "created",
+        "error",
+        "exit",
+        "expiry",
+        "input",
+        "name",
+        "output",
+        "program",
+        "status",
+        "tool",
+        "used",
+        "uses"
+      ],
+      "member_count": 12,
+      "arms": 19,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/tool-index.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/list-filter.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 14
+        },
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 0.74,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "output",
+        "status"
+      ],
+      "provider_coverage": 0.17,
+      "capability_holes": [
+        {
+          "member": "output",
+          "missing": [
+            "registerStatusCommand"
+          ]
+        },
+        {
+          "member": "status",
+          "missing": [
+            "registerOutputCommand"
+          ]
+        }
+      ],
+      "arms_per_member": 1.6,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "category",
+      "generic_name": false,
+      "members": [
+        "build-test",
+        "http",
+        "install",
+        "media",
+        "metadata",
+        "other",
+        "permissions",
+        "probe",
+        "remote",
+        "search",
+        "shell",
+        "system",
+        "upscaling",
+        "vcs",
+        "wait"
+      ],
+      "member_count": 15,
+      "arms": 18,
+      "files": 5,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/bash-command.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/lib/devices/doctor-findings.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/digest.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/render.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/versions.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 16
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 1
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.89,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/bash-command.ts:10",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/session/render.ts:120",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "provider",
+      "generic_name": false,
+      "members": [
+        "antigravity",
+        "codex",
+        "cursor",
+        "devices",
+        "env",
+        "exec",
+        "file",
+        "keychain",
+        "rush"
+      ],
+      "member_count": 9,
+      "arms": 17,
+      "files": 7,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/secrets/bundles.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/cloud/types.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/index.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/exec.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/commands/profiles.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/cloud/host.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/icloud-import.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 10
+        },
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.59,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/lib/cloud",
+      "provider_covered": [
+        "antigravity",
+        "codex",
+        "cursor",
+        "rush"
+      ],
+      "provider_coverage": 0.44,
+      "capability_holes": [],
+      "arms_per_member": 1.9,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "verb",
+      "generic_name": false,
+      "members": [
+        "add",
+        "ax-action",
+        "click",
+        "describe",
+        "focus",
+        "get-text",
+        "key",
+        "launch",
+        "right-click",
+        "run",
+        "screenshot",
+        "scroll",
+        "type",
+        "type-text",
+        "wait"
+      ],
+      "member_count": 15,
+      "arms": 16,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/computer/dispatch.ts",
+          "arms": 14
+        },
+        {
+          "file": "apps/cli/src/commands/plugins.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/computer/sessions-list.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/computer",
+          "arms": 15
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.94,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "version",
+      "generic_name": false,
+      "members": [
+        "0.0.0-dev",
+        "latest",
+        "oldest"
+      ],
+      "member_count": 3,
+      "arms": 16,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/versions.ts",
+          "arms": 9
+        },
+        {
+          "file": "apps/cli/src/lib/versions.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/sessions-browser.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/self-update.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 11
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 0.69,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/installations/update.ts:13",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 5.3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "stoppedBy",
+      "generic_name": false,
+      "members": [
+        "budget",
+        "condition-met",
+        "drained",
+        "error",
+        "max",
+        "max-waves",
+        "signal",
+        "stalled"
+      ],
+      "member_count": 8,
+      "arms": 14,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/exec.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/commands/teams.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/teams/supervisor.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/runner.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 11
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.79,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/loop.ts:54",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.8,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "event",
+      "generic_name": true,
+      "members": [
+        "SessionEnd",
+        "command.start",
+        "debug",
+        "pull_request",
+        "push",
+        "status.posted",
+        "subagent.spawned",
+        "warn",
+        "workflow_run"
+      ],
+      "member_count": 9,
+      "arms": 14,
+      "files": 7,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/activity.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/triggers/handlers.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/triggers/webhook.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/events.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/feed.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/hooks.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/index.bench.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib/triggers",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/secrets.ts:896",
+      "contract_kind": "keyed-type",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/secrets.ts:896",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.6,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "activity",
+      "generic_name": false,
+      "members": [
+        "idle",
+        "waiting_input",
+        "working"
+      ],
+      "member_count": 3,
+      "arms": 14,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 10
+        },
+        {
+          "file": "apps/cli/src/lib/session/active.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/answer-router.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/watchdog/runner.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 10
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 2
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 1
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.71,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/sessions.ts:1807",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 4.7,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "policy",
+      "generic_name": false,
+      "members": [
+        "always",
+        "handsoff",
+        "hold",
+        "never",
+        "off"
+      ],
+      "member_count": 5,
+      "arms": 14,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/secrets/bundles.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/commands/setup-secrets.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/watchdog/runner.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/secrets/bundles.ts:215",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.8,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "phase",
+      "generic_name": false,
+      "members": [
+        "awaiting-tui",
+        "browser",
+        "computer",
+        "done",
+        "exiting",
+        "failed",
+        "fleet",
+        "launching",
+        "replaying",
+        "secrets",
+        "share",
+        "watchdog"
+      ],
+      "member_count": 12,
+      "arms": 14,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/watchdog/runner.ts",
+          "arms": 8
+        },
+        {
+          "file": "apps/cli/src/commands/setup.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 8
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 0.57,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/setup.ts:313",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "browser",
+        "computer",
+        "secrets",
+        "share",
+        "watchdog"
+      ],
+      "provider_coverage": 0.42,
+      "capability_holes": [],
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "cmd",
+      "generic_name": true,
+      "members": [
+        "get",
+        "load",
+        "lock",
+        "ping",
+        "revoke",
+        "status"
+      ],
+      "member_count": 6,
+      "arms": 14,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/secrets/agent.ts",
+          "arms": 14
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 14
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/secrets/agent.ts:392",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "protocol",
+      "generic_name": false,
+      "members": [
+        "cdp:",
+        "http:",
+        "https:",
+        "ssh:",
+        "ws:",
+        "wss:"
+      ],
+      "member_count": 6,
+      "arms": 13,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/browser/service.ts",
+          "arms": 8
+        },
+        {
+          "file": "apps/cli/src/lib/browser/profiles.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 13
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.2,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "detected",
+      "generic_name": false,
+      "members": [
+        "antigravity",
+        "claude",
+        "codex",
+        "cursor",
+        "droid",
+        "gemini",
+        "grok",
+        "hermes",
+        "kimi",
+        "muse",
+        "openclaw",
+        "opencode",
+        "rush"
+      ],
+      "member_count": 13,
+      "arms": 13,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 13
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 13
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/types.ts:11",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/add-dir.ts:32",
+      "provider_dir": "apps/cli/src/lib/cloud",
+      "provider_covered": [
+        "antigravity",
+        "codex",
+        "cursor",
+        "rush"
+      ],
+      "provider_coverage": 0.31,
+      "capability_holes": [],
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "exemplar"
+    },
+    {
+      "discriminator": "groupBy",
+      "generic_name": false,
+      "members": [
+        "account",
+        "agent",
+        "device",
+        "machine",
+        "project"
+      ],
+      "member_count": 5,
+      "arms": 12,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/db.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/commands/cost.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/output.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/insights.ts:112",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/sessions.ts:2423",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.4,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "outcome",
+      "generic_name": false,
+      "members": [
+        "changed",
+        "error",
+        "failed",
+        "ok",
+        "unknown"
+      ],
+      "member_count": 5,
+      "arms": 12,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/tool-calls.ts",
+          "arms": 7
+        },
+        {
+          "file": "apps/cli/src/commands/menubar.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 9
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.75,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/tool-calls.ts:26",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.4,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "arg",
+      "generic_name": false,
+      "members": [
+        "--device",
+        "--help",
+        "--output",
+        "--passes",
+        "--sessions",
+        "--since",
+        "--version",
+        "-V",
+        "-h",
+        "versions"
+      ],
+      "member_count": 10,
+      "arms": 11,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/scripts/sample-session-shell-commands.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/bootstrap.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/prune.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/scripts",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.55,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "severity",
+      "generic_name": false,
+      "members": [
+        "critical",
+        "info",
+        "warning"
+      ],
+      "member_count": 3,
+      "arms": 11,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/devices/doctor-findings.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/commands/doctor.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/project-status.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.45,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/doctor.ts:811",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/doctor.ts:963",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 3.7,
+      "same_contract": null,
+      "verdict": "bypassed"
+    },
+    {
+      "discriminator": "normalized",
+      "generic_name": false,
+      "members": [
+        ".",
+        "..",
+        "auto",
+        "full",
+        "max",
+        "xhigh"
+      ],
+      "member_count": 6,
+      "arms": 11,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/models.ts",
+          "arms": 8
+        },
+        {
+          "file": "apps/cli/src/lib/plugins.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/teams/agents.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 10
+        },
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.91,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/exec.ts:212",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.8,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "alias",
+      "generic_name": false,
+      "members": [
+        "inbox",
+        "roster",
+        "system",
+        "timeline",
+        "user"
+      ],
+      "member_count": 5,
+      "arms": 10,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/repo.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/lib/observe-aliases.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/doctor.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.7,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/observe-aliases.ts:15",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "result",
+      "generic_name": false,
+      "members": [
+        "claimed-elsewhere",
+        "error",
+        "invalid",
+        "no-target",
+        "ran",
+        "recorded",
+        "unreachable"
+      ],
+      "member_count": 7,
+      "arms": 10,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/daemon.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/lease.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 0.6,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "versionToken",
+      "generic_name": false,
+      "members": [
+        "all",
+        "default",
+        "latest",
+        "oldest"
+      ],
+      "member_count": 4,
+      "arms": 10,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/mcp.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/versions.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/utils.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 0.6,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/installations/update.ts:13",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/bench/resolve-perf.ts:41",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.5,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "runtime",
+      "generic_name": false,
+      "members": [
+        "binary",
+        "docker",
+        "headless",
+        "node",
+        "python",
+        "teams",
+        "terminal"
+      ],
+      "member_count": 7,
+      "arms": 10,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/registry.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/secrets/headless.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/packages.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/feed-outcome.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "awaitingReason",
+      "generic_name": false,
+      "members": [
+        "permission",
+        "plan_review",
+        "question"
+      ],
+      "member_count": 3,
+      "arms": 9,
+      "files": 5,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/answer-router.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/session/active.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/state.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/session/types.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.33,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/state.ts:26",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "templateStatus",
+      "generic_name": false,
+      "members": [
+        "current",
+        "outdated",
+        "unknown"
+      ],
+      "member_count": 3,
+      "arms": 8,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/artifacts-setup.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/commands/share.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 8
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.7,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "level",
+      "generic_name": true,
+      "members": [
+        "ERROR",
+        "WARN",
+        "audit",
+        "debug",
+        "warn"
+      ],
+      "member_count": 5,
+      "arms": 8,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/events.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/logs.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/daemon.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 8
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/events.ts:126",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/feed-broadcast.ts:45",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.6,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "choice",
+      "generic_name": false,
+      "members": [
+        "__always_fresh__",
+        "all",
+        "choose",
+        "no",
+        "specific"
+      ],
+      "member_count": 5,
+      "arms": 8,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/versions.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/drift-sync.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/exec.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 7
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.88,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.6,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "decision",
+      "generic_name": false,
+      "members": [
+        "attach",
+        "launch",
+        "nudge",
+        "rotate",
+        "run",
+        "skip"
+      ],
+      "member_count": 6,
+      "arms": 8,
+      "files": 5,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/watchdog/runner.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/watchdog.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/commands/exec.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/commands/harness-wizard.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/exec.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "syncState",
+      "generic_name": false,
+      "members": [
+        "deleted",
+        "modified",
+        "new",
+        "synced"
+      ],
+      "member_count": 4,
+      "arms": 8,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/view.ts",
+          "arms": 8
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 8
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/view.ts:237",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/git.ts:1426",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "url",
+      "generic_name": false,
+      "members": [
+        "/",
+        "/api/run",
+        "/api/state",
+        "/api/status",
+        "/events",
+        "/index.html"
+      ],
+      "member_count": 6,
+      "arms": 8,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/serve/server.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/fleet/remote-login.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/serve/control.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/serve",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/lib/fleet",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.63,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "shellName",
+      "generic_name": false,
+      "members": [
+        "bash",
+        "fish",
+        "zsh"
+      ],
+      "member_count": 3,
+      "arms": 7,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/scripts/postinstall.js",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/shims.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/scripts",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.57,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/shell-programs.ts:18",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2.3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "word",
+      "generic_name": false,
+      "members": [
+        "--",
+        "--chdir",
+        "--unset",
+        "-C",
+        "-u",
+        "completed"
+      ],
+      "member_count": 6,
+      "arms": 7,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/shell-programs.ts",
+          "arms": 6
+        },
+        {
+          "file": "apps/cli/src/commands/inspect.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 6
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.86,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "requested",
+      "generic_name": false,
+      "members": [
+        "auto",
+        "latest",
+        "oldest",
+        "plan",
+        "resume"
+      ],
+      "member_count": 5,
+      "arms": 7,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/exec.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/installations/strategies.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/sessions-migrate.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/installations",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.43,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/exec.ts:657",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "lower",
+      "generic_name": false,
+      "members": [
+        "auto",
+        "cloud",
+        "devbox",
+        "fleet",
+        "lease",
+        "local",
+        "off"
+      ],
+      "member_count": 7,
+      "arms": 7,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/placement.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/add-dir.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 7
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/placement.ts:19",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "cloud",
+        "lease"
+      ],
+      "provider_coverage": 0.29,
+      "capability_holes": [
+        {
+          "member": "cloud",
+          "missing": [
+            "fmtDurationShort",
+            "fmtIdleShort",
+            "fmtExpiresShort",
+            "boxAddress",
+            "boxStatus",
+            "reusableBoxes",
+            "formatBoxRow",
+            "validateHetznerToken",
+            "runLeaseSetup",
+            "registerLeaseCommand"
+          ]
+        },
+        {
+          "member": "lease",
+          "missing": [
+            "statusColor",
+            "registerCloudCommands"
+          ]
+        }
+      ],
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "class",
+      "generic_name": false,
+      "members": [
+        "approval",
+        "clarification",
+        "decision",
+        "fyi",
+        "stall"
+      ],
+      "member_count": 5,
+      "arms": 7,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/feed-ranking.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/ask-classifier.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 7
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/ask-classifier.ts:21",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/ask-classifier.ts:235",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "propName",
+      "generic_name": false,
+      "members": [
+        "checked",
+        "disabled",
+        "expanded",
+        "invalid",
+        "readonly",
+        "required",
+        "selected"
+      ],
+      "member_count": 7,
+      "arms": 7,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/browser/refs.ts",
+          "arms": 7
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 7
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "eventName",
+      "generic_name": false,
+      "members": [
+        "assistant",
+        "done",
+        "error",
+        "result",
+        "status",
+        "thinking",
+        "tool_call"
+      ],
+      "member_count": 7,
+      "arms": 7,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/cloud/cursor.ts",
+          "arms": 7
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 7
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/cloud/types.ts:173",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "cache",
+      "generic_name": false,
+      "members": [
+        "hit",
+        "miss",
+        "none",
+        "stale-prefetch"
+      ],
+      "member_count": 4,
+      "arms": 7,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/perf/db.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/hooks/profile.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/perf",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/lib/hooks",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.57,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.8,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "command",
+      "generic_name": false,
+      "members": [
+        "browser",
+        "doctor",
+        "output",
+        "teams",
+        "view"
+      ],
+      "member_count": 5,
+      "arms": 7,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/hosts/passthrough.ts",
+          "arms": 7
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/hosts",
+          "arms": 7
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/hosts/passthrough.ts:76",
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "browser",
+        "doctor",
+        "output",
+        "teams",
+        "view"
+      ],
+      "provider_coverage": 1,
+      "capability_holes": [],
+      "arms_per_member": 1.4,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "stateType",
+      "generic_name": false,
+      "members": [
+        "canceled",
+        "completed",
+        "runs",
+        "sessions",
+        "started",
+        "trash"
+      ],
+      "member_count": 6,
+      "arms": 6,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/prune.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/tickets/list.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/tickets",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/prune.ts:62",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "sessions",
+        "trash"
+      ],
+      "provider_coverage": 0.33,
+      "capability_holes": [
+        {
+          "member": "sessions",
+          "missing": [
+            "restoreVersion",
+            "registerRestoreCommand",
+            "registerTrashCommands"
+          ]
+        },
+        {
+          "member": "trash",
+          "missing": [
+            "backfillToolsLocal",
+            "runToolsBackfill",
+            "runResourceBackfill",
+            "registerSessionsBackfillCommand"
+          ]
+        }
+      ],
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "next",
+      "generic_name": false,
+      "members": [
+        "/",
+        "always",
+        "hold",
+        "open",
+        "parked"
+      ],
+      "member_count": 5,
+      "arms": 6,
+      "files": 4,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/secrets.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/feed-outcome.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/agents.ts",
+          "arms": 1
+        },
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.67,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "repo",
+      "generic_name": false,
+      "members": [
+        "agents",
+        "project",
+        "system",
+        "user"
+      ],
+      "member_count": 4,
+      "arms": 6,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sync.ts",
+          "arms": 5
+        },
+        {
+          "file": "apps/cli/src/lib/devices/fleet-divergence.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 5
+        },
+        {
+          "area": "apps/cli/src/lib/devices",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.83,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/view.ts:237",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/doctor-diff.ts:107",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.5,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "tool_name",
+      "generic_name": false,
+      "members": [
+        "Bash",
+        "ExitPlanMode",
+        "Task",
+        "TaskCreate",
+        "TaskUpdate",
+        "Write"
+      ],
+      "member_count": 6,
+      "arms": 6,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/activity.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "hook_event",
+      "generic_name": false,
+      "members": [
+        "Notification",
+        "PermissionRequest",
+        "PostToolUse",
+        "PreToolUse",
+        "UserPromptSubmit"
+      ],
+      "member_count": 5,
+      "arms": 6,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/feed.ts",
+          "arms": 4
+        },
+        {
+          "file": "apps/cli/src/lib/activity.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/hooks.ts:3141",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "qualifier",
+      "generic_name": false,
+      "members": [
+        "all",
+        "default",
+        "latest",
+        "oldest",
+        "pinned"
+      ],
+      "member_count": 5,
+      "arms": 6,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/agent-spec/resolve.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/agent-spec",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/bench/resolve-perf.ts:41",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "toUpperCase",
+      "generic_name": false,
+      "members": [
+        "CANCELLED",
+        "CREATING",
+        "ERROR",
+        "EXPIRED",
+        "FINISHED",
+        "RUNNING"
+      ],
+      "member_count": 6,
+      "arms": 6,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/cloud/types.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "usageStatus",
+      "generic_name": false,
+      "members": [
+        "available",
+        "out_of_credits",
+        "rate_limited"
+      ],
+      "member_count": 3,
+      "arms": 6,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/rotate.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/usage.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/devices/harness-inventory.ts:29",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "ptype",
+      "generic_name": false,
+      "members": [
+        "custom_tool_call",
+        "custom_tool_call_output",
+        "function_call",
+        "function_call_output",
+        "message",
+        "reasoning"
+      ],
+      "member_count": 6,
+      "arms": 6,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "unit",
+      "generic_name": false,
+      "members": [
+        "d",
+        "h",
+        "m",
+        "mo",
+        "w",
+        "y"
+      ],
+      "member_count": 6,
+      "arms": 6,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/relative-time.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "keepIf",
+      "generic_name": false,
+      "members": [
+        "all",
+        "any",
+        "majority"
+      ],
+      "member_count": 3,
+      "arms": 6,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/teams/forEach.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/workflows.ts",
+          "arms": 3
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        }
+      ],
+      "area_concentration": 0.5,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "via",
+      "generic_name": false,
+      "members": [
+        "inject",
+        "mailbox",
+        "refuse"
+      ],
+      "member_count": 3,
+      "arms": 6,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/watchdog/runner.ts",
+          "arms": 6
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/watchdog",
+          "arms": 6
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/answer-router.ts:18",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 2,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "sort",
+      "generic_name": false,
+      "members": [
+        "cost",
+        "duration",
+        "recent"
+      ],
+      "member_count": 3,
+      "arms": 5,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sessions.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/commands/sessions-browser.ts",
+          "arms": 2
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.7,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "auth",
+      "generic_name": false,
+      "members": [
+        "api-key",
+        "password",
+        "setup-token"
+      ],
+      "member_count": 3,
+      "arms": 5,
+      "files": 3,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/setup-fleet.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/account-registry.ts",
+          "arms": 2
+        },
+        {
+          "file": "apps/cli/src/lib/account-schema.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 2
+        }
+      ],
+      "area_concentration": 0.6,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/account-provider-registry.ts:3",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/ssh.ts:999",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.7,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "resolvedMode",
+      "generic_name": false,
+      "members": [
+        "edit",
+        "plan",
+        "skip"
+      ],
+      "member_count": 3,
+      "arms": 5,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/exec.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/codex-policy.ts:6",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/agent-modes.ts:17",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.7,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "sub",
+      "generic_name": false,
+      "members": [
+        "a",
+        "add",
+        "c",
+        "create",
+        "new"
+      ],
+      "member_count": 5,
+      "arms": 5,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/hosts/passthrough.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/hosts",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "head",
+      "generic_name": false,
+      "members": [
+        "cloud",
+        "device",
+        "fleet",
+        "host",
+        "lease"
+      ],
+      "member_count": 5,
+      "arms": 5,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/placement.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/placement.ts:19",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": "apps/cli/src/commands",
+      "provider_covered": [
+        "cloud",
+        "lease"
+      ],
+      "provider_coverage": 0.4,
+      "capability_holes": [
+        {
+          "member": "cloud",
+          "missing": [
+            "fmtDurationShort",
+            "fmtIdleShort",
+            "fmtExpiresShort",
+            "boxAddress",
+            "boxStatus",
+            "reusableBoxes",
+            "formatBoxRow",
+            "validateHetznerToken",
+            "runLeaseSetup",
+            "registerLeaseCommand"
+          ]
+        },
+        {
+          "member": "lease",
+          "missing": [
+            "statusColor",
+            "registerCloudCommands"
+          ]
+        }
+      ],
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "partType",
+      "generic_name": false,
+      "members": [
+        "reasoning",
+        "text",
+        "think",
+        "tool"
+      ],
+      "member_count": 4,
+      "arms": 5,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/parse.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/session/tool-calls.ts:304",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "subtype",
+      "generic_name": false,
+      "members": [
+        "completed",
+        "delta",
+        "init"
+      ],
+      "member_count": 3,
+      "arms": 5,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 5
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 5
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.7,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "dim",
+      "generic_name": false,
+      "members": [
+        "account",
+        "agent",
+        "day",
+        "project"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/insights.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/insights.ts:112",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/sessions.ts:2423",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "lastStatus",
+      "generic_name": false,
+      "members": [
+        "completed",
+        "failed",
+        "missed",
+        "timeout"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/routines.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/commands/logs.ts:48",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/teams.ts:1146",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "bucket",
+      "generic_name": false,
+      "members": [
+        "artifacts",
+        "docs",
+        "plans",
+        "reports"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/commands/sessions-picker.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/session/render.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/commands",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.75,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/highlights.ts:227",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "tagName",
+      "generic_name": false,
+      "members": [
+        "INPUT",
+        "LABEL",
+        "TRIX-EDITOR"
+      ],
+      "member_count": 3,
+      "arms": 4,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/browser/upload.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/browser/refs.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/browser",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "base",
+      "generic_name": false,
+      "members": [
+        "agents",
+        "agents.cmd",
+        "agents.exe",
+        "fleet"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 2,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/cli-entry.ts",
+          "arms": 3
+        },
+        {
+          "file": "apps/cli/src/lib/triggers/handlers.ts",
+          "arms": 1
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 3
+        },
+        {
+          "area": "apps/cli/src/lib/triggers",
+          "arms": 1
+        }
+      ],
+      "area_concentration": 0.75,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/state.ts:931",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "ext",
+      "generic_name": false,
+      "members": [
+        ".jpeg",
+        ".jpg",
+        ".png",
+        ".webp"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/cloud/dispatch.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/cloud",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/lib/browser/sessions-list.ts:48",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "lvl",
+      "generic_name": false,
+      "members": [
+        "ERROR",
+        "FATAL",
+        "START",
+        "STOP"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/daemon.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "flowType",
+      "generic_name": false,
+      "members": [
+        "api-key",
+        "device-code",
+        "loopback",
+        "unknown"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/fleet/remote-login.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/fleet",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/fleet/auth-sync.ts:91",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "fileName",
+      "generic_name": false,
+      "members": [
+        "config.toml",
+        "opencode.json",
+        "opencode.jsonc",
+        "settings.json"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/permissions.ts:2163",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "parentDir",
+      "generic_name": false,
+      "members": [
+        ".claude",
+        ".codex",
+        ".opencode",
+        "opencode"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/permissions.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/permissions.ts:2163",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "seq",
+      "generic_name": false,
+      "members": [
+        "e",
+        "n",
+        "r",
+        "t"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/pty-client.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/sessions-browser.ts:809",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "tag",
+      "generic_name": false,
+      "members": [
+        "FAIL",
+        "OK",
+        "WARN"
+      ],
+      "member_count": 3,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/secrets/index.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/secrets",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1.3,
+      "same_contract": null,
+      "verdict": "missing"
+    },
+    {
+      "discriminator": "subcommand",
+      "generic_name": false,
+      "members": [
+        "commit",
+        "pr",
+        "push",
+        "worktree"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/bash-command.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/feed-outcome.ts:22",
+      "contract_kind": "union",
+      "has_registry": true,
+      "registry_ref": "apps/cli/src/commands/sessions.ts:3418",
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "classifySshFailure",
+      "generic_name": false,
+      "members": [
+        "ok",
+        "query-failed",
+        "spawn-error",
+        "unreachable"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/session/remote.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/session",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": true,
+      "contract_ref": "apps/cli/src/lib/session/remote.ts:133",
+      "contract_kind": "union",
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "partial"
+    },
+    {
+      "discriminator": "itemType",
+      "generic_name": false,
+      "members": [
+        "agent_message",
+        "command_execution",
+        "file_change",
+        "tool_call"
+      ],
+      "member_count": 4,
+      "arms": 4,
+      "files": 1,
+      "top_sites": [
+        {
+          "file": "apps/cli/src/lib/teams/parsers.ts",
+          "arms": 4
+        }
+      ],
+      "arms_by_area": [
+        {
+          "area": "apps/cli/src/lib/teams",
+          "arms": 4
+        }
+      ],
+      "area_concentration": 1,
+      "has_contract": false,
+      "contract_ref": null,
+      "contract_kind": null,
+      "has_registry": false,
+      "registry_ref": null,
+      "provider_dir": null,
+      "provider_covered": null,
+      "provider_coverage": null,
+      "capability_holes": null,
+      "arms_per_member": 1,
+      "same_contract": null,
+      "verdict": "missing"
+    }
+  ]
+}
