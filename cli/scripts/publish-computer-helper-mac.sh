@@ -64,10 +64,19 @@ command -v gh >/dev/null 2>&1 || die "gh CLI not found"
 
 # Helper releases are immutable: the upload below uses --clobber, so re-cutting an
 # existing tag would silently replace a binary an installed CLI already pins to
-# that exact version. Check locally first, then the remote.
-if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1 \
-  || git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
-  die "$TAG already exists. Helper releases are immutable -- cut the next patch instead."
+# that exact version.
+#
+# ORIGIN is the source of truth for "published", not the local ref. A local-only
+# tag means an earlier run of THIS script tagged and then failed before or during
+# the push -- nothing was published, so refusing it would tell the operator to
+# burn a version number over a transient network error, and (because this guard
+# runs before the build) would make that version permanently uncuttable from this
+# checkout without a manual `git tag -d`. Resume instead; the push below retries.
+if git -C "$REPO_ROOT" ls-remote --exit-code --tags origin "$TAG" >/dev/null 2>&1; then
+  die "$TAG already exists on origin. Helper releases are immutable -- cut the next patch instead."
+fi
+if git -C "$REPO_ROOT" rev-parse -q --verify "refs/tags/$TAG" >/dev/null 2>&1; then
+  log "$TAG exists locally but not on origin -- resuming an interrupted publish."
 fi
 [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_APP_SPECIFIC_PASSWORD:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] \
   || die "notary creds missing. Run under: agents secrets exec apple.com -- $0 $VERSION"

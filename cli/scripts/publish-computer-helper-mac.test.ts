@@ -117,6 +117,24 @@ describe('publish-computer-helper-mac.sh', () => {
     expect(run('latest').status).not.toBe(0);
   });
 
+  it('resumes when the tag is local-only — a failed push must not burn a version', () => {
+    // Regression in this PR's own first revision: adding `git tag` made a
+    // tag-then-push-failure leave a local ref, and the guard treated that as
+    // "published" and told the operator to cut the next patch. Nothing had been
+    // published, and because the guard runs before the build, that version
+    // became permanently uncuttable from the checkout without `git tag -d`.
+    // Origin is the source of truth; a local-only tag means resume.
+    const version = '0.0.9';
+    const tag = `computer-mac/v${version}`;
+    git(repo, 'tag', tag); // local only — never pushed to the bare origin
+
+    const r = run(version);
+    expect(r.stderr).not.toMatch(/already exists/);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/resuming an interrupted publish/);
+    // Still stops before the publish path, as every case in this file must.
+    expect(r.stderr).toMatch(/notary creds missing/);
+  });
+
   it('refuses an existing tag — a helper release is immutable', () => {
     // The upload uses --clobber, so re-tagging would silently replace a binary
     // an installed CLI already pins to that exact version.
@@ -132,10 +150,14 @@ describe('publish-computer-helper-mac.sh', () => {
     // ever reaching the build/notarize/publish path below it.
     expect(before.stderr).toMatch(/notary creds missing/);
 
+    // Push it: ORIGIN is what makes a release immutable. A local-only tag means
+    // an interrupted publish and is resumable (covered by the case above), so
+    // tagging without pushing would assert the wrong thing here.
     git(repo, 'tag', tag);
+    git(repo, 'push', '-q', 'origin', tag);
     const after = run(version);
     expect(after.status).not.toBe(0);
-    expect(after.stderr).toMatch(/already exists/);
+    expect(after.stderr).toMatch(/already exists on origin/);
   });
 
   it('creates and pushes the tag itself — gh release create --verify-tag will not', () => {
