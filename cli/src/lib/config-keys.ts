@@ -36,11 +36,12 @@ export interface ParsedAutoConfigKey {
   property: 'pool';
 }
 
-/** A device-scope browser key (self or peer): the profile agents drive, or the
- *  browser that shows the user a page. */
+/** A browser key: the profile agents drive or the browser that shows the user a
+ *  page (both device-scope, self or peer), or `device` — the user-scope fleet
+ *  hub every box drives by default, which is central and never peer-targeted. */
 export interface ParsedBrowserConfigKey {
   scope: 'browser';
-  property: 'profile' | 'viewer';
+  property: 'profile' | 'viewer' | 'device';
   device?: string;
 }
 
@@ -169,6 +170,10 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     return { scope: 'browser', property: 'viewer' };
   }
 
+  if (raw === 'browser.device') {
+    return { scope: 'browser', property: 'device' };
+  }
+
   if (raw === 'project.root') {
     return { scope: 'project', property: 'root' };
   }
@@ -197,7 +202,7 @@ export function parseConfigKey(key: string): ParsedConfigKey {
     throw new Error(`Invalid auto config key '${key}'. Use auto.pool.`);
   }
   if (raw.startsWith('browser.')) {
-    throw new Error(`Invalid browser config key '${key}'. Use browser.profile or browser.viewer.`);
+    throw new Error(`Invalid browser config key '${key}'. Use browser.profile, browser.viewer, or browser.device.`);
   }
   if (raw.startsWith('project.')) {
     throw new Error(`Invalid project config key '${key}'. Use project.root.`);
@@ -252,6 +257,7 @@ export function listKnownConfigKeys(): string[] {
     'auto.pool',
     'browser.profile',
     'browser.viewer',
+    'browser.device',
     'project.root',
   );
   for (const prop of DEVICE_CONFIG_PROPERTIES) {
@@ -308,6 +314,10 @@ export function configKeyStorageHint(parsed: ParsedConfigKey): string {
     case 'auto':
       return 'config.autoPool';
     case 'browser': {
+      if (parsed.property === 'device') {
+        // User scope: one value in the central agents.yaml that syncs fleet-wide.
+        return 'config.defaultBrowserDevice (central agents.yaml; syncs fleet-wide)';
+      }
       const yamlKey = parsed.property === 'viewer' ? 'browserViewer' : 'defaultBrowserProfile';
       return parsed.device
         ? `devices/${parsed.device}/agents.yaml config.${yamlKey}`

@@ -57,6 +57,16 @@ describe('config-keys', () => {
       expect(parseConfigKey('browser.profile')).toEqual({ scope: 'browser', property: 'profile' });
     });
 
+    it('parses the fleet browser hub (browser.device) as a user-scope central key', () => {
+      expect(parseConfigKey('browser.device')).toEqual({ scope: 'browser', property: 'device' });
+      expect(configKeyStorageHint(parseConfigKey('browser.device'))).toContain('central agents.yaml');
+      expect(listKnownConfigKeys()).toContain('browser.device');
+    });
+
+    it('names browser.device in the invalid-browser-key error', () => {
+      expect(() => parseConfigKey('browser.bogus')).toThrow(/browser\.device/);
+    });
+
     it('parses device config keys', () => {
       expect(parseConfigKey('devices.mac-mini.max-agents')).toEqual({
         scope: 'device',

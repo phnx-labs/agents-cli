@@ -142,6 +142,11 @@ function setConfig(parsed: ParsedConfigKey, value: unknown): void {
       return;
     }
     case 'browser': {
+      if (parsed.property === 'device') {
+        // Fleet hub: user scope, one central value, never peer-targeted.
+        setConfigValue('browser.device', value as string);
+        return;
+      }
       // Device-local default lives in the per-device doc's config: block
       // (same store `agents devices config` / getConfigValue use). Bare
       // browser.profile targets this machine; devices.<name>.browser.profile
@@ -190,6 +195,11 @@ function unsetConfig(parsed: ParsedConfigKey): boolean {
       return had;
     }
     case 'browser': {
+      if (parsed.property === 'device') {
+        const had = getConfigValue('browser.device').value !== undefined;
+        unsetConfigValue('browser.device');
+        return had;
+      }
       const target = parsed.device ? { device: parsed.device } : undefined;
       // Must follow parsed.property. Hardcoding 'browser.profile' here meant
       // `config unset browser.viewer` deleted the user's browser.profile while
@@ -231,6 +241,9 @@ function getConfig(parsed: ParsedConfigKey): unknown {
     case 'auto':
       return getConfigValue('auto.pool').value;
     case 'browser': {
+      if (parsed.property === 'device') {
+        return getConfigValue('browser.device').value;
+      }
       return getConfigValue(
         parsed.property === 'viewer' ? 'browser.viewer' : 'browser.profile',
         parsed.device ? { device: parsed.device } : undefined,
