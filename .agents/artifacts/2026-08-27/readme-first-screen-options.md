@@ -8,8 +8,6 @@ repository: phnx-labs/agi-cli
 branch: docs/readme-first-screen-options
 harness: codex
 agent: gpt-5
-host: zion
-session: 01a043a1-5b39-7241-8235-ceae1405ad63
 date: "2026-08-27"
 links:
   - https://x.com/ClaudeDevs/status/2088014831605702937
@@ -46,9 +44,9 @@ Today’s first screen explains the machinery before it gives a reader one reaso
 <p><span class="artifact-tag artifact-tag-accent">A · PAIN-FIRST</span></p>
 <p><code>README preview</code></p>
 <h1>agents-cli</h1>
-<p><strong>Pin the version. Rotate the account. Resume the session.</strong></p>
-<p>Keep a usage limit or forgotten permission prompt from stopping a task halfway through. agents-cli chooses an account with headroom, resumes the session, and brings stalled work back to the top.</p>
-<p>It drives your already-authenticated CLIs on your existing subscriptions. Your credentials stay with those CLIs; agents-cli never proxies your tokens.</p>
+<p><strong>Pin the version, rotate the account, resume the session.</strong></p>
+<p>agents-cli drives your already-authenticated CLIs on your existing subscriptions and never proxies your tokens.</p>
+<p>When a usage limit ends a run, it relaunches on an account with headroom and resumes the same session. Stalled sessions and sessions waiting for input rise to the top instead of disappearing in a terminal tab.</p>
 <pre><code>npm install -g \
   @phnx-labs/agents-cli
 agents setup</code></pre>
@@ -63,8 +61,8 @@ agents setup</code></pre>
 <p><code>README preview</code></p>
 <h1>agents-cli</h1>
 <p><strong>One <code>agents</code> binary for every coding agent you already pay for.</strong></p>
+<p>agents-cli drives your already-authenticated CLIs on your existing subscriptions and never proxies your tokens.</p>
 <p>Run Claude Code, Codex, Cursor, Grok, Kimi, and Droid without learning six wrappers. Pin each CLI version, keep sessions searchable, and move between agents or machines without rebuilding your setup.</p>
-<p>agents-cli drives your already-authenticated CLIs on your existing subscriptions. It never proxies your tokens.</p>
 <pre><code>npm install -g \
   @phnx-labs/agents-cli
 agents setup</code></pre>
@@ -79,8 +77,8 @@ agents setup</code></pre>
 <p><code>README preview</code></p>
 <h1>agents-cli</h1>
 <p><strong>Keep Claude, Codex, Cursor, Grok, Kimi, and Droid moving.</strong></p>
-<p>Stalled sessions rise to the top. When a usage limit ends a run, agents-cli relaunches it on an account with headroom and resumes the same session, even on another machine.</p>
-<p>It drives your local, already-authenticated CLIs on your existing subscriptions. Your credentials stay local; agents-cli never proxies your tokens.</p>
+<p>agents-cli drives your local, already-authenticated CLIs on your existing subscriptions and never proxies your tokens.</p>
+<p>Stalled sessions and sessions waiting for input rise to the top. When a usage limit ends a run, agents-cli relaunches it on an account with headroom and resumes the same session on that machine.</p>
 <pre><code>npm install -g \
   @phnx-labs/agents-cli
 agents setup</code></pre>
@@ -102,14 +100,14 @@ agents setup</code></pre>
 ````markdown
 # agents-cli
 
-**Pin the version. Rotate the account. Resume the session.**
+**Pin the version, rotate the account, resume the session.**
 
-Keep a usage limit or forgotten permission prompt from stopping a task halfway through.
-agents-cli chooses an account with headroom, resumes the session, and brings stalled
-work back to the top.
+agents-cli drives your already-authenticated CLIs on your existing subscriptions and
+never proxies your tokens.
 
-It drives your already-authenticated CLIs on your existing subscriptions. Your
-credentials stay with those CLIs; agents-cli never proxies your tokens.
+When a usage limit ends a run, it relaunches on an account with headroom and resumes
+the same session. Stalled sessions and sessions waiting for input rise to the top
+instead of disappearing in a terminal tab.
 
 ```bash
 npm install -g \
@@ -132,12 +130,12 @@ agents setup
 
 **One `agents` binary for every coding agent you already pay for.**
 
+agents-cli drives your already-authenticated CLIs on your existing subscriptions and
+never proxies your tokens.
+
 Run Claude Code, Codex, Cursor, Grok, Kimi, and Droid without learning six wrappers.
 Pin each CLI version, keep sessions searchable, and move between agents or machines
 without rebuilding your setup.
-
-agents-cli drives your already-authenticated CLIs on your existing subscriptions.
-It never proxies your tokens.
 
 ```bash
 npm install -g \
@@ -160,11 +158,12 @@ agents setup
 
 **Keep Claude, Codex, Cursor, Grok, Kimi, and Droid moving.**
 
-Stalled sessions rise to the top. When a usage limit ends a run, agents-cli relaunches
-it on an account with headroom and resumes the same session, even on another machine.
+agents-cli drives your local, already-authenticated CLIs on your existing subscriptions
+and never proxies your tokens.
 
-It drives your local, already-authenticated CLIs on your existing subscriptions.
-Your credentials stay local; agents-cli never proxies your tokens.
+Stalled sessions and sessions waiting for input rise to the top. When a usage limit
+ends a run, agents-cli relaunches it on an account with headroom and resumes the same
+session on that machine.
 
 ```bash
 npm install -g \
