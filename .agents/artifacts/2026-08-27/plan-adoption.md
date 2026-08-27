@@ -114,7 +114,7 @@ done
 | `supabase` | 34 | — | — |
 | `gh` | 40 | — | plus `gh extension` |
 | `kubectl` | 43 | — | — |
-| `docker` | 57 | — | Yes — `docker COMMAND --help` |
+| `docker` | 57 | — | Not needed — `--help` already lists effectively everything |
 | `vercel` | 60 | — | — |
 | **`agents`** | **26** | **69** | **No** |
 
@@ -594,8 +594,8 @@ diff /tmp/a.txt /tmp/b.txt && echo "deterministic"
 sed -n '/USAGE TIERS/,/dead or near-dead/p' /tmp/a.txt   # expect 63/117/130/98/156, 254 (45%)
 
 # 1. Surface: the front door is small, the full index still reachable
-agents --help | grep -cE '^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}'   # expect <= 12, was 69
-agents commands --index --json | jq '.commands'    # expect 564, unchanged
+agents --help | grep -cE '^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}'   # expect <= 12, is 26 today
+jq '.commands, .groups' cli/docs/command-index.json  # expect 564 and 69, unchanged
 
 # 1b. The invisible groups: which of the 69 does --help never name?
 python3 .agents/artifacts/2026-08-27/adoption-evidence/help-coverage.py
@@ -614,7 +614,9 @@ curl -sL -H 'Accept: text/markdown' https://agents-cli.sh/docs/agents/run -i | h
 curl -sL -o /dev/null -w '%{http_code}\n' https://agents-cli.sh/AGENTS.md  # expect 200
 
 # 4. License truth
-grep -ri 'apache-2.0' website/public/llms.txt DESIGN.md   # expect the FSL wording
+grep -i 'apache-2.0' DESIGN.md                     # expect the FSL wording
+# llms.txt lives in the agent-cli-web repo (.gitignore:103) — check it there:
+curl -s https://agents-cli.sh/llms.txt | grep -i 'apache-2.0\|FSL'
 
 # 5. The wedge actually works before it is filmed
 agents accounts add                                 # second Max account
@@ -639,7 +641,7 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 - Evidence, committed beside this plan in `.agents/artifacts/2026-08-27/adoption-evidence/`:
   - `help-coverage.py` — which of the 69 groups `agents --help` actually names
   - `mine-command-usage.py`, `command-usage-report.txt`, `command-usage.json` — the transcript reducer, its printed report, and the raw per-command counts. Every number the plan cites is printed by the script; re-run it to reproduce them.
-  - `is-agentic-agi-cli.json` — the raw 118-check agent-readiness scan
+  - `is-agentic-agi-cli.json` — the raw agent-readiness scan (26 checks eligible for this site)
   - `research-x-market-grok.md` — live X engagement data, DIY reasons, distribution case studies
   - `research-discoverability-codex.md` — llms.txt / AGENTS.md / MCP registries / skill marketplaces / AEO evidence
   - `research-competitive-kimi.md` — 36-tool competitive sweep with live stars and download counts
