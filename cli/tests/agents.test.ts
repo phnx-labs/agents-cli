@@ -651,6 +651,15 @@ describe('getAccountEmail', () => {
       path.join(versionHome, '.claude.json'),
       JSON.stringify({ oauthAccount: { emailAddress: 'version@example.com' } })
     );
+    // Off macOS, getAccountInfo requires a real credential file or it reports
+    // signed-out regardless of oauthAccount (PHNX-2685's credential floor) —
+    // this fixture describes a genuinely signed-in version home, so plant one.
+    fs.mkdirSync(path.join(versionHome, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(versionHome, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at-test', refreshToken: 'rt-test', expiresAt: 1 } }),
+      'utf-8',
+    );
 
     const originalHome = process.env.HOME;
     process.env.HOME = realHome;

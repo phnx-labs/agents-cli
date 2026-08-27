@@ -36,6 +36,23 @@ describe('agents run defaults', () => {
     fs.mkdirSync(projectDir, { recursive: true });
     const managedBinDir = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.45', 'node_modules', '.bin');
     fs.mkdirSync(managedBinDir, { recursive: true });
+    // Off macOS, account-strategy resolution requires a real credential file
+    // for a version to count as healthy (PHNX-2685's credential floor) — this
+    // fixture's fake `claude@2.1.45` needs to look genuinely signed in, or
+    // `strategy: pinned` excludes it as signed_out before ever reaching the
+    // fake binary this test is actually exercising.
+    const versionHomeDir = path.join(home, '.agents', '.history', 'versions', 'claude', '2.1.45', 'home');
+    fs.mkdirSync(path.join(versionHomeDir, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(versionHomeDir, '.claude.json'),
+      JSON.stringify({ oauthAccount: { emailAddress: 'fixture@example.com' } }),
+      'utf-8',
+    );
+    fs.writeFileSync(
+      path.join(versionHomeDir, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at-test', refreshToken: 'rt-test', expiresAt: 1 } }),
+      'utf-8',
+    );
     const captureArgvScript = [
       '#!/usr/bin/env node',
       'const fs = require("fs");',
