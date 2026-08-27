@@ -73,7 +73,7 @@ export async function maybePickInteractiveHost(): Promise<boolean> {
 
   const { select } = await import('@inquirer/prompts');
   const self = machineId();
-  const picked = await select<string>({
+  const picked = await select({
     message: 'Which machine do you sit at? (agents open browser windows and artifacts there)',
     default: defaultInteractiveHostChoice(macs, self) ?? SKIP,
     choices: [
@@ -91,25 +91,46 @@ export async function maybePickInteractiveHost(): Promise<boolean> {
  * Offer to pin this machine's default browser profile to a chosen browser.
  * Only asked when there is nothing to preserve: no configured device default
  * AND no existing `default` profile (an existing profile is the user's earlier
- * choice — never re-pinned behind their back). Returns true when a profile was
- * created and set as the device default. Silent no-op non-TTY.
+ * choice — never re-pinned behind their back). The list is the installed
+ * Chromium-family browsers plus a "None — this box uses the fleet hub" opt-out.
+ *
+ * This is the ONE place a default browser is chosen for a machine (PHNX-3296):
+ * a bare `agents browser start` no longer auto-detects and mints one, so picking
+ * here (or `agents browser use` / `agents setup browser` later) is how a box
+ * gets a local default at all. Picking "None" leaves it to the fleet hub
+ * (`browser.device`). Returns true when a profile was created and set as the
+ * device default. Silent no-op non-TTY — a headless box relies on the hub.
  */
-export async function maybePickBrowserProfile(): Promise<boolean> {
-  if (!isInteractiveTerminal()) return false;
+export async function maybePickBrowserProfile(deps: {
+  /** Force interactivity in a test; defaults to a real TTY probe. */
+  interactive?: boolean;
+  /** Inject the prompt so the pick is testable without a TTY. */
+  select?: (config: { message: string; default?: string; choices: Array<{ name: string; value: string }> }) => Promise<string>;
+} = {}): Promise<boolean> {
+  const interactive = deps.interactive ?? isInteractiveTerminal();
+  if (!interactive) return false;
   if (getConfiguredDefaultProfileName()) return false;
   if (await getAutoDetectedProfile()) return false;
   const installed = listInstalledBrowsers();
   if (installed.length === 0) return false;
 
-  const { select } = await import('@inquirer/prompts');
-  const picked = await select<string>({
+  const config = {
     message: 'Which browser should agents drive on THIS machine?',
     default: defaultBrowserChoice(installed) ?? SKIP,
     choices: [
       ...installed.map((b) => ({ name: `${b.browserType}  ${chalk.dim(b.binary)}`, value: b.browserType })),
-      { name: `Skip ${chalk.dim('— auto-detect on first use (priority order)')}`, value: SKIP },
+      { name: `None ${chalk.dim('— this box uses the fleet hub (agents config set browser.device <host>)')}`, value: SKIP },
     ],
-  });
+  };
+  // The prompt is the only non-testable boundary here, so it is injectable —
+  // everything after (createProfile, setConfigValue) runs for real.
+  let picked: string;
+  if (deps.select) {
+    picked = await deps.select(config);
+  } else {
+    const { select } = await import('@inquirer/prompts');
+    picked = await select<string>(config);
+  }
   if (picked === SKIP) return false;
 
   const chosen = installed.find((b) => b.browserType === picked) ?? installed[0];

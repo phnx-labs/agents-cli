@@ -2917,9 +2917,10 @@ export class BrowserService {
     if (!opts.createIfMissing) return null;
 
     // The top-of-function consent gate already refused a fleet-remote create
-    // here — before ensureDefaultBrowserProfile() below can probe local browser
-    // installs and persist an `auto-chrome` profile — so a refused request never
-    // leaves state behind on the target machine.
+    // here — before ensureDefaultBrowserProfile() below resolves a default — so
+    // a refused request never touches the target machine. Since PHNX-3296 that
+    // resolver never mints a profile: with no launchable default it throws, and
+    // the throw surfaces to the caller exactly like any other start failure.
 
     // Implicit start on the default / named profile.
     let profileName = opts.profile;

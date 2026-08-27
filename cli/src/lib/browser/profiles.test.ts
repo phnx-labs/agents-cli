@@ -464,29 +464,24 @@ describe('ensureDefaultBrowserProfile', () => {
     fs.rmSync(path.join(TEST_ROOT, '.agents', 'devices'), { recursive: true, force: true });
   });
 
-  it('auto-picks the first installed browser and persists a default profile', async () => {
-    const store: ProfileStore =
-      { browser: {} };
+  it('throws instead of auto-creating when nothing is configured and no launchable profile exists', async () => {
+    // PHNX-3296: the silent auto-detect+create is gone. With no configured
+    // default and no existing profile, a bare start must stop and guide the
+    // user — never mint a logged-out `auto-chrome` behind their back.
+    const store: ProfileStore = { browser: {} };
     vi.mocked(readMeta).mockImplementation(() => store as any);
-    vi.mocked(writeMeta).mockImplementation((meta: any) => {
-      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
-      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
-    });
-    vi.mocked(isPortInUse).mockReturnValue(false);
+    const writeSpy = vi.mocked(writeMeta);
 
-    const profile = await ensureDefaultBrowserProfile();
+    const err = await ensureDefaultBrowserProfile().catch((e) => e as Error);
 
-    // RUSH-2709: the auto-detected profile is `auto-chrome`; `default` is now
-    // only an alias resolved by resolveProfileRef.
-    expect(profile.name).toBe('auto-chrome');
-    expect(profile.browser).toBe('chrome');
-    expect(profile.binary).toBe('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-    expect(profile.endpoints).toEqual(['cdp://127.0.0.1:9222']);
-    // The auto default is machine-specific — an absolute binary path plus a port
-    // picked by probing THIS box — so it lands in the per-machine map and never
-    // in the fleet-shared one.
-    expect(store.deviceBrowser!['auto-chrome'].browser).toBe('chrome');
-    expect(store.browser['auto-chrome']).toBeUndefined();
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/No default browser is configured on this machine/);
+    // The guidance points at both the interactive fix and the headless one.
+    expect(err.message).toMatch(/agents setup/);
+    expect(err.message).toMatch(/fleet hub/);
+    // Nothing was persisted, and it never even probed the installed browsers.
+    expect(writeSpy).not.toHaveBeenCalled();
+    expect(findFirstInstalledBrowser).not.toHaveBeenCalled();
   });
 
   it('reuses an existing default profile instead of overwriting it', async () => {
@@ -506,41 +501,36 @@ describe('ensureDefaultBrowserProfile', () => {
     expect(writeSpy).not.toHaveBeenCalled();
   });
 
-  it('regenerates a stale default whose binary is missing on this machine', async () => {
-    // A `default` auto-created on macOS carries a /Applications/... binary that
-    // doesn't exist on this (Linux) box — the top browser roadblock.
+  it('throws rather than regenerating a stale default whose binary is missing here', async () => {
+    // Pre-PHNX-3296 this re-detected a browser and rewrote the profile in place.
+    // A stale `default` auto-created on macOS carries a /Applications/... binary
+    // that doesn't exist on this (Linux) box. Now an unlaunchable existing
+    // default is NOT silently repaired — the user is told to pick a browser, and
+    // the stale record is left exactly as it was.
     const stale: BrowserProfileConfig = {
       browser: 'custom',
       binary: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
       endpoints: ['cdp://127.0.0.1:9222'],
     };
-    // The stale copy arrived from another machine via the SHARED map — that is
-    // exactly how a macOS-written default reaches a Linux box.
-    const store: ProfileStore =
-      { browser: { default: stale } };
+    const store: ProfileStore = { browser: { default: stale } };
     vi.mocked(readMeta).mockImplementation(() => store as any);
-    vi.mocked(writeMeta).mockImplementation((meta: any) => {
-      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
-      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
-    });
+    const writeSpy = vi.mocked(writeMeta);
     // The stale binary isn't launchable here → findBrowserPath throws for it.
     vi.mocked(findBrowserPath).mockImplementationOnce(() => {
       throw new Error('Custom binary not found: /Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
     });
 
-    const profile = await ensureDefaultBrowserProfile();
-
-    // Re-detected and regenerated in place for THIS machine, not handed back broken.
-    expect(profile.name).toBe('default');
-    expect(profile.browser).toBe('chrome');
-    expect(findFirstInstalledBrowser).toHaveBeenCalled();
-    // Regenerated into THIS machine's own map. The shared copy is left alone, so
-    // the two boxes stop overwriting each other's binary path on every launch.
-    expect(store.deviceBrowser!.default.browser).toBe('chrome');
+    await expect(ensureDefaultBrowserProfile()).rejects.toThrow(
+      /No default browser is configured on this machine/,
+    );
+    expect(writeSpy).not.toHaveBeenCalled();
+    // The stale record is untouched.
     expect(store.browser.default.binary).toBe(stale.binary);
   });
 
-  it("falls back to auto-detect when the configured default can't launch here", async () => {
+  it("warns, then throws, when the configured default can't launch here and nothing else does", async () => {
+    // A declared-but-unlaunchable configured default still warns (missing binary
+    // on this box), but there is no auto-detect fallback anymore — it throws.
     const store = withDefaultProfile({
       browser: {
         'mac-chrome': {
@@ -551,21 +541,17 @@ describe('ensureDefaultBrowserProfile', () => {
       },
     }, 'mac-chrome');
     vi.mocked(readMeta).mockImplementation(() => store as any);
-    vi.mocked(writeMeta).mockImplementation((meta: any) => {
-      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
-      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
-    });
+    const writeSpy = vi.mocked(writeMeta);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(findBrowserPath).mockImplementationOnce(() => {
       throw new Error('Custom binary not found');
     });
 
-    const profile = await ensureDefaultBrowserProfile();
-
-    expect(profile.name).toBe('auto-chrome');
-    expect(profile.browser).toBe('chrome');
-    expect(findFirstInstalledBrowser).toHaveBeenCalled();
+    await expect(ensureDefaultBrowserProfile()).rejects.toThrow(
+      /No default browser is configured on this machine/,
+    );
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("can't launch on this"));
+    expect(writeSpy).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 
@@ -586,13 +572,17 @@ describe('ensureDefaultBrowserProfile', () => {
     expect(findFirstInstalledBrowser).not.toHaveBeenCalled();
   });
 
-  it('throws an actionable error when no Chromium-family browser is installed', async () => {
+  it('throws the same guidance even when a supported browser IS installed (never auto-creates)', async () => {
+    // The crux of PHNX-3296: a browser being available is NOT consent to drive
+    // it. `findFirstInstalledBrowser` is wired to chrome in this suite, yet with
+    // nothing configured we must still refuse to mint a profile.
     vi.mocked(readMeta).mockImplementation(() => ({ browser: {} }) as any);
-    vi.mocked(findFirstInstalledBrowser).mockReturnValueOnce(null);
+    const writeSpy = vi.mocked(writeMeta);
 
     await expect(ensureDefaultBrowserProfile()).rejects.toThrow(
-      /No supported browser found.*Chrome.*Brave.*Edge/
+      /Run `agents setup`.*pick the browser/s,
     );
+    expect(writeSpy).not.toHaveBeenCalled();
   });
 
   it('returns the configured default profile without auto-detecting', async () => {
@@ -998,18 +988,18 @@ describe('resolveProfileRef — the one `default` rule (RUSH-2709)', () => {
 });
 
 /**
- * `start` is the only command that launches, so it is the only one that may
- * warn about or regenerate a default that cannot run on this machine. Routing
- * it through the plain (filter) resolver skipped that repair entirely — the
- * "Custom binary not found" regression this pins.
+ * `start` is the only command that launches, so it is the only one that even
+ * warns about a default that cannot run on this machine. Before PHNX-3296 it
+ * also silently regenerated one; now it throws instead. Routing it through the
+ * plain (filter) resolver would skip both the warn and that throw.
  */
-describe('resolveProfileRefForStart — keeps the launchable repair (RUSH-2709)', () => {
+describe('resolveProfileRefForStart — no silent repair (RUSH-2709, PHNX-3296)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     fs.rmSync(path.join(TEST_ROOT, '.agents', 'devices'), { recursive: true, force: true });
   });
 
-  it('regenerates for THIS machine when the configured default cannot launch here', async () => {
+  it('throws (no silent repair) when the configured default cannot launch here', async () => {
     const store: ProfileStore = {
       browser: {
         'mac-chrome': {
@@ -1020,22 +1010,21 @@ describe('resolveProfileRefForStart — keeps the launchable repair (RUSH-2709)'
       },
     };
     vi.mocked(readMeta).mockImplementation(() => store as any);
-    vi.mocked(writeMeta).mockImplementation((meta: any) => {
-      store.browser = (meta.browser ?? {}) as Record<string, BrowserProfileConfig>;
-      store.deviceBrowser = (meta.deviceBrowser ?? {}) as Record<string, BrowserProfileConfig>;
-    });
+    const writeSpy = vi.mocked(writeMeta);
     writeDeviceDefaultProfile('mac-chrome');
-    vi.mocked(isPortInUse).mockReturnValue(false);
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.mocked(findBrowserPath).mockImplementationOnce(() => {
       throw new Error('Custom binary not found');
     });
 
-    // The filter resolver hands back the unlaunchable profile, by design.
+    // The filter resolver still hands back the unlaunchable profile, by design.
     expect(await resolveProfileRef(undefined)).toBe('mac-chrome');
-    // `start` must not: it warns and falls through to a re-detected profile.
-    expect(await resolveProfileRefForStart(undefined)).toBe('auto-chrome');
+    // `start` must not silently repair it — it warns and then throws.
+    await expect(resolveProfileRefForStart(undefined)).rejects.toThrow(
+      /No default browser is configured on this machine/,
+    );
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("can't launch on this"));
+    expect(writeSpy).not.toHaveBeenCalled();
     warn.mockRestore();
   });
 

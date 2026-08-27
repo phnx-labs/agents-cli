@@ -3,6 +3,19 @@
 ## Unreleased
 
 - **`agents monitors add` refuses immediately when a reachable peer already has the same watcher (PHNX-3299).** The fleet duplicate guard used to collect every peer before reporting a clash, so a single slow box forced the full 12-second timeout even when another peer had already answered with the same fingerprint. The fan-out now aborts remaining SSH captures the moment a peer reports a matching monitor, while the no-match path still waits for the whole fleet so uniqueness can be proved. Source: `cli/src/commands/monitors.ts`, `cli/src/lib/monitors/remote.ts`.
+- **A bare `agents browser start` no longer auto-detects and silently creates a
+  logged-out `auto-chrome` profile — the default browser is now a choice you make
+  in `agents setup` (PHNX-3296).** `ensureDefaultBrowserProfile` used to probe the
+  installed Chromium-family browsers and mint an `auto-chrome` profile
+  (`cdp://127.0.0.1:922x`) on the spot, so an agent could pop a signed-out Chrome
+  on your machine unbidden. It now resolves only a configured default or an
+  existing launchable profile; when neither exists it throws an actionable error
+  pointing at `agents setup` / `agents browser use <name>` (or, for a headless
+  worker, `agents config set browser.device <host>`). A pre-existing
+  `auto-chrome`/legacy `default` is still recognized, so existing installs keep
+  resolving it. The interactive `agents setup` browser pick still lets you choose
+  and pin one — now with an explicit "None — this box uses the fleet hub" opt-out
+  in place of the silent auto-detect.
 
 - **A fleet browser hub lets every box drive one shared logged-in browser with no `--device` (PHNX-2010).**
   New `browser.device` config key (user scope, so a single value in the central

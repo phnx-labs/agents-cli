@@ -14,8 +14,7 @@ import {
   profileRegistry,
   type ProfileDeclaration,
 } from './registry.js';
-import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
-import { DEFAULT_VIEWPORT } from './devices.js';
+import { findBrowserPath, isPortInUse } from './chrome.js';
 
 export type { BrowserProfile } from './types.js';
 export {
@@ -26,14 +25,17 @@ export {
 } from './registry.js';
 
 /**
- * Name of the profile `ensureDefaultBrowserProfile` auto-detects and pins.
+ * Name of the profile the setup wizards pin as this machine's default browser
+ * (`agents setup`, `agents setup browser`). Older builds also auto-created it
+ * silently on the first `agents browser start`; PHNX-3296 removed that — see
+ * {@link ensureDefaultBrowserProfile}.
  *
  * It is `auto-chrome`, NOT `default`, since RUSH-2709: `default` used to be
  * both this concrete profile AND the alias meaning "whatever profile the user
- * configured", so `--profile default` landed on a literal auto-detected Chrome
- * on one command and on the user's configured Comet on another. The alias now
- * lives alone in {@link DEFAULT_PROFILE_ALIAS} and resolves in exactly one
- * place ({@link resolveProfileRef}).
+ * configured", so `--profile default` landed on a literal Chrome on one command
+ * and on the user's configured Comet on another. The alias now lives alone in
+ * {@link DEFAULT_PROFILE_ALIAS} and resolves in exactly one place
+ * ({@link resolveProfileRef}).
  */
 export const DEFAULT_BROWSER_PROFILE_NAME = 'auto-chrome';
 
@@ -250,14 +252,15 @@ export async function resolveProfileRef(ref?: string): Promise<string | undefine
  * no profile of that name) goes through {@link ensureDefaultBrowserProfile} —
  * which additionally verifies the resolved default can launch on THIS machine.
  * An undeclared configured default is an error. A declared default whose
- * browser isn't installed here warns and falls through to auto-detect.
+ * browser isn't installed here warns and falls through to an existing profile,
+ * else the actionable throw below.
  *
  * `start` is the only command that launches a browser, so it is the only one
  * that may do those things; routing a filter-only command through this would
- * warn about, and rewrite, config the user never asked it to touch.
+ * warn about config the user never asked it to touch.
  *
- * Throws when the configured default is undeclared, or when no profile exists
- * and no supported browser is installed.
+ * Throws ({@link noDefaultBrowserError}) when the configured default is
+ * undeclared, or when no profile exists that can launch here.
  */
 export async function resolveProfileRefForStart(ref?: string): Promise<string> {
   if (ref && ref !== DEFAULT_PROFILE_ALIAS) return ref;
@@ -267,22 +270,47 @@ export async function resolveProfileRefForStart(ref?: string): Promise<string> {
 }
 
 /**
+ * The error a bare `agents browser start` raises when this machine has no
+ * launchable default browser. Its own function so the wording — the one thing
+ * the user reads when a browser won't start — stays in one place and is
+ * testable without spawning anything.
+ *
+ * Since PHNX-3296 this is a hard stop, NOT a silent auto-create. The old
+ * behavior probed the installed Chromium-family browsers and minted a
+ * logged-out `auto-chrome` profile on the spot; agents then drove a signed-out
+ * Chrome that popped up on the user's Mac unbidden. Which browser agents drive
+ * is a choice the user makes once, in `agents setup` — never one this code
+ * makes for them.
+ */
+export function noDefaultBrowserError(): Error {
+  return new Error(
+    'No default browser is configured on this machine. ' +
+      'Run `agents setup` (or `agents browser use <name>`) to pick the browser agents should drive. ' +
+      'If this is a headless worker, use the fleet hub instead: `agents config set browser.device <host>`.',
+  );
+}
+
+/**
  * Resolve the profile a bare `agents browser start` uses.
  *
  * Order: (1) the device-local configured default (`agents browser use <name>`)
  * when it names a profile that exists and can launch here; (2) an existing
- * auto-detected profile that can launch here; (3) auto-pick the first installed
- * Chromium-family browser and pin `auto-chrome` (or repair a stale legacy
- * `default`) to it.
+ * auto-detected profile (`auto-chrome`, or a legacy `default`) that can launch
+ * here. When neither resolves, THROW ({@link noDefaultBrowserError}) rather than
+ * detect-and-create — see that function for why (PHNX-3296).
  *
  * Two failure modes at the configured-default step are not the same:
  *   - No device declares the name (including a leftover central `browser:`
- *     entry that was never claimed) → throw. Auto-creating `auto-chrome` would
- *     hand the agent a logged-out browser while `browser.profile` still names
- *     the credentialed one.
+ *     entry that was never claimed) → throw. Falling back to a minted profile
+ *     would hand the agent a logged-out browser while `browser.profile` still
+ *     names the credentialed one.
  *   - The name is declared, but its browser/binary is not installed HERE →
- *     warn and fall through. That is a missing binary on this box, not a
- *     missing identity; auto-detect is the existing repair.
+ *     warn and fall through to an existing profile, else the actionable throw.
+ *     That is a missing binary on this box, not a missing identity.
+ *
+ * This RECOGNIZES a pre-existing `auto-chrome`/legacy `default` so installs that
+ * already carry one keep resolving it (and its running browser + runtime dirs),
+ * but it never CREATES one.
  */
 export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
   const configured = getConfiguredDefaultProfileName();
@@ -307,7 +335,7 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
     }
     console.warn(
       `warning: configured default browser profile "${configured}" can't launch on this ` +
-        `machine (its browser/binary isn't installed here); falling back to auto-detect. ` +
+        `machine (its browser/binary isn't installed here). ` +
         `Fix with: agents browser use <name>  (or --unset)`,
     );
   }
@@ -319,40 +347,12 @@ export async function ensureDefaultBrowserProfile(): Promise<BrowserProfile> {
   const existing = await getAutoDetectedProfile();
   if (existing && isProfileLaunchableHere(existing)) return existing;
 
-  const detected = findFirstInstalledBrowser();
-  if (!detected) {
-    throw new Error(
-      'No supported browser found. Install one of: Chrome, Brave, Edge, Chromium, Comet, or Arc, ' +
-      'then re-run `agents browser start`. Or create a profile explicitly with ' +
-      '`agents browser profiles create <name> --browser <chrome|comet|chromium|brave|edge|arc|custom>`. ' +
-      'Note: Safari and Firefox are not supported — agents browser drives over the ' +
-      'Chrome DevTools Protocol, which they don\'t implement.'
-    );
-  }
-
-  const freePort = await findFreeProfilePort();
-  const profile: BrowserProfile = {
-    // Regenerate under the name that is already on disk when there is one, so a
-    // stale legacy `default` is repaired in place instead of leaving the user
-    // with two auto-detected profiles.
-    name: existing?.name ?? DEFAULT_BROWSER_PROFILE_NAME,
-    description: `Auto-detected ${detected.browserType} profile`,
-    browser: detected.browserType,
-    binary: detected.binary,
-    endpoints: [`cdp://127.0.0.1:${freePort}`],
-    viewport: {
-      width: DEFAULT_VIEWPORT.width,
-      height: DEFAULT_VIEWPORT.height,
-    },
-  };
-  // A stale `default` (auto-created on another OS, unlaunchable here) is
-  // regenerated in place; otherwise this is the first-run create.
-  if (existing) {
-    await updateProfile(profile);
-  } else {
-    await createProfile(profile);
-  }
-  return profile;
+  // No configured default resolves and no existing profile launches here. We
+  // used to auto-detect the first installed browser and silently mint (or
+  // regenerate) an `auto-chrome` profile at this point — that is exactly the
+  // logged-out-Chrome-on-your-Mac bug PHNX-3296 removed. Stop and tell the user
+  // how to choose a browser instead.
+  throw noDefaultBrowserError();
 }
 
 /**

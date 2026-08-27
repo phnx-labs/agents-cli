@@ -379,7 +379,7 @@ export function registerBrowserCommand(program: Command): void {
       # Create a Chrome profile pointed at a CDP endpoint
       agents browser profiles create work --browser chrome --endpoint http://localhost:9222
 
-      # Start a session — auto-picks the first installed Chromium-family browser
+      # Start a session on this machine's default browser (set it once with: agents browser use)
       agents browser start
 
       # Or pin to a specific profile
@@ -469,7 +469,7 @@ export async function runBrowserUse(
 ): Promise<boolean> {
   if (opts.unset || name === 'auto') {
     unsetConfigValue('browser.profile');
-    console.log('Default browser profile cleared. `agents browser start` will auto-detect an installed Chromium-family browser.');
+    console.log('Default browser profile cleared. Pick one with `agents browser use <name>` (or `agents setup`); until then `agents browser start` has no default to launch here.');
     return true;
   }
 
@@ -479,7 +479,7 @@ export async function runBrowserUse(
     if (!interactive) {
       console.log(current
         ? `Default browser profile (this machine): ${current}`
-        : 'Default browser profile (this machine): auto-detect');
+        : 'Default browser profile (this machine): none — pick one with `agents browser use <name>`');
       const hub = getConfigValue('browser.device').value as string | undefined;
       if (hub) {
         console.log(
@@ -532,7 +532,7 @@ export async function runBrowserUse(
 function configureBrowserUseCommand(command: Command, deprecated = false): void {
   command
     .description('Pick the profile `agents browser start` uses when no --profile is passed. No name opens a picker on a TTY or prints the current default headlessly.')
-    .option('--unset', 'Clear the configured default (revert to auto-detecting an installed browser)')
+    .option('--unset', 'Clear the configured default (leaves this machine with no default until you pick one)')
     .action(async (name: string | undefined, opts: BrowserUseOptions) => {
       if (deprecated) {
         console.warn(chalk.yellow('Deprecation: `agents browser profiles set-default` is replaced by `agents browser use`.'));
@@ -1085,7 +1085,7 @@ function registerProfilesCommands(browser: Command): void {
       if (getConfiguredDefaultProfileName() === name) {
         console.error(
           `warning: "${name}" was this machine's default browser profile; ` +
-          `\`agents browser start\` will auto-detect until you run: agents browser use <name>`
+          `\`agents browser start\` has no default here until you run: agents browser use <name>`
         );
       }
     });
@@ -1177,13 +1177,13 @@ function registerProfilesCommands(browser: Command): void {
       with \`agents browser profiles claim\` on the machine that hosts the browser.
 
       In \`list\`, the \`*\` marker means "this machine's configured default"
-      (\`agents browser start\` with no --profile). The auto-detected profile is
-      named \`auto-chrome\`; \`default\` is only an ALIAS for whichever profile
+      (\`agents browser start\` with no --profile). A profile a setup wizard pins
+      is named \`auto-chrome\`; \`default\` is only an ALIAS for whichever profile
       this machine is configured to use, resolved the same way by every command.
 
       \`prune\` only considers profiles this device declares. It never removes a
-      profile that is in use, the configured default, or the auto-detected
-      \`auto-chrome\`.
+      profile that is in use, the configured default, or the \`auto-chrome\`
+      profile a setup wizard created.
     `,
   });
 
@@ -1539,8 +1539,8 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('start')
-    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (`agents browser use <name>`), else auto-pick an installed Chromium-family browser. Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.')
-    .option('-p, --profile <name>', 'Browser profile to use (omit to use the configured default, else auto-pick an installed Chromium-family browser)')
+    .description('Start a browser task. Pass --profile <name>; omit to use your configured default (set it with `agents browser use <name>` or `agents setup`). Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.')
+    .option('-p, --profile <name>', 'Browser profile to use (omit to use this machine\'s configured default; set it with `agents browser use <name>`)')
     .option(TASK_OPTION_FLAG, 'Task name (auto-generated short id if omitted)')
     .option('--title <label>', 'Human label shown in `browser status` (defaults to first navigated host)')
     .option('-e, --endpoint <name>', 'Endpoint preset (defaults to the profile\'s default)')
@@ -1617,9 +1617,10 @@ function registerTaskCommands(browser: Command): void {
       // means the same profile here as it does in stop / status / navigate.
       // `start` is the one command that LAUNCHES, so its implicit path goes
       // through ensureDefaultBrowserProfile, which additionally verifies the
-      // resolved default can launch on THIS machine and regenerates it when it
-      // can't (the "Custom binary not found" repair) — a filter-only command
-      // must not warn or rewrite a profile, so that check lives only here.
+      // resolved default can launch on THIS machine and, when nothing launchable
+      // resolves, throws an actionable "pick a browser in `agents setup`" error
+      // (PHNX-3296 — it no longer silently mints an auto-chrome). A filter-only
+      // command must not warn about the config, so that check lives only here.
       let profileName: string;
       try {
         profileName = await resolveProfileRefForStart(opts.profile);
