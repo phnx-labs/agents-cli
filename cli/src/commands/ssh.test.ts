@@ -4,7 +4,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { fileURLToPath } from 'url';
-import { renderDeviceTable, renderLeasedBoxesSection, showLeasedBoxesSection, raceFleetPingDeadline } from './ssh.js';
+import { renderDeviceTable, renderLeasedBoxesSection, showLeasedBoxesSection, raceFleetPingDeadline, leasedBoxRemoteCmd } from './ssh.js';
 import { stripAnsi } from '../lib/text/width.js';
 import type { CrabboxBox } from '../lib/crabbox/cli.js';
 import type { DeviceProfile, DeviceRegistry } from '../lib/devices/registry.js';
@@ -211,6 +211,52 @@ describe('renderLeasedBoxesSection — F4 devices "Leased boxes" (RUSH-1923)', (
     expect(flat).not.toContain('203.0.113.9');
     expect(flat).toContain('agents run --box <slug>');
     expect(flat).toContain('agents devices lease stop <slug>');
+  });
+});
+
+describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => {
+  // trySshLeasedBox does not go through buildSshInvocation; it stamps via this
+  // helper. Pin the exact remote argv so a leased-box browser drive cannot
+  // skip AGENTS_FLEET_REMOTE the way the registered-device path used to.
+  it('stamps AGENTS_FLEET_REMOTE on agents/ag browser drives', () => {
+    expect(leasedBoxRemoteCmd(['agents', 'browser', 'navigate', '--url', 'https://example.com'])).toEqual([
+      'env',
+      'AGENTS_FLEET_REMOTE=1',
+      'agents',
+      'browser',
+      'navigate',
+      '--url',
+      'https://example.com',
+    ]);
+    expect(leasedBoxRemoteCmd(['ag', 'browser', 'screenshot'])).toEqual([
+      'env',
+      'AGENTS_FLEET_REMOTE=1',
+      'ag',
+      'browser',
+      'screenshot',
+    ]);
+  });
+
+  it('stamps the standalone browser binary (the P0 hole the registered-device path also closed)', () => {
+    expect(leasedBoxRemoteCmd(['browser', 'navigate', '--url', 'https://evil.example'])).toEqual([
+      'env',
+      'AGENTS_FLEET_REMOTE=1',
+      'browser',
+      'navigate',
+      '--url',
+      'https://evil.example',
+    ]);
+    expect(leasedBoxRemoteCmd(['browser navigate --url https://evil.example'])).toEqual([
+      'env',
+      'AGENTS_FLEET_REMOTE=1',
+      'browser navigate --url https://evil.example',
+    ]);
+  });
+
+  it('leaves non-browser commands unmarked', () => {
+    expect(leasedBoxRemoteCmd(['uptime'])).toEqual(['uptime']);
+    expect(leasedBoxRemoteCmd(['agents', 'sessions', 'list'])).toEqual(['agents', 'sessions', 'list']);
+    expect(leasedBoxRemoteCmd([])).toEqual([]);
   });
 });
 

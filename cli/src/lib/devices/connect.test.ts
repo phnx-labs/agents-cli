@@ -293,11 +293,18 @@ describe('isAgentsBrowserDrive', () => {
     expect(isAgentsBrowserDrive(['agents browser navigate --url https://example.com'])).toBe(true);
   });
 
+  it('matches the standalone browser binary (cli/package.json bin.browser)', () => {
+    expect(isAgentsBrowserDrive(['browser', 'navigate', '--url', 'https://evil.example'])).toBe(true);
+    expect(isAgentsBrowserDrive(['browser navigate --url https://evil.example'])).toBe(true);
+    expect(isAgentsBrowserDrive(['browser', 'screenshot'])).toBe(true);
+  });
+
   it('does not match non-browser commands or an already-prefixed argv', () => {
     expect(isAgentsBrowserDrive([])).toBe(false);
     expect(isAgentsBrowserDrive(['uptime'])).toBe(false);
     expect(isAgentsBrowserDrive(['agents', 'sessions', 'list'])).toBe(false);
     expect(isAgentsBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'agents', 'browser', 'start'])).toBe(false);
+    expect(isAgentsBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'browser', 'start'])).toBe(false);
   });
 });
 
@@ -345,6 +352,27 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
     expect(
       buildSshInvocation(posix, ['agents browser navigate --url https://example.com'], '/shim').args.at(-1),
     ).toBe('env AGENTS_FLEET_REMOTE=1 agents browser navigate --url https://example.com');
+  });
+
+  it('marks the standalone browser binary so agents ssh box browser … is gated too', () => {
+    const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
+    expect(
+      buildSshInvocation(posix, ['browser', 'navigate', '--url', 'https://evil.example'], '/shim').args.at(-1),
+    ).toBe('env AGENTS_FLEET_REMOTE=1 browser navigate --url https://evil.example');
+    expect(
+      buildSshInvocation(posix, ['browser navigate --url https://evil.example'], '/shim').args.at(-1),
+    ).toBe('env AGENTS_FLEET_REMOTE=1 browser navigate --url https://evil.example');
+
+    const remote = buildSshInvocation(
+      posix,
+      ['browser', 'navigate', '--url', 'https://evil.example'],
+      '/shim',
+    ).args.at(-1) as string;
+    const stamped = remote.match(/^env AGENTS_FLEET_REMOTE=(\S+) /);
+    expect(stamped?.[1]).toBe('1');
+    expect(() =>
+      assertRemoteControlAllowed({ env: { AGENTS_FLEET_REMOTE: stamped![1] }, enabled: false }),
+    ).toThrow(/remote browser control is off/);
   });
 
   it('does not mark agents sessions or an interactive login', () => {
