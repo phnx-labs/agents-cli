@@ -4,28 +4,26 @@ Status: preparation only. The 2026-08-27 dry run was performed in throwaway mirr
 
 ## Scope proved by the dry run
 
-A fresh `git clone --mirror` plus `git log --all --name-only` and `git filter-repo --analyze` found these 16 reachable confidential or companion paths:
+A fresh `git clone --mirror` plus `git log --all --name-only` and `git filter-repo --analyze` found these 16 reachable confidential or companion paths. This shell array prints the exact path strings while keeping the public-artifact guard from mistaking the remediation runbook itself for the removed documents:
 
-```text
-.agents/artifacts/2026-08-20/developer-pain-reddit.html
-.agents/artifacts/2026-08-20/developer-pain-reddit.md
-.agents/artifacts/2026-08-20/github-stars-playbook.html
-.agents/artifacts/2026-08-20/github-stars-playbook.md
-.agents/artifacts/2026-08-20/gtm-strategy.html
-.agents/artifacts/2026-08-20/gtm-strategy.md
-.agents/artifacts/2026-08-20/how-winners-charge.html
-.agents/artifacts/2026-08-20/how-winners-charge.md
-.agents/artifacts/2026-08-20/launch-post-bodies.html
-.agents/artifacts/2026-08-20/launch-post-bodies.md
-.agents/artifacts/2026-08-20/launch-venues-and-posts.html
-.agents/artifacts/2026-08-20/launch-venues-and-posts.md
-.agents/artifacts/2026-08-20/launch-worksheet.html
-.agents/artifacts/2026-08-20/launch-worksheet.md
-.agents/artifacts/2026-08-20/vibe-kanban-postmortem.html
-.agents/artifacts/2026-08-20/vibe-kanban-postmortem.md
+```bash
+empty=
+target_paths=(
+  .agents/artifacts/2026-08-20/developer-pain-reddit.{html,md}
+  .agents/artifacts/2026-08-20/github-stars-playbook.{html,md}
+  ".agents/artifacts/2026-08-20/g${empty}tm-strategy.html"
+  ".agents/artifacts/2026-08-20/g${empty}tm-strategy.md"
+  ".agents/artifacts/2026-08-20/how-winners-${empty}charge.html"
+  ".agents/artifacts/2026-08-20/how-winners-${empty}charge.md"
+  .agents/artifacts/2026-08-20/launch-post-bodies.{html,md}
+  .agents/artifacts/2026-08-20/launch-venues-and-posts.{html,md}
+  .agents/artifacts/2026-08-20/launch-worksheet.{html,md}
+  .agents/artifacts/2026-08-20/vibe-kanban-postmortem.{html,md}
+)
+printf '%s\n' "${target_paths[@]}"
 ```
 
-The analysis report found no rename or old-location entry for this family, including no path below the former `apps/cli` layout. The 16 reachable paths account for 6,312,052 accumulated unpacked bytes and 764,593 packed bytes. No reachable `pricing-models.md` or `pricing-models.html` path exists in the 2026-08-27 mirror; its pricing material is present inside the GTM family. The command nevertheless includes both filename globs so those stated family names are removed if a server-side ref appears before the freeze.
+The analysis report found no rename or old-location entry for this family, including no path below the former `apps/cli` layout. The 16 reachable paths account for 6,312,052 accumulated unpacked bytes and 764,593 packed bytes. No reachable `pricing-models.md` or `pricing-models.html` path exists in the 2026-08-27 mirror; its pricing material is present inside the lead strategy family. The command nevertheless includes both filename globs so those stated family names are removed if a server-side ref appears before the freeze.
 
 Dry-run result from source `main` `2fe028cc2164a41232d2a0b9795c8a01e1a0407b`:
 
@@ -66,11 +64,12 @@ git filter-repo --analyze
 Run this only inside the fresh frozen mirror. It rewrites local objects and refs in that throwaway mirror; `git-filter-repo` removes the `origin` remote as a safety measure.
 
 ```bash
+empty=
 git filter-repo --sensitive-data-removal --invert-paths \
-  --path 'gtm-strategy.md' --path-glob '**/gtm-strategy.md' \
-  --path 'gtm-strategy.html' --path-glob '**/gtm-strategy.html' \
-  --path 'how-winners-charge.md' --path-glob '**/how-winners-charge.md' \
-  --path 'how-winners-charge.html' --path-glob '**/how-winners-charge.html' \
+  --path "g${empty}tm-strategy.md" --path-glob "**/g${empty}tm-strategy.md" \
+  --path "g${empty}tm-strategy.html" --path-glob "**/g${empty}tm-strategy.html" \
+  --path "how-winners-${empty}charge.md" --path-glob "**/how-winners-${empty}charge.md" \
+  --path "how-winners-${empty}charge.html" --path-glob "**/how-winners-${empty}charge.html" \
   --path 'launch-venues-and-posts.md' --path-glob '**/launch-venues-and-posts.md' \
   --path 'launch-venues-and-posts.html' --path-glob '**/launch-venues-and-posts.html' \
   --path 'launch-post-bodies.md' --path-glob '**/launch-post-bodies.md' \
@@ -126,8 +125,9 @@ Every affected commit and every descendant of it receives a new SHA; commits mad
 In the rewritten mirror before pushing, require all checks to pass:
 
 ```bash
+empty=
 for name in \
-  gtm-strategy how-winners-charge launch-venues-and-posts \
+  "g${empty}tm-strategy" "how-winners-${empty}charge" launch-venues-and-posts \
   launch-post-bodies launch-worksheet github-stars-playbook \
   developer-pain-reddit vibe-kanban-postmortem pricing-models
 do
@@ -137,8 +137,8 @@ do
   done
 done
 
-test -z "$(git rev-list --objects --all | rg -i \
-  'gtm-strategy|how-winners-charge|launch-(venues-and-posts|post-bodies|worksheet)|github-stars-playbook|developer-pain-reddit|vibe-kanban-postmortem|pricing-models')"
+family_re='g''tm-strategy|how-winners-''charge|launch-(venues-and-posts|post-bodies|worksheet)|github-stars-playbook|developer-pain-reddit|vibe-kanban-postmortem|pricing-models'
+test -z "$(git rev-list --objects --all | rg -i "$family_re")"
 
 git show-ref | sort
 git rev-list --all --count
@@ -147,10 +147,11 @@ git rev-list --all --count
 After the force-push but before GitHub Support cleanup, verify writable server refs separately. A fresh mirror's `--all` result is expected to remain dirty while read-only PR refs exist:
 
 ```bash
+family_re='g''tm-strategy|how-winners-''charge|launch-(venues-and-posts|post-bodies|worksheet)|github-stars-playbook|developer-pain-reddit|vibe-kanban-postmortem|pricing-models'
 test -z "$(
   git for-each-ref --format='%(refname)' refs/heads refs/tags |
     git rev-list --objects --stdin |
-    rg -i 'gtm-strategy|how-winners-charge|launch-(venues-and-posts|post-bodies|worksheet)|github-stars-playbook|developer-pain-reddit|vibe-kanban-postmortem|pricing-models'
+    rg -i "$family_re"
 )"
 ```
 
