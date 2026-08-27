@@ -3631,7 +3631,7 @@
           "name": "remote-control",
           "path": "browser remote-control",
           "aliases": [],
-          "description": "Allow or deny other fleet machines driving THIS machine's browser over `browser --device`. `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.",
+          "description": "Allow or deny other fleet machines driving THIS machine's browser over `browser --device` or `agents ssh … agents browser`. `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.",
           "args": [
             {
               "name": "state",

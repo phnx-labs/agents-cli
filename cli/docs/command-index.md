@@ -113,7 +113,7 @@ agents browser record                         Record a video of the page
 agents browser record start                   Start recording — auto-saved under sessions/<task>/recordings/. Bounded by --fps, --duration, --max-mb.
 agents browser record stop                    Stop an in-progress recording
 agents browser refs                           Get DOM refs for interactive elements
-agents browser remote-control [state]         Allow or deny other fleet machines driving THIS machine's browser over `browser --device`. `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.
+agents browser remote-control [state]         Allow or deny other fleet machines driving THIS machine's browser over `browser --device` or `agents ssh … agents browser`. `on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.
 agents browser requests                       Read captured network requests. --format har emits a HAR 1.2 JSON document.
 agents browser responsebody <url-pattern>     Wait for and read a response body by URL pattern
 agents browser screenshot                     Take a screenshot — auto-saved per task; --output only needed when you want a specific path
