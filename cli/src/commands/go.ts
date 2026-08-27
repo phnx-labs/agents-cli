@@ -322,9 +322,10 @@ export function describeWhere(s: ActiveSession, self: string): Where {
 /**
  * What to do when a session can't be *attached* (no tmux/Ghostty rail). `go`
  * refuses; `focus` opens a new tab and resumes. `remote` is the peer name when
- * the session lives on another machine, else undefined.
+ * the session lives on another machine, else undefined. `fallbackId` is the
+ * indexed session id when the live row has not registered one yet (PHNX-3356).
  */
-export type UnreachableFallback = (s: ActiveSession, remote: string | undefined) => void | Promise<void>;
+export type UnreachableFallback = (s: ActiveSession, remote: string | undefined, fallbackId?: string) => void | Promise<void>;
 
 export type AttachRailLiveness =
   | { state: 'alive' }
@@ -363,7 +364,7 @@ export async function probeAttachRail(s: ActiveSession, self: string): Promise<A
 
 /** Strict attach-only fallback: no pane means no attach. Never open a shell or
  * start recovery, because both would violate the caller's no-fork intent. */
-export async function refuseFallback(s: ActiveSession, remote: string | undefined): Promise<void> {
+export async function refuseFallback(s: ActiveSession, remote: string | undefined, fallbackId?: string): Promise<void> {
   if (remote) {
     console.log(chalk.yellow(`Can't attach ${shortId(s)} on ${remote} — it has no living tmux pane.`));
     process.exitCode = 1;
@@ -371,12 +372,12 @@ export async function refuseFallback(s: ActiveSession, remote: string | undefine
   }
   console.log(
     chalk.yellow(`Can't jump to ${shortId(s)} — it's in ${s.host ?? 'an unknown terminal'} with no attach rail (not tmux/Ghostty).`) +
-      chalk.gray(`\n${addressabilityRecoveryHint(s)}`),
+      chalk.gray(`\n${addressabilityRecoveryHint(s, fallbackId)}`),
   );
   process.exitCode = 1;
 }
 
-export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback): Promise<void> {
+export async function jumpTo(s: ActiveSession, self: string, fallback: UnreachableFallback = refuseFallback, fallbackId?: string): Promise<void> {
   const remote = sessionProcessHost(s, self);
   const mux = s.provenance?.mux;
 
@@ -385,7 +386,7 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
     if (mux?.kind === 'tmux' && mux.pane) {
       const liveness = await probeAttachRail(s, self);
       if (liveness.state !== 'alive') {
-        await fallback(s, remote);
+        await fallback(s, remote, fallbackId);
         return;
       }
       assertValidSshTarget(remote);
@@ -404,7 +405,7 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
       process.exit(code);
     }
     // Remote, not in tmux → hand off to the fallback (go: shell; focus: resume in a tab).
-    await fallback(s, remote);
+    await fallback(s, remote, fallbackId);
     return;
   }
 
@@ -412,7 +413,7 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
   if (mux?.kind === 'tmux' && mux.pane) {
     const liveness = await probeAttachRail(s, self);
     if (liveness.state !== 'alive') {
-      await fallback(s, undefined);
+      await fallback(s, undefined, fallbackId);
       return;
     }
     const socket = mux.socket ?? getDefaultSocketPath();
@@ -461,7 +462,7 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
   }
 
   // Path D: no attach rail (headless / plain terminal) → hand off to the fallback.
-  await fallback(s, undefined);
+  await fallback(s, undefined, fallbackId);
 }
 
 /** Resolve a local tmux pane id to its session name + window index. */

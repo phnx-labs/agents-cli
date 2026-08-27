@@ -623,7 +623,7 @@ export function focusTargetForResolved(
   return poolMatch ?? resolved;
 }
 
-async function focusResolvedSession(
+export async function focusResolvedSession(
   meta: SessionMeta,
   liveById: Map<string, ActiveSession>,
   self: string,
@@ -633,7 +633,7 @@ async function focusResolvedSession(
 ): Promise<void> {
   const active = liveById.get(meta.id);
   if (active && isAttachableLiveSession(active)) {
-    await jumpTo(active, self, fallback);
+    await jumpTo(active, self, fallback, meta.id);
     return;
   }
   if (attachOnly) {
