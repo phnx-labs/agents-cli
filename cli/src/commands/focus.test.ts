@@ -19,6 +19,7 @@ import {
   resolveTmuxAliasState,
   shouldAttachLocalTmuxAliasBeforeFleet,
   dedupeSessionsByLogicalId,
+  focusResolvedSession,
 } from './focus.js';
 import { refuseFallback } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
@@ -112,6 +113,39 @@ describe('selectFallback — --attach-only (old `go`) vs default resume', () => 
     expect(output).toContain('no attach rail');
     expect(output).toContain('agents sessions resume');
     expect(output).toContain('tmux');
+    expect(process.exitCode).toBe(1);
+    process.exitCode = previous;
+    log.mockRestore();
+  });
+});
+
+describe('focusResolvedSession --attach-only Path D (PHNX-3356)', () => {
+  // `agents focus <id> --attach-only` against a live IDE row that has not
+  // registered a sessionId yet: isAttachableLiveSession is true (pid liveness
+  // only), jumpTo takes Path D (no tmux/Ghostty rail), refuseFallback prints
+  // the recovery hint. The indexed id the user passed must appear in that hint
+  // — not the literal `<id>` placeholder.
+  const id = 'ffffffff-1111-2222-3333-444444444444';
+  const meta: SessionMeta = {
+    id, shortId: 'ffffffff', agent: 'codex', version: '0.1.0', mode: 'edit',
+    machine: 'self-host', timestamp: '2026-08-27T00:00:00Z', filePath: '/s/a.jsonl',
+  };
+
+  it('prints resume <real-id> when the live IDE row has no sessionId', async () => {
+    const live = s({
+      machine: 'self-host', host: 'codium', pid: 4242, pidAlive: true,
+      status: 'running', sessionId: undefined,
+    });
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const previous = process.exitCode;
+    process.exitCode = undefined;
+    await focusResolvedSession(meta, new Map([[id, live]]), 'self-host', refuseFallback, true);
+    const out = log.mock.calls.flat().join('\n');
+    expect(out).toContain('no attach rail');
+    expect(out).toContain('agents sessions resume ffffffff');
+    expect(out).not.toContain('resume <id>');
+    expect(out).not.toContain('opening a new');
+    expect(out).not.toContain('resuming it there');
     expect(process.exitCode).toBe(1);
     process.exitCode = previous;
     log.mockRestore();
