@@ -37,6 +37,11 @@ function makeEnv() {
         const current = store.get(key);
         if (opts.onlyIf?.etagMatches) {
           // R2 returns null when the precondition fails (Workers API).
+          // etagMatches compares against the BARE hash (R2Object#etag), not
+          // the quoted HTTP header form (R2Object#httpEtag) — real R2 500s
+          // ("Conditional ETag should not be wrapped in quotes") if a caller
+          // passes the quoted form, which a fake that conflated the two
+          // would never catch.
           if (!current || current.etag !== opts.onlyIf.etagMatches) return null;
         }
         // The Worker forwards request.body (a ReadableStream) — consume it so the
@@ -47,7 +52,7 @@ function makeEnv() {
           ? { contentType: rawHttp.get('content-type') ?? undefined }
           : (rawHttp ?? {});
         etagSeq += 1;
-        const etag = `"etag-${etagSeq}"`;
+        const etag = `etag-${etagSeq}`;
         store.set(key, {
           body: buf,
           httpMetadata,
@@ -56,7 +61,7 @@ function makeEnv() {
           size: buf.length,
           etag,
         });
-        return { httpEtag: etag, size: buf.length };
+        return { etag, httpEtag: `"${etag}"`, size: buf.length };
       },
       get: async (key: string) => {
         const item = store.get(key);
@@ -65,7 +70,8 @@ function makeEnv() {
           body: item.body,
           customMetadata: item.customMetadata,
           uploaded: new Date(item.uploaded),
-          httpEtag: item.etag,
+          etag: item.etag,
+          httpEtag: `"${item.etag}"`,
           // R2 objects expose text()/arrayBuffer(); the Worker reads text() to
           // inject the attribution bar, so the fake must too.
           text: async () => Buffer.from(item.body).toString('utf8'),
@@ -437,7 +443,7 @@ describe('worker metadata edit route (PATCH /<user>/<slug>)', () => {
       const obj = await origGet(key);
       const cur = store.get(key);
       if (cur) {
-        store.set(key, { ...cur, body: Buffer.from('v2-body'), etag: '"etag-raced"', size: 7 });
+        store.set(key, { ...cur, body: Buffer.from('v2-body'), etag: 'etag-raced', size: 7 });
       }
       return obj;
     };

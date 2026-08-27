@@ -252,7 +252,11 @@ export default {
       const httpHeaders = new Headers();
       if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(httpHeaders);
       const putOpts = { httpMetadata: httpHeaders, customMetadata: metadata };
-      if (existing.httpEtag) putOpts.onlyIf = { etagMatches: existing.httpEtag };
+      // onlyIf.etagMatches wants the bare hash (R2Object#etag), not the
+      // quoted HTTP header form (R2Object#httpEtag) — passing httpEtag 500s
+      // on a real Workers R2 binding ("Conditional ETag should not be
+      // wrapped in quotes"), a defect only a real R2 backend surfaces.
+      if (existing.etag) putOpts.onlyIf = { etagMatches: existing.etag };
       const putResult = await env.BUCKET.put(path, existing.body, putOpts);
       if (putResult === null) return json({ error: 'conflict', key: path }, 409);
       return json({ ok: true, url: url.origin + '/' + path, label: metadata.label || null, meta: extraMetaOf(metadata) }, 200);
