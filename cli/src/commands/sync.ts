@@ -320,6 +320,9 @@ async function runRepoGitSync(
       if (adopted.localEdits.length > 0) {
         outLog(chalk.yellow(`  kept ${adopted.localEdits.length} local edit(s): ${adopted.localEdits.slice(0, 5).join(', ')}${adopted.localEdits.length > 5 ? ', …' : ''}`));
       }
+      if (adopted.agentsYamlBackup) {
+        outLog(chalk.gray(`  saved the previous agents.yaml to ${adopted.agentsYamlBackup}`));
+      }
     }
   }
 
@@ -335,6 +338,14 @@ async function runRepoGitSync(
     return;
   }
 
+  // Record the resolved remote so a future partial box (lost .git) can adopt in
+  // place without the operator re-typing the URL (PHNX-3301). Before the --json
+  // early-return so the record is refreshed on every healthy sync, JSON or not.
+  if (repo === 'user') {
+    const u = resolveUserRepoRemoteUrl(target.dir);
+    if (u) recordUserRepoRemote(target.dir, u);
+  }
+
   if (json) {
     emitJson({
       ok: true,
@@ -344,13 +355,6 @@ async function runRepoGitSync(
       pushed: !!result.pushed,
     });
     return;
-  }
-
-  // Record the resolved remote so a future partial box (lost .git) can adopt in
-  // place without the operator re-typing the URL (PHNX-3301).
-  if (repo === 'user') {
-    const u = resolveUserRepoRemoteUrl(target.dir);
-    if (u) recordUserRepoRemote(target.dir, u);
   }
 
   if (!quiet) {

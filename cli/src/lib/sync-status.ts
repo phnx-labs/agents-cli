@@ -33,7 +33,7 @@ import { listInstalledVersions, getGlobalDefault } from './installations/version
 import { loadManifest } from './staleness/index.js';
 import { getSystemAgentsDir, getUserAgentsDir } from './state.js';
 import * as fs from 'fs';
-import { isGitRepo } from './git.js';
+import { isGitRepo, readOriginUrl } from './git.js';
 
 /**
  * One stable status per resource, unified across every surface.
@@ -176,12 +176,9 @@ export async function getUserRepoStatus(): Promise<UserRepoStatus> {
   const dir = getUserAgentsDir();
   if (!fs.existsSync(dir)) return { dir, notGitRepo: false };
   if (!isGitRepo(dir)) return { dir, notGitRepo: true };
-  try {
-    const remotes = await simpleGit(dir).getRemotes();
-    return { dir, notGitRepo: !remotes.some((r) => r.name === 'origin') };
-  } catch {
-    return { dir, notGitRepo: true };
-  }
+  // A repo with no `origin` is just as partial for adopt's purposes — reuse the
+  // single origin-URL reader rather than a second remote check.
+  return { dir, notGitRepo: readOriginUrl(dir) === null };
 }
 
 /**

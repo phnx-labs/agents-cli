@@ -117,9 +117,12 @@ describe('adoptRepoInPlace', () => {
     expect(fs.readFileSync(path.join(target, '.cache', 'state.json'), 'utf8')).toBe('{"runtime":true}\n');
     expect(fs.readFileSync(path.join(target, 'scratch', 'note.txt'), 'utf8')).toBe('do not lose me\n');
 
-    // 4. Stale-stub agents.yaml reconciled from origin.
+    // 4. Stale-stub agents.yaml reconciled from origin — and the pre-reconcile
+    //    local copy saved to gitignored runtime state (recoverable, not lost).
     expect(res.reconciledAgentsYaml).toBe(true);
     expect(fs.readFileSync(path.join(target, 'agents.yaml'), 'utf8')).toBe(COMMITTED_AGENTS_YAML);
+    expect(res.agentsYamlBackup).toBeTruthy();
+    expect(fs.readFileSync(res.agentsYamlBackup!, 'utf8')).toBe('hooks:\nfleet: {}\n');
 
     // 5. A real local edit is surfaced, NOT overwritten.
     expect(fs.readFileSync(path.join(target, 'rules', 'keep.md'), 'utf8')).toBe('LOCAL EDIT\n');

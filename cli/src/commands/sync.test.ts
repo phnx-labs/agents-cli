@@ -8,7 +8,7 @@
  * fleet roster's `safeJsonParse` succeeds.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawnSync, execFileSync } from 'child_process';
 import { Command } from 'commander';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -400,5 +400,97 @@ describe('sync --json reports a refused write (RUSH-2700)', () => {
     expect(payload.mode).toBe('agent-all');
     expect(payload.ok).toBe(true);
     expect(payload.versions.flatMap((v: { declined?: string[] }) => v.declined ?? [])).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PHNX-3301: `agents sync user` adopt-in-place self-heal — the real command
+// against a real bare origin and a non-git ~/.agents (no mocks). Exercises the
+// entry point (not just the library fn), so the runRepoGitSync wiring — remote
+// recording, the --json path, the adopt→sync handoff — is covered end to end.
+// ---------------------------------------------------------------------------
+
+describe('agents sync user — adopt-in-place self-heal (PHNX-3301)', () => {
+  const FULL_YAML = [
+    '# agents-cli metadata',
+    'hooks:',
+    '  SessionStart:',
+    '    - startup',
+    'config:',
+    '  interactiveHost: zion',
+    'fleet:',
+    '  devices: {}',
+    '',
+  ].join('\n');
+
+  function git(cwd: string, ...args: string[]): void {
+    execFileSync('git', args, {
+      cwd,
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@e.c',
+        GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@e.c',
+        GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null',
+      },
+    });
+  }
+
+  it('git-backs a non-git ~/.agents against its origin, materializing resources and preserving runtime state', () => {
+    const home = guardedHome();
+    const userDir = path.join(home, '.agents');
+    const remote = path.join(home, 'origin.git');
+    const author = path.join(home, 'author');
+
+    // Bare origin seeded on main with a full agents.yaml + a skill.
+    execFileSync('git', ['init', '--bare', '-b', 'main', remote]);
+    execFileSync('git', ['clone', remote, author]);
+    fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
+    fs.writeFileSync(path.join(author, '.gitignore'), '.cache/\nscratch/\n');
+    fs.writeFileSync(path.join(author, 'agents.yaml'), FULL_YAML);
+    fs.mkdirSync(path.join(author, 'skills'), { recursive: true });
+    fs.writeFileSync(path.join(author, 'skills', 'x.md'), 'skill\n');
+    git(author, 'add', '-A');
+    git(author, 'commit', '-m', 'seed');
+    git(author, 'push', 'origin', 'main');
+
+    // Partial box: runtime state + a stub agents.yaml, and NO .git.
+    fs.mkdirSync(path.join(userDir, '.cache'), { recursive: true });
+    fs.writeFileSync(path.join(userDir, '.cache', 'x'), 'runtime\n');
+    fs.writeFileSync(path.join(userDir, 'agents.yaml'), 'hooks:\nfleet: {}\n');
+    expect(fs.existsSync(path.join(userDir, '.git'))).toBe(false);
+
+    const r = spawnSync('bun', [INDEX, 'sync', 'user', '--json'], {
+      encoding: 'utf-8',
+      env: {
+        ...process.env,
+        HOME: home,
+        AGENTS_NO_UPDATE_CHECK: '1',
+        AGENTS_SECRETS_PASSPHRASE: '',
+        AGENTS_USER_REPO_URL: remote,
+      },
+    });
+    const payload = JSON.parse((r.stdout ?? '').trim());
+
+    // The command succeeded via the git-sync path.
+    expect(payload.ok).toBe(true);
+    expect(payload.mode).toBe('repo-git');
+    expect(payload.repo).toBe('user');
+
+    // Tracking restored + resources materialized, runtime preserved.
+    expect(fs.existsSync(path.join(userDir, '.git'))).toBe(true);
+    expect(fs.readFileSync(path.join(userDir, 'skills', 'x.md'), 'utf8')).toBe('skill\n');
+    expect(fs.readFileSync(path.join(userDir, '.cache', 'x'), 'utf8')).toBe('runtime\n');
+    // Stale-stub agents.yaml reconciled from origin.
+    expect(fs.readFileSync(path.join(userDir, 'agents.yaml'), 'utf8')).toBe(FULL_YAML);
+
+    // The remote is recorded for a future heal EVEN on the --json path (the
+    // record block must run before the --json early return).
+    const rec = JSON.parse(fs.readFileSync(path.join(userDir, '.history', 'user-repo-remote.json'), 'utf8'));
+    expect(rec.url).toBe(remote);
+
+    // No stray commit pushed to origin.
+    const count = execFileSync('git', ['--git-dir', remote, 'rev-list', '--count', 'main'], { encoding: 'utf-8' }).trim();
+    expect(count).toBe('1');
   });
 });

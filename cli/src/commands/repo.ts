@@ -1318,6 +1318,9 @@ Examples:
             if (adopted.localEdits.length > 0) {
               console.log(chalk.yellow(`  kept ${adopted.localEdits.length} local edit(s): ${adopted.localEdits.slice(0, 5).join(', ')}${adopted.localEdits.length > 5 ? ', …' : ''}`));
             }
+            if (adopted.agentsYamlBackup) {
+              console.log(chalk.gray(`  saved the previous agents.yaml to ${adopted.agentsYamlBackup}`));
+            }
             // Now a git repo — fall through to the normal sync below.
           } else {
             console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));

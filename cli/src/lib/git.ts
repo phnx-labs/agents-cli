@@ -966,7 +966,7 @@ function userRepoRemoteRecordPath(dir: string): string {
 }
 
 /** Read an origin remote URL from a git dir, or null when there is none. */
-function readOriginUrl(dir: string): string | null {
+export function readOriginUrl(dir: string): string | null {
   if (!isGitRepo(dir)) return null;
   try {
     const url = execFileSync('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], {
@@ -1050,6 +1050,13 @@ export interface AdoptInPlaceResult {
   materialized: number;
   /** True when the stale-stub top-level agents.yaml was restored from origin. */
   reconciledAgentsYaml: boolean;
+  /**
+   * When agents.yaml was reconciled, the path the PRE-reconcile local copy was
+   * saved to first — so even a false-positive stub match (e.g. a user who
+   * deliberately removed a whole `hooks:`/`config:` block) is recoverable, never
+   * silently lost.
+   */
+  agentsYamlBackup?: string;
   /**
    * Tracked paths whose local copy differs from origin/main and was NOT touched
    * — un-gitignored local edits surfaced rather than silently overwritten.
@@ -1144,11 +1151,21 @@ export async function adoptRepoInPlace(
     // 7. Reconcile a stale-stub top-level agents.yaml from origin/main. `restore`
     //    is plumbing the git-guard allows; it rewrites only this one path.
     let reconciledAgentsYaml = false;
+    let agentsYamlBackup: string | undefined;
     if (tracked.includes('agents.yaml')) {
       const abs = path.join(dir, 'agents.yaml');
       const local = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf-8') : '';
       const committed = await git.raw(['show', 'origin/main:agents.yaml']);
       if (isStaleAgentsYamlStub(local, committed)) {
+        // The stub heuristic can't perfectly distinguish a partial-install stub
+        // from a user who deliberately removed a whole block, so save the local
+        // copy to gitignored runtime state BEFORE restoring — a false positive is
+        // then recoverable and surfaced, never silent data loss.
+        if (local) {
+          agentsYamlBackup = path.join(dir, '.history', 'agents.yaml.pre-adopt.bak');
+          fs.mkdirSync(path.dirname(agentsYamlBackup), { recursive: true });
+          fs.writeFileSync(agentsYamlBackup, local);
+        }
         await git.raw(['restore', '--source=origin/main', '--', 'agents.yaml']);
         reconciledAgentsYaml = true;
       }
@@ -1170,6 +1187,7 @@ export async function adoptRepoInPlace(
       commit,
       materialized: missing.length,
       reconciledAgentsYaml,
+      ...(agentsYamlBackup ? { agentsYamlBackup } : {}),
       localEdits: dirty,
     };
   } catch (err) {
