@@ -76,6 +76,36 @@ describe('resolveTeammateDelivery (RUSH-2380)', () => {
       }),
     ).toBe('in_progress');
   });
+
+  it('completed with no PR and uncommitted changes is stranded (PHNX-2951)', () => {
+    expect(
+      resolveTeammateDelivery({
+        status: AgentStatus.COMPLETED,
+        prUrl: null,
+        hasUncommittedChanges: true,
+      }),
+    ).toBe('stranded');
+  });
+
+  it('completed with no PR and a clean worktree stays no_pr', () => {
+    expect(
+      resolveTeammateDelivery({
+        status: AgentStatus.COMPLETED,
+        prUrl: null,
+        hasUncommittedChanges: false,
+      }),
+    ).toBe('no_pr');
+  });
+
+  it('completed with a PR URL ignores worktree state', () => {
+    expect(
+      resolveTeammateDelivery({
+        status: AgentStatus.COMPLETED,
+        prUrl: 'https://github.com/x/y/pull/9',
+        hasUncommittedChanges: true,
+      }),
+    ).toBe('pr_open');
+  });
 });
 
 describe('deliveryDisplayLabel', () => {
@@ -86,11 +116,19 @@ describe('deliveryDisplayLabel', () => {
     expect(deliveryDisplayLabel('failed', AgentStatus.FAILED)).toBe('FAILED');
     expect(deliveryDisplayLabel('in_progress', AgentStatus.RUNNING)).toBe('RUNNING');
   });
+
+  it('surfaces STRANDED for completed teammates with uncommitted work (PHNX-2951)', () => {
+    expect(deliveryDisplayLabel('stranded', AgentStatus.COMPLETED)).toBe('STRANDED');
+  });
 });
 
 describe('deliveryColorKey', () => {
   it('uses pr_open key so the row is not green COMPLETED', () => {
     expect(deliveryColorKey('pr_open', 'completed')).toBe('pr_open');
     expect(deliveryColorKey('no_pr', 'completed')).toBe('completed');
+  });
+
+  it('uses stranded key so the row is not green COMPLETED (PHNX-2951)', () => {
+    expect(deliveryColorKey('stranded', 'completed')).toBe('stranded');
   });
 });

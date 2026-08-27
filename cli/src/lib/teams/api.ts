@@ -11,6 +11,7 @@ import { getDelta } from './summarizer.js';
 import { debug } from './debug.js';
 import { buildClaudeLabelMap } from '../session/discover.js';
 import { resolveTeammateDelivery } from './delivery.js';
+import { hasUncommittedChanges } from './worktree.js';
 
 /**
  * Truncate a bash command for status output.
@@ -127,6 +128,8 @@ export interface AgentStatusDetail {
   task_type?: TaskType | null;
   /** Device name the teammate runs on for a distributed (--on) teammate; null for local. */
   host?: string | null;
+  /** Absolute path to the teammate's worktree, when known. */
+  workspace_dir?: string | null;
   /** Sanitized evidence observed at the lifecycle boundary that failed. */
   failure?: TeammateFailure | null;
 }
@@ -135,7 +138,7 @@ export interface AgentStatusDetail {
 export interface TaskStatusResult {
   task_name: string;
   agents: AgentStatusDetail[];
-  summary: { pending: number; running: number; completed: number; failed: number; stopped: number };
+  summary: { pending: number; running: number; completed: number; stranded: number; failed: number; stopped: number };
   cursor: string;  // ISO timestamp - max across all agents
 }
 
@@ -176,6 +179,8 @@ export interface AgentStatusSummary {
   /** Device name for a distributed (--on) teammate; null for local. */
   host: string | null;
   failure: TeammateFailure | null;
+  /** Absolute path to the teammate's worktree, when known. */
+  workspace_dir?: string | null;
   /** ISO timestamp — feed back via --since for delta polling. */
   cursor: string;
 }
@@ -184,7 +189,7 @@ export interface AgentStatusSummary {
 export interface TaskStatusSummaryResult {
   task_name: string;
   agents: AgentStatusSummary[];
-  summary: { pending: number; running: number; completed: number; failed: number; stopped: number };
+  summary: { pending: number; running: number; completed: number; stranded: number; failed: number; stopped: number };
   cursor: string;
 }
 
@@ -260,6 +265,7 @@ export function toAgentStatusSummary(detail: AgentStatusDetail): AgentStatusSumm
       .map((m) => trimMessage(m)),
     host: detail.host ?? null,
     failure: detail.failure ?? null,
+    workspace_dir: detail.workspace_dir ?? null,
     cursor: detail.cursor,
   };
 }
@@ -289,6 +295,8 @@ export interface TaskInfo {
   pending: number;
   running: number;
   completed: number;
+  /** Completed teammates with uncommitted work and no PR (PHNX-2951). */
+  stranded: number;
   failed: number;
   stopped: number;
   workspace_dir: string | null;
@@ -441,7 +449,7 @@ export async function handleStatus(
     : allAgents.filter((a) => a.status === effectiveFilter);
 
   const agentStatuses: AgentStatusDetail[] = [];
-  const counts = { pending: 0, running: 0, completed: 0, failed: 0, stopped: 0 };
+  const counts = { pending: 0, running: 0, completed: 0, stranded: 0, failed: 0, stopped: 0 };
 
   // Count ALL agents for summary (not just filtered)
   for (const agent of allAgents) {
@@ -478,6 +486,26 @@ export async function handleStatus(
       maxTimestamp = agentTimestamp;
     }
 
+    // Local worktrees only: a remote workspace_dir is a path on another host,
+    // so probing it here would be meaningless and noisy.
+    const shouldProbeWorktree =
+      agent.status === AgentStatus.COMPLETED &&
+      !agent.prUrl?.trim() &&
+      !agent.hostName &&
+      Boolean(agent.workspaceDir);
+    const hasUncommitted = shouldProbeWorktree
+      ? await hasUncommittedChanges(agent.workspaceDir!)
+      : false;
+
+    const delivery = resolveTeammateDelivery({
+      status: agent.status,
+      prUrl: agent.prUrl,
+      hasUncommittedChanges: hasUncommitted,
+    });
+    if (delivery === 'stranded') {
+      counts.stranded++;
+    }
+
     const detail: AgentStatusDetail = {
       agent_id: agent.agentId,
       agent_type: agent.agentType,
@@ -495,15 +523,13 @@ export async function handleStatus(
       after: agent.after,
       task_type: agent.taskType,
       host: agent.hostName,
+      workspace_dir: agent.workspaceDir,
       failure: agent.failure,
       mode: agent.mode,
       cloud_session_id: agent.cloudSessionId,
       cloud_provider: agent.cloudProvider,
       pr_url: agent.prUrl,
-      delivery: resolveTeammateDelivery({
-        status: agent.status,
-        prUrl: agent.prUrl,
-      }),
+      delivery,
       files_created: delta.new_files_created,
       files_modified: delta.new_files_modified,
       files_read: delta.new_files_read,
@@ -549,7 +575,7 @@ export async function handleTasks(
   const tasks: TaskInfo[] = [];
 
   for (const [taskName, agents] of taskMap) {
-    let pending = 0, running = 0, completed = 0, failed = 0, stopped = 0;
+    let pending = 0, running = 0, completed = 0, stranded = 0, failed = 0, stopped = 0;
     let earliestStart: Date | null = null;
     let latestActivity: Date | null = null;
     let workspaceDir: string | null = null;
@@ -561,6 +587,20 @@ export async function handleTasks(
       else if (agent.status === AgentStatus.COMPLETED) completed++;
       else if (agent.status === AgentStatus.FAILED) failed++;
       else if (agent.status === AgentStatus.STOPPED) stopped++;
+
+      // Stranded = completed, no PR, local worktree still dirty. Probes the real
+      // worktree so `teams tasks` and `teams list --status` don't classify lost
+      // work as done (PHNX-2951).
+      if (agent.status === AgentStatus.COMPLETED && !agent.prUrl?.trim() && !agent.hostName && agent.workspaceDir) {
+        const delivery = resolveTeammateDelivery({
+          status: agent.status,
+          prUrl: agent.prUrl,
+          hasUncommittedChanges: await hasUncommittedChanges(agent.workspaceDir),
+        });
+        if (delivery === 'stranded') {
+          stranded++;
+        }
+      }
 
       // Track earliest start (created_at)
       if (!earliestStart || agent.startedAt < earliestStart) {
@@ -588,6 +628,7 @@ export async function handleTasks(
       pending,
       running,
       completed,
+      stranded,
       failed,
       stopped,
       workspace_dir: workspaceDir,

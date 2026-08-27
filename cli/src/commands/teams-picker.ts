@@ -10,6 +10,7 @@ import chalk from 'chalk';
 import { relTime, truncate, humanDuration } from '../lib/format.js';
 import { itemPicker } from '../lib/picker.js';
 import type { AgentStatusDetail, TaskInfo } from '../lib/teams/api.js';
+import { deliveryDisplayLabel, deliveryColorKey, type TeammateDelivery } from '../lib/teams/delivery.js';
 
 export interface TeamRow {
   team: TaskInfo;
@@ -37,6 +38,7 @@ function statusColor(status: string): (s: string) => string {
     case 'pending': return chalk.blue;
     case 'running': return chalk.yellow;
     case 'completed': return chalk.green;
+    case 'stranded': return chalk.yellow;
     case 'failed': return chalk.red;
     case 'stopped': return chalk.gray;
     default: return chalk.white;
@@ -78,10 +80,12 @@ function displayAgent(agent: string, version?: string | null): string {
 // (everyone done / everyone working), or a dotted breakdown when mixed.
 function statusCell(t: TaskInfo): string {
   if (t.agent_count === 0) return chalk.gray('empty');
+  const done = Math.max(0, t.completed - (t.stranded ?? 0));
   const states: Array<[number, (s: string) => string, string]> = [
     [t.pending, chalk.blue, 'pending'],
     [t.running, chalk.yellow, 'working'],
-    [t.completed, chalk.green, 'done'],
+    [done, chalk.green, 'done'],
+    [t.stranded ?? 0, chalk.yellow, 'stranded'],
     [t.failed, chalk.red, 'failed'],
     [t.stopped, chalk.gray, 'stopped'],
   ];
@@ -94,10 +98,12 @@ function statusCell(t: TaskInfo): string {
 }
 
 function statusSummaryParts(t: TaskInfo): string[] {
+  const done = Math.max(0, t.completed - (t.stranded ?? 0));
   const parts: string[] = [];
   if (t.pending) parts.push(chalk.blue(`${t.pending} pending`));
   if (t.running) parts.push(chalk.yellow(`${t.running} working`));
-  if (t.completed) parts.push(chalk.green(`${t.completed} done`));
+  if (done) parts.push(chalk.green(`${done} done`));
+  if (t.stranded) parts.push(chalk.yellow(`${t.stranded} stranded`));
   if (t.failed) parts.push(chalk.red(`${t.failed} failed`));
   if (t.stopped) parts.push(chalk.gray(`${t.stopped} stopped`));
   return parts;
@@ -197,7 +203,12 @@ export function buildTeamPreview(row: TeamRow): string {
   const agentW = Math.max(8, ...row.agents.map((a) => displayAgent(a.agent_type, a.version).length));
 
   for (const a of row.agents) {
-    const stat = statusColor(a.status)(a.status);
+    const delivery = a.delivery as TeammateDelivery | undefined;
+    const colorKey = delivery ? deliveryColorKey(delivery, a.status) : a.status;
+    const label = delivery
+      ? deliveryDisplayLabel(delivery, a.status)
+      : a.status.toUpperCase();
+    const stat = statusColor(colorKey)(label);
     const metaParts: string[] = [];
     if (a.task_type) metaParts.push(chalk.magenta(a.task_type));
     if (a.duration) metaParts.push(chalk.white(a.duration));
@@ -271,13 +282,14 @@ function searchHaystack(row: TeamRow): string {
     parts.push(a.status);
   }
   // Also include team-level status words exposed in the row ("done",
-  // "working", "pending", "failed", "stopped", "empty") so the search matches
-  // what the user sees on screen.
+  // "working", "pending", "stranded", "failed", "stopped", "empty") so the
+  // search matches what the user sees on screen.
   const t = row.team;
   if (t.agent_count === 0) parts.push('empty');
   if (t.pending) parts.push('pending');
   if (t.running) parts.push('working', 'running');
   if (t.completed) parts.push('done', 'completed');
+  if (t.stranded) parts.push('stranded');
   if (t.failed) parts.push('failed');
   if (t.stopped) parts.push('stopped');
   return parts.join(' ').toLowerCase();

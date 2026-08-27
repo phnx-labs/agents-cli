@@ -156,6 +156,7 @@ function statusColor(status: string): (s: string) => string {
     case 'running': return chalk.yellow;
     case 'completed': return chalk.green;
     case 'pr_open': return chalk.magenta; // RUSH-2380: process done, PR not merged
+    case 'stranded': return chalk.yellow; // PHNX-2951: done but work not committed
     case 'failed': return chalk.red;
     case 'stopped': return chalk.gray;
     default: return chalk.white;
@@ -243,6 +244,7 @@ function snapshotToStatusDetail(agent: TeamListAgentSnapshot): AgentStatusDetail
     after: agent.after,
     task_type: agent.task_type,
     host: agent.host,
+    workspace_dir: agent.workspace_dir,
   };
 }
 
@@ -1005,6 +1007,9 @@ function printAgentDetail(a: AgentStatusDetail, session: SessionMeta | null): vo
     }
   }
   if (a.has_errors) console.log(`    ${chalk.red('! reported an error')}`);
+  if (delivery === 'stranded' && a.workspace_dir) {
+    console.log(`    ${chalk.yellow('! stranded')} uncommitted work at ${a.workspace_dir}`);
+  }
   if (a.pr_url) console.log(`    ${chalk.gray('PR  ')}${a.pr_url}`);
 }
 
@@ -1088,7 +1093,24 @@ function printAgentSummary(s: AgentStatusSummary): void {
     }
   }
 
+  if (delivery === 'stranded' && s.workspace_dir) {
+    console.log(`    ${chalk.yellow('! stranded')} uncommitted work at ${s.workspace_dir}`);
+  }
   if (s.pr_url) console.log(`    ${chalk.gray('PR      ')} ${chalk.cyan(s.pr_url)}`);
+}
+
+function formatTeamStatusSummary(
+  summary: { pending: number; running: number; completed: number; stranded: number; failed: number; stopped: number }
+): string {
+  const done = Math.max(0, summary.completed - summary.stranded);
+  const parts: string[] = [];
+  if (summary.pending > 0) parts.push(`${summary.pending} pending`);
+  if (summary.running > 0 || parts.length === 0) parts.push(`${summary.running} working`);
+  if (done > 0 || summary.stranded === 0) parts.push(`${done} done`);
+  if (summary.stranded > 0) parts.push(`${summary.stranded} stranded`);
+  if (summary.failed > 0 || parts.length === 0) parts.push(`${summary.failed} failed`);
+  if (summary.stopped > 0 || parts.length === 0) parts.push(`${summary.stopped} stopped`);
+  return `(${parts.join(', ')})`;
 }
 
 // Render a team's status in the same format the `status` subcommand uses, so
@@ -1096,12 +1118,7 @@ function printAgentSummary(s: AgentStatusSummary): void {
 async function printTeamStatus(team: string, result: import('../lib/teams/api.js').TaskStatusResult): Promise<void> {
   const { summary, agents } = result;
   console.log(
-    chalk.bold(`Team ${chalk.cyan(team)}  `) +
-      chalk.gray(
-        summary.pending > 0
-          ? `(${summary.pending} pending, ${summary.running} working, ${summary.completed} done, ${summary.failed} failed, ${summary.stopped} stopped)`
-          : `(${summary.running} working, ${summary.completed} done, ${summary.failed} failed, ${summary.stopped} stopped)`
-      )
+    chalk.bold(`Team ${chalk.cyan(team)}  `) + chalk.gray(formatTeamStatusSummary(summary))
   );
   if (agents.length === 0) {
     console.log(chalk.gray('  (no teammates yet — add one with `agents teams add`)'));
@@ -1132,12 +1149,7 @@ function printTeamSummary(
 ): void {
   const { summary, agents } = result;
   console.log(
-    chalk.bold(`Team ${chalk.cyan(team)}  `) +
-      chalk.gray(
-        summary.pending > 0
-          ? `(${summary.pending} pending, ${summary.running} working, ${summary.completed} done, ${summary.failed} failed, ${summary.stopped} stopped)`
-          : `(${summary.running} working, ${summary.completed} done, ${summary.failed} failed, ${summary.stopped} stopped)`
-      )
+    chalk.bold(`Team ${chalk.cyan(team)}  `) + chalk.gray(formatTeamStatusSummary(summary))
   );
   if (agents.length === 0) {
     console.log(chalk.gray('  (no teammates yet — add one with `agents teams add`)'));
@@ -1160,13 +1172,14 @@ function printTeamSummary(
 }
 
 // Classify a team into a single bucket for --status filtering.
-//  - empty:   no teammates (created but nobody added yet)
-//  - waiting: only staged teammates — call `teams start` to kick them off
-//  - working: at least one teammate still running
-//  - failed:  at least one teammate failed or was stopped (any failure wins —
-//             even if others finished, you want to know about the failure)
-//  - done:    everyone finished successfully, no failures
-function classifyTeamStatus(t: TaskInfo): 'empty' | 'waiting' | 'working' | 'done' | 'failed' {
+//  - empty:    no teammates (created but nobody added yet)
+//  - waiting:  only staged teammates — call `teams start` to kick them off
+//  - working:  at least one teammate still running
+//  - failed:   at least one teammate failed or was stopped (any failure wins —
+//              even if others finished, you want to know about the failure)
+//  - stranded: everyone finished, but at least one has uncommitted work and no PR
+//  - done:     everyone finished successfully, no failures, no stranded work
+function classifyTeamStatus(t: TaskInfo): 'empty' | 'waiting' | 'working' | 'stranded' | 'done' | 'failed' {
   if (t.agent_count === 0) return 'empty';
   if (t.running > 0) return 'working';
   if (t.failed + t.stopped > 0) return 'failed';
@@ -1174,6 +1187,9 @@ function classifyTeamStatus(t: TaskInfo): 'empty' | 'waiting' | 'working' | 'don
   // teammate (agent_count > running+completed+failed+stopped), it's "waiting".
   const accounted = t.running + t.completed + t.failed + t.stopped;
   if (accounted < t.agent_count) return 'waiting';
+  // Completed-without-delivery is not "done": the work is still in the worktree
+  // and will be lost on cleanup (PHNX-2951).
+  if ((t.stranded ?? 0) > 0) return 'stranded';
   return 'done';
 }
 
@@ -1193,6 +1209,7 @@ function mergeTeams(
         pending: 0,
         running: 0,
         completed: 0,
+        stranded: 0,
         failed: 0,
         stopped: 0,
         workspace_dir: null,
@@ -1206,7 +1223,7 @@ function mergeTeams(
   );
 }
 
-function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): TaskInfo[] {
+async function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): Promise<TaskInfo[]> {
   const byTeam = new Map<string, TeamListAgentSnapshot[]>();
   for (const agent of agents) {
     const teamAgents = byTeam.get(agent.task_name) || [];
@@ -1219,6 +1236,7 @@ function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): TaskInfo[] {
     let pending = 0;
     let running = 0;
     let completed = 0;
+    let stranded = 0;
     let failed = 0;
     let stopped = 0;
     let earliestStart: Date | null = null;
@@ -1232,6 +1250,19 @@ function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): TaskInfo[] {
       else if (status === AgentStatus.COMPLETED) completed++;
       else if (status === AgentStatus.FAILED) failed++;
       else if (status === AgentStatus.STOPPED) stopped++;
+
+      // Stranded = completed with no PR and a dirty local worktree (PHNX-2951).
+      if (
+        status === AgentStatus.COMPLETED &&
+        !agent.pr_url?.trim() &&
+        !agent.host &&
+        agent.workspace_dir
+      ) {
+        const dirty = await hasUncommittedChanges(agent.workspace_dir);
+        if (dirty) {
+          stranded++;
+        }
+      }
 
       const startedAt = parseTimestamp(agent.started_at);
       if (startedAt && (!earliestStart || startedAt < earliestStart)) {
@@ -1255,6 +1286,7 @@ function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): TaskInfo[] {
       pending,
       running,
       completed,
+      stranded,
       failed,
       stopped,
       workspace_dir: workspaceDir,
@@ -1266,12 +1298,12 @@ function buildTasksFromSnapshots(agents: TeamListAgentSnapshot[]): TaskInfo[] {
   return tasks.sort((a, b) => new Date(b.modified_at).getTime() - new Date(a.modified_at).getTime());
 }
 
-export function buildTeamRowsFromSnapshots(
+export async function buildTeamRowsFromSnapshots(
   registry: TeamRegistry,
   agents: TeamListAgentSnapshot[],
   /** team name -> the session that spawned it (see teamSpawners). */
   spawners?: Map<string, TeamSpawner>
-): { rows: TeamRow[]; teams: TaskInfo[]; names: string[] } {
+): Promise<{ rows: TeamRow[]; teams: TaskInfo[]; names: string[] }> {
   const byTeam = new Map<string, AgentStatusDetail[]>();
   for (const agent of agents) {
     const details = byTeam.get(agent.task_name) || [];
@@ -1279,7 +1311,30 @@ export function buildTeamRowsFromSnapshots(
     byTeam.set(agent.task_name, details);
   }
 
-  const teams = mergeTeams(registry, buildTasksFromSnapshots(agents));
+  const teams = mergeTeams(registry, await buildTasksFromSnapshots(agents));
+
+  // Recompute delivery for cached snapshots so `teams list` reflects stranded
+  // work discovered by probing the real worktree (PHNX-2951).
+  for (const details of byTeam.values()) {
+    for (const a of details) {
+      const snapshot = agents.find((s) => s.agent_id === a.agent_id);
+      if (
+        snapshot &&
+        normalizeTeamListStatus(a.status) === AgentStatus.COMPLETED &&
+        !snapshot.pr_url?.trim() &&
+        !snapshot.host &&
+        snapshot.workspace_dir
+      ) {
+        const dirty = await hasUncommittedChanges(snapshot.workspace_dir);
+        a.delivery = resolveTeammateDelivery({
+          status: a.status,
+          prUrl: snapshot.pr_url,
+          hasUncommittedChanges: dirty,
+        });
+      }
+    }
+  }
+
   return {
     teams,
     rows: teams.map((team) => ({
@@ -1352,7 +1407,7 @@ async function loadTeamRows(
   } catch {
     // The index is an enrichment here — a missing/locked DB just drops the column.
   }
-  return buildTeamRowsFromSnapshots(registry, agents, spawners);
+  return await buildTeamRowsFromSnapshots(registry, agents, spawners);
 }
 
 // Picker fallback for `teams logs` when the teammate ref is omitted. Shows a
@@ -1555,7 +1610,7 @@ export function registerTeamsCommands(program: Command): void {
       } catch {
         // The session index is an enrichment here; a missing one drops the column.
       }
-      let rows = buildTeamRowsFromSnapshots(registry, everyAgent, spawners).rows;
+      let rows = (await buildTeamRowsFromSnapshots(registry, everyAgent, spawners)).rows;
 
       // --- query: substring match on team name ---
       if (query) {
@@ -1580,7 +1635,7 @@ export function registerTeamsCommands(program: Command): void {
       // --- --status: classify each team, filter ---
       if (opts.status) {
         const want = opts.status.toLowerCase();
-        const validStatuses = ['working', 'done', 'failed', 'empty'];
+        const validStatuses = ['working', 'done', 'stranded', 'failed', 'empty'];
         if (!validStatuses.includes(want)) {
           dieFriction('teams', 'invalid-status-filter', `Invalid --status '${opts.status}'. Use one of: ${validStatuses.join(', ')}`);
         }

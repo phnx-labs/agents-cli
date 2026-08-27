@@ -137,7 +137,7 @@ describe('toTaskStatusSummary', () => {
     const result: TaskStatusResult = {
       task_name: 'caps-driven-sync',
       agents: [fakeDetail({ name: 'alice' }), fakeDetail({ name: 'bob' })],
-      summary: { pending: 0, running: 1, completed: 1, failed: 0, stopped: 0 },
+      summary: { pending: 0, running: 1, completed: 1, stranded: 0, failed: 0, stopped: 0 },
       cursor: '2026-06-08T00:10:00.000Z',
     };
     const compact = toTaskStatusSummary(result);
@@ -158,7 +158,7 @@ describe('toTaskStatusSummary', () => {
         fakeDetail({ name: 'b' }),
         fakeDetail({ name: 'c' }),
       ],
-      summary: { pending: 0, running: 0, completed: 3, failed: 0, stopped: 0 },
+      summary: { pending: 0, running: 0, completed: 3, stranded: 0, failed: 0, stopped: 0 },
       cursor: 'x',
     };
     expect(toTaskStatusSummary(result).agents.map((a) => a.name)).toEqual(['a', 'b', 'c']);

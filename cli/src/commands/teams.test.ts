@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawnSync, execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -129,8 +129,8 @@ describe('teams list output modes', () => {
     expect(JSON.parse(stdout)).toEqual({ teams: [] });
   });
 
-  it('builds list rows from cached teammate metadata', () => {
-    const result = buildTeamRowsFromSnapshots(
+  it('builds list rows from cached teammate metadata', async () => {
+    const result = await buildTeamRowsFromSnapshots(
       { 'remote-lag': { created_at: '2026-08-01T12:00:00.000Z', description: 'remote work' } },
       [remoteSnapshot()],
     );
@@ -201,5 +201,65 @@ describe('printFeedHint', () => {
     expect(out).toContain('agents teams status pricing-page');
     // Anti-spam framing (RUSH-2250): milestones, not every step.
     expect(out).toContain('IMPORTANT milestones');
+  });
+});
+
+describe('buildTeamRowsFromSnapshots stranded detection (PHNX-2951)', () => {
+  const tempDirs: string[] = [];
+
+  afterEach(() => {
+    for (const dir of tempDirs.splice(0)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  function createDirtyWorktree(): { worktreePath: string } {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'teams-list-stranded-'));
+    tempDirs.push(repoRoot);
+
+    execFileSync('git', ['init'], { cwd: repoRoot });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: repoRoot });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: repoRoot });
+    fs.writeFileSync(path.join(repoRoot, 'README.md'), '# repo\n');
+    execFileSync('git', ['add', 'README.md'], { cwd: repoRoot });
+    execFileSync('git', ['commit', '-m', 'init'], { cwd: repoRoot });
+
+    const worktreePath = path.join(repoRoot, '.agents', 'worktrees', 'monitor-auth');
+    execFileSync(
+      'git',
+      ['worktree', 'add', '-b', 'agents/monitor-auth', worktreePath],
+      { cwd: repoRoot },
+    );
+    fs.writeFileSync(path.join(worktreePath, 'fix.ts'), 'export const fixed = true;\n');
+
+    return { worktreePath };
+  }
+
+  it('counts a completed no-PR teammate with a dirty worktree as stranded', async () => {
+    const { worktreePath } = createDirtyWorktree();
+    const result = await buildTeamRowsFromSnapshots(
+      { 'bugfix-swarm': { created_at: '2026-08-20T12:00:00.000Z' } },
+      [
+        remoteSnapshot({
+          agent_id: 'agent-stranded-1',
+          task_name: 'bugfix-swarm',
+          agent_type: 'cursor',
+          status: 'completed',
+          host: null,
+          pr_url: null,
+          workspace_dir: worktreePath,
+          completed_at: '2026-08-20T12:33:00.000Z',
+        }),
+      ],
+    );
+
+    expect(result.teams[0]).toMatchObject({
+      task_name: 'bugfix-swarm',
+      agent_count: 1,
+      completed: 1,
+      stranded: 1,
+    });
+    expect(result.rows[0].agents[0].delivery).toBe('stranded');
+    expect(result.rows[0].agents[0].workspace_dir).toBe(worktreePath);
   });
 });
