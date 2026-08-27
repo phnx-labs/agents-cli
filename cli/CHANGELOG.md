@@ -1,17 +1,5 @@
 # Changelog
 
-## 1.22.53
-
-- **Native-account labels sync across the fleet by identityKey (PHNX-3206).**
-  `agents accounts label` wrote the native-account record into the local
-  `meta.accounts.native` cache only, so labeling `personal` on one box did not
-  select `codex#personal` on another until the same login was labeled there by
-  hand. Labels bind to a stable `(agent, identityKey)` (email / org key), which
-  is machine-independent. They now live in tracked `~/.agents/accounts/native.yaml`
-  and sync with `agents repo push/pull` the way device role/description do; the
-  device-local registry remains the read cache (`readMeta` overlays the file).
-  Source: `cli/src/lib/account-labels.ts`, `cli/src/lib/account-registry.ts`.
-
 ## 1.22.52
 
 - **`agents artifacts share --visibility me|org` — identity-gated share pages (PHNX-3260).**
