@@ -20,7 +20,8 @@ async function freshModules() {
   const state = await import('../state.js');
   const migration = await import('./config-migration.js');
   const deviceConfig = await import('../device-config.js');
-  return { ...state, ...migration, ...deviceConfig };
+  const registry = await import('./registry.js');
+  return { ...state, ...migration, ...deviceConfig, ...registry };
 }
 
 function centralPath() {
@@ -219,7 +220,7 @@ describe('migrateDeviceConfigStores', () => {
     expect(readDoc('mac-mini')).toContain('maxAgents: 4');
   });
 
-  it('folds a legacy ignored.json into fleet.ignored, removes the file, and re-running is a no-op', async () => {
+  it("folds a legacy ignored.json into THIS box's device doc, removes the file, and re-running is a no-op", async () => {
     const legacy = path.join(TMP, '.agents', '.history', 'devices', 'ignored.json');
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
     fs.writeFileSync(
@@ -227,30 +228,31 @@ describe('migrateDeviceConfigStores', () => {
       JSON.stringify({ ignored: ['old-phone', 'ipad165'], updatedAt: '2026-08-01T10:00:00.000Z' }),
     );
 
-    const { migrateDeviceConfigStores, readMeta } = await freshModules();
+    const { migrateDeviceConfigStores, loadIgnoredEntries } = await freshModules();
     migrateDeviceConfigStores();
 
     // Entries preserved — the legacy file's updatedAt becomes ignoredAt, and
     // the folding box is the only attribution the legacy store could offer.
-    const fleet = readMeta().fleet as unknown as { ignored: Array<Record<string, string>> };
-    expect(fleet.ignored).toEqual([
+    expect(loadIgnoredEntries()).toEqual([
       { name: 'ipad165', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' },
       { name: 'old-phone', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' },
     ]);
-    // The dismissal now lives in the TRACKED central file…
-    expect(readCentral()).toContain('ignored:');
+    // The dismissal now lives in THIS box's device doc, not the shared central
+    // file (PHNX-3315)…
+    expect(readDoc('testbox')).toContain('ignored:');
+    expect(readDoc('testbox')).toContain('old-phone');
+    expect(readCentral()).not.toContain('ignored:');
     // …and the legacy file is gone.
     expect(fs.existsSync(legacy)).toBe(false);
 
     // Second run: nothing to fold — no duplication, no rewrite.
-    const afterFirst = readCentral();
+    const afterFirst = readDoc('testbox');
     migrateDeviceConfigStores();
-    expect(readCentral()).toBe(afterFirst);
-    const fleet2 = readMeta().fleet as unknown as { ignored: Array<Record<string, string>> };
-    expect(fleet2.ignored).toHaveLength(2);
+    expect(readDoc('testbox')).toBe(afterFirst);
+    expect(loadIgnoredEntries()).toHaveLength(2);
   });
 
-  it('unions legacy names with existing fleet.ignored entries — existing who/when wins', async () => {
+  it('unions legacy names with an existing central dismissal — newest ignoredAt wins', async () => {
     writeCentral(
       'fleet:\n  devices: {}\n  ignored:\n    - name: ipad165\n      ignoredAt: "2026-07-01T00:00:00.000Z"\n      ignoredOn: zion\n',
     );
@@ -258,14 +260,17 @@ describe('migrateDeviceConfigStores', () => {
     fs.mkdirSync(path.dirname(legacy), { recursive: true });
     fs.writeFileSync(legacy, JSON.stringify({ ignored: ['ipad165', 'kindle'], updatedAt: '2026-08-01T10:00:00.000Z' }));
 
-    const { migrateDeviceConfigStores, readMeta } = await freshModules();
+    const { migrateDeviceConfigStores, loadIgnoredEntries } = await freshModules();
     migrateDeviceConfigStores();
 
-    const fleet = readMeta().fleet as unknown as { ignored: Array<Record<string, string>> };
-    expect(fleet.ignored).toEqual([
-      { name: 'ipad165', ignoredAt: '2026-07-01T00:00:00.000Z', ignoredOn: 'zion' }, // untouched
-      { name: 'kindle', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' }, // folded
+    // Both the central-legacy entry and the legacy-file entry fold into this
+    // box's device doc; for the shared name the newest ignoredAt wins (the
+    // 2026-08-01 fold over the 2026-07-01 central entry), deterministically.
+    expect(loadIgnoredEntries()).toEqual([
+      { name: 'ipad165', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' },
+      { name: 'kindle', ignoredAt: '2026-08-01T10:00:00.000Z', ignoredOn: 'testbox' },
     ]);
+    expect(readCentral()).not.toContain('ignored:');
     expect(fs.existsSync(legacy)).toBe(false);
   });
 
@@ -287,23 +292,73 @@ describe('migrateDeviceConfigStores', () => {
     }
   });
 
-  it('never drops a populated fleet.ignored when the #2458 strip empties the rest of the fleet block', async () => {
+  it('folds central dismissals into the device doc without losing them as the #2458 strip empties the fleet block', async () => {
     // A box carrying BOTH legacy central per-device config AND dismissals: the
-    // strip must not delete the whole fleet block — the deletion would sync
-    // fleet-wide via `agents repo push`.
+    // config strip AND the dismissal fold both drain central. The dismissal must
+    // survive the move to this box's device doc — losing it would silently
+    // un-ignore the node fleet-wide.
     writeCentral(
       'fleet:\n  devices:\n    mac-mini:\n      config:\n        maxAgents: 8\n  ignored:\n    - name: ipad165\n      ignoredAt: "2026-08-20T09:15:00.000Z"\n      ignoredOn: zion\n',
+    );
+
+    const { migrateDeviceConfigStores, loadIgnoredEntries, readMeta } = await freshModules();
+    migrateDeviceConfigStores();
+
+    // The dismissal is preserved (attribution intact) in this box's device doc,
+    // and central's fleet block is fully drained (config folded, dismissals
+    // moved) rather than left as a half-empty shared map.
+    expect(loadIgnoredEntries()).toEqual([
+      { name: 'ipad165', ignoredAt: '2026-08-20T09:15:00.000Z', ignoredOn: 'zion' },
+    ]);
+    expect(readMeta().fleet).toBeUndefined();
+    expect(readCentral()).not.toContain('ignored:');
+    expect(readDoc('mac-mini')).toContain('maxAgents: 8');
+  });
+});
+
+describe('migrateDeviceConfigStores — hosts + accounts device-scoping (PHNX-3315)', () => {
+  it("folds a central hosts map into THIS box's device doc and drops the central key", async () => {
+    writeCentral('hosts:\n  s1:\n    source: inline\n    address: yosemite-s1\n    addedAt: "2026-05-01T00:00:00.000Z"\n');
+
+    const { migrateDeviceConfigStores, readMeta } = await freshModules();
+    migrateDeviceConfigStores();
+
+    expect(readDoc('testbox')).toContain('s1');
+    expect(readDoc('testbox')).toContain('yosemite-s1');
+    expect(readMeta().hosts).toBeUndefined();
+    expect(readCentral()).not.toContain('yosemite-s1');
+
+    const after = readDoc('testbox');
+    migrateDeviceConfigStores();
+    expect(readDoc('testbox')).toBe(after); // idempotent
+  });
+
+  it("folds central scope:'device' natives (and their bindings) into the device doc, keeping version accounts central", async () => {
+    writeCentral(
+      'accounts:\n' +
+        '  native:\n' +
+        '    dev-1:\n      id: dev-1\n      name: opencode-me\n      agent: opencode\n      identityKey: "opencode:user=1"\n      identityLabel: me@example.com\n      scope: device\n' +
+        '    ver-1:\n      id: ver-1\n      name: codex-me\n      agent: codex\n      identityKey: "codex:user=2"\n      scope: version\n' +
+        '  bindings:\n    "opencode@1.0.0": dev-1\n    "claude@2.0.0": ver-1\n',
     );
 
     const { migrateDeviceConfigStores, readMeta } = await freshModules();
     migrateDeviceConfigStores();
 
-    const fleet = readMeta().fleet as unknown as { devices: Record<string, unknown>; ignored: Array<Record<string, string>> };
-    expect(fleet).toBeDefined();
-    expect(fleet.ignored).toEqual([
-      { name: 'ipad165', ignoredAt: '2026-08-20T09:15:00.000Z', ignoredOn: 'zion' },
-    ]);
-    expect(fleet.devices).toEqual({}); // config stripped, block kept
-    expect(readDoc('mac-mini')).toContain('maxAgents: 8');
+    // The device-scoped identity + its binding move to the device doc; PII off central.
+    expect(readDoc('testbox')).toContain('opencode:user=1');
+    expect(readDoc('testbox')).toContain('opencode@1.0.0');
+    expect(readCentral()).not.toContain('opencode:user=1');
+
+    // The version-scoped identity + its binding stay in the fleet-shared central store.
+    const central = readMeta();
+    expect(central.accounts?.native?.['ver-1']).toBeDefined();
+    expect(central.accounts?.native?.['dev-1']).toBeUndefined();
+    expect(central.accounts?.bindings?.['claude@2.0.0']).toBe('ver-1');
+    expect(central.accounts?.bindings?.['opencode@1.0.0']).toBeUndefined();
+
+    const after = readDoc('testbox');
+    migrateDeviceConfigStores();
+    expect(readDoc('testbox')).toBe(after); // idempotent
   });
 });

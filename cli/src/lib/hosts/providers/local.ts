@@ -2,18 +2,33 @@
  * Local host provider: the v1 directory.
  *
  * `list()` is the union of ssh-config `Host` stanzas (read-only, connection
- * details owned by ssh) and inline entries the user registered in agents.yaml.
- * The `Meta.hosts` overlay (caps/os, keyed by name) is merged onto both. We
- * never copy or rewrite ssh config.
+ * details owned by ssh) and inline entries the user registered. The host
+ * overlay (caps/os, keyed by name) is merged onto both. We never copy or
+ * rewrite ssh config.
+ *
+ * PHNX-3315: registrations are DEVICE-SCOPED — each box writes only its own
+ * `hosts:` block in `devices/<machine>/agents.yaml` (via `Meta.deviceHosts`),
+ * so N boxes no longer rewrite one shared `hosts:` map (the pull conflict).
+ * Reads are the cross-box UNION of every device doc, plus any lingering central
+ * legacy entries drained by the migration.
  */
 
 import { readMeta, updateMeta } from '../../state.js';
+import { unionDeviceHosts } from '../../devices/device-docs.js';
 import type { HostEntry } from '../../types.js';
 import type { Host, HostProvider, HostProviderCapabilities } from '../types.js';
 import { listSshConfigHosts, isSshConfigHost } from '../ssh-config.js';
 
+/** The EFFECTIVE host overlay: the cross-box union of every device doc's
+ * `hosts:` block, with any lingering central-legacy `hosts:` entries as a base
+ * (a device doc wins on a name collision). Newest `addedAt` wins across boxes. */
 function entries(): Record<string, HostEntry> {
-  return readMeta().hosts ?? {};
+  return { ...readMeta().hosts, ...unionDeviceHosts() };
+}
+
+/** THIS box's OWN host registrations (the writable slice in the device doc). */
+function ownEntries(meta = readMeta()): Record<string, HostEntry> {
+  return meta.deviceHosts ?? {};
 }
 
 function toHost(name: string, entry: HostEntry, enrolled: boolean): Host {
@@ -71,20 +86,17 @@ export class LocalHostProvider implements HostProvider {
       ...(spec.caps && spec.caps.length ? { caps: spec.caps } : {}),
       addedAt: spec.addedAt ?? new Date().toISOString(),
     };
-    updateMeta((meta) => ({ ...meta, hosts: { ...(meta.hosts ?? {}), [spec.name]: entry } }));
+    // Device-scoped: land in THIS box's device doc, never the shared central map.
+    updateMeta((meta) => ({ ...meta, deviceHosts: { ...ownEntries(meta), [spec.name]: entry } }));
     return toHost(spec.name, entry, true);
   }
 
   async remove(name: string): Promise<void> {
+    // A box only owns the registrations in its own device doc; drop from there.
     updateMeta((meta) => {
-      const hosts = { ...(meta.hosts ?? {}) };
+      const hosts = { ...ownEntries(meta) };
       delete hosts[name];
-      // Drop the key entirely when empty so we don't leave `hosts: {}` behind.
-      if (Object.keys(hosts).length === 0) {
-        const { hosts: _omit, ...rest } = meta;
-        return rest;
-      }
-      return { ...meta, hosts };
+      return { ...meta, deviceHosts: hosts };
     });
   }
 }

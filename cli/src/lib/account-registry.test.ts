@@ -5,8 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type KeychainBackend } from './secrets/index.js';
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { readMeta, updateMeta } from './state.js';
-import { addAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+import { readMeta, updateMeta, getUserAgentsDir, getDeviceMetaPath } from './state.js';
+import { addAccount, addNativeAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -399,5 +399,47 @@ describe('legacy accounts.yaml migration', () => {
     expect(() => readAccountRegistry(root)).toThrow("a different secrets bundle already uses that name");
     expect(fs.existsSync(path.join(root, 'accounts.yaml'))).toBe(true);
     expect(keychain.has(legacyItem)).toBe(true);
+  });
+});
+
+describe('native account device-scoping (PHNX-3315)', () => {
+  const prevMid = process.env.AGENTS_SYNC_MACHINE_ID;
+  const clear = () => updateMeta(m => ({ ...m, accounts: { ...m.accounts, native: {}, bindings: {} }, deviceAccounts: undefined }));
+  beforeEach(() => { process.env.AGENTS_SYNC_MACHINE_ID = 'accbox'; clear(); });
+  afterEach(() => {
+    clear();
+    if (prevMid === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = prevMid;
+  });
+
+  const central = () => {
+    const p = path.join(getUserAgentsDir(), 'agents.yaml');
+    return fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : '';
+  };
+  const deviceDoc = () => (fs.existsSync(getDeviceMetaPath()) ? fs.readFileSync(getDeviceMetaPath(), 'utf8') : '');
+
+  it("routes a scope:'device' login to this box's device doc, keeping identity PII off central", () => {
+    addNativeAccount('opencode-login', 'opencode', 'opencode:user=1', 'me@example.com', 'device');
+
+    // Visible through the effective list (central version natives + this box's device natives).
+    expect(listNativeAccounts(readMeta()).map(a => a.name)).toContain('opencode-login');
+    // Its identity PII lives in the device doc, never the fleet-shared central file.
+    expect(deviceDoc()).toContain('opencode:user=1');
+    expect(deviceDoc()).toContain('me@example.com');
+    expect(central()).not.toContain('opencode:user=1');
+    expect(central()).not.toContain('me@example.com');
+  });
+
+  it("keeps a scope:'version' login in the fleet-shared central store", () => {
+    addNativeAccount('codex-login', 'codex', 'codex:user=2', 'you@example.com', 'version');
+    expect(central()).toContain('codex:user=2');
+    expect(deviceDoc()).not.toContain('codex:user=2');
+    expect(listNativeAccounts(readMeta()).map(a => a.name)).toContain('codex-login');
+  });
+
+  it('resolves a device login by name across both stores (findUnifiedAccount)', () => {
+    const acct = addNativeAccount('droid-login', 'droid', 'droid:user=3', undefined, 'device');
+    const found = findUnifiedAccount('droid-login', readMeta());
+    expect(found).toMatchObject({ kind: 'native', id: acct.id, agent: 'droid', scope: 'device' });
   });
 });

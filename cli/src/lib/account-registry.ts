@@ -162,8 +162,17 @@ export function findAccount(name: string, doc = readAccountRegistry()): Credenti
   return doc.accounts[name] ?? Object.values(doc.accounts).find(account => account.name === name) ?? null;
 }
 
-export function listNativeAccounts(meta: Pick<Meta, 'accounts'>): NativeAccount[] {
-  return Object.values(meta.accounts?.native ?? {}).map(account => ({ ...account, kind: 'native' as const }));
+/**
+ * Effective native accounts: the fleet-shared central store (version-scoped
+ * identities) merged with THIS box's own device doc (device-scoped identities).
+ * A native login is machine-local — its home follows its scope (PHNX-3315), so
+ * a `scope:'device'` identity is read from this box's device doc and never the
+ * shared central agents.yaml (which is where its email/identityKey PII used to
+ * accumulate). On an id collision the device slice wins.
+ */
+export function listNativeAccounts(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>): NativeAccount[] {
+  const merged = { ...meta.accounts?.native, ...meta.deviceAccounts?.native };
+  return Object.values(merged).map(account => ({ ...account, kind: 'native' as const }));
 }
 
 /**
@@ -177,7 +186,7 @@ export function listNativeAccounts(meta: Pick<Meta, 'accounts'>): NativeAccount[
  * running before the body, so callers that only need a native lookup must be
  * able to omit it.
  */
-export function findUnifiedAccount(nameOrId: string, meta: Pick<Meta, 'accounts'>, doc?: AccountRegistryDocument): UnifiedAccount | null {
+export function findUnifiedAccount(nameOrId: string, meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, doc?: AccountRegistryDocument): UnifiedAccount | null {
   const needle = nameOrId.toLowerCase();
   const native = listNativeAccounts(meta).find(account =>
     account.id === nameOrId || account.name.toLowerCase() === needle || account.identityLabel?.toLowerCase() === needle,
@@ -187,12 +196,13 @@ export function findUnifiedAccount(nameOrId: string, meta: Pick<Meta, 'accounts'
   return provider ? { ...provider, kind: 'provider' } : null;
 }
 
-function nativeIdentityRows(meta: Pick<Meta, 'accounts'>, agent: AgentId, identityKey: string): NativeAccount[] {
+function nativeIdentityRows(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, agent: AgentId, identityKey: string): NativeAccount[] {
   return listNativeAccounts(meta).filter(account => account.agent === agent && account.identityKey === identityKey);
 }
 
-/** Every central row for the identity that `name` (id or account name) resolves to. */
-function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts'>, name: string): NativeAccount[] {
+/** Every row (central + this box's device store) for the identity that `name`
+ * (id or account name) resolves to. */
+function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts' | 'deviceAccounts'>, name: string): NativeAccount[] {
   const found = listNativeAccounts(meta).find(account => account.id === name || account.name === name);
   if (!found) return [];
   return nativeIdentityRows(meta, found.agent, found.identityKey);
@@ -200,7 +210,7 @@ function nativeRowsForNameOrId(meta: Pick<Meta, 'accounts'>, name: string): Nati
 
 function assertUniqueUnifiedName(
   name: string,
-  meta: Pick<Meta, 'accounts'>,
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   doc?: AccountRegistryDocument,
   exceptIds?: ReadonlySet<string>,
 ): void {
@@ -229,13 +239,27 @@ export function addNativeAccount(
   const duplicate = listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey);
   if (duplicate) throw new Error(`This ${agent} login is already named '${duplicate.name}'.`);
   const account: NativeAccount = { id: crypto.randomUUID(), name, kind: 'native', agent, identityKey, identityLabel, scope };
-  updateMeta(current => ({
-    ...current,
-    accounts: {
-      ...current.accounts,
-      native: { ...current.accounts?.native, [account.id]: { id: account.id, name, agent, identityKey, identityLabel, scope } },
-    },
-  }));
+  const entry = { id: account.id, name, agent, identityKey, identityLabel, scope };
+  // A native login's home follows its scope (PHNX-3315): a device-scoped
+  // identity lands in THIS box's device doc (its PII never touches the shared
+  // central agents.yaml); a version-scoped one stays in the fleet-shared store.
+  if (scope === 'device') {
+    updateMeta(current => ({
+      ...current,
+      deviceAccounts: {
+        ...current.deviceAccounts,
+        native: { ...current.deviceAccounts?.native, [account.id]: entry },
+      },
+    }));
+  } else {
+    updateMeta(current => ({
+      ...current,
+      accounts: {
+        ...current.accounts,
+        native: { ...current.accounts?.native, [account.id]: entry },
+      },
+    }));
+  }
   return account;
 }
 
@@ -254,24 +278,42 @@ export function labelNativeAccount(
   const matches = nativeIdentityRows(meta, agent, identityKey);
   assertUniqueUnifiedName(resolvedLabel, meta, undefined, new Set(matches.map(account => account.id)));
   if (matches.length === 0) return addNativeAccount(resolvedLabel, agent, identityKey, identityLabel, scope);
+  // Sweep every row for this identity (PHNX-3206), routing the whole sweep to the
+  // store that owns them: all rows for one identityKey share a scope (same agent),
+  // so a device-scoped login lands in this box's device doc, a version-scoped one
+  // in central (PHNX-3315).
+  const rowScope = matches[0]!.scope;
   updateMeta(current => {
-    const native = { ...current.accounts?.native };
-    for (const row of matches) {
-      native[row.id] = { id: row.id, name: resolvedLabel, agent, identityKey, identityLabel, scope };
+    if (rowScope === 'device') {
+      const native = { ...current.deviceAccounts?.native };
+      for (const row of matches) native[row.id] = { id: row.id, name: resolvedLabel, agent, identityKey, identityLabel, scope: rowScope };
+      return { ...current, deviceAccounts: { ...current.deviceAccounts, native } };
     }
+    const native = { ...current.accounts?.native };
+    for (const row of matches) native[row.id] = { id: row.id, name: resolvedLabel, agent, identityKey, identityLabel, scope: rowScope };
     return { ...current, accounts: { ...current.accounts, native } };
   });
-  return { ...matches[0]!, name: resolvedLabel, identityLabel, scope };
+  return { ...matches[0]!, name: resolvedLabel, identityLabel, scope: rowScope };
 }
 
 export function bindAccount(nameOrId: string, target: string): UnifiedAccount {
   const meta = readMeta();
   const account = findUnifiedAccount(nameOrId, meta);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
-  updateMeta(current => ({
-    ...current,
-    accounts: { ...current.accounts, bindings: { ...current.accounts?.bindings, [target]: account.id } },
-  }));
+  // A binding follows its account: one that targets a device-scoped native login
+  // is itself machine-local and lands in this box's device doc (PHNX-3315);
+  // every other binding stays fleet-shared in central.
+  if (account.kind === 'native' && account.scope === 'device') {
+    updateMeta(current => ({
+      ...current,
+      deviceAccounts: { ...current.deviceAccounts, bindings: { ...current.deviceAccounts?.bindings, [target]: account.id } },
+    }));
+  } else {
+    updateMeta(current => ({
+      ...current,
+      accounts: { ...current.accounts, bindings: { ...current.accounts?.bindings, [target]: account.id } },
+    }));
+  }
   return account;
 }
 
@@ -279,29 +321,47 @@ export function unbindAccount(nameOrId: string, target: string): void {
   const meta = readMeta();
   const account = findUnifiedAccount(nameOrId, meta);
   if (!account) throw new Error(`Unknown account '${nameOrId}'.`);
-  if (meta.accounts?.bindings?.[target] !== account.id) throw new Error(`Account '${account.name}' is not attached to '${target}'.`);
+  const inCentral = meta.accounts?.bindings?.[target] === account.id;
+  const inDevice = meta.deviceAccounts?.bindings?.[target] === account.id;
+  if (!inCentral && !inDevice) throw new Error(`Account '${account.name}' is not attached to '${target}'.`);
   updateMeta(current => {
-    const bindings = { ...current.accounts?.bindings };
-    delete bindings[target];
-    return { ...current, accounts: { ...current.accounts, bindings } };
+    let next = current;
+    if (current.accounts?.bindings?.[target] === account.id) {
+      const bindings = { ...current.accounts?.bindings };
+      delete bindings[target];
+      next = { ...next, accounts: { ...next.accounts, bindings } };
+    }
+    if (current.deviceAccounts?.bindings?.[target] === account.id) {
+      const bindings = { ...current.deviceAccounts?.bindings };
+      delete bindings[target];
+      next = { ...next, deviceAccounts: { ...next.deviceAccounts, bindings } };
+    }
+    return next;
   });
 }
 
-export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts'>): string[] {
-  return Object.entries(meta.accounts?.bindings ?? {}).filter(([, id]) => id === accountId).map(([target]) => target).sort();
+/** Every target bound to `accountId`: this box's device-doc bindings merged over
+ * the fleet-shared central bindings (PHNX-3315). */
+export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts' | 'deviceAccounts'>): string[] {
+  const merged = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
+  return Object.entries(merged).filter(([, id]) => id === accountId).map(([target]) => target).sort();
 }
 
 /** Explicit selection wins over a configured per-harness default. */
 export function resolveAccountSelection(
   explicit: string | undefined,
   agent: AgentId,
-  meta: Pick<Meta, 'accounts'>,
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; target?: string } = {},
 ): string | undefined {
   if (explicit) return explicit;
-  const bound = opts.target ? meta.accounts?.bindings?.[opts.target] : undefined;
+  // This box's device-doc bindings win over the fleet-shared central bindings
+  // (PHNX-3315), so a per-box account attachment resolves without touching the
+  // shared file. Defaults are genuinely fleet-shared and stay central.
+  const bindings = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
+  const bound = opts.target ? bindings[opts.target] : undefined;
   if (bound) return bound;
-  const deviceScoped = meta.accounts?.bindings?.[agent];
+  const deviceScoped = bindings[agent];
   if (deviceScoped) return deviceScoped;
   return opts.useDefault === false ? undefined : meta.accounts?.defaults?.[agent];
 }
@@ -359,7 +419,14 @@ export function renameAccount(oldName: string, newName: string, base = getUserAg
   const rows = nativeRowsForNameOrId(meta, oldName);
   if (rows.length) {
     assertUniqueUnifiedName(newName, meta, doc, new Set(rows.map(account => account.id)));
+    // Sweep every row for the identity (PHNX-3206) in its owning store (PHNX-3315).
+    const rowScope = rows[0]!.scope;
     updateMeta(current => {
+      if (rowScope === 'device') {
+        const native = { ...current.deviceAccounts?.native };
+        for (const row of rows) native[row.id] = { ...native[row.id]!, name: newName };
+        return { ...current, deviceAccounts: { ...current.deviceAccounts, native } };
+      }
       const native = { ...current.accounts?.native };
       for (const row of rows) native[row.id] = { ...native[row.id]!, name: newName };
       return { ...current, accounts: { ...current.accounts, native } };
@@ -380,7 +447,14 @@ export function removeAccount(name: string, base = getUserAgentsDir()): void {
     const bindings = [...new Set(rows.flatMap(row => accountBindings(row.id, meta)))].sort();
     if (bindings.length) throw new Error(`Account '${rows[0]!.name}' is attached to: ${bindings.join(', ')}. Detach it before removing it.`);
     const ids = new Set(rows.map(row => row.id));
+    // Sweep every row for the identity (PHNX-3206) from its owning store (PHNX-3315).
+    const rowScope = rows[0]!.scope;
     updateMeta(current => {
+      if (rowScope === 'device') {
+        const accounts = { ...current.deviceAccounts?.native };
+        for (const id of ids) delete accounts[id];
+        return { ...current, deviceAccounts: { ...current.deviceAccounts, native: accounts } };
+      }
       const accounts = { ...current.accounts?.native };
       for (const id of ids) delete accounts[id];
       return { ...current, accounts: { ...current.accounts, native: accounts } };
@@ -458,7 +532,7 @@ export function resolveSpawnAccount(
   explicit: string | undefined,
   agent: AgentId,
   version: string | undefined,
-  meta: Pick<Meta, 'accounts'>,
+  meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; provider?: string; base?: string; target?: string } = {},
 ): SpawnAccount | null {
   // The binding lookup key. A custom harness passes its own profile/harness name

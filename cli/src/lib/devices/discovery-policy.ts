@@ -1,5 +1,6 @@
 /** Synced device approval/ignore policy and local registry reconciliation. */
 import { readMeta, updateMeta } from '../state.js';
+import { unionDeviceDiscovery } from './device-docs.js';
 import {
   addIgnored,
   assertValidDeviceName,
@@ -26,35 +27,44 @@ export function getDeviceDiscoveryStatus(name: string): DeviceDiscoveryStatus | 
   return loadDeviceDiscoveryPolicies().get(name);
 }
 
-/** Persist one portable decision in the central fleet manifest. */
+/**
+ * Persist ONE discovery decision in THIS box's device doc (PHNX-3315). Each box
+ * records only its own choices in `devices/<machine>/agents.yaml` `fleet.discovery`,
+ * so N boxes no longer rewrite one shared central map (the guaranteed pull
+ * conflict). The effective policy is the union across every box
+ * ({@link loadDeviceDiscoveryPolicies}).
+ */
 export function setDeviceDiscoveryStatus(name: string, status: DeviceDiscoveryStatus | undefined): void {
   assertValidDeviceName(name);
   updateMeta((meta) => {
-    const discovery = { ...meta.fleet?.discovery };
+    const discovery = { ...meta.deviceFleet?.discovery };
     if (status) discovery[name] = status;
     else delete discovery[name];
-    const fleet = {
-      ...meta.fleet,
-      devices: meta.fleet?.devices ?? {},
-      // Keep an empty map as the synced tombstone: it distinguishes "policy is
-      // authoritative and every device is pending" from an older config that
-      // has never opted into portable discovery decisions.
-      discovery,
-    };
-    return { ...meta, fleet };
+    return { ...meta, deviceFleet: { ...meta.deviceFleet, discovery } };
   });
 }
 
-/** Load every explicit decision from the synced central fleet manifest. */
+/**
+ * The effective discovery policy: the UNION across every box's device doc, plus
+ * any lingering central-legacy map (drained by the fold-then-delete migration).
+ * Precedence for a name declared by more than one box is deterministic and
+ * order-independent — `ignored` beats `approved` — so every box computes the
+ * identical policy. Absence means pending.
+ */
 export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus> {
   const policies = new Map<string, DeviceDiscoveryStatus>();
-  for (const [name, status] of Object.entries(readMeta().fleet?.discovery ?? {})) {
-    assertValidDeviceName(name);
-    if (status !== 'approved' && status !== 'ignored') {
-      throw new Error(`Device discovery policy for '${name}' must be approved or ignored.`);
+  const apply = (rec: Record<string, unknown> | undefined) => {
+    for (const [name, status] of Object.entries(rec ?? {})) {
+      assertValidDeviceName(name);
+      if (status !== 'approved' && status !== 'ignored') {
+        throw new Error(`Device discovery policy for '${name}' must be approved or ignored.`);
+      }
+      if (policies.get(name) === 'ignored') continue; // ignored is never downgraded
+      policies.set(name, status);
     }
-    policies.set(name, status);
-  }
+  };
+  apply(readMeta().fleet?.discovery); // central legacy, until the migration drains it
+  apply(unionDeviceDiscovery());       // per-box device docs (ignored still wins)
   return policies;
 }
 
@@ -73,11 +83,10 @@ export function loadDeviceDiscoveryPolicies(): Map<string, DeviceDiscoveryStatus
  * that never meant to touch them.
  */
 export async function reconcileDeviceDiscoveryPolicies(): Promise<DeviceDiscoveryReconcileResult> {
-  const configured = readMeta().fleet?.discovery;
-  if (configured === undefined) {
+  const policies = loadDeviceDiscoveryPolicies();
+  if (policies.size === 0) {
     return { approved: [], ignored: [], registered: [], unresolved: [] };
   }
-  const policies = loadDeviceDiscoveryPolicies();
   const approved = [...policies].filter(([, s]) => s === 'approved').map(([n]) => n).sort();
   const ignored = [...policies].filter(([, s]) => s === 'ignored').map(([n]) => n).sort();
 

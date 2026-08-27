@@ -25,6 +25,7 @@ import { DevicesHostProvider } from './providers/devices.js';
 import { assertValidSshTarget } from '../ssh-exec.js';
 import { normalizeHost } from '../machine-id.js';
 import { readMeta } from '../state.js';
+import { unionDeviceHosts } from '../devices/device-docs.js';
 import { isSshConfigHost } from './ssh-config.js';
 import { resolveRemoteOsSync } from './remote-os.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
@@ -236,7 +237,9 @@ export async function matchHost(name: string, opts: MatchHostOptions = {}): Prom
   } catch {
     reg = {};
   }
-  const overlay = readMeta().hosts?.[host];
+  // The effective host overlay is the cross-box union of every device doc's
+  // `hosts:` block (PHNX-3315), plus any lingering central-legacy entry.
+  const overlay = { ...readMeta().hosts, ...unionDeviceHosts() }[host];
 
   // 1. A registered device (normalized match) — its live address/OS/presence win.
   const device = matchDevice(host, reg);

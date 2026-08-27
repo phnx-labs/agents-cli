@@ -972,6 +972,9 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
   deviceRoutines: 'device',
   deviceConfig: 'device',
   deviceBrowser: 'device',
+  deviceFleet: 'device',
+  deviceHosts: 'device',
+  deviceAccounts: 'device',
   // Central — synced via agents.yaml.
   accounts: 'central',
   run: 'central',
@@ -1129,7 +1132,7 @@ function serializeCentral(central: Record<string, unknown>): string {
  * read-snapshot-then-separately-lock race that {@link updateMeta} would impose.
  */
 export function writeMetaUnlocked(meta: Meta): void {
-  const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, projectRoot, ...central } = meta;
+  const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, deviceFleet, deviceHosts, deviceAccounts, projectRoot, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write
   // never removes pins/versions from central before they're persisted elsewhere.
@@ -1184,6 +1187,33 @@ export function writeMetaUnlocked(meta: Meta): void {
   const hasDeviceBrowser = !!deviceBrowser && Object.keys(deviceBrowser).length > 0;
   if (hasDeviceBrowser) doc.browser = deviceBrowser;
   else delete doc.browser;
+  // PHNX-3315 device-scoped fleet/hosts/accounts blocks. Each is this box's OWN
+  // slice; the effective fleet view is unioned across every device doc at read
+  // time (lib/devices/device-docs.ts). Empty slices are dropped so a box that
+  // has made no decision leaves no key behind (no committed empty maps).
+  const fleetDiscovery = deviceFleet?.discovery && Object.keys(deviceFleet.discovery).length > 0
+    ? deviceFleet.discovery : undefined;
+  const fleetIgnored = deviceFleet?.ignored && deviceFleet.ignored.length > 0
+    ? deviceFleet.ignored : undefined;
+  if (fleetDiscovery || fleetIgnored) {
+    const df: Record<string, unknown> = {};
+    if (fleetDiscovery) df.discovery = fleetDiscovery;
+    if (fleetIgnored) df.ignored = fleetIgnored;
+    doc.fleet = df;
+  } else delete doc.fleet;
+  const hasDeviceHosts = !!deviceHosts && Object.keys(deviceHosts).length > 0;
+  if (hasDeviceHosts) doc.hosts = deviceHosts;
+  else delete doc.hosts;
+  const accountsNative = deviceAccounts?.native && Object.keys(deviceAccounts.native).length > 0
+    ? deviceAccounts.native : undefined;
+  const accountsBindings = deviceAccounts?.bindings && Object.keys(deviceAccounts.bindings).length > 0
+    ? deviceAccounts.bindings : undefined;
+  if (accountsNative || accountsBindings) {
+    const da: Record<string, unknown> = {};
+    if (accountsNative) da.native = accountsNative;
+    if (accountsBindings) da.bindings = accountsBindings;
+    doc.accounts = da;
+  } else delete doc.accounts;
   const hasProjectRoot = typeof projectRoot === 'string' && projectRoot.length > 0;
   if (hasProjectRoot) doc.projectRoot = projectRoot;
   else delete doc.projectRoot;
@@ -1253,6 +1283,27 @@ function overlayMachineLocal(meta: Meta): Meta {
       }
       if (dm?.config && typeof dm.config === 'object' && !Array.isArray(dm.config)) {
         meta.deviceConfig = { ...meta.deviceConfig, ...(dm.config as Record<string, unknown>) };
+      }
+      // PHNX-3315: this box's own device-scoped fleet/hosts/accounts slices.
+      // These populate the `device*` keys the writers read-modify-write; the
+      // effective UNION across all boxes is computed separately by
+      // lib/devices/device-docs.ts, not here (this overlay is this box only).
+      const df = (dm as { fleet?: { discovery?: unknown; ignored?: unknown } })?.fleet;
+      if (df && typeof df === 'object' && !Array.isArray(df)) {
+        const discovery = df.discovery && typeof df.discovery === 'object' && !Array.isArray(df.discovery)
+          ? (df.discovery as Record<string, 'approved' | 'ignored'>) : undefined;
+        const ignored = Array.isArray(df.ignored)
+          ? (df.ignored as NonNullable<Meta['deviceFleet']>['ignored']) : undefined;
+        if (discovery || ignored) meta.deviceFleet = { ...(discovery ? { discovery } : {}), ...(ignored ? { ignored } : {}) };
+      }
+      if (dm?.hosts && typeof dm.hosts === 'object' && !Array.isArray(dm.hosts)) {
+        meta.deviceHosts = { ...meta.deviceHosts, ...(dm.hosts as Meta['hosts']) };
+      }
+      if (dm?.accounts && typeof dm.accounts === 'object' && !Array.isArray(dm.accounts)) {
+        const acc = dm.accounts as NonNullable<Meta['deviceAccounts']>;
+        const native = acc.native && typeof acc.native === 'object' && !Array.isArray(acc.native) ? acc.native : undefined;
+        const bindings = acc.bindings && typeof acc.bindings === 'object' && !Array.isArray(acc.bindings) ? acc.bindings : undefined;
+        if (native || bindings) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}) };
       }
       if (Object.prototype.hasOwnProperty.call(dm, 'routines')) {
         if (!Array.isArray(dm.routines) || dm.routines.some((name) => typeof name !== 'string')) {

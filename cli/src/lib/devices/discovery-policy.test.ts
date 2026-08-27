@@ -28,7 +28,7 @@ afterEach(() => {
 });
 
 describe('synced device discovery policy', () => {
-  it('round-trips approved, ignored, and pending while preserving sibling fleet config', async () => {
+  it('round-trips approved, ignored, and pending in the device doc, never touching central sibling config', async () => {
     const file = centralFile();
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, 'fleet:\n  devices:\n    mac-mini:\n      config:\n        maxAgents: 2\n');
@@ -36,15 +36,32 @@ describe('synced device discovery policy', () => {
 
     setDeviceDiscoveryStatus('mac-mini', 'approved');
     expect(getDeviceDiscoveryStatus('mac-mini')).toBe('approved');
+    // The decision lands in THIS box's device doc, so the fleet-shared central
+    // file — and its sibling fleet config — is left untouched (PHNX-3315).
     expect(fs.readFileSync(file, 'utf-8')).toContain('maxAgents: 2');
+    expect(fs.readFileSync(file, 'utf-8')).not.toContain('discovery');
 
     setDeviceDiscoveryStatus('mac-mini', 'ignored');
     expect(getDeviceDiscoveryStatus('mac-mini')).toBe('ignored');
 
     setDeviceDiscoveryStatus('mac-mini', undefined);
     expect(getDeviceDiscoveryStatus('mac-mini')).toBeUndefined();
-    expect(fs.readFileSync(file, 'utf-8')).toContain('discovery: {}');
     expect(fs.readFileSync(file, 'utf-8')).toContain('maxAgents: 2');
+    expect(fs.readFileSync(file, 'utf-8')).not.toContain('discovery');
+  });
+
+  it('unions discovery decisions across two boxes, ignored beating approved (PHNX-3315)', async () => {
+    const { loadDeviceDiscoveryPolicies, setDeviceDiscoveryStatus } = await freshModules();
+    // This box approves mac-mini.
+    setDeviceDiscoveryStatus('mac-mini', 'approved');
+    // A peer box's device doc dismisses mac-mini and approves win-mini.
+    const peer = path.join(home, '.agents', 'devices', 'peer', 'agents.yaml');
+    fs.mkdirSync(path.dirname(peer), { recursive: true });
+    fs.writeFileSync(peer, 'fleet:\n  discovery:\n    mac-mini: ignored\n    win-mini: approved\n');
+
+    const policies = loadDeviceDiscoveryPolicies();
+    expect(policies.get('mac-mini')).toBe('ignored'); // the peer's dismissal wins
+    expect(policies.get('win-mini')).toBe('approved');
   });
 
   it('applies an ignored synced decision to the real local registry and ignore-list', async () => {

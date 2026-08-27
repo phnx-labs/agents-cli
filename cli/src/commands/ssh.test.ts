@@ -71,21 +71,31 @@ describe('devices command', () => {
     expect(stdout).not.toContain('Usage: agents devices');
   });
 
-  it('persists add, ignore, and unignore decisions in the synced fleet manifest', () => {
+  it("persists add, ignore, and unignore decisions in THIS box's device doc, not central", () => {
     guardedHome();
-    const policyPath = path.join(testHome, '.agents', 'agents.yaml');
+    const env = { AGENTS_SYNC_MACHINE_ID: 'testbox' };
+    const docPath = path.join(testHome, '.agents', 'devices', 'testbox', 'agents.yaml');
+    const centralPath = path.join(testHome, '.agents', 'agents.yaml');
+    const central = () => (fs.existsSync(centralPath) ? fs.readFileSync(centralPath, 'utf-8') : '');
+    const doc = () => (fs.existsSync(docPath) ? fs.readFileSync(docPath, 'utf-8') : '');
 
-    const added = run(['devices', 'add', 'mac-mini', 'operator@mac-mini.internal', '--platform', 'macos']);
+    const added = run(['devices', 'add', 'mac-mini', 'operator@mac-mini.internal', '--platform', 'macos'], env);
     expect(added.status).toBe(0);
-    expect(fs.readFileSync(policyPath, 'utf-8')).toContain('mac-mini: approved');
+    // The discovery decision lands in this box's device doc, never the shared
+    // central agents.yaml (PHNX-3315).
+    expect(doc()).toContain('mac-mini: approved');
+    expect(central()).not.toContain('mac-mini: approved');
 
-    const ignored = run(['devices', 'ignore', 'mac-mini']);
+    const ignored = run(['devices', 'ignore', 'mac-mini'], env);
     expect(ignored.status).toBe(0);
-    expect(fs.readFileSync(policyPath, 'utf-8')).toContain('mac-mini: ignored');
+    expect(doc()).toContain('mac-mini: ignored');
+    expect(central()).not.toContain('mac-mini: ignored');
 
-    const unignored = run(['devices', 'unignore', 'mac-mini']);
+    const unignored = run(['devices', 'unignore', 'mac-mini'], env);
     expect(unignored.status).toBe(0);
-    expect(fs.readFileSync(policyPath, 'utf-8')).toContain('discovery: {}');
+    // The decision is cleared from the device doc; central was never touched.
+    expect(doc()).not.toContain('mac-mini: approved');
+    expect(doc()).not.toContain('mac-mini: ignored');
   });
 });
 
@@ -246,7 +256,9 @@ describe('devices ignored (RUSH-3062 surface)', () => {
     expect(entries[0].ignoredOn).toBe('zion');
     expect(Number.isFinite(Date.parse(entries[0].ignoredAt))).toBe(true);
 
-    expect(run(['devices', 'unignore', 'old-laptop']).status).toBe(0);
+    // Dismissals are per-box now (PHNX-3315): the un-ignore must run on the same
+    // box that recorded the dismissal (zion), since a box only edits its own doc.
+    expect(run(['devices', 'unignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'zion' }).status).toBe(0);
     expect(run(['devices', 'ignored']).stdout).toContain('No ignored nodes');
   });
 });

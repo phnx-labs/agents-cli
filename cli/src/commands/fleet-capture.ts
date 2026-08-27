@@ -15,13 +15,14 @@ import * as path from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as yaml from 'yaml';
-import { loadDevices } from '../lib/devices/registry.js';
+import { loadDevices, loadIgnoredEntries } from '../lib/devices/registry.js';
+import { loadDeviceDiscoveryPolicies } from '../lib/devices/discovery-policy.js';
 import { readMeta, updateMeta, getDevicePinsPath } from '../lib/state.js';
 import { machineId } from '../lib/machine-id.js';
 import { listBundles } from '../lib/secrets/bundles.js';
 import { listJobs } from '../lib/scheduling/routines.js';
 import { captureFleet, type CaptureInputs } from '../lib/fleet/capture.js';
-import type { FleetDefaults } from '../lib/fleet/types.js';
+import type { FleetDefaults, FleetManifest } from '../lib/fleet/types.js';
 
 interface CaptureOptions {
   dryRun?: boolean;
@@ -86,7 +87,25 @@ async function runCapture(opts: CaptureOptions): Promise<void> {
     routines: listJobs().map((j) => j.name),
   };
 
-  const next = captureFleet(meta.fleet, inputs);
+  // Discovery decisions and dismissals are device-scoped now (PHNX-3315), so the
+  // captured manifest must carry the cross-box UNION — not just this box's
+  // central-legacy map — or a fresh `agents apply` would rebuild a fleet that
+  // forgot every peer's approvals/dismissals.
+  const effDiscovery = Object.fromEntries(loadDeviceDiscoveryPolicies());
+  const effIgnored = loadIgnoredEntries();
+  const prevFleet: FleetManifest | undefined = meta.fleet
+    ? { ...meta.fleet }
+    : Object.keys(effDiscovery).length > 0 || effIgnored.length > 0
+      ? { devices: {} }
+      : undefined;
+  if (prevFleet) {
+    if (Object.keys(effDiscovery).length > 0) prevFleet.discovery = effDiscovery;
+    else delete prevFleet.discovery;
+    if (effIgnored.length > 0) prevFleet.ignored = effIgnored;
+    else delete prevFleet.ignored;
+  }
+
+  const next = captureFleet(prevFleet, inputs);
 
   if (opts.dryRun) {
     console.log(chalk.gray('# agents.yaml fleet: block (dry run — not written)'));

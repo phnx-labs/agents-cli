@@ -98,3 +98,45 @@ describe('LocalHostProvider ssh-config union + resolution order', () => {
     expect((await provider.list()).filter((h) => h.name === 'dup')).toHaveLength(1);
   });
 });
+
+describe('LocalHostProvider device-scoping (PHNX-3315)', () => {
+  const originalMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
+  afterEach(() => {
+    if (originalMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = originalMachineId;
+  });
+
+  it("registers into THIS box's device doc, never the shared central agents.yaml", async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'boxa';
+    const p = await freshProvider();
+    await p.register!({ name: 'h1', provider: 'local', source: 'inline', address: '10.0.0.9' });
+
+    const doc = fs.readFileSync(path.join(home, '.agents', 'devices', 'boxa', 'agents.yaml'), 'utf-8');
+    expect(doc).toContain('h1');
+    expect(doc).toContain('10.0.0.9');
+    const centralPath = path.join(home, '.agents', 'agents.yaml');
+    const central = fs.existsSync(centralPath) ? fs.readFileSync(centralPath, 'utf-8') : '';
+    expect(central).not.toContain('h1');
+  });
+
+  it("merges host registries across boxes on read, and remove only touches this box's doc", async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'boxa';
+    const p = await freshProvider();
+    await p.register!({ name: 'mine', provider: 'local', source: 'inline', address: 'a' });
+    // A peer box's device doc, written directly (as a repo sync would deliver it).
+    const peer = path.join(home, '.agents', 'devices', 'boxb', 'agents.yaml');
+    fs.mkdirSync(path.dirname(peer), { recursive: true });
+    fs.writeFileSync(peer, 'hosts:\n  theirs:\n    source: inline\n    address: b\n');
+
+    const names = (await p.list()).map((h) => h.name).sort();
+    expect(names).toContain('mine');
+    expect(names).toContain('theirs'); // the union surfaces the peer's host
+
+    // Removing on boxA drops only boxA's own entry; the peer's doc is untouched.
+    await p.remove!('theirs'); // not ours — a no-op on our doc
+    await p.remove!('mine');
+    expect((await p.list()).map((h) => h.name)).toContain('theirs');
+    expect((await p.list()).map((h) => h.name)).not.toContain('mine');
+    expect(fs.readFileSync(peer, 'utf-8')).toContain('theirs'); // peer doc never rewritten
+  });
+});

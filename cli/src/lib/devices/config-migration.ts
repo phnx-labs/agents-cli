@@ -54,7 +54,9 @@ import {
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { machineId } from '../machine-id.js';
 import { withIgnoredAdded } from './registry.js';
-import type { FleetDeviceOverride, FleetManifest } from '../fleet/types.js';
+import { addIgnoredEntry } from './device-docs.js';
+import type { Meta } from '../types.js';
+import type { FleetDeviceOverride, FleetManifest, IgnoredDeviceEntry } from '../fleet/types.js';
 
 /** One parsed device doc under ~/.agents/devices/. */
 interface DeviceDoc {
@@ -192,6 +194,28 @@ export function migrateDeviceConfigStores(): void {
   const legacyIgnoredPending = fs.existsSync(legacyIgnoredPath);
   const legacyIgnored = legacyIgnoredPending ? readLegacyIgnoredFile(legacyIgnoredPath) : null;
 
+  // Central shared fleet.discovery / fleet.ignored (PHNX-3315): the maps N boxes
+  // used to rewrite. Folded into THIS box's device doc below, then stripped.
+  const centralFleetState = !!(
+    fleet &&
+    ((fleet.discovery && Object.keys(fleet.discovery).length > 0) ||
+      (Array.isArray(fleet.ignored) && fleet.ignored.length > 0))
+  );
+
+  // Central shared `hosts:` map (PHNX-3315): the host registry N boxes used to
+  // rewrite. Folded into THIS box's device doc below, then the central key is
+  // dropped entirely.
+  const centralHosts = readMeta().hosts;
+  const centralHostsPending = !!(centralHosts && Object.keys(centralHosts).length > 0);
+
+  // Central device-scoped native accounts (PHNX-3315): a native login is
+  // machine-local, so `scope:'device'` identities (and the bindings that target
+  // them) belong in this box's device doc, off the git-tracked shared file.
+  const centralAccounts = readMeta().accounts;
+  const accountsPending = !!(
+    centralAccounts?.native && Object.values(centralAccounts.native).some((a) => a.scope === 'device')
+  );
+
   const pinsPath = getDevicePinsPath();
   let selfPins: { agents?: Record<string, string>; isolatedAgents?: Record<string, string> } = {};
   try {
@@ -223,7 +247,7 @@ export function migrateDeviceConfigStores(): void {
   const hasDestinationWork = plans.length > 0 || newDocs.length > 0 || docAgents !== undefined || docIsolated !== undefined;
 
   const autoLaunchPending = fs.existsSync(autoLaunchPath);
-  if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending && !legacyIgnoredPending) return;
+  if (!centralHasConfig && !hasDestinationWork && !autoLaunchPending && !legacyIgnoredPending && !centralFleetState && !centralHostsPending && !accountsPending) return;
 
   // ── 2. Destination writes FIRST (crash-safe), under the meta lock so they
   //    serialize against writeMetaUnlocked's own read-merge-write of the doc.
@@ -310,6 +334,133 @@ export function migrateDeviceConfigStores(): void {
     } catch (err) {
       console.error(`device config migration: could not remove ${legacyIgnoredPath} (${(err as Error).message}); a later run retries`);
     }
+  }
+
+  // ── 5. Central fleet.discovery / fleet.ignored → THIS box's device doc ─────
+  // (PHNX-3315) The shared maps every box used to rewrite fold into this box's
+  // deviceFleet, then are stripped from central. writeMetaUnlocked writes the
+  // device doc BEFORE the central strip, so a crash re-folds on the next run and
+  // the union-dedup (ignored beats approved; newest ignoredAt wins) makes the
+  // re-fold a no-op. Idempotent — once central holds neither key the gather
+  // guard above skips this whole pass.
+  if (centralFleetState) {
+    updateMeta((m) => {
+      const disc = m.fleet?.discovery;
+      const ign = m.fleet?.ignored;
+      const hasDisc = !!disc && Object.keys(disc).length > 0;
+      const hasIgn = Array.isArray(ign) && ign.length > 0;
+      if (!hasDisc && !hasIgn) return m;
+
+      const discovery: Record<string, 'approved' | 'ignored'> = { ...m.deviceFleet?.discovery };
+      if (hasDisc) {
+        for (const [name, status] of Object.entries(disc!)) {
+          if (status !== 'approved' && status !== 'ignored') continue;
+          if (discovery[name] === 'ignored') continue; // ignored is never downgraded
+          discovery[name] = status;
+        }
+      }
+
+      const byName = new Map<string, IgnoredDeviceEntry>();
+      for (const e of m.deviceFleet?.ignored ?? []) addIgnoredEntry(byName, e);
+      if (hasIgn) for (const e of ign!) addIgnoredEntry(byName, e);
+      const ignored = [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+      const deviceFleet = {
+        ...(Object.keys(discovery).length > 0 ? { discovery } : {}),
+        ...(ignored.length > 0 ? { ignored } : {}),
+      };
+
+      const fleet: FleetManifest | undefined = m.fleet ? { ...m.fleet } : undefined;
+      if (fleet) {
+        delete fleet.discovery;
+        delete fleet.ignored;
+      }
+      // Drop an emptied fleet block entirely (mirrors step 3a's guard) so the
+      // strip does not leave a bare `fleet: { devices: {} }` behind.
+      const fleetEmpty =
+        !fleet ||
+        ((fleet.devices === undefined ||
+          (fleet.devices !== 'all' && Object.keys(fleet.devices).length === 0)) &&
+          !fleet.defaults &&
+          !fleet.secrets &&
+          !fleet.routines);
+      if (fleetEmpty) {
+        const { fleet: _drop, ...rest } = m;
+        void _drop;
+        return { ...rest, deviceFleet } as Meta;
+      }
+      return { ...m, deviceFleet, fleet } as Meta;
+    });
+  }
+
+  // ── 6. Central hosts map → THIS box's device doc (PHNX-3315) ───────────────
+  // The shared host registry folds into this box's deviceHosts, then the central
+  // key is dropped. writeMetaUnlocked writes the device doc before the central
+  // strip, so a crash re-folds and the newest-addedAt union makes it a no-op.
+  // Idempotent — once central holds no `hosts:` the gather guard skips this.
+  if (centralHostsPending) {
+    updateMeta((m) => {
+      const hosts = m.hosts;
+      if (!hosts || Object.keys(hosts).length === 0) return m;
+      // This box's own device-doc entries win over the shared legacy on a name
+      // collision (a re-fold after a crash must not clobber a fresher local edit).
+      const deviceHosts = { ...hosts, ...m.deviceHosts };
+      const { hosts: _drop, ...rest } = m;
+      void _drop;
+      return { ...rest, deviceHosts } as Meta;
+    });
+  }
+
+  // ── 7. Central device-scoped native accounts → THIS box's device doc ───────
+  // (PHNX-3315) Fold `scope:'device'` natives and the bindings that target them
+  // out of central and into the device doc, removing their identity PII from the
+  // git-tracked shared file. The selection is recomputed INSIDE the lock so a
+  // concurrent write is never clobbered; the device-doc write precedes the
+  // central strip, so a crash re-folds and the id-keyed merge makes it a no-op.
+  if (accountsPending) {
+    updateMeta((m) => {
+      const native = { ...m.accounts?.native };
+      const bindings = { ...m.accounts?.bindings };
+      const devNative = { ...m.deviceAccounts?.native };
+      const devBindings = { ...m.deviceAccounts?.bindings };
+      const movedIds = new Set<string>();
+      let changed = false;
+      for (const [id, entry] of Object.entries(native)) {
+        if (entry.scope === 'device') {
+          devNative[id] = entry;
+          movedIds.add(id);
+          delete native[id];
+          changed = true;
+        }
+      }
+      for (const [target, id] of Object.entries(bindings)) {
+        if (movedIds.has(id)) {
+          devBindings[target] = id;
+          delete bindings[target];
+          changed = true;
+        }
+      }
+      if (!changed) return m;
+
+      const deviceAccounts = {
+        ...(Object.keys(devNative).length > 0 ? { native: devNative } : {}),
+        ...(Object.keys(devBindings).length > 0 ? { bindings: devBindings } : {}),
+      };
+      const accounts: NonNullable<Meta['accounts']> = { ...m.accounts };
+      if (Object.keys(native).length > 0) accounts.native = native;
+      else delete accounts.native;
+      if (Object.keys(bindings).length > 0) accounts.bindings = bindings;
+      else delete accounts.bindings;
+      // Drop the whole central `accounts` block only when nothing fleet-shared
+      // remains (no version natives, no bindings, no defaults).
+      const accountsEmpty = !accounts.native && !accounts.bindings && !accounts.defaults;
+      if (accountsEmpty) {
+        const { accounts: _drop, ...rest } = m;
+        void _drop;
+        return { ...rest, deviceAccounts } as Meta;
+      }
+      return { ...m, accounts, deviceAccounts } as Meta;
+    });
   }
 }
 

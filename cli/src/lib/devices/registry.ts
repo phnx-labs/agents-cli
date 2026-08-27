@@ -21,7 +21,8 @@ import { getDevicesRegistryPath, readMeta, updateMeta } from '../state.js';
 import { atomicWriteJsonSync } from '../fs-atomic.js';
 import { machineId } from '../machine-id.js';
 import type { Meta } from '../types.js';
-import type { FleetManifest, IgnoredDeviceEntry } from '../fleet/types.js';
+import type { IgnoredDeviceEntry } from '../fleet/types.js';
+import { addIgnoredEntry, unionDeviceIgnored } from './device-docs.js';
 
 /** Operating-system family of a device, used to pick the remote shell. */
 export type DevicePlatform = 'windows' | 'linux' | 'macos' | 'unknown';
@@ -424,9 +425,8 @@ export type { IgnoredDeviceEntry } from '../fleet/types.js';
  * []. A malformed block is a hard error for the same reason the registry is:
  * silently returning [] would let the next write wipe the user's dismissals.
  */
-export function loadIgnoredEntries(meta: Meta = readMeta()): IgnoredDeviceEntry[] {
-  const raw = meta.fleet?.ignored;
-  if (raw === undefined) return [];
+/** Validate a raw ignore-list block, or throw with `where` naming the file. */
+function assertIgnoredShape(raw: unknown, where: string): asserts raw is IgnoredDeviceEntry[] {
   if (
     !Array.isArray(raw) ||
     raw.some(
@@ -438,10 +438,40 @@ export function loadIgnoredEntries(meta: Meta = readMeta()): IgnoredDeviceEntry[
     )
   ) {
     throw new Error(
-      `Device ignore-list corrupted in agents.yaml (fleet.ignored): expected a list of { name, ignoredAt, ignoredOn } entries. Inspect and repair ~/.agents/agents.yaml.`,
+      `Device ignore-list corrupted in ${where}: expected a list of { name, ignoredAt, ignoredOn } entries. Inspect and repair it.`,
     );
   }
+}
+
+/**
+ * THIS box's OWN dismissals — the writable slice in `meta.deviceFleet.ignored`
+ * (the device doc). `withIgnoredAdded`/`removeIgnored` operate on this so a box
+ * only ever edits its own folder (PHNX-3315). Absent => [].
+ */
+function loadOwnIgnoredEntries(meta: Meta): IgnoredDeviceEntry[] {
+  const raw = meta.deviceFleet?.ignored;
+  if (raw === undefined) return [];
+  assertIgnoredShape(raw, `devices/<machine>/agents.yaml (fleet.ignored)`);
   return raw;
+}
+
+/**
+ * The EFFECTIVE ignore-list: the union of every box's device doc
+ * `fleet.ignored` (deduped by node name, newest `ignoredAt` winning) plus any
+ * lingering central-legacy `fleet.ignored` block (drained by the migration).
+ * Deterministic and order-independent. A malformed block is a hard error for the
+ * same reason the registry is: silently returning [] would let the next write
+ * wipe the user's dismissals.
+ */
+export function loadIgnoredEntries(meta: Meta = readMeta()): IgnoredDeviceEntry[] {
+  const byName = new Map<string, IgnoredDeviceEntry>();
+  const central = meta.fleet?.ignored;
+  if (central !== undefined) {
+    assertIgnoredShape(central, `agents.yaml (fleet.ignored)`);
+    for (const e of central) addIgnoredEntry(byName, e);
+  }
+  for (const e of unionDeviceIgnored()) addIgnoredEntry(byName, e);
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Load the set of ignored node names. Same corruption contract as
@@ -463,24 +493,26 @@ export async function isIgnored(name: string): Promise<boolean> {
  * lib/devices/config-migration.ts.
  */
 export function withIgnoredAdded(meta: Meta, names: string[], ignoredAt: string): Meta {
-  const entries = loadIgnoredEntries(meta); // throws on a corrupted block — never wipe it
+  const entries = loadOwnIgnoredEntries(meta); // throws on a corrupted block — never wipe it
   const have = new Set(entries.map((e) => e.name));
   const fresh = names.filter((n) => !have.has(n));
   if (fresh.length === 0) return meta;
-  const fleet = (meta.fleet ?? { devices: {} });
   const ignored: IgnoredDeviceEntry[] = [
     ...entries,
     ...fresh.map((name) => ({ name, ignoredAt, ignoredOn: machineId() })),
   ].sort((a, b) => a.name.localeCompare(b.name));
-  const nextFleet: FleetManifest = { ...fleet, ignored };
-  return { ...meta, fleet: nextFleet };
+  return { ...meta, deviceFleet: { ...meta.deviceFleet, ignored } };
 }
 
-/** Add a node name to the ignore-list. Idempotent. Returns the resulting set. */
+/** Add a node name to THIS box's ignore-list (device doc). Idempotent. Returns
+ * the resulting cross-box union of dismissed names. Reads only the device docs
+ * for the return value — a corrupt central-legacy block surfaces loudly on the
+ * effective read path ({@link loadIgnoredEntries}), never blocks a per-box
+ * write that does not touch central at all. */
 export async function addIgnored(name: string): Promise<Set<string>> {
   assertValidDeviceName(name);
-  const meta = updateMeta((m) => withIgnoredAdded(m, [name], new Date().toISOString()));
-  return new Set(loadIgnoredEntries(meta).map((e) => e.name));
+  updateMeta((m) => withIgnoredAdded(m, [name], new Date().toISOString()));
+  return new Set(unionDeviceIgnored().map((e) => e.name));
 }
 
 /** Remove a node name from the ignore-list (un-ignore). Returns false if it was
@@ -488,14 +520,11 @@ export async function addIgnored(name: string): Promise<Set<string>> {
 export async function removeIgnored(name: string): Promise<boolean> {
   let removed = false;
   updateMeta((m) => {
-    const fleet = m.fleet;
-    if (!fleet?.ignored) return m;
-    const entries = loadIgnoredEntries(m);
+    const entries = loadOwnIgnoredEntries(m); // only this box's own dismissals are ours to drop
     const next = entries.filter((e) => e.name !== name);
     if (next.length === entries.length) return m;
     removed = true;
-    const nextFleet: FleetManifest = { ...fleet, ignored: next };
-    return { ...m, fleet: nextFleet };
+    return { ...m, deviceFleet: { ...m.deviceFleet, ignored: next } };
   });
   return removed;
 }

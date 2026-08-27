@@ -901,6 +901,26 @@ export interface Meta {
     /** Exact installation/custom-harness target -> stable account id. */
     bindings?: Record<string, string>;
   };
+  /**
+   * Device-scoped slice of {@link Meta.accounts}, written as `accounts:` in
+   * `~/.agents/devices/<machine>/agents.yaml` (PHNX-3315). Holds this box's own
+   * `scope: 'device'` native identities and the bindings that target them, so a
+   * per-box login no longer rewrites the fleet-shared central `agents.yaml` (and
+   * its identity PII no longer lands on that one file). The effective account
+   * view is the union of central (fleet-shared `defaults` + `scope:'version'`
+   * natives) and every device doc's block; only this machine writes this key.
+   */
+  deviceAccounts?: {
+    native?: Record<string, {
+      id: string;
+      name: string;
+      agent: AgentId;
+      identityKey: string;
+      identityLabel?: string;
+      scope: 'version' | 'device';
+    }>;
+    bindings?: Record<string, string>;
+  };
   agents?: Partial<Record<AgentId, string>>;
   /**
    * Per-agent preferred ISOLATED version — which copy a bare `agents run <agent>`
@@ -1084,6 +1104,15 @@ export interface Meta {
    */
   hosts?: Record<string, HostEntry>;
   /**
+   * Device-scoped agent-host registry, written as `hosts:` in
+   * `~/.agents/devices/<machine>/agents.yaml` (PHNX-3315). Locally-discovered
+   * SSH hosts and inline registrations land here so one box's enrollment no
+   * longer rewrites the fleet-shared `hosts:` map (the source of pull conflicts).
+   * The effective host view is the union across every device doc (plus any
+   * lingering central legacy entries); only this machine writes this key.
+   */
+  deviceHosts?: Record<string, HostEntry>;
+  /**
    * Declarative fleet profile (`agents apply` / `ag apply`). Additive to the
    * schema — project `agents:` version-pins are untouched. Declares which agents
    * every device should have, which config to sync, and how login propagates.
@@ -1093,6 +1122,19 @@ export interface Meta {
    * Full shape in `lib/fleet/types.ts` (FleetManifest).
    */
   fleet?: import('./fleet/types.js').FleetManifest;
+  /**
+   * Device-scoped slice of {@link Meta.fleet}: THIS box's own discovery
+   * decisions and dismissals, written as `fleet:` in
+   * `~/.agents/devices/<machine>/agents.yaml` (PHNX-3315). Each box records only
+   * its own choices here, so N boxes no longer rewrite one shared
+   * `fleet.discovery`/`fleet.ignored` map (the guaranteed pull conflict). The
+   * effective fleet view is computed as a UNION across every device doc (plus
+   * lingering central legacy) at read time; only this machine writes this key.
+   */
+  deviceFleet?: {
+    discovery?: Record<string, 'approved' | 'ignored'>;
+    ignored?: import('./fleet/types.js').IgnoredDeviceEntry[];
+  };
   /** Artifact share endpoint (Cloudflare R2 + Worker). Set by `agents artifacts
    * setup`/`join`; syncs fleet-wide via `agents repo push/pull`. The write token
    * lives in the `share` secrets bundle, not here. */

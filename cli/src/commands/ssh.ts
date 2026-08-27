@@ -1325,7 +1325,7 @@ function registerDevicesCommands(program: Command): void {
 
   devicesCmd
     .command('register <name>')
-    .description('Register a discovered node and sync the approval through agents.yaml fleet.discovery.')
+    .description("Register a discovered node and record the approval in this box's device doc (fleet.discovery), unioned fleet-wide.")
     .action(async (name: string) => {
       try {
         const nodes = parseTailscaleStatus(tailscaleStatusJson());
@@ -1347,7 +1347,7 @@ function registerDevicesCommands(program: Command): void {
 
   devicesCmd
     .command('ignore <name>')
-    .description('Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).')
+    .description("Dismiss a node and record the decision in this box's device doc (fleet.ignored), unioned fleet-wide (also removes it locally).")
     .action(async (name: string) => {
       try {
         await removeDevice(name);
@@ -1408,11 +1408,13 @@ function registerDevicesCommands(program: Command): void {
       agents devices unignore old-laptop   # undo a dismissal
     `,
     notes: `
-      Dismissals live in the tracked central agents.yaml (fleet.ignored) and
-      sync with 'agents repo push/pull', so a node dismissed on one box stays
-      dismissed everywhere. An ignored node is not a device — it never enters
-      the registry, so 'agents devices list' never shows it; this command is
-      where dismissals are visible.
+      Dismissals live in each box's tracked device doc
+      (devices/<host>/agents.yaml fleet.ignored) and sync with 'agents repo
+      push/pull'; the effective list is their cross-box union, so a node
+      dismissed on one box stays dismissed everywhere without the boxes ever
+      rewriting one shared file. An ignored node is not a device — it never
+      enters the registry, so 'agents devices list' never shows it; this command
+      is where dismissals are visible.
     `,
   });
 
