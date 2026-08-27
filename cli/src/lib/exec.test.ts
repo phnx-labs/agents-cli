@@ -610,14 +610,19 @@ describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
     expect(resolveTmuxWrap({ ...base, configEnabled: false, tmuxAvailable: true, raw: false }).kind).toBe('bare');
   });
 
-  // RUSH-3125: a run dispatched here over --device holds its TTY on an ssh link,
-  // so a blink SIGHUPs a bare spawn. Durability is not the local operator's
-  // mouse/scrollback preference, so it does not consult tmux.enabled.
-  it('wraps a REMOTE-dispatched run even when this device set tmux.enabled=false', () => {
-    expect(resolveTmuxWrap({ ...base, configEnabled: false, remoteDispatch: true }).kind).toBe('wrap');
+  // PHNX-3316: tmux.enabled=false means NO wrap, local or remote. A followed
+  // --device run left bare is protected by reconnect-and-resume (hosts/
+  // reconnect.ts), not by a pane. The RUSH-3125 forced wrap conflated
+  // durability with an ergonomics preference and wrapped boxes whose operator
+  // had explicitly left tmux off.
+  it('does NOT wrap a followed REMOTE-dispatched run when this device set tmux.enabled=false', () => {
+    expect(resolveTmuxWrap({ ...base, configEnabled: false, remoteDispatch: true }).kind).toBe('bare');
+    // …even when tmux is missing — nothing requested the wrap, so there is
+    // nothing to refuse.
+    expect(resolveTmuxWrap({ ...base, configEnabled: false, remoteDispatch: true, tmuxAvailable: false }).kind).toBe('bare');
   });
 
-  it('refuses a remote-dispatched run when tmux is missing, instead of spawning something a blink would kill', () => {
+  it('refuses a remote-dispatched run that WANTS the wrap when tmux is missing, instead of spawning something a blink would kill', () => {
     expect(resolveTmuxWrap({ ...base, remoteDispatch: true, tmuxAvailable: false }).kind).toBe('undurable');
     // A LOCAL run with no tmux is merely unwrapped — nothing about it needs to
     // outlive a network link, so it must not be refused.
@@ -628,8 +633,13 @@ describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
     expect(resolveTmuxWrap({ ...base, hasTty: false }).kind).toBe('bare');
   });
 
-  it('still wraps a REMOTE-dispatched run with no TTY (--no-follow wants a detached pane)', () => {
+  it('still wraps a REMOTE-dispatched run with no TTY, even with tmux.enabled=false (--no-follow wants a detached pane)', () => {
+    // The pane is the run's only stdout — infrastructure, not ergonomics — so
+    // the config toggle does not reach this case.
     expect(resolveTmuxWrap({ ...base, hasTty: false, remoteDispatch: true }).kind).toBe('wrap');
+    expect(resolveTmuxWrap({ ...base, hasTty: false, remoteDispatch: true, configEnabled: false }).kind).toBe('wrap');
+    // …and with no tmux on the peer there is no pane to hold it: refuse.
+    expect(resolveTmuxWrap({ ...base, hasTty: false, remoteDispatch: true, configEnabled: false, tmuxAvailable: false }).kind).toBe('undurable');
   });
 
   it('lets the explicit per-run opt-outs beat the durability rule', () => {

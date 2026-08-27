@@ -236,8 +236,9 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'bool',
     defaultValue: false,
     description:
-      'Whether an interactive `agents run` on this device is wrapped in the shared-socket tmux session. ' +
-      'Off, the default, spawns the agent directly. Turn it on to give every agent an addressable pane for ' +
+      'Whether an interactive `agents run` on this device is wrapped in the shared-socket tmux session — local runs and ' +
+      'followed `--device` runs alike (PHNX-3316). Off, the default, spawns the agent directly; a remote run left bare ' +
+      'is protected by reconnect-and-resume, not a pane. Turn it on to give every agent an addressable pane for ' +
       '`agents message`, injection, and `agents focus` once the tmux mouse, clipboard, and scrollback behavior suits this device.',
   },
   {

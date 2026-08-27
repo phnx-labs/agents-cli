@@ -657,12 +657,12 @@ describe('remoteRunShellPrelude — the run-auto chain-hop guard crosses the SSH
     expect(buildInteractiveRunForwardedArgs({ agent: 'auto' }).join(' ')).not.toContain('AGENTS_RUN_AUTO_HOST_RESOLVED');
   });
 
-  // RUSH-3125. The interactive dispatch hands the remote agent a TTY that IS an
-  // ssh link, so the remote CLI has to know to detach — otherwise a blink
-  // SIGHUPs the agent and the in-flight turn is lost, while reconnect.ts
-  // re-attaches on the premise that it survived. Like the run-auto guard, this
-  // MUST be a shell export: resolveTmuxWrap reads the remote CLI's own
-  // process.env, which a forwarded `--env` never reaches.
+  // RUSH-3125 / PHNX-3316. The interactive dispatch hands the remote agent a
+  // TTY that IS an ssh link, so the remote CLI has to know the run arrived
+  // over the network — resolveTmuxWrap reads it for the --no-follow pane
+  // requirement, and reconnect.ts keys the drop-recovery off it. Like the
+  // run-auto guard, this MUST be a shell export: resolveTmuxWrap reads the
+  // remote CLI's own process.env, which a forwarded `--env` never reaches.
   it('exports the remote-interactive marker when asked, and the remote shell really sees it', () => {
     const prelude = remoteRunShellPrelude('claude', { AGENTS_REMOTE_INTERACTIVE: '1' });
     expect(prelude).toContain('export AGENTS_REMOTE_INTERACTIVE=1');

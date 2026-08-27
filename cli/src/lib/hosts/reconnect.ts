@@ -2,34 +2,35 @@
  * Auto-reconnect for an interactive `agents run --device` session whose
  * SSH link dropped.
  *
- * A remote interactive agent runs in a DETACHED tmux session on the peer (see
- * lib/exec.ts `runInTmux`), so a network blink kills only the local ssh client —
- * the agent keeps running.
- *
- * **That premise is a guarantee, not a hope, only since RUSH-3125.** It used to
- * rest on the peer's `tmux.enabled`, an ergonomics preference that defaults OFF
- * — so on a default box the agent was a child of the sshd session, a blink
- * SIGHUPed it, and this file reconnected to a corpse while telling the user it
- * was "still running there." The interactive dispatch now exports
- * REMOTE_INTERACTIVE_ENV and exec.ts `resolveTmuxWrap` wraps on it regardless of
- * that toggle, so what is written below actually holds. Anything that would let
- * a remote interactive run reach the peer unwrapped breaks this whole file.
+ * What the reconnect lands on depends on the peer's `tmux.enabled`
+ * (PHNX-3316). With the wrap opted in, the agent runs in a DETACHED tmux
+ * session on the peer (see lib/exec.ts `runInTmux`), so a network blink kills
+ * only the local ssh client and the reattach below rejoins the live pane.
+ * With the wrap off — the fleet default — the remote agent is a child of the
+ * sshd session and a blink SIGHUPs it: the in-flight turn is lost, and the
+ * reattach RESUMES the harness session from disk instead. Both outcomes go
+ * through the same verb below; what changed in PHNX-3316 is that "resumed"
+ * is once again an honest, expected result rather than a corpse this file
+ * pretended was alive (the pre-RUSH-3125 bug), and RUSH-3125's forced wrap —
+ * which made the pane a guarantee by overriding the operator's tmux.enabled —
+ * is gone with it.
  *
  * `sshStream` reports that drop as exit code 255 (ssh's
  * own connection-layer failure; see ssh-exec.ts). Without this, exec.ts would
  * `process.exit(255)` and the user would have to notice, find the session id, and
- * `agents sessions focus` by hand. Instead we re-attach the live remote pane over
- * SSH automatically, with bounded backoff, until the user detaches cleanly (the
- * remote returns 0), the agent exits (the tmux session is gone; a non-255 code),
- * or the user interrupts the wait with Ctrl-C ({@link waitOrInterrupt} → 130).
+ * `agents sessions focus` by hand. Instead we re-attach over SSH automatically,
+ * with bounded backoff, until the user detaches cleanly (the remote returns 0),
+ * the agent exits (a non-255 code), or the user interrupts the wait with
+ * Ctrl-C ({@link waitOrInterrupt} → 130).
  *
  * The re-attach reuses the peer's OWN recovery verb — `agents sessions focus <id>
  * --local` — which JOINS the live local tmux pane there (a second client, no fork)
- * when it still exists, and RESUMES the session in place when the pane is already
- * gone. Dropping `--attach-only` is deliberate: a reattach that lands after the
- * remote pane died must not dead-end at a bare shell (the RUSH-2085 bug), it must
- * fall through to resume so the user is put back into the agent. There is one
- * re-attach implementation (the peer's focus) to keep in sync.
+ * when it exists, and RESUMES the session in place when there is no pane — which
+ * is every drop on a default (wrap-off) box. Dropping `--attach-only` is
+ * deliberate: a reattach that finds no pane must not dead-end at a bare shell
+ * (the RUSH-2085 bug), it must fall through to resume so the user is put back
+ * into the agent. There is one re-attach implementation (the peer's focus) to
+ * keep in sync.
  *
  * **What it takes to refill the budget: reached the host AND held the pane.** ssh
  * returns 255 for BOTH "couldn't connect at all" and "connected, then the link

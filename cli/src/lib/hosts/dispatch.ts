@@ -91,9 +91,10 @@ export function withActorEnv(env?: Record<string, string>): Record<string, strin
  *
  * `extra` carries the markers that are true of ONE path rather than both — the
  * interactive dispatch adds REMOTE_INTERACTIVE_ENV, which the remote CLI reads
- * to decide it must detach. It goes through this builder rather than being
- * concatenated on at the call site so every remote env marker is exported the
- * same way, in one place.
+ * to know its stdio is an ssh link (reconnect target, `--no-follow` pane
+ * requirement). It goes through this builder rather than being concatenated on
+ * at the call site so every remote env marker is exported the same way, in one
+ * place.
  */
 export function remoteRunShellPrelude(agent: string, extra: Record<string, string> = {}): string {
   const guard: Record<string, string> = agent === RUN_AUTO_KEYWORD ? { [RUN_AUTO_HOST_RESOLVED_ENV]: '1' } : {};
@@ -637,10 +638,12 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   // than re-resolving from this box's SSH_CONNECTION (RUSH-2028); a `run auto`
   // dispatch also gets the chain-hop guard (remoteRunShellPrelude).
   //
-  // REMOTE_INTERACTIVE_ENV rides the same prelude and is what makes the remote
-  // agent DETACHED: its stdio is this ssh link, so without the tmux wrap a
-  // blink SIGHUPs it and the in-flight turn is gone — while reconnect.ts is
-  // built to re-attach a pane it assumes survived (RUSH-3125). Set here, on the
+  // REMOTE_INTERACTIVE_ENV rides the same prelude and tells the remote CLI its
+  // stdio is this ssh link: it marks the run as reconnect-managed (a drop is
+  // answered by reconnect.ts, which rejoins the live pane or resumes the
+  // session in place) and, for --no-follow, requires the detached pane that is
+  // the run's only stdout. Since PHNX-3316 it no longer forces the tmux wrap
+  // on a followed run — the peer's tmux.enabled decides that. Set here, on the
   // interactive path only: `launchDetached` already setsids the headless one.
   const prelude = remoteRunShellPrelude(opts.agent, { [REMOTE_INTERACTIVE_ENV]: '1' });
   let remoteCmd = `${prelude}${cwd}${invocation}`;
