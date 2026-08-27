@@ -1246,6 +1246,12 @@ agents monitors add ci-red \
   --run claude --prompt 'CI failed: {event}. Diagnose and fix.' \
   --device yosemite-s0
 
+# Merge-on-green: ok only if the PR actually merged, not just because the agent exited 0
+agents monitors add merge-1682 \
+  --poll 'gh pr view 1682 --json state --jq .state' 2m --match OPEN \
+  --run claude --prompt 'Rebase-merge #1682: {event}' \
+  --postcondition 'gh pr view 1682 --json state --jq .state | grep -qx MERGED'
+
 # A fleet box goes unreachable or overloaded -> notify (watch the fleet itself)
 agents monitors add box-down --watch-device mac-mini --on-change --notify telegram
 
@@ -1257,7 +1263,7 @@ agents monitors test ci-red    # Dry-run: evaluate the source once, show what it
 agents monitors list           # Every monitor: source, owner device, last fired
 ```
 
-Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-http`), a file (`--watch-file`), or a fleet device's reachability + load (`--watch-device`). Push sources -- a signed webhook (`--on`) and a WebSocket (`--ws`) -- are accepted today and delivered through a receiver wired in a follow-up. Conditions: fire on any change (`--on-change`), on a regex (`--match`), or `--every` tick -- deduped by a native state store, so a monitor stays silent until something *actually* changes. Actions: `--run <agent>` (the event is injected into the prompt as `{event}`), `--routine`, `--notify`, or `--webhook-out`. Pin a monitor to one owner device with `--device` (exactly-once), or offload the action elsewhere with `--run-on`. Runs in the routines daemon; `agents monitors pause` / `resume` any time.
+Sources: a command's stdout (`--watch` / `--poll`), an HTTP endpoint (`--poll-http`), a file (`--watch-file`), or a fleet device's reachability + load (`--watch-device`). Push sources -- a signed webhook (`--on`) and a WebSocket (`--ws`) -- are accepted today and delivered through a receiver wired in a follow-up. Conditions: fire on any change (`--on-change`), on a regex (`--match`), or `--every` tick -- deduped by a native state store, so a monitor stays silent until something *actually* changes. Actions: `--run <agent>` (the event is injected into the prompt as `{event}`), `--routine`, `--notify`, or `--webhook-out`. A `--run`/`--routine` action can take `--postcondition '<cmd>'` — a shell command that must exit 0 after the agent settles, otherwise `agents monitors runs` records `no effect` rather than `ok`. Pin a monitor to one owner device with `--device` (exactly-once), or offload the action elsewhere with `--run-on`. Runs in the routines daemon; `agents monitors pause` / `resume` any time.
 
 ---
 

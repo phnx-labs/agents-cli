@@ -32,6 +32,9 @@ catch-up, overlap policy, and crash recovery observable rather than timing-depen
 A monitor observes a source, compares it with durable observed state, and submits an
 action through the same execution path as a routine. Semantic identity deduplicates the
 watched condition across the fleet; execution placement is not part of that identity.
+A `run`/`routine` action may declare a `postcondition` shell command; after the
+dispatched run settles, the fire is `ok` only if that command exits 0. `completed`
+without a met postcondition is `no effect`, not success.
 
 ## Watchdog
 
