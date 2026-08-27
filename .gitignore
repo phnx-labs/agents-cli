@@ -52,6 +52,13 @@ coverage/
 .agents/scratch/
 .plans/
 
+# Local release-proof store: release-attestation-produce.sh (the interim
+# attestation producer, RUSH-2749) writes the exact-tree attestation JSON +
+# pretested tarball here, and release.sh reads it from the same dir. It is a
+# machine-local build cache, never committed — without this it surfaces in
+# `git status` after every release and gets deleted by hand.
+/.release-attestations/
+
 # Scrub script lists personal data strings — must not be committed to public repo
 scripts/scrub-history.sh
 
