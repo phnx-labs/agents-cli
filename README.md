@@ -959,6 +959,9 @@ agents browser refs                  # Get interactive element refs
 agents browser click 42              # Click element ref 42
 agents browser type 15 --text "hello"  # Type into element ref 15
 agents browser screenshot            # Smart resizing, token-efficient
+agents browser record start --fps 10 --duration 40
+# Drive the page, then finalize a playable WebM under the task's recordings/ dir.
+agents browser record stop
 agents browser tabs                  # List tabs open for the current task
 agents browser tab focus tab123      # Switch focus to another tab
 agents browser done                  # Close task's tabs when finished
@@ -972,6 +975,11 @@ printf '%s\n' \
   '{"action":"click","atX":320,"atY":540}' \
   | agents browser stream --task "$AGENTS_BROWSER_TASK"
 ```
+
+Recording resolves ffmpeg automatically. It reuses a usable binary on `PATH` or
+under `~/.agents/.cache`, and when none exists it installs through Homebrew on
+macOS, apt on Debian/Ubuntu, or the available platform package manager. If the
+automatic path cannot run, the error names the exact manual install command.
 
 ### Why this works where Playwright fails
 

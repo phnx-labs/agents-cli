@@ -2,6 +2,8 @@
 
 ## 1.22.54
 
+- **`agents browser record` now provisions ffmpeg and reliably produces a playable full-duration WebM (PHNX-2600).** Recording resolves ffmpeg once from `PATH` or managed `~/.agents/.cache` locations, auto-installs it per platform when absent, and fails loud with the exact manual command only after automatic paths are exhausted. The CDP listener is installed before screencast start, filters the outer tab session, bootstraps static pages from Chrome's stored last frame, and clocks the latest real frame into ffmpeg at `--fps`, so a 15-second static-page capture remains 15 seconds instead of empty or one frame. Source: `src/lib/browser/ffmpeg.ts`, `src/lib/browser/cdp.ts`, `src/lib/browser/service.ts`.
+
 - **`agents accounts mint claude` (also `agents auth mint claude`) mints a
   setup-token and seeds it — the first-class close of the mint-auth recipe
   (PHNX-2364).** `claude setup-token` is driven through the same injectable PTY

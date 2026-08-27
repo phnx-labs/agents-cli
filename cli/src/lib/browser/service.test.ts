@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { tmpdir } from 'os';
 import { EventEmitter } from 'node:events';
+import { execFileSync } from 'node:child_process';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 import * as profiles from './profiles.js';
@@ -651,6 +652,52 @@ describe('recordStop ffmpeg exit handling (#560)', () => {
     } finally {
       fs.rmSync(outputPath, { force: true });
     }
+  });
+});
+
+describe('browser recording frame pipe (PHNX-2600)', () => {
+  it('catches a frame emitted before startScreencast responds and finalizes a playable WebM', async () => {
+    const ffmpeg = execFileSync('/bin/sh', ['-c', 'command -v ffmpeg'], { encoding: 'utf8' }).trim();
+    const ffprobe = execFileSync('/bin/sh', ['-c', 'command -v ffprobe'], { encoding: 'utf8' }).trim();
+    const jpegPath = path.join(TEST_HOME, 'frame.jpg');
+    execFileSync(ffmpeg, [
+      '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=1',
+      '-frames:v', '1', '-update', '1', '-y', jpegPath,
+    ]);
+    const jpeg = fs.readFileSync(jpegPath).toString('base64');
+
+    const handlers = new Map<string, (params: unknown, sessionId?: string) => void>();
+    const cdp = {
+      on: (event: string, handler: (params: unknown, sessionId?: string) => void) => handlers.set(event, handler),
+      off: (event: string) => handlers.delete(event),
+      send: async (method: string) => {
+        if (method === 'Page.startScreencast') {
+          // This is the production race: Chrome's event can precede the command response.
+          handlers.get('Page.screencastFrame')?.({ data: jpeg, sessionId: 41 }, 'session-1');
+        }
+        return {};
+      },
+    };
+    const task = { name: 'frame-race', tabIds: ['tab-1'], currentTabId: 'tab-1' };
+    const svc = new BrowserService();
+    const internals = svc as unknown as Record<string, (...args: unknown[]) => unknown>;
+    internals.findTask = async () => ({ conn: { cdp }, task, key: 'test@endpoint-0' });
+    internals.resolveCurrentTab = () => 'tab-1';
+    internals.getCdpTargetId = () => 'target-1';
+    internals.getTarget = async () => ({ targetId: 'target-1' });
+    internals.getSessionId = async () => 'session-1';
+
+    await svc.recordStart('frame-race', undefined, { fps: 10, duration: 10 });
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    const result = await svc.recordStop('frame-race');
+    expect(result.bytes).toBeGreaterThan(0);
+    const probe = JSON.parse(execFileSync(ffprobe, [
+      '-v', 'error', '-count_frames', '-select_streams', 'v:0',
+      '-show_entries', 'stream=codec_name,nb_read_frames:format=duration', '-of', 'json', result.path,
+    ], { encoding: 'utf8' }));
+    expect(probe.streams[0].codec_name).toBe('vp9');
+    expect(Number(probe.streams[0].nb_read_frames)).toBeGreaterThanOrEqual(3);
+    expect(Number(probe.format.duration)).toBeGreaterThanOrEqual(0.3);
   });
 });
 

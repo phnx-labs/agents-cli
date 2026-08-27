@@ -71,6 +71,7 @@ import { resolveActor } from '../actor.js';
 import { recordBrowserSession } from '../session/db.js';
 import { sshExecAsync } from '../ssh-exec.js';
 import type { TargetFilter } from './types.js';
+import { resolveFfmpeg } from './ffmpeg.js';
 
 export type UploadMode = 'auto' | 'input' | 'drop' | 'chooser';
 
@@ -1418,9 +1419,11 @@ export class BrowserService {
     durationMs: number;
     ffmpeg: import('child_process').ChildProcess;
     ffmpegStderr: () => string;
+    frameCount: number;
     sessionId: string;
     conn: ProfileConnection;
     frameHandler: (params: unknown) => void;
+    framePump: NodeJS.Timeout;
     durationTimer: NodeJS.Timeout;
     sizeCheckInterval: NodeJS.Timeout;
     stopReason?: 'manual' | 'duration-cap' | 'size-cap';
@@ -1454,41 +1457,33 @@ export class BrowserService {
     const outputPath = path.join(recordingsDir, `${Date.now()}.webm`);
 
     // Resolve ffmpeg lazily so non-recording paths don't pay the import cost.
-    const { spawn } = await import('child_process');
-    // CDP `Page.startScreencast` delivers frames at a VARIABLE cadence (paints
-    // are event-driven, not clocked). Feeding those into a fixed `-framerate`
-    // input made ffmpeg assume every frame was 1/fps apart, so a page that
-    // painted slower/faster than `fps` played back at the wrong speed. Instead
-    // stamp each frame with its wall-clock arrival time
-    // (`-use_wallclock_as_timestamps 1`) and keep those timings on output
-    // (`-vsync vfr`), so playback duration matches the real capture.
+    const [{ spawn }, ffmpegPath] = await Promise.all([
+      import('child_process'),
+      resolveFfmpeg(),
+    ]);
+    // The frame pump below clocks the latest CDP paint into stdin at exactly
+    // `fps`, including repeated frames while the page is static. Declare that
+    // cadence to image2pipe so frame count / fps is the real capture duration.
     const ffmpeg = spawn(
-      'ffmpeg',
+      ffmpegPath,
       [
         '-loglevel', 'error',
         '-f', 'image2pipe',
-        '-use_wallclock_as_timestamps', '1',
+        '-framerate', String(fps),
         '-i', '-',
         '-c:v', 'libvpx-vp9',
         '-b:v', '1M',
         '-pix_fmt', 'yuv420p',
-        '-vsync', 'vfr',
         '-y',
         outputPath,
       ],
       { stdio: ['pipe', 'ignore', 'pipe'], windowsHide: true }
     );
-    // Wait for the spawn to confirm (or fail) before we wire CDP frames into a
-    // dead pipe. ENOENT from a missing ffmpeg surfaces here as a real error
-    // instead of a silently empty .webm.
+    // Wait for the spawn to confirm before wiring CDP frames into a dead pipe.
     await new Promise<void>((resolve, reject) => {
       const onError = (err: NodeJS.ErrnoException) => {
         ffmpeg.off('spawn', onSpawn);
-        if (err.code === 'ENOENT') {
-          reject(new Error('ffmpeg not found on PATH — install via `brew install ffmpeg`'));
-        } else {
-          reject(err);
-        }
+        reject(err);
       };
       const onSpawn = () => {
         ffmpeg.off('error', onError);
@@ -1509,25 +1504,94 @@ export class BrowserService {
     const ffmpegStderr = () => stderrBuf;
     ffmpeg.on('error', () => { /* post-spawn errors get reported via exit code */ });
 
-    // 30 fps is CDP's screencast cap; everyNthFrame = round(30/fps).
-    const everyNthFrame = Math.max(1, Math.round(30 / fps));
-    await conn.cdp.send(
-      'Page.startScreencast',
-      { format: 'jpeg', quality: 60, everyNthFrame },
-      sessionId
-    );
-
-    const frameHandler = (params: unknown) => {
+    let frameCount = 0;
+    let latestFrame: Buffer | undefined;
+    const frameIntervalMs = 1000 / fps;
+    let resolveFirstFrame!: () => void;
+    const firstFrame = new Promise<void>((resolve) => { resolveFirstFrame = resolve; });
+    const frameHandler = (params: unknown, eventSessionId?: string) => {
+      if (eventSessionId !== sessionId) return;
       const p = params as { data: string; sessionId: number };
       try {
-        ffmpeg.stdin?.write(Buffer.from(p.data, 'base64'));
+        latestFrame = Buffer.from(p.data, 'base64');
+        if (frameCount === 0) {
+          ffmpeg.stdin?.write(latestFrame);
+          frameCount += 1;
+          resolveFirstFrame();
+        }
       } catch {
         // ffmpeg exited; ignore writes
       }
       // Must ack every frame or CDP stops sending.
       conn.cdp.send('Page.screencastFrameAck', { sessionId: p.sessionId }, sessionId).catch(() => {});
     };
+    // CDP emits on paints, so a static page can legitimately produce only one
+    // event in 15 seconds. Retain the latest real frame and clock it into the
+    // encoder at --fps; new paints replace it, while quiet time still advances
+    // the WebM timeline instead of collapsing to a one-frame, 0.04s artifact.
+    const framePump = setInterval(() => {
+      if (!latestFrame) return;
+      try {
+        ffmpeg.stdin?.write(latestFrame);
+        frameCount += 1;
+      } catch {
+        // ffmpeg exited; recordStop reports its exit code and stderr.
+      }
+    }, frameIntervalMs);
+    // Register BEFORE startScreencast. Chrome may emit its first frame before
+    // the command response; missing that frame also misses its ack and stalls
+    // the entire stream with ffmpeg's stdin still empty (PHNX-2600).
     conn.cdp.on('Page.screencastFrame', frameHandler);
+
+    try {
+      await conn.cdp.send('Page.enable', {}, sessionId);
+      await conn.cdp.send(
+        'Page.startScreencast',
+        {
+          format: 'jpeg',
+          quality: 60,
+          // Chrome's frames are paint-driven, not a 30fps clock. Asking for
+          // every third paint can suppress the only stored frame on a static
+          // page, so receive every paint and enforce --fps when writing stdin.
+          everyNthFrame: 1,
+          maxFramesInFlight: 1,
+          // A static/low-paint page may produce no new compositor frame after
+          // startScreencast. Ask Chrome to send its stored last frame so the
+          // first ack can bootstrap the stream instead of leaving ffmpeg stdin
+          // empty forever (confirmed live against Chrome 151 / PHNX-2600).
+          sendLastFrame: true,
+        },
+        sessionId
+      );
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(
+          () => reject(new Error('Chrome produced no screencast frame within 5s; recording was not started.')),
+          5000,
+        );
+        firstFrame.then(() => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+    } catch (error) {
+      conn.cdp.off('Page.screencastFrame', frameHandler);
+      clearInterval(framePump);
+      try { await conn.cdp.send('Page.stopScreencast', {}, sessionId); } catch { /* session may be gone */ }
+      try { ffmpeg.stdin?.end(); } catch { /* process may already be gone */ }
+      await new Promise<void>((resolve) => {
+        if (ffmpeg.exitCode !== null) return resolve();
+        const timer = setTimeout(() => {
+          try { ffmpeg.kill('SIGKILL'); } catch { /* already gone */ }
+          resolve();
+        }, 1000);
+        ffmpeg.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
+      });
+      await fs.promises.rm(outputPath, { force: true });
+      throw error;
+    }
 
     const durationMs = durationSec * 1000;
     const maxBytes = maxMb * 1024 * 1024;
@@ -1540,9 +1604,11 @@ export class BrowserService {
       maxBytes,
       ffmpeg,
       ffmpegStderr,
+      get frameCount() { return frameCount; },
       sessionId,
       conn,
       frameHandler,
+      framePump,
       durationTimer: setTimeout(() => {
         this.recordStop(taskId, 'duration-cap').catch(() => {});
       }, durationMs),
@@ -1581,6 +1647,7 @@ export class BrowserService {
 
     clearTimeout(rec.durationTimer);
     clearInterval(rec.sizeCheckInterval);
+    clearInterval(rec.framePump);
     rec.conn.cdp.off('Page.screencastFrame', rec.frameHandler);
 
     try {
@@ -1631,6 +1698,10 @@ export class BrowserService {
           `${rec.outputPath}; the file is likely corrupt or empty.` +
           (err ? ` ffmpeg: ${err.slice(-800)}` : '')
       );
+    }
+
+    if (rec.frameCount === 0) {
+      throw new Error(`Chrome delivered no frames for the recording at ${rec.outputPath}; the output is empty.`);
     }
 
     let bytes = 0;
@@ -2502,6 +2573,7 @@ export class BrowserService {
       clearTimeout(rec.durationTimer);
       clearInterval(rec.sizeCheckInterval);
       try { rec.conn.cdp.off('Page.screencastFrame', rec.frameHandler); } catch { /* socket may be gone */ }
+      clearInterval(rec.framePump);
       try { rec.ffmpeg.stdin?.end(); } catch { /* already closed */ }
       // Give ffmpeg up to 1s to flush; then SIGKILL.
       const exited = await new Promise<boolean>((resolve) => {
