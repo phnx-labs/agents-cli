@@ -18,14 +18,12 @@ can be an older, truncated snapshot of a session that is complete under versions
 Taking whichever copy happened to be seen first made the totals swing by 15% run
 to run. Sorting and preferring the canonical copy fixes that.
 
-Known limit of that identity: Claude, Codex and Grok name transcripts by session
-UUID, so the key is exact. Antigravity and Gemini both name theirs
-transcript.jsonl / transcript_full.jsonl, and a few stores use session.jsonl or
-events.jsonl, so those OVER-collapse. Measured blast radius: 22 files folding into
-4 ids, all from harnesses that contributed zero matched executions, so the tier
-counts are unaffected. A further 258 files sharing generic names are
-package.json / hooks.json / settings.json configs that match the tool-name regex
-but hold no tool calls, so they contribute nothing either way.
+The session id is the path TAIL after the store prefix, not the bare filename.
+Filename alone is wrong: 118 distinct kimi sessions all end in
+`agents/main/wire.jsonl`, and Antigravity/Gemini both use `transcript.jsonl`, so a
+basename key silently merges them into one. The tail
+(`sessions/wd_.../session_<uuid>/agents/main/wire.jsonl`) is stable across stores
+and unique per session.
 
 Transcript formats differ per harness, so this reads BOTH line-delimited JSONL
 (Claude, Grok, some Antigravity) and whole-file JSON (Codex, OpenCode, Cursor,
@@ -132,6 +130,42 @@ rg = subprocess.run(
 all_files = sorted(l.strip() for l in rg.stdout.splitlines() if l.strip())
 
 
+# Store prefixes, most specific first. Each names WHICH COPY a file is, so the
+# remaining tail names WHICH SESSION it is. Order matters: backups/<harness>/<device>/
+# must not be read as backups/<kind>/<harness>/.
+STORE_PREFIXES = [
+    re.compile(r"^runs/[^/]+/[^/]+/sessions/(?P<h>[^/]+)/"),
+    re.compile(r"^backups/settings-carry/(?P<h>[^/]+)/[^/]+/"),
+    re.compile(r"^backups/(?P<h>[^/]+)/[^/]+/"),
+    re.compile(r"^(?:trash/)?versions/(?P<h>[^/]+)/[^/]+/(?:\d{4}-[^/]+/)?"),
+    re.compile(r"^(?:trash/)?plugins/(?P<h>[^/]+)/"),
+    re.compile(r"^(?P<h>activity)/"),
+]
+
+
+def split_store(path):
+    """Return (harness, session_tail).
+
+    The same session is copied under versions/, trash/versions/, runs/<job>/<ts>/
+    and backups/<harness>/<device>/, always keeping the same tail. Keying on the
+    tail merges those copies and nothing else.
+
+    Keying on the BASENAME instead would be wrong: 118 genuinely distinct kimi
+    sessions all end in `agents/main/wire.jsonl`, and Antigravity and Gemini both
+    use `transcript.jsonl`, so a basename key silently merges distinct sessions
+    into one and misreports their commands as never executed.
+    """
+    rel = path.split("/.history/", 1)[-1]
+    for rx in STORE_PREFIXES:
+        m = rx.match(rel)
+        if m:
+            tail = rel[m.end():]
+            if tail.startswith("home/"):
+                tail = tail[len("home/"):]
+            return m.group("h"), tail
+    return "(other .history store)", rel
+
+
 def canonical_rank(path):
     """Lower sorts better. Prefer versions/, then the largest copy, then a stable path."""
     try:
@@ -143,8 +177,11 @@ def canonical_rank(path):
 
 # One canonical file per session id, chosen deterministically.
 by_id = collections.defaultdict(list)
+harness_of = {}
 for fp in all_files:
-    by_id[os.path.basename(fp)].append(fp)
+    h, tail = split_store(fp)
+    by_id[tail].append(fp)
+    harness_of.setdefault(tail, h)
 chosen = {sid: min(paths_, key=canonical_rank) for sid, paths_ in by_id.items()}
 
 inv = collections.Counter()
@@ -155,8 +192,7 @@ nfiles = len(all_files)
 seen_ids = set(chosen)
 for sid in sorted(chosen):
     fp = chosen[sid]
-    parts = fp.split("/versions/")
-    harness = parts[1].split("/")[0] if len(parts) > 1 else "(only in backups/ or runs/)"
+    harness = harness_of[sid]
     scanned_per_harness[harness].add(sid)
     matched_here = False
     for obj in records(fp):

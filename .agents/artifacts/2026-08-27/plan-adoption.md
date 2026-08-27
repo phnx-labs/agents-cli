@@ -2,7 +2,7 @@
 kind: plan
 surface: cli
 title: "Adoption plan for agents-cli: fix the entity, cut the front door, own the two pains that get a million views"
-summary: "17 stars against peers at 8k-55k, four names for one product, and 46% of 564 commands dead on the author's own machine — yet its weekly npm downloads sit in the same order of magnitude as peers with a thousand times the stars. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
+summary: "17 stars against peers at 8k-55k, four names for one product, and 45% of 564 commands dead on the author's own machine — yet its weekly npm downloads sit in the same order of magnitude as peers with a thousand times the stars. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
 status: draft
 project: AGI
 repository: phnx-labs/agents-cli
@@ -29,7 +29,7 @@ Five decisions. Two of them are yours and nobody else's.
 
 You asked: why is adoption low when the tool is strong, why do developers keep building their own instead, how do we get Codex, Claude, and Perplexity to surface it, and does the 551-command surface hurt. You asked for it grounded in real research and in your own session data rather than opinion.
 
-Four evidence streams ran in parallel: a reducer over **8,075 local sessions**, a Grok pass over live X data, a Codex pass over agent-discoverability standards, and a direct `is-agentic` audit of the live site.
+Four evidence streams ran in parallel: a reducer over **9,223 local sessions**, a Grok pass over live X data, a Codex pass over agent-discoverability standards, and a direct `is-agentic` audit of the live site.
 
 The finding is that **the product is not the bottleneck.** Three cheaper things are.
 
@@ -37,62 +37,68 @@ The finding is that **the product is not the bottleneck.** Three cheaper things 
 <strong>The one-line diagnosis.</strong> A developer who would love this tool cannot find it, cannot name it, and if they land on it, is handed 69 top-level command groups and the sentence "A framework for running a distributed agent factory." Every one of those is fixable in days, not quarters.
 </div>
 
-## Evidence 1: your own sessions say the surface is 46% dead
+## Evidence 1: your own sessions say the surface is 45% dead
 
 A reducer parsed every `agents` invocation inside a shell tool call across `~/.agents/.history` and matched each against the canonical `cli/docs/command-index.json`. Transcripts come in two shapes — line-delimited JSONL (Claude, Grok) and whole-file JSON (Codex, OpenCode, Cursor, Droid, Kimi, Muse) — and the reducer reads both.
 
 ```
 $ python3 adoption-evidence/mine-command-usage.py
 transcript files seen:              11,812
-DISTINCT sessions (deduped by id):   8,075
-duplicate copies skipped:            3,737
-total `agents` executions matched:  81,971
-distinct commands ever executed:    405 / 564
-NEVER executed:                     159 (28%)
+DISTINCT sessions (deduped by id):   9,223
+duplicate copies skipped:            2,589
+total `agents` executions matched:  85,285
+distinct commands ever executed:    408 / 564
+NEVER executed:                     156 (28%)
 
-top  20 commands =  70.7% of all executions
+top  20 commands =  70.4% of all executions
 ```
 
-Deduplication is load-bearing and was not obvious. `~/.agents/.history` keeps repeat copies of the same transcript under `backups/` and under `runs/<job>/<timestamp>/` — one security-sweep session appears under six different run timestamps. Keying reach on the file path counted that session six times. Keying on session id drops **3,737 duplicate copies, 32% of the files**, leaving 8,075 distinct sessions.
+Deduplication is load-bearing and was not obvious. `~/.agents/.history` keeps repeat copies of the same transcript under `backups/` and under `runs/<job>/<timestamp>/` — one security-sweep session appears under six different run timestamps. Keying reach on the file path counted that session six times. Keying on session id drops **2,589 duplicate copies, 22% of the files**, leaving 9,223 distinct sessions.
 
-Getting this right took two attempts. The first cut kept whichever copy `rg -l` happened to return first, and `rg` walks in parallel, so a stale truncated `backups/` snapshot sometimes won over the complete copy under `versions/` — the totals swung 15% between runs of the same script. The committed version resolves each session id to a canonical copy deterministically (prefer `versions/`, then the largest file, then a stable path) and sorts every tie, so three consecutive runs now produce byte-identical output.
+Getting this right took three attempts, and the two failures are worth recording because both produced confident, wrong numbers.
 
-That correction happens to strengthen the plan's own argument, so it is worth stating what could be wrong with it. The identity is the transcript filename. Claude, Codex and Grok name transcripts by session UUID, so the key is exact. Antigravity and Gemini both use `transcript.jsonl`, which over-collapses — measured at 22 files folding into 4 ids, all from harnesses that contributed zero matched executions, so the tiers are unaffected.
+**Attempt one kept whichever copy `rg -l` returned first.** `rg` walks in parallel, so a stale truncated `backups/` snapshot sometimes beat the complete copy under `versions/`; totals swung 15% between runs of the same script on the same data.
+
+**Attempt two keyed on the bare filename.** That merged real sessions: 118 distinct Kimi sessions all end in `agents/main/wire.jsonl`, and Antigravity and Gemini both use `transcript.jsonl`. Kimi collapsed from 222 sessions to 3, and 17 commands were misreported as *never executed* when they had in fact run.
+
+**The committed version keys on the store-relative path tail** — `sessions/wd_.../session_<uuid>/agents/main/wire.jsonl` — which is identical across duplicate copies and unique per session, and resolves each id to a canonical file deterministically (prefer `versions/`, then the largest copy, then a stable path). Every sort has a stable tiebreak. Three consecutive runs produce byte-identical output, verified before committing.
+
+
 
 | Tier | Commands | Share of surface | What it means |
 |---|---:|---:|---|
-| Daily driver (50+ sessions) | 62 | 11% | The real product |
-| Occasional (10-49 sessions) | 114 | 20% | Earns its keep |
-| Rare (3-9 sessions) | 129 | 23% | Depth, keep hidden |
-| Near-dead (1-2 sessions) | 100 | 18% | Hide or fold |
-| Never executed | 159 | 28% | Hide or fold |
+| Daily driver (50+ sessions) | 63 | 11% | The real product |
+| Occasional (10-49 sessions) | 117 | 21% | Earns its keep |
+| Rare (3-9 sessions) | 130 | 23% | Depth, keep hidden |
+| Near-dead (1-2 sessions) | 98 | 17% | Hide or fold |
+| Never executed | 156 | 28% | Hide or fold |
 
 The five tiers sum to 564, and every figure above is printed by the committed script into `adoption-evidence/command-usage-report.txt`.
 
-If **46% of commands are dead or near-dead for the person who wrote them**, a first-time user will not discover the 11% that matter by reading `--help`.
+If **45% of commands are dead or near-dead for the person who wrote them**, a first-time user will not discover the 11% that matter by reading `--help`.
 
 <div class="artifact-callout artifact-callout-warn">
-<strong>What this measurement does and does not cover.</strong> The corpus is overwhelmingly Claude: 6,457 of 8,075 distinct sessions, and 2,077 of the 2,246 that contained a matched execution. Codex contributed 179 sessions but only 1 with a hit, and SQLite-backed stores (some Antigravity, Cursor, Muse) are not read at all. So this is <em>how one power user and their Claude agents drive the CLI</em>, not a cross-harness usage census. That is the right population for deciding what the front door shows, and the wrong population for retiring a command outright — which is why the plan hides tiers 4 and 5 rather than deleting them. The per-harness coverage table is printed in the committed report.
+<strong>What this measurement does and does not cover.</strong> The corpus is overwhelmingly Claude: 7,336 of 9,223 distinct sessions, and 2,342 of the 2,400 that contained a matched execution. Codex contributed 552 sessions but only 1 with a hit, and SQLite-backed stores (some Antigravity, Cursor, Muse) are not read at all. So this is <em>how one power user and their Claude agents drive the CLI</em>, not a cross-harness usage census. That is the right population for deciding what the front door shows, and the wrong population for retiring a command outright — which is why the plan hides tiers 4 and 5 rather than deleting them. The per-harness coverage table is printed in the committed report.
 </div>
 
 The counts also expose which groups are actually the product:
 
 | Group | Sessions reached | Group | Sessions reached |
 |---|---:|---|---:|
-| `sessions` | 934 | `view` | 198 |
-| `secrets` | 827 | `routines` | 186 |
-| `browser` | 759 | `feed` | 181 |
-| `run` | 438 | `add` | 134 |
-| `ssh` | 342 | `computer` | 126 |
-| `teams` | 272 | `sync` | 114 |
-| `devices` | 246 | `daemon` | 109 |
-| `repos` | 239 | `doctor` | 97 |
+| `sessions` | 965 | `feed` | 216 |
+| `secrets` | 884 | `view` | 205 |
+| `browser` | 816 | `routines` | 195 |
+| `run` | 457 | `add` | 135 |
+| `ssh` | 368 | `computer` | 132 |
+| `teams` | 284 | `sync` | 132 |
+| `devices` | 277 | `daemon` | 110 |
+| `repos` | 246 | `doctor` | 107 |
 
-Counts are session reach, taken verbatim from the committed report. Sixteen groups clear 95 sessions; the remaining fifty-three share the same visual weight in `agents --help`.
+Counts are session reach, taken verbatim from the committed report. Sixteen groups clear 105 sessions; the remaining fifty-three share the same visual weight in `agents --help`.
 
 ### Surface area against comparable CLIs
 
-Measured on this machine, same rule for every tool — count the indented command entries each prints in its own top-level `--help`:
+Counting the same way for every tool — the command entries each names in its own top-level `--help`:
 
 ```bash
 for c in git bun deno supabase gh kubectl docker vercel agents; do
@@ -100,21 +106,23 @@ for c in git bun deno supabase gh kubectl docker vercel agents; do
 done
 ```
 
-The absolute counts depend on each tool's help formatting, so treat them as an order-of-magnitude comparison rather than an exact census. The ranking is what matters, and it is not close:
+| CLI | Named in `--help` | Total command groups | Pointer to the rest? |
+|---|---:|---:|---|
+| `git` | 23 | hundreds | Yes — `--help` ends with *"'git help -a' … list available subcommands"* |
+| `bun` | 20 | — | — |
+| `deno` | 28 | — | — |
+| `supabase` | 34 | — | — |
+| `gh` | 40 | — | plus `gh extension` |
+| `kubectl` | 43 | — | — |
+| `docker` | 57 | — | Yes — `docker COMMAND --help` |
+| `vercel` | 60 | — | — |
+| **`agents`** | **26** | **69** | **No** |
 
-| CLI | Top-level commands |
-|---|---:|
-| `git` | 23 |
-| `bun` | 20 |
-| `deno` | 28 |
-| `supabase` | 34 |
-| `gh` | 40 |
-| `kubectl` | 43 |
-| `docker` | 57 |
-| `vercel` | 60 |
-| **`agents`** | **69** |
+<div class="artifact-callout artifact-callout-warn">
+<strong>The surface problem is not the count — it is the missing door.</strong> An earlier draft of this plan claimed <code>agents</code> shows 69 entries; the one-liner actually returns <strong>26</strong>. The 69 is the true group total from <code>cli/docs/command-index.json</code>, and mixing the two was an error. The corrected picture is worse, not better: <code>agents --help</code> <em>names 26 of its 69 groups and points at none of the other 43</em>. Grepping its output for a full-listing pointer returns one unrelated <code>--names</code> example. So <code>ssh</code>, <code>repos</code>, <code>auth</code>, <code>notify</code> and twenty-plus other groups are reachable only if you already know they exist. git names about the same number, 23, but tells you where the rest live.
+</div>
 
-`agents` has a larger top-level surface than Docker or Kubernetes. Those tools solve it with progressive disclosure: `git` hides roughly 130 plumbing commands behind `git help -a`, and `gh` pushes breadth into `gh extension`. Neither deleted capability.
+That reframes the fix. Tiering `--help` is only half of it; the half that actually matters is adding the pointer git has had for twenty years.
 
 ## Evidence 2: the entity is fragmented across four names
 
@@ -208,7 +216,7 @@ Reasons 1 and 2 are both arguments **for** a CLI and **against** a GUI. That is 
 Downloads are npm `last-week` (2026-08-19 to 08-25) except where noted; Go- and Homebrew-distributed tools have no npm figure and show `—`, which means missing data, not zero. Happy's figure is for the `happy` package, which it migrated to from `happy-coder` (the deprecated alias still shows 501/week — quoting that one would understate a live competitor).
 
 <div class="artifact-callout">
-<strong>The number that reframes everything.</strong> Vibe Kanban has <strong>1,644x</strong> the stars of agents-cli and <strong>half</strong> the weekly npm downloads. Stated honestly in both directions: Vibe Kanban is a sunsetting project, so it is the flattering comparison — Happy, which is thriving, pulls 5,736/week to agents-cli's 2,961, and ccusage does exactly one thing and pulls 87,857. The point stands either way. At 2,961/week this is real usage in the same order of magnitude as live peers with a thousand times the stars, so the deficit is visibility and legibility, not product. That is a much cheaper problem than it looked.
+<strong>A supporting data point, not the headline.</strong> At 2,961 npm downloads a week, agents-cli sits in the same order of magnitude as Happy (5,736/week) — a live, thriving peer with 23.5k stars to its 17. Two caveats keep this from carrying more weight than that. Vibe Kanban's 1,495/week is the flattering comparison and is excluded from the claim, because it is a sunsetting project. And this package's own release cadence inflates its number by up to ~10% (bounded in <a href="#risks">Risks</a>). The thesis does not rest here: it rests on 17 stars against peers at 2.8k-54.8k, four names for one product, a false open-source claim, a FAILED brand-discoverability check, and a front door that names 26 of 69 groups with no pointer to the rest. Those are all independently verified and none of them are download counts.
 </div>
 
 Note the graveyard: Terragon shut down Jan 2026, Crystal deprecated Feb 2026, Vibe Kanban's company Apr 2026. **Every dead one was a desktop GUI.** The survivors are a CLI-shaped install or a phone client.
@@ -266,11 +274,11 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
 
   <rect x="16" y="278" width="470" height="58" rx="4" fill="#141414" stroke="#333"/>
   <text x="32" y="302" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="14">4 · Installs, runs `agents --help`</text>
-  <text x="32" y="322" fill="#666" font-family="ui-monospace,monospace" font-size="12">69 top-level groups · 564 commands</text>
+  <text x="32" y="322" fill="#666" font-family="ui-monospace,monospace" font-size="12">26 of 69 groups named · no pointer to the rest</text>
   <line x1="486" y1="307" x2="556" y2="307" stroke="#f87171" stroke-width="1.5" marker-end="url(#ahl)"/>
   <rect x="560" y="282" width="344" height="50" rx="4" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.5"/>
   <text x="576" y="302" fill="#f87171" font-family="ui-monospace,monospace" font-size="12">Cannot find the 11% that matter.</text>
-  <text x="576" y="320" fill="#888" font-family="ui-monospace,monospace" font-size="11">git=23, docker=57, vercel=60 top-level</text>
+  <text x="576" y="320" fill="#888" font-family="ui-monospace,monospace" font-size="11">git names 23 but points at `git help -a`</text>
 
   <rect x="16" y="356" width="470" height="58" rx="4" fill="#0f1a0f" stroke="#a3e635" stroke-opacity="0.55"/>
   <text x="32" y="380" fill="#a3e635" font-family="ui-monospace,monospace" font-size="14">5 · Uses it and stays</text>
@@ -278,7 +286,7 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
   <line x1="486" y1="385" x2="556" y2="385" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
   <rect x="560" y="360" width="344" height="50" rx="4" fill="#0f1a0f" stroke="#a3e635" stroke-opacity="0.35"/>
   <text x="576" y="380" fill="#a3e635" font-family="ui-monospace,monospace" font-size="12">No leak here. The product works.</text>
-  <text x="576" y="398" fill="#888" font-family="ui-monospace,monospace" font-size="11">81,971 executions across 8,075 sessions</text>
+  <text x="576" y="398" fill="#888" font-family="ui-monospace,monospace" font-size="11">85,285 executions across 9,223 sessions</text>
 
   <text x="16" y="450" fill="#666" font-family="ui-monospace,monospace" font-size="11">All four leaks sit upstream of the product. None of them require shipping a feature.</text>
 </svg>
@@ -288,8 +296,8 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
 ## The command surface, drawn
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-<svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="564 commands split into usage tiers; 259 are dead or near-dead">
-  <text x="16" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13">564 COMMANDS, BY SESSIONS REACHED (8,075 DISTINCT SESSIONS)</text>
+<svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="564 commands split into usage tiers; 254 are dead or near-dead">
+  <text x="16" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13">564 COMMANDS, BY SESSIONS REACHED (9,223 DISTINCT SESSIONS)</text>
 
   <rect x="16"  y="46" width="96"  height="44" fill="#a3e635"/>
   <rect x="112" y="46" width="176" height="44" fill="#5f8f1f"/>
@@ -297,11 +305,11 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
   <rect x="486" y="46" width="155" height="44" fill="#241414" stroke="#f87171" stroke-opacity="0.4"/>
   <rect x="641" y="46" width="247" height="44" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.6"/>
 
-  <text x="24"  y="74" fill="#0a0a0a" font-family="ui-monospace,monospace" font-size="13" font-weight="700">62</text>
-  <text x="120" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">114</text>
-  <text x="296" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">129</text>
-  <text x="494" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">100</text>
-  <text x="649" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">159</text>
+  <text x="24"  y="74" fill="#0a0a0a" font-family="ui-monospace,monospace" font-size="13" font-weight="700">63</text>
+  <text x="120" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">117</text>
+  <text x="296" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">130</text>
+  <text x="494" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">98</text>
+  <text x="649" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">156</text>
 
   <line x1="64"  y1="96" x2="64"  y2="118" stroke="#444"/>
   <line x1="200" y1="96" x2="200" y2="140" stroke="#444"/>
@@ -316,12 +324,12 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
   <text x="904" y="210" fill="#f87171" font-family="ui-monospace,monospace" font-size="12" text-anchor="end">never executed, not once</text>
 
   <line x1="486" y1="230" x2="904" y2="230" stroke="#f87171" stroke-width="2"/>
-  <text x="904" y="250" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700" text-anchor="end">259 commands (46%) dead or near-dead</text>
+  <text x="904" y="250" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700" text-anchor="end">254 commands (45%) dead or near-dead</text>
   <text x="904" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11" text-anchor="end">measured on the author's own machine</text>
 
   <line x1="16" y1="230" x2="112" y2="230" stroke="#a3e635" stroke-width="2"/>
-  <text x="16" y="250" fill="#a3e635" font-family="ui-monospace,monospace" font-size="13" font-weight="700">Top 20 commands = 70.7% of all 81,971 executions</text>
-  <text x="16" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11">the other 544 share the remaining 29.3%</text>
+  <text x="16" y="250" fill="#a3e635" font-family="ui-monospace,monospace" font-size="13" font-weight="700">Top 20 commands = 70.4% of all 85,285 executions</text>
+  <text x="16" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11">the other 544 share the remaining 29.6%</text>
 </svg>
 <figcaption>Tiering is measured, not guessed. The proposal hides tiers 4 and 5 from <code>--help</code>; it does not delete them.</figcaption>
 </figure>
@@ -563,9 +571,15 @@ Sequenced so nothing waits on the naming decision except the naming work itself.
 ## Validation
 
 ```bash
-# 0. Reproduce every number this plan cites
-python3 .agents/artifacts/2026-08-27/adoption-evidence/mine-command-usage.py \
-  | diff - .agents/artifacts/2026-08-27/adoption-evidence/command-usage-report.txt
+# 0. Reproduce every number this plan cites.
+#    The corpus is LIVE — agents running right now write new transcripts — so the
+#    execution total creeps by a few counts between runs. That is corpus growth,
+#    not non-determinism: run it twice back to back and the two runs match
+#    byte-for-byte. What must stay stable is the tier block and the percentages.
+python3 .agents/artifacts/2026-08-27/adoption-evidence/mine-command-usage.py > /tmp/a.txt
+python3 .agents/artifacts/2026-08-27/adoption-evidence/mine-command-usage.py > /tmp/b.txt
+diff /tmp/a.txt /tmp/b.txt && echo "deterministic"
+sed -n '/USAGE TIERS/,/dead or near-dead/p' /tmp/a.txt   # expect 63/117/130/98/156, 254 (45%)
 
 # 1. Surface: the front door is small, the full index still reachable
 agents --help | grep -cE '^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}'   # expect <= 12, was 69
@@ -598,9 +612,9 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 - **The name cutover breaks live installs.** `cli/scripts/release.sh` and `cli/scripts/postinstall.js` embed the repo URL for update checks; renaming the GitHub repo before the 301 is verified would break `agents upgrade` for every installed client. Mitigation: rename first (GitHub keeps the 301 permanently), verify with `curl -sI`, then flip the domain, then publish a release.
 - **Tiered help hides a command someone scripted against.** Nothing is removed, but a user who learned a group from `--help` may believe it was deleted. Mitigation: the `agents commands` pointer sits in the help body, and `agents <anything> --help` still resolves for all 564.
 - **Publicly advertising multi-account rotation is a ToS gray zone.** Anthropic's April 2026 policy shift blocked Pro and Max subscriptions on most third-party frameworks, and one developer reported seven Max accounts banned. Mitigation: frame the feature as *pin a named account per repo or session* (work versus personal), which is the same code path and a defensible story. Never proxy or resell tokens, and say so in sentence two of the README.
-- **The usage tiers come from a Claude-heavy corpus.** 6,457 of 8,075 distinct sessions are Claude, and Codex contributed exactly 1 session with a matched execution; SQLite-backed stores are not read. A command that is load-bearing for Codex or Cursor users could sit in tier 4 here. Mitigation: the plan only *hides* tiers 4 and 5 from the front door, never deletes them, so a mis-tiered command costs a reader one `agents commands` away rather than a broken workflow.
+- **The usage tiers come from a Claude-heavy corpus.** 7,336 of 9,223 distinct sessions are Claude, and Codex contributed exactly 1 session with a matched execution; SQLite-backed stores are not read. A command that is load-bearing for Codex or Cursor users could sit in tier 4 here. Mitigation: the plan only *hides* tiers 4 and 5 from the front door, never deletes them, so a mis-tiered command costs a reader one `agents commands` away rather than a broken workflow.
 - **`agents-cli` is a generic string.** This is Decision 1's own weakness: it may not rank against the literal words "agents cli". That is the honest argument for choosing a distinctive third name instead, at the cost of one hard cutover.
-- **Do not over-read the download curve in either direction.** 68 versions shipped in August alone, so fleet auto-update and CI install smokes inflate the raw count by an unknown amount. But the cross-check holds: at 2,961/week agents-cli already out-downloads Vibe Kanban's 1,495/week despite 1,644x fewer stars, so the usage is not imaginary. Track stars, Show HN position, and first-run telemetry as the adoption metric, and keep downloads as a sanity check only.
+- **The download figure carries a self-inflation confound, now bounded.** 68 versions shipped in August alone, and this project has documented fleet auto-update plus a mandatory clean-prefix install smoke per release. Order-of-magnitude ceiling: 68 releases across a 14-device fleet is about 950 installs a month, roughly 220 a week, plus around 16 a week of release smoke. Call it **~250/week of the 2,961**, under 10%. That is a ceiling, not a measurement, and it should be replaced with real first-run telemetry. It does not account for the bulk of the figure, but it is large enough that the download number should never be the headline. Track stars, Show HN position, and first-run telemetry as the adoption metric.
 
 ## Tracking
 
