@@ -1,0 +1,34 @@
+top-level groups (command-index): 69
+named anywhere in `agents --help`: 40
+NEVER mentioned:                   29
+
+never mentioned, ranked by measured session reach:
+    368 sessions  rank #5    ssh
+    246 sessions  rank #8    repos
+    132 sessions  rank #13   computer
+     92 sessions  rank #18   notify
+     67 sessions  rank #22   list
+     54 sessions  rank #24   monitors
+     48 sessions  rank #26   message
+     30 sessions  rank #32   menubar
+     28 sessions  rank #34   projects
+     24 sessions  rank #37   auth
+     21 sessions  rank #40   tmux
+     17 sessions  rank #43   models
+     17 sessions  rank #44   workflows
+     16 sessions  rank #45   mailboxes
+     16 sessions  rank #46   watchdog
+     11 sessions  rank #48   send
+      9 sessions  rank #52   feedback
+      9 sessions  rank #54   registry
+      6 sessions  rank #57   restore
+      4 sessions  rank #58   uninstall
+      3 sessions  rank #60   clis
+      3 sessions  rank #61   memory
+      3 sessions  rank #62   open
+      2 sessions  rank #64   modes
+      1 sessions  rank #65   route
+      1 sessions  rank #66   webhooks
+      0 sessions  rank -     humans
+      0 sessions  rank -     trace
+      0 sessions  rank -     traces

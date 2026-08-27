@@ -12,9 +12,25 @@ IDX = os.path.expanduser("~/src/github.com/muqsitnawaz/agents-cli/cli/docs/comma
 groups = sorted({n["path"] for n in json.load(open(IDX))["tree"] if n.get("path")})
 help_txt = subprocess.run(["agents", "--help"], capture_output=True, text=True).stdout
 
-named, missing = [], []
-for g in groups:
-    (named if re.search(r"(?<![\w-])" + re.escape(g) + r"(?![\w-])", help_txt) else missing).append(g)
+def is_named(g):
+    """A group counts as NAMED only if the help text actually names the command.
+
+    A bare substring search over the whole help text is wrong: `auth` matches
+    inside "(host CLI + model + auth) harnesses", which describes `harness`;
+    `open` matches "(open blocks waiting on you)", which describes `feed`. Those
+    credit a group for appearing in some OTHER command's prose. Two honest forms:
+
+      1. the leading command token of a help line  ("  sessions   Browse past ...")
+      2. an explicit invocation anywhere           ("agents-cli itself is 'agents upgrade'")
+    """
+    esc = re.escape(g)
+    leading = re.compile(r"^\s{2,6}(?:agents\s+)?" + esc + r"(?![\w-])", re.M)
+    invocation = re.compile(r"(?<![\w-])agents\s+" + esc + r"(?![\w-])")
+    return bool(leading.search(help_txt) or invocation.search(help_txt))
+
+
+named = [g for g in groups if is_named(g)]
+missing = [g for g in groups if g not in named]
 
 reach = {}
 report = os.path.join(os.path.dirname(os.path.abspath(__file__)), "command-usage-report.txt")
