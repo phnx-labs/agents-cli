@@ -2068,8 +2068,11 @@ function museAuthEmail(value: unknown, depth = 0): string | null {
  * this file is not authoritative, and probing the Keychain would raise an
  * authorization sheet per installed version on every `agents run` — the reason
  * rotation stopped calling `isClaudeAuthValid` at all. Off macOS the file IS the
- * only store, so a token-less file is proof of signed-out. `platform` is a
- * parameter so both branches are testable on any host.
+ * only store, so a missing or token-less file is proof of signed-out — unless a
+ * Linux setup-token (`.claude/.oauth_token`) is present, which the shim exports
+ * as `CLAUDE_CODE_OAUTH_TOKEN` and can authenticate the run without
+ * `.credentials.json`. `platform` is a parameter so both branches are testable
+ * on any host.
  *
  * Sync, no Keychain, no network — safe on the `agents run` hot path.
  */
@@ -2078,6 +2081,16 @@ export function isClaudeCredentialFileBlank(
   platform: NodeJS.Platform = process.platform
 ): boolean {
   if (platform === 'darwin') return false;
+  // A per-version setup-token is a real credential on Linux even when
+  // `.credentials.json` was never written (the shim's `$CLAUDE_CONFIG_DIR/.oauth_token`
+  // fallback). Treat it as signed-in so rotation does not skip a worker that
+  // authenticates from an attached setup-token.
+  try {
+    const token = fs.readFileSync(path.join(base, '.claude', '.oauth_token'), 'utf-8').trim();
+    if (token.length > 0) return false;
+  } catch {
+    /* absent — fall through to the credentials.json floor */
+  }
   try {
     const raw = fs.readFileSync(path.join(base, '.claude', '.credentials.json'), 'utf-8');
     const oauth = (JSON.parse(raw) as {
@@ -2086,11 +2099,13 @@ export function isClaudeCredentialFileBlank(
     if (!oauth) return false;
     const nonEmpty = (v: unknown): v is string => typeof v === 'string' && v.trim().length > 0;
     return !nonEmpty(oauth.accessToken) && !nonEmpty(oauth.refreshToken);
-  } catch {
-    // No file (a Keychain-backed home, or never logged in here) or an
-    // unreadable/corrupt one: not positive evidence of a blank credential, so
-    // leave the existing signal alone rather than declaring a working install
-    // signed out.
+  } catch (err) {
+    // Off macOS the file IS the store. Missing it means this home cannot
+    // authenticate (a newly installed default with leftover `.claude.json`
+    // oauthAccount is the PHNX-2685 false-healthy case). A corrupt file is
+    // not positive evidence of a blank credential — leave the existing
+    // signal alone rather than declaring a working install signed out.
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return true;
     return false;
   }
 }

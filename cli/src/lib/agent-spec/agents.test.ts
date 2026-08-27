@@ -1014,9 +1014,18 @@ describe('getAccountInfo — claude credential floor (blanked .credentials.json)
     expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(false);
   });
 
-  it('stays silent when there is no credential file to judge', () => {
+  it('treats a missing credential file as signed out off macOS (PHNX-2685)', () => {
     const home = makeTempDir();
     writeClaudeHome(home, null);
+    expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(true);
+    expect(isClaudeCredentialFileBlank(home, 'darwin')).toBe(false);
+  });
+
+  it('keeps a Linux home with a setup-token usable even without .credentials.json', () => {
+    const home = makeTempDir();
+    writeClaudeHome(home, null);
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.claude', '.oauth_token'), 'sk-ant-oat01-testtoken', 'utf-8');
     expect(isClaudeCredentialFileBlank(home, 'linux')).toBe(false);
   });
 
@@ -1056,6 +1065,18 @@ describe('getAccountInfo — claude credential floor (blanked .credentials.json)
       expect(info.email).toBeNull();
       expect(info.plan).toBeNull();
       expect(info.usageStatus).toBeNull();
+    },
+  );
+
+  it.skipIf(process.platform === 'darwin')(
+    'reports a home with oauthAccount but no credentials.json as signed out (PHNX-2685)',
+    async () => {
+      const home = makeTempDir();
+      writeClaudeHome(home, null);
+
+      const info = await getAccountInfo('claude', home);
+      expect(info.signedIn).toBe(false);
+      expect(info.email).toBeNull();
     },
   );
 });
@@ -1211,6 +1232,14 @@ describe('getAccountInfo — Claude organization identity', () => {
   function writeClaudeConfig(oauthAccount: Record<string, unknown>): string {
     const home = makeTempDir();
     fs.writeFileSync(path.join(home, '.claude.json'), JSON.stringify({ oauthAccount }), 'utf-8');
+    // Off macOS getAccountInfo requires a real credential file (PHNX-2685);
+    // these fixtures describe signed-in homes, so plant a token pair.
+    fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.claude', '.credentials.json'),
+      JSON.stringify({ claudeAiOauth: { accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 } }),
+      'utf-8',
+    );
     return home;
   }
 
