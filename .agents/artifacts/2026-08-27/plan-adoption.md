@@ -2,7 +2,7 @@
 kind: plan
 surface: cli
 title: "Adoption plan for agents-cli: fix the entity, cut the front door, own the two pains that get a million views"
-summary: "17 stars against peers at 8k-55k, four names for one product, and 46% of 564 commands dead on the author's own machine — yet it already out-downloads a 27.9k-star rival. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
+summary: "17 stars against peers at 8k-55k, four names for one product, and 45% of 564 commands dead on the author's own machine — yet it already out-downloads a 27.9k-star rival. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
 status: draft
 project: AGI
 repository: phnx-labs/agents-cli
@@ -20,7 +20,7 @@ links:
 Five decisions. Two of them are yours and nobody else's.
 
 1. **DECISION 1 — the name.** The product answers to `agents-cli`, `agi-cli`, `AGI CLI`, and the binary `agents`. Recommendation: **Agents CLI wins**, everything else redirects.
-2. **DECISION 2 — the license claim.** `llms.txt` and `DESIGN.md` both say "open source (Apache-2.0)". `LICENSE` is FSL-1.1-Apache-2.0. One of the two has to change. Recommendation: **fix the claim**, consider relicensing separately.
+2. **DECISION 2 — the license claim.** `DESIGN.md:4` here, and `llms.txt` on the live site (which lives in the separate `agent-cli-web` repo), both say "open source (Apache-2.0)". `LICENSE` is FSL-1.1-Apache-2.0, and `README.md:1652` already states that correctly. Recommendation: **fix the two wrong strings**; relicensing is a separate, larger call.
 3. **The wedge.** Lead with *rotate accounts and resume through the limit*, not with teams, worktrees, or browser. Worktrees are table stakes in 2026 and Conductor and Orca own the pictures.
 4. **The cut.** Reduce the *first-run* surface from 69 groups to 10 without deleting a single command. Help tiering, not deprecation.
 5. **What we do NOT do.** No `agents.txt`, no experimental MCP server cards, no Wikipedia page, no Product Hunt as the spark. Evidence for each below.
@@ -29,7 +29,7 @@ Five decisions. Two of them are yours and nobody else's.
 
 You asked: why is adoption low when the tool is strong, why do developers keep building their own instead, how do we get Codex, Claude, and Perplexity to surface it, and does the 551-command surface hurt. You asked for it grounded in real research and in your own session data rather than opinion.
 
-Four evidence streams ran in parallel: a reducer over **11,304 local transcripts**, a Grok pass over live X data, a Codex pass over agent-discoverability standards, and a direct `is-agentic` audit of the live site.
+Four evidence streams ran in parallel: a reducer over **11,812 local transcripts**, a Grok pass over live X data, a Codex pass over agent-discoverability standards, and a direct `is-agentic` audit of the live site.
 
 The finding is that **the product is not the bottleneck.** Three cheaper things are.
 
@@ -37,33 +37,41 @@ The finding is that **the product is not the bottleneck.** Three cheaper things 
 <strong>The one-line diagnosis.</strong> A developer who would love this tool cannot find it, cannot name it, and if they land on it, is handed 69 top-level command groups and the sentence "A framework for running a distributed agent factory." Every one of those is fixable in days, not quarters.
 </div>
 
-## Evidence 1: your own sessions say the surface is 46% dead
+## Evidence 1: your own sessions say the surface is 45% dead
 
-A reducer parsed every `agents` invocation inside a shell tool call across `~/.agents/.history` (11,304 transcripts, 86,717 executions) and matched each against the canonical `cli/docs/command-index.json`.
+A reducer parsed every `agents` invocation inside a shell tool call across `~/.agents/.history` and matched each against the canonical `cli/docs/command-index.json`. Transcripts come in two shapes — line-delimited JSONL (Claude, Grok) and whole-file JSON (Codex, OpenCode, Cursor, Droid, Kimi, Muse) — and the reducer reads both.
 
-```bash
-# .agents/scratch/adoption-2026-08-27/exec_mine.py
-transcripts scanned: 11,304
-distinct commands actually executed: 404 / 564
-NEVER executed: 160 (28%)
-top 20 commands = 70.8% of all executions
+```
+$ python3 adoption-evidence/mine-command-usage.py
+transcripts scanned:                11,812
+total `agents` executions matched:  88,755
+distinct commands ever executed:    408 / 564
+NEVER executed:                     156 (28%)
+
+top  20 commands =  70.7% of all executions
 ```
 
 | Tier | Commands | Share of surface | What it means |
 |---|---:|---:|---|
-| Daily driver (50+ sessions) | 62 | 11% | The real product |
-| Occasional (10-49 sessions) | 114 | 20% | Earns its keep |
-| Rare (3-9 sessions) | 128 | 23% | Depth, keep hidden |
-| Near-dead (1-2 sessions) | 100 | 18% | Hide or fold |
-| Never executed | 160 | 28% | Hide or fold |
+| Daily driver (50+ transcripts) | 64 | 11% | The real product |
+| Occasional (10-49 transcripts) | 116 | 21% | Earns its keep |
+| Rare (3-9 transcripts) | 131 | 23% | Depth, keep hidden |
+| Near-dead (1-2 transcripts) | 97 | 17% | Hide or fold |
+| Never executed | 156 | 28% | Hide or fold |
 
-This is the author's own machine. If **46% of commands are dead or near-dead for the person who wrote them**, a first-time user will not discover the 11% that matter by reading `--help`.
+The five tiers sum to 564, and every figure above is printed by the committed script into `adoption-evidence/command-usage-report.txt`.
+
+If **45% of commands are dead or near-dead for the person who wrote them**, a first-time user will not discover the 11% that matter by reading `--help`.
+
+<div class="artifact-callout artifact-callout-warn">
+<strong>What this measurement does and does not cover.</strong> The corpus is overwhelmingly Claude: 6,572 of 11,812 scanned transcripts, and 2,081 of the 2,583 that contained a matched execution. Codex contributed 208 scanned transcripts but only 1 with a hit, and SQLite-backed stores (some Antigravity, Cursor, Muse) are not read at all. So this is <em>how one power user and their Claude agents drive the CLI</em>, not a cross-harness usage census. That is the right population for deciding what the front door shows, and the wrong population for retiring a command outright — which is why the plan hides tiers 4 and 5 rather than deleting them. The per-harness coverage table is printed in the committed report.
+</div>
 
 The counts also expose which groups are actually the product:
 
-| Group | Sessions reached | Group | Sessions reached |
+| Group | Transcripts reached | Group | Transcripts reached |
 |---|---:|---|---:|
-| `sessions` | 934 | `repos` | 239 |
+| `sessions` | 948 | `repos` | 239 |
 | `secrets` | 823 | `view` | 197 |
 | `browser` | 759 | `routines` | 186 |
 | `run` | 436 | `feed` | 182 |
@@ -71,7 +79,7 @@ The counts also expose which groups are actually the product:
 | `teams` | 271 | `daemon` | 109 |
 | `devices` | 244 | `doctor` | 97 |
 
-Ten groups carry the tool. Fifty-nine others share the same visual weight in `agents --help`.
+Counts are transcript reach, from the committed report. Ten groups carry the tool. Fifty-nine others share the same visual weight in `agents --help`.
 
 ### Surface area against comparable CLIs
 
@@ -93,7 +101,7 @@ Measured on this machine by counting top-level commands in each tool's own `--he
 
 ## Evidence 2: the entity is fragmented across four names
 
-`is-agentic` (Vercel's agent-readiness scanner, 118 checks) scored the live site and returned a specific, damning check:
+`is-agentic` (Vercel's agent-readiness scanner; a 118-check catalog, of which 26 were eligible for this site) scored the live site and returned a specific, damning check:
 
 ```
 score 63 / 100 — "Important blockers remain"
@@ -123,17 +131,20 @@ Codex's research explains why this is fatal for the "get Codex, Claude, and Perp
 
 ### The license contradiction
 
-Three sources disagree with the actual `LICENSE`:
+Two marketing surfaces contradict the actual `LICENSE`. The README does not — it is already correct, and its wording is the model to copy.
 
-| Source | Claim |
-|---|---|
-| `LICENSE` line 1 | Functional Source License, Version 1.1, Apache 2.0 Future License |
-| `package.json` | `"license": "FSL-1.1-Apache-2.0"` |
-| `llms.txt` | "Free and open source (**Apache-2.0**)" |
-| `DESIGN.md` | "A Phoenix Labs OSS product (**Apache-2.0**)" |
-| GitHub API | `"license": NOASSERTION` |
+| Source | Claim | Correct? |
+|---|---|---|
+| `LICENSE` line 1 | Functional Source License, Version 1.1, Apache 2.0 Future License | — |
+| `cli/package.json:80` | `"license": "FSL-1.1-Apache-2.0"` | Yes |
+| `README.md:1652` | "FSL-1.1-Apache-2.0 … becomes Apache-2.0 two years after release" | Yes |
+| `DESIGN.md:4` | "A Phoenix Labs OSS product (**Apache-2.0**)" | **No** |
+| `llms.txt` on the live site | "Free and open source (**Apache-2.0**)" | **No** |
+| GitHub API | `"license": NOASSERTION` | — |
 
 FSL is source-available, not OSI open source. A skeptical developer, the exact person we are trying to convert, checks the LICENSE file. Finding a false OSS claim is worse than finding FSL honestly labeled.
+
+Note on scope: `llms.txt` is **not in this repo**. `.gitignore:103-104` excludes `/website/` with the comment *"lives in agent-cli-web, not here"*, so fixing it needs a companion PR in `agent-cli-web`. `DESIGN.md` is fixable here.
 
 ## Evidence 3: the market says two pains, and we lead with neither
 
@@ -163,19 +174,21 @@ Reasons 1 and 2 are both arguments **for** a CLI and **against** a GUI. That is 
 
 ### The peer set, with numbers
 
-| Tool | Stars | npm dl/week | Distribution hook | Fate |
+| Tool | Stars | Downloads/week | Distribution hook | Fate |
 |---|---:|---:|---|---|
 | [Orca](https://github.com/stablyai/orca) | 54.8k | — | "fleet of parallel agents, bring your own subscription", MIT, cross-platform | 50k stars in under six months |
 | [claude-code-router](https://github.com/musistudio/claude-code-router) | 36.9k | 154,467 | Routes requests across providers | Thriving, and complementary |
 | [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) | 27.9k | **1,495** | `npx vibe-kanban` | Company shut down Apr 2026 |
-| [Happy](https://github.com/slopus/happy) | 23.5k | 2,776 | "Leave your desk. Keep your agents moving." | Thriving |
+| [Happy](https://github.com/slopus/happy) | 23.5k | 501 | "Leave your desk. Keep your agents moving." | Thriving |
 | [ccusage](https://github.com/ryoppippi/ccusage) | 18.2k | 87,857 | One job: show my token spend | Thriving |
 | [Paseo](https://github.com/getpaseo/paseo) | 15.2k | — | open and hackable plugins | Thriving |
-| [Claude Squad](https://github.com/smtg-ai/claude-squad) | 8.4k | 451 | tmux plus worktrees TUI, AGPL | Plateaued |
+| [Claude Squad](https://github.com/smtg-ai/claude-squad) | 8.4k | 97 | tmux plus worktrees TUI, AGPL | Plateaued |
 | [container-use](https://github.com/dagger/container-use) | 4.0k | — | `claude mcp add container-use` | Niche: isolation, not control plane |
-| [Omnara](https://github.com/omnara-ai/omnara) | 2.8k | 1,060 | YC, "managed agent = managed database" | Modest |
-| [claude-swap](https://github.com/realiti4/claude-swap) | 2.0k | 4,702 | Threshold auto-switch across Claude subs | The one head-on rotation competitor |
+| [Omnara](https://github.com/omnara-ai/omnara) | 2.8k | 726 | YC, "managed agent = managed database" | Modest |
+| [claude-swap](https://github.com/realiti4/claude-swap) | 2.0k | 4,702 *(PyPI; 25 on npm)* | Threshold auto-switch across Claude subs | The one head-on rotation competitor |
 | **agents-cli** | **17** | **2,961** | none yet | Alive, v1.22.51 today |
+
+Downloads are npm `last-week` (2026-08-19 to 08-25) except where noted. Star counts and Go/Homebrew-distributed tools have no npm figure, shown as `—`; a dash is missing data, not zero.
 
 <div class="artifact-callout">
 <strong>The number that reframes everything.</strong> Vibe Kanban has <strong>1,644x</strong> the stars of agents-cli and <strong>half</strong> the weekly npm downloads. ccusage does exactly one thing and pulls 87,857 a week. agents-cli's 2,961/week is real usage, not a vanity metric — the deficit is visibility and legibility, not product. That is a much cheaper problem than it looked.
@@ -188,7 +201,7 @@ Note the graveyard: Terragon shut down Jan 2026, Crystal deprecated Feb 2026, Vi
 Kimi's pass across the usage/account/version layer (36 tools, live star and download counts) found:
 
 - **Per-version isolated-HOME management for agent CLIs has no competitor at all.** `mise`, `asdf`, and `proto` pin runtimes but share `$HOME`, so two Claude Code versions still fight over `~/.claude`. Anthropic's own native installer *removed* rollback — [claude-code#20044](https://github.com/anthropics/claude-code/issues/20044), 22 reactions: *"no version control, rollbacks, or professional package management."* The vendor widened this gap themselves. Grok found no high-engagement X corpus for it, so it is not the launch tweet, but it is a defensible moat and belongs in sentence three.
-- **Rotation has exactly two competitors, both narrow.** [claude-swap](https://github.com/realiti4/claude-swap) (2.0k stars, 4,702 dl/week) polls every 60s and switches at 90% of the window — but it is Claude-only and a foreground loop you babysit. `headroom` does Claude *and* Codex, at 99 stars. Nobody combines daemon-owned rotation with stall detection. The wedge holds, but the demo has to show the daemon doing it unattended, not a script you watch.
+- **Rotation has exactly two competitors, both narrow.** [claude-swap](https://github.com/realiti4/claude-swap) (2.0k stars, 4,702 PyPI downloads/week) polls every 60s and switches at 90% of the window — but it is Claude-only and a foreground loop you babysit. `headroom` does Claude *and* Codex, at 99 stars. Nobody combines daemon-owned rotation with stall detection. The wedge holds, but the demo has to show the daemon doing it unattended, not a script you watch.
 - **Stall detection is the genuinely hard half.** Competitors ship it and get it wrong (cmux's false-positive issues are public). "Idle versus done" is where a homegrown weekend script actually fails, which is the honest answer to the DIY objection.
 
 
@@ -248,7 +261,7 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
   <line x1="486" y1="385" x2="556" y2="385" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"/>
   <rect x="560" y="360" width="344" height="50" rx="4" fill="#0f1a0f" stroke="#a3e635" stroke-opacity="0.35"/>
   <text x="576" y="380" fill="#a3e635" font-family="ui-monospace,monospace" font-size="12">No leak here. The product works.</text>
-  <text x="576" y="398" fill="#888" font-family="ui-monospace,monospace" font-size="11">86,717 executions across 11,304 sessions</text>
+  <text x="576" y="398" fill="#888" font-family="ui-monospace,monospace" font-size="11">88,755 executions across 11,812 transcripts</text>
 
   <text x="16" y="450" fill="#666" font-family="ui-monospace,monospace" font-size="11">All four leaks sit upstream of the product. None of them require shipping a feature.</text>
 </svg>
@@ -258,8 +271,8 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
 ## The command surface, drawn
 
 <figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
-<svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="564 commands split into usage tiers; 260 are dead or near-dead">
-  <text x="16" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13">564 COMMANDS, BY SESSIONS REACHED ACROSS 11,304 TRANSCRIPTS</text>
+<svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="564 commands split into usage tiers; 253 are dead or near-dead">
+  <text x="16" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13">564 COMMANDS, BY TRANSCRIPTS REACHED (11,812 SCANNED)</text>
 
   <rect x="16"  y="46" width="96"  height="44" fill="#a3e635"/>
   <rect x="112" y="46" width="176" height="44" fill="#5f8f1f"/>
@@ -267,11 +280,11 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
   <rect x="486" y="46" width="155" height="44" fill="#241414" stroke="#f87171" stroke-opacity="0.4"/>
   <rect x="641" y="46" width="247" height="44" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.6"/>
 
-  <text x="24"  y="74" fill="#0a0a0a" font-family="ui-monospace,monospace" font-size="13" font-weight="700">62</text>
-  <text x="120" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">114</text>
-  <text x="296" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">128</text>
-  <text x="494" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">100</text>
-  <text x="649" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">160</text>
+  <text x="24"  y="74" fill="#0a0a0a" font-family="ui-monospace,monospace" font-size="13" font-weight="700">64</text>
+  <text x="120" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">116</text>
+  <text x="296" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">131</text>
+  <text x="494" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">97</text>
+  <text x="649" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">156</text>
 
   <line x1="64"  y1="96" x2="64"  y2="118" stroke="#444"/>
   <line x1="200" y1="96" x2="200" y2="140" stroke="#444"/>
@@ -279,19 +292,19 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
   <line x1="563" y1="96" x2="563" y2="184" stroke="#444"/>
   <line x1="764" y1="96" x2="764" y2="206" stroke="#444"/>
 
-  <text x="72"  y="122" fill="#a3e635" font-family="ui-monospace,monospace" font-size="12">50+ sessions — the daily driver</text>
-  <text x="208" y="144" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="12">10-49 sessions — earns its keep</text>
-  <text x="395" y="166" fill="#888" font-family="ui-monospace,monospace" font-size="12">3-9 sessions — real depth, keep it hidden</text>
-  <text x="904" y="188" fill="#f87171" font-family="ui-monospace,monospace" font-size="12" text-anchor="end">1-2 sessions — near-dead</text>
+  <text x="72"  y="122" fill="#a3e635" font-family="ui-monospace,monospace" font-size="12">50+ transcripts — the daily driver</text>
+  <text x="208" y="144" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="12">10-49 transcripts — earns its keep</text>
+  <text x="395" y="166" fill="#888" font-family="ui-monospace,monospace" font-size="12">3-9 transcripts — real depth, keep it hidden</text>
+  <text x="904" y="188" fill="#f87171" font-family="ui-monospace,monospace" font-size="12" text-anchor="end">1-2 transcripts — near-dead</text>
   <text x="904" y="210" fill="#f87171" font-family="ui-monospace,monospace" font-size="12" text-anchor="end">never executed, not once</text>
 
   <line x1="486" y1="230" x2="904" y2="230" stroke="#f87171" stroke-width="2"/>
-  <text x="904" y="250" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700" text-anchor="end">260 commands (46%) dead or near-dead</text>
+  <text x="904" y="250" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700" text-anchor="end">253 commands (45%) dead or near-dead</text>
   <text x="904" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11" text-anchor="end">measured on the author's own machine</text>
 
   <line x1="16" y1="230" x2="112" y2="230" stroke="#a3e635" stroke-width="2"/>
-  <text x="16" y="250" fill="#a3e635" font-family="ui-monospace,monospace" font-size="13" font-weight="700">Top 20 commands = 70.8% of all 86,717 executions</text>
-  <text x="16" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11">the other 544 share the remaining 29.2%</text>
+  <text x="16" y="250" fill="#a3e635" font-family="ui-monospace,monospace" font-size="13" font-weight="700">Top 20 commands = 70.7% of all 88,755 executions</text>
+  <text x="16" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11">the other 544 share the remaining 29.3%</text>
 </svg>
 <figcaption>Tiering is measured, not guessed. The proposal hides tiers 4 and 5 from <code>--help</code>; it does not delete them.</figcaption>
 </figure>
@@ -416,9 +429,21 @@ Infrastructure side: `agi-cli.sh` starts 301-ing to `agents-cli.sh` (currently t
 
 ### 2. Stop the false license claim
 
+In **this** repo, one line:
+
 ```diff
---- a/website/public/llms.txt
-+++ b/website/public/llms.txt
+--- a/DESIGN.md
++++ b/DESIGN.md
+-description: "The meta harness engineering system for agents. A Phoenix Labs
+-OSS product (Apache-2.0), terminal-coded — NOT the Rush/Swarmify brand. …"
++description: "The meta harness engineering system for agents. A Phoenix Labs
++product, source-available under FSL-1.1-Apache-2.0, terminal-coded — NOT the
++Rush/Swarmify brand. …"
+```
+
+In the **`agent-cli-web`** repo (a companion PR — `/website/` is gitignored here per `.gitignore:103`), the same correction to `public/llms.txt`:
+
+```diff
 -Free and open source (Apache-2.0), local-first, runs on your existing
 -subscriptions (no per-token API cost, no account).
 +Source-available under FSL-1.1-Apache-2.0 — free for you and your team to use,
@@ -426,7 +451,7 @@ Infrastructure side: `agi-cli.sh` starts 301-ing to `agents-cli.sh` (currently t
 +existing subscriptions (no per-token API cost, no account).
 ```
 
-The same edit applies to `DESIGN.md`. If Decision 2 goes the other way and we relicense, these strings become true instead, and `cli/package.json` plus `LICENSE` change with them.
+`README.md:1652` already says this correctly and needs no change. If Decision 2 goes the other way and we relicense, these strings become true instead, and `cli/package.json` plus `LICENSE` change with them.
 
 ### 3. Tier the help output
 
@@ -521,6 +546,10 @@ Sequenced so nothing waits on the naming decision except the naming work itself.
 ## Validation
 
 ```bash
+# 0. Reproduce every number this plan cites
+python3 .agents/artifacts/2026-08-27/adoption-evidence/mine-command-usage.py \
+  | diff - .agents/artifacts/2026-08-27/adoption-evidence/command-usage-report.txt
+
 # 1. Surface: the front door is small, the full index still reachable
 agents --help | grep -cE '^\s{2,6}[a-z]'          # expect <= 12, was 69
 agents commands --index --json | jq '.commands'    # expect 564, unchanged
@@ -552,6 +581,7 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 - **The name cutover breaks live installs.** `cli/scripts/release.sh` and `cli/scripts/postinstall.js` embed the repo URL for update checks; renaming the GitHub repo before the 301 is verified would break `agents upgrade` for every installed client. Mitigation: rename first (GitHub keeps the 301 permanently), verify with `curl -sI`, then flip the domain, then publish a release.
 - **Tiered help hides a command someone scripted against.** Nothing is removed, but a user who learned a group from `--help` may believe it was deleted. Mitigation: the `agents commands` pointer sits in the help body, and `agents <anything> --help` still resolves for all 564.
 - **Publicly advertising multi-account rotation is a ToS gray zone.** Anthropic's April 2026 policy shift blocked Pro and Max subscriptions on most third-party frameworks, and one developer reported seven Max accounts banned. Mitigation: frame the feature as *pin a named account per repo or session* (work versus personal), which is the same code path and a defensible story. Never proxy or resell tokens, and say so in sentence two of the README.
+- **The usage tiers come from a Claude-heavy corpus.** 6,572 of 11,812 scanned transcripts are Claude, and Codex contributed exactly 1 transcript with a matched execution; SQLite-backed stores are not read. A command that is load-bearing for Codex or Cursor users could sit in tier 4 here. Mitigation: the plan only *hides* tiers 4 and 5 from the front door, never deletes them, so a mis-tiered command costs a reader one `agents commands` away rather than a broken workflow.
 - **`agents-cli` is a generic string.** This is Decision 1's own weakness: it may not rank against the literal words "agents cli". That is the honest argument for choosing a distinctive third name instead, at the cost of one hard cutover.
 - **Do not over-read the download curve in either direction.** 68 versions shipped in August alone, so fleet auto-update and CI install smokes inflate the raw count by an unknown amount. But the cross-check holds: at 2,961/week agents-cli already out-downloads Vibe Kanban's 1,495/week despite 1,644x fewer stars, so the usage is not imaginary. Track stars, Show HN position, and first-run telemetry as the adoption metric, and keep downloads as a sanity check only.
 
@@ -559,7 +589,7 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 
 - Plan source: `.agents/artifacts/2026-08-27/plan-adoption.md`
 - Evidence, committed beside this plan in `.agents/artifacts/2026-08-27/adoption-evidence/`:
-  - `mine-command-usage.py` and `command-usage-report.txt` — the transcript reducer and its output
+  - `mine-command-usage.py`, `command-usage-report.txt`, `command-usage.json` — the transcript reducer, its printed report, and the raw per-command counts. Every number the plan cites is printed by the script; re-run it to reproduce them.
   - `is-agentic-agi-cli.json` — the raw 118-check agent-readiness scan
   - `research-x-market-grok.md` — live X engagement data, DIY reasons, distribution case studies
   - `research-discoverability-codex.md` — llms.txt / AGENTS.md / MCP registries / skill marketplaces / AEO evidence
