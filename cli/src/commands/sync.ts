@@ -36,7 +36,9 @@ import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
 import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
-import type { AgentId } from '../lib/types.js';
+import type { AgentId, BrowserProfileConfig } from '../lib/types.js';
+import { autoEvictCentralBrowserProfiles } from '../lib/browser/registry.js';
+import { isProfileLaunchableHere } from '../lib/browser/profiles.js';
 import {
   isVersionInstalled,
   syncResourcesToVersion,
@@ -473,6 +475,44 @@ async function runInteractiveReconcile(
 }
 
 /**
+ * Drain the legacy central `browser:` tombstone during `agents sync` (PHNX-3315).
+ * New profiles write the per-device doc, but profiles created before the
+ * device-scoped store lingered in the shared top-level `agents.yaml` and churned
+ * every fleet pull until someone ran `agents browser profiles claim` by hand.
+ * Fold the ones THIS box can host into its device doc here — host-gated and
+ * serialized under the meta lock (`updateMeta`) so it never races a peer, and
+ * non-fatal so a hiccup can never wedge the sync.
+ */
+function evictCentralBrowserProfilesForSync(
+  quiet: boolean,
+  json: boolean,
+  outLog: (msg: string) => void,
+  errLog: (msg: string) => void,
+): void {
+  try {
+    const result = autoEvictCentralBrowserProfiles((config: BrowserProfileConfig) =>
+      isProfileLaunchableHere({
+        name: '_',
+        browser: config.browser,
+        binary: config.binary,
+        endpoints: config.endpoints,
+      }),
+    );
+    if (!quiet && !json && result.claimed.length > 0) {
+      outLog(
+        chalk.gray(
+          `  Claimed ${result.claimed.length} central browser profile(s) into this device: ${result.claimed.join(', ')}`,
+        ),
+      );
+    }
+  } catch (err) {
+    if (!quiet && !json) {
+      errLog(chalk.yellow(`  ! browser profile eviction skipped: ${(err as Error).message}`));
+    }
+  }
+}
+
+/**
  * The umbrella verb: bare `agents sync` (no agent) makes this machine current.
  * Resolves the flags + a secrets passphrase (env-only for now; tokenized auth
  * arrives with `agents secrets vault unlock`) and runs the fetch+reconcile stages, then prints
@@ -485,6 +525,12 @@ async function runUmbrella(
   errLog: (msg: string) => void,
   json = false,
 ): Promise<void> {
+  // Self-heal: drain the legacy central `browser:` tombstone before anything
+  // else. Both the interactive picker and the non-interactive path below
+  // return without touching it otherwise, so this runs first on every bare
+  // `agents sync`. Skipped under --cloud, which is fetch-only (no local write).
+  if (!opts.cloud) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
+
   // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
   // the two-checklist picker: which repos to sync from, which agents to sync
   // into. Any explicit flag, --yes, or --json keeps the non-interactive path.

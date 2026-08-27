@@ -16,7 +16,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
-/** Leftover central `browser:` map from before per-device declarations. Empty when none remain. */
+/**
+ * The leftover central `browser:` tombstone from before per-device declarations.
+ * Empty when none remain — and `agents sync` now drains it automatically via
+ * {@link autoEvictCentralBrowserProfiles}, so on a synced box this is empty and
+ * {@link profileRegistry} is the single source of truth. It survives only to
+ * fold in migration and to explain an as-yet-unclaimed profile in a resolve
+ * error (a profile hostable on a peer that has not synced yet), never as a
+ * parallel store callers read for resolution.
+ */
 export function centralBrowserProfiles(): Record<string, BrowserProfileConfig> {
   const central = (readMeta() as LegacyBrowserMeta).browser;
   if (!central || Object.keys(central).length === 0) return {};
@@ -29,22 +37,87 @@ export interface CentralClaimResult {
 }
 
 /**
+ * Pick the central `browser:` entries this machine may fold into its device doc.
+ *
+ * A profile is claimable only when `canHostHere` accepts it — the endpoint or
+ * binary resolves to THIS machine — so a `cdp://localhost:*` profile owned by a
+ * peer is never claimed here (the logged-out-headless-browser bug this module
+ * exists to prevent). A name already declared locally with an IDENTICAL config
+ * is folded too, which just drops the redundant central copy. A name declared
+ * locally with a DIFFERENT config is a genuine conflict: `onConflict: 'throw'`
+ * (the explicit `claim` command) surfaces it; `onConflict: 'skip'` (automatic
+ * eviction on sync) leaves it central so a stray duplicate can never wedge a
+ * sync — an operator resolves it with an explicit claim.
+ */
+function selectClaimableCentral(
+  central: Record<string, BrowserProfileConfig>,
+  local: Record<string, BrowserProfileConfig>,
+  canHostHere: (config: BrowserProfileConfig) => boolean,
+  opts: { name?: string; onConflict: 'throw' | 'skip' },
+): { toClaim: Record<string, BrowserProfileConfig>; skipped: string[] } {
+  const toClaim: Record<string, BrowserProfileConfig> = {};
+  const skipped: string[] = [];
+  for (const [profileName, config] of Object.entries(central)) {
+    if (opts.name && profileName !== opts.name) continue;
+    if (!canHostHere(config)) {
+      skipped.push(profileName);
+      continue;
+    }
+    const existing = local[profileName];
+    if (existing && !isDeepStrictEqual(existing, config)) {
+      if (opts.onConflict === 'throw') {
+        throw new Error(
+          `Cannot migrate browser profile "${profileName}": central agents.yaml and this device's ` +
+            `agents.yaml declare different configurations. Resolve the duplicate before retrying.`,
+        );
+      }
+      skipped.push(profileName);
+      continue;
+    }
+    toClaim[profileName] = config;
+  }
+  return { toClaim, skipped };
+}
+
+/**
+ * Move `toClaim` out of the central `browser:` map and into this device's
+ * `deviceBrowser` doc, atomically under the meta lock (`updateMeta`). The central
+ * key is dropped entirely once drained, so the tombstone disappears rather than
+ * lingering as an empty map.
+ */
+function commitCentralClaim(toClaim: Record<string, BrowserProfileConfig>): void {
+  updateMeta((current) => {
+    const legacy = current as LegacyBrowserMeta;
+    const remaining: Record<string, BrowserProfileConfig> = {};
+    for (const [profileName, config] of Object.entries(legacy.browser ?? {})) {
+      if (!(profileName in toClaim)) remaining[profileName] = config;
+    }
+    const { browser: _removed, ...withoutCentralBrowser } = legacy;
+    return {
+      ...withoutCentralBrowser,
+      ...(Object.keys(remaining).length > 0 ? { browser: remaining } : {}),
+      deviceBrowser: { ...current.deviceBrowser, ...toClaim },
+    } as Meta;
+  });
+}
+
+/**
  * Fold leftover central `browser:` entries into THIS device's declaration file.
  *
- * Never called implicitly, and that is the point. Every device can read the
- * central map, so an implicit claim races: whichever box happens to read first
- * claims the name, {@link profileKind} then reports it `identity`, and the
- * daemon tunnels to that box — which for a fleet-wide `cdp://localhost:*`
- * profile is a logged-out headless browser wearing a credentialed browser's
- * name. That is the exact bug this module exists to remove, and an implicit
- * migration would write it to disk as a stored fact.
+ * The EXPLICIT operator action (`agents browser profiles claim`), run on the
+ * machine that actually owns the browser. It is never called implicitly from a
+ * read, and that is the point: every device can read the central map, so an
+ * implicit claim races — whichever box reads first claims the name, {@link
+ * profileKind} then reports it `identity`, and the daemon tunnels to that box,
+ * which for a fleet-wide `cdp://localhost:*` profile is a logged-out headless
+ * browser wearing a credentialed browser's name. {@link autoEvictCentralBrowserProfiles}
+ * closes that race for the automatic path (host-gated + non-throwing on sync);
+ * this one is the manual, throw-on-conflict counterpart.
  *
- * The claim is an explicit operator action (`agents browser profiles claim`),
- * run on the machine that actually owns the browser. `canHostHere` is supplied
- * by the command layer so this module stays a leaf — it must not import
- * `isProfileLaunchableHere` (that would cycle through chrome.ts → profiles.ts).
- * Only profiles this machine can host are claimed; the rest stay central,
- * undeclared, and fail loudly on resolve.
+ * `canHostHere` is supplied by the command layer so this module stays a leaf —
+ * it must not import `isProfileLaunchableHere` (that would cycle through
+ * chrome.ts → profiles.ts). Only profiles this machine can host are claimed; the
+ * rest stay central, undeclared, and fail loudly on resolve.
  */
 export function migrateCentralBrowserProfiles(
   canHostHere: (config: BrowserProfileConfig) => boolean,
@@ -77,41 +150,52 @@ export function migrateCentralBrowserProfiles(
     }
   }
 
-  const toClaim: Record<string, BrowserProfileConfig> = {};
-  const skipped: string[] = [];
-  for (const [profileName, config] of Object.entries(central)) {
-    if (name && profileName !== name) continue;
-    if (!canHostHere(config)) {
-      skipped.push(profileName);
-      continue;
-    }
-    const existing = local[profileName];
-    if (existing && !isDeepStrictEqual(existing, config)) {
-      throw new Error(
-        `Cannot migrate browser profile "${profileName}": central agents.yaml and this device's ` +
-          `agents.yaml declare different configurations. Resolve the duplicate before retrying.`,
-      );
-    }
-    toClaim[profileName] = config;
-  }
+  const { toClaim, skipped } = selectClaimableCentral(central, local, canHostHere, {
+    name,
+    onConflict: 'throw',
+  });
 
   const claimed = Object.keys(toClaim).sort();
   skipped.sort();
   if (claimed.length === 0) return { claimed, skipped };
 
-  updateMeta((current) => {
-    const legacy = current as LegacyBrowserMeta;
-    const remaining: Record<string, BrowserProfileConfig> = {};
-    for (const [profileName, config] of Object.entries(legacy.browser ?? {})) {
-      if (!(profileName in toClaim)) remaining[profileName] = config;
-    }
-    const { browser: _removed, ...withoutCentralBrowser } = legacy;
-    return {
-      ...withoutCentralBrowser,
-      ...(Object.keys(remaining).length > 0 ? { browser: remaining } : {}),
-      deviceBrowser: { ...current.deviceBrowser, ...toClaim },
-    } as Meta;
+  commitCentralClaim(toClaim);
+  return { claimed, skipped };
+}
+
+/**
+ * Automatic, self-draining counterpart to {@link migrateCentralBrowserProfiles}:
+ * fold every lingering central `browser:` profile THIS machine can host into its
+ * device doc and clear it from central, so the tombstone drains itself on
+ * `agents sync` with no manual `agents browser profiles claim`.
+ *
+ * Safe to call implicitly, unlike a claim at registry-read time (which races —
+ * see the `profileRegistry does not claim central declarations` guard). Three
+ * properties make it safe: it runs only during the serialized `agents sync` on
+ * the box that owns the browser; it claims ONLY profiles `canHostHere` accepts,
+ * i.e. that resolve HERE; and it never throws — an unhostable profile or a
+ * config that conflicts with an existing local declaration is left central for
+ * an explicit claim rather than wedging the sync. After it runs, {@link
+ * profileRegistry} is the single source of truth: a claimed profile lives in the
+ * device doc alone, never double-counted across the two stores.
+ */
+export function autoEvictCentralBrowserProfiles(
+  canHostHere: (config: BrowserProfileConfig) => boolean,
+): CentralClaimResult {
+  const meta = readMeta() as LegacyBrowserMeta;
+  const central = meta.browser;
+  if (!central || Object.keys(central).length === 0) return { claimed: [], skipped: [] };
+
+  const local = meta.deviceBrowser ?? {};
+  const { toClaim, skipped } = selectClaimableCentral(central, local, canHostHere, {
+    onConflict: 'skip',
   });
+
+  const claimed = Object.keys(toClaim).sort();
+  skipped.sort();
+  if (claimed.length === 0) return { claimed, skipped };
+
+  commitCentralClaim(toClaim);
   return { claimed, skipped };
 }
 

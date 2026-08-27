@@ -295,3 +295,68 @@ describe('ensureDefaultBrowserProfile with undeclared configured default', () =>
     });
   });
 });
+
+describe('autoEvictCentralBrowserProfiles (self-draining tombstone, PHNX-3315)', () => {
+  it('folds a hostable central tombstone into the device doc, drains central, and the single reader returns it once', async () => {
+    const centralFile = path.join(root, '.agents', 'agents.yaml');
+    const config = {
+      browser: 'custom',
+      binary: process.execPath,
+      endpoints: ['cdp://127.0.0.1:9222'],
+    };
+    writeYaml(centralFile, { browser: { work: config }, model: { claude: 'opus' } });
+
+    const { machineId } = await import('../machine-id.js');
+    const { autoEvictCentralBrowserProfiles, profileRegistry, declaringDevices } = await import(
+      './registry.js'
+    );
+
+    expect(autoEvictCentralBrowserProfiles(() => true)).toEqual({ claimed: ['work'], skipped: [] });
+
+    // Lives in the device doc now…
+    expect(yaml.parse(fs.readFileSync(deviceFile(machineId()), 'utf8')).browser).toEqual({ work: config });
+    // …central browser: tombstone is drained (other central keys untouched)…
+    expect(yaml.parse(fs.readFileSync(centralFile, 'utf8'))).toEqual({ model: { claude: 'opus' } });
+    // …and the single source of truth returns it exactly once, on this device.
+    expect(declaringDevices('work')).toEqual([machineId()]);
+    expect(profileRegistry().get('work')).toHaveLength(1);
+  });
+
+  it('is idempotent and a no-op when there is no central tombstone', async () => {
+    writeYaml(deviceFile('anything'), { browser: {} });
+    const { autoEvictCentralBrowserProfiles } = await import('./registry.js');
+    expect(autoEvictCentralBrowserProfiles(() => true)).toEqual({ claimed: [], skipped: [] });
+  });
+
+  it('never throws on a conflicting local declaration — leaves it central for an explicit claim', async () => {
+    const centralFile = path.join(root, '.agents', 'agents.yaml');
+    const central = { browser: 'chrome', binary: process.execPath, endpoints: ['cdp://127.0.0.1:9222'] };
+    const local = { browser: 'brave', binary: process.execPath, endpoints: ['cdp://127.0.0.1:9333'] };
+    writeYaml(centralFile, { browser: { work: central } });
+    const { machineId } = await import('../machine-id.js');
+    const ownFile = deviceFile(machineId());
+    writeYaml(ownFile, { browser: { work: local } });
+
+    const beforeCentral = fs.readFileSync(centralFile, 'utf8');
+    const beforeDevice = fs.readFileSync(ownFile, 'utf8');
+    const { autoEvictCentralBrowserProfiles } = await import('./registry.js');
+
+    // Unlike the explicit claim (which throws), the automatic path must never
+    // wedge a sync: the conflict is skipped and both copies are left untouched.
+    expect(autoEvictCentralBrowserProfiles(() => true)).toEqual({ claimed: [], skipped: ['work'] });
+    expect(fs.readFileSync(centralFile, 'utf8')).toBe(beforeCentral);
+    expect(fs.readFileSync(ownFile, 'utf8')).toBe(beforeDevice);
+  });
+
+  it('leaves a profile this machine cannot host in central', async () => {
+    const centralFile = path.join(root, '.agents', 'agents.yaml');
+    const config = { browser: 'comet', endpoints: ['cdp://localhost:9333'] };
+    writeYaml(centralFile, { browser: { 'comet-local': config } });
+    const { machineId } = await import('../machine-id.js');
+    const { autoEvictCentralBrowserProfiles } = await import('./registry.js');
+
+    expect(autoEvictCentralBrowserProfiles(() => false)).toEqual({ claimed: [], skipped: ['comet-local'] });
+    expect(fs.existsSync(deviceFile(machineId()))).toBe(false);
+    expect(yaml.parse(fs.readFileSync(centralFile, 'utf8')).browser).toEqual({ 'comet-local': config });
+  });
+});
