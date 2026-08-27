@@ -21135,7 +21135,7 @@
             },
             {
               "flags": "--remote-backend <backend>",
-              "description": "Backend for the bundle on the remote device (with --device): keychain (default) or file. file is headless-readable via the remote's machine-local key; it forwards AGENTS_SECRETS_PASSPHRASE over stdin only if set (opt-in).",
+              "description": "Backend for the bundle on the remote device (with --device): keychain (default) or file. file is headless-readable via the remote's machine-local key and never forwards AGENTS_SECRETS_PASSPHRASE.",
               "long": "--remote-backend",
               "required": true,
               "optional": false,
