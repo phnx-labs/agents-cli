@@ -32,12 +32,15 @@ import { updateGeminiSettings } from './gemini-settings.js';
 import {
   ANTIGRAVITY_ACTION_BY_TOOL,
   CANONICAL_TO_OPENCLAW_TOOL,
+  CODEX_RULES_FILENAME,
   stripJsonComments,
   GROK_TOOL_BY_CANONICAL,
   KIRO_CAPABILITY_BY_TOOL,
   PERMISSION_TARGETS,
   readCanonicalPermissions,
 } from './permissions-registry.js';
+
+export { CODEX_RULES_FILENAME };
 
 const HOME = os.homedir();
 
@@ -47,9 +50,6 @@ const HOME = os.homedir();
 //   antigravity → ~/.gemini/antigravity-cli/settings.json `permissions.{allow,deny}`
 //   grok        → ~/.grok/config.toml `[permission].rules`
 // the writer in `applyPermissionsToVersion` handles the format dispatch.)
-
-/** Filename used for Codex Starlark deny-rules generated from permission groups. */
-export const CODEX_RULES_FILENAME = 'agents-deny.rules';
 
 export type ParsedRules = PermissionSet;
 
@@ -130,6 +130,9 @@ export function containsBroadGrants(rules: ParsedRules): { broad: string[]; reas
 /**
  * Convert canonical deny rules to Codex Starlark .rules format.
  * E.g. "Bash(git reset:*)" -> prefix_rule(pattern=["git", "reset"], decision="forbidden")
+ *
+ * Inverse: `toCanonical` for `PERMISSION_TARGETS.codex` reads
+ * `.codex/rules/agents-deny.rules` back into `Bash(<parts>:*)`.
  */
 export function convertDenyToCodexRules(deny: string[]): string | null {
   const rules: string[] = [];

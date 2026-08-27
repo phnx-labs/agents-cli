@@ -2,9 +2,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { PERMISSION_TARGETS, readCanonicalPermissions } from './permissions-registry.js';
+import { CODEX_RULES_FILENAME, PERMISSION_TARGETS, readCanonicalPermissions } from './permissions-registry.js';
 import { capableAgents } from './capabilities.js';
-import { applyPermissionsToVersion, detectPermissionAgentFromPath, exportPermissionsFromPath } from './permissions.js';
+import {
+  applyPermissionsToVersion,
+  convertDenyToCodexRules,
+  detectPermissionAgentFromPath,
+  exportPermissionsFromPath,
+} from './permissions.js';
 import type { AgentId, PermissionSet } from './types.js';
 
 const tempDirs: string[] = [];
@@ -149,16 +154,12 @@ describe('allow and deny never cross on the way back', () => {
    *               skipped by the serializer (convertToOpenClawFormat).
    *   copilot   — CANNOT express it. Its config records approvals (grants) and
    *               has no deny list at all.
-   *   codex     — CAN and DOES express it: the writer emits
-   *               `.codex/rules/agents-deny.rules` with
-   *               `prefix_rule(pattern=["rm"], decision="forbidden")`. The
-   *               READER just never opens that file, hardcoding an empty deny.
-   *               That is a fixable read-side gap (RUSH-2703), not a limit of
-   *               the format.
    *
-   * All three read back `null` today, so asserting non-null would assert a lie.
+   * Both read back `null` today, so asserting non-null would assert a lie.
+   * Codex used to sit here because the reader skipped `agents-deny.rules`
+   * (PHNX-2703); it now round-trips like the other nine harnesses.
    */
-  const DENY_NOT_READ_BACK = new Set(['codex', 'openclaw', 'copilot']);
+  const DENY_NOT_READ_BACK = new Set(['openclaw', 'copilot']);
 
   for (const agent of capableAgents('allowlist')) {
     it(`${agent}: an allow-only set never reads back a deny`, () => {
@@ -180,7 +181,7 @@ describe('allow and deny never cross on the way back', () => {
       const back = readCanonicalPermissions(agent, 'user', undefined, home);
 
       if (DENY_NOT_READ_BACK.has(agent)) {
-        // Nothing read back is the honest outcome for these three — but it
+        // Nothing read back is the honest outcome for these two — but it
         // must be NOTHING, not a grant invented out of a deny.
         expect(back?.allow ?? []).toEqual([]);
         return;
@@ -191,6 +192,79 @@ describe('allow and deny never cross on the way back', () => {
       expect(back!.deny ?? []).not.toEqual([]);
     });
   }
+});
+
+describe('codex reads agents-deny.rules (PHNX-2703)', () => {
+  // The writer always emitted `.codex/rules/agents-deny.rules`; the reader
+  // opened only config.toml and hardcoded `deny: []`. These tests drive the
+  // real write path (or the exact Starlark the writer produces) and require
+  // the forbids to come back.
+
+  it('reads back Bash(rm:*) that applyPermissionsToVersion just wrote', () => {
+    const home = makeTempHome();
+    const set: PermissionSet = {
+      name: 'test',
+      allow: ['Bash(git status:*)'],
+      deny: ['Bash(rm:*)', 'Bash(git reset:*)'],
+    };
+    expect(applyPermissionsToVersion('codex', set, home, false, process.cwd()).success).toBe(true);
+
+    const rulesPath = path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME);
+    expect(fs.existsSync(rulesPath), `writer did not emit ${rulesPath}`).toBe(true);
+    const rules = fs.readFileSync(rulesPath, 'utf-8');
+    expect(rules).toContain('pattern = ["rm"]');
+    expect(rules).toContain('decision = "forbidden"');
+
+    const back = readCanonicalPermissions('codex', 'user', undefined, home);
+    expect(back, 'codex wrote denies that read back as absent').not.toBeNull();
+    expect(back!.deny ?? []).toContain('Bash(rm:*)');
+    expect(back!.deny ?? []).toContain('Bash(git reset:*)');
+  });
+
+  it('inverts convertDenyToCodexRules through the reader, including escaped strings', () => {
+    const home = makeTempHome();
+    const deny = ['Bash(sudo:*)', 'Bash(git push --force:*)', 'Bash(git "status":*)'];
+    const starlark = convertDenyToCodexRules(deny);
+    expect(starlark).not.toBeNull();
+    fs.mkdirSync(path.join(home, '.codex', 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), '', 'utf-8');
+    fs.writeFileSync(path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME), starlark!, 'utf-8');
+
+    const back = readCanonicalPermissions('codex', 'user', undefined, home);
+    expect(back).not.toBeNull();
+    expect(back!.deny).toEqual(deny);
+    expect(back!.allow).toEqual([]);
+  });
+
+  it('reads a compacted prefix_rule even when config.toml has no sandbox grants', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(home, '.codex', 'rules'), { recursive: true });
+    fs.writeFileSync(path.join(home, '.codex', 'config.toml'), '', 'utf-8');
+    fs.writeFileSync(
+      path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME),
+      'prefix_rule(pattern=["rm"], decision="forbidden")\n',
+      'utf-8',
+    );
+
+    const back = readCanonicalPermissions('codex', 'user', undefined, home);
+    expect(back).not.toBeNull();
+    expect(back!.deny ?? []).toContain('Bash(rm:*)');
+    expect(back!.allow).toEqual([]);
+  });
+
+  it('still returns denies when config.toml is missing', () => {
+    const home = makeTempHome();
+    fs.mkdirSync(path.join(home, '.codex', 'rules'), { recursive: true });
+    fs.writeFileSync(
+      path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME),
+      'prefix_rule(pattern=["sudo"], decision="forbidden")\n',
+      'utf-8',
+    );
+
+    const back = readCanonicalPermissions('codex', 'user', undefined, home);
+    expect(back).not.toBeNull();
+    expect(back!.deny ?? []).toContain('Bash(sudo:*)');
+  });
 });
 
 describe('harness detection does not depend on the working directory', () => {

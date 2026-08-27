@@ -104,6 +104,9 @@ const CANONICAL_BY_KIRO_CAPABILITY = invertFirstWins(KIRO_CAPABILITY_BY_TOOL);
 const CANONICAL_BY_OPENCLAW_TOOL = invertFirstWins(CANONICAL_TO_OPENCLAW_TOOL);
 const CANONICAL_BY_ANTIGRAVITY_ACTION = invertFirstWins(ANTIGRAVITY_ACTION_BY_TOOL);
 
+/** Filename Codex stores generated deny rules under `.codex/rules/`. */
+export const CODEX_RULES_FILENAME = 'agents-deny.rules';
+
 /** Canonical TitleCase spelling for a lowercased canonical tool name. */
 const CANONICAL_TOOL_CASE: Record<string, string> = {
   bash: 'Bash',
@@ -264,6 +267,97 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
 }
 
+/**
+ * Invert `convertDenyToCodexRules` (permissions.ts). The writer emits
+ * `prefix_rule(pattern=["git", "reset"], decision="forbidden")` from a
+ * canonical `Bash(git reset:*)`. Prefix-match is the native form of `:*`,
+ * so the reverse always reconstructs `Bash(<parts>:*)`.
+ *
+ * Only `decision = "forbidden"` is a deny; anything else is skipped rather
+ * than guessed into an allow (Codex grants come from sandbox_mode).
+ */
+function convertCodexRulesToDeny(content: string): string[] {
+  const deny: string[] = [];
+  const marker = 'prefix_rule';
+  let searchFrom = 0;
+  while (searchFrom < content.length) {
+    const start = content.indexOf(marker, searchFrom);
+    if (start < 0) break;
+    const open = content.indexOf('(', start + marker.length);
+    if (open < 0) break;
+    const bodyEnd = findMatchingCloser(content, open, '(', ')');
+    if (bodyEnd < 0) {
+      searchFrom = open + 1;
+      continue;
+    }
+    const body = content.slice(open + 1, bodyEnd);
+    searchFrom = bodyEnd + 1;
+
+    const decision = body.match(/decision\s*=\s*"((?:\\.|[^"\\])*)"/);
+    if (!decision || decision[1] !== 'forbidden') continue;
+
+    const patternKw = body.search(/pattern\s*=/);
+    if (patternKw < 0) continue;
+    const arrayStart = body.indexOf('[', patternKw);
+    if (arrayStart < 0) continue;
+    const arrayEnd = findMatchingCloser(body, arrayStart, '[', ']');
+    if (arrayEnd < 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(body.slice(arrayStart, arrayEnd + 1));
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parsed)) continue;
+    const parts = parsed.filter((p): p is string => typeof p === 'string' && p.length > 0);
+    if (parts.length === 0) continue;
+    deny.push(`Bash(${parts.join(' ')}:*)`);
+  }
+  return deny;
+}
+
+/** Index of the closer matching `source[openIdx]`, skipping quoted strings. */
+function findMatchingCloser(source: string, openIdx: number, open: string, close: string): number {
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = openIdx; i < source.length; i++) {
+    const c = source[i];
+    if (inString) {
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (c === '\\') {
+        escape = true;
+        continue;
+      }
+      if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') {
+      inString = true;
+      continue;
+    }
+    if (c === open) depth++;
+    else if (c === close) {
+      depth--;
+      if (depth === 0) return i;
+    }
+  }
+  return -1;
+}
+
+function readCodexDenyRules(configPath: string): string[] {
+  const rulesPath = path.join(path.dirname(configPath), 'rules', CODEX_RULES_FILENAME);
+  if (!fs.existsSync(rulesPath)) return [];
+  try {
+    return convertCodexRulesToDeny(fs.readFileSync(rulesPath, 'utf-8'));
+  } catch {
+    return [];
+  }
+}
+
 // ── the registry ─────────────────────────────────────────────────────────────
 
 /** The complete permissions contract for one agent. */
@@ -358,22 +452,24 @@ export const PERMISSION_TARGETS: Partial<Record<AgentId, PermissionTarget>> = {
   codex: {
     home: (h) => path.join(h, '.codex', 'config.toml'),
     project: (cwd) => path.join(cwd, '.codex', 'config.toml'),
-    lossyBecause: 'Codex has no rule list — its sandbox mode is widened into representative blanket grants',
+    lossyBecause:
+      'sandbox mode widens into representative blanket grants; deny round-trips from agents-deny.rules as Bash(prefix:*)',
     toCanonical(configPath) {
       const config = readToml(configPath);
-      if (!config) return null;
       const allow: string[] = [];
-      const sandboxMode = config.sandbox_mode;
-      if (config.approval_policy === 'never' || sandboxMode === 'danger-full-access') {
-        allow.push('Bash(*)', 'Read(**)', 'Write(**)', 'Edit(**)');
-      } else if (sandboxMode === 'workspace-write') {
-        allow.push('Bash(*)', 'Read(**)');
+      if (config) {
+        const sandboxMode = config.sandbox_mode;
+        if (config.approval_policy === 'never' || sandboxMode === 'danger-full-access') {
+          allow.push('Bash(*)', 'Read(**)', 'Write(**)', 'Edit(**)');
+        } else if (sandboxMode === 'workspace-write') {
+          allow.push('Bash(*)', 'Read(**)');
+        }
+        const sw = config.sandbox_workspace_write;
+        if (sw && typeof sw === 'object' && !Array.isArray(sw) && (sw as Record<string, unknown>).network_access) {
+          allow.push('WebSearch(*)', 'WebFetch(*)');
+        }
       }
-      const sw = config.sandbox_workspace_write;
-      if (sw && typeof sw === 'object' && !Array.isArray(sw) && (sw as Record<string, unknown>).network_access) {
-        allow.push('WebSearch(*)', 'WebFetch(*)');
-      }
-      return permissionSet(allow, []);
+      return permissionSet(allow, readCodexDenyRules(configPath));
     },
   },
 
