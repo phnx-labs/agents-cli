@@ -23,6 +23,7 @@ enum ChildProcessSelfTest {
         testRegistryTracksInFlightChildren()
         testRegistryRoundTrip()
         testRegistryReadFailureIsNotAnEmptyRegistry()
+        testRegistryWriteSelfHealsCorruption()
         testRegistryWriteFailureIsReported()
         testReapRetainsEntryAfterFailedValidation()
         testReapRecoversChildSpawnedBeforeRegistrationCompletes()
@@ -105,9 +106,14 @@ enum ChildProcessSelfTest {
         check(parsed == entries, "registry round-trips pids and paths containing spaces")
         check((try? ChildProcess.Registry.parse("garbage\n0 /bin/x\n-1 /bin/y")) == nil,
               "a malformed legacy registry fails loud instead of becoming empty")
-        let legacy = try? ChildProcess.Registry.parse("42 /opt/old agents")
+        let legacy = try? ChildProcess.Registry.parse("garbage\n42 /opt/old agents")
         check(legacy?.first?.pid == 42 && legacy?.first?.startTime == nil,
-              "legacy two-field records migrate conservatively as unverifiable")
+              "valid legacy records survive malformed neighboring lines")
+        let mixedJSON = """
+        {"version":2,"children":[{"pid":11,"pgid":11,"startTime":123,"resolvedExecutable":"/bin/echo","argv":["/bin/echo"],"commandKind":"test","token":"valid"},{"pid":"broken"}]}
+        """
+        check((try? ChildProcess.Registry.parse(mixedJSON))?.map(\.token) == ["valid"],
+              "valid JSON entries survive a malformed neighboring entry")
     }
 
     private static func testRegistryReadFailureIsNotAnEmptyRegistry() {
@@ -118,6 +124,18 @@ enum ChildProcessSelfTest {
               "an unreadable registry fails the reap without claiming children")
         check((try? Data(contentsOf: URL(fileURLWithPath: file))) == before,
               "a registry read failure leaves the durable file untouched")
+        try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: file + ".lock")
+    }
+
+    private static func testRegistryWriteSelfHealsCorruption() {
+        let file = "\(NSTemporaryDirectory())menubar-children-corrupt-\(getpid())"
+        try? "not-json".write(toFile: file, atomically: true, encoding: .utf8)
+        let out = ChildProcess.run(["/bin/echo", "healed"], timeout: 10, registryFile: file)
+        check(out.flatMap { String(data: $0, encoding: .utf8) } == "healed\n",
+              "a real child spawn succeeds when the registry starts corrupt")
+        check((try? ChildProcess.Registry.readAll(file: file)) == [],
+              "the successful child write rewrites corruption as a clean registry")
         try? FileManager.default.removeItem(atPath: file)
         try? FileManager.default.removeItem(atPath: file + ".lock")
     }

@@ -63,13 +63,14 @@ enum ChildProcess {
     ///
     /// stderr goes to /dev/null: callers here parse JSON and must never get
     /// diagnostics interleaved into the payload.
-    static func run(_ argv: [String], timeout: TimeInterval = defaultTimeout) -> Data? {
+    static func run(_ argv: [String], timeout: TimeInterval = defaultTimeout,
+                    registryFile: String = Registry.path()) -> Data? {
         guard !argv.isEmpty else { return nil }
 
         let commandKind = argv.dropFirst().prefix(2).joined(separator: " ")
         let launch: Registry.Entry
         do {
-            launch = try Registry.begin(argv: argv, commandKind: commandKind)
+            launch = try Registry.begin(argv: argv, commandKind: commandKind, file: registryFile)
         } catch {
             fputs("menubar: cannot persist child launch intent: \(error)\n", stderr)
             return nil
@@ -77,7 +78,7 @@ enum ChildProcess {
 
         var fds: [Int32] = [-1, -1]
         guard pipe(&fds) == 0 else {
-            removeRegistryEntry(token: launch.token)
+            removeRegistryEntry(token: launch.token, file: registryFile)
             return nil
         }
         let readFD = fds[0]
@@ -86,7 +87,7 @@ enum ChildProcess {
         guard let pid = spawn(argv, stdout: writeFD, closeInChild: readFD, provenance: launch.token) else {
             close(readFD)
             close(writeFD)
-            removeRegistryEntry(token: launch.token)
+            removeRegistryEntry(token: launch.token, file: registryFile)
             return nil
         }
 
@@ -95,7 +96,7 @@ enum ChildProcess {
         close(writeFD)
 
         do {
-            try Registry.complete(token: launch.token, pid: pid)
+            try Registry.complete(token: launch.token, pid: pid, file: registryFile)
         } catch {
             // The child is already live. Kill it now rather than allow a process
             // whose durable ownership could not be completed to escape tracking.
@@ -103,12 +104,12 @@ enum ChildProcess {
             close(readFD)
             var status: Int32 = 0
             while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
-            removeRegistryEntry(token: launch.token)
+            removeRegistryEntry(token: launch.token, file: registryFile)
             return nil
         }
         var removeOnReturn = true
         defer {
-            if removeOnReturn { removeRegistryEntry(token: launch.token) }
+            if removeOnReturn { removeRegistryEntry(token: launch.token, file: registryFile) }
         }
 
         // Drain on a background thread so the deadline is enforceable. Draining
@@ -517,20 +518,30 @@ enum ChildProcess {
         static func parse(_ text: String) throws -> [Entry] {
             if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
             if text.first == "{" {
-                let document = try JSONDecoder().decode(Document.self, from: Data(text.utf8))
-                guard document.version == 2 else { throw RegistryError.invalidDocument }
-                return document.children
+                guard let object = try JSONSerialization.jsonObject(with: Data(text.utf8)) as? [String: Any],
+                      object["version"] as? Int == 2,
+                      let children = object["children"] as? [Any] else {
+                    throw RegistryError.invalidDocument
+                }
+                let decoder = JSONDecoder()
+                let entries: [Entry] = children.compactMap { child in
+                    guard JSONSerialization.isValidJSONObject(child),
+                          let data = try? JSONSerialization.data(withJSONObject: child) else { return nil }
+                    return try? decoder.decode(Entry.self, from: data)
+                }
+                guard children.isEmpty || !entries.isEmpty else { throw RegistryError.invalidDocument }
+                return entries
             }
             // Safe migration: old `<pid> <path>` entries remain durable but
             // intentionally lack enough identity to be signalled.
-            return try text.split(separator: "\n").map { line in
+            let entries = text.split(separator: "\n").compactMap { line -> Entry? in
                 let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
-                guard parts.count == 2, let pid = pid_t(parts[0]), pid > 0 else {
-                    throw RegistryError.invalidDocument
-                }
+                guard parts.count == 2, let pid = pid_t(parts[0]), pid > 0 else { return nil }
                 return Entry(pid: pid, pgid: pid, startTime: nil, resolvedExecutable: parts[1],
                              argv: [parts[1]], commandKind: "legacy", token: "legacy-\(pid)")
             }
+            guard !entries.isEmpty else { throw RegistryError.invalidDocument }
+            return entries
         }
 
         static func serialize(_ entries: [Entry]) throws -> String {
@@ -541,7 +552,10 @@ enum ChildProcess {
         private static func mutate(file: String, _ body: (inout [Entry]) throws -> Void) throws {
             try queue.sync {
                 try withLock(file: file) {
-                    var entries = try read(file)
+                    // A corrupt durable registry must not brick every future
+                    // menu refresh. Salvageable entries are retained by parse;
+                    // wholly unreadable content is replaced on this write path.
+                    var entries = try readForMutation(file)
                     try body(&entries)
                     try write(entries, to: file)
                 }
@@ -561,6 +575,12 @@ enum ChildProcess {
         private static func read(_ file: String) throws -> [Entry] {
             guard FileManager.default.fileExists(atPath: file) else { return [] }
             return try parse(String(contentsOfFile: file, encoding: .utf8))
+        }
+
+        private static func readForMutation(_ file: String) throws -> [Entry] {
+            guard FileManager.default.fileExists(atPath: file) else { return [] }
+            let text = try String(contentsOfFile: file, encoding: .utf8)
+            return (try? parse(text)) ?? []
         }
 
         private static func write(_ entries: [Entry], to file: String) throws {
