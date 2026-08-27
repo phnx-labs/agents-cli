@@ -1363,6 +1363,22 @@ export function getDB(): Database.Database {
     db.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_agent_ts ON sessions(agent, timestamp DESC)`);
   }
 
+  // harness column: only after the column is guaranteed present.
+  // Fresh SCHEMA (v41) includes the column; older DBs get it from migrate v41.
+  // schema_version can be stamped at SCHEMA_VERSION without the column existing
+  // — getDB writes the marker for any DB whose meta has no row (a hand-built
+  // or partially-created index), and migrateSchema never runs in that path
+  // (`currentVersion === undefined`). If a partial upgrade left schema_version
+  // ahead of the column, repair here so the next upsertSession INSERT naming
+  // `harness` does not throw (PHNX-2935). Same shape as the `machine` repair
+  // above, for the same reason.
+  {
+    const cols = db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>;
+    if (!cols.some((c) => c.name === 'harness')) {
+      db.exec(`ALTER TABLE sessions ADD COLUMN harness TEXT`);
+    }
+  }
+
   // One-shot cleanup of the pre-SQLite JSONL indexes. Safe — nothing reads
   // them anymore. Guarded by a meta flag so we only try once.
   const cleaned = db.prepare(`SELECT value FROM meta WHERE key = 'legacy_indexes_removed'`).get() as { value: string } | undefined;
