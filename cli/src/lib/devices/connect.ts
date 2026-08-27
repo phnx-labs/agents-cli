@@ -91,6 +91,40 @@ export function wrapRemoteCommand(device: DeviceProfile, cmd: string[]): string 
 }
 
 /**
+ * True when `cmd` is an `agents browser …` / `ag browser …` drive, including
+ * the quoted single-string form `agents ssh box 'agents browser …'`. The
+ * `--device` passthrough stamps {@link markFleetRemote} on this shape so the
+ * far-side consent gate can fire; `agents ssh` must too (PHNX-3065).
+ */
+export function isAgentsBrowserDrive(cmd: string[]): boolean {
+  if (cmd.length === 0) return false;
+  const tokens = cmd.length === 1 && /\s/.test(cmd[0]!) ? cmd[0]!.trim().split(/\s+/) : cmd;
+  const bin = tokens[0];
+  return (bin === 'agents' || bin === 'ag') && tokens[1] === 'browser';
+}
+
+/**
+ * Prefix a remote command so the far side sees `AGENTS_FLEET_REMOTE=1` — the
+ * marker the browser consent gate reads. `wrapRemoteCommand` joins the argv
+ * with spaces (POSIX) or base64-encodes it for PowerShell, so a
+ * shell-appropriate leading token rides through both: `env VAR=1 …` on POSIX,
+ * `$env:VAR='1'; …` on PowerShell.
+ *
+ * Already-marked argv (the `--device` fan-out stamps this before
+ * {@link buildSshInvocation}) is left unchanged so the prefix is not doubled.
+ */
+export function markFleetRemote(cmd: string[], device: Pick<DeviceProfile, 'shell'>): string[] {
+  if (device.shell === 'powershell') {
+    return cmd[0] === `$env:AGENTS_FLEET_REMOTE='1';`
+      ? cmd
+      : [`$env:AGENTS_FLEET_REMOTE='1';`, ...cmd];
+  }
+  return cmd[0] === 'env' && cmd[1] === 'AGENTS_FLEET_REMOTE=1'
+    ? cmd
+    : ['env', 'AGENTS_FLEET_REMOTE=1', ...cmd];
+}
+
+/**
  * Build the remote command that starts an INTERACTIVE LOGIN shell inside a
  * mirrored project directory, falling back to the remote home when that
  * directory is absent. Returns undefined when there is nothing to mirror
@@ -180,6 +214,12 @@ export function deviceIdentityArgs(device: DeviceProfile): string[] {
  * to the remote home), matching `agents run --device`. It is ignored when a `cmd`
  * is given: an explicit command keeps its current cwd (the remote home) and its
  * behavior unchanged (RUSH-2412).
+ *
+ * An `agents browser …` / `ag browser …` command is prefixed with
+ * {@link markFleetRemote} so the far-side consent gate sees `AGENTS_FLEET_REMOTE=1`
+ * the same way `browser --device` does. The local `env` overlay here is for the
+ * ssh *client* (askpass); it cannot carry the marker — OpenSSH does not forward
+ * arbitrary env (PHNX-3065).
  */
 export function buildSshInvocation(
   device: DeviceProfile,
@@ -196,9 +236,13 @@ export function buildSshInvocation(
   // wrapper (interactiveCwd), which is an interactive login too and still needs
   // a real tty below.
   const interactive = cmd.length === 0;
+  // Stamp the consent marker on the REMOTE command, not the local ssh env:
+  // SSH_ASKPASS lives on this side; AGENTS_FLEET_REMOTE must be visible to the
+  // process that runs on the peer.
+  const remoteCmd = !interactive && isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, device) : cmd;
   const remote = interactive
     ? buildInteractiveShellCommand(device, opts.interactiveCwd)
-    : wrapRemoteCommand(device, cmd);
+    : wrapRemoteCommand(device, remoteCmd);
   const env: Record<string, string> = {};
   const args: string[] = [
     ...hostKeyCheckingOpts(hostKey.pinned ?? false, hostKey.knownHostsFile),

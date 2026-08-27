@@ -43,6 +43,7 @@ import {
 import { flagValue, hasHostRoutingFlag } from './routing-flag.js';
 import { loadDevices, type DeviceProfile, type DeviceRegistry } from '../devices/registry.js';
 import { isSelfHost } from '../devices/self-host.js';
+import { markFleetRemote } from '../devices/connect.js';
 import {
   fanOutDevices,
   planFleetTargets,
@@ -422,20 +423,6 @@ function renderFleetRoster(
   if (summaryParts.length) {
     console.log(chalk.gray(summaryParts.join(' · ')));
   }
-}
-
-/**
- * Prefix a fan-out remote command so the far side sees AGENTS_FLEET_REMOTE=1 —
- * the same marker the single-target dispatch sets via env. `wrapRemoteCommand`
- * joins the argv with spaces (POSIX) or base64-encodes it for PowerShell, so a
- * shell-appropriate leading token rides through both: `env VAR=1 …` on POSIX,
- * `$env:VAR='1'; …` on PowerShell. Only remote (non-self) targets get it; the
- * self target runs locally and must stay ungated.
- */
-export function markFleetRemote(cmd: string[], device: DeviceProfile): string[] {
-  return device.shell === 'powershell'
-    ? [`$env:AGENTS_FLEET_REMOTE='1';`, ...cmd]
-    : ['env', 'AGENTS_FLEET_REMOTE=1', ...cmd];
 }
 
 /** Run `agents <command> …` across every registered device and render the roster. */

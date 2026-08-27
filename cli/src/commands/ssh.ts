@@ -66,6 +66,8 @@ import {
   buildSshInvocation,
   deviceIdentityArgs,
   fleetDialTarget,
+  isAgentsBrowserDrive,
+  markFleetRemote,
   writeAskpassShim,
 } from '../lib/devices/connect.js';
 import { ensureManagedKnownHostsDir, isHostPinned } from '../lib/devices/known-hosts.js';
@@ -489,7 +491,10 @@ function trySshLeasedBox(name: string, cmd: string[]): boolean {
     console.error(chalk.red(`Leased box '${name}' is not reachable yet (status: ${boxStatus(box)}).`));
     process.exit(1);
   }
-  const res = spawnSync(sshArgv[0], [...sshArgv.slice(1), ...cmd], { stdio: 'inherit' });
+  // Crabbox ssh does not go through buildSshInvocation; stamp the same
+  // consent marker so a browser drive on a leased box is gated too.
+  const remoteCmd = isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
+  const res = spawnSync(sshArgv[0], [...sshArgv.slice(1), ...remoteCmd], { stdio: 'inherit' });
   process.exit(res.status ?? 1);
 }
 
@@ -2606,6 +2611,10 @@ An interactive login with no command mirrors the home-relative directory you
 launched from — 'agents ssh yosemite-s0' from ~/src/app lands in ~/src/app on
 the target when it exists, else the remote home. Same portable-cwd rule as
 'agents run --device'. Passing a command keeps the remote home.
+
+An 'agents browser …' (or 'ag browser …') command is stamped AGENTS_FLEET_REMOTE
+so the target's browser.remote-control consent gate applies, same as
+'agents browser <verb> --device <name>'.
 `)
     .action(async (name: string, cmd: string[]) => {
       // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.
