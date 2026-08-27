@@ -569,7 +569,7 @@ Sequenced so nothing waits on the naming decision except the naming work itself.
 
 **Week 2 — the wedge artifact**
 
-6. Record the 12-second demo: limit hit, `--strategy balanced` rotates, same session continues. This is the only pain with million-view posts and no competitor owns it on camera.
+6. Record the 12-second demo: limit hit, `--strategy balanced` rotates to an account with headroom, the work continues. This is the only pain with million-view posts and no competitor owns it on camera. **Film what the code actually does**, not "the same session continues" — see the accuracy note below.
 7. Ship the `SKILL.md` and plugin marketplace entry; submit to Claude, Cursor, and skills.sh.
 8. Do the name cutover: domain 301 flip, repo rename, README title.
 
@@ -580,6 +580,10 @@ Sequenced so nothing waits on the naming decision except the naming work itself.
 11. Submit to `awesome-claude-code` (53.1k stars) and the maintained agent lists.
 
 **Deliberately not doing:** `agents.txt` and `agent.json` and experimental MCP server cards (no answer-engine adoption evidence; several are unaccepted proposals); a Wikipedia page (fails notability without independent coverage, and creating one early is counterproductive); Product Hunt as the launch spark; a 564-tool MCP server mirroring the CLI.
+
+<div class="artifact-callout artifact-callout-warn">
+<strong>Accuracy correction — what rotation actually does.</strong> An earlier revision of this plan described move #6 as "same session continues". That is false, and it was caught by a reviewer tracing the code rather than the prose. <code>cli/src/lib/exec.ts:2554</code> mints a <em>new</em> <code>randomUUID()</code> on every rotation attempt, and it does so only for Claude: <code>const pinnedSessionId = agent === 'claude' ? randomUUID() : undefined</code>. For Codex, Cursor, Grok, Kimi and Droid there is no session handoff at all — they get a retry-with-context prompt (<code>buildFallbackPrompt</code>, <code>exec.ts:2467</code>). Rotation also arms only for <strong>headless, prompt-driven</strong> runs; <code>shouldArmRotationFailover</code> (<code>cli/src/commands/exec.ts:3230</code>) excludes interactive sessions entirely. What is true, and still worth filming: the run does not die at the limit — it moves to an account with headroom and picks the work back up, with Claude handed <code>/continue &lt;id&gt;</code> pointing at the prior transcript. The demo survives; the wording did not.
+</div>
 
 ## Validation
 
