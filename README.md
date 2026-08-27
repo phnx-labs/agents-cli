@@ -1219,7 +1219,7 @@ on `SIGHUP reload`.
 There is no `agents daemon jobs` -- scheduled work is always `agents routines`
 (see `agents routines stats` for per-routine failure detail). `disable` is a
 device-local kill switch: with it set, `routines add`/`routines start`/
-`routines catchup`/webhook triggers stop auto-starting the daemon, mirroring
+`routines catchup`/`monitors add`/webhook triggers stop auto-starting the daemon, mirroring
 `systemctl disable` -- `agents daemon start` still works as the explicit
 override.
 

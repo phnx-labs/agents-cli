@@ -2968,15 +2968,16 @@ nothing but its own view cache.
   gates only the UI's view of an action MUST NOT exist.
 - **SING-4a (MUST).** A device-local `daemon.enabled: false` (`lib/device-config.ts`,
   `agents daemon disable`) MUST prevent every AUTO-start surface from bringing the
-  daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`) and every `routines`
+  daemon up — `ensureDaemonStarted` (`lib/daemon/daemon.ts`), every `routines`
   auto-start call site (`add`, `start`, `catchup`, webhook triggers,
-  `commands/routines.ts`). It MUST NOT stop an already-running daemon and MUST NOT
-  block the explicit override (`agents daemon start`), mirroring `systemctl
-  disable` — a disabled unit still starts on a direct `systemctl start`. This is
-  the daemon-wide sibling of `scheduler.enabled`: `scheduler.enabled` gates only
-  the routines `JobScheduler` inside a running daemon (SING-5), while
-  `daemon.enabled` gates whether the daemon itself may be auto-started at all
-  (the secrets broker, browser IPC, and watchdog with it).
+  `commands/routines.ts`), and `monitors add` (`commands/monitors.ts`). It MUST NOT
+  stop an already-running daemon and MUST NOT block the explicit override
+  (`agents daemon start`), mirroring `systemctl disable` — a disabled unit still
+  starts on a direct `systemctl start`. This is the daemon-wide sibling of
+  `scheduler.enabled`: `scheduler.enabled` gates only the routines `JobScheduler`
+  inside a running daemon (SING-5), while `daemon.enabled` gates whether the
+  daemon itself may be auto-started at all (the secrets broker, browser IPC, and
+  watchdog with it).
 - **SING-5 (MUST).** Routines MUST fire only from the daemon's pid-claimed
   `JobScheduler` (`lib/daemon/daemon.ts` — the pid-file claim exists precisely so a second
   scheduler cannot double-fire). A UI MAY request an immediate run
