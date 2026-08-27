@@ -161,4 +161,26 @@ describe('CDPClient pipe transport', () => {
 
     cdp.close();
   });
+
+  it('delivers the outer CDP session id with events so tab-scoped streams can be filtered', async () => {
+    const read = new PassThrough();
+    const write = new PassThrough();
+    const cdp = new CDPClient();
+    cdp.connectPipe({ read, write });
+    const received = new Promise<{ params: Record<string, unknown>; sessionId?: string }>((resolve) => {
+      cdp.on('Page.screencastFrame', (params, sessionId) => resolve({ params, sessionId }));
+    });
+
+    read.write(JSON.stringify({
+      method: 'Page.screencastFrame',
+      sessionId: 'tab-session-2',
+      params: { data: 'jpeg', sessionId: 7 },
+    }) + '\0');
+
+    await expect(received).resolves.toEqual({
+      params: { data: 'jpeg', sessionId: 7 },
+      sessionId: 'tab-session-2',
+    });
+    cdp.close();
+  });
 });

@@ -19,7 +19,7 @@ type PendingCall = {
   reject: (error: Error) => void;
 };
 
-type EventHandler = (params: Record<string, unknown>) => void;
+type EventHandler = (params: Record<string, unknown>, sessionId?: string) => void;
 type TransportKind = 'websocket' | 'pipe';
 
 const pipeTransports = new Map<string, CDPPipeTransport>();
@@ -183,7 +183,7 @@ export class CDPClient {
       const handlers = this.eventHandlers.get(msg.method);
       if (handlers) {
         for (const handler of handlers) {
-          handler(msg.params || {});
+          handler(msg.params || {}, msg.sessionId);
         }
       }
     }
