@@ -12,6 +12,7 @@ import { runOnPeer } from '../lib/session/remote-list.js';
 import { sessionRecoveryPeer } from '../lib/session/recovery.js';
 import { resolveSessionMetadataValue, resumeSessionInPlace } from './sessions.js';
 import { readDetachRecord, clearDetachRecord, isHeadlessAlive } from '../lib/session/detached.js';
+import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 
 export function registerAttachCommand(program: Command): void {
   // Deprecated: superseded by `agents sessions resume`, which detects the state
@@ -30,6 +31,12 @@ export function registerAttachCommand(program: Command): void {
 }
 
 export async function attachAction(id: string): Promise<void> {
+  // PHNX-3292: this deprecated spelling still gets the local-pane fast path —
+  // a live tmux alias/short id on THIS box attaches with zero SSH, matching
+  // `sessions resume`. `attach` takes no `--device`, so hosts is always empty.
+  if (await attachLocalLiveSelector(id.trim(), [])) {
+    return;
+  }
   const outcome = await resolveSessionMetadataValue(id);
   if (outcome.kind === 'partial') {
     // RUSH-2492: an unreachable peer is a warning, not a hard failure. The

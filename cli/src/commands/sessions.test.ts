@@ -566,18 +566,41 @@ describe('RUSH-2203 definitive-match fleet resolve', () => {
       expect(isDefinitiveMatch(labelled, 'fix the flaky ssh test')).toBe(false);
     });
 
-    it('is NOT definitive for a short-id prefix — ambiguity needs every peer', () => {
-      expect(isDefinitiveMatch(base, '019fd0c8')).toBe(false);
+    it('is NOT definitive for a short-id prefix narrower than 8 hex — ambiguity needs every peer', () => {
+      expect(isDefinitiveMatch(base, '019fd')).toBe(false);
+      expect(isDefinitiveMatch(base, 'abcd12')).toBe(false);
+    });
+
+    // PHNX-3292: `agents tmux ls` prints `ag-<agent>-<8hex>` names and the bare
+    // 8-hex suffix — both name at most one session per answering peer, so the
+    // first reachable hit is enough (same trade `isUniqueEnoughSelector`
+    // already makes post-sweep for SES-9a, now applied in-flight too).
+    it('IS definitive for an exact 8-hex short id (the shortId column width)', () => {
+      expect(isDefinitiveMatch(base, base.shortId)).toBe(true);
+      expect(isDefinitiveMatch(base, base.shortId.toUpperCase())).toBe(true);
+      expect(isDefinitiveMatch({ ...base, shortId: 'deadbeef' }, base.shortId)).toBe(false);
+    });
+
+    it('IS definitive for a live tmux alias embedding this session\'s short id', () => {
+      expect(isDefinitiveMatch(base, `ag-claude-${base.shortId}`)).toBe(true);
+      expect(isDefinitiveMatch(base, `ag-codex-${base.shortId}`)).toBe(true);
+      expect(isDefinitiveMatch(base, 'ag-claude-deadbeef')).toBe(false);
     });
   });
 
   describe('selectorAllowsEarlyExit', () => {
-    it('enables early-exit ONLY for a full UUID (globally unique)', () => {
+    it('enables early-exit for a full UUID (globally unique)', () => {
       expect(selectorAllowsEarlyExit(FULL)).toBe(true);
     });
-    it('disables early-exit for labels and short-id prefixes so the sweep can surface a conflict', () => {
+    it('enables early-exit for a live tmux alias and an exact 8-hex short id (PHNX-3292)', () => {
+      expect(selectorAllowsEarlyExit('ag-claude-0145ab8f')).toBe(true);
+      expect(selectorAllowsEarlyExit('ag-kimi-632c1fbc')).toBe(true);
+      expect(selectorAllowsEarlyExit('0145ab8f')).toBe(true);
+      expect(selectorAllowsEarlyExit('0145AB8F')).toBe(true);
+    });
+    it('disables early-exit for labels and short-id prefixes narrower than 8 hex', () => {
       expect(selectorAllowsEarlyExit('fix the flaky ssh test')).toBe(false);
-      expect(selectorAllowsEarlyExit('019fd0c8')).toBe(false);
+      expect(selectorAllowsEarlyExit('019fd0c')).toBe(false);
       expect(selectorAllowsEarlyExit('abcd12')).toBe(false);
     });
   });

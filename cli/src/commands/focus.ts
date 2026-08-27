@@ -19,8 +19,9 @@ import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
 import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
-import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, runTmux } from '../lib/tmux/index.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
+import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
+export { looksLikeTmuxAlias, resolveTmuxAliasState, shouldAttachLocalTmuxAliasBeforeFleet, type TmuxAliasState } from '../lib/session/local-tmux-attach.js';
 import {
   buildSessionRecoveryCommand,
   filterSessionsByQuery,
@@ -303,15 +304,16 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       return;
     }
 
-    // A live local tmux alias attaches immediately — before any fleet SSH.
-    // `collectSessionCandidates` fans out twice (transcript pool + live roster),
-    // so a selector that is already a pane on THIS box used to print two
-    // unreachable-device lists and stall on offline peers (~2 min measured on
-    // yosemite-s0 for `sessions resume ag-claude-0145ab8f --attach-only`) and
-    // only then attach. SES-41: an alive `ag-<agent>-<8hex>` pane is attached;
-    // the name is sufficient. A dead/absent pane falls through to id resolution.
-    if (shouldAttachLocalTmuxAliasBeforeFleet(textSelector, hosts)
-        && await attachLiveTmuxAlias(textSelector)) {
+    // A live local tmux alias — or a bare 8-hex short id naming exactly one
+    // live local pane — attaches immediately, before any fleet SSH.
+    // `collectSessionCandidates` fans out twice (transcript pool + live
+    // roster), so a selector that is already a pane on THIS box used to print
+    // two unreachable-device lists and stall on offline peers (~2 min measured
+    // on yosemite-s0 for `sessions resume ag-claude-0145ab8f --attach-only`)
+    // and only then attach. SES-41 / PHNX-3292: an alive `ag-<agent>-<8hex>`
+    // pane is attached by name; the pane is sufficient, no fleet SSH needed. A
+    // dead/absent pane falls through to id resolution.
+    if (await attachLocalLiveSelector(textSelector, hosts)) {
       return;
     }
 
@@ -512,37 +514,6 @@ function looksLikeIdentitySelector(selector: string | undefined): selector is st
 }
 
 /**
- * A local `ag-<agent>-<8hex>` alias names a pane on THIS box. Attach it
- * without `collectSessionCandidates` (fleet SSH). `--device` keeps the
- * sweep: the caller scoped identity to another machine.
- */
-export function shouldAttachLocalTmuxAliasBeforeFleet(
-  selector: string | undefined,
-  hosts: string[],
-): selector is string {
-  return !!selector && hosts.length === 0 && isAgentTmuxAlias(selector);
-}
-
-/**
- * Attach a live tmux session named exactly as the selector, without needing the
- * session index to know anything about it.
- *
- * SES-41 requires a `ag-<agent>-<8hex>` tmux alias to resolve, but the alias's
- * hex is the LAUNCH id, not the harness session id, and for a harness that
- * writes no `state/sessions/<pid>.json` record there is no mapping back to a
- * SessionMeta at all. Measured on yosemite-s0: `--resolve ag-kimi-632c1fbc`
- * fell through to a keyword search and returned 13 unrelated rows, while the
- * pane itself was alive (`%124`, `kimi-code`). The pane is the thing the user
- * asked for, and its NAME is sufficient to attach it — so an unattributable
- * session is still reachable instead of being a dead end that forces raw
- * `tmux -S … attach`.
- *
- * Returns false when this is not an alias, the server/session is absent, or
- * every pane is dead — the caller then continues to normal id resolution.
- * SES-39's "re-read `pane_dead` immediately before attach" is honoured here:
- * liveness is queried at attach time, not read from the roster.
- */
-/**
  * Rank two rows that are the same logical session, best first.
  *
  * Prefer the row that can actually be acted on: a real transcript over a
@@ -573,62 +544,6 @@ export function dedupeSessionsByLogicalId(rows: SessionMeta[], self?: string): S
     if (!held || sessionRowRank(row, self) > sessionRowRank(held, self)) byId.set(key, row);
   }
   return [...byId.values()];
-}
-
-export type TmuxAliasState = 'not-an-alias' | 'no-server' | 'absent' | 'dead' | 'live';
-
-/** Shape of the tmux alias the CLI mints for an agent session: `ag-<agent>-<shortid>`.
- * Delegates to the one canonical matcher beside the name parsers in active.ts. */
-export function looksLikeTmuxAlias(selector: string): boolean {
-  return isAgentTmuxAlias(selector);
-}
-
-/**
- * Classify a selector against the live tmux server. Split from the attach so the
- * decision is testable against a real tmux server without replacing the caller's
- * shell (attaching is not something a test can undo).
- */
-export async function resolveTmuxAliasState(selector: string, socket?: string): Promise<TmuxAliasState> {
-  if (!looksLikeTmuxAlias(selector)) return 'not-an-alias';
-  const sock = socket ?? getDefaultSocketPath();
-  if (!fs.existsSync(sock)) return 'no-server';
-  if (!(await hasSession(selector, sock).catch(() => false))) return 'absent';
-
-  const panes = await runTmux({
-    socket: sock,
-    args: ['list-panes', '-t', `=${selector}`, '-F', '#{pane_dead}'],
-  }).catch(() => undefined);
-  const states = (panes?.stdout ?? '').split('\n').map(s => s.trim()).filter(Boolean);
-  return states.some(d => d === '0') ? 'live' : 'dead';
-}
-
-async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
-  const socket = getDefaultSocketPath();
-  if (await resolveTmuxAliasState(selector, socket) !== 'live') return false;
-
-  if (!process.stdout.isTTY) {
-    console.error(chalk.red(`"${selector}" is a live tmux session, but attaching needs a TTY.`));
-    console.error(chalk.gray(`  Run it from a terminal, or: agents tmux attach ${selector}`));
-    process.exitCode = 1;
-    return true;
-  }
-  // Already inside a tmux client on this socket — which is the normal state for
-  // an interactive agent session here — MOVE that client instead of nesting a
-  // second one. jumpTo (go.ts) does the same; attaching from inside tmux
-  // otherwise stacks clients rather than taking you to the session.
-  if (process.env.TMUX) {
-    await runTmux({ socket, args: ['switch-client', '-t', `=${selector}`], throwOnError: false }).catch(() => {});
-    console.log(chalk.gray(`Switched this tmux client to ${selector}.`));
-    return true;
-  }
-  console.log(chalk.gray(`Attaching ${selector} — Ctrl-b d to detach.`));
-  // Repair a legacy/stale pane-died hook before handing the session to an
-  // attach client — the 5-min daemon reconcile that used to cover this was
-  // deleted; attach-time repair is what closes the gap now (RUSH-2435).
-  await ensureSessionHookRepaired(selector, socket);
-  const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${selector}`] });
-  process.exitCode = code;
-  return true;
 }
 
 function hasFocusFilters(opts: FocusOptions, statuses: LiveStatusFilter[]): boolean {

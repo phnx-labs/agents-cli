@@ -44,6 +44,7 @@ import { looksLikeSessionId } from '../lib/session/discover.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { sessionOriginDevice, sessionRecoveryDestinationMatches } from '../lib/session/recovery.js';
 import { runStrictResume, wantsStrictResume, type StrictResumeOptions } from './resume.js';
+import { attachLocalLiveSelector } from '../lib/session/local-tmux-attach.js';
 
 /** Opening more than this many live sessions at once asks for confirmation first. */
 export const CONFIRM_THRESHOLD = 5;
@@ -159,8 +160,18 @@ async function sessionsResumeAction(
   // must go through sessions focus so they cannot silently fork a copy
   // (AGI EXT still shells `sessions resume <id> --local`).
   if (query && (isDirectResumeSelector(query) || wantsStrictResume(prompt, strictOpts))) {
+    const hosts = options.device ? [options.device] : [];
+    // PHNX-3292: a live LOCAL tmux pane (the exact alias, or a unique 8-hex
+    // short id) attaches immediately, before any fleet SSH — the product rule
+    // is "first unique match wins," and a pane already on this box is the
+    // fastest possible match. This applies to bare resume too, not just
+    // `--attach-only`: a prompt/mode/headless/cwd override still means the
+    // caller wants strict resume semantics (a scripted continue), so that
+    // case is excluded via wantsStrictResume.
+    if (!wantsStrictResume(prompt, strictOpts) && await attachLocalLiveSelector(query.trim(), hosts)) {
+      return;
+    }
     if (resumeUsesLifecycleDispatch(query, prompt, options)) {
-      const hosts = options.device ? [options.device] : [];
       await dispatchSessionLifecycleInPlace(query.trim(), hosts, !!options.attachOnly, !!options.local);
       return;
     }

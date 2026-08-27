@@ -1,6 +1,5 @@
 # Changelog
 
-<<<<<<< HEAD
 ## 1.22.51
 
 - **`publish-computer-helper-mac.sh` cuts the helper's own tag (PHNX-3228).**

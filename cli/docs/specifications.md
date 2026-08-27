@@ -239,9 +239,18 @@ SSH access (§7); rendering sessions that no harness produced.
   among peers that DID answer are still reported: they produce two candidates and
   surface through the `ambiguous` outcome, which is unchanged, so the residual
   risk is confined to a time-ordered collision hiding on the unanswered peer.
-  RUSH-2203's early-exit rule is also unchanged and stays full-UUID-only
-  (`isDefinitiveMatch`), because that cancels a sweep still in flight, where a
-  silent peer is still expected to answer.
+  RUSH-2203's early-exit rule (`isDefinitiveMatch`/`selectorAllowsEarlyExit`)
+  cancels a sweep still IN FLIGHT, where a silent peer is still expected to
+  answer — a stricter bar than the post-sweep rule above. It was full-UUID-only
+  until PHNX-3292 widened it to also cover a live tmux alias and an EXACT
+  8-hex short id (not a narrower prefix): both name at most one session per
+  answering peer, the same width `SHORT_SESSION_ID_WIDTH` already treats as
+  unique-enough post-sweep, so the first reachable hit is enough. PHNX-3292 also
+  added a LOCAL-only gate ahead of any fleet call: a live tmux alias, or a bare
+  8-hex naming exactly one live LOCAL pane, attaches with zero SSH
+  (`lib/session/local-tmux-attach.ts`, `attachLocalLiveSelector`) before
+  `sessions resume`/`sessions attach`/`sessions focus` ever reach this
+  resolver.
 - **SES-9b (MUST).** An ID-shaped selector that misses the local transcript index
   but names a session the LOCAL live registry (`getActiveSessions`, the source
   `--active` reads) currently reports as running MUST resolve to that session

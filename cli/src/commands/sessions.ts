@@ -20,10 +20,10 @@ import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../l
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
-import { SESSION_AGENTS } from '../lib/session/types.js';
+import { SESSION_AGENTS, isAgentTmuxAlias } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
-import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
+import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, shortIdFromName, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
 export { activeSessionProjectKey, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, type BackfillMeta } from '../lib/session/active.js';
 import { enumerateGhosttyTabs, assignGhosttyTabs, type GhosttySurface } from '../lib/session/ghostty-tabs.js';
 import { mapPanesToTargets, listClients } from '../lib/tmux/session.js';
@@ -5222,36 +5222,56 @@ export type MetadataResolveOutcome =
 
 const FULL_SESSION_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Width of `SessionMeta.shortId` / the hex a tmux alias embeds (`deriveShortId`). */
+const SHORT_SESSION_ID_RE = /^[0-9a-f]{8}$/i;
+
+
 /**
  * A match unique enough to resolve on the FIRST peer that returns it and cancel
- * the rest of the fleet sweep: a full session UUID, which is globally unique.
+ * the rest of the fleet sweep: a full session UUID (globally unique), a live
+ * tmux alias, or a bare 8-hex short id — all three name at most one session PER
+ * ANSWERING peer, so the first reachable hit is enough (PHNX-3292: the alias/
+ * short-id case is exactly what `agents tmux ls` prints, and it used to stay
+ * all-settle right alongside a genuine keyword search).
  *
- * Only a full UUID qualifies. A session **label** is deliberately NOT definitive
- * here even on an exact match: labels are free-form and can collide, so a
- * distinct session may carry the same label on a peer that has not answered yet
- * — early-exiting on the first would silently, and nondeterministically, resume
- * the wrong session (whichever peer replied first). Labels therefore stay
- * all-settle so a cross-machine label conflict surfaces as an ambiguity, and a
- * short-id PREFIX stays all-settle for the same reason (RUSH-2203).
+ * A session **label** is deliberately NOT definitive here even on an exact
+ * match: labels are free-form and can collide, so a distinct session may carry
+ * the same label on a peer that has not answered yet — early-exiting on the
+ * first would silently, and nondeterministically, resume the wrong session
+ * (whichever peer replied first). Labels therefore stay all-settle so a
+ * cross-machine label conflict surfaces as an ambiguity, and a short-id PREFIX
+ * *shorter* than the full 8-hex width stays all-settle for the same reason
+ * (RUSH-2203).
  *
  * This is about cancelling a sweep that is still IN FLIGHT, where a peer that
  * has not answered yet is still expected to. It is deliberately stricter than
  * `isUniqueEnoughSelector`, which decides what to do once the sweep is OVER and
- * a peer has definitively not answered — see SES-9a.
+ * a peer has definitively not answered — see SES-9a. A collision between two
+ * peers that BOTH answer before the abort lands is still caught by the ordinary
+ * uniqueness gate in `metadataResolveOutcome`/`fleetCandidatesByQuery`; only a
+ * peer that has not answered yet, at the moment of the FIRST hit, is the
+ * accepted risk (documented in the PHNX-3292 plan).
  */
 export function isDefinitiveMatch(session: SessionMeta, selector: string): boolean {
-  return FULL_SESSION_ID_RE.test(selector) && session.id.toLowerCase() === selector.trim().toLowerCase();
+  const trimmed = selector.trim();
+  if (FULL_SESSION_ID_RE.test(trimmed)) {
+    return session.id.toLowerCase() === trimmed.toLowerCase();
+  }
+  const shortId = shortIdFromName(trimmed) ?? (SHORT_SESSION_ID_RE.test(trimmed) ? trimmed : undefined);
+  return !!shortId && session.shortId.toLowerCase() === shortId.toLowerCase();
 }
 
 /**
- * Whether a selector may enable early-exit on the cancellable fan-out — only a
- * full UUID, which is globally unique so the first hit is the only hit. Labels,
- * keywords, and short-id prefixes stay all-settle: their uniqueness (or
- * conflict) is only knowable once every peer has answered. See
+ * Whether a selector may enable early-exit on the cancellable fan-out: a full
+ * UUID, a tmux alias, or an exact 8-hex short id — every shape that is globally
+ * unique enough for the first hit to be the only hit worth waiting for. Labels,
+ * keywords, and short-id prefixes narrower than 8 hex stay all-settle: their
+ * uniqueness (or conflict) is only knowable once every peer has answered. See
  * {@link isDefinitiveMatch}.
  */
 export function selectorAllowsEarlyExit(selector: string): boolean {
-  return FULL_SESSION_ID_RE.test(selector);
+  const trimmed = selector.trim();
+  return FULL_SESSION_ID_RE.test(trimmed) || isAgentTmuxAlias(trimmed) || SHORT_SESSION_ID_RE.test(trimmed);
 }
 
 /** Resolve a fleet sweep through the same canonical full-id / prefix resolver as
