@@ -19,6 +19,7 @@ import { readMeta } from './state.js';
 import { getOwnerNotifyFromHumans } from './humans.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { lookupTransport } from './channels/resolve.js';
+import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 import type { SendResult } from './channels/registry.js';
 
 export interface OwnerNotifyOptions {
@@ -79,6 +80,13 @@ export function buildOpenClawNotifyArgs(
  * selects the provider per host. A missing owner config or a delivery failure
  * (e.g. openclaw not on PATH) returns a clean `SendResult` error — never a raw
  * ENOENT — so callers surface a consistent, best-effort failure.
+ *
+ * When local delivery fails because THIS box structurally cannot reach the owner
+ * — the rush-backed owner channel is macOS-only, so a headless Linux worker can
+ * never ring the phone (PHNX-3303) — the notify is forwarded over SSH to a
+ * capable fleet peer that DOES have the provider, mirroring the reroute
+ * `agents message` already uses. A successful forward is returned as the result;
+ * if no capable peer is reachable, the original clean local error stands.
  */
 export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}): Promise<SendResult> {
   const meta = options.meta ?? readMeta();
@@ -98,11 +106,16 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
   if (!provider) {
     return { ok: false, channel, id: target, error };
   }
-  return provider.send(text, {
+  const local = await provider.send(text, {
     target,
     ownerScoped: options.target === undefined,
     dryRun: options.dryRun,
   });
+  // A dry-run never delivers, and an override target is an explicit recipient
+  // (not the fleet-wide owner) — neither should hop to a peer.
+  if (local.ok || options.dryRun || options.target !== undefined) return local;
+  const forwarded = await forwardOwnerNotifyToPeer(text, channel, meta);
+  return forwarded ?? local;
 }
 
 export async function notifyUrgentBlock(

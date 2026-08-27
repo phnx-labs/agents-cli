@@ -37,6 +37,7 @@ import { spawnSync } from 'child_process';
 import type { Meta } from './types.js';
 import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } from './channels/send.js';
 import { lookupTransport } from './channels/resolve.js';
+import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
@@ -583,7 +584,19 @@ async function runChannelSink(sink: PlannedSink, meta: Meta): Promise<SinkOutcom
   if (!provider) return { name, ok: false, error };
 
   const result = await deliverEnvelope(resolved.envelope, meta);
-  return result.ok ? { name, ok: true } : { name, ok: false, error: result.error };
+  if (result.ok) return { name, ok: true };
+
+  // The owner sink failed locally. When this box structurally cannot reach the
+  // owner (the rush-backed channel is macOS-only, so a headless Linux worker can
+  // never ring the phone — PHNX-3303), hand the delivery to a capable fleet peer
+  // over SSH rather than stranding the important post. Only the `owner` alias
+  // forwards: it resolves the peer's own fleet-synced owner destination, so a
+  // non-owner channel sink with an explicit recipient stays local.
+  if (owner) {
+    const forwarded = await forwardOwnerNotifyToPeer(sink.text ?? '', resolved.envelope.channel, meta);
+    if (forwarded?.ok) return { name, ok: true };
+  }
+  return { name, ok: false, error: result.error };
 }
 
 /**

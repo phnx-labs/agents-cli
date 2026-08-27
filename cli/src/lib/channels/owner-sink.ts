@@ -11,6 +11,13 @@
  * after-the-fact `owner failed: …` line. `agents doctor` had no signal for it,
  * which is exactly the gap RUSH-2258 / RUSH-2262 flagged.
  *
+ * At runtime the owner-delivery lane no longer strands this failure: when local
+ * delivery fails on a box that structurally cannot reach the owner,
+ * `forwardOwnerNotifyToPeer` (owner-forward.ts) hands it to a capable macOS peer
+ * over SSH (PHNX-3303). This finding still stands as a diagnostic — the forward
+ * is best-effort and only lands when a reachable mac peer exists, so a box that
+ * cannot deliver locally is worth surfacing regardless.
+ *
  * This probes the SAME transport the lane uses, from the SAME context doctor runs
  * in, so `agents doctor` can fail loud when this box cannot reach the owner. It is
  * deliberately honest about context: `rush whoami` is what tells a real signed-in
