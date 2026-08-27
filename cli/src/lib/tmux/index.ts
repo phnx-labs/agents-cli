@@ -29,6 +29,7 @@ export {
   hasSession,
   createSession,
   killSession,
+  teardownIfAgentExited,
   killAll,
   listSessions,
   splitPane,

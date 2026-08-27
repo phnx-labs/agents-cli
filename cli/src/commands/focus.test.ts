@@ -17,6 +17,7 @@ import {
   focusTargetForResolved,
   looksLikeTmuxAlias,
   resolveTmuxAliasState,
+  shouldAttachLocalTmuxAliasBeforeFleet,
   dedupeSessionsByLogicalId,
 } from './focus.js';
 import { refuseFallback } from './go.js';
@@ -330,6 +331,26 @@ describe('openFocusTabs — N selected sessions → N tab requests through the e
     expect(calls).toHaveLength(0);
     expect(log.mock.calls.flat().join('\n')).toContain('Nothing to open');
     log.mockRestore();
+  });
+});
+
+describe('shouldAttachLocalTmuxAliasBeforeFleet — local pane, no SSH', () => {
+  // Measured: `sessions resume ag-claude-0145ab8f --attach-only` on yosemite-s0
+  // printed two unreachable-device lists and waited ~2 min on offline peers
+  // before attaching a pane that `agents tmux ls` already showed on this box.
+  // The alias is the pane name; a fleet sweep cannot add information.
+  it('is true for a tmux alias with no --device scope', () => {
+    expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-claude-0145ab8f', [])).toBe(true);
+    expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-kimi-632c1fbc', [])).toBe(true);
+  });
+
+  it('is false for a UUID/prefix (those still need index/fleet resolution)', () => {
+    expect(shouldAttachLocalTmuxAliasBeforeFleet('0145ab8f', [])).toBe(false);
+    expect(shouldAttachLocalTmuxAliasBeforeFleet('87e2bc83-d1e8-499b-9f54-d8cf98abe51b', [])).toBe(false);
+  });
+
+  it('is false when --device scoped the lookup to another machine', () => {
+    expect(shouldAttachLocalTmuxAliasBeforeFleet('ag-claude-0145ab8f', ['zion'])).toBe(false);
   });
 });
 

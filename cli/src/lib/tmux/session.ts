@@ -399,6 +399,34 @@ export async function killSession(
 }
 
 /**
+ * After an attach client returns: destroy the session if every pane is dead
+ * (the agent exited); leave it if any pane is still alive (Ctrl-b d).
+ *
+ * `runInTmux` already does this via `resolveAfterAttach`. The attach verbs
+ * (`agents tmux attach`, `sessions focus`/`resume --attach-only`, `jumpTo`)
+ * used to `process.exit` the tmux client status and leave a `remain-on-exit`
+ * husk — the session "came back" in `tmux ls` after the user exited the agent.
+ */
+export async function teardownIfAgentExited(name: string, socket?: string): Promise<'killed' | 'kept' | 'absent'> {
+  assertValidSessionName(name);
+  const sock = socket ?? getDefaultSocketPath();
+  if (!(await hasSession(name, sock))) return 'absent';
+  const res = await runTmux({
+    socket: sock,
+    args: ['list-panes', '-t', `=${name}`, '-F', '#{pane_dead}'],
+    throwOnError: false,
+  }).catch(() => null);
+  if (!res || res.code !== 0) {
+    await killSession(name, sock).catch(() => {});
+    return 'killed';
+  }
+  const flags = res.stdout.split('\n').map((s) => s.trim()).filter(Boolean);
+  if (flags.some((d) => d === '0')) return 'kept';
+  await killSession(name, sock).catch(() => {});
+  return 'killed';
+}
+
+/**
  * Kill every session on the shared server AND the server itself, then prune
  * meta files. Wipes the socket so the next `new` starts from a clean slate.
  */

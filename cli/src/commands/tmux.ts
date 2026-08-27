@@ -39,6 +39,7 @@ import {
   isTmuxVersionSupported,
   killAll,
   killSession,
+  teardownIfAgentExited,
   listSessions,
   MIN_TMUX_VERSION,
   readSessionMeta,
@@ -176,7 +177,7 @@ export function registerTmuxCommands(program: Command): void {
 
   const attachCmd = tmux
     .command('attach <name>')
-    .description('Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d).')
+    .description('Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d) or the agent exits (session is then torn down).')
     .option('--socket <path>', 'Use a custom socket (default: shared server)');
 
   attachCmd.action(async (name, opts) => {
@@ -195,6 +196,11 @@ export function registerTmuxCommands(program: Command): void {
       // deleted; attach-time repair is what closes the gap now (RUSH-2435).
       await ensureSessionHookRepaired(name, socket);
       const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${name}`] });
+      // The v6 pane-died hook only detach-clients when a client is attached
+      // (so runInTmux can read the exit status). Attach verbs must kill the
+      // husk themselves — otherwise `tmux ls` still lists the session after
+      // the agent exits (PHNX-3293).
+      await teardownIfAgentExited(name, socket);
       process.exit(code);
     });
   });

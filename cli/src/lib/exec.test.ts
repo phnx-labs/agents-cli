@@ -574,6 +574,7 @@ describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
     configEnabled: true,
     remoteDispatch: false,
     tmuxAvailable: true,
+    hasTty: true,
   };
 
   it('wraps an interactive macOS/Linux run when tmux is available and nothing opts out', () => {
@@ -621,6 +622,14 @@ describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
     // A LOCAL run with no tmux is merely unwrapped — nothing about it needs to
     // outlive a network link, so it must not be refused.
     expect(resolveTmuxWrap({ ...base, remoteDispatch: false, tmuxAvailable: false }).kind).toBe('bare');
+  });
+
+  it('does not wrap a LOCAL interactive run with no TTY (piped tests must not leak panes)', () => {
+    expect(resolveTmuxWrap({ ...base, hasTty: false }).kind).toBe('bare');
+  });
+
+  it('still wraps a REMOTE-dispatched run with no TTY (--no-follow wants a detached pane)', () => {
+    expect(resolveTmuxWrap({ ...base, hasTty: false, remoteDispatch: true }).kind).toBe('wrap');
   });
 
   it('lets the explicit per-run opt-outs beat the durability rule', () => {

@@ -19,7 +19,7 @@ import chalk from 'chalk';
 import { confirm } from '@inquirer/prompts';
 import { gatherLiveTargets, pickLiveTarget, pickLiveTargets, jumpTo, probeAttachRail, refuseFallback, type AttachRailLiveness, type UnreachableFallback } from './go.js';
 import { sessionProcessIsLocal, sessionProcessHost, shortIdFromName, type ActiveSession } from '../lib/session/active.js';
-import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, runTmux } from '../lib/tmux/index.js';
+import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, runTmux, teardownIfAgentExited } from '../lib/tmux/index.js';
 import { SESSION_AGENTS, isAgentTmuxAlias, type SessionMeta, type SessionAgentId } from '../lib/session/types.js';
 import {
   buildSessionRecoveryCommand,
@@ -303,6 +303,18 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
       return;
     }
 
+    // A live local tmux alias attaches immediately — before any fleet SSH.
+    // `collectSessionCandidates` fans out twice (transcript pool + live roster),
+    // so a selector that is already a pane on THIS box used to print two
+    // unreachable-device lists and stall on offline peers (~2 min measured on
+    // yosemite-s0 for `sessions resume ag-claude-0145ab8f --attach-only`) and
+    // only then attach. SES-41: an alive `ag-<agent>-<8hex>` pane is attached;
+    // the name is sufficient. A dead/absent pane falls through to id resolution.
+    if (shouldAttachLocalTmuxAliasBeforeFleet(textSelector, hosts)
+        && await attachLiveTmuxAlias(textSelector)) {
+      return;
+    }
+
     // RUSH-2477: an id selector for a LOCAL indexed session resolves against the
     // WAL index alone — a plain read, no write-heavy discovery scan (none of
     // `tryClaimScan`/`releaseScan`'s `BEGIN IMMEDIATE` writer lock) and no
@@ -359,12 +371,6 @@ export async function focusAction(id: string | undefined, opts: FocusOptions): P
           self,
         )
       : [];
-    // A tmux alias naming a LIVE local session attaches directly. This must run
-    // before the metadata resolver: that resolver treats an unmatched alias as a
-    // keyword query, so `ag-kimi-632c1fbc` came back as 13 unrelated text hits
-    // while the pane was alive and attachable the whole time.
-    if (exact.length === 0 && textSelector && !hosts.length && await attachLiveTmuxAlias(textSelector)) return;
-
     // Not live (or remote-scoped): an alias still carries the session's shortid,
     // so resolve by THAT rather than handing the whole `ag-<agent>-<shortid>`
     // string to the resolver — which treats an unmatched alias as a keyword
@@ -498,6 +504,18 @@ function looksLikeIdSelector(selector: string | undefined): selector is string {
   return !!selector && /^[0-9a-f][0-9a-f-]{5,}$/i.test(selector);
 }
 
+/**
+ * A local `ag-<agent>-<8hex>` alias names a pane on THIS box. Attach it
+ * without `collectSessionCandidates` (fleet SSH). `--device` keeps the
+ * sweep: the caller scoped identity to another machine.
+ */
+export function shouldAttachLocalTmuxAliasBeforeFleet(
+  selector: string | undefined,
+  hosts: string[],
+): selector is string {
+  return !!selector && hosts.length === 0 && isAgentTmuxAlias(selector);
+}
+
 function looksLikeIdentitySelector(selector: string | undefined): selector is string {
   return !!selector && (
     /^[0-9a-f][0-9a-f-]{5,}$/i.test(selector) ||
@@ -609,6 +627,7 @@ async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
   // deleted; attach-time repair is what closes the gap now (RUSH-2435).
   await ensureSessionHookRepaired(selector, socket);
   const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${selector}`] });
+  await teardownIfAgentExited(selector, socket);
   process.exitCode = code;
   return true;
 }

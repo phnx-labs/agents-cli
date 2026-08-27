@@ -832,7 +832,7 @@ agents teams stop [team] [teammate]               Stop a running teammate. Resum
 
 ```
 agents tmux                           Persistent terminal-multiplexer sessions for agents. Survive editor restarts, share with other tools.
-agents tmux attach <name>             Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d).
+agents tmux attach <name>             Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d) or the agent exits (session is then torn down).
 agents tmux capture <target>          Print the contents of a pane. Target is "name" or "name:pane".
 agents tmux check                     Check whether tmux is installed and report its version.
 agents tmux has <name>                Exit 0 if a session with this name exists, 1 otherwise. Useful in shell scripts.

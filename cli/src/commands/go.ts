@@ -40,7 +40,7 @@ import { isPromptCancelled } from './utils.js';
 import { focusAction } from './focus.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
-import { ensureSessionHookRepaired, paneExitStatus } from '../lib/tmux/session.js';
+import { ensureSessionHookRepaired, paneExitStatus, teardownIfAgentExited } from '../lib/tmux/session.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { sshExec, sshStream, assertValidSshTarget, shellQuote, SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
 import { connectionEndedNotice } from '../lib/hosts/reconnect.js';
@@ -370,7 +370,9 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
     // — the 5-min daemon reconcile that used to cover this was deleted;
     // attach-time repair is what closes the gap now (RUSH-2435).
     if (session) await ensureSessionHookRepaired(session, socket);
-    process.exit(await attachTmux({ socket, args: ['attach-session', '-t', tgt] }));
+    const code = await attachTmux({ socket, args: ['attach-session', '-t', tgt] });
+    if (session) await teardownIfAgentExited(session, socket);
+    process.exit(code);
   }
 
   // Path A: local Ghostty — focus its tab (Cmd+N via System Events).
