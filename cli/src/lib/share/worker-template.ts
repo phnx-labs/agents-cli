@@ -460,45 +460,67 @@ export default {
         );
       }
 
-      // Managed OG cover: the CLI publishes only the page and points og:image
-      // at its sibling .png. On the first request, inherit the canonical page's
-      // visibility gate, render a deterministic branded card, and cache it in
-      // R2. An explicitly uploaded BYO cover wins because this path is only
-      // entered when the sibling object is absent.
+      // Managed OG cover: generated siblings are caches, never visibility
+      // authorities. Gate every request against the current canonical page and
+      // bind each cached render to that page's etag. Re-read after rendering and
+      // after storing so a concurrent PATCH cannot publish a card from the old
+      // visibility/title/description snapshot. Explicit BYO siblings carry no
+      // generated marker and continue through the ordinary object route below.
       if (segments.length === 2 && path.endsWith('.png')) {
-        const existingCover = await env.BUCKET.get(path);
-        if (!existingCover) {
+        let existingCover = await env.BUCKET.get(path);
+        if (!existingCover || (existingCover.customMetadata && existingCover.customMetadata['og-generated'] === 'true')) {
           const pagePath = path.slice(0, -4);
-          const page = await env.BUCKET.get(pagePath);
-          if (!page) return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
-          const pageVisibility = (page.customMetadata && page.customMetadata.visibility) || 'public';
           const viewer = await resolveViewer(request, env, url);
           if (viewer.redirect) return viewer.redirect;
-          if (viewer.error && isIdentityGated(pageVisibility)) return viewer.error;
-          const denied = gateVisibility(url, env, page, viewer.identity || null);
-          if (denied) return denied;
-          const pageHtml = await page.text();
-          const meta = page.customMetadata || {};
-          const png = await hooks.renderOgCard({
-            title: meta['og-title'] || extractHtmlMeta(pageHtml, 'title') || meta.label || segments[1],
-            description: meta['og-description'] || extractHtmlMeta(pageHtml, 'description') || '',
-            handle: segments[0],
-            visibility: pageVisibility,
-            orgDomain: meta.org_domain || '',
-          });
-          await env.BUCKET.put(path, png, {
-            httpMetadata: { contentType: 'image/png' },
-            customMetadata: { ...meta, 'og-generated': 'true' },
-          });
-          const headers = new Headers({ 'content-type': 'image/png' });
-          if (isIdentityGated(pageVisibility)) {
-            headers.set('cache-control', 'private, no-store');
-            headers.set('X-Robots-Tag', 'noindex');
-          } else {
-            headers.set('cache-control', 'public, max-age=31536000, immutable');
-            if (pageVisibility === 'unlisted') headers.set('X-Robots-Tag', 'noindex');
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            const page = await env.BUCKET.get(pagePath);
+            if (!page) return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
+            const pageVisibility = (page.customMetadata && page.customMetadata.visibility) || 'public';
+            if (viewer.error && isIdentityGated(pageVisibility)) return viewer.error;
+            const denied = gateVisibility(url, env, page, viewer.identity || null);
+            if (denied) return denied;
+
+            if (existingCover && existingCover.customMetadata['og-source-etag'] === page.etag) {
+              const current = await env.BUCKET.get(pagePath);
+              if (!current || current.etag !== page.etag) { existingCover = null; continue; }
+              const currentDenied = gateVisibility(url, env, current, viewer.identity || null);
+              if (currentDenied) return currentDenied;
+              return new Response(request.method === 'HEAD' ? null : existingCover.body, {
+                status: 200,
+                headers: managedCoverHeaders(pageVisibility),
+              });
+            }
+
+            const pageHtml = await page.text();
+            const meta = page.customMetadata || {};
+            const png = await hooks.renderOgCard({
+              title: meta['og-title'] || extractHtmlMeta(pageHtml, 'title') || meta.label || segments[1],
+              description: meta['og-description'] || extractHtmlMeta(pageHtml, 'description') || '',
+              handle: segments[0],
+              visibility: pageVisibility,
+              orgDomain: meta.org_domain || '',
+            });
+            const beforeStore = await env.BUCKET.get(pagePath);
+            if (!beforeStore || beforeStore.etag !== page.etag) { existingCover = null; continue; }
+            await env.BUCKET.put(path, png, {
+              httpMetadata: { contentType: 'image/png' },
+              customMetadata: { ...meta, 'og-generated': 'true', 'og-source-etag': page.etag },
+            });
+            const beforeServe = await env.BUCKET.get(pagePath);
+            if (!beforeServe || beforeServe.etag !== page.etag) {
+              const justStored = await env.BUCKET.get(path);
+              if (justStored && justStored.customMetadata && justStored.customMetadata['og-source-etag'] === page.etag) {
+                await env.BUCKET.delete(path);
+              }
+              existingCover = null;
+              continue;
+            }
+            return new Response(request.method === 'HEAD' ? null : png, {
+              status: 200,
+              headers: managedCoverHeaders(pageVisibility),
+            });
           }
-          return new Response(request.method === 'HEAD' ? null : png, { status: 200, headers });
+          return new Response('cover changed during rendering; retry', { status: 503, headers: { 'content-type': 'text/plain', 'retry-after': '1' } });
         }
       }
 
@@ -813,7 +835,7 @@ async function renderRevisions(bucket, origin, key, method, identityGated) {
 // before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
 // One list, reused both to strip a same-named --meta collision on write and
 // to split arbitrary --meta entries back out on read.
-var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source', 'og-title', 'og-description', 'og-generated'];
+var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source', 'og-title', 'og-description', 'og-generated', 'og-source-etag'];
 var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
 var SHARE_COOKIE = '__Host-phoenix_share';
 var SHARE_COOKIE_MAX_AGE = 604800;
@@ -1257,6 +1279,18 @@ function isHiddenFromGallery(visibility) {
 
 function isIdentityGated(visibility) {
   return visibility === 'me' || visibility === 'org';
+}
+
+function managedCoverHeaders(visibility) {
+  const headers = new Headers({ 'content-type': 'image/png' });
+  if (isIdentityGated(visibility)) {
+    headers.set('cache-control', 'private, no-store');
+    headers.set('X-Robots-Tag', 'noindex');
+  } else {
+    headers.set('cache-control', 'public, max-age=31536000, immutable');
+    if (visibility === 'unlisted') headers.set('X-Robots-Tag', 'noindex');
+  }
+  return headers;
 }
 
 // Gate a me/org read given the ALREADY-RESOLVED viewer identity. Pure/sync: the

@@ -228,6 +228,59 @@ describe('lazy managed OG cover', () => {
     expect(store.get('octocat/plan.png')?.customMetadata).toMatchObject({ visibility: 'public', 'og-generated': 'true' });
   });
 
+  it('re-gates an in-flight anonymous render when PATCH changes public to me', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    (env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+    const owner = { userId: 'u1', email: 'octocat@acme.com' };
+    worker.hooks.verifyPhoenixToken = async (request: Request) => request.headers.get('authorization') ? owner : null;
+    const published = await worker.default.fetch(new Request('https://share.test/octocat/race', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html', 'x-share-visibility': 'public' },
+      body: '<title>Race</title>',
+    }), env);
+    expect(published.status).toBe(200);
+
+    const realRender = worker.hooks.renderOgCard;
+    let signalStarted!: () => void;
+    let resumeRender!: () => void;
+    const renderStarted = new Promise<void>((resolve) => { signalStarted = resolve; });
+    const renderMayFinish = new Promise<void>((resolve) => { resumeRender = resolve; });
+    worker.hooks.renderOgCard = async (input: unknown) => {
+      signalStarted();
+      await renderMayFinish;
+      return realRender(input);
+    };
+
+    const anonymousGet = worker.default.fetch(new Request('https://share.test/octocat/race.png'), env);
+    await renderStarted;
+    const makePrivate = await worker.default.fetch(new Request('https://share.test/octocat/race', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'me' }),
+    }), env);
+    expect(makePrivate.status).toBe(200);
+    resumeRender();
+
+    const racedResponse = await anonymousGet;
+    expect(racedResponse.status).not.toBe(200);
+    expect(store.has('octocat/race.png')).toBe(false);
+
+    worker.hooks.renderOgCard = realRender;
+    const ownerCover = await worker.default.fetch(new Request('https://share.test/octocat/race.png', {
+      headers: { authorization: 'Bearer phoenix' },
+    }), env);
+    expect(ownerCover.status).toBe(200);
+    expect(store.get('octocat/race.png')?.customMetadata).toMatchObject({
+      visibility: 'me',
+      'og-generated': 'true',
+      'og-source-etag': store.get('octocat/race')?.etag,
+    });
+
+    const laterAnonymous = await worker.default.fetch(new Request('https://share.test/octocat/race.png'), env);
+    expect(laterAnonymous.status).not.toBe(200);
+  });
+
   it('retains an explicitly uploaded sibling when canonical visibility changes', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();
