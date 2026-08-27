@@ -1,10 +1,12 @@
 /**
- * Pin the release cross-platform matrix trigger policy in ./ci.yml.
+ * Pin the cross-platform matrix trigger policy in ./ci.yml.
  *
- * The six-job OS × Node matrix is expensive (macOS 10×, Windows 2×). It must
- * run on release/** branch pushes/PRs and manual workflow_dispatch only — never
- * on v* tag pushes, because the tag points at the exact release commit already
- * gated by the release-branch matrix.
+ * The six-job OS × Node matrix is expensive (macOS 10×, Windows 2×) and gates
+ * nothing (main requires only `test` + `gitleaks`; release.sh gates on an
+ * exact-tree attestation, never this matrix). It must therefore stay OFF the
+ * release path: a nightly schedule plus manual workflow_dispatch only. It must
+ * NOT fire on release/** branches (16-53 min of billed, non-gating, often-red
+ * work on every release) nor on v* tags.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -21,11 +23,17 @@ function onBlock(source: string): string {
   return source.slice(start, jobs);
 }
 
-describe('ci.yml release-matrix trigger policy', () => {
+describe('ci.yml cross-platform matrix trigger policy', () => {
   const on = onBlock(CI_YML);
 
-  test('push still triggers on release/** branches', () => {
-    expect(on).toMatch(/push:\s*\n\s+branches:\s*\['release\/\*\*'\]/);
+  test('runs on a nightly schedule', () => {
+    expect(on).toMatch(/schedule:\s*\n\s+- cron:\s*'[^']+'/);
+  });
+
+  test('is OFF the release path — no release/** push or pull_request trigger', () => {
+    expect(on).not.toContain("branches: ['release/**']");
+    expect(on).not.toMatch(/^\s*push:\s*$/m);
+    expect(on).not.toMatch(/^\s*pull_request:\s*$/m);
   });
 
   test('v* tags do not trigger the matrix', () => {
@@ -35,7 +43,7 @@ describe('ci.yml release-matrix trigger policy', () => {
     expect(on).not.toContain('tags: [v*]');
   });
 
-  test('workflow_dispatch remains for manual runs', () => {
+  test('workflow_dispatch remains for on-demand pre-release runs', () => {
     expect(on).toMatch(/^\s*workflow_dispatch:\s*$/m);
   });
 });

@@ -766,9 +766,13 @@ Tests are `*.test.ts` next to source; integration in `tests/`. Every PR to `main
 runs the real suite cheaply on Linux — `test`
 ([`../../.github/workflows/tests.yml`](../../.github/workflows/tests.yml)) plus
 `gitleaks`; those two are the required checks. The full cross-platform matrix
-(ubuntu + macOS + Windows × Node 22/24, `ci.yml`) is cost-gated to `release/**`
-branch pushes/PRs and manual `workflow_dispatch` — not `v*` tags (the tag points
-at the commit already gated on the release branch). CI runs from `cli` via
+(ubuntu + macOS + Windows × Node 22/24, `ci.yml`) runs **nightly** plus manual
+`workflow_dispatch` — deliberately **off** the release path. It used to fire on
+`release/**` branches, but that was 16-53 min of macOS/Windows-billed work on
+every release while gating nothing (it is not a required check, and `release.sh`
+gates on the exact-tree attestation, never this matrix). Cross-platform
+regressions are caught on the nightly lane instead; a risky release can still run
+it on demand via `workflow_dispatch`. CI runs from `cli` via
 `defaults.run.working-directory`.
 
 **Live Windows `--device` e2e (opt-in):** `src/lib/computer/ssh-tunnel.e2e.test.ts` and
@@ -975,12 +979,14 @@ base** (never borrowed to the trigger box), publishes, and pushes the computer-
 helper release asset. `bun run build` copies the signed helpers into `dist/` on a
 presence gate (`[ -d bin/… ]`); `prepack`'s sha gate is sha-tool-portable.
 
-**Tests: an auto-picked fleet worker for Linux, GH Actions for the rest.** The
+**Tests: an auto-picked fleet worker for Linux; cross-platform runs nightly.** The
 `--apply` flow runs the full suite on a worker before opening the PR; a failure prints the failing tests +
 the captured log path and **halts before any PR/publish**. That covers the Linux
-suite; the GH Actions CI matrix on the release PR still gates the cross-platform
-(macOS/Windows) legs (`wait_for_ci_green` blocks on them, fail-closed). `--skip-tests`
-skips only that suite run.
+suite, and the exact-tree attestation is the functional proof the publish gates
+on. The cross-platform (macOS/Windows) matrix (`ci.yml`) is **not** on the release
+path — it runs nightly, not on the release PR, so a release no longer waits on it.
+Run it on demand via `workflow_dispatch` before a risky release. `--skip-tests`
+skips only the Linux suite run.
 
 **The attestation producer shards by default.** `release-attestation-produce.sh`
 (the suite run that mints the attestation) now fans the ~13k-test suite across the
