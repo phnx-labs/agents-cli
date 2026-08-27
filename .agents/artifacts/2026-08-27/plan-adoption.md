@@ -2,7 +2,7 @@
 kind: plan
 surface: cli
 title: "Adoption plan for agents-cli: fix the entity, cut the front door, own the two pains that get a million views"
-summary: "17 stars against peers at 8k-55k, four names for one product, and 46% of 564 commands dead on the author's own machine. The leaks are all upstream of the product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
+summary: "17 stars against peers at 8k-55k, four names for one product, and 46% of 564 commands dead on the author's own machine — yet it already out-downloads a 27.9k-star rival. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
 status: draft
 project: AGI
 repository: phnx-labs/agents-cli
@@ -163,18 +163,34 @@ Reasons 1 and 2 are both arguments **for** a CLI and **against** a GUI. That is 
 
 ### The peer set, with numbers
 
-| Tool | Stars | Distribution hook | Fate |
-|---|---:|---|---|
-| [Orca](https://github.com/stablyai/orca) | 54.8k | "fleet of parallel agents, bring your own subscription", MIT, cross-platform | 50k stars in under six months |
-| [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) | 27.9k | `npx vibe-kanban` | Company shut down Apr 2026; stars kept climbing |
-| [Happy](https://github.com/slopus/happy) | 23.5k | "Leave your desk. Keep your agents moving." | Thriving |
-| [Paseo](https://github.com/getpaseo/paseo) | 15.2k | open and hackable plugins | Thriving |
-| [Claude Squad](https://github.com/smtg-ai/claude-squad) | 8.4k | tmux plus worktrees TUI, AGPL | Plateaued |
-| [container-use](https://github.com/dagger/container-use) | 4.0k | `claude mcp add container-use` | Niche: isolation, not control plane |
-| [Omnara](https://github.com/omnara-ai/omnara) | 2.8k | YC, "managed agent = managed database" | Modest |
-| **agents-cli** | **17** | none yet | — |
+| Tool | Stars | npm dl/week | Distribution hook | Fate |
+|---|---:|---:|---|---|
+| [Orca](https://github.com/stablyai/orca) | 54.8k | — | "fleet of parallel agents, bring your own subscription", MIT, cross-platform | 50k stars in under six months |
+| [claude-code-router](https://github.com/musistudio/claude-code-router) | 36.9k | 154,467 | Routes requests across providers | Thriving, and complementary |
+| [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) | 27.9k | **1,495** | `npx vibe-kanban` | Company shut down Apr 2026 |
+| [Happy](https://github.com/slopus/happy) | 23.5k | 2,776 | "Leave your desk. Keep your agents moving." | Thriving |
+| [ccusage](https://github.com/ryoppippi/ccusage) | 18.2k | 87,857 | One job: show my token spend | Thriving |
+| [Paseo](https://github.com/getpaseo/paseo) | 15.2k | — | open and hackable plugins | Thriving |
+| [Claude Squad](https://github.com/smtg-ai/claude-squad) | 8.4k | 451 | tmux plus worktrees TUI, AGPL | Plateaued |
+| [container-use](https://github.com/dagger/container-use) | 4.0k | — | `claude mcp add container-use` | Niche: isolation, not control plane |
+| [Omnara](https://github.com/omnara-ai/omnara) | 2.8k | 1,060 | YC, "managed agent = managed database" | Modest |
+| [claude-swap](https://github.com/realiti4/claude-swap) | 2.0k | 4,702 | Threshold auto-switch across Claude subs | The one head-on rotation competitor |
+| **agents-cli** | **17** | **2,961** | none yet | Alive, v1.22.51 today |
+
+<div class="artifact-callout">
+<strong>The number that reframes everything.</strong> Vibe Kanban has <strong>1,644x</strong> the stars of agents-cli and <strong>half</strong> the weekly npm downloads. ccusage does exactly one thing and pulls 87,857 a week. agents-cli's 2,961/week is real usage, not a vanity metric — the deficit is visibility and legibility, not product. That is a much cheaper problem than it looked.
+</div>
 
 Note the graveyard: Terragon shut down Jan 2026, Crystal deprecated Feb 2026, Vibe Kanban's company Apr 2026. **Every dead one was a desktop GUI.** The survivors are a CLI-shaped install or a phone client.
+
+### Two capabilities nobody else has, and one competitor we do have
+
+Kimi's pass across the usage/account/version layer (36 tools, live star and download counts) found:
+
+- **Per-version isolated-HOME management for agent CLIs has no competitor at all.** `mise`, `asdf`, and `proto` pin runtimes but share `$HOME`, so two Claude Code versions still fight over `~/.claude`. Anthropic's own native installer *removed* rollback — [claude-code#20044](https://github.com/anthropics/claude-code/issues/20044), 22 reactions: *"no version control, rollbacks, or professional package management."* The vendor widened this gap themselves. Grok found no high-engagement X corpus for it, so it is not the launch tweet, but it is a defensible moat and belongs in sentence three.
+- **Rotation has exactly two competitors, both narrow.** [claude-swap](https://github.com/realiti4/claude-swap) (2.0k stars, 4,702 dl/week) polls every 60s and switches at 90% of the window — but it is Claude-only and a foreground loop you babysit. `headroom` does Claude *and* Codex, at 99 stars. Nobody combines daemon-owned rotation with stall detection. The wedge holds, but the demo has to show the daemon doing it unattended, not a script you watch.
+- **Stall detection is the genuinely hard half.** Competitors ship it and get it wrong (cmux's false-positive issues are public). "Idle versus done" is where a homegrown weekend script actually fails, which is the honest answer to the DIY objection.
+
 
 ## Current architecture
 
@@ -537,11 +553,11 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 - **Tiered help hides a command someone scripted against.** Nothing is removed, but a user who learned a group from `--help` may believe it was deleted. Mitigation: the `agents commands` pointer sits in the help body, and `agents <anything> --help` still resolves for all 564.
 - **Publicly advertising multi-account rotation is a ToS gray zone.** Anthropic's April 2026 policy shift blocked Pro and Max subscriptions on most third-party frameworks, and one developer reported seven Max accounts banned. Mitigation: frame the feature as *pin a named account per repo or session* (work versus personal), which is the same code path and a defensible story. Never proxy or resell tokens, and say so in sentence two of the README.
 - **`agents-cli` is a generic string.** This is Decision 1's own weakness: it may not rank against the literal words "agents cli". That is the honest argument for choosing a distinctive third name instead, at the cost of one hard cutover.
-- **20,412 npm downloads per month overstates external adoption.** 68 versions were published in August alone; fleet auto-update and CI install smokes account for an unknown share. Do not treat the download curve as the adoption metric. Measure stars, Show HN, and first-run telemetry instead.
+- **Do not over-read the download curve in either direction.** 68 versions shipped in August alone, so fleet auto-update and CI install smokes inflate the raw count by an unknown amount. But the cross-check holds: at 2,961/week agents-cli already out-downloads Vibe Kanban's 1,495/week despite 1,644x fewer stars, so the usage is not imaginary. Track stars, Show HN position, and first-run telemetry as the adoption metric, and keep downloads as a sanity check only.
 
 ## Tracking
 
 - Plan source: `.agents/artifacts/2026-08-27/plan-adoption.md`
-- Evidence and reducers: `.agents/scratch/adoption-2026-08-27/` — `exec_mine.py`, `exec-report.txt`, `exec-usage.json`, `is-agentic-*.json`, `out-codex.md`, `report-adoption-2026-08-27.md`
+- Evidence and reducers: `.agents/scratch/adoption-2026-08-27/` — `exec_mine.py`, `exec-report.txt`, `exec-usage.json`, `is-agentic-*.json`, `out-codex.md`, `out-kimi.md`, `report-adoption-2026-08-27.md`
 - Existing command reference: [share.agents-cli.sh — command reference](https://share.agents-cli.sh/muqsitnawaz/agents-cli-command-reference-rush-2396)
 - Live audit: [is-agentic.com/scan/agi-cli.sh](https://is-agentic.com/scan/agi-cli.sh)
