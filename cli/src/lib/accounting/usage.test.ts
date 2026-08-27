@@ -38,6 +38,7 @@ import {
   USAGE_HEADLESS_SCOPE_MARKER,
   USAGE_NO_USAGE_CREDENTIAL_MARKER,
   USAGE_NOT_COLLECTED_MARKER,
+  usageErrorForDisplay,
   probeClaudeStatus,
   probeKimiStatus,
   type UsageSnapshot,
@@ -1421,6 +1422,32 @@ describe('classifyUsageErrorKind — the interface for view.ts (RUSH-3040)', () 
   it('classifies the Claude no-usage-credential message distinctly from a generic missing credential', () => {
     expect(classifyUsageErrorKind(usageNoClaudeUsageCredentialError())).toBe('no-usage-credential');
     expect(classifyUsageErrorKind(usageNoCredentialError('Kimi'))).toBe('no-credential');
+  });
+});
+
+describe('usageErrorForDisplay — no internal sentinel leaks into --json (PHNX-3348)', () => {
+  // `agents view --json` emits `usageInfo.error` as the `usageError` field. Without
+  // `--refresh` on a never-cached account the read-only lookup returns the internal
+  // `'stale'` sentinel (USAGE_NOT_COLLECTED_MARKER) — which is a cache signal, not a
+  // human message, and leaking it verbatim contradicts the field's docstring.
+  it('maps the internal not-collected sentinel to a human, actionable string', () => {
+    const shown = usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER);
+    expect(shown).not.toBe(USAGE_NOT_COLLECTED_MARKER);
+    expect(shown).not.toBe('stale');
+    expect(shown).toContain('not collected');
+    expect(shown).toContain('--refresh');
+  });
+
+  it('passes a genuine, already-human error string through unchanged', () => {
+    const real = usageNoClaudeUsageCredentialError();
+    expect(usageErrorForDisplay(real)).toBe(real);
+    const rejected = usageRejectedError('Antigravity', 429);
+    expect(usageErrorForDisplay(rejected)).toBe(rejected);
+  });
+
+  it('returns null when there is no error', () => {
+    expect(usageErrorForDisplay(null)).toBeNull();
+    expect(usageErrorForDisplay(undefined)).toBeNull();
   });
 });
 

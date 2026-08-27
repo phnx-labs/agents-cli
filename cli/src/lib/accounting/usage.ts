@@ -204,6 +204,25 @@ export type UsageBenignState = 'no-recent-usage';
 export const USAGE_NOT_COLLECTED_MARKER = 'stale';
 
 /**
+ * Human-facing form of a `UsageInfo.error` for a machine/JSON consumer
+ * (`agents view --json`'s `usageError`). Every error string this module
+ * constructs is already a full human sentence EXCEPT the internal
+ * {@link USAGE_NOT_COLLECTED_MARKER} (`'stale'`) sentinel, which a read-only
+ * lookup returns for a never-cached account when `--refresh` was not passed. That
+ * value is an internal cache signal, not an error message, and leaking it verbatim
+ * contradicts the field's "human-readable" contract (PHNX-3348). Map it to a
+ * plain-language, actionable string and pass every genuine error through
+ * unchanged. Returns `null` when there is no error.
+ */
+export function usageErrorForDisplay(error: string | null | undefined): string | null {
+  if (!error) return null;
+  if (error === USAGE_NOT_COLLECTED_MARKER) {
+    return 'Usage not collected yet — run `agents view --refresh` to fetch it.';
+  }
+  return error;
+}
+
+/**
  * Shared error-classification + 429 backoff for a networked usage fetch whose
  * only signal is an HTTP status (or none at all, on a network failure) —
  * Antigravity's :retrieveUserQuota and Muse's Meta Model API probe are both
