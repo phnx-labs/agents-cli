@@ -264,6 +264,22 @@ describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
     expect(parsed.fleet.defaults.config.maxAgents).toBe(7);
   });
 
+  it('does not heal on a device-only write — the shared file stays byte-identical even with a stale header', async () => {
+    const { updateMeta } = await freshState();
+    writeCentral(STALE);
+    const before = fs.readFileSync(centralPath(), 'utf-8');
+
+    // A device-only write (agents pins route to the untracked device store, not
+    // central). Healing here would rewrite the shared file on an unrelated write —
+    // the exact churn that wedges `agents sync` — so central must be untouched and
+    // its stale header must survive until a real central change heals it.
+    updateMeta((m) => ({ ...m, agents: { claude: '2.1.0' } }));
+
+    const after = fs.readFileSync(centralPath(), 'utf-8');
+    expect(after).toBe(before);
+    expect(after).toContain('# https://github.com/phnx-labs/agents-cli');
+  });
+
   it('is byte-stable once healed — a later no-op central write does not touch the file', async () => {
     const { updateMeta } = await freshState();
     writeCentral(STALE);

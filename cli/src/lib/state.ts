@@ -1036,7 +1036,12 @@ const KNOWN_META_KEYS: ReadonlySet<string> = new Set([
 function healMetaHeader(serialized: string): string {
   const headerBlock =
     /^# agents-cli metadata\n# Auto-generated - do not edit manually\n(?:# (?:https:\/\/github\.com\/phnx-labs\/[^\n]*|yaml-language-server: \$schema=[^\n]*)\n)*\n?/;
-  return META_HEADER + serialized.replace(headerBlock, '');
+  const stripped = serialized.replace(headerBlock, '');
+  // No metadata header present (replace was a no-op) → leave the file exactly as
+  // it is. We heal a STALE header; we never prepend one to a file that never had
+  // it (that would rewrite a hand-authored, headerless central file on the first
+  // real central change). A current header round-trips to the identical bytes.
+  return stripped === serialized ? serialized : META_HEADER + stripped;
 }
 
 /**
@@ -1094,24 +1099,26 @@ function serializeCentral(central: Record<string, unknown>): string {
       changed = true;
     }
   }
-  // Everything cleared → header only (never leave a flow `{}` behind); this also
-  // heals a stale header-only file to the current one. Byte-stable when the file
-  // is already exactly the current header.
+  // No central field changed → keep the file byte-identical (comments intact), so
+  // writeIfChanged skips it and the churn loop never starts. A device-only write
+  // (pins/routines/etc. routed elsewhere) reaches here with changed=false and
+  // MUST NOT rewrite the shared file — header healing waits for a genuine central
+  // change below rather than dirtying agents.yaml on an unrelated write, which is
+  // the very churn that wedges `agents sync` and blocks fleet pulls.
+  if (!changed) return existing;
+  // Everything cleared → header only (never leave a flow `{}` behind). Byte-stable
+  // when the file is already exactly the current header.
   if (isEmpty) return existing === META_HEADER ? existing : META_HEADER;
-  // Serialize the edited doc when a central key changed, otherwise keep the exact
-  // existing bytes, then heal the header on that string. stringifyDoc still
-  // normalizes a legacy flow root (`{}`) to block, so edited nodes do not render
-  // flow (`disabledCommands: [ teams ]` instead of a `- teams` block list), but it
-  // no longer forces block on a normal document — that flattened committed flow
-  // sequences and made this writer disagree with feed.ts/activity.ts/migrate.ts on
-  // the same file (RUSH-2505). parseDocument still preserves body comments + key
-  // ordering.
-  const healed = healMetaHeader(changed ? stringifyDoc(doc) : existing);
-  // No central field changed AND the header was already current → healed equals
-  // the existing bytes, so returning them keeps the file byte-identical (comments
-  // intact): writeIfChanged skips it and the churn loop never starts. A stale
-  // header makes healed differ, so it is rewritten once and byte-stable after.
-  return healed === existing ? existing : healed;
+  // A central key changed: serialize the edited doc and heal a frozen header on
+  // the result. stringifyDoc still normalizes a legacy flow root (`{}`) to block,
+  // so edited nodes do not render flow (`disabledCommands: [ teams ]` instead of a
+  // `- teams` block list), but it no longer forces block on a normal document —
+  // that flattened committed flow sequences and made this writer disagree with
+  // feed.ts/activity.ts/migrate.ts on the same file (RUSH-2505). parseDocument
+  // still preserves body comments + key ordering; healMetaHeader is a no-op unless
+  // a stale metadata header is actually present, so a headerless central file is
+  // updated in place without gaining one.
+  return healMetaHeader(stringifyDoc(doc));
 }
 
 function writeMetaUnlocked(meta: Meta): void {
