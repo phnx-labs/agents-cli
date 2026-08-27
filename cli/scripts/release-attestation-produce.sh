@@ -130,15 +130,19 @@ done
 # shard still passes --maxWorkers=2 --retry=2 to vitest (below), so the RUSH-3015
 # flake mitigation (integration tests contend on shared version-home state at
 # high parallelism) is preserved PER BOX -- sharding adds machines, it does not
-# raise per-box concurrency. Count eligible workers from the same picker test.sh
-# uses; shard across them (capped). Echo nothing when <2 are eligible, so the
-# caller falls back to test.sh's single auto-picked box (its --shard has no silent
-# fallback, so we must resolve the count here rather than demand N boxes and fail
-# a release on a thin fleet). jq/agents missing -> 0 -> single box, never an error.
+# raise per-box concurrency. Count eligible workers with the SAME filter test.sh's
+# shard branch applies (headroom != "loaded", scripts/test.sh:~327), so this is the
+# exact pool it will fan across -- counting raw candidates could ask for more shards
+# than test.sh finds eligible, which it downshifts but with a misleading "only N
+# eligible" line on every release. Shard across them (capped). Echo nothing when <2
+# are eligible, so the caller falls back to test.sh's single auto-picked box (its
+# --shard has no silent fallback, so we must resolve the count here rather than
+# demand N boxes and fail a release on a thin fleet). jq/agents missing -> 0 ->
+# single box, never an error.
 SHARD_CAP=8
 resolve_default_shards() {
   local n
-  n="$(agents devices pick --json 2>/dev/null | jq -r '.candidates | length' 2>/dev/null || echo 0)"
+  n="$(agents devices pick --json 2>/dev/null | jq -r '[.candidates[] | select(.headroom != "loaded")] | length' 2>/dev/null || echo 0)"
   [[ "$n" =~ ^[0-9]+$ ]] || n=0
   if (( n >= 2 )); then
     (( n > SHARD_CAP )) && n=$SHARD_CAP

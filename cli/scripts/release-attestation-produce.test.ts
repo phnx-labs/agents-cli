@@ -258,8 +258,13 @@ describe('release-attestation-produce.sh', () => {
   // commit a recording stub test.sh (the producer runs test.sh from a fresh
   // worktree checkout, hence a commit, not a working-tree edit) and stub
   // `agents devices pick --json` on PATH to control the eligible-worker count.
-  function withRecordingTestSh(fx: ReturnType<typeof buildFixture>, root: string, candidates: number) {
-    const cand = Array.from({ length: candidates }, (_, i) => `{"device":"w${i}"}`).join(',');
+  // `headrooms` is one entry per candidate `agents devices pick` reports: a string
+  // sets that candidate's headroom, null omits the field. The producer must count
+  // only headroom != "loaded", matching test.sh's own shard-worker filter.
+  function withRecordingTestSh(fx: ReturnType<typeof buildFixture>, root: string, headrooms: Array<string | null>) {
+    const cand = headrooms
+      .map((h, i) => (h === null ? `{"device":"w${i}"}` : `{"device":"w${i}","headroom":"${h}"}`))
+      .join(',');
     fs.writeFileSync(
       path.join(fx.fakebin, 'agents'),
       [
@@ -298,12 +303,25 @@ describe('release-attestation-produce.sh', () => {
     // not per-box concurrency).
     const root = tmp('attest-produce-shard-');
     const fx = buildFixture(root);
-    const { r, argsLog } = withRecordingTestSh(fx, root, 3);
+    const { r, argsLog } = withRecordingTestSh(fx, root, [null, null, null]);
     const out = `${r.stdout}${r.stderr}`;
     expect(r.status, out).toBe(0);
     const argv = fs.readFileSync(argsLog, 'utf-8');
     expect(argv).toContain('--shard 3');
     expect(argv).toContain('--maxWorkers=2');
+  });
+
+  it('counts only headroom != "loaded", matching test.sh\'s shard-worker filter', () => {
+    // The producer's count must be the SAME eligible pool test.sh will fan across
+    // (scripts/test.sh filters headroom != "loaded"). Counting raw candidates would
+    // ask for more shards than test.sh finds eligible. Here 2 idle + 2 loaded -> 2.
+    const root = tmp('attest-produce-loaded-');
+    const fx = buildFixture(root);
+    const { r, argsLog } = withRecordingTestSh(fx, root, ['idle', 'idle', 'loaded', 'loaded']);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(r.status, out).toBe(0);
+    const argv = fs.readFileSync(argsLog, 'utf-8');
+    expect(argv).toContain('--shard 2');
   });
 
   it('falls back to a single auto-picked box when fewer than 2 workers are eligible (no thin-fleet release break)', () => {
@@ -312,7 +330,7 @@ describe('release-attestation-produce.sh', () => {
     // resolves the count itself and only shards when >=2 are eligible.
     const root = tmp('attest-produce-thin-');
     const fx = buildFixture(root);
-    const { r, argsLog } = withRecordingTestSh(fx, root, 1);
+    const { r, argsLog } = withRecordingTestSh(fx, root, [null]);
     const out = `${r.stdout}${r.stderr}`;
     expect(r.status, out).toBe(0);
     const argv = fs.readFileSync(argsLog, 'utf-8');
