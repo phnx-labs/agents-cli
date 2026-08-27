@@ -4845,7 +4845,15 @@ export function filterSessionsByQuery(
     );
   }
 
-  return sessions
+  // The listing pool is a page of the index. FTS hits the whole index. Union
+  // so a grep-visible transcript is returned even when it missed the page
+  // (PHNX-2767).
+  const poolById = new Map(sessions.map(s => [s.id, s]));
+  for (const [id, hit] of contentIndex) {
+    if (!poolById.has(id)) poolById.set(id, hit);
+  }
+
+  return [...poolById.values()]
     .map(session => ({ session, score: scoreSessionQuery(session, terms) }))
     .filter(entry => {
       // Include if scored by topic/project/etc, or matched by content search
@@ -5753,7 +5761,7 @@ export function registerSessionsCommands(program: Command): void {
 
   setHelpSections(sessionsCmd, {
     examples: `
-      # Search prior sessions in this project by topic, file path, or command
+      # Search indexed transcripts by topic, file path, or command
       agents sessions "add auth middleware"
 
       # Read a session as markdown (user + assistant + thinking + tools)
