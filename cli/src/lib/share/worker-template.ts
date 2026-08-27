@@ -25,6 +25,10 @@
 //   - PATCH /<username>/<slug> — authenticated metadata-only edit. Rewrites the
 //     exact existing body with all HTTP/custom metadata preserved except the
 //     explicitly requested label/arbitrary metadata changes; never revisions.
+//     Conditional put (onlyIf etagMatches) so a concurrent republish 409s
+//     instead of rolling the body back. Phoenix requires customMetadata.owner
+//     === auth.owner (fail closed when the stamp is missing); WRITE_TOKEN is
+//     the admin repair path.
 //   - GET  /<username>/<slug>  — public|unlisted are anonymous; me requires the
 //     Phoenix owner, org requires a same-domain Phoenix identity (Bearer, then
 //     HMAC cookie, then phoenix_ticket). Unauthenticated me/org 302s to
@@ -208,9 +212,9 @@ export default {
       if (!existing) return json({ error: 'share not found', key: path }, 404);
       const owner = existing.customMetadata && existing.customMetadata.owner;
       // WRITE_TOKEN is the endpoint owner/admin credential (the same authority
-      // the DELETE path grants it). Only a Phoenix bearer is constrained to the
-      // per-object owner stamped by managed publishing.
-      if (auth.kind === 'phoenix' && owner && owner !== auth.owner) return json({ error: 'forbidden' }, 403);
+      // the DELETE path grants it). Phoenix must prove ownership — fail closed
+      // when the object has no owner stamp (handles collide after sanitization).
+      if (auth.kind === 'phoenix' && (!owner || owner !== auth.owner)) return json({ error: 'forbidden' }, 403);
 
       let edit;
       try { edit = await request.json(); } catch { return json({ error: 'PATCH body must be JSON' }, 400); }
@@ -247,7 +251,10 @@ export default {
       if (!metadata['published-at']) metadata['published-at'] = new Date(existing.uploaded).toISOString();
       const httpHeaders = new Headers();
       if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(httpHeaders);
-      await env.BUCKET.put(path, existing.body, { httpMetadata: httpHeaders, customMetadata: metadata });
+      const putOpts = { httpMetadata: httpHeaders, customMetadata: metadata };
+      if (existing.httpEtag) putOpts.onlyIf = { etagMatches: existing.httpEtag };
+      const putResult = await env.BUCKET.put(path, existing.body, putOpts);
+      if (putResult === null) return json({ error: 'conflict', key: path }, 409);
       return json({ ok: true, url: url.origin + '/' + path, label: metadata.label || null, meta: extraMetaOf(metadata) }, 200);
     }
 

@@ -16,18 +16,29 @@ interface StoredObject {
   customMetadata: Record<string, string>;
   uploaded: string;
   size: number;
+  etag: string;
 }
 
 function makeEnv() {
   const store = new Map<string, StoredObject>();
+  let etagSeq = 0;
   const env = {
     WRITE_TOKEN: 'secret',
     BUCKET: {
       put: async (
         key: string,
         body: BodyInit | null,
-        opts: { httpMetadata?: { contentType?: string }; customMetadata?: Record<string, string> },
+        opts: {
+          httpMetadata?: { contentType?: string };
+          customMetadata?: Record<string, string>;
+          onlyIf?: { etagMatches?: string };
+        },
       ) => {
+        const current = store.get(key);
+        if (opts.onlyIf?.etagMatches) {
+          // R2 returns null when the precondition fails (Workers API).
+          if (!current || current.etag !== opts.onlyIf.etagMatches) return null;
+        }
         // The Worker forwards request.body (a ReadableStream) — consume it so the
         // fake records a real byte size, exactly as R2 would.
         const buf = body == null ? Buffer.alloc(0) : Buffer.from(await new Response(body as BodyInit).arrayBuffer());
@@ -35,13 +46,17 @@ function makeEnv() {
         const httpMetadata = rawHttp instanceof Headers
           ? { contentType: rawHttp.get('content-type') ?? undefined }
           : (rawHttp ?? {});
+        etagSeq += 1;
+        const etag = `"etag-${etagSeq}"`;
         store.set(key, {
           body: buf,
           httpMetadata,
           customMetadata: opts.customMetadata ?? {},
           uploaded: new Date().toISOString(),
           size: buf.length,
+          etag,
         });
+        return { httpEtag: etag, size: buf.length };
       },
       get: async (key: string) => {
         const item = store.get(key);
@@ -50,7 +65,7 @@ function makeEnv() {
           body: item.body,
           customMetadata: item.customMetadata,
           uploaded: new Date(item.uploaded),
-          httpEtag: '"etag"',
+          httpEtag: item.etag,
           // R2 objects expose text()/arrayBuffer(); the Worker reads text() to
           // inject the attribution bar, so the fake must too.
           text: async () => Buffer.from(item.body).toString('utf8'),
@@ -411,6 +426,69 @@ describe('worker metadata edit route (PATCH /<user>/<slug>)', () => {
     await put(worker, env, 'octocat/existing-meta', 'body', { 'x-share-meta': JSON.stringify({ note: 'x'.repeat(2000) }) });
     const largeMergedMeta = await worker.default.fetch(new Request('https://share.test/octocat/existing-meta', { method: 'PATCH', headers: { authorization: 'Bearer secret', 'content-type': 'application/json' }, body: JSON.stringify({ meta: { second: 'y'.repeat(100) } }) }), env);
     expect(largeMergedMeta.status).toBe(400);
+  });
+
+  it('returns 409 when a concurrent republish changes the object between PATCH get and put', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/plan', 'v1-body');
+    const origGet = env.BUCKET.get;
+    env.BUCKET.get = async (key: string) => {
+      const obj = await origGet(key);
+      const cur = store.get(key);
+      if (cur) {
+        store.set(key, { ...cur, body: Buffer.from('v2-body'), etag: '"etag-raced"', size: 7 });
+      }
+      return obj;
+    };
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ meta: { status: 'final' } }),
+    }), env);
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ error: 'conflict' });
+    expect(store.get('octocat/plan')!.body.toString()).toBe('v2-body');
+  });
+
+  it('refuses a Phoenix PATCH of an ownerless object and of another owner; WRITE_TOKEN still repairs', async () => {
+    const worker = await loadWorker();
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'alice', email: 'alice@example.com' });
+    const { env, store } = makeEnv();
+    await put(worker, env, 'alice/legacy', 'exact');
+    delete store.get('alice/legacy')!.customMetadata.owner;
+
+    const ownerless = await worker.default.fetch(new Request('https://share.test/alice/legacy', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ meta: { project: 'AGI' } }),
+    }), env);
+    expect(ownerless.status).toBe(403);
+
+    store.get('alice/legacy')!.customMetadata.owner = 'someone-else';
+    const other = await worker.default.fetch(new Request('https://share.test/alice/legacy', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ meta: { project: 'AGI' } }),
+    }), env);
+    expect(other.status).toBe(403);
+
+    const admin = await worker.default.fetch(new Request('https://share.test/alice/legacy', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
+      body: JSON.stringify({ meta: { project: 'AGI' } }),
+    }), env);
+    expect(admin.status).toBe(200);
+    expect(store.get('alice/legacy')!.customMetadata.project).toBe('AGI');
+
+    store.get('alice/legacy')!.customMetadata.owner = 'alice';
+    const own = await worker.default.fetch(new Request('https://share.test/alice/legacy', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ meta: { status: 'final' } }),
+    }), env);
+    expect(own.status).toBe(200);
+    expect(store.get('alice/legacy')!.customMetadata.status).toBe('final');
   });
 });
 

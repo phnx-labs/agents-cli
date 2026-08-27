@@ -45,6 +45,8 @@ import {
   parseMetaEntries,
   sanitizeLabel,
   resolveShareVisibility,
+  scanShareContent,
+  formatSensitiveContentError,
   type PublishResult,
   type ShareVisibility,
 } from '../lib/share/publish.js';
@@ -148,9 +150,19 @@ export async function runShareEdit(
     githubUser?: string; config?: ShareConfig; writeToken?: string; byo?: boolean;
     session?: PhoenixSession | null; label?: string | null; meta?: Record<string, string>;
     metaMode?: 'merge' | 'replace'; removeMeta?: string[];
+    force?: boolean;
     fetchEdit?: typeof fetch;
   },
 ): Promise<ShareEditResult> {
+  // Same public-listing gate as publish: label + every metadata value are
+  // world-readable in the gallery and `share list --list-json`.
+  if (opts.force !== true) {
+    const hits = [
+      ...(typeof opts.label === 'string' ? scanShareContent(opts.label) : []),
+      ...Object.values(opts.meta ?? {}).flatMap((value) => scanShareContent(value)),
+    ];
+    if (hits.length > 0) throw new Error(formatSensitiveContentError(hits));
+  }
   const backend = resolveShareBackend({ githubUser: opts.githubUser, config: opts.config, writeToken: opts.writeToken, byo: opts.byo, session: opts.session });
   const { key } = await resolveDeleteTarget(target, { githubUser: backend.kind === 'managed' ? backend.namespace : opts.githubUser || backend.namespace });
   const res = await (opts.fetchEdit ?? fetch)(`${backend.baseUrl.replace(/\/+$/, '')}/${key}`, {
@@ -966,7 +978,7 @@ ${SHARE_DELETE_NOTES}
     .option('--edit-json', 'emit the machine-readable edit result')
     .action(async (target: string, opts: { forUser?: string; label?: string; removeLabel?: boolean; meta: string[]; replaceMeta: string[]; removeMeta: string[]; editJson?: boolean }) => {
       try {
-        const parent = shareCmd.opts<{ label?: string; meta?: string[] }>();
+        const parent = shareCmd.opts<{ label?: string; meta?: string[]; force?: boolean }>();
         const label = opts.label ?? parent.label;
         const mergeMeta = opts.meta.length ? opts.meta : (parent.meta ?? []);
         if (label !== undefined && opts.removeLabel) throw new Error('--label and --remove-label are mutually exclusive.');
@@ -980,6 +992,8 @@ ${SHARE_DELETE_NOTES}
           meta: parseMetaEntries(opts.replaceMeta.length ? opts.replaceMeta : mergeMeta),
           metaMode: opts.replaceMeta.length ? 'replace' : 'merge',
           removeMeta,
+          // Parent `share --force` (RUSH-2687: a child --force is silently dropped).
+          force: parent.force,
         });
         console.log(opts.editJson ? JSON.stringify(result, null, 2) : chalk.green(`updated ${result.url}`));
       } catch (e) { console.error(chalk.red((e as Error).message)); process.exitCode = 1; }
@@ -999,6 +1013,8 @@ ${SHARE_DELETE_NOTES}
   publication time, visibility, expiry, provenance, cover, and retained revisions. --meta merges;
   --replace-meta replaces all arbitrary metadata; --remove-meta deletes named keys.
   Reserved Worker/provenance keys cannot be changed through metadata flags.
+  Edited labels and metadata values are scanned for emails and credential-shaped
+  strings the same way publish is — pass --force to write them anyway.
     `,
   });
 

@@ -1147,6 +1147,29 @@ describe('share metadata edit/filter (PHNX-3278)', () => {
     expect(JSON.parse(String(request?.body))).toEqual({ label: 'Final', meta: { status: 'final' }, metaMode: 'merge', removeMeta: ['draft'] });
     expect(result.label).toBe('Final');
   });
+
+  it('refuses credential-shaped metadata on edit unless force is set', async () => {
+    const { share } = await freshShareModules();
+    const config = { baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b' };
+    const secret = 'ghp_' + 'A'.repeat(24);
+    await expect(share.runShareEdit('plan', {
+      githubUser: 'octocat', writeToken: 'secret', config,
+      meta: { token: secret },
+      fetchEdit: (async () => { throw new Error('must not fetch'); }) as typeof fetch,
+    })).rejects.toThrow(/credential-shaped strings/);
+
+    let fetched = false;
+    const result = await share.runShareEdit('plan', {
+      githubUser: 'octocat', writeToken: 'secret', config,
+      meta: { token: secret }, force: true,
+      fetchEdit: (async () => {
+        fetched = true;
+        return new Response(JSON.stringify({ ok: true, url: 'https://share.test/octocat/plan', label: null, meta: { token: secret } }), { status: 200 });
+      }) as typeof fetch,
+    });
+    expect(fetched).toBe(true);
+    expect(result.url).toBe('https://share.test/octocat/plan');
+  });
 });
 
 describe('parseShareRevisions', () => {
