@@ -181,6 +181,8 @@ export const RESERVED_META_KEYS = [
   'label-source',
   'og-title',
   'og-description',
+  'og-generated',
+  'og-source-etag',
 ] as const;
 
 const META_KEY_RE = /^[a-z0-9-]{1,64}$/;

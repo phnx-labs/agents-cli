@@ -756,7 +756,13 @@ describe('parseMetaEntries (RUSH-2683)', () => {
   });
 
   it('rejects Worker-stamped keys owner/visibility/expires-at (RUSH-3135)', () => {
-    expect(RESERVED_META_KEYS).toEqual(expect.arrayContaining(['owner', 'visibility', 'expires-at']));
+    expect(RESERVED_META_KEYS).toEqual(expect.arrayContaining([
+      'owner',
+      'visibility',
+      'expires-at',
+      'og-generated',
+      'og-source-etag',
+    ]));
     expect(() => parseMetaEntries(['owner=someone-else'])).toThrow(/reserved/);
     expect(() => parseMetaEntries(['visibility=public'])).toThrow(/reserved/);
     expect(() => parseMetaEntries(['expires-at=never'])).toThrow(/reserved/);
