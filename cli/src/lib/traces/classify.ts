@@ -53,30 +53,55 @@ function normalizedEvidence(input: TopicEvidence): string {
     .toLowerCase();
 }
 
+/**
+ * The human task labels the console's session-topic treemap renders — the taxonomy
+ * approved in the Phoenix Evals mockup (`console-v0-mockup.html`, 2026-08-24), which the
+ * shipped 5-label heuristic never matched. Ordered most-specific first; the first rule
+ * whose `text` (normalized cwd+branch+topic+label) or `tool` (any tool in the mix) hits
+ * wins. `group` stays one of the five stable `TraceTopicGroup` values so the treemap's
+ * grouping and existing consumers don't move — only the per-leaf `key`/`label` become the
+ * granular human terms (Feature work / Bug fixes / Refactor / Debugging / Release /
+ * Fleet-ops / Blog & docs). One-time: existing users' `bucketHistory`/`driftSignals` keyed
+ * on the old `engineering`/`operations`/`content` show a single-day discontinuity the day
+ * this ships, then track the new keys.
+ */
+interface TopicRule {
+  group: TraceTopicGroup;
+  key: string;
+  label: string;
+  text?: RegExp;
+  tool?: RegExp;
+}
+
+const TOPIC_RULES: readonly TopicRule[] = [
+  { group: 'review', key: 'code-review', label: 'Code review',
+    text: /\b(review|audit|pr[-_/ ]?review|code[-_/ ]?review)\b/, tool: /review|comment/ },
+  { group: 'ops', key: 'release', label: 'Release',
+    text: /\b(release|deploy|publish|rollout|changelog)\b/ },
+  { group: 'research', key: 'debugging', label: 'Debugging',
+    text: /\b(debug|investigat|repro|root[-_ ]?cause|traceback|stack ?trace)\b/ },
+  { group: 'content', key: 'content', label: 'Blog & docs',
+    text: /\b(blog|docs?|documentation|readme|post|article|content|caption)\b/ },
+  { group: 'research', key: 'research', label: 'Research',
+    text: /\b(research|analysis|benchmark|paper|explore|spike)\b/, tool: /web_search|search_query|webfetch|browser/ },
+  { group: 'code', key: 'bugfix', label: 'Bug fixes',
+    text: /\b(fix|bug|hotfix|patch)\b/ },
+  { group: 'code', key: 'refactor', label: 'Refactor',
+    text: /\b(refactor|cleanup|clean[-_ ]?up|restructure|rename|tidy)\b/ },
+  { group: 'ops', key: 'operations', label: 'Fleet / ops',
+    text: /\b(fleet|ci|infra|daemon|provision|ops|pipeline)\b/, tool: /ssh|deploy|computer/ },
+  { group: 'code', key: 'feature', label: 'Feature work',
+    text: /\b(feat|feature|implement|add|build|code|test)\b/, tool: /edit|write|apply_patch|exec|bash|shell/ },
+];
+
 /** Classify a session from metadata and aggregate tool names; never reads transcript text. */
 export function classifyTopic(input: TopicEvidence): ClassifiedTopic {
   const text = normalizedEvidence(input);
   const tools = Object.keys(input.toolMix ?? {}).map((tool) => tool.toLowerCase());
-  const hasTool = (pattern: RegExp): boolean => tools.some((tool) => pattern.test(tool));
-
-  if (/\b(review|audit|pr[-_/ ]?review|code[-_/ ]?review)\b/.test(text)
-      || hasTool(/review|comment/)) {
-    return { group: 'review', key: 'code-review', label: 'Code review' };
-  }
-  if (/\b(research|investigat|analysis|benchmark|paper|docs?)\b/.test(text)
-      || hasTool(/web_search|search_query|webfetch|browser/)) {
-    return { group: 'research', key: 'research', label: 'Research' };
-  }
-  if (/\b(blog|copy|content|post|article|script|caption)\b/.test(text)) {
-    return { group: 'content', key: 'content', label: 'Content' };
-  }
-  if (/\b(deploy|release|infra|ci|ops|fleet|daemon|provision)\b/.test(text)
-      || hasTool(/ssh|deploy|computer/)) {
-    return { group: 'ops', key: 'operations', label: 'Operations' };
-  }
-  if (/\b(test|fix|bug|feat|refactor|implement|code)\b/.test(text)
-      || hasTool(/edit|write|apply_patch|exec|bash|shell/)) {
-    return { group: 'code', key: 'engineering', label: 'Engineering' };
+  for (const rule of TOPIC_RULES) {
+    if ((rule.text && rule.text.test(text)) || (rule.tool && tools.some((tool) => rule.tool!.test(tool)))) {
+      return { group: rule.group, key: rule.key, label: rule.label };
+    }
   }
   return { group: 'research', key: 'general', label: 'General' };
 }

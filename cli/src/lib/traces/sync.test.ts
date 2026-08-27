@@ -83,11 +83,11 @@ describe('rich traces index shard', () => {
     const expected = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, 'testdata/rich-index.json'), 'utf8'));
     expect(shard).toEqual(expected);
 
-    expect(readSessionTopics<ClassifiedTopic>([id]).get(id)?.key).toBe('engineering');
+    expect(readSessionTopics<ClassifiedTopic>([id]).get(id)?.key).toBe('bugfix');
     db.prepare('UPDATE sessions SET file_size = file_size + 1 WHERE id = ?').run(id);
     expect(readSessionTopics<ClassifiedTopic>([id]).has(id)).toBe(false);
     buildIndexShard([{ ...first, file_size: first.file_size! + 1 }], 'test-device', 'owner-1');
-    expect(readSessionTopics<ClassifiedTopic>([id]).get(id)?.key).toBe('engineering');
+    expect(readSessionTopics<ClassifiedTopic>([id]).get(id)?.key).toBe('bugfix');
     db.prepare('UPDATE sessions SET file_mtime_ms = file_mtime_ms + 1 WHERE id = ?').run(id);
     expect(readSessionTopics<ClassifiedTopic>([id]).has(id)).toBe(false);
     buildIndexShard([{
@@ -95,7 +95,7 @@ describe('rich traces index shard', () => {
       file_mtime_ms: first.file_mtime_ms! + 1,
       file_size: first.file_size! + 1,
     }], 'test-device', 'owner-1');
-    expect(readSessionTopics<ClassifiedTopic>([id]).get(id)?.key).toBe('engineering');
+    expect(readSessionTopics<ClassifiedTopic>([id]).get(id)?.key).toBe('bugfix');
     db.prepare(`
       UPDATE session_insights
       SET file_mtime_ms = ?, file_size = ?,
@@ -121,10 +121,10 @@ describe('rich traces index shard', () => {
       schema: 1, device: 'test-device', syncedAt: 0, owner: 'owner-1',
       stats: { sessionsImported: 1, medianMs: 0, p90Ms: 0, needAttention: 0, toolErrorRate: 0.1 },
       needsAttention: [],
-      topics: [{ key: 'engineering', label: 'Engineering', count: 10, group: 'code' }],
+      topics: [{ key: 'bugfix', label: 'Bug fixes', count: 10, group: 'code' }],
       failures: { byToolError: [], byCause: { real: 0, guard: 0, hook: 0 } },
       bucketHistory: Array.from({ length: 7 }, (_, i) => [
-        { key: 'engineering', date: `2026-08-${String(i + 18).padStart(2, '0')}`, count: 10, errorRate: 0.1, stallRate: 0 },
+        { key: 'bugfix', date: `2026-08-${String(i + 18).padStart(2, '0')}`, count: 10, errorRate: 0.1, stallRate: 0 },
       ]),
       driftSignals: [],
     });
@@ -180,7 +180,7 @@ describe('rich traces index shard', () => {
     // vs the seeded 7-day baseline (errorRate=0.1) → delta≈0.567 → degrading.
     const indexBody = JSON.parse(indexPutBodies[0]);
     expect(indexBody.driftSignals).toHaveLength(1);
-    expect(indexBody.driftSignals[0].bucket).toBe('engineering');
+    expect(indexBody.driftSignals[0].bucket).toBe('bugfix');
     expect(indexBody.driftSignals[0].severity).toBe('degrading');
   });
 });

@@ -57,7 +57,10 @@ claims the first reply and routes it over the recorded session reply rail.
 spanMs/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
 `whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
 rich per-device `index.json`. The index contains duration/error statistics,
-ranked attention flags, metadata/tool-mix topic buckets, and structured tool
+ranked attention flags, metadata/tool-mix topic buckets — the human task taxonomy the
+console treemap renders (Feature work · Bug fixes · Refactor · Debugging · Code review ·
+Release · Blog & docs · Fleet / ops), an ordered rules table in `classify.ts`'s
+`classifyTopic`, keyed within the five stable `TraceTopicGroup` groups — and structured tool
 failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**.
 Group-by dimensions for the console insight bar are pure functions in
 [`src/lib/traces/segments.ts`](src/lib/traces/segments.ts): `deriveAgent`

@@ -15,12 +15,32 @@ describe('classifyCause', () => {
 
 describe('classifyTopic', () => {
   it('uses repository metadata and tool mix without transcript content', () => {
+    // A fix/* branch is a bug fix, not generic "engineering".
     expect(classifyTopic({ gitBranch: 'fix/session-cache', toolMix: { Edit: 3 } })).toEqual({
-      group: 'code', key: 'engineering', label: 'Engineering',
+      group: 'code', key: 'bugfix', label: 'Bug fixes',
     });
     expect(classifyTopic({ label: 'Review PR 123' })).toEqual({
       group: 'review', key: 'code-review', label: 'Code review',
     });
+  });
+
+  it('splits code work into the human task leaves the console renders', () => {
+    expect(classifyTopic({ label: 'feat: add insights breakdown', toolMix: { Edit: 2 } }))
+      .toMatchObject({ group: 'code', key: 'feature', label: 'Feature work' });
+    expect(classifyTopic({ gitBranch: 'refactor/exec-env' }))
+      .toMatchObject({ group: 'code', key: 'refactor', label: 'Refactor' });
+    expect(classifyTopic({ label: 'debug the flaky drift signal' }))
+      .toMatchObject({ group: 'research', key: 'debugging', label: 'Debugging' });
+    expect(classifyTopic({ label: 'Release 1.22.54' }))
+      .toMatchObject({ group: 'ops', key: 'release', label: 'Release' });
+    expect(classifyTopic({ gitBranch: 'fleet/provision-daemon', toolMix: { Bash: 1 } }))
+      .toMatchObject({ group: 'ops', key: 'operations', label: 'Fleet / ops' });
+    expect(classifyTopic({ label: 'update the blog post and docs' }))
+      .toMatchObject({ group: 'content', key: 'content', label: 'Blog & docs' });
+  });
+
+  it('falls back to General when nothing matches', () => {
+    expect(classifyTopic({})).toEqual({ group: 'research', key: 'general', label: 'General' });
   });
 });
 
