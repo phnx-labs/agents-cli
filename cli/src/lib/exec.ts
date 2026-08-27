@@ -217,6 +217,14 @@ export type ExecEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max' | 'auto';
 /** Options for spawning an agent process. Omitting `prompt` launches the CLI interactively. */
 export interface ExecOptions {
   agent: AgentId;
+  /**
+   * Custom harness / profile name when this run was launched via
+   * `agents run <profile>` (e.g. `deepseek`). `agent` stays the HOST CLI
+   * that actually executes. Stamped onto `AGENTS_AGENT_NAME`, the pid
+   * registry, and the session-actor sidecar so listings can tell the
+   * profile apart from a native host run (PHNX-2935).
+   */
+  harnessName?: string;
   version?: string;
   /** Version home whose native auth/config is overlaid onto this run's binary. */
   configVersion?: string;
@@ -300,6 +308,27 @@ export interface ExecOptions {
    * session. Also forced off by AGENTS_NO_TMUX=1. No effect on headless runs.
    */
   raw?: boolean;
+}
+
+/**
+ * Identity a custom-harness run stamps on env / pid-registry / sidecars.
+ * `agent` is the host CLI; `harnessName` is the profile the user launched.
+ * Empty/whitespace harness names fall back to the host so a blank stamp
+ * never hides a real agent.
+ */
+export function stampedAgentName(options: Pick<ExecOptions, 'agent' | 'harnessName'>): string {
+  const harness = options.harnessName?.trim();
+  return harness || options.agent;
+}
+
+/**
+ * Profile name when it differs from the host agent. Undefined for a native
+ * run, so pid-registry / sidecar records stay sparse.
+ */
+export function customHarnessName(options: Pick<ExecOptions, 'agent' | 'harnessName'>): string | undefined {
+  const harness = options.harnessName?.trim();
+  if (!harness || harness === options.agent) return undefined;
+  return harness;
 }
 
 /**
@@ -489,8 +518,11 @@ export function buildExecEnv(options: ExecOptions): NodeJS.ProcessEnv {
   );
   result.AGENTS_HISTORY_DIR = getHistoryDir();
   // So activity / feed posts stamp the right harness without re-detecting.
+  // A custom-harness run (`agents run deepseek`) must stamp the PROFILE name,
+  // not the host CLI (`claude`) — otherwise sessions and feed posts cannot
+  // tell the two apart (PHNX-2935).
   if (options.agent) {
-    result.AGENTS_AGENT_NAME = options.agent;
+    result.AGENTS_AGENT_NAME = stampedAgentName(options);
   }
   if (options.cwd) {
     result.AGENTS_CWD = options.cwd;
@@ -1795,6 +1827,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
     writePidSessionEntry({
       pid: panePid,
       agent: options.agent,
+      harness: customHarnessName(options),
       sessionId: options.sessionId,
       cwd,
       actor: resolveActor().id,
@@ -1813,6 +1846,7 @@ async function runInTmux(options: ExecOptions, executable: string, args: string[
         sessionId: options.sessionId,
         actor: resolveActor().id,
         initiatedBy: resolveActor().kind,
+        harness: customHarnessName(options),
         startedAtMs: Date.now(),
       });
     }
@@ -2022,6 +2056,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     writePidSessionEntry({
       pid: child.pid ?? 0,
       agent: options.agent,
+      harness: customHarnessName(options),
       sessionId: options.sessionId,
       cwd: options.cwd || process.cwd(),
       actor: resolveActor().id,
@@ -2036,6 +2071,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
         sessionId: options.sessionId,
         actor: resolveActor().id,
         initiatedBy: resolveActor().kind,
+        harness: customHarnessName(options),
         startedAtMs: Date.now(),
       });
     }

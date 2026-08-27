@@ -38,7 +38,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 40;
+export const SCHEMA_VERSION = 41;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -77,6 +77,7 @@ CREATE TABLE IF NOT EXISTS sessions (
   id TEXT PRIMARY KEY,
   short_id TEXT NOT NULL,
   agent TEXT NOT NULL,
+  harness TEXT,
   origin TEXT DEFAULT 'cli',
   routine_name TEXT,
   routine_run_id TEXT,
@@ -432,6 +433,8 @@ interface SessionRow {
   id: string;
   short_id: string;
   agent: string;
+  /** Custom harness/profile name; NULL for a native host run (PHNX-2935). */
+  harness: string | null;
   origin: string | null;
   routine_name: string | null;
   routine_run_id: string | null;
@@ -1214,6 +1217,20 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     }
   }
 
+  if (fromVersion < 41) {
+    // v40 -> v41: persist the custom-harness / profile name a run was launched
+    // as (PHNX-2935). Transcript discovery still keys `agent` on the HOST
+    // (the file lives under the host's session dir), so without this column
+    // `agents sessions` cannot tell `agents run deepseek` from a native claude
+    // run. Additive, no ledger flush — the name is launch metadata joined from
+    // the actor sidecar, not parsed from the transcript. Pre-upgrade rows stay
+    // NULL (native / unknown) until a sidecar-backed rescan fills them.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('harness')) db.exec(`ALTER TABLE sessions ADD COLUMN harness TEXT`);
+  }
+
 }
 
 /**
@@ -1790,7 +1807,7 @@ export function recordDirScans(
 
 const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   INSERT INTO sessions (
-    id, short_id, agent, origin, routine_name, routine_run_id,
+    id, short_id, agent, harness, origin, routine_name, routine_run_id,
     version, account, account_key, account_org, mode, timestamp, last_activity,
     project, cwd, git_branch, topic, label, message_count, token_count,
     output_tokens, input_tokens, cache_read_tokens, cache_write_tokens,
@@ -1801,7 +1818,7 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
     recent_directories_touched, linear_project, linear_project_url, machine,
     actor, initiated_by, used_browser, used_computer
   ) VALUES (
-    @id, @short_id, @agent, @origin, @routine_name, @routine_run_id,
+    @id, @short_id, @agent, @harness, @origin, @routine_name, @routine_run_id,
     @version, @account, @account_key, @account_org, @mode, @timestamp, @last_activity,
     @project, @cwd, @git_branch, @topic, @label, @message_count, @token_count,
     @output_tokens, @input_tokens, @cache_read_tokens, @cache_write_tokens,
@@ -1815,6 +1832,11 @@ const upsertSessionStmt = (db: Database.Database) => db.prepare(`
   ON CONFLICT(id) DO UPDATE SET
     short_id = excluded.short_id,
     agent = excluded.agent,
+    -- Custom harness/profile name is launch metadata, not transcript-derived.
+    -- COALESCE(existing, incoming) keeps a stored stamp on rescan (the scanner
+    -- carries none) and backfills a NULL-first row once the sidecar lands —
+    -- the same write-once pattern as actor/initiated_by (PHNX-2935).
+    harness = COALESCE(sessions.harness, excluded.harness),
     origin = excluded.origin,
     routine_name = excluded.routine_name,
     routine_run_id = excluded.routine_run_id,
@@ -2136,6 +2158,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     id: meta.id,
     short_id: meta.shortId,
     agent: meta.agent,
+    harness: meta.harness ?? actorRec?.harness ?? null,
     origin: meta.origin ?? 'cli',
     routine_name: meta.routineName ?? null,
     routine_run_id: meta.routineRunId ?? null,
@@ -2355,6 +2378,7 @@ export function upsertSessionsBatch(
         id: meta.id,
         short_id: meta.shortId,
         agent: meta.agent,
+        harness: meta.harness ?? actorIndex.get(meta.id)?.harness ?? null,
         origin: meta.origin ?? 'cli',
         routine_name: meta.routineName ?? null,
         routine_run_id: meta.routineRunId ?? null,
@@ -2598,6 +2622,7 @@ function rowToMeta(row: SessionRow): SessionMeta {
     id: row.id,
     shortId: row.short_id,
     agent: row.agent as SessionAgentId,
+    harness: row.harness ?? undefined,
     origin: (row.origin === 'routine' ? 'routine' : 'cli'),
     routineName: row.routine_name ?? undefined,
     routineRunId: row.routine_run_id ?? undefined,

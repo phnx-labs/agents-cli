@@ -10,6 +10,7 @@ import path from 'node:path';
 import chalk from 'chalk';
 import { truncate, humanDuration } from '../lib/format.js';
 import type { SessionEvent, SessionMeta, TodoItem, TodoProgress } from '../lib/session/types.js';
+import { sessionDisplayAgent } from '../lib/session/types.js';
 import { fetchPeerPreviewDigest } from '../lib/session/remote-list.js';
 import { parseSession, sanitizeForTerminal, SNAPSHOT_TODO_TOOLS } from '../lib/session/parse.js';
 import { safeTeamText } from '../lib/session/team-filter.js';
@@ -470,7 +471,7 @@ function formatHeader(session: SessionMeta, events: SessionEvent[]): string {
 
   // Line 1: Agent v version · shortId · model · account
   const line1: string[] = [];
-  line1.push(chalk.gray(`${displayAgent(session.agent)}${session.version ? ` v${session.version}` : ''}`));
+  line1.push(chalk.gray(`${displayAgent(sessionDisplayAgent(session))}${session.version ? ` v${session.version}` : ''}`));
   if (session.shortId) line1.push(chalk.dim(session.shortId));
   if (model) line1.push(chalk.bold.white(shortenModel(model)));
   if (session.account) line1.push(chalk.gray(session.account));

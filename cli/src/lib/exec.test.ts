@@ -3,7 +3,7 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
+import { shouldTapStdout, resolveInteractive, inferredInteractiveWithoutTty, buildExecCommand, nativeResume, resolveShimSpawn, buildExecEnv, stampedAgentName, customHarnessName, resolveTmuxWrap, buildTmuxAgentCommand, writeTmuxEnvFile, formatPaneTail, detectRateLimit, detectOutOfCredits, classifyClaudeRunRefusal, detectAuthFailure, detectAuthFailureEvent, authFailureReason, isAuthFailureFromLog, resolveLaunchId, shouldRecapDeadPane, isPaneKnownAliveFromQueryResult, tmuxRunExitCode, UNKNOWN_OUTCOME_EXIT_CODE, type TmuxWrapContext } from './exec.js';
 import type { ExecOptions } from './exec.js';
 import { isTmuxInstalled } from './tmux/binary.js';
 import { mailboxDir } from './mailbox.js';
@@ -211,6 +211,32 @@ describe('buildExecEnv — AGENTS_MAILBOX_DIR wiring (mailbox loop-closer)', () 
       env: { AGENTS_MAILBOX_DIR: runBox },
     }));
     expect(env.AGENTS_MAILBOX_DIR).toBe(runBox);
+  });
+});
+
+describe('buildExecEnv — custom harness identity (PHNX-2935)', () => {
+  it('stamps AGENTS_AGENT_NAME with the profile name, not the host CLI', () => {
+    // The bug: `agents run deepseek` resolved the host to claude and then
+    // stamped AGENTS_AGENT_NAME=claude, so feed posts and sessions could not
+    // tell a deepseek run from a native claude run.
+    const env = buildExecEnv(execOpts({ agent: 'claude', harnessName: 'deepseek' }));
+    expect(env.AGENTS_AGENT_NAME).toBe('deepseek');
+  });
+
+  it('keeps AGENTS_AGENT_NAME as the host for a native run', () => {
+    expect(buildExecEnv(execOpts({ agent: 'claude' })).AGENTS_AGENT_NAME).toBe('claude');
+  });
+
+  it('stampedAgentName prefers a non-empty harness name', () => {
+    expect(stampedAgentName({ agent: 'claude', harnessName: 'deepseek' })).toBe('deepseek');
+    expect(stampedAgentName({ agent: 'claude' })).toBe('claude');
+    expect(stampedAgentName({ agent: 'claude', harnessName: '  ' })).toBe('claude');
+  });
+
+  it('customHarnessName is sparse — only set when the profile differs from the host', () => {
+    expect(customHarnessName({ agent: 'claude', harnessName: 'deepseek' })).toBe('deepseek');
+    expect(customHarnessName({ agent: 'claude' })).toBeUndefined();
+    expect(customHarnessName({ agent: 'claude', harnessName: 'claude' })).toBeUndefined();
   });
 });
 

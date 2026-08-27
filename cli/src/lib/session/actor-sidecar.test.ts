@@ -106,6 +106,26 @@ describe('upsertSession joins the actor sidecar (RUSH-2019)', () => {
     return { id, shortId: id.slice(0, 8), agent: 'claude', timestamp: '2026-08-01T10:00:00.000Z', filePath };
   }
 
+  it('fills harness from the sidecar so a deepseek run is not indexed as claude (PHNX-2935)', () => {
+    writeSessionActorRecord({ sessionId: 'joined-harness', harness: 'deepseek', startedAtMs: 1 });
+    upsertSession(scanMeta('joined-harness'), '');
+    const meta = getSessionById('joined-harness');
+    expect(meta?.agent).toBe('claude');
+    expect(meta?.harness).toBe('deepseek');
+  });
+
+  it('preserves a stored harness on rescan and backfills a NULL-first row', () => {
+    upsertSession(scanMeta('harness-backfill'), '');
+    expect(getSessionById('harness-backfill')?.harness).toBeUndefined();
+    writeSessionActorRecord({ sessionId: 'harness-backfill', harness: 'deepseek', startedAtMs: 1 });
+    upsertSession(scanMeta('harness-backfill'), '');
+    expect(getSessionById('harness-backfill')?.harness).toBe('deepseek');
+
+    fs.rmSync(path.join(TEST_HOME, '.agents', '.history', 'by-session', 'harness-backfill.json'), { force: true });
+    upsertSession({ ...scanMeta('harness-backfill'), topic: 'rescanned' }, '');
+    expect(getSessionById('harness-backfill')?.harness).toBe('deepseek');
+  });
+
   it('fills actor/initiatedBy from the sidecar when the scanned meta has none', () => {
     writeSessionActorRecord({ sessionId: 'joined-1', actor: 'grace@example.com', initiatedBy: 'human', mode: 'edit', startedAtMs: 1 });
     upsertSession(scanMeta('joined-1'), '');

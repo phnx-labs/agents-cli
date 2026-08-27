@@ -63,6 +63,19 @@ describe('empty-shortId repair migration (v16)', () => {
   });
 });
 
+describe('harness column migration (v41)', () => {
+  it('adds the harness column to a v40 index', () => {
+    const db = getDB();
+    db.exec(`ALTER TABLE sessions DROP COLUMN harness`);
+    db.prepare(`INSERT OR REPLACE INTO meta(key, value) VALUES ('schema_version', '40')`).run();
+    closeDB();
+
+    const reopened = getDB();
+    const cols = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('harness');
+  });
+});
+
 describe('model column migration (v20)', () => {
   it('adds the model column to a v19 index', () => {
     const db = getDB();

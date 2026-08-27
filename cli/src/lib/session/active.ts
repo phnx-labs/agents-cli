@@ -174,7 +174,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName'
+  'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness'
 >;
 
 export function backfillActiveRowsFromMeta(
@@ -195,6 +195,7 @@ export function backfillActiveRowsFromMeta(
     }
     if (!s.origin && m.origin) s.origin = m.origin;
     if (!s.routineName && m.routineName) s.routineName = m.routineName;
+    if (!s.harness && m.harness) s.harness = m.harness;
   }
 }
 
@@ -299,6 +300,13 @@ export type RecapSource = 'label' | 'last' | 'prompt';
 export interface ActiveSession {
   context: ActiveContext;
   kind: string;
+  /**
+   * Custom harness / profile name when this live process was launched via
+   * `agents run <profile>` (e.g. `deepseek`). `kind` stays the HOST process
+   * (claude) so transcript lookup and live-signal parsers keep working.
+   * `sessions --active` displays this when set (PHNX-2935).
+   */
+  harness?: string;
   /** Specific host app — 'code', 'cursor', 'codium', 'iterm', 'terminal', 'warp', 'tmux', etc. */
   host?: string;
   pid?: number;
@@ -1398,6 +1406,7 @@ export async function listTeamsActive(opts: { localOnly?: boolean } = {}): Promi
     return applyState({
       context: 'teams',
       kind: a.agentType,
+      harness: a.profileName ?? undefined,
       pid: a.pid ?? undefined,
       sessionId: resolvedId,
       machine: offloaded ? execHost : undefined,
@@ -1461,6 +1470,7 @@ export async function listTerminalsActive(): Promise<ActiveSession[]> {
     return applyState({
       context: 'terminal',
       kind: t.kind,
+      harness: pidEntry?.harness,
       host: detectHost(t.pid, procByPid),
       tty: procByPid.get(t.pid)?.tty,
       pid: t.pid,
@@ -1958,6 +1968,7 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
     out.push(applyState({
       context,
       kind,
+      harness: entry?.harness,
       host,
       tty: procByPid.get(pid)?.tty,
       pid,
@@ -1985,6 +1996,8 @@ async function listUnattributedActiveLive(attributed: Set<number>): Promise<Acti
 /** One tmux pane's resolved agent identity for the authoritative source. */
 interface PaneIdentity {
   agent: string;
+  /** Custom harness/profile name from the launch registry, when set. */
+  harness?: string;
   /** Exact session id when resolvable (launch registry, or the hook join). */
   sessionId?: string;
   /** The agent's OS pid from the launch registry (may differ from `pane_pid`). */
@@ -2038,7 +2051,7 @@ export function resolvePaneIdentity(
         terminalId: liveEntry.terminalId,
       })?.session_id
       ?? nameSessionId;
-    return { agent: liveEntry.agent, sessionId, pid: liveEntry.pid };
+    return { agent: liveEntry.agent, harness: liveEntry.harness, sessionId, pid: liveEntry.pid };
   }
   // No live-registry entry. Session-meta labels are the wrapped-origin fallback;
   // prefer them, then fall back to the name so a pane with neither a registry
@@ -2191,6 +2204,7 @@ export async function listTmuxAgentSessions(): Promise<ActiveSession[]> {
     out.push(applyState({
       context: 'terminal',
       kind: id.agent,
+      harness: id.harness,
       host: 'tmux',
       pid,
       sessionId: id.sessionId ?? sessionIdFromFile(sessionFile),

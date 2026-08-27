@@ -27,6 +27,13 @@ export interface SessionActorRecord {
   initiatedBy?: 'human' | 'agent';
   /** Effective permissions mode used by the launcher. */
   mode?: SessionRunMode;
+  /**
+   * Custom harness / profile name when launched via `agents run <profile>`
+   * (e.g. `deepseek`). Joined onto the session index at scan time so a
+   * durable listing can distinguish the profile from its host agent
+   * (PHNX-2935).
+   */
+  harness?: string;
   /** Stable wrapper names that resolve to this native session id. */
   aliases?: string[];
   startedAtMs: number;
@@ -58,6 +65,7 @@ function isSafeAlias(alias: string): boolean {
 function hasRecordData(record: SessionActorRecord): boolean {
   return typeof record.actor === 'string'
     || typeof record.mode === 'string'
+    || typeof record.harness === 'string'
     || (Array.isArray(record.aliases) && record.aliases.some(alias => typeof alias === 'string'));
 }
 
@@ -101,6 +109,7 @@ export function writeSessionAliasRecord(sessionId: string, alias: string): void 
       actor: previous?.actor,
       initiatedBy: previous?.initiatedBy,
       mode: previous?.mode,
+      harness: previous?.harness,
       aliases: normalizedAliases([...(previous?.aliases ?? []), alias]),
       startedAtMs: previous?.startedAtMs ?? Date.now(),
     });

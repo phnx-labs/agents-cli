@@ -77,6 +77,16 @@ describe('renderActiveRowLines', () => {
 
   // RUSH-2336: every process-backed row now surfaces its exact machine + pid
   // handle; a cloud row surfaces its provider + task id instead of a pid.
+  it('shows the custom-harness name instead of the host process (PHNX-2935)', () => {
+    const [line1] = renderActiveRowLines(
+      active({ kind: 'claude', harness: 'deepseek', cwd: undefined, topic: undefined, label: undefined }),
+      '  ',
+      120,
+    );
+    expect(line1).toContain('deepseek');
+    expect(line1).not.toMatch(/\bclaude\b/);
+  });
+
   it('shows a machine:pid locator for a process row', () => {
     const s = active({ context: 'terminal', machine: 'yosemite-s0', pid: 48213, cwd: undefined, topic: undefined, label: undefined });
     const lines = renderActiveRowLines(s, '  ', 120);

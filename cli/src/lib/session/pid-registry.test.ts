@@ -49,6 +49,19 @@ describe('pid session registry', () => {
     expect(got?.initiatedBy).toBe('human');
   });
 
+  it('round-trips a custom-harness stamp so --active can show deepseek not claude (PHNX-2935)', () => {
+    writePidSessionEntry({
+      pid: FAKE_PID,
+      agent: 'claude',
+      harness: 'deepseek',
+      sessionId: 'abc-123-uuid',
+      startedAtMs: 1,
+    });
+    const got = readPidSessionEntry(FAKE_PID);
+    expect(got?.agent).toBe('claude');
+    expect(got?.harness).toBe('deepseek');
+  });
+
   it('returns undefined for a pid with no entry', () => {
     expect(readPidSessionEntry(FAKE_PID + 7)).toBeUndefined();
   });

@@ -2,6 +2,8 @@
 
 ## 1.22.52
 
+- **Custom harness runs (`agents run deepseek`) stamp the profile name on sessions, not the host CLI (PHNX-2935).** A profile launched via `agents run <name>`, a teammate, or a routine/monitor was recorded everywhere as its host agent (`claude`): `AGENTS_AGENT_NAME`, the pid registry, and the session index had no harness column, so `agents sessions` / `--active` / the preview header could not tell a deepseek run from a native claude run. The host agent stays the execution identity (binary, transcript path, parsers); the profile name now rides `AGENTS_AGENT_NAME`, `PidSessionEntry.harness`, a durable `sessions.harness` column joined from the launch sidecar, and the listing/preview/`--active` display. `--device` dispatch, teams, and routines already re-enter `agents run <name>`, so they pick the stamp up on the executing side. Source: `cli/src/lib/exec.ts`, `cli/src/lib/session/{pid-registry,actor-sidecar,db,active,types}.ts`, `cli/src/commands/{exec,sessions,sessions-picker}.ts`.
+
 - **`agents artifacts share --visibility me|org` — identity-gated share pages (PHNX-3260).**
   Extends the P1 `public|unlisted` tiers (RUSH-3135) with two Phoenix-gated GET
   visibilities. `me` is visible only to the signed-in owner (the viewer's Phoenix

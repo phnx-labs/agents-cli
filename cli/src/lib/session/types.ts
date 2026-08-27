@@ -42,6 +42,17 @@ export function isSessionTrackedAgent(agent: string): agent is SessionAgentId {
   return (SESSION_AGENTS as string[]).includes(agent);
 }
 
+/**
+ * The name `agents sessions` shows for a run. A custom harness launched via a
+ * profile (`agents run deepseek`) keeps its host agent for transcript discovery
+ * and parsing (`claude`) and stamps the profile name on `harness`. Display
+ * prefers that stamp so a deepseek run is not listed as claude (PHNX-2935).
+ */
+export function sessionDisplayAgent(session: { agent: string; harness?: string | null }): string {
+  const harness = session.harness?.trim();
+  return harness || session.agent;
+}
+
 /** A single normalized event within a session (message, tool call, thinking, etc.). */
 export interface SessionEvent {
   type: 'message' | 'tool_use' | 'tool_result' | 'thinking' | 'error' | 'init' | 'result' | 'usage' | 'attachment' | 'hook' | 'interrupt';
@@ -175,6 +186,13 @@ export interface SessionMeta {
   id: string;
   shortId: string;
   agent: SessionAgentId;
+  /**
+   * Custom harness / profile name when this session was launched via
+   * `agents run <profile>` (e.g. `deepseek`). `agent` stays the HOST
+   * harness that produced the transcript (`claude`, …) so discovery and
+   * parsing keep working. Display surfaces this when set (PHNX-2935).
+   */
+  harness?: string;
   /** Where the indexed transcript came from. Routine rows are archived from a run directory. */
   origin?: 'cli' | 'routine';
   /** Routine name for transcripts archived from ~/.agents/.history/runs/<name>/<runId>/. */

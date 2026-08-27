@@ -2153,6 +2153,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       let accountConfigVersion: string | undefined;
       let profileProvider: string | undefined;
       let fromProfile = false;
+      let profileName: string | undefined;
       let profileFallbackModel: { envKey: string; model: string } | undefined;
       let workflowModel: string | undefined;
       // WORKFLOW.md capability scoping, translated to Claude headless flags below.
@@ -2241,6 +2242,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
           profileProvider = readProfile(rawAgent).provider;
           profileFallbackModel = resolved.fallbackModel;
           fromProfile = true;
+          profileName = resolved.profileName;
           process.stderr.write(chalk.gray(`Resolved custom harness '${resolved.profileName}' -> ${agent}${version ? `@${version}` : ''}\n`));
           if (resolved.tierNote) {
             process.stderr.write(chalk.gray(`[agents] ${resolved.tierNote}\n`));
@@ -3121,6 +3123,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
 
       const execOptions: ExecOptions = {
         agent,
+        harnessName: profileName,
         version,
         configVersion: accountConfigVersion,
         prompt,

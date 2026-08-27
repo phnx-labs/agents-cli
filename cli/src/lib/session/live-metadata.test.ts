@@ -46,6 +46,7 @@ describe('activeSessionToSessionMeta', () => {
     expect(meta!.id).toBe('b947a623-1111-2222-3333-444444444444');
     expect(meta!.shortId).toBe('b947a623');
     expect(meta!.agent).toBe('claude');
+    expect(meta!.harness).toBeUndefined();
     // The transcript path rides across, so buildPreview parses the real digest
     // when the file is on disk.
     expect(meta!.filePath).toBe('/home/me/.claude/projects/p/b947a623.jsonl');
@@ -61,6 +62,20 @@ describe('activeSessionToSessionMeta', () => {
     expect(meta!.gitBranch).toBe('feat');
     expect(meta!.timestamp).toBe(new Date(now - 5_000).toISOString());
     expect(meta!.lastActivity).toBe(new Date(now - 1_000).toISOString());
+  });
+
+  it('carries the custom-harness stamp so preview of a live deepseek run is not claude (PHNX-2935)', () => {
+    const meta = activeSessionToSessionMeta(
+      active({
+        sessionId: 'b947a623-1111-2222-3333-444444444444',
+        kind: 'claude',
+        harness: 'deepseek',
+      }),
+      self,
+      now,
+    );
+    expect(meta!.agent).toBe('claude');
+    expect(meta!.harness).toBe('deepseek');
   });
 
   it('leaves filePath empty when the transcript has no path yet (renders header + live note)', () => {

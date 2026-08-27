@@ -44,6 +44,7 @@ export function activeSessionToSessionMeta(
     id,
     shortId: deriveShortId(id),
     agent: active.kind,
+    harness: active.harness,
     timestamp: new Date(startedMs).toISOString(),
     lastActivity: new Date(lastMs).toISOString(),
     // An empty file path is honest — a just-created session may have no

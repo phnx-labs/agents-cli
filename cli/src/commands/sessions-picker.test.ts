@@ -187,6 +187,14 @@ describe('buildPreview — ticket + PR links line', () => {
     _resetLinearWorkspaceCache();
   });
 
+  it('shows the custom-harness name in the preview header, not the host (PHNX-2935)', () => {
+    const preview = stripVTControlCharacters(
+      buildPreview(mk({ agent: 'claude', harness: 'deepseek' })),
+    );
+    expect(preview).toContain('Deepseek');
+    expect(preview).not.toMatch(/\bClaude\b/);
+  });
+
   it('shows the ticket id and PR number in the preview', () => {
     const preview = stripVTControlCharacters(
       buildPreview(mk({ ticketId: 'RUSH-1864', prUrl: 'https://github.com/o/r/pull/42', prNumber: 42 })),

@@ -87,7 +87,7 @@ with what, and how big it got.** The nine fields below are that contract.
 | # | Field | Meaning | In preview today | In the data model |
 |---|-------|---------|------------------|-------------------|
 | 1 | owner / account | who ran it | yes — `sessions-picker.ts:178` | `SessionMeta.account` (`types.ts:136`) |
-| 2 | harness (agent) | claude / codex / … | yes — `sessions-picker.ts:175` | `SessionMeta.agent` (`types.ts:109`) |
+| 2 | harness (agent) | claude / codex / …, or a custom profile name | yes — `sessions-picker.ts` `formatHeader` via `sessionDisplayAgent` | `SessionMeta.agent` (host) + `SessionMeta.harness` (profile, PHNX-2935) |
 | 3 | version | agents-cli version | yes — `sessions-picker.ts:175` | `SessionMeta.version` (`types.ts:135`) |
 | 4 | model | model used | yes* — `sessions-picker.ts:177` | **not persisted** — only `SessionEvent.model` (`types.ts:51`), read via `extractModel` |
 | 5 | tokens burned | total (and output) | yes — `sessions-picker.ts:201` | `SessionMeta.tokenCount` (`types.ts:128`), `outputTokens` (`types.ts:130`) |

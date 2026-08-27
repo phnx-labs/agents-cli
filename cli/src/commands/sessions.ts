@@ -20,7 +20,7 @@ import { listProjectDefs, resolveProjectNameForCwd, type ProjectDef } from '../l
 import ora from 'ora';
 import type { AgentId } from '../lib/types.js';
 import type { SessionAgentId, SessionMeta, ViewMode } from '../lib/session/types.js';
-import { SESSION_AGENTS, isAgentTmuxAlias } from '../lib/session/types.js';
+import { SESSION_AGENTS, isAgentTmuxAlias, sessionDisplayAgent } from '../lib/session/types.js';
 import { discoverArtifacts, readArtifact, resolveArtifact } from '../lib/session/artifacts.js';
 import { looksLikePath, toComparablePath, homeDir, needsWindowsShell, composeWin32CommandLine } from '../lib/platform/index.js';
 import { getActiveSessions, describeActiveDiscoveryHealth, sessionProcessIsLocal, backfillActiveRowsFromIndex, backfillActiveRowsFromMeta, isRunningLiveSession, serializeActiveSessionsForJson, serializeSessionsJson, shortIdFromName, type ActiveSession, type BackfillMeta } from '../lib/session/active.js';
@@ -407,10 +407,11 @@ async function renderArtifactsForSession(
     return;
   }
 
-  const agentColor = colorAgent(session.agent);
+  const shown = sessionDisplayAgent(session);
+  const agentColor = colorAgent(shown);
   console.log('');
   console.log(
-    agentColor(session.agent) +
+    agentColor(shown) +
     chalk.gray(` · ${session.shortId} · ${formatRelativeTime(session.timestamp)}`)
   );
   console.log(chalk.gray('─'.repeat(72)));
@@ -933,7 +934,8 @@ function fitCell(content: string, room: number): string {
  */
 export function renderActiveRowLines(s: ActiveSession, indent: string, termW: number): string[] {
   const idCol = chalk.dim(padToWidth((s.sessionId?.slice(0, 8)) ?? '-', ROW_ID_W));
-  const kindCol = colorAgent(s.kind as any)(padToWidth(truncateToWidth(s.kind, ROW_AGENT_W), ROW_AGENT_W + 1));
+  const shownKind = sessionDisplayAgent({ agent: s.kind, harness: s.harness });
+  const kindCol = colorAgent(shownKind)(padToWidth(truncateToWidth(shownKind, ROW_AGENT_W), ROW_AGENT_W + 1));
   const versionCol = chalk.gray(padToWidth(truncateToWidth(s.version ?? '', ROW_VERSION_W), ROW_VERSION_W + 1));
   const statusCol = statusColor(s.status)(padToWidth(truncateToWidth(activityLabel(s), ROW_STATUS_W - 1), ROW_STATUS_W));
   const ownerCol = chalk.cyan(padToWidth(truncateToWidth(ownerLabel(s), ROW_OWNER_W - 1), ROW_OWNER_W));
@@ -1237,6 +1239,7 @@ export function serializeResolvedSessionsJson(sessions: SessionMeta[]): string {
     id: session.id,
     shortId: session.shortId,
     agent: session.agent,
+    harness: session.harness,
     origin: session.origin,
     timestamp: session.timestamp,
     lastActivity: session.lastActivity,
@@ -2136,7 +2139,8 @@ function runOutcomeDetail(meta: RunMeta): string {
 /** Compact per-session metadata line under a linked session row. */
 function linkedSessionMeta(session: SessionMeta): string {
   const parts: string[] = [];
-  parts.push(session.version ? `${session.agent} v${session.version}` : session.agent);
+  const shown = sessionDisplayAgent(session);
+  parts.push(session.version ? `${shown} v${session.version}` : shown);
   if (session.account) parts.push(session.account);
   if (session.model) parts.push(shortenModel(session.model));
   if (typeof session.outputTokens === 'number') parts.push(`${formatTokenCount(session.outputTokens)} out`);
@@ -3410,7 +3414,8 @@ export function flatSessionRow(
   cols: PickerColumns = {},
   bookmarked = false,
 ): string {
-  const agentColor = colorAgent(session.agent);
+  const shown = sessionDisplayAgent(session);
+  const agentColor = colorAgent(shown);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const project = session.project || '-';
   const tag = originTag(session) || teamTag(session);
@@ -3463,7 +3468,7 @@ export function flatSessionRow(
   return (
     bookmarkCell +
     chalk.white(padToWidth(truncateToWidth(session.shortId, 9), 10)) +
-    agentColor(padToWidth(truncateToWidth(session.agent, 8), 9)) +
+    agentColor(padToWidth(truncateToWidth(shown, 8), 9)) +
     chalk.yellow(padToWidth(truncateToWidth(session.version || '-', 7), 8)) +
     (modelW ? chalk.yellow(padToWidth(truncateToWidth(modelLabel(session.model), modelW - 1), modelW)) : '') +
     machineCell +
@@ -3480,7 +3485,8 @@ export function flatSessionRow(
 
 /** One tree-mode row (grouped under a dir header): id · agent · badges · topic · time. No version/project column. */
 function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
-  const agentColor = colorAgent(session.agent);
+  const shown = sessionDisplayAgent(session);
+  const agentColor = colorAgent(shown);
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const tag = originTag(session) || teamTag(session);
   const label = (session as any).label;
@@ -3504,7 +3510,7 @@ function treeSessionRow(session: SessionMeta, live?: ActiveSession): string {
   return (
     '  ' +
     chalk.dim(padToWidth(session.shortId, 9)) +
-    agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
+    agentColor(padToWidth(truncateToWidth(shown, 7), 8)) +
     (badges ? badges + ' ' : '') +
     (glyph ? glyph + ' ' : '') +
     statusCell +
@@ -3686,7 +3692,8 @@ const TEAM_HANDLE_W = 16;
  * identity the `--teams` view exists to show (RUSH-1997).
  */
 function teamMemberRow(session: SessionMeta, live?: ActiveSession): string {
-  const agentColor = colorAgent(session.agent);
+  const shown = sessionDisplayAgent(session);
+  const agentColor = colorAgent(shown);
   const origin = session.teamOrigin;
   const age = sessionAgeParts(session.timestamp, session.lastActivity);
   const handle = safeTeamText(origin?.handle) ?? session.shortId;
@@ -3709,7 +3716,7 @@ function teamMemberRow(session: SessionMeta, live?: ActiveSession): string {
   return (
     '  ' +
     chalk.dim(padToWidth(session.shortId, 9)) +
-    agentColor(padToWidth(truncateToWidth(session.agent, 7), 8)) +
+    agentColor(padToWidth(truncateToWidth(shown, 7), 8)) +
     chalk.yellow(padToWidth(truncateToWidth(mode || '-', TEAM_MODE_W), TEAM_MODE_W + 1)) +
     (badges ? badges + ' ' : '') +
     (glyph ? glyph + ' ' : '') +
@@ -3896,13 +3903,14 @@ function renderArchivedSession(
     }, null, 2));
     return;
   }
-  const agentColor = colorAgent(session.agent);
+  const shown = sessionDisplayAgent(session);
+  const agentColor = colorAgent(shown);
   const absTime = formatAbsoluteTime(session.timestamp);
   const title = (session as any).label || session.topic;
   console.log('');
   if (title) console.log(chalk.bold.white(title));
   console.log(
-    agentColor(session.agent) +
+    agentColor(shown) +
     (session.version ? chalk.yellow(` ${session.version}`) : '') +
     (session.project ? chalk.cyan(`  ${session.project}`) : '') +
     chalk.gray(`  ${absTime} (${formatRelativeTime(session.timestamp)})`) +
@@ -3939,20 +3947,21 @@ async function renderSession(
     }
     console.log(chalk.yellow('Session transcript not available (file no longer exists).'));
     console.log(chalk.gray(`Path: ${session.filePath}`));
-    if (session.version) console.log(chalk.gray(`Version: ${session.agent} ${session.version}`));
+    if (session.version) console.log(chalk.gray(`Version: ${sessionDisplayAgent(session)} ${session.version}`));
     if (session.project) console.log(chalk.gray(`Project: ${session.project}`));
     if (session.account) console.log(chalk.gray(`Account: ${session.account}`));
     console.log(chalk.gray(`Time: ${session.timestamp}`));
     return;
   }
 
-  const spinner = ora(`Parsing ${session.agent} session...`).start();
+  const spinner = ora(`Parsing ${sessionDisplayAgent(session)} session...`).start();
   const parsedEvents = parseSession(session.filePath, session.agent);
   spinner.stop();
 
   let events = filterEvents(parsedEvents, filters);
 
-  const agentColor = colorAgent(session.agent);
+  const shown = sessionDisplayAgent(session);
+  const agentColor = colorAgent(shown);
   console.log('');
 
   if (mode === 'summary') {
@@ -3969,7 +3978,7 @@ async function renderSession(
       console.log(chalk.bold.white(title) + (badges ? '  ' + badges : ''));
     }
     console.log(
-      agentColor(session.agent) +
+      agentColor(shown) +
       (session.version ? chalk.yellow(` ${session.version}`) : '') +
       modelStr +
       (session.project ? chalk.cyan(`  ${session.project}`) + branchStr : branchStr) +
@@ -3986,7 +3995,7 @@ async function renderSession(
 
   if (mode === 'markdown') {
     console.log(
-      agentColor(session.agent) +
+      agentColor(shown) +
       (session.version ? chalk.yellow(` ${session.version}`) : '') +
       (session.project ? chalk.cyan(` ${session.project}`) : '') +
       chalk.gray(` ${formatRelativeTime(session.timestamp)}`) +
@@ -4197,7 +4206,8 @@ export function formatPickerLabel(
   bookmarked = false,
   live?: ActiveSession,
 ): string {
-  const agentColor = colorAgent(s.agent);
+  const shown = sessionDisplayAgent(s);
+  const agentColor = colorAgent(shown);
   const age = sessionAgeParts(s.timestamp, s.lastActivity);
   const project = s.project || '-';
   // SSH-launch origin (live rows only): mirrors the flat listing's `ssh←<device>`
@@ -4269,7 +4279,7 @@ export function formatPickerLabel(
     // live row with no session id is named by its pid or cloud task, which can
     // run past the column and shunt every later column out of alignment.
     chalk.white(padRight(truncate(s.shortId, 9), 10)) +
-    agentColor(padRight(truncate(s.agent, 8), 9)) +
+    agentColor(padRight(truncate(shown, 8), 9)) +
     chalk.yellow(padRight(truncate(versionStr, 7), 8)) +
     machineCell +
     hostCell +

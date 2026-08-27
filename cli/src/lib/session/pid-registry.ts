@@ -24,6 +24,13 @@ import { getTerminalsDir } from '../state.js';
 export interface PidSessionEntry {
   pid: number;
   agent: string;
+  /**
+   * Custom harness / profile name when this pid was launched via
+   * `agents run <profile>` (e.g. `deepseek`). `agent` stays the HOST
+   * CLI (`claude`) so process matching and transcript discovery keep
+   * working. `sessions --active` displays this when set (PHNX-2935).
+   */
+  harness?: string;
   /** The launch session id. Present for agents launched with a known id (Claude). */
   sessionId?: string;
   cwd?: string;
