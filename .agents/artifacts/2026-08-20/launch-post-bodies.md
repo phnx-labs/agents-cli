@@ -41,7 +41,7 @@ mechanic that makes a specific number valuable — a reader can evaluate the cla
 from the title alone, which is why they click. It is the same mechanic that makes
 the wrong number expensive.
 
-Candidate B is `Show HN: Agi - open-source CLI that rotates 7 Claude accounts so
+Candidate B is `Show HN: Agi - source-available CLI that rotates 7 Claude accounts so
 runs never stall`. It contains two separately attackable things:
 
 **1. "7 Claude accounts" invites a terms-of-service argument.** HN has a
@@ -128,15 +128,14 @@ headroom," which remains true, and makes no stall-prevention promise.
 ### The Show HN title, ranked
 
 ```
-A.  Show HN: Open-source CLI that runs 16 coding agents across your own machines
-B.  Show HN: Agi - open-source CLI that rotates 7 Claude accounts so runs never stall
+A.  Show HN: Source-available CLI that runs 16 coding agents across your own machines
+B.  Show HN: Agi - source-available CLI that rotates 7 Claude accounts so runs never stall
 C.  Show HN: Run coding agents on machines you own, not a per-seat cloud sandbox
 ```
 
-**A is the pick.** 76 characters, inside the 65-85 band that averaged 11.0 points
-against 6.1 for short titles. It carries "open-source" (the strongest single
-lever: mean 23.7 for titles that say it against 8.4 for those that do not) and
-a number (17.3 vs 8.2 for titles without one), and the number it carries —
+**A is the pick.** 81 characters, inside the 65-85 band that averaged 11.0 points
+against 6.1 for short titles. It uses the accurate "source-available" label and
+carries a number (17.3 vs 8.2 for titles without one), and the number it carries —
 16 — is checkable, defensible, and boring in the right way. Nobody starts a fight
 about how many harnesses you support.
 

@@ -87,7 +87,7 @@ agi-cli is a **terminal-first tool that also wears a web face**. The same brand 
 - **The terminal** — the primary surface. Thousands of lines of `chalk`-colored output, spinners, and aligned monospace tables. This is where the tool lives.
 - **The web** — the [agi-cli.sh](https://agi-cli.sh) landing page. The same identity rendered in HTML, and it leans *harder* into the terminal aesthetic than the CLI: `#0a0a0a` canvas, one neon-lime accent, and monospace almost everywhere — a JetBrains Mono wordmark over a system `ui-monospace` body. The page reads like a `man` page that happens to be a website.
 
-> **Not the Rush/Swarmify brand.** agi-cli is Phoenix Labs OSS and terminal-coded; it does not use Swarmify's Geist/coral system. The Swarmify VS Code extension mirrors this *palette* (lime on black) but is a separate product with its own design doc — don't import its tokens here.
+> **Not the Rush/Swarmify brand.** agi-cli is Phoenix Labs source-available (FSL-1.1-Apache-2.0) and terminal-coded; it does not use Swarmify's Geist/coral system. The Swarmify VS Code extension mirrors this *palette* (lime on black) but is a separate product with its own design doc — don't import its tokens here.
 
 The through-line across both surfaces is **quiet, dense, high-signal**. The tool is mostly gray — secondary text, paths, hints — so that the rare colored element (a lime success, a red failure, a lime call-to-action) carries real weight. The brand personality is a *developer-first performance instrument*: the landing headline is "The meta harness engineering system for agents," and the hero stat is "4.3× FASTER." Nothing is decorative; every glyph and color is a status signal.
 

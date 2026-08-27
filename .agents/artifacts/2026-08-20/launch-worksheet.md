@@ -68,7 +68,7 @@ Nothing below Phase 1 moves until these are settled.
 | # | Decision | Options | My recommendation |
 | --- | --- | --- | --- |
 | **D1** | Launch at all, and when? | Now (HN + PH only) · In ~2 weeks (full multi-channel) · Hold | **2 weeks.** Reddit needs aged accounts or the posts get removed, and the multi-channel 48h window is the whole mechanic |
-| **D2** | Which Show HN title? | A · C (B is out) | **A** — `Show HN: Open-source CLI that runs 16 coding agents across your own machines` |
+| **D2** | Which Show HN title? | A · C (B is out) | **A** — `Show HN: Source-available CLI that runs 16 coding agents across your own machines` |
 | **D3** | Fix RUSH-2858 before launching? | Fix first · Launch and stay quiet about rotation | **Fix first.** Rotation is a top differentiator and a commenter can falsify it today |
 | **D4** | Do I open the awesome-list PRs now? | Yes · Wait for D1 | **Yes.** They have review lag, they compound, and they do not depend on a launch date |
 

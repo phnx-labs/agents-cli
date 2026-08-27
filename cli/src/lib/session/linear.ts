@@ -9,7 +9,7 @@
  *   2. `workspaceUrlKey` in the linear-cli config (`~/.linear-cli/config.json`).
  *
  * When neither is set the ticket stays plain text — it's still shown, just not
- * linked. This keeps the OSS CLI free of any Rush/workspace-specific string.
+ * linked. This keeps the published CLI free of any Rush/workspace-specific string.
  */
 import fs from 'node:fs';
 import os from 'node:os';
