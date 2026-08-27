@@ -53,7 +53,7 @@ describeRoutines('routines status --json', () => {
       expect(entry.enabledDevices).toEqual(['yosemite-s0']);
       expect(entry.runsHere).toBe(true);
       expect(entry.lastStatus).toBe('failed');
-      expect(entry.lastError).toBe('agent exited non-zero');
+      expect(entry.failureReason).toBe('agent exited non-zero');
       expect(entry.lastRunCompletedAt).toBe('2026-07-21T10:01:00.000Z');
       expect(entry.inFlight).toBeNull();
     } finally {
@@ -96,6 +96,43 @@ describeRoutines('routines status --json', () => {
       expect(entry.inFlight.runId).toBe('2026-07-21T12-00-00-000Z');
       expect(entry.inFlight.pid).toBe(process.pid);
       expect(entry.inFlight.triggerKind).toBe('schedule');
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('does NOT report a provisional pre-spawn claim (status running, pid null) as in-flight', () => {
+    const job = { ...baseJob, devices: ['yosemite-s0'] };
+    const home = makeHome({
+      jobs: [job],
+      registry,
+      deviceRoutines: { 'yosemite-s0': ['test-job'] },
+    });
+    try {
+      // The window writeActiveClaim opens BEFORE the child spawns: status
+      // 'running' with pid null and no hostTaskId. monitorRunningJobs() does not
+      // reap this (nothing to probe; within timeout), so a daemon crash here
+      // would otherwise surface a phantom in-flight run (RUSH-2640). It must read
+      // as running-but-not-in-flight, never as a live spawn.
+      writeRunMeta(home, 'test-job', '2026-07-21T13-00-00-000Z', {
+        jobName: 'test-job',
+        runId: '2026-07-21T13-00-00-000Z',
+        agent: 'claude',
+        pid: null,
+        status: 'running',
+        startedAt: new Date().toISOString(),
+        completedAt: null,
+        exitCode: null,
+      });
+
+      const res = run(home, ['status', '--json'], { AGENTS_SYNC_MACHINE_ID: 'yosemite-s0' });
+      expect(res.status).toBe(0);
+
+      const parsed = JSON.parse(res.stdout.trim());
+      const entry = parsed.routines.find((r: Record<string, unknown>) => r.name === 'test-job');
+      expect(entry).toBeDefined();
+      expect(entry.lastStatus).toBe('running');
+      expect(entry.inFlight).toBeNull();
     } finally {
       fs.rmSync(home, { recursive: true, force: true });
     }
