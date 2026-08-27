@@ -9,8 +9,9 @@
  * injection guard.
  */
 import { describe, expect, it } from 'vitest';
-import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
+import { buildAskpassShimBody, buildInteractiveShellCommand, buildSshInvocation, deviceIdentityArgs, fleetDialTarget, isAgentsBrowserDrive, markFleetRemote, sshTargetFor, wrapRemoteCommand, ASKPASS_BUNDLE_ENV, ASKPASS_KEY_ENV, ASKPASS_AGENT_ONLY_ENV } from './connect.js';
 import type { DeviceProfile } from './registry.js';
+import { assertRemoteControlAllowed } from '../browser/remote-control.js';
 
 function decodePowerShell(cmd: string): string {
   const m = cmd.match(/^powershell -NoProfile -EncodedCommand (\S+)$/);
@@ -282,6 +283,103 @@ describe('buildSshInvocation', () => {
     expect(args).toContain('StrictHostKeyChecking=yes');
     expect(args).toContain('UserKnownHostsFile=/managed/kh');
     expect(args).not.toContain('StrictHostKeyChecking=accept-new');
+  });
+});
+
+describe('isAgentsBrowserDrive', () => {
+  it('matches agents/ag browser argv and the quoted single-string form', () => {
+    expect(isAgentsBrowserDrive(['agents', 'browser', 'navigate', '--url', 'https://example.com'])).toBe(true);
+    expect(isAgentsBrowserDrive(['ag', 'browser', 'screenshot'])).toBe(true);
+    expect(isAgentsBrowserDrive(['agents browser navigate --url https://example.com'])).toBe(true);
+  });
+
+  it('does not match non-browser commands or an already-prefixed argv', () => {
+    expect(isAgentsBrowserDrive([])).toBe(false);
+    expect(isAgentsBrowserDrive(['uptime'])).toBe(false);
+    expect(isAgentsBrowserDrive(['agents', 'sessions', 'list'])).toBe(false);
+    expect(isAgentsBrowserDrive(['env', 'AGENTS_FLEET_REMOTE=1', 'agents', 'browser', 'start'])).toBe(false);
+  });
+});
+
+describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () => {
+  // The bug: agents ssh <box> agents browser … built an ssh command whose
+  // remote argv had no AGENTS_FLEET_REMOTE, so isFleetRemoteInvocation was
+  // false on the peer and the consent gate returned before any check.
+  it('stamps AGENTS_FLEET_REMOTE on an agents browser drive so the far-side gate can fire', () => {
+    const { args, env } = buildSshInvocation(
+      dev({ name: 'peer', user: 'me', auth: { method: 'key' } }),
+      ['agents', 'browser', 'navigate', '--url', 'https://example.com'],
+      '/shim',
+    );
+    expect(args[args.length - 1]).toBe(
+      'env AGENTS_FLEET_REMOTE=1 agents browser navigate --url https://example.com',
+    );
+    // The local ssh-client overlay is askpass-only — the marker must ride the
+    // remote command, not this process's env (OpenSSH does not forward it).
+    expect(env.AGENTS_FLEET_REMOTE).toBeUndefined();
+
+    const remote = args[args.length - 1] as string;
+    const stamped = remote.match(/^env AGENTS_FLEET_REMOTE=(\S+) /);
+    expect(stamped?.[1]).toBe('1');
+    expect(() =>
+      assertRemoteControlAllowed({ env: { AGENTS_FLEET_REMOTE: stamped![1] }, enabled: false }),
+    ).toThrow(/remote browser control is off/);
+  });
+
+  it('without the marker the gate no-ops — that is the bypass this closes', () => {
+    const { args } = buildSshInvocation(
+      dev({ name: 'peer', user: 'me', auth: { method: 'key' } }),
+      ['uptime'],
+      '/shim',
+    );
+    expect(args[args.length - 1]).toBe('uptime');
+    expect(args[args.length - 1]).not.toContain('AGENTS_FLEET_REMOTE');
+    expect(() => assertRemoteControlAllowed({ env: {}, enabled: false })).not.toThrow();
+  });
+
+  it('marks the ag alias and the quoted single-string form', () => {
+    const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
+    expect(buildSshInvocation(posix, ['ag', 'browser', 'screenshot'], '/shim').args.at(-1)).toBe(
+      'env AGENTS_FLEET_REMOTE=1 ag browser screenshot',
+    );
+    expect(
+      buildSshInvocation(posix, ['agents browser navigate --url https://example.com'], '/shim').args.at(-1),
+    ).toBe('env AGENTS_FLEET_REMOTE=1 agents browser navigate --url https://example.com');
+  });
+
+  it('does not mark agents sessions or an interactive login', () => {
+    const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
+    expect(buildSshInvocation(posix, ['agents', 'sessions', 'list'], '/shim').args.at(-1)).toBe(
+      'agents sessions list',
+    );
+    const interactive = buildSshInvocation(posix, [], '/shim');
+    expect(interactive.args.at(-1)).toBe('me@peer.ts.net');
+    expect(interactive.args.join(' ')).not.toContain('AGENTS_FLEET_REMOTE');
+  });
+
+  it('PowerShell dialect carries the marker inside EncodedCommand', () => {
+    const { args } = buildSshInvocation(
+      dev({
+        name: 'win-mini',
+        platform: 'windows',
+        shell: 'powershell',
+        user: 'me',
+        auth: { method: 'key' },
+      }),
+      ['agents', 'browser', 'screenshot'],
+      '/shim',
+    );
+    expect(decodePowerShell(args[args.length - 1] as string)).toBe(
+      "$env:AGENTS_FLEET_REMOTE='1'; agents browser screenshot",
+    );
+  });
+
+  it('does not double-prefix a command the --device fan-out already marked', () => {
+    const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
+    const already = markFleetRemote(['agents', 'browser', 'start'], posix);
+    const { args } = buildSshInvocation(posix, already, '/shim');
+    expect(args.at(-1)).toBe('env AGENTS_FLEET_REMOTE=1 agents browser start');
+    expect((args.at(-1) as string).match(/AGENTS_FLEET_REMOTE/g)).toHaveLength(1);
   });
 });
 
