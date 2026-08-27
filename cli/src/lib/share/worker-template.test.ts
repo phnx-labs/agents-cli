@@ -583,6 +583,28 @@ describe('owner-scoped hidden listing (GET /<user>?format=json&scope=mine)', () 
     const body = await res.json();
     expect(body.error).toBe('namespace mismatch');
   });
+
+  it('lets BYO WRITE_TOKEN list hidden pages with scope=mine without namespace enforcement', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/public-page', '<h1>public</h1>');
+    await put(worker, env, 'octocat/byo-unlisted', '<h1>byo unlisted</h1>', { 'x-share-visibility': 'unlisted' });
+
+    const anon = await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env);
+    expect((await anon.json()).objects.map((o: any) => o.slug)).toEqual(['public-page']);
+
+    const byo = await worker.default.fetch(
+      new Request('https://share.test/octocat?format=json&scope=mine', {
+        headers: { authorization: 'Bearer secret' },
+      }),
+      env,
+    );
+    expect(byo.status).toBe(200);
+    expect(byo.headers.get('cache-control')).toBe('private, no-store');
+    const payload = await byo.json();
+    const slugs = payload.objects.map((o: any) => o.slug).sort();
+    expect(slugs).toEqual(['byo-unlisted', 'public-page']);
+  });
 });
 
 describe('revision retention (RUSH-2683 — R2 has no native object versioning)', () => {

@@ -520,13 +520,17 @@ async function renderListing(bucket, origin, user, method, includeHidden) {
 // '?format=json&scope=mine' asks to include the owner's hidden pages
 // (unlisted / me / org). We honor it ONLY after a valid owner bearer whose
 // namespace matches the requested handle, so one user cannot list another's
-// hidden shares. Anonymous or mismatched requests fail loud.
+// hidden shares. Anonymous or mismatched requests fail loud. A BYO WRITE_TOKEN
+// bearer is the worker's owner, so namespace enforcement is skipped for BYO.
 async function resolveListingScope(request, env, user) {
   const scope = new URL(request.url).searchParams.get('scope');
   if (scope !== 'mine') return { includeHidden: false };
   const auth = await authorizeWrite(request, env);
   if (auth.error) return { error: auth.error };
-  const owner = auth.kind === 'phoenix' ? phoenixHandle(auth) : (env.SHARE_NAMESPACE || auth.owner);
+  if (auth.kind === 'byo') {
+    return { includeHidden: true };
+  }
+  const owner = phoenixHandle(auth);
   if (owner !== user) {
     return { error: json({ error: 'namespace mismatch' }, 403) };
   }
