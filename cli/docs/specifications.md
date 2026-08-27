@@ -707,6 +707,17 @@ SSH access (§7); rendering sessions that no harness produced.
   from transcript content and rewrite `file_path` on the same row, so no such
   duplicate arises (Status: `[Landed]`; the content-vs-phantom discriminator is
   content presence, not supersession detection — SES-GAP-9).
+- **SES-48 (MUST).** A keyword content query (`agents sessions "tmux pane"`,
+  `filterSessionsByQuery`, `searchContentIndex`) MUST return every FTS5 hit
+  whose `sessions` row still exists, not only hits that already sit in the
+  in-memory listing pool. The pool is a page of the index (cwd-scoped,
+  default-capped at 50) and is a minority of indexed transcripts, so
+  intersecting FTS hits with it dropped grep-visible sessions the index already
+  matched (PHNX-2767). Hits the pool missed MUST be hydrated from the index and
+  unioned into the result. An id-shaped query MUST still resolve by id only
+  (SES-9a) and MUST NOT fall through to this content path.
+  (`lib/session/discover.ts` `searchContentIndex`; `commands/sessions.ts`
+  `filterSessionsByQuery`; test `discover.search-content.test.ts`).
 - **SES-31 (MUST).** Tool-call evidence MUST be redacted before persistence and
   bounded to 16 KiB input, 1 KiB successful output, or 4 KiB error output.
   Raw evidence and shell source MUST be bounded to 64 KiB before redaction or
@@ -1307,6 +1318,13 @@ records cwd A before its first user turn records cwd B; When the session recover
 Then native resume launches from A. Given the transcript is retained outside the
 active origin home instead; Then the same healthy harness/version uses
 `/continue`, never native resume (`lib/session/recovery.test.ts`).
+
+**GWT-18 — Content search returns an FTS hit missing from the listing pool.**
+Given an indexed transcript whose user turns contain `tmux pane` and a listing
+pool that does not include that session (empty, or filled with an unrelated
+recent row); When `searchContentIndex` / `filterSessionsByQuery` run that
+phrase; Then the indexed session is in the result, with `_matchedTerms`
+covering the query tokens (`lib/session/discover.search-content.test.ts`).
 
 ---
 
