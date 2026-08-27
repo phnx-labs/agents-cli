@@ -33,7 +33,7 @@ So this is not a feature roadmap. It is eleven repairs, ordered so the cheapest 
   </defs>
 
   <text x="16" y="24" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="15" font-weight="700">ELEVEN MOVES · NONE OF THEM SHIPS A FEATURE</text>
-  <text x="16" y="44" fill="#666" font-family="ui-monospace,monospace" font-size="11.5">Bar length = estimated engineering hours. Fill = expected impact (judgement, not measurement).</text>
+  <text x="16" y="44" fill="#666" font-family="ui-monospace,monospace" font-size="11.5">Bar length = estimated engineering hours at a constant 8px/hour (range midpoint). Fill = expected impact (judgement, not measurement).</text>
 
   <rect x="700" y="14" width="14" height="11" fill="#a3e635"/><text x="720" y="24" fill="#888" font-family="ui-monospace,monospace" font-size="11">high</text>
   <rect x="762" y="14" width="14" height="11" fill="#5f8f1f"/><text x="782" y="24" fill="#888" font-family="ui-monospace,monospace" font-size="11">medium</text>
@@ -44,24 +44,24 @@ So this is not a feature roadmap. It is eleven repairs, ordered so the cheapest 
   <text x="250" y="80" fill="#666" font-family="ui-monospace,monospace" font-size="11">only #2 needs a decision from you</text>
 
   <text x="30" y="106" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">1 · Add the full-listing pointer to --help</text>
-  <rect x="520" y="95" width="26" height="15" fill="#a3e635"/>
-  <text x="556" y="107" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">~1h · unhides 29 groups, incl. ssh (rank #5 by use)</text>
+  <rect x="520" y="95" width="8" height="15" fill="#a3e635"/>
+  <text x="540" y="107" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">~1h · unhides 29 groups, incl. ssh (rank #5 by use)</text>
 
   <text x="30" y="132" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">2 · Fix the false Apache-2.0 claim</text>
-  <rect x="520" y="121" width="26" height="15" fill="#a3e635"/>
-  <text x="556" y="133" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">~1h · DESIGN.md + llms.txt · removes a trust landmine</text>
+  <rect x="520" y="121" width="8" height="15" fill="#a3e635"/>
+  <text x="540" y="133" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">~1h · DESIGN.md + llms.txt · removes a trust landmine</text>
 
   <text x="30" y="158" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">3 · Rewrite README first screen + npm description</text>
-  <rect x="520" y="147" width="78" height="15" fill="#a3e635"/>
-  <text x="608" y="159" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">6-12h · lead with the pain, name the harnesses</text>
+  <rect x="520" y="147" width="72" height="15" fill="#a3e635"/>
+  <text x="604" y="159" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">6-12h · lead with the pain, name the harnesses</text>
 
   <text x="30" y="184" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">4 · Tier --help into a 10-group front door</text>
-  <rect x="520" y="173" width="60" height="15" fill="#5f8f1f"/>
-  <text x="590" y="185" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="11.5">4-8h · orders what the pointer exposes</text>
+  <rect x="520" y="173" width="48" height="15" fill="#5f8f1f"/>
+  <text x="580" y="185" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="11.5">4-8h · orders what the pointer exposes</text>
 
   <text x="30" y="210" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">5 · /AGENTS.md, markdown 404, content negotiation, trust pages</text>
   <rect x="520" y="199" width="96" height="15" fill="#5f8f1f"/>
-  <text x="626" y="211" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="11.5">8-16h · is-agentic 63 → 85+</text>
+  <text x="628" y="211" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="11.5">8-16h · is-agentic 63 → 85+</text>
 
   <text x="30" y="240" fill="#666" font-family="ui-monospace,monospace" font-size="11">≈ 20-40 engineering hours total. Closes every measured leak except the name.</text>
 
@@ -72,15 +72,15 @@ So this is not a feature roadmap. It is eleven repairs, ordered so the cheapest 
   <text x="262" y="304" fill="#666" font-family="ui-monospace,monospace" font-size="11">#8 is blocked until you pick the name</text>
 
   <text x="30" y="330" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">6 · Record the 12-second rotation demo</text>
-  <rect x="520" y="319" width="40" height="15" fill="#a3e635"/>
-  <text x="570" y="331" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">3-6h · limit hit → rotate → same session continues</text>
+  <rect x="520" y="319" width="36" height="15" fill="#a3e635"/>
+  <text x="568" y="331" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">3-6h · limit hit → rotate → same session continues</text>
 
   <text x="30" y="356" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">7 · SKILL.md + Claude / Cursor / skills.sh entries</text>
-  <rect x="520" y="345" width="120" height="15" fill="#a3e635"/>
-  <text x="650" y="357" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">12-24h · the real discovery lever</text>
+  <rect x="520" y="345" width="144" height="15" fill="#a3e635"/>
+  <text x="676" y="357" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">12-24h · the real discovery lever</text>
 
   <text x="30" y="382" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">8 · Name cutover: rename repo → verify 301 → flip domain</text>
-  <rect x="520" y="371" width="50" height="15" fill="#5f8f1f"/>
+  <rect x="520" y="371" width="48" height="15" fill="#5f8f1f"/>
   <text x="580" y="383" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="11.5">4-8h · that order, or `agents upgrade` breaks</text>
 
   <text x="30" y="412" fill="#666" font-family="ui-monospace,monospace" font-size="11">The demo is the thing week 3 spends. Nobody owns rotation-plus-resume on camera.</text>
@@ -89,19 +89,19 @@ So this is not a feature roadmap. It is eleven repairs, ordered so the cheapest 
 
   <rect x="16" y="458" width="968" height="124" rx="5" fill="#0f0f0f" stroke="#2a2a2a"/>
   <text x="30" y="480" fill="#a3e635" font-family="ui-monospace,monospace" font-size="13" font-weight="700">WEEK 3 · SPEND IT</text>
-  <text x="196" y="480" fill="#666" font-family="ui-monospace,monospace" font-size="11">Show HN is the spark; the rest are echoes</text>
+  <text x="196" y="480" fill="#666" font-family="ui-monospace,monospace" font-size="11">Show HN is the spark; the rest are echoes — writing time, so no hour bar</text>
 
   <text x="30" y="506" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">9 · Show HN, leading with the demo</text>
-  <rect x="520" y="495" width="20" height="15" fill="#a3e635"/>
-  <text x="550" y="507" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">Conductor 228 pts · container-use 82 pts</text>
+  <rect x="520" y="495" width="14" height="15" fill="#a3e635"/>
+  <text x="546" y="507" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">Conductor 228 pts · container-use 82 pts</text>
 
   <text x="30" y="532" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">10 · A setup-dump thread, not a product thread</text>
-  <rect x="520" y="521" width="20" height="15" fill="#a3e635"/>
-  <text x="550" y="533" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">Jamon's listicle: 10,332 bookmarks, nothing to install</text>
+  <rect x="520" y="521" width="14" height="15" fill="#a3e635"/>
+  <text x="546" y="533" fill="#a3e635" font-family="ui-monospace,monospace" font-size="11.5">Jamon's listicle: 10,332 bookmarks, nothing to install</text>
 
   <text x="30" y="558" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="12.5">11 · awesome-claude-code + maintained agent lists</text>
-  <rect x="520" y="547" width="26" height="15" fill="#3a3a3a"/>
-  <text x="556" y="559" fill="#888" font-family="ui-monospace,monospace" font-size="11.5">amplifier after the spark, never the spark</text>
+  <rect x="520" y="547" width="14" height="15" fill="#3a3a3a"/>
+  <text x="546" y="559" fill="#888" font-family="ui-monospace,monospace" font-size="11.5">amplifier after the spark, never the spark</text>
 
   <rect x="16" y="602" width="968" height="74" rx="5" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.45"/>
   <text x="30" y="624" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">DELIBERATELY NOT DOING</text>
