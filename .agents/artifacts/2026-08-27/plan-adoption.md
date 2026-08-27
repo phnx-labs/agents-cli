@@ -2,7 +2,7 @@
 kind: plan
 surface: cli
 title: "Adoption plan for agents-cli: fix the entity, cut the front door, own the two pains that get a million views"
-summary: "17 stars against peers at 8k-55k, four names for one product, and 45% of 564 commands dead on the author's own machine — yet it already out-downloads a 27.9k-star rival. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
+summary: "17 stars against peers at 8k-55k, four names for one product, and 45% of 564 commands dead on the author's own machine — yet its weekly npm downloads sit in the same order of magnitude as peers with a thousand times the stars. The deficit is visibility, not product: collapse the identity, cut the front door, and lead with the two pains that get a million views."
 status: draft
 project: AGI
 repository: phnx-labs/agents-cli
@@ -110,7 +110,7 @@ The absolute counts depend on each tool's help formatting, so treat them as an o
 
 ## Evidence 2: the entity is fragmented across four names
 
-`is-agentic` (Vercel's agent-readiness scanner; a 118-check catalog, of which 26 were eligible for this site) scored the live site and returned a specific, damning check:
+`is-agentic` (Vercel's agent-readiness scanner; the scan reports 26 checks eligible for this site — 9 essential, 17 recommended) scored the live site and returned a specific, damning check:
 
 ```
 score 63 / 100 — "Important blockers remain"
@@ -188,7 +188,7 @@ Reasons 1 and 2 are both arguments **for** a CLI and **against** a GUI. That is 
 | [Orca](https://github.com/stablyai/orca) | 54.8k | — | "fleet of parallel agents, bring your own subscription", MIT, cross-platform | 50k stars in under six months |
 | [claude-code-router](https://github.com/musistudio/claude-code-router) | 36.9k | 154,467 | Routes requests across providers | Thriving, and complementary |
 | [Vibe Kanban](https://github.com/BloopAI/vibe-kanban) | 27.9k | **1,495** | `npx vibe-kanban` | Company shut down Apr 2026 |
-| [Happy](https://github.com/slopus/happy) | 23.5k | 501 | "Leave your desk. Keep your agents moving." | Thriving |
+| [Happy](https://github.com/slopus/happy) | 23.5k | 5,736 | "Leave your desk. Keep your agents moving." | Thriving |
 | [ccusage](https://github.com/ryoppippi/ccusage) | 18.2k | 87,857 | One job: show my token spend | Thriving |
 | [Paseo](https://github.com/getpaseo/paseo) | 15.2k | — | open and hackable plugins | Thriving |
 | [Claude Squad](https://github.com/smtg-ai/claude-squad) | 8.4k | 97 | tmux plus worktrees TUI, AGPL | Plateaued |
@@ -197,10 +197,10 @@ Reasons 1 and 2 are both arguments **for** a CLI and **against** a GUI. That is 
 | [claude-swap](https://github.com/realiti4/claude-swap) | 2.0k | 4,702 *(PyPI; 25 on npm)* | Threshold auto-switch across Claude subs | The one head-on rotation competitor |
 | **agents-cli** | **17** | **2,961** | none yet | Alive, v1.22.51 today |
 
-Downloads are npm `last-week` (2026-08-19 to 08-25) except where noted. Star counts and Go/Homebrew-distributed tools have no npm figure, shown as `—`; a dash is missing data, not zero.
+Downloads are npm `last-week` (2026-08-19 to 08-25) except where noted; Go- and Homebrew-distributed tools have no npm figure and show `—`, which means missing data, not zero. Happy's figure is for the `happy` package, which it migrated to from `happy-coder` (the deprecated alias still shows 501/week — quoting that one would understate a live competitor).
 
 <div class="artifact-callout">
-<strong>The number that reframes everything.</strong> Vibe Kanban has <strong>1,644x</strong> the stars of agents-cli and <strong>half</strong> the weekly npm downloads. ccusage does exactly one thing and pulls 87,857 a week. agents-cli's 2,961/week is real usage, not a vanity metric — the deficit is visibility and legibility, not product. That is a much cheaper problem than it looked.
+<strong>The number that reframes everything.</strong> Vibe Kanban has <strong>1,644x</strong> the stars of agents-cli and <strong>half</strong> the weekly npm downloads. Stated honestly in both directions: Vibe Kanban is a sunsetting project, so it is the flattering comparison — Happy, which is thriving, pulls 5,736/week to agents-cli's 2,961, and ccusage does exactly one thing and pulls 87,857. The point stands either way. At 2,961/week this is real usage in the same order of magnitude as live peers with a thousand times the stars, so the deficit is visibility and legibility, not product. That is a much cheaper problem than it looked.
 </div>
 
 Note the graveyard: Terragon shut down Jan 2026, Crystal deprecated Feb 2026, Vibe Kanban's company Apr 2026. **Every dead one was a desktop GUI.** The survivors are a CLI-shaped install or a phone client.
