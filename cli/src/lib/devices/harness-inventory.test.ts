@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { UsageSnapshot, UsageWindow } from '../accounting/usage.js';
+import { USAGE_NOT_COLLECTED_MARKER, usageErrorForDisplay } from '../accounting/usage.js';
 import {
   computeReady,
   formatQuota,
@@ -143,6 +144,18 @@ describe('summarizeQuota', () => {
       verdict: 'unavailable',
       unavailableReason: 'provider timed out',
     });
+  });
+
+  it('never surfaces the internal not-collected sentinel — the caller normalizes it (PHNX-3348)', () => {
+    // collectLocalHarnessInventory feeds `usageErrorForDisplay(usage?.error)` into
+    // summarizeQuota, so a never-cached account (error === 'stale', without
+    // --refresh) can never reach `agents devices harnesses/accounts --json`'s
+    // `quota.unavailableReason` as the raw sentinel — the same leak class PHNX-3348
+    // fixed for `agents view --json`.
+    const q = summarizeQuota(null, usageErrorForDisplay(USAGE_NOT_COLLECTED_MARKER));
+    expect(q.unavailableReason).not.toBe(USAGE_NOT_COLLECTED_MARKER);
+    expect(q.unavailableReason).not.toBe('stale');
+    expect(q.unavailableReason).toContain('not collected');
   });
 });
 

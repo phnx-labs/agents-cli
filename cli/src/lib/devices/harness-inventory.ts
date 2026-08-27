@@ -26,6 +26,7 @@ import {
   deriveUsageStatusFromSnapshot,
   getUsageInfoByIdentity,
   getUsageLookupKey,
+  usageErrorForDisplay,
   type UsageIdentityInput,
   type UsageSnapshot,
 } from '../accounting/usage.js';
@@ -215,7 +216,10 @@ export async function collectLocalHarnessInventory(opts?: {
     const key = getUsageLookupKey(info);
     const usage = key ? usageByKey.get(key) : undefined;
     const snapshot = usage?.snapshot ?? null;
-    const quota = summarizeQuota(snapshot, usage?.error ?? null, info?.usageStatus ?? null);
+    // Normalize the internal 'stale' not-collected sentinel out before it reaches
+    // the JSON `quota.unavailableReason` — same leak PHNX-3348 fixed for
+    // `agents view --json`, here for `agents devices harnesses/accounts --json`.
+    const quota = summarizeQuota(snapshot, usageErrorForDisplay(usage?.error), info?.usageStatus ?? null);
     const signedIn = !!info?.signedIn;
     const { ready, reason } = computeReady(signedIn, quota);
     const display = info ? accountDisplayLabel(info) || null : null;
