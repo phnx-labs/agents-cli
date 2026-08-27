@@ -9,19 +9,21 @@ import {
   type SessionDetail,
 } from './phenotype.js';
 
+const FIXTURES_DIR = path.join(import.meta.dirname, 'testdata/sessions');
 const TRACES_REAL_DIR = '/tmp/traces-real/sessions';
 
-function loadSession(id: string): SessionDetail {
-  const filePath = path.join(TRACES_REAL_DIR, `${id}.json`);
+function loadFixture(id: string): SessionDetail {
+  const filePath = path.join(FIXTURES_DIR, `${id}.json`);
   return JSON.parse(fs.readFileSync(filePath, 'utf8')) as SessionDetail;
 }
 
-function listSessionFiles(): string[] {
+function listRealSessionFiles(): string[] {
+  if (!fs.existsSync(TRACES_REAL_DIR)) return [];
   return fs.readdirSync(TRACES_REAL_DIR).filter((f) => f.endsWith('.json'));
 }
 
-function loadAllSessions(): SessionDetail[] {
-  return listSessionFiles().map((f) =>
+function loadRealSessions(): SessionDetail[] {
+  return listRealSessionFiles().map((f) =>
     JSON.parse(fs.readFileSync(path.join(TRACES_REAL_DIR, f), 'utf8')) as SessionDetail,
   );
 }
@@ -37,40 +39,41 @@ function deriveFixture(base: SessionDetail, mutate: (s: SessionDetail) => void):
   return clone;
 }
 
-describe('classifyPhenotype over /tmp/traces-real', () => {
+describe('classifyPhenotype', () => {
   it('flags no-tool short sessions as failure-to-act', () => {
-    const session = loadSession('00d7eed6-9ef3-4826-9780-6f0833b6a843');
+    const session = loadFixture('00d7eed6-9ef3-4826-9780-6f0833b6a843');
     expect(classifyPhenotype(session)).toBe('failure-to-act');
     const detailed = classifyPhenotypeDetailed(session);
     expect(detailed.reason).toContain('no tool use');
   });
 
   it('flags write-before-read as out-of-order', () => {
-    const session = loadSession('01a004a4-7b1b-7d33-b47b-5a7a32a945a1');
+    const session = loadFixture('01a004a4-7b1b-7d33-b47b-5a7a32a945a1');
     expect(classifyPhenotype(session)).toBe('out-of-order');
     expect(classifyPhenotypeDetailed(session).reason).toContain('preceded any read/plan');
   });
 
   it('flags completed engineering work without verification as premature-completion', () => {
-    const session = loadSession('01a0306a-7811-7543-8fb0-2ee0ce952dd6');
+    const session = loadFixture('01a0306a-7811-7543-8fb0-2ee0ce952dd6');
     expect(classifyPhenotype(session)).toBe('premature-completion');
     expect(classifyPhenotypeDetailed(session).reason).toContain('without a test/build/lint verification step');
   });
 
   it('flags errored sessions ending in error as false-termination', () => {
-    const session = loadSession('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
+    const session = loadFixture('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
     expect(classifyPhenotype(session)).toBe('false-termination');
     expect(classifyPhenotypeDetailed(session).reason).toContain('ended in error');
   });
 
   it('returns null for clean, ordered, verified sessions', () => {
-    const session = loadSession('019fc247-6220-7d50-a11c-975d58f1e2e1');
+    const session = loadFixture('019fc247-6220-7d50-a11c-975d58f1e2e1');
     expect(classifyPhenotype(session)).toBeNull();
     expect(classifyPhenotypeDetailed(session).reason).toBe('no failure phenotype matched');
   });
 
   it('produces a sensible distribution across the real corpus', () => {
-    const sessions = loadAllSessions();
+    const sessions = loadRealSessions();
+    if (sessions.length === 0) return;
     const counts: Record<string, number> = {};
     for (const session of sessions) {
       const p = classifyPhenotype(session) ?? 'null';
@@ -86,9 +89,9 @@ describe('classifyPhenotype over /tmp/traces-real', () => {
   });
 });
 
-describe('deriveOutcome over /tmp/traces-real', () => {
+describe('deriveOutcome', () => {
   it('returns partial for completed sessions with no landing or test signal', () => {
-    const session = loadSession('00d7eed6-9ef3-4826-9780-6f0833b6a843');
+    const session = loadFixture('00d7eed6-9ef3-4826-9780-6f0833b6a843');
     expect(deriveOutcome(session)).toBe('partial');
     const detailed = deriveOutcomeDetailed(session);
     expect(detailed.confidence).toBe('low');
@@ -96,7 +99,7 @@ describe('deriveOutcome over /tmp/traces-real', () => {
   });
 
   it('returns merged when an explicit merge signal is present', () => {
-    const session = loadSession('019fcfad-7df4-7351-a58f-7527778a34b5');
+    const session = loadFixture('019fcfad-7df4-7351-a58f-7527778a34b5');
     expect(deriveOutcome(session)).toBe('merged');
     const detailed = deriveOutcomeDetailed(session);
     expect(detailed.confidence).toBe('high');
@@ -104,14 +107,14 @@ describe('deriveOutcome over /tmp/traces-real', () => {
   });
 
   it('returns tests-green for completed sessions with test steps', () => {
-    const session = loadSession('019fcff4-e7dc-7252-8ef8-7ddf037ec0c2');
+    const session = loadFixture('019fcff4-e7dc-7252-8ef8-7ddf037ec0c2');
     expect(deriveOutcome(session)).toBe('tests-green');
     const detailed = deriveOutcomeDetailed(session);
     expect(detailed.outcome).toBe('tests-green');
   });
 
   it('returns abandoned for errored sessions with long stalls and no recovery', () => {
-    const session = loadSession('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
+    const session = loadFixture('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
     expect(deriveOutcome(session)).toBe('abandoned');
     const detailed = deriveOutcomeDetailed(session);
     expect(detailed.confidence).toBe('medium');
@@ -122,7 +125,7 @@ describe('deriveOutcome over /tmp/traces-real', () => {
     // No session in /tmp/traces-real ends on a human-facing ask, so this fixture
     // derives the shape from a real completed session and changes only the last
     // substantive step.
-    const base = loadSession('019fc247-6220-7d50-a11c-975d58f1e2e1');
+    const base = loadFixture('019fc247-6220-7d50-a11c-975d58f1e2e1');
     const session = deriveFixture(base, (s) => {
       const last = s.steps.filter((step) => step.kind === 'tool').pop();
       if (last) {
@@ -138,7 +141,7 @@ describe('deriveOutcome over /tmp/traces-real', () => {
     // No session in /tmp/traces-real is dominated by env/setup errors, so this
     // fixture derives the shape from a real errored session and replaces its
     // early steps with failing environment/setup commands.
-    const base = loadSession('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
+    const base = loadFixture('03c6dd37-089f-42ce-8f6f-8c40c5d6f798');
     const session = deriveFixture(base, (s) => {
       s.meta.outcome = 'errored';
       s.meta.errorCount = 4;
@@ -156,7 +159,8 @@ describe('deriveOutcome over /tmp/traces-real', () => {
   });
 
   it('produces a sensible distribution across the real corpus', () => {
-    const sessions = loadAllSessions();
+    const sessions = loadRealSessions();
+    if (sessions.length === 0) return;
     const counts: Record<string, number> = {};
     for (const session of sessions) {
       const o = deriveOutcome(session);
