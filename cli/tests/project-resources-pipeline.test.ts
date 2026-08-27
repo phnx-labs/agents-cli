@@ -50,6 +50,10 @@ vi.mock('../src/lib/state.js', async () => {
     getTrashVersionsDir: () => path.join(VERSIONS_DIR, '.trash'),
     getActivePermissionPresetName: () => null,
     getActiveRulesPreset: () => null,
+    // Keep syncClaudeProjectMemoryDir's canonical-dir writes inside the
+    // sandbox — `...actual` would otherwise resolve the real user's
+    // ~/.agents/.cache/state (PHNX-2817).
+    getRuntimeStateDir: () => path.join(TEMP_ROOT, '_state'),
   };
 });
 

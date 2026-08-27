@@ -97,6 +97,7 @@ vi.mock('../src/lib/state.js', () => {
     get getActiveRulesPreset() { return () => 'default'; },
     get setActiveRulesPreset() { return () => {}; },
     get getCliVersionCachePath() { return () => nodePath.join(state().AGENTS_DIR, '.cli-version-cache.json'); },
+    get getRuntimeStateDir() { return () => nodePath.join(state().AGENTS_DIR, '.cache', 'state'); },
     // droid/muse global-binary paths resolve under the real user home; pin to
     // TEST_ROOT so path helpers stay hermetic in this suite.
     get getHomeDir() { return () => state().TEST_ROOT || require('node:os').homedir(); },
