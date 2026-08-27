@@ -1181,6 +1181,25 @@ fi
 # ----- Open (or reuse) the release PR + merge, unless already merged -----
 if ! $MAIN_AT_TARGET; then
   phase "Open release PR, wait for release-tree attestation" "$THIS_HOST"
+  # Cross-version stuck-bump guard (PHNX-3084). The version-bump PR merges
+  # async/best-effort AFTER publish (RUSH-2395); if an EARLIER target's bump PR is
+  # still open, its .changelog/next/* fragments are still queued on
+  # origin/$DEFAULT_BRANCH -- the fold that drains them only landed inside that
+  # unmerged branch commit. Folding $TARGET now would re-read those fragments and
+  # fold an earlier version's notes under $TARGET (misattributed or lost). The
+  # same-target STUCK_BUMP_PR retry lands THIS version's bump; this closes the
+  # cross-version gap the review of #2966 flagged. Command substitution (not a
+  # process substitution) so a die inside the helper aborts the release --
+  # stuck-release.test.ts documents why the `<(...)` form would fail open.
+  OPEN_PR_LINES="$(gh pr list --state open --limit 200 --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"' 2>/dev/null || true)"
+  OTHER_BUMP_PRS="$(printf '%s\n' "$OPEN_PR_LINES" | scripts/release-other-bump-prs.sh "$RELEASE_BRANCH")"
+  if [[ -n "$OTHER_BUMP_PRS" ]]; then
+    red "Refusing to fold .changelog/next/* for $TARGET — an earlier release bump PR is still open:" >&2
+    while IFS= read -r line; do red "  $line" >&2; done <<< "$OTHER_BUMP_PRS"
+    red "Its notes are still queued on $DEFAULT_BRANCH; folding $TARGET now would re-attribute them." >&2
+    red "Land it first (gh pr merge <n> --squash --delete-branch), then re-run this release." >&2
+    exit 1
+  fi
   # Collapse the release queue: fold every .changelog/next/<slug>.md fragment into
   # .changelog/$TARGET.md, then regenerate the released-only aggregate CHANGELOG.md.
   # Fails closed if the queue is empty (a release must document itself). The folded

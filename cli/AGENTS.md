@@ -1018,6 +1018,19 @@ next run validating its bump against a registry that was behind, so it cut the
 *next* version and the gap widened by one every time — that is how npm sat at
 1.20.78 while `main` carried 1.20.81.
 
+**A stuck EARLIER bump PR blocks the changelog fold, not just a stuck tag
+(PHNX-3084).** The stuck-*tag* guard above is registry-vs-tag; this is its
+PR-side twin. The version-bump PR merges async/best-effort after publish
+(RUSH-2395), so a bump PR wedged on a CHANGELOG conflict leaves that version's
+`.changelog/next/*` fragments still queued on `main` — the drain only landed
+inside the unmerged branch commit. A *later* version releasing then re-reads those
+fragments and folds an earlier version's notes under the new version. The
+same-target `STUCK_BUMP_PR` retry only lands `release/v<current-target>`, so it
+never sees an OTHER version's PR. Before folding, `release.sh` detects any other
+open `release/v*` bump PR (`scripts/release-other-bump-prs.sh`, unit-tested) and
+**fails loud** with the exact `gh pr merge` to run first, rather than silently
+re-attributing the earlier version's release notes.
+
 **The privileged phase runs on the home base, always — from the TAGGED script.**
 After the invoking box merges + tags (git + gh, which need that box's auth),
 `release.sh` routes build + sign + notarize + `npm publish` + computer-helper to
