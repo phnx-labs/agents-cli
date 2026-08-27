@@ -435,6 +435,8 @@ describe('runWatchdogTick — rotate state machine', () => {
     expect(o.decision).toBe('skip');
     expect(o.addressable).toBe(false);
     expect(o.reason).toMatch(/un-addressable/i);
+    expect(o.reason).toContain('agents sessions resume sess-gho');
+    expect(o.reason).not.toContain('<id>');
     expect(calls).toHaveLength(0);
     expect(readFlags()['sess-ghostty']).toBeDefined();
     expect(readFlags()['sess-ghostty'].reason).toMatch(/rotate:/i);
