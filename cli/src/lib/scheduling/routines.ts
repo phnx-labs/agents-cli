@@ -155,6 +155,88 @@ export function buildRoutineListJson(): Record<string, unknown>[] {
   }
 }
 
+/** One routine's live scheduler-status row for `agents routines status --json`. */
+export interface RoutineStatusRow {
+  name: string;
+  /** The single device this routine is pinned to fire on, or null when unpinned. */
+  ownerDevice: string | null;
+  /** True when `devices:` names more than one device — no single owner (doctor flags it). */
+  ambiguousDevicePin: boolean;
+  /** Every device this routine is enabled on. */
+  enabledDevices: string[];
+  /** Whether THIS device is the one that fires the routine. */
+  runsHere: boolean;
+  enabled: boolean;
+  overdue: boolean;
+  nextRun: string | null;
+  /** Terminal status of the last local fire: completed/failed/timeout/missed/blocked/skipped/running, or null if it never ran here. */
+  lastStatus: RunMeta['status'] | null;
+  /** The last fire's failure reason, when it did not complete cleanly. */
+  lastError: string | null;
+  lastRunStartedAt: string | null;
+  lastRunCompletedAt: string | null;
+  /** Present only while a run is genuinely in flight on THIS device (post-reap). */
+  inFlight: { runId: string; pid: number | null; startedAt: string; triggerKind: RunMeta['triggerKind'] | null } | null;
+}
+
+/**
+ * The per-routine rows behind `agents routines status --json`. Distinct from
+ * {@link buildRoutineListJson}: this is the scheduler-truth surface the daemon
+ * owns — per routine it names the single owner device, the last fire's outcome
+ * and error, and any in-flight spawn — the fields an operator (or the menu bar /
+ * ext) needs to answer "did this routine fire, and is one running right now?"
+ * that the definition-shaped `list --json` does not carry (PHNX-3215).
+ *
+ * `monitorRunningJobs()` runs first so a record still marked `running` is one the
+ * reaper just confirmed alive — a dead pid has already been finalized to
+ * timeout/failed — so `inFlight` is truthful without re-probing pid liveness here.
+ */
+export function buildRoutineStatusRows(): RoutineStatusRow[] {
+  try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
+  const jobs = listJobsForDisplay(process.cwd());
+  if (jobs.length === 0) return [];
+
+  const scheduler = new JobScheduler(async () => {});
+  scheduler.loadAll();
+  try {
+    const overdueSet = new Set<string>();
+    try {
+      for (const job of detectOverdueJobs()) overdueSet.add(job.name);
+    } catch {
+      // Best-effort indicator; never block status on detection errors.
+    }
+    const now = new Date();
+    return jobs.map((job) => {
+      const latestRun = localLatestRun(job);
+      const inFlight = latestRun && latestRun.status === 'running'
+        ? {
+            runId: latestRun.runId,
+            pid: latestRun.pid,
+            startedAt: latestRun.startedAt,
+            triggerKind: latestRun.triggerKind ?? null,
+          }
+        : null;
+      return {
+        name: job.name,
+        ownerDevice: routineOwnerDevice(job),
+        ambiguousDevicePin: hasAmbiguousDevicePin(job),
+        enabledDevices: devicesWithRoutineEnabled(job.name),
+        runsHere: jobRunsOnThisDevice(job),
+        enabled: job.enabled,
+        overdue: overdueSet.has(job.name),
+        nextRun: nextRunForDisplay(job, scheduler)?.toISOString() ?? null,
+        lastStatus: latestRun?.status ?? null,
+        lastError: latestRun?.errorMessage ?? null,
+        lastRunStartedAt: latestRun?.startedAt ?? null,
+        lastRunCompletedAt: latestRun?.completedAt ?? null,
+        inFlight,
+      };
+    });
+  } finally {
+    scheduler.stopAll();
+  }
+}
+
 /** Tool/site/directory allow-list for sandboxed job execution. */
 export interface JobAllowConfig {
   tools?: string[];
