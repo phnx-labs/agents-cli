@@ -71,19 +71,28 @@ The counts also expose which groups are actually the product:
 
 | Group | Transcripts reached | Group | Transcripts reached |
 |---|---:|---|---:|
-| `sessions` | 948 | `repos` | 239 |
-| `secrets` | 823 | `view` | 197 |
-| `browser` | 759 | `routines` | 186 |
-| `run` | 436 | `feed` | 182 |
-| `ssh` | 340 | `computer` | 126 |
-| `teams` | 271 | `daemon` | 109 |
-| `devices` | 244 | `doctor` | 97 |
+| `secrets` | 1,004 | `repos` | 246 |
+| `sessions` | 996 | `view` | 205 |
+| `browser` | 943 | `routines` | 199 |
+| `run` | 456 | `notify` | 158 |
+| `ssh` | 392 | `add` | 136 |
+| `devices` | 288 | `computer` | 133 |
+| `teams` | 284 | `sync` | 132 |
+| `feed` | 265 | `doctor` | 130 |
 
-Counts are transcript reach, from the committed report. Ten groups carry the tool. Fifty-nine others share the same visual weight in `agents --help`.
+Counts are transcript reach, taken verbatim from the committed report. Sixteen groups clear 130 transcripts; the remaining fifty-three share the same visual weight in `agents --help`. Two details worth noting: `secrets` outranks `sessions`, which argues for keeping it in the front door tier, and `notify` still reaches 158 transcripts despite being superseded by `feed post` — a deprecation that has not finished landing.
 
 ### Surface area against comparable CLIs
 
-Measured on this machine by counting top-level commands in each tool's own `--help`:
+Measured on this machine, same rule for every tool — count the indented command entries each prints in its own top-level `--help`:
+
+```bash
+for c in git bun deno supabase gh kubectl docker vercel agents; do
+  echo "$c: $($c --help 2>&1 | grep -cE '^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}')"
+done
+```
+
+The absolute counts depend on each tool's help formatting, so treat them as an order-of-magnitude comparison rather than an exact census. The ranking is what matters, and it is not close:
 
 | CLI | Top-level commands |
 |---|---:|
@@ -551,7 +560,7 @@ python3 .agents/artifacts/2026-08-27/adoption-evidence/mine-command-usage.py \
   | diff - .agents/artifacts/2026-08-27/adoption-evidence/command-usage-report.txt
 
 # 1. Surface: the front door is small, the full index still reachable
-agents --help | grep -cE '^\s{2,6}[a-z]'          # expect <= 12, was 69
+agents --help | grep -cE '^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}'   # expect <= 12, was 69
 agents commands --index --json | jq '.commands'    # expect 564, unchanged
 bash cli/scripts/verify-command-index.sh           # index still matches registry
 
