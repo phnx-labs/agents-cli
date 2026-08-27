@@ -2,7 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import * as yaml from 'yaml';
-import { getUserAgentsDir, readMeta, updateMeta } from '../state.js';
+import { getUserAgentsDir, readMeta, updateMeta, withMetaLock, writeMetaUnlocked } from '../state.js';
 import type { BrowserProfileConfig, Meta } from '../types.js';
 
 export interface ProfileDeclaration {
@@ -80,25 +80,34 @@ function selectClaimableCentral(
 }
 
 /**
- * Move `toClaim` out of the central `browser:` map and into this device's
- * `deviceBrowser` doc, atomically under the meta lock (`updateMeta`). The central
- * key is dropped entirely once drained, so the tombstone disappears rather than
- * lingering as an empty map.
+ * Return `current` with `toClaim` moved out of the central `browser:` map and
+ * into this device's `deviceBrowser` doc. The central key is dropped entirely
+ * once drained, so the tombstone disappears rather than lingering as an empty
+ * map. Pure — the caller applies it under the meta lock.
+ */
+function buildEvictedMeta(current: Meta, toClaim: Record<string, BrowserProfileConfig>): Meta {
+  const legacy = current as LegacyBrowserMeta;
+  const remaining: Record<string, BrowserProfileConfig> = {};
+  for (const [profileName, config] of Object.entries(legacy.browser ?? {})) {
+    if (!(profileName in toClaim)) remaining[profileName] = config;
+  }
+  const { browser: _removed, ...withoutCentralBrowser } = legacy;
+  return {
+    ...withoutCentralBrowser,
+    ...(Object.keys(remaining).length > 0 ? { browser: remaining } : {}),
+    deviceBrowser: { ...current.deviceBrowser, ...toClaim },
+  } as Meta;
+}
+
+/**
+ * Commit a claim computed by the EXPLICIT path (`migrateCentralBrowserProfiles`).
+ * `toClaim` was selected from an unlocked snapshot — acceptable for that manual,
+ * deliberate command; the automatic path instead selects INSIDE the lock (see
+ * {@link autoEvictCentralBrowserProfiles}) so an unrelated concurrent write can
+ * never be clobbered by a stale selection.
  */
 function commitCentralClaim(toClaim: Record<string, BrowserProfileConfig>): void {
-  updateMeta((current) => {
-    const legacy = current as LegacyBrowserMeta;
-    const remaining: Record<string, BrowserProfileConfig> = {};
-    for (const [profileName, config] of Object.entries(legacy.browser ?? {})) {
-      if (!(profileName in toClaim)) remaining[profileName] = config;
-    }
-    const { browser: _removed, ...withoutCentralBrowser } = legacy;
-    return {
-      ...withoutCentralBrowser,
-      ...(Object.keys(remaining).length > 0 ? { browser: remaining } : {}),
-      deviceBrowser: { ...current.deviceBrowser, ...toClaim },
-    } as Meta;
-  });
+  updateMeta((current) => buildEvictedMeta(current, toClaim));
 }
 
 /**
@@ -170,33 +179,45 @@ export function migrateCentralBrowserProfiles(
  * `agents sync` with no manual `agents browser profiles claim`.
  *
  * Safe to call implicitly, unlike a claim at registry-read time (which races —
- * see the `profileRegistry does not claim central declarations` guard). Three
- * properties make it safe: it runs only during the serialized `agents sync` on
- * the box that owns the browser; it claims ONLY profiles `canHostHere` accepts,
- * i.e. that resolve HERE; and it never throws — an unhostable profile or a
- * config that conflicts with an existing local declaration is left central for
- * an explicit claim rather than wedging the sync. After it runs, {@link
- * profileRegistry} is the single source of truth: a claimed profile lives in the
- * device doc alone, never double-counted across the two stores.
+ * see the `profileRegistry does not claim central declarations` guard), but the
+ * CALLER owns one ordering invariant: invoke it AFTER the sync's repo pull. Two
+ * boxes can both host the same profile (`canHostHere` is launchability, not
+ * ownership), so a box acting on a PRE-pull view of central could re-claim a
+ * profile a peer already drained and pushed — both writes land in different
+ * device files with no git conflict, and the profile flips identity->fungible.
+ * Running post-pull means central already reflects peers' drains, so the tombstone
+ * is gone locally before this box looks. The selection is also computed INSIDE
+ * the meta lock, and the path never throws — an unhostable profile or one that
+ * conflicts with an existing local declaration is left central for an explicit
+ * claim rather than wedging the sync. After it runs, {@link profileRegistry} is
+ * the single source of truth: a claimed profile lives in the device doc alone,
+ * never double-counted across the two stores.
  */
 export function autoEvictCentralBrowserProfiles(
   canHostHere: (config: BrowserProfileConfig) => boolean,
 ): CentralClaimResult {
-  const meta = readMeta() as LegacyBrowserMeta;
-  const central = meta.browser;
-  if (!central || Object.keys(central).length === 0) return { claimed: [], skipped: [] };
-
-  const local = meta.deviceBrowser ?? {};
-  const { toClaim, skipped } = selectClaimableCentral(central, local, canHostHere, {
-    onConflict: 'skip',
+  // Read fresh, select, and commit inside ONE meta-lock acquisition. Reading
+  // central before the lock and committing after (the manual path's shape) leaves
+  // a window where a concurrent write on THIS machine changes central/deviceBrowser
+  // between snapshot and commit, so the stale selection would be merged over the
+  // fresher value. Selecting from the state the lock just handed us closes that
+  // window. We write ONLY when something is claimed, so a no-op sync never touches
+  // any doc (writeMetaUnlocked would otherwise re-serialize the device doc every
+  // run). This mirrors updateMeta's own body, minus the unconditional write.
+  return withMetaLock(() => {
+    const meta = readMeta() as LegacyBrowserMeta;
+    const central = meta.browser;
+    if (!central || Object.keys(central).length === 0) return { claimed: [], skipped: [] };
+    const local = meta.deviceBrowser ?? {};
+    const { toClaim, skipped } = selectClaimableCentral(central, local, canHostHere, {
+      onConflict: 'skip',
+    });
+    const claimed = Object.keys(toClaim).sort();
+    skipped.sort();
+    if (claimed.length === 0) return { claimed, skipped };
+    writeMetaUnlocked(buildEvictedMeta(meta, toClaim));
+    return { claimed, skipped };
   });
-
-  const claimed = Object.keys(toClaim).sort();
-  skipped.sort();
-  if (claimed.length === 0) return { claimed, skipped };
-
-  commitCentralClaim(toClaim);
-  return { claimed, skipped };
 }
 
 /**

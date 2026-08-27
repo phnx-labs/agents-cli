@@ -1121,7 +1121,14 @@ function serializeCentral(central: Record<string, unknown>): string {
   return healMetaHeader(stringifyDoc(doc));
 }
 
-function writeMetaUnlocked(meta: Meta): void {
+/**
+ * Write `meta` to disk (central + device docs + pins) WITHOUT taking the meta
+ * lock — the caller must already hold it via {@link withMetaLock}. Exported so a
+ * writer that needs to read fresh state, decide, and commit within a SINGLE lock
+ * acquisition (e.g. browser tombstone eviction) can do so without the
+ * read-snapshot-then-separately-lock race that {@link updateMeta} would impose.
+ */
+export function writeMetaUnlocked(meta: Meta): void {
   const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, projectRoot, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write

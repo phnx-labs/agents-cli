@@ -322,6 +322,25 @@ describe('autoEvictCentralBrowserProfiles (self-draining tombstone, PHNX-3315)',
     expect(profileRegistry().get('work')).toHaveLength(1);
   });
 
+  it('drains once, then the second run claims nothing and rewrites no doc (self-draining, no churn)', async () => {
+    const centralFile = path.join(root, '.agents', 'agents.yaml');
+    const config = { browser: 'custom', binary: process.execPath, endpoints: ['cdp://127.0.0.1:9222'] };
+    writeYaml(centralFile, { browser: { work: config } });
+    const { machineId } = await import('../machine-id.js');
+    const { autoEvictCentralBrowserProfiles } = await import('./registry.js');
+
+    expect(autoEvictCentralBrowserProfiles(() => true)).toEqual({ claimed: ['work'], skipped: [] });
+    const centralAfter = fs.readFileSync(centralFile, 'utf8');
+    const deviceAfter = fs.readFileSync(deviceFile(machineId()), 'utf8');
+
+    // Second run: the tombstone is already drained, so nothing is claimed AND no
+    // doc is rewritten — the commit only fires when something is actually claimed,
+    // so a routine `agents sync` with no tombstone never churns a file.
+    expect(autoEvictCentralBrowserProfiles(() => true)).toEqual({ claimed: [], skipped: [] });
+    expect(fs.readFileSync(centralFile, 'utf8')).toBe(centralAfter);
+    expect(fs.readFileSync(deviceFile(machineId()), 'utf8')).toBe(deviceAfter);
+  });
+
   it('is idempotent and a no-op when there is no central tombstone', async () => {
     writeYaml(deviceFile('anything'), { browser: {} });
     const { autoEvictCentralBrowserProfiles } = await import('./registry.js');

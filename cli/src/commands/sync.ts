@@ -449,6 +449,13 @@ async function runInteractiveReconcile(
     } else outLog(chalk.yellow(`  ! ${repo}: ${(res.error ?? 'pull failed').split('\n')[0]}`));
   }
 
+  // Drain the legacy central `browser:` tombstone now that the repos are pulled.
+  // Running AFTER the pull is load-bearing: it acts on a view of central that
+  // already reflects peers' drains, so it never re-claims a profile another box
+  // already migrated (which would flip that profile's kind identity->fungible).
+  // The interactive path is always non-quiet, non-json.
+  evictCentralBrowserProfilesForSync(false, false, outLog, errLog);
+
   // 2. One selection spanning the chosen repos.
   const selection = mergeRepoScopedSelections(repos, cwd);
   const hasResources = selection.memory === 'all' || Object.entries(selection).some(
@@ -479,9 +486,12 @@ async function runInteractiveReconcile(
  * New profiles write the per-device doc, but profiles created before the
  * device-scoped store lingered in the shared top-level `agents.yaml` and churned
  * every fleet pull until someone ran `agents browser profiles claim` by hand.
- * Fold the ones THIS box can host into its device doc here — host-gated and
- * serialized under the meta lock (`updateMeta`) so it never races a peer, and
- * non-fatal so a hiccup can never wedge the sync.
+ * Fold the ones THIS box can host into its device doc — host-gated, and the
+ * selection is computed under the meta lock (see autoEvictCentralBrowserProfiles)
+ * so it never races itself. Callers MUST invoke this AFTER the repo pull: acting
+ * on a pre-pull view of central risks re-claiming a profile a peer already
+ * drained, which would flip its kind identity->fungible. Non-fatal so a hiccup
+ * can never wedge the sync.
  */
 function evictCentralBrowserProfilesForSync(
   quiet: boolean,
@@ -525,12 +535,6 @@ async function runUmbrella(
   errLog: (msg: string) => void,
   json = false,
 ): Promise<void> {
-  // Self-heal: drain the legacy central `browser:` tombstone before anything
-  // else. Both the interactive picker and the non-interactive path below
-  // return without touching it otherwise, so this runs first on every bare
-  // `agents sync`. Skipped under --cloud, which is fetch-only (no local write).
-  if (!opts.cloud) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
-
   // Interactive bare `agents sync` (a TTY, no --yes, no scope flag) drops into
   // the two-checklist picker: which repos to sync from, which agents to sync
   // into. Any explicit flag, --yes, or --json keeps the non-interactive path.
@@ -566,6 +570,12 @@ async function runUmbrella(
       quiet: quiet || json,
       log: (msg) => { if (!quiet && !json) outLog(chalk.gray(`  ${msg}`)); },
     });
+
+    // Drain the legacy central `browser:` tombstone AFTER the umbrella pull, so
+    // we act on central as converged by this sync rather than a stale pre-pull
+    // copy that could re-claim a profile a peer already migrated. Skipped under
+    // --cloud (fetch-only, no local reconcile).
+    if (!opts.cloud) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
 
     if (json) {
       emitJson({
