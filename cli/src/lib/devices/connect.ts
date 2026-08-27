@@ -91,15 +91,18 @@ export function wrapRemoteCommand(device: DeviceProfile, cmd: string[]): string 
 }
 
 /**
- * True when `cmd` is an `agents browser …` / `ag browser …` drive, including
- * the quoted single-string form `agents ssh box 'agents browser …'`. The
- * `--device` passthrough stamps {@link markFleetRemote} on this shape so the
- * far-side consent gate can fire; `agents ssh` must too (PHNX-3065).
+ * True when `cmd` is a browser drive: `agents browser …`, `ag browser …`, or
+ * the standalone `browser` binary (`cli/package.json` `bin.browser` →
+ * `src/browser.ts`), including the quoted single-string form
+ * `agents ssh box 'browser …'`. The `--device` passthrough stamps
+ * {@link markFleetRemote} on this shape so the far-side consent gate can fire;
+ * `agents ssh` must too (PHNX-3065).
  */
 export function isAgentsBrowserDrive(cmd: string[]): boolean {
   if (cmd.length === 0) return false;
   const tokens = cmd.length === 1 && /\s/.test(cmd[0]!) ? cmd[0]!.trim().split(/\s+/) : cmd;
   const bin = tokens[0];
+  if (bin === 'browser') return true;
   return (bin === 'agents' || bin === 'ag') && tokens[1] === 'browser';
 }
 
@@ -215,11 +218,11 @@ export function deviceIdentityArgs(device: DeviceProfile): string[] {
  * is given: an explicit command keeps its current cwd (the remote home) and its
  * behavior unchanged (RUSH-2412).
  *
- * An `agents browser …` / `ag browser …` command is prefixed with
- * {@link markFleetRemote} so the far-side consent gate sees `AGENTS_FLEET_REMOTE=1`
- * the same way `browser --device` does. The local `env` overlay here is for the
- * ssh *client* (askpass); it cannot carry the marker — OpenSSH does not forward
- * arbitrary env (PHNX-3065).
+ * An `agents browser …` / `ag browser …` / standalone `browser …` command is
+ * prefixed with {@link markFleetRemote} so the far-side consent gate sees
+ * `AGENTS_FLEET_REMOTE=1` the same way `browser --device` does. The local `env`
+ * overlay here is for the ssh *client* (askpass); it cannot carry the marker —
+ * OpenSSH does not forward arbitrary env (PHNX-3065).
  */
 export function buildSshInvocation(
   device: DeviceProfile,

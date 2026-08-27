@@ -493,9 +493,19 @@ function trySshLeasedBox(name: string, cmd: string[]): boolean {
   }
   // Crabbox ssh does not go through buildSshInvocation; stamp the same
   // consent marker so a browser drive on a leased box is gated too.
-  const remoteCmd = isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
+  const remoteCmd = leasedBoxRemoteCmd(cmd);
   const res = spawnSync(sshArgv[0], [...sshArgv.slice(1), ...remoteCmd], { stdio: 'inherit' });
   process.exit(res.status ?? 1);
+}
+
+/**
+ * Remote argv for `agents ssh <slug>` into a leased crabbox. Crabbox ssh does
+ * not go through {@link buildSshInvocation}, so this stamps the same
+ * AGENTS_FLEET_REMOTE consent marker a registered-device ssh would (PHNX-3065).
+ * Exported so the branch is unit-testable without a live crabbox.
+ */
+export function leasedBoxRemoteCmd(cmd: string[]): string[] {
+  return isAgentsBrowserDrive(cmd) ? markFleetRemote(cmd, { shell: 'posix' }) : cmd;
 }
 
 /** Resolve a device or exit with a clear error. */
@@ -2612,9 +2622,9 @@ launched from — 'agents ssh yosemite-s0' from ~/src/app lands in ~/src/app on
 the target when it exists, else the remote home. Same portable-cwd rule as
 'agents run --device'. Passing a command keeps the remote home.
 
-An 'agents browser …' (or 'ag browser …') command is stamped AGENTS_FLEET_REMOTE
-so the target's browser.remote-control consent gate applies, same as
-'agents browser <verb> --device <name>'.
+An 'agents browser …', 'ag browser …', or standalone 'browser …' command is
+stamped AGENTS_FLEET_REMOTE so the target's browser.remote-control consent
+gate applies, same as 'agents browser <verb> --device <name>'.
 `)
     .action(async (name: string, cmd: string[]) => {
       // Hidden askpass bridge: ssh execs the shim, which re-invokes us here.

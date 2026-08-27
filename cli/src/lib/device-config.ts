@@ -249,7 +249,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'bool',
     defaultValue: false,
     description:
-      "Whether other fleet machines may drive THIS device's browser over `browser --device <this-device>` or `agents ssh <this-device> agents browser …`. " +
+      "Whether other fleet machines may drive THIS device's browser over `browser --device <this-device>` or `agents ssh <this-device> …` (`agents browser` / `ag browser` / standalone `browser`). " +
       'Default off — a fleet-remote drive is refused until the owner runs `agents browser remote-control on`.',
   },
   {

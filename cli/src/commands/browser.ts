@@ -1472,7 +1472,7 @@ function registerTaskCommands(browser: Command): void {
   browser
     .command('remote-control [state]')
     .description(
-      "Allow or deny other fleet machines driving THIS machine's browser over `browser --device` or `agents ssh … agents browser`. " +
+      "Allow or deny other fleet machines driving THIS machine's browser over `browser --device` or `agents ssh …` (`agents browser` / `ag browser` / standalone `browser`). " +
         '`on`/`off` to set (device-local, never synced); no argument prints the current value. Default off.',
     )
     .option('--json', 'Output as JSON')
