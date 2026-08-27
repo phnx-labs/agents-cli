@@ -40,9 +40,9 @@
   "driftSignals": [],
   "failurePatterns": [
     {
-      "id": "58bca113",
-      "label": "exec_command: git guard denial",
-      "signature": { "tool": "exec_command", "cause": "guard", "key": "git-guard blocked" },
+      "id": "b57b8150",
+      "label": "exec_command: command failed",
+      "signature": { "tool": "exec_command", "cause": "real", "key": "command failed" },
       "sessions": 1,
       "occurrences": 1,
       "wastedMs": 0,
@@ -50,9 +50,9 @@
       "drift": "up"
     },
     {
-      "id": "c7a7fd10",
-      "label": "exec_command: command failed",
-      "signature": { "tool": "exec_command", "cause": "real", "key": "command failed" },
+      "id": "f8afc153",
+      "label": "exec_command: git guard denial",
+      "signature": { "tool": "exec_command", "cause": "guard", "key": "git-guard blocked" },
       "sessions": 1,
       "occurrences": 1,
       "wastedMs": 0,
