@@ -362,7 +362,7 @@ type DeliveryPlan =
   | { via: 'inject'; rail: InjectRail; target: InjectTarget }
   | { via: 'resume' }
   | { via: 'mailbox'; mailboxId: string }
-  | { via: 'refuse'; reason: string };
+  | { via: 'refuse'; reason: string; hint?: string };
 
 /**
  * Pick the delivery mechanism. resolveAnswerRoute (answer-router.ts) chooses
@@ -396,7 +396,13 @@ function planDelivery(
   // (no open block) would never poll the mailbox, so it is flagged instead of
   // silently dropping a nudge into a spool it will never read.
   if (route.kind === 'mailbox' && isOpenQuestionBlock(block)) return { via: 'mailbox', mailboxId };
-  return { via: 'refuse', reason: route.kind === 'refuse' ? route.reason : resolution.reason };
+  return {
+    via: 'refuse',
+    // answer-router's refuse reason already bakes in the recovery hint; the
+    // resolver's reason does not, so carry hint separately for the caller.
+    reason: route.kind === 'refuse' ? route.reason : resolution.reason,
+    hint: route.kind === 'refuse' ? undefined : resolution.hint,
+  };
 }
 
 /** Default open-block reader — the same lookup `agents message` uses. */
@@ -884,7 +890,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
           flags[sid] = { reason: `rotate: ${resolution.reason}`, host: session.host, atMs: nowMs };
           outcomes.push({
             ...base, decision: 'skip', addressable: false,
-            reason: `rate-limited but un-addressable — ${resolution.reason}`,
+            reason: resolution.hint
+              ? `rate-limited but un-addressable — ${resolution.reason} — ${resolution.hint}`
+              : `rate-limited but un-addressable — ${resolution.reason}`,
           });
           continue;
         }
@@ -1029,7 +1037,11 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
               try {
                 const declaredBlock = buildDeclaredBlock(
                   { sessionId: session.sessionId, mailboxId, host: machineHost, runtime, cwd: session.cwd },
-                  { text: `Session genuinely needs Muqsit and is un-addressable — ${decision.reason}. Needs attention.` },
+                  {
+                    text: resolution.hint
+                      ? `Session genuinely needs Muqsit and is un-addressable — ${decision.reason}. Needs attention. ${resolution.hint}`
+                      : `Session genuinely needs Muqsit and is un-addressable — ${decision.reason}. Needs attention.`,
+                  },
                 );
                 publishBlockFn(declaredBlock);
                 ledgerUpdates[session.sessionId] = nowMs;
@@ -1063,7 +1075,9 @@ export async function runWatchdogTick(opts: WatchdogTickOptions = {}): Promise<W
       flags[session.sessionId] = { reason: plan.reason, host: session.host, atMs: nowMs };
       outcomes.push({
         ...base, decision: 'skip', addressable: false,
-        reason: `nudge-worthy but un-addressable — ${plan.reason}`,
+        reason: plan.hint
+          ? `nudge-worthy but un-addressable — ${plan.reason} — ${plan.hint}`
+          : `nudge-worthy but un-addressable — ${plan.reason}`,
         nudgeText: chosenText,
       });
       continue;
