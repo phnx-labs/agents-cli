@@ -8,7 +8,7 @@
 
 import { existsSync } from 'node:fs';
 import { formatBytes } from '../lib/format.js';
-import { Option, type Command } from 'commander';
+import { Argument, Option, type Command } from 'commander';
 import chalk from 'chalk';
 import {
   DEFAULT_BUCKET_NAME,
@@ -47,6 +47,7 @@ import {
   resolveShareVisibility,
   scanShareContent,
   formatSensitiveContentError,
+  SHARE_VISIBILITY_LEVELS,
   type PublishResult,
   type ShareVisibility,
 } from '../lib/share/publish.js';
@@ -142,6 +143,11 @@ export interface ShareEditResult {
   url: string;
   label: string | null;
   meta: Record<string, string>;
+  /** The visibility the page now carries (present on Workers that support the
+   * visibility edit; absent from an older deployed template). */
+  visibility?: ShareVisibility;
+  /** The visibility the page had before this edit, when the Worker reports it. */
+  previousVisibility?: ShareVisibility;
 }
 
 export async function runShareEdit(
@@ -150,6 +156,10 @@ export async function runShareEdit(
     githubUser?: string; config?: ShareConfig; writeToken?: string; byo?: boolean;
     session?: PhoenixSession | null; label?: string | null; meta?: Record<string, string>;
     metaMode?: 'merge' | 'replace'; removeMeta?: string[];
+    /** Change the page's visibility in place (public | unlisted | me | org).
+     * A metadata-only rewrite like label/meta — the body is untouched, so no
+     * revision is created. me/org require a Phoenix session. */
+    visibility?: ShareVisibility;
     force?: boolean;
     fetchEdit?: typeof fetch;
   },
@@ -164,12 +174,19 @@ export async function runShareEdit(
     if (hits.length > 0) throw new Error(formatSensitiveContentError(hits));
   }
   const backend = resolveShareBackend({ githubUser: opts.githubUser, config: opts.config, writeToken: opts.writeToken, byo: opts.byo, session: opts.session });
+  // me/org are Phoenix-only — surface a crisp login hint here rather than the
+  // Worker's generic 400 for a signed-out caller (BYO WRITE_TOKEN can only set
+  // public/unlisted).
+  if ((opts.visibility === 'me' || opts.visibility === 'org') && backend.kind !== 'managed') {
+    throw new Error(`Changing visibility to '${opts.visibility}' requires a Phoenix session. Run 'agents auth login'.`);
+  }
   const { key } = await resolveDeleteTarget(target, { githubUser: backend.kind === 'managed' ? backend.namespace : opts.githubUser || backend.namespace });
   const res = await (opts.fetchEdit ?? fetch)(`${backend.baseUrl.replace(/\/+$/, '')}/${key}`, {
     method: 'PATCH',
     headers: { authorization: `Bearer ${backend.token}`, 'content-type': 'application/json' },
     body: JSON.stringify({
       ...(opts.label !== undefined ? { label: opts.label } : {}),
+      ...(opts.visibility !== undefined ? { visibility: opts.visibility } : {}),
       meta: opts.meta ?? {}, metaMode: opts.metaMode ?? 'merge', removeMeta: opts.removeMeta ?? [],
     }),
   });
@@ -179,7 +196,19 @@ export async function runShareEdit(
     try { detail = String((JSON.parse(body) as { error?: unknown }).error ?? body); } catch { /* keep body */ }
     throw new Error(`Share metadata edit failed (${res.status}): ${detail || 'unknown error'}`);
   }
-  return JSON.parse(body) as ShareEditResult;
+  const result = JSON.parse(body) as ShareEditResult;
+  // A Worker template that predates the visibility edit ignores the `visibility`
+  // field and 200s without echoing it back — which would otherwise report a
+  // silent success while the page's visibility never changed. Fail loud with the
+  // update path instead (visibility rode in on RUSH-3135's metadata-edit route).
+  if (opts.visibility !== undefined && result.visibility === undefined) {
+    throw new Error(
+      "This share endpoint's Worker doesn't support in-place visibility changes yet — it predates them. " +
+        "Run 'agents artifacts share update' to deploy the current Worker template, then retry " +
+        "('agents artifacts share status' shows whether an update is due).",
+    );
+  }
+  return result;
 }
 
 /** Shown whenever the deployed Worker has no `?format=json` listing route — an
@@ -542,6 +571,19 @@ export function formatShareDeleteResult(result: DeleteShareResult, json = false)
   return lines.join('\n');
 }
 
+/** Human summary of an in-place visibility change. */
+function formatShareVisibilityResult(result: ShareEditResult, requested: ShareVisibility): string {
+  const now = result.visibility ?? requested;
+  const from = result.previousVisibility && result.previousVisibility !== now
+    ? `${chalk.dim(result.previousVisibility)} → `
+    : '';
+  return [
+    `${chalk.green('✓')} visibility ${from}${chalk.bold(now)}`,
+    chalk.dim(`  ${result.url}`),
+    chalk.dim('  body unchanged — no revision created'),
+  ].join('\n');
+}
+
 interface ShareDeleteCliOpts {
   keepCover?: boolean;
   keepRevisions?: boolean;
@@ -640,6 +682,38 @@ const SHARE_DELETE_NOTES = `
   lifecycle rule on their own schedule either way).
 
   agents artifacts share delete === agents artifacts unshare (same command, different name).
+`;
+
+const SHARE_VISIBILITY_EXAMPLES = `
+      # Take a public page private to just you (Phoenix session required for me/org)
+      agents artifacts share visibility https://share.agents-cli.sh/octocat/q3-plan me
+
+      # Make it public again — by <user>/<slug> or a bare slug in your namespace
+      agents artifacts share visibility octocat/q3-plan public
+      agents artifacts share visibility q3-plan unlisted
+
+      # Share with your Phoenix org (rejected on a public-inbox email domain)
+      agents artifacts share visibility q3-plan org
+
+      # Machine-readable result
+      agents artifacts share visibility q3-plan me --visibility-json
+`;
+
+const SHARE_VISIBILITY_NOTES = `
+  Changes an ALREADY-published page's visibility in place: the slug — and so the
+  URL — is preserved. It re-stamps only the visibility on the stored object; the
+  body, provenance, label, and --meta are untouched, so — like 'agents artifacts
+  share edit' — this is a metadata-only rewrite and creates no revision.
+
+  public is listed in the gallery; unlisted is a capability URL (GET still 200,
+  X-Robots-Tag: noindex, hidden from gallery/list); me is visible only to the
+  signed-in owner; org is visible to members of the same Phoenix organization.
+  me and org require a Phoenix session — run 'agents auth login' first — and org
+  is refused on a public-inbox email domain (gmail.com, outlook.com, …).
+
+  This hits the live endpoint via the owner's Phoenix session (or the BYO
+  WRITE_TOKEN for public/unlisted). It does not re-run the pre-publish
+  sensitive-content scan — the body is unchanged.
 `;
 
 /**
@@ -797,6 +871,43 @@ ${SHARE_DELETE_NOTES}
   setHelpSections(shareDeleteCmd, { examples: SHARE_DELETE_EXAMPLES, notes: SHARE_DELETE_NOTES });
   shareDeleteCmd.action(async (targets: string[], opts: ShareDeleteCliOpts) => {
     await runShareDelete(targets, opts);
+  });
+
+  // `agents artifacts share visibility <target> <level>` — change an
+  // already-published page's visibility in place. Kept in its own block; it
+  // reuses the delete target parser and the same PATCH metadata-edit route as
+  // `share edit` (visibility is metadata), so it re-stamps the stored object
+  // rather than re-publishing — a re-publish over the PUT path can't express an
+  // in-place change (GET injects the attribution bar at serve time and never
+  // strips it, and the served body carries no provenance/label/--meta back to
+  // re-send). --for-user / --visibility-json (not --github-user / --json): the
+  // parent `share <file>` already owns both long names, and commander resolves a
+  // child option's long name against the whole ancestor chain, silently dropping
+  // a same-named child (RUSH-2687) — the same rename the delete/list blocks make.
+  const shareVisibilityCmd = shareCmd
+    .command('visibility')
+    .description("Change an already-published page's visibility in place (public | unlisted | me | org). The slug/URL is preserved; the body is untouched, so no revision is created.")
+    .addArgument(new Argument('<target>', 'the published page: a full URL, <user>/<slug>, or a bare slug in your namespace'))
+    .addArgument(new Argument('<level>', 'new visibility').choices([...SHARE_VISIBILITY_LEVELS]))
+    .option('--for-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from gh/git config)')
+    .option('--visibility-json', 'emit a machine-readable result')
+    .action(async (target: string, level: string, opts: { forUser?: string; visibilityJson?: boolean }) => {
+      try {
+        const visibility = level as ShareVisibility;
+        const result = await runShareEdit(target, { visibility, githubUser: opts.forUser });
+        if (opts.visibilityJson) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        console.log(formatShareVisibilityResult(result, visibility));
+      } catch (e) {
+        console.error(chalk.red((e as Error).message));
+        process.exitCode = 1;
+      }
+    });
+  setHelpSections(shareVisibilityCmd, {
+    examples: SHARE_VISIBILITY_EXAMPLES,
+    notes: SHARE_VISIBILITY_NOTES,
   });
 
   shareCmd

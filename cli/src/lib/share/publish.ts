@@ -114,6 +114,10 @@ export interface PublishOptions {
 
 export type ShareVisibility = 'public' | 'unlisted' | 'me' | 'org';
 
+/** The visibility levels a share may carry — the Worker's own set, used to
+ * validate `--visibility` and `share visibility <target> <level>`. */
+export const SHARE_VISIBILITY_LEVELS: readonly ShareVisibility[] = ['public', 'unlisted', 'me', 'org'];
+
 export interface PublishResult {
   url: string;
   /** URL-safe object name, explicit (`--slug`) or deterministically derived. */

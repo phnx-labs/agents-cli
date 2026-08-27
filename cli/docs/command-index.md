@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 568 commands._
+_69 command groups · 569 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -47,18 +47,19 @@ agents add <specs...>  Download and install agent CLI versions. Enables subsidiz
 ## artifacts — Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.
 
 ```
-agents artifacts                            Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.
-agents artifacts setup                      Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.
-agents artifacts share [file]               Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.
-agents artifacts share analytics            Show the Cloudflare Web Analytics status for this share endpoint.
-agents artifacts share delete <targets...>  Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.
-agents artifacts share edit <target>        Edit a published share's label or arbitrary metadata without republishing its body.
-agents artifacts share join [baseUrl]       Use an existing synced share endpoint and write token (no provisioning).
-agents artifacts share list                 List the pages you've published to your share namespace (human table; --list-json for scripts).
-agents artifacts share revisions <target>   Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).
-agents artifacts share status               Show the configured share endpoint and namespace.
-agents artifacts share update               Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
-agents artifacts unshare <targets...>       Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
+agents artifacts                                    Publish agent-made artifacts (plans, reports, visuals) to a shareable link — managed if signed in, otherwise your Cloudflare R2.
+agents artifacts setup                              Provision (or join) the Cloudflare R2 + Worker endpoint that backs `agents artifacts share`.
+agents artifacts share [file]                       Publish an HTML file to a shareable link — managed if signed in, otherwise your Cloudflare R2.
+agents artifacts share analytics                    Show the Cloudflare Web Analytics status for this share endpoint.
+agents artifacts share delete <targets...>          Take down a published page (and by default its OG cover). Verifies the page 404s before reporting success. Nested alias: agents artifacts unshare.
+agents artifacts share edit <target>                Edit a published share's label or arbitrary metadata without republishing its body.
+agents artifacts share join [baseUrl]               Use an existing synced share endpoint and write token (no provisioning).
+agents artifacts share list                         List the pages you've published to your share namespace (human table; --list-json for scripts).
+agents artifacts share revisions <target>           Show the retained prior versions of a published slug, newest first (human table; --revisions-json for scripts).
+agents artifacts share status                       Show the configured share endpoint and namespace.
+agents artifacts share update                       Re-deploy the Worker script to the current template on an already-provisioned endpoint (idempotent).
+agents artifacts share visibility <target> <level>  Change an already-published page's visibility in place (public | unlisted | me | org). The slug/URL is preserved; the body is untouched, so no revision is created.
+agents artifacts unshare <targets...>               Alias of `agents artifacts share delete` — take down a published page (and by default its OG cover).
 ```
 
 ## auth — Sign in to Phoenix ID — the account layer behind team spaces

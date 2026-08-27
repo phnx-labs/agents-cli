@@ -220,11 +220,37 @@ export default {
       try { edit = await request.json(); } catch { return json({ error: 'PATCH body must be JSON' }, 400); }
       if (!edit || typeof edit !== 'object') return json({ error: 'PATCH body must be an object' }, 400);
       const metadata = { ...(existing.customMetadata || {}) };
+      const previousVisibility = metadata.visibility || 'public';
       if (Object.prototype.hasOwnProperty.call(edit, 'label')) {
         if (edit.label !== null && typeof edit.label !== 'string') return json({ error: 'label must be a string or null' }, 400);
         if (typeof edit.label === 'string' && (edit.label.trim() !== edit.label || !edit.label || edit.label.length > 200)) return json({ error: 'label must be 1-200 trimmed characters' }, 400);
         if (edit.label === null) { delete metadata.label; delete metadata['label-source']; }
         else { metadata.label = edit.label; metadata['label-source'] = 'explicit'; }
+      }
+      // Visibility is a first-class edit field (like label), not an arbitrary
+      // --meta entry — 'visibility' is a RESERVED key, so it can only be changed
+      // here, never smuggled through edit.meta. me/org require a Phoenix identity
+      // and org additionally requires a private (non-public-inbox) email domain,
+      // the SAME gate PUT enforces. This is a metadata-only rewrite: the body is
+      // untouched, so no revision is created (identical to a label/meta edit).
+      if (Object.prototype.hasOwnProperty.call(edit, 'visibility')) {
+        const vis = normalizeVisibility(edit.visibility);
+        if (vis.error) return vis.error;
+        const visibility = vis.value;
+        if (visibility === 'me' || visibility === 'org') {
+          const phoenixBase = typeof env.PHOENIX_ID_BASE === 'string' ? env.PHOENIX_ID_BASE.replace(/\\/+$/, '') : '';
+          if (auth.kind !== 'phoenix' || !phoenixBase) return json({ error: 'visibility me/org requires Phoenix identity' }, 400);
+          if (visibility === 'org') {
+            const domain = emailDomain(auth.email);
+            if (!domain) return json({ error: 'org visibility requires a verified email domain' }, 400);
+            if (PUBLIC_INBOX_DOMAINS.indexOf(domain) !== -1) return json({ error: 'org visibility cannot use a public email domain', domain: domain }, 400);
+          }
+        }
+        metadata.visibility = visibility;
+        // org_domain is meaningful only for org — set it there, drop the stale
+        // value on any move away from org so it can never gate a later read.
+        if (visibility === 'org') metadata.org_domain = emailDomain(auth.email);
+        else delete metadata.org_domain;
       }
       const mode = edit.metaMode || 'merge';
       if (mode !== 'merge' && mode !== 'replace') return json({ error: 'metaMode must be merge or replace' }, 400);
@@ -259,7 +285,7 @@ export default {
       if (existing.etag) putOpts.onlyIf = { etagMatches: existing.etag };
       const putResult = await env.BUCKET.put(path, existing.body, putOpts);
       if (putResult === null) return json({ error: 'conflict', key: path }, 409);
-      return json({ ok: true, url: url.origin + '/' + path, label: metadata.label || null, meta: extraMetaOf(metadata) }, 200);
+      return json({ ok: true, url: url.origin + '/' + path, label: metadata.label || null, meta: extraMetaOf(metadata), visibility: metadata.visibility || 'public', previousVisibility: previousVisibility }, 200);
     }
 
     if (request.method === 'GET' || request.method === 'HEAD') {

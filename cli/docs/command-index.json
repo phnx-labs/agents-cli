@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 568,
+  "commands": 569,
   "root": {
     "name": "agents",
     "path": "",
@@ -1481,6 +1481,65 @@
               ],
               "examples": "# Push a worker-template.ts change out to your already-provisioned endpoint\n      agents artifacts share update\n\n      # Force a re-deploy even though the template hash already matches\n      agents artifacts share update --force",
               "notes": "Reuses the existing account/worker/bucket from 'agents artifacts share status' and the\n  existing write token — it never re-provisions a bucket, touches routes, or\n  regenerates the token. See 'agents artifacts share status' for whether an update is due.",
+              "subcommands": []
+            },
+            {
+              "name": "visibility",
+              "path": "artifacts share visibility",
+              "aliases": [],
+              "description": "Change an already-published page's visibility in place (public | unlisted | me | org). The slug/URL is preserved; the body is untouched, so no revision is created.",
+              "args": [
+                {
+                  "name": "target",
+                  "required": true,
+                  "variadic": false,
+                  "description": "the published page: a full URL, <user>/<slug>, or a bare slug in your namespace"
+                },
+                {
+                  "name": "level",
+                  "required": true,
+                  "variadic": false,
+                  "description": "new visibility",
+                  "choices": [
+                    "public",
+                    "unlisted",
+                    "me",
+                    "org"
+                  ]
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--for-user <user>",
+                  "description": "GitHub username for resolving a bare-slug target (default: resolved from gh/git config)",
+                  "long": "--for-user",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--visibility-json",
+                  "description": "emit a machine-readable result",
+                  "long": "--visibility-json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Take a public page private to just you (Phoenix session required for me/org)\n      agents artifacts share visibility https://share.agents-cli.sh/octocat/q3-plan me\n\n      # Make it public again — by <user>/<slug> or a bare slug in your namespace\n      agents artifacts share visibility octocat/q3-plan public\n      agents artifacts share visibility q3-plan unlisted\n\n      # Share with your Phoenix org (rejected on a public-inbox email domain)\n      agents artifacts share visibility q3-plan org\n\n      # Machine-readable result\n      agents artifacts share visibility q3-plan me --visibility-json",
+              "notes": "Changes an ALREADY-published page's visibility in place: the slug — and so the\n  URL — is preserved. It re-stamps only the visibility on the stored object; the\n  body, provenance, label, and --meta are untouched, so — like 'agents artifacts\n  share edit' — this is a metadata-only rewrite and creates no revision.\n\n  public is listed in the gallery; unlisted is a capability URL (GET still 200,\n  X-Robots-Tag: noindex, hidden from gallery/list); me is visible only to the\n  signed-in owner; org is visible to members of the same Phoenix organization.\n  me and org require a Phoenix session — run 'agents auth login' first — and org\n  is refused on a public-inbox email domain (gmail.com, outlook.com, …).\n\n  This hits the live endpoint via the owner's Phoenix session (or the BYO\n  WRITE_TOKEN for public/unlisted). It does not re-run the pre-publish\n  sensitive-content scan — the body is unchanged.",
               "subcommands": []
             }
           ]

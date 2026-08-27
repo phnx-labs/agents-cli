@@ -1284,6 +1284,7 @@ agents artifacts share list --agent claude                  # everything publish
 agents artifacts share list --meta kind=plan                # exact, repeatable metadata filters
 agents artifacts share edit fleet --label "Final fleet plan" --meta status=final
 agents artifacts share revisions fleet                      # prior versions kept under a slug
+agents artifacts share visibility fleet me                  # re-scope a published page in place (public|unlisted|me|org)
 agents artifacts share status                               # show the endpoint
 agents artifacts unshare fleet                              # take a published link (+ its OG cover) down
 ```
@@ -1297,7 +1298,11 @@ email (`muqsitnawaz@gmail.com` → `muqsitnawaz`); the page slug is readable plu
 short view-id. HTML is stored as one object: local images are inlined, `file://` TOC
 links become in-page hashes, so the published page is actually viewable. `--visibility unlisted` (hidden aliases
 `--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
-and the Worker sends `X-Robots-Tag: noindex`. **BYO Cloudflare** remains: `setup` reads
+and the Worker sends `X-Robots-Tag: noindex`. `share visibility <target> <level>`
+re-scopes an **already-published** page in place — the slug/URL is preserved and the
+body is untouched (a metadata-only change, like `share edit`, so no revision) — so you
+can promote a draft to `public` or pull a link back to `me`/`org` without re-publishing
+(`me`/`org` need a Phoenix session). **BYO Cloudflare** remains: `setup` reads
 a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates
 an R2 bucket, uploads a tiny Worker, and enables the free `*.workers.dev` subdomain (or
 maps `--domain share.example.com` when the token owns the zone). Writes are bearer-gated
