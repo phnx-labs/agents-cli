@@ -62,6 +62,7 @@ import {
 } from '../lib/share/backend.js';
 import { resolveGitHubUsername } from '../lib/git.js';
 import { setHelpSections } from '../lib/help.js';
+import { showUrl } from '../lib/open-url.js';
 import type { PhoenixSession } from '../lib/identity/client.js';
 
 export function formatSharePublishResult(result: PublishResult, json = false): string {
@@ -586,6 +587,75 @@ export async function runShareRevisions(
   return parseShareRevisions(key, res.body);
 }
 
+/** The resolved page URL plus a signed-in-owner URL that carries a one-time
+ * login ticket, so opening it activates the shared page's inline visibility
+ * control (PHNX-3370). */
+export interface ShareOpenResult {
+  /** `<user>/<slug>` key of the target page. */
+  key: string;
+  /** The plain page URL (no ticket). */
+  url: string;
+  /** The page URL with `?phoenix_ticket=<t>` — open THIS to be the owner. */
+  ownerUrl: string;
+}
+
+/** Mint a one-time login ticket for the signed-in owner and build the URL that
+ * opens their own published page **as the owner**, so the inline visibility
+ * control is live in the browser. Managed backend only — the control is gated on
+ * the Phoenix identity, and BYO (WRITE_TOKEN) endpoints have no per-viewer login.
+ * `target` accepts the same three forms as `visibility`/`unshare` (a full URL,
+ * `<user>/<slug>`, or a bare slug in the caller's namespace). */
+export async function runShareOpen(
+  target: string,
+  opts: {
+    githubUser?: string;
+    config?: ShareConfig;
+    session?: PhoenixSession | null;
+    /** DI seam — override the ticket-mint POST. */
+    fetchTicket?: (url: string, bearer: string) => Promise<{ status: number; body: string }>;
+  } = {},
+): Promise<ShareOpenResult> {
+  const backend = resolveShareBackend({
+    githubUser: opts.githubUser,
+    config: opts.config,
+    session: opts.session,
+    requireToken: false,
+  } satisfies ResolveShareBackendOpts);
+  if (backend.kind !== 'managed') {
+    throw new Error(
+      "'agents artifacts share open' needs a managed (Phoenix) endpoint — the page's inline " +
+        "visibility control is gated on your signed-in identity. Run 'agents auth login' first.",
+    );
+  }
+  const baseUrl = backend.baseUrl.replace(/\/+$/, '');
+  const { key } = await resolveDeleteTarget(target, { githubUser: backend.namespace });
+  const url = `${baseUrl}/${key}`;
+
+  const doFetch =
+    opts.fetchTicket ??
+    (async (u: string, bearer: string) => {
+      const res = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${bearer}` } });
+      return { status: res.status, body: await res.text() };
+    });
+  const res = await doFetch(`${baseUrl}/__ticket`, backend.token);
+  if (res.status !== 200) {
+    throw new Error(
+      `Could not mint a login ticket (${res.status}) from ${baseUrl}/__ticket. ` +
+        "The endpoint may predate this feature — run 'agents artifacts share update' to redeploy the Worker.",
+    );
+  }
+  let ticket: string;
+  try {
+    const parsed = JSON.parse(res.body) as { ticket?: unknown };
+    if (typeof parsed.ticket !== 'string' || !parsed.ticket) throw new Error('no ticket in response');
+    ticket = parsed.ticket;
+  } catch {
+    throw new Error(`Ticket endpoint at ${baseUrl}/__ticket did not return a usable ticket.`);
+  }
+  const ownerUrl = `${url}?phoenix_ticket=${encodeURIComponent(ticket)}`;
+  return { key, url, ownerUrl };
+}
+
 export function formatShareRevisions(result: ShareRevisionsResult, json = false): string {
   if (json) return JSON.stringify(result, null, 2);
   if (result.count === 0) {
@@ -959,6 +1029,48 @@ ${SHARE_DELETE_NOTES}
   setHelpSections(shareVisibilityCmd, {
     examples: SHARE_VISIBILITY_EXAMPLES,
     notes: SHARE_VISIBILITY_NOTES,
+  });
+
+  const shareOpenCmd = shareCmd
+    .command('open')
+    .description(
+      "Open your own published page in the browser signed in as the owner, so the page's inline visibility control is live. Mints a one-time login ticket and appends it to the URL.",
+    )
+    .addArgument(new Argument('<target>', 'the published page: a full URL, <user>/<slug>, or a bare slug in your namespace'))
+    .option('--for-user <user>', 'GitHub username for resolving a bare-slug target (default: resolved from your Phoenix handle)')
+    .option('--no-open', 'print the owner URL instead of opening a browser')
+    .option('--json', 'emit a machine-readable result (includes the ticketed owner URL)')
+    .action(async (target: string, opts: { forUser?: string; open?: boolean; json?: boolean }) => {
+      try {
+        const result = await runShareOpen(target, { githubUser: opts.forUser });
+        if (opts.json) {
+          console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        if (opts.open === false) {
+          console.log(chalk.green(result.ownerUrl));
+          console.log(chalk.dim('  open this to land on the page as the owner (the visibility chip becomes a control)'));
+          return;
+        }
+        const shown = await showUrl(result.ownerUrl);
+        if (shown.via === 'none') {
+          console.log(chalk.green(result.ownerUrl));
+          console.error(chalk.dim('  could not open a browser — open the URL above yourself'));
+        } else {
+          console.log(chalk.green(`Opened ${result.url} as owner — the visibility chip is now a live control.`));
+        }
+      } catch (e) {
+        console.error(chalk.red((e as Error).message));
+        process.exitCode = 1;
+      }
+    });
+  setHelpSections(shareOpenCmd, {
+    examples: `agents artifacts share open q3-plan               # open your page, signed in, ready to re-scope
+agents artifacts share open octocat/q3-plan
+agents artifacts share open https://share.agents-cli.sh/octocat/q3-plan --no-open`,
+    notes: `The shared page's visibility chip is an interactive control only for the signed-in owner; a plain link has no login, so the chip renders as a static cue. This mints a short-lived, single-use login ticket (self-signed by your share Worker) and opens the page with it, so the chip becomes a dropdown you can switch in place.
+Managed (Phoenix) endpoints only — run 'agents auth login' first. If the mint 501s/404s, your Worker predates the feature: run 'agents artifacts share update' to redeploy it.
+Prefer to change visibility without a browser? Use 'agents artifacts share visibility <target> <level>'.`,
   });
 
   shareCmd

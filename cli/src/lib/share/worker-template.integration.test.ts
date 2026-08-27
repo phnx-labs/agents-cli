@@ -64,7 +64,12 @@ function wrapBucketForDirectFetch(bucket: R2Bucket, opts: { onFirstGet?: (key: s
       getCalls += 1;
       if (getCalls === 1 && opts.onFirstGet) await opts.onFirstGet(key, obj);
       return {
-        body: obj.body,
+        // Lazy: eagerly reading `obj.body` here locks the single-use R2 stream, so
+        // a later obj.text() (the HTML GET-render path) throws "Body already used".
+        // Non-HTML responses read `.body`; HTML reads `.text()` — never both.
+        get body() {
+          return obj.body;
+        },
         customMetadata: obj.customMetadata,
         uploaded: obj.uploaded,
         etag: obj.etag,
@@ -209,6 +214,81 @@ describe('worker PATCH route against real R2 (miniflare, PHNX-3278 blocker #4)',
     expect(stored!.customMetadata!.label).toBe('会話の記録 🚀');
     expect(stored!.customMetadata!.mood).toBe('shipped 🚀');
     expect(stored!.customMetadata!.title).toBe('会話');
+  });
+
+  it('mints a self-signed login ticket that becomes the __share cookie and unlocks the owner control (PHNX-3370)', async () => {
+    const { realBucket, worker } = await setup();
+    const env = { WRITE_TOKEN: 'secret', BUCKET: wrapBucketForDirectFetch(realBucket) };
+    // The CLI authenticates the mint with the owner's Phoenix bearer, which the
+    // Worker verifies via hooks.verifyPhoenixToken (stubbed here instead of a live
+    // /auth/me call — the identity resolution is not what this test exercises).
+    worker.hooks.verifyPhoenixToken = async (req) => (/^Bearer phoenix-bearer/i.test(req.headers.get('authorization') || '') ? { userId: 'u-octocat', email: 'octocat@example.com' } : null);
+
+    // Publish a page in octocat's namespace (WRITE_TOKEN owner-write).
+    const put = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+      body: '<html><head><title>Plan</title></head><body>ok</body></html>',
+    }), env);
+    expect(put.status).toBe(200);
+
+    // Anonymous GET: the visibility chip is a STATIC cue (no owner control).
+    const anon = await worker.default.fetch(new Request('https://share.test/octocat/plan'), env);
+    const anonHtml = await anon.text();
+    expect(anonHtml).toContain('agents-share-bar');
+    expect(anonHtml).not.toContain('ash-chip-own');
+
+    // CLI mint: POST /__ticket with the owner's bearer (anything != WRITE_TOKEN, so
+    // the Phoenix path runs) returns a self-signed ticket.
+    const mint = await worker.default.fetch(new Request('https://share.test/__ticket', {
+      method: 'POST',
+      headers: { authorization: 'Bearer phoenix-bearer-xyz' },
+    }), env);
+    expect(mint.status).toBe(200);
+    const ticket = (await mint.json() as { ticket: string }).ticket;
+    expect(typeof ticket).toBe('string');
+    expect(ticket.length).toBeGreaterThan(0);
+
+    // Opening the page WITH the ticket 302s and sets the __share identity cookie,
+    // stripping the ticket from the redirect target.
+    const redeem = await worker.default.fetch(new Request('https://share.test/octocat/plan?phoenix_ticket=' + encodeURIComponent(ticket)), env);
+    expect(redeem.status).toBe(302);
+    expect(redeem.headers.get('location')).toBe('https://share.test/octocat/plan');
+    const setCookie = redeem.headers.get('set-cookie') || '';
+    expect(setCookie).toContain('__Host-phoenix_share=');
+    const cookie = setCookie.split(';')[0]; // "__Host-phoenix_share=<value>"
+
+    // GET carrying that cookie: the viewer is the owner, so the chip is now the
+    // interactive control (ash-chip-own + data-ash-chip).
+    const owner = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      headers: { cookie },
+    }), env);
+    const ownerHtml = await owner.text();
+    expect(ownerHtml).toContain('ash-chip-own');
+    expect(ownerHtml).toContain('data-ash-chip');
+  });
+
+  it('rejects a tampered login ticket rather than trusting it (PHNX-3370)', async () => {
+    const { realBucket, worker } = await setup();
+    const env = { WRITE_TOKEN: 'secret', BUCKET: wrapBucketForDirectFetch(realBucket) };
+    worker.hooks.verifyPhoenixToken = async (req) => (/^Bearer phoenix-bearer/i.test(req.headers.get('authorization') || '') ? { userId: 'u-octocat', email: 'octocat@example.com' } : null);
+    await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+      body: '<html><head><title>Plan</title></head><body>ok</body></html>',
+    }), env);
+    const mint = await worker.default.fetch(new Request('https://share.test/__ticket', {
+      method: 'POST', headers: { authorization: 'Bearer phoenix-bearer-xyz' },
+    }), env);
+    const ticket = (await mint.json() as { ticket: string }).ticket;
+    // Flip the signature: verifySelfTicket must reject it (no cookie, no redirect).
+    const tampered = ticket.slice(0, -1) + (ticket.endsWith('a') ? 'b' : 'a');
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plan?phoenix_ticket=' + encodeURIComponent(tampered)), env);
+    // A public page serves anonymously on a bad ticket (never 302/owner) — the
+    // forged ticket grants nothing.
+    expect(res.status).toBe(200);
+    expect(res.headers.get('set-cookie')).toBeNull();
+    expect(await res.text()).not.toContain('ash-chip-own');
   });
 
   it('a real R2 onlyIf.etagMatches wants the bare etag, not the quoted httpEtag (regression guard)', async () => {

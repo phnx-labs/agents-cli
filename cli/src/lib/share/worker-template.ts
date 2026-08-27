@@ -92,6 +92,21 @@ export default {
       return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
     }
 
+    // POST /__ticket — mint a short-lived, single-navigation login ticket for the
+    // authenticated owner (PHNX-3370). The CLI (which holds the Phoenix bearer)
+    // calls this, then opens the owner's page with ?phoenix_ticket=<t> so the
+    // browser trades it for the __share cookie and the inline visibility control
+    // goes live. The ticket is SELF-signed with the Worker's own HMAC secret — no
+    // external ticket service — and carries the SAME identity authorizeWrite
+    // already proved, so it grants nothing the caller didn't already have.
+    if (request.method === 'POST' && firstSeg === '__ticket') {
+      const auth = await authorizeWrite(request, env);
+      if (auth.error) return auth.error;
+      const ticket = await signSelfTicket({ userId: auth.owner, email: auth.email || '' }, env);
+      if (!ticket) return json({ error: 'ticket minting is not configured' }, 501);
+      return json({ ticket: ticket }, 200);
+    }
+
     if (request.method === 'PUT') {
       const auth = await authorizeWrite(request, env);
       if (auth.error) return auth.error;
@@ -1258,6 +1273,47 @@ async function signShareCookie(identity, env) {
   return SHARE_COOKIE + '=' + value + '; HttpOnly; Secure; Path=/; SameSite=Lax; Max-Age=' + SHARE_COOKIE_MAX_AGE;
 }
 
+// A short-lived login ticket, self-signed with the same HMAC secret as the cookie
+// but DOMAIN-SEPARATED (the signature covers a 'ticket:'-prefixed payload), so a
+// ticket value can never be replayed as a cookie value or vice versa. It rides in
+// the ?phoenix_ticket= param for exactly one navigation; resolveViewer verifies it
+// locally and exchanges it for the __share cookie. TTL is deliberately tiny — it
+// only has to survive the round-trip from CLI mint to the browser opening the URL.
+var SELF_TICKET_MAX_AGE = 120;
+
+async function signSelfTicket(identity, env) {
+  const secret = typeof env.WRITE_TOKEN === 'string' ? env.WRITE_TOKEN : '';
+  if (!secret || !identity || !identity.userId) return '';
+  const exp = Math.floor(Date.now() / 1000) + SELF_TICKET_MAX_AGE;
+  const payload = identity.userId + '|' + (identity.email || '') + '|' + exp;
+  const sig = await hmacHex(secret, 'ticket:' + payload);
+  return toB64Url(payload) + '.' + sig;
+}
+
+async function verifySelfTicket(ticket, env) {
+  const secret = typeof env.WRITE_TOKEN === 'string' ? env.WRITE_TOKEN : '';
+  if (!secret || !ticket) return null;
+  const dot = ticket.lastIndexOf('.');
+  if (dot < 1) return null;
+  let payload;
+  try {
+    payload = fromB64Url(ticket.slice(0, dot));
+  } catch {
+    return null;
+  }
+  const sig = ticket.slice(dot + 1);
+  const expected = await hmacHex(secret, 'ticket:' + payload);
+  if (!safeEqual(sig, expected)) return null;
+  const first = payload.indexOf('|');
+  const last = payload.lastIndexOf('|');
+  if (first < 0 || last <= first) return null;
+  const userId = payload.slice(0, first);
+  const email = payload.slice(first + 1, last);
+  const exp = Number(payload.slice(last + 1));
+  if (!userId || !Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return null;
+  return { userId: userId, email: email };
+}
+
 async function identityFromCookie(request, env) {
   const secret = typeof env.WRITE_TOKEN === 'string' ? env.WRITE_TOKEN : '';
   if (!secret) return null;
@@ -1317,7 +1373,9 @@ async function resolveViewer(request, env, url) {
   if (cookieId) return { identity: cookieId };
   const ticket = url.searchParams.get('phoenix_ticket');
   if (!ticket) return {};
-  const redeemed = await redeemTicket(ticket, env);
+  // Prefer the locally-verifiable self-signed ticket (PHNX-3370, no network);
+  // fall back to the external identity-server redeem for tickets it issued.
+  const redeemed = (await verifySelfTicket(ticket, env)) || (await redeemTicket(ticket, env));
   if (!redeemed) return { error: json({ error: 'invalid ticket' }, 401) };
   const cookie = await signShareCookie(redeemed, env);
   if (!cookie) return { error: json({ error: 'phoenix login is not configured' }, 401) };

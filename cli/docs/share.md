@@ -199,6 +199,37 @@ predates the visibility edit **fails loud** — it 200s without echoing `visibil
 back, which the CLI detects and turns into an `agents artifacts share update` hint
 rather than a silent no-op success (`share.ts:211`–`217`).
 
+## Changing visibility in the browser — `share open <target>`
+
+The served page carries an **inline visibility control** — the `Public`/`Unlisted`/…
+chip in the attribution bar is an interactive dropdown, but **only for the signed-in
+owner**. `isOwner` is `handleFromEmail(identity.email) === firstSeg` (`worker-template.ts:425`),
+and a browser gets that identity only from the `__share` cookie, which the Worker sets
+by redeeming a `?phoenix_ticket=` on one navigation (`resolveViewer`,
+`worker-template.ts`). Opening your own link directly (bookmark, pasted URL) carries no
+cookie, so the chip renders as a static cue.
+
+`agents artifacts share open <target>` closes that loop:
+
+```bash
+agents artifacts share open q3-plan                 # open, signed in, chip is live
+agents artifacts share open octocat/q3-plan
+agents artifacts share open q3-plan --no-open       # print the ticketed URL instead
+```
+
+It `POST`s your Phoenix bearer to `<base>/__ticket`, where the Worker mints a
+**short-lived (120 s), single-use, self-signed** login ticket — signed with the same
+HMAC secret as the cookie but **domain-separated** (`ticket:`-prefixed payload) so a
+ticket can never be replayed as a cookie or vice versa (`signSelfTicket` /
+`verifySelfTicket`, `worker-template.ts`). The CLI appends it as `?phoenix_ticket=`;
+the Worker verifies it locally (no external ticket service), sets the `__share` cookie,
+and 302s the ticket back off the URL. The ticket grants nothing the caller's bearer
+didn't already prove. Managed (Phoenix) endpoints only — a BYO/`WRITE_TOKEN` endpoint
+has no per-viewer login, so `share open` fails loud pointing at
+`agents artifacts share visibility` instead. A Worker deployed before this feature 501s
+the mint, which the CLI turns into an `agents artifacts share update` hint
+(`share.ts` `runShareOpen`).
+
 ## Related
 
 - [observability.md](observability.md) — the publication boundary (bearer-gated

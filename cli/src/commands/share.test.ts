@@ -6,6 +6,7 @@ import { Command } from 'commander';
 import type { KeychainBackend } from '../lib/secrets/index.js';
 import type { CloudflareRequest, CloudflareRequester } from '../lib/share/provision.js';
 import { formatSharePublishResult, formatShareDeleteResult, runShareDelete } from './share.js';
+import { SHARE_TOKEN_ENV_KEY } from '../lib/share/config.js';
 import type { DeleteShareResult } from '../lib/share/delete.js';
 
 interface StoredItem { value: string }
@@ -1826,6 +1827,57 @@ describe('agents artifacts share delete (CLI)', () => {
       expect(parsed[0]).toMatchObject({ target: 'my-plan', result: { key: 'octocat/my-plan' } });
     } finally {
       globalThis.fetch = originalFetch;
+    }
+  });
+});
+
+describe('runShareOpen (PHNX-3370 — open my page signed in as owner)', () => {
+  const OCTO = { access_token: 'pid_octo', userId: 'u-octo', email: 'octocat@example.com' };
+
+  it('mints a ticket with the owner bearer and builds the ticketed owner URL', async () => {
+    const share = await import('./share.js');
+    let hitUrl = '';
+    let bearer = '';
+    const result = await share.runShareOpen('plan', {
+      session: OCTO,
+      fetchTicket: async (url: string, b: string) => {
+        hitUrl = url;
+        bearer = b;
+        return { status: 200, body: JSON.stringify({ ticket: 'TICKET123' }) };
+      },
+    });
+    expect(hitUrl).toMatch(/\/__ticket$/);
+    expect(bearer).toBe('pid_octo'); // the Phoenix access_token, not printed anywhere
+    expect(result.key).toBe('octocat/plan');
+    expect(result.url).toMatch(/\/octocat\/plan$/);
+    expect(result.ownerUrl).toBe(`${result.url}?phoenix_ticket=TICKET123`);
+  });
+
+  it('points at share update when the Worker predates the mint route', async () => {
+    const share = await import('./share.js');
+    await expect(
+      share.runShareOpen('plan', {
+        session: OCTO,
+        fetchTicket: async () => ({ status: 501, body: '{"error":"ticket minting is not configured"}' }),
+      }),
+    ).rejects.toThrow(/share update/i);
+  });
+
+  it('refuses a BYO endpoint — the owner control is Phoenix-gated', async () => {
+    const share = await import('./share.js');
+    const prev = process.env[SHARE_TOKEN_ENV_KEY];
+    process.env[SHARE_TOKEN_ENV_KEY] = 'byo-token';
+    try {
+      await expect(
+        share.runShareOpen('plan', {
+          session: null,
+          config: { baseUrl: 'https://byo.example', accountId: '', workerName: '', bucketName: '', domain: '' },
+          fetchTicket: async () => ({ status: 200, body: '{"ticket":"x"}' }),
+        }),
+      ).rejects.toThrow(/managed/i);
+    } finally {
+      if (prev === undefined) delete process.env[SHARE_TOKEN_ENV_KEY];
+      else process.env[SHARE_TOKEN_ENV_KEY] = prev;
     }
   });
 });

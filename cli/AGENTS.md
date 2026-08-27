@@ -44,7 +44,17 @@ only after verifying that the bearer owns the requested namespace. The filter is
 already-published page in place through the same `PATCH` metadata-edit route as
 `share edit`: the slug/URL and body are preserved, so no revision is created; the
 result flag is `--visibility-json` (the same ancestor-collision rename as
-`--scope`/`--for-user`).
+`--scope`/`--for-user`). `agents artifacts share open <target>` opens the owner's own
+page **signed in**, so the served page's inline visibility chip is a live control and
+not a static cue (PHNX-3370): the served chip is interactive only when `isOwner`
+(`handleFromEmail(identity.email) === firstSeg`), and a browser gets that identity from
+the `__share` cookie the Worker sets by redeeming a `?phoenix_ticket=`. Nothing minted
+that ticket before, so `share open` has the Worker mint a short-lived, single-use,
+self-signed one at `POST /__ticket` (authenticated by the caller's Phoenix bearer;
+signed with the cookie's HMAC secret but domain-separated so neither can be replayed as
+the other — `signSelfTicket`/`verifySelfTicket` in `worker-template.ts`) and appends it
+to the opened URL. Managed-only; a pre-feature Worker 501s the mint into an
+`agents artifacts share update` hint.
 
 `agents feed watch --json` is the canonical thin-client operator stream: it
 composes the existing session watcher with feed attention and activity, while
