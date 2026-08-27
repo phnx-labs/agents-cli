@@ -14,7 +14,7 @@ import { createHash } from 'node:crypto';
 import { readSession } from '../identity/client.js';
 import { readShareConfig, type ShareConfig } from './config.js';
 import { resolveGitHubUsername } from '../git.js';
-import { resolveShareBackend, sanitizeShareNamespace, type ResolveShareBackendOpts } from './backend.js';
+import { resolveShareBackend, sanitizeShareNamespace, type ResolveShareBackendOpts, type ShareBackendKind } from './backend.js';
 import { captureCover, OG_WIDTH, OG_HEIGHT, OG_SCALE } from './capture.js';
 import { deriveMeta, injectOgMeta } from './og.js';
 import { injectAnalyticsBeacon } from './analytics.js';
@@ -32,6 +32,8 @@ export interface PublishEndpoint {
 }
 
 export interface PublishOptions {
+  /** Internal resolved backend; publishFile sets this after authentication. */
+  backendKind?: ShareBackendKind;
   slug?: string;
   /**
    * Auto-expire window. Relative (`30d`, `12h`), absolute (`2026-08-01`), or
@@ -177,6 +179,8 @@ export const RESERVED_META_KEYS = [
   'avatar',
   'label',
   'label-source',
+  'og-title',
+  'og-description',
 ] as const;
 
 const META_KEY_RE = /^[a-z0-9-]{1,64}$/;
@@ -670,6 +674,7 @@ export async function publishFile(
     ...opts,
     githubUser: username,
     analyticsToken,
+    backendKind: backend.kind,
   });
 }
 
@@ -709,6 +714,20 @@ export async function publishToEndpoint(
   // is only reached when --label is omitted.
   const label = explicitLabel ? sanitizeLabel(explicitLabel) : deriveLabel(filePath, body);
   const labelSource: 'explicit' | 'derived' = explicitLabel ? 'explicit' : 'derived';
+  const ogMeta = isHtml ? deriveMeta(body.toString('utf8')) : undefined;
+
+  // The managed Worker owns deterministic OG generation. Point crawlers at the
+  // lazy sibling route without invoking a browser on the publishing machine.
+  if (isHtml && opts.cover !== false && opts.backendKind === 'managed' && ogMeta) {
+    coverUrl = `${pageUrl}.png`;
+    body = Buffer.from(injectOgMeta(body.toString('utf8'), {
+      ...ogMeta,
+      imageUrl: coverUrl,
+      pageUrl,
+      imageWidth: OG_WIDTH,
+      imageHeight: OG_HEIGHT,
+    }), 'utf8');
+  }
 
   // Pre-publish scan (RUSH-2443/RUSH-2683): refuse emails / credential-shaped
   // strings unless --force. Runs on the raw file body AND on every piece of
@@ -733,6 +752,10 @@ export async function publishToEndpoint(
   // Validate the FULL customMetadata payload before any network call — fail
   // fast, not mid-upload.
   const metadataPreview: Record<string, string> = { ...meta, label, 'label-source': labelSource };
+  if (ogMeta && opts.backendKind === 'managed') {
+    metadataPreview['og-title'] = ogMeta.title;
+    metadataPreview['og-description'] = ogMeta.description;
+  }
   if (provenance.agent) metadataPreview.agent = provenance.agent;
   if (provenance.session) metadataPreview.session = provenance.session;
   if (provenance.host) metadataPreview.host = provenance.host;
@@ -769,6 +792,10 @@ export async function publishToEndpoint(
     if (avatarUrl) setText('x-share-avatar', avatarUrl);
     setText('x-share-label', label);
     h['x-share-label-source'] = labelSource;
+    if (ogMeta && opts.backendKind === 'managed') {
+      setText('x-share-og-title', ogMeta.title);
+      setText('x-share-og-description', ogMeta.description);
+    }
     // Per VALUE, before JSON.stringify — folding the serialized form would rewrite
     // a curly quote inside a value into a bare `"`, which is structural in JSON and
     // makes the Worker's JSON.parse throw. It swallows that error, so every --meta
@@ -798,7 +825,7 @@ export async function publishToEndpoint(
   // Cover: screenshot the page's hero → upload <slug>.png → inject og:image meta.
   // Unlisted pages still get a cover (the direct URL is the capability), but the
   // cover inherits visibility=unlisted so it is also omitted from the gallery.
-  if (isHtml && opts.cover !== false) {
+  if (isHtml && opts.cover !== false && opts.backendKind !== 'managed') {
     const res = await attachOgCover(filePath, body, {
       pngUrl: `${pageUrl}.png`,
       pageUrl,

@@ -40,8 +40,16 @@ export function candidateBrowsers(): string[] {
     if (p && fs.existsSync(p) && !out.includes(p)) out.push(p);
   };
 
-  // 1) An explicit override always wins.
-  push(process.env.PUPPETEER_EXECUTABLE_PATH || process.env.AGENTS_SHARE_BROWSER);
+  // 1) Explicit overrides are contracts, not hints. A typo must fail at the
+  // boundary instead of silently falling through to an unrelated browser.
+  for (const name of ['PUPPETEER_EXECUTABLE_PATH', 'AGENTS_SHARE_BROWSER'] as const) {
+    const value = process.env[name]?.trim();
+    if (!value) continue;
+    if (!fs.existsSync(value)) {
+      throw new Error(`${name} points to a browser that does not exist: ${value}`);
+    }
+    push(value);
+  }
 
   // 2) Managed Chromium in the Playwright / Puppeteer caches — purpose-built for
   //    headless, so it's the most reliable capture host when present.

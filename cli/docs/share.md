@@ -61,6 +61,14 @@ plus the aliases below.
 | `me` | only the signed-in owner | no | `noindex`, `private, no-store` | Phoenix session |
 | `org` | anyone at the sharer's email **domain** | no | `noindex`, `private, no-store` | Phoenix session + a workspace domain |
 
+Managed HTML shares always advertise `<slug>.png` as their Open Graph image. The
+Worker lazily renders that first request as a deterministic 1200×630 AGI card
+from the page title, description, handle, and visibility, then caches the PNG in
+R2. The cover passes through the canonical page's visibility gate before render,
+so `me`/`org` metadata cannot leak. No browser is launched on the publishing
+machine. BYO endpoints retain the local Chromium screenshot fallback because
+their independently hosted Worker may predate the renderer.
+
 - **`unlisted` is a capability URL, not a secret.** GET still returns 200; it is
   only hidden from the gallery/listing and marked `noindex`
   (`worker-template.ts:356`). `--private` and `--unlisted` are hidden aliases of
