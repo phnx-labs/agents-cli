@@ -1,8 +1,7 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
-import { syncTraces, type SyncFailure } from '../lib/traces/sync.js';
-import { readSyncLedger } from '../lib/traces/sync.js';
+import { readSyncLedger, syncTraces, type SyncFailure } from '../lib/traces/sync.js';
 import { managedTracesBaseUrl, resolveTracesBackend } from '../lib/traces/backend.js';
 import { showUrl } from '../lib/open-url.js';
 import { DEFAULT_CF_BUNDLE, readCloudflareCreds } from '../lib/share/config.js';
