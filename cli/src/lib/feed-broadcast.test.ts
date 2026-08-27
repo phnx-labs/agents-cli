@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -384,5 +384,97 @@ describe('channel delivery — real provider registry, no mocking', () => {
     expect(outcomes).toEqual([
       { name: 'tg', ok: false, error: expect.stringContaining('No channel provider') },
     ]);
+  });
+});
+
+/**
+ * PHNX-3303 integration: the feed owner sink must actually INVOKE the SSH
+ * forward when local owner delivery fails on a box with no working provider —
+ * not just leave the pure `owner-forward.ts` functions correct in isolation.
+ *
+ * Real path, no mocking of the logic: the owner channel is the macOS-only rush
+ * `imessage` transport, `rush` is absent from PATH so the local send genuinely
+ * fails its `which rush` preflight, a real device registry names a macOS peer,
+ * and a fake `ssh` on PATH stands in for the transport (the same kind of on-PATH
+ * fake the notify/openclaw tests use) and returns the peer's `agents send --json`
+ * result. POSIX-only: the fake `ssh`/absent-`rush` rig needs `which` + `#!/bin/sh`.
+ */
+describe.skipIf(process.platform === 'win32')('feed owner sink forwards over SSH on local failure (PHNX-3303)', () => {
+  let tmp: string;
+  let sshRecord: string;
+  const saved = {
+    PATH: process.env.PATH,
+    devicesDir: process.env.AGENTS_DEVICES_DIR,
+    machineId: process.env.AGENTS_SYNC_MACHINE_ID,
+    humans: process.env.AGENTS_HUMANS_FILE,
+    sshRecord: process.env.SSH_RECORD,
+    guard: process.env.AGENTS_OWNER_NO_FORWARD,
+  };
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'feed-owner-forward-'));
+    // A real device registry naming one reachable macOS peer.
+    const devicesDir = path.join(tmp, 'devices');
+    fs.mkdirSync(devicesDir, { recursive: true });
+    const now = new Date().toISOString();
+    fs.writeFileSync(path.join(devicesDir, 'registry.json'), JSON.stringify({
+      'mac-test': {
+        name: 'mac-test', platform: 'macos', shell: 'posix',
+        address: { via: 'manual', dnsName: 'mac-test.example' },
+        auth: { method: 'key' }, createdAt: now, updatedAt: now,
+      },
+    }));
+    process.env.AGENTS_DEVICES_DIR = devicesDir;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self'; // not the mac peer
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml'); // absent -> meta.notify.owner wins
+
+    // A fake `ssh` that records its argv and returns the peer's send result.
+    // No `rush` on PATH, so the LOCAL imessage send fails its `which rush` preflight.
+    sshRecord = path.join(tmp, 'ssh.log');
+    process.env.SSH_RECORD = sshRecord;
+    const bin = path.join(tmp, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    const ssh = path.join(bin, 'ssh');
+    fs.writeFileSync(ssh, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$SSH_RECORD"\nprintf '%s\\n' '{"ok":true,"channel":"imessage","id":"+18055551234"}'\nexit 0\n`);
+    fs.chmodSync(ssh, 0o755);
+    process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
+    delete process.env.AGENTS_OWNER_NO_FORWARD;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries({
+      PATH: saved.PATH, AGENTS_DEVICES_DIR: saved.devicesDir, AGENTS_SYNC_MACHINE_ID: saved.machineId,
+      AGENTS_HUMANS_FILE: saved.humans, SSH_RECORD: saved.sshRecord, AGENTS_OWNER_NO_FORWARD: saved.guard,
+    })) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('delivers the important post via the macOS peer when this box has no rush', async () => {
+    const meta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
+    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ level: 'important' }));
+    const outcomes = await runFeedBroadcast(planned, meta);
+
+    // Local rush send failed, but the owner sink forwarded and reports success.
+    expect(outcomes).toEqual([{ name: 'owner', ok: true }]);
+    // The forward really ran `agents send --to owner` on the peer over SSH,
+    // carrying the loop guard so the peer never forwards onward.
+    const log = fs.readFileSync(sshRecord, 'utf-8');
+    expect(log).toContain('mac-test.example');
+    expect(log).toContain('AGENTS_OWNER_NO_FORWARD');
+    expect(log).toContain('send');
+  });
+
+  it('keeps the clean local failure when no capable peer exists', async () => {
+    fs.writeFileSync(path.join(process.env.AGENTS_DEVICES_DIR!, 'registry.json'), JSON.stringify({}));
+    const meta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
+    const planned = planFeedBroadcast({ owner: { channel: 'owner' } }, ctx({ level: 'important' }));
+    const outcomes = await runFeedBroadcast(planned, meta);
+
+    expect(outcomes[0].ok).toBe(false);
+    expect(outcomes[0].error).toContain('rush CLI not found on PATH');
+    expect(fs.existsSync(sshRecord)).toBe(false); // never dialed a peer
   });
 });

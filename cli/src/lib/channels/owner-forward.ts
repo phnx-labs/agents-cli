@@ -29,8 +29,7 @@ import { loadDevices, isDialableDevice } from '../devices/registry.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import { RUSH_CHANNELS } from './providers/rush.js';
 import { resolvePeerTarget, sshCapture } from '../session/remote/remote-list.js';
-import { remoteShellFor, buildWindowsAgentsCommand, stripClixml } from '../hosts/remote-cmd.js';
-import { shellQuote } from '../ssh-exec.js';
+import { buildRemoteAgentsInvocation, stripClixml } from '../hosts/remote-cmd.js';
 
 /**
  * Env marker set on the forwarded `agents send` so a box that received a
@@ -116,12 +115,11 @@ async function sendOnPeer(machine: string, text: string): Promise<SendResult | u
   const peer = await resolvePeerTarget(machine);
   if (!peer) return undefined;
   const args = ['send', '--to', 'owner', '--text', text, '--json'];
-  const env = { [OWNER_FORWARD_GUARD_ENV]: '1' };
-  const remoteCmd = remoteShellFor(peer.os) === 'powershell'
-    ? buildWindowsAgentsCommand({ args, env })
-    : `bash -lc ${shellQuote(
-        [`${OWNER_FORWARD_GUARD_ENV}=1`, 'agents', ...args].map((t, i) => (i === 0 ? t : shellQuote(t))).join(' '),
-      )}`;
+  // Reuse the one injection-tested remote-command builder every `--device`
+  // dispatch uses (posix `bash -lc` / Windows `-EncodedCommand`), rather than a
+  // second hand-rolled quoting path on a security-sensitive seam. The env map is
+  // the loop guard, exported the same way every remote invocation exports env.
+  const remoteCmd = buildRemoteAgentsInvocation(args, undefined, peer.os, { [OWNER_FORWARD_GUARD_ENV]: '1' });
   const capture = await sshCapture(peer.target, remoteCmd, PEER_SEND_TIMEOUT_MS);
   if (capture.code !== 0) return undefined;
   try {
@@ -150,6 +148,12 @@ export async function forwardOwnerNotifyToPeer(
   meta: Meta,
   opts: { self?: string; devices?: DeviceProfile[]; send?: PeerOwnerSender } = {},
 ): Promise<SendResult | undefined> {
+  // Cheap, I/O-free gate first: a box that already received a forward, or an
+  // owner channel that isn't the macOS-only rush family, can never forward — so
+  // a normal local success/failure never pays a device-registry disk read.
+  if (process.env[OWNER_FORWARD_GUARD_ENV] === '1') return undefined;
+  if (!isRushBackedTransport(channel, meta)) return undefined;
+
   const self = opts.self ?? machineId();
   let devices = opts.devices;
   if (!devices) {
@@ -160,9 +164,7 @@ export async function forwardOwnerNotifyToPeer(
     }
   }
 
-  const plan = planOwnerForward(channel, meta, devices, self, {
-    guarded: process.env[OWNER_FORWARD_GUARD_ENV] === '1',
-  });
+  const plan = planOwnerForward(channel, meta, devices, self);
   if (plan.candidates.length === 0) return undefined;
 
   const send = opts.send ?? sendOnPeer;

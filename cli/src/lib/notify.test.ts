@@ -241,3 +241,99 @@ describe.skipIf(process.platform === 'win32')('notifyUrgentBlock (feed urgent-bl
     expect(fs.existsSync(record)).toBe(false);
   });
 });
+
+/**
+ * PHNX-3303 integration: sendToOwner must actually INVOKE the SSH forward when
+ * local owner delivery fails on a box with no working provider — proving the
+ * wiring, not just the isolated owner-forward.ts functions.
+ *
+ * Real path, no mocking of the logic: the owner channel is the macOS-only rush
+ * `imessage` transport, `rush` is absent from PATH so the local send genuinely
+ * fails its `which rush` preflight, a real device registry names a macOS peer,
+ * and a fake `ssh` on PATH stands in for the transport (the same on-PATH-fake
+ * pattern the openclaw tests above use) returning the peer's `agents send
+ * --json` result. POSIX-only: the rig needs `which` + `#!/bin/sh`.
+ */
+describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on local failure (PHNX-3303)', () => {
+  let tmp: string;
+  let sshRecord: string;
+  const saved = {
+    PATH: process.env.PATH,
+    devicesDir: process.env.AGENTS_DEVICES_DIR,
+    machineId: process.env.AGENTS_SYNC_MACHINE_ID,
+    humans: process.env.AGENTS_HUMANS_FILE,
+    sshRecord: process.env.SSH_RECORD,
+    guard: process.env.AGENTS_OWNER_NO_FORWARD,
+  };
+  const ownerMeta = { notify: { owner: { channel: 'imessage', to: '+18055551234' } } } as Meta;
+
+  function writeRegistry(reg: object): void {
+    fs.writeFileSync(path.join(process.env.AGENTS_DEVICES_DIR!, 'registry.json'), JSON.stringify(reg));
+  }
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'sendtoowner-forward-'));
+    const devicesDir = path.join(tmp, 'devices');
+    fs.mkdirSync(devicesDir, { recursive: true });
+    process.env.AGENTS_DEVICES_DIR = devicesDir;
+    const now = new Date().toISOString();
+    writeRegistry({
+      'mac-test': {
+        name: 'mac-test', platform: 'macos', shell: 'posix',
+        address: { via: 'manual', dnsName: 'mac-test.example' },
+        auth: { method: 'key' }, createdAt: now, updatedAt: now,
+      },
+    });
+    process.env.AGENTS_SYNC_MACHINE_ID = 'linux-self'; // not the mac peer
+    process.env.AGENTS_HUMANS_FILE = path.join(tmp, 'humans.yaml'); // absent -> meta.notify.owner wins
+
+    sshRecord = path.join(tmp, 'ssh.log');
+    process.env.SSH_RECORD = sshRecord;
+    const bin = path.join(tmp, 'bin');
+    fs.mkdirSync(bin, { recursive: true });
+    const ssh = path.join(bin, 'ssh');
+    // No `rush` on PATH -> the LOCAL imessage send fails its `which rush` preflight.
+    fs.writeFileSync(ssh, `#!/bin/sh\nprintf '%s\\n' "$*" >> "$SSH_RECORD"\nprintf '%s\\n' '{"ok":true,"channel":"imessage","id":"+18055551234"}'\nexit 0\n`);
+    fs.chmodSync(ssh, 0o755);
+    process.env.PATH = `${bin}${path.delimiter}/usr/bin${path.delimiter}/bin`;
+    delete process.env.AGENTS_OWNER_NO_FORWARD;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries({
+      PATH: saved.PATH, AGENTS_DEVICES_DIR: saved.devicesDir, AGENTS_SYNC_MACHINE_ID: saved.machineId,
+      AGENTS_HUMANS_FILE: saved.humans, SSH_RECORD: saved.sshRecord, AGENTS_OWNER_NO_FORWARD: saved.guard,
+    })) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('hands off to the macOS peer when this box has no rush', async () => {
+    const result = await sendToOwner('ship it', { meta: ownerMeta });
+    expect(result.ok).toBe(true); // forwarded delivery, not the local rush failure
+    const log = fs.readFileSync(sshRecord, 'utf-8');
+    expect(log).toContain('mac-test.example');
+    expect(log).toContain('AGENTS_OWNER_NO_FORWARD'); // loop guard rides the forward
+    expect(log).toContain('send');
+  });
+
+  it('keeps the clean local error (never dials a peer) when no capable peer exists', async () => {
+    writeRegistry({});
+    const result = await sendToOwner('ship it', { meta: ownerMeta });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('rush CLI not found on PATH');
+    expect(fs.existsSync(sshRecord)).toBe(false);
+  });
+
+  it('does not forward for a Linux-capable transport — only the rush family hops', async () => {
+    const meta = {
+      notify: { owner: { channel: 'telegram', to: 'c1' }, transports: { telegram: 'openclaw-telegram' } },
+    } as Meta;
+    const result = await sendToOwner('ship it', { meta });
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe('openclaw CLI not found on PATH');
+    expect(fs.existsSync(sshRecord)).toBe(false); // non-rush failure stays local
+  });
+});
