@@ -94,7 +94,7 @@ there's no relational index for fast cross-session queries.
   (`cli/src/lib/secrets/drivers/rush.ts:19`, `cli/src/lib/cloud/rush.ts:29`).
 - Classification already has a taxonomy — 5 groups (`code · research · review · content · ops`,
   `classify.ts:1`), heuristic (regex + tool-name match), cached self-healingly in `session_topics`
-  by transcript mtime+size (`db.ts:313`, confirmed from the console-shard prior session).
+  by transcript mtime+size (`db.ts:335`, confirmed from the console-shard prior session).
 
 **The actual gap, precisely:**
 1. `agents traces open` opens `managedTracesBaseUrl()` "which will route to the console once
@@ -102,7 +102,7 @@ there's no relational index for fast cross-session queries.
    renders from a hand-copied `--dry-run --out` fixture.
 2. The 5-group heuristic has no embedding, no per-leaf granularity, and no clustering — it can't
    answer "what kind of work is this" at the ~18-leaf resolution Decision #2 below asks for.
-3. There is no **project** concept — `IndexedSession.repo` (`sync.ts:317`) is `row.project ??
+3. There is no **project** concept — `IndexedSession.repo` (`sync.ts:454`) is `row.project ??
    basename(cwd)`, which is exactly the fallback that produced the `repo="muqsit"` bug.
 4. R2/KV (what `traces.agents-cli.sh` already uses) has no query engine — `GROUP BY project_id`,
    `ORDER BY severity DESC` across a user's full history needs a real index, which is what the new
@@ -264,7 +264,7 @@ is unaffected by day one; only the new `task_leaf` column is genuinely new state
     <text x="475" y="240" text-anchor="middle" font-family="Inter, sans-serif" font-size="8.5" fill="#7c9a4e" font-style="italic">Taxonomy grows from real data; LLM touches ~1 label per new cluster, not sessions.</text>
     <line x1="575" y1="122" x2="475" y2="160" stroke="#f0616d" stroke-width="1.2" stroke-dasharray="4 3"/>
   </svg>
-  <figcaption><b>Figure 2.</b> Anchored assignment gives stable, human-named buckets from day one (no cold-start blob problem); a nightly unsupervised pass over the *low-confidence* tail surfaces genuinely new task shapes, and the only LLM call names each new cluster once. Sessions are never sent to an LLM.</figcaption>
+  <figcaption><b>Figure 2.</b> Anchored assignment gives stable, human-named buckets from day one (no cold-start blob problem); a nightly unsupervised pass over the *low-confidence* tail surfaces genuinely new task shapes, and the only LLM call names each new cluster once. Sessions are never sent to an LLM.<br/><em>Superseded, same as Figure 1: the embedding-anchored assignment and nightly HDBSCAN batch shown here did not survive independent review — jump to <strong>§Verification</strong> immediately below for the synthesized design that ships in v1 (fixed 18-leaf taxonomy + async LLM fallback only on low-confidence sessions, no vectors, no clustering batch). Kept as the record of the analysis, not the final proposal.</em></figcaption>
 </figure>
 
 - **Why anchored, not pure unsupervised (Decision #3):** unsupervised-only gives you numbered blobs a user can't read on day one and that renumber every run. Anchoring to the ~18 named leaves gives stable, legible buckets immediately; unsupervised is reserved for *growing* the taxonomy from the low-confidence tail.
@@ -413,7 +413,7 @@ The classifier/rollup **never runs on open** — `rollups` is updated at ingest 
 | When to compute | (a) on dashboard open (b) at sync, cached | **b** — your explicit ask; open must be O(read). (a) recomputes for every viewer, every load. Already the shipped pattern for `bucketHistory`/`driftSignals` (`classify.ts:104`) — this extends it, doesn't introduce it. |
 | Classifier tier 2 — **superseded, see §Verification** | (a) client-side embedding + anchored clustering (original pick) (b) rules-first + async server LLM on low-confidence only | **b** — an independent blind design (Grok) argued this directly against a risk I flagged against my own draft (emergent clustering shipping unwired); no client model weight, no `pgvector`, cost bounded to the genuinely ambiguous tail. |
 | Clustering — **superseded** | (a) anchored taxonomy + nightly unsupervised emergent discovery (original pick) (b) fixed taxonomy + `other` relief valve, no clustering in v1 | **b** — removes an entire subsystem (HDBSCAN batch, centroid table, re-cluster ANN index) that this doc's own §Risks worried would never get properly staffed. Revisit only if the `other` bucket grows past a real threshold (see §Risks). |
-| Project identity | (a) cwd basename (b) git remote | **b** — canonical; (a) is the `repo="muqsit"` bug (`sync.ts:317`: `row.project ?? basename(cwd)`). Basename is a flagged fallback only. Confirmed independently by Grok's design. |
+| Project identity | (a) cwd basename (b) git remote | **b** — canonical; (a) is the `repo="muqsit"` bug (`sync.ts:454`: `row.project ?? basename(cwd)`). Basename is a flagged fallback only. Confirmed independently by Grok's design. |
 | Backend — detail storage | (a) new blob store (b) reuse the existing R2 store | **b** — `traces.agents-cli.sh` already holds every session's redacted detail, already owner-namespaced, already live (`backend.ts:33`). A new blob store would duplicate storage and create a second source of truth for the same bytes. Confirmed independently by Grok's design. |
 | Rollup reads | (a) `GROUP BY` an indexed column at read time (b) a materialized `rollups` row maintained on ingest | **b** — Grok's addition: cheaper than a live aggregate even indexed, at real scale, and the home screen becomes one row read instead of four aggregate queries. |
 | Backend — metadata index | (a) query R2/KV directly (b) add a Supabase index fed by `api.prix.dev` | **b** — R2 has no `GROUP BY`; a dashboard would recompute every rollup on open, which the governing rule forbids. `api.prix.dev` already receives a link call on every sync (`sync.ts:263`) — extending that call to carry facets, instead of inventing a second endpoint, is the smaller diff. |
@@ -485,5 +485,5 @@ infra that was already mostly live before this doc, not a new backend stood up f
 - OpenRouter — task/use-case usage categories (coding · agentic · reasoning · debugging · refactoring): [rankings](https://openrouter.ai/rankings), [programming collection](https://openrouter.ai/collections/programming).
 - Embedding-model sizes/latency, kept for the deferred v2 path (all-MiniLM-L6-v2 46 MB, &lt;10 ms CPU, 384-d; embeddinggemma 622 MB higher MTEB-Code; gte-small clustering acc.): [MTEB embedding roundup](https://www.morphllm.com/ollama-embedding-models), [best embeddings 2026](https://www.premai.io/blog/best-embedding-models-for-rag-2026-ranked-by-mteb-score-cost-and-self-hosting/).
 - MTEB benchmark — 7 task categories incl. **clustering**: [MTEB paper](https://arxiv.org/pdf/2210.07316).
-- Prior in this session: heuristic classifier `classify.ts`, `buildSessionDetail` (#3041, merged), `session_topics` self-healing cache pattern (`db.ts:313`), backend seam `backend.ts` (Phoenix token → managed worker), sync ingest `sync.ts` (existing R2 + `api.prix.dev` link call).
+- Prior in this session: heuristic classifier `classify.ts`, `buildSessionDetail` (#3041, merged), `session_topics` self-healing cache pattern (`db.ts:335`), backend seam `backend.ts` (Phoenix token → managed worker), sync ingest `sync.ts` (existing R2 + `api.prix.dev` link call).
 - Independent blind design (§Verification): Grok, dispatched via `agents run grok --mode plan`, given the same first-principles brief with no exposure to this doc.
