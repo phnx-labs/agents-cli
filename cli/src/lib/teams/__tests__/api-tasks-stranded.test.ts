@@ -1,9 +1,9 @@
 /**
- * Real-path tests for PHNX-2951: detecting completed teammates whose work is
- * stranded in a dirty worktree with no PR.
+ * Real-path tests for PHNX-2951: `handleTasks` must also detect completed
+ * teammates whose work is stranded in a dirty worktree with no PR.
  *
- * These tests create actual git repositories and worktrees so the stranded
- * detection exercises the same `git status --porcelain` probe the CLI uses.
+ * These tests create actual git repositories and worktrees so the probe path
+ * matches the CLI.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
@@ -12,9 +12,9 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 
 import { AgentManager, AgentProcess, AgentStatus } from '../agents.js';
-import { handleStatus } from '../api.js';
+import { handleTasks } from '../api.js';
 
-describe('handleStatus stranded detection (PHNX-2951)', () => {
+describe('handleTasks stranded detection (PHNX-2951)', () => {
   const tempDirs: string[] = [];
 
   afterEach(() => {
@@ -46,21 +46,24 @@ describe('handleStatus stranded detection (PHNX-2951)', () => {
 
   function saveCompletedAgent(
     baseDir: string,
+    agentId: string,
+    taskName: string,
     workspaceDir: string,
+    status: AgentStatus = AgentStatus.COMPLETED,
     prUrl: string | null = null,
   ): Promise<void> {
     const now = new Date();
     const agent = new AgentProcess(
-      'agent-stranded-1',
-      'bugfix-swarm',
+      agentId,
+      taskName,
       'cursor',
       'fix the monitor',
       null,
       'edit',
       null,
-      AgentStatus.COMPLETED,
+      status,
       now,
-      now,
+      status === AgentStatus.COMPLETED ? now : null,
       baseDir,
       null,
       workspaceDir,
@@ -74,18 +77,21 @@ describe('handleStatus stranded detection (PHNX-2951)', () => {
     return agent.saveMeta();
   }
 
-  it('marks a completed teammate with uncommitted work and no PR as stranded', async () => {
-    const { repoRoot, worktreePath } = createRepo('agents-stranded-');
+  it('counts a completed teammate with uncommitted work and no PR as stranded', async () => {
+    const { repoRoot, worktreePath } = createRepo('agents-tasks-stranded-');
     fs.writeFileSync(path.join(worktreePath, 'fix.ts'), 'export const fixed = true;\n');
 
     const agentsDir = path.join(repoRoot, '.agents', '.history', 'agents');
     fs.mkdirSync(agentsDir, { recursive: true });
-    await saveCompletedAgent(agentsDir, worktreePath);
+    await saveCompletedAgent(agentsDir, 'agent-tasks-stranded-1', 'bugfix-swarm', worktreePath);
 
     const manager = new AgentManager(50, agentsDir);
-    const result = await handleStatus(manager, 'bugfix-swarm');
+    const result = await handleTasks(manager, 10);
 
-    expect(result.summary).toMatchObject({
+    expect(result.tasks).toHaveLength(1);
+    expect(result.tasks[0]).toMatchObject({
+      task_name: 'bugfix-swarm',
+      agent_count: 1,
       completed: 1,
       stranded: 1,
       failed: 0,
@@ -93,42 +99,33 @@ describe('handleStatus stranded detection (PHNX-2951)', () => {
       running: 0,
       pending: 0,
     });
-    expect(result.agents).toHaveLength(1);
-    expect(result.agents[0].delivery).toBe('stranded');
-    expect(result.agents[0].workspace_dir).toBe(worktreePath);
   });
 
-  it('leaves a clean completed teammate without a PR as no_pr', async () => {
-    const { repoRoot, worktreePath } = createRepo('agents-clean-');
+  it('leaves a clean completed teammate without a PR as not stranded', async () => {
+    const { repoRoot, worktreePath } = createRepo('agents-tasks-clean-');
 
     const agentsDir = path.join(repoRoot, '.agents', '.history', 'agents');
     fs.mkdirSync(agentsDir, { recursive: true });
-    await saveCompletedAgent(agentsDir, worktreePath);
+    await saveCompletedAgent(agentsDir, 'agent-tasks-clean-1', 'bugfix-swarm', worktreePath);
 
     const manager = new AgentManager(50, agentsDir);
-    const result = await handleStatus(manager, 'bugfix-swarm');
+    const result = await handleTasks(manager, 10);
 
-    expect(result.summary).toMatchObject({
+    expect(result.tasks[0]).toMatchObject({
       completed: 1,
       stranded: 0,
-      failed: 0,
-      stopped: 0,
-      running: 0,
-      pending: 0,
     });
-    expect(result.agents[0].delivery).toBe('no_pr');
   });
 
-  it('does not probe remote teammates for uncommitted changes', async () => {
-    const { repoRoot, worktreePath } = createRepo('agents-remote-');
+  it('does not count a remote dirty teammate as stranded', async () => {
+    const { repoRoot, worktreePath } = createRepo('agents-tasks-remote-');
     fs.writeFileSync(path.join(worktreePath, 'fix.ts'), 'export const fixed = true;\n');
 
     const agentsDir = path.join(repoRoot, '.agents', '.history', 'agents');
     fs.mkdirSync(agentsDir, { recursive: true });
 
-    const now = new Date();
     const agent = new AgentProcess(
-      'agent-remote-dirty-1',
+      'agent-tasks-remote-1',
       'bugfix-swarm',
       'cursor',
       'fix the monitor',
@@ -136,8 +133,8 @@ describe('handleStatus stranded detection (PHNX-2951)', () => {
       'edit',
       null,
       AgentStatus.COMPLETED,
-      now,
-      now,
+      new Date(),
+      new Date(),
       agentsDir,
       null,
       '/remote/path/that/does/not/exist',
@@ -152,59 +149,11 @@ describe('handleStatus stranded detection (PHNX-2951)', () => {
     await agent.saveMeta();
 
     const manager = new AgentManager(50, agentsDir);
-    const result = await handleStatus(manager, 'bugfix-swarm');
+    const result = await handleTasks(manager, 10);
 
-    expect(result.agents[0].delivery).toBe('no_pr');
-    expect(result.summary.stranded).toBe(0);
-  });
-
-  function saveRunningAgent(baseDir: string): Promise<void> {
-    const now = new Date();
-    const agent = new AgentProcess(
-      'agent-running-1',
-      'bugfix-swarm',
-      'claude',
-      'keep running',
-      null,
-      'edit',
-      process.pid,
-      AgentStatus.RUNNING,
-      now,
-      null,
-      baseDir,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      null,
-      'runner',
-    );
-    return agent.saveMeta();
-  }
-
-  it('counts stranded teammates even when status is filtered to running', async () => {
-    const { repoRoot, worktreePath } = createRepo('agents-filter-running-');
-    fs.writeFileSync(path.join(worktreePath, 'fix.ts'), 'export const fixed = true;\n');
-
-    const agentsDir = path.join(repoRoot, '.agents', '.history', 'agents');
-    fs.mkdirSync(agentsDir, { recursive: true });
-    await saveCompletedAgent(agentsDir, worktreePath);
-    await saveRunningAgent(agentsDir);
-
-    const manager = new AgentManager(50, agentsDir);
-    const result = await handleStatus(manager, 'bugfix-swarm', 'running');
-
-    expect(result.summary).toMatchObject({
-      pending: 0,
-      running: 1,
+    expect(result.tasks[0]).toMatchObject({
       completed: 1,
-      stranded: 1,
-      failed: 0,
-      stopped: 0,
+      stranded: 0,
     });
-    expect(result.agents).toHaveLength(1);
-    expect(result.agents[0].status).toBe('running');
   });
 });

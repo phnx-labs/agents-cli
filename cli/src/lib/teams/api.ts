@@ -460,6 +460,32 @@ export async function handleStatus(
     else if (agent.status === AgentStatus.STOPPED) counts.stopped++;
   }
 
+  // Stranded count is computed over ALL agents, not the filter-narrowed view,
+  // so a `--filter running` status still reports teammates that completed dirty.
+  // Cache the probe result so we can reuse it when building details for the
+  // filtered subset without probing the worktree twice.
+  const uncommittedCache = new Map<string, boolean>();
+  for (const agent of allAgents) {
+    if (agent.status !== AgentStatus.COMPLETED) continue;
+    const shouldProbeWorktree =
+      !agent.prUrl?.trim() &&
+      !agent.hostName &&
+      Boolean(agent.workspaceDir);
+    const hasUncommitted = shouldProbeWorktree
+      ? await hasUncommittedChanges(agent.workspaceDir!)
+      : false;
+    uncommittedCache.set(agent.agentId, hasUncommitted);
+
+    const delivery = resolveTeammateDelivery({
+      status: agent.status,
+      prUrl: agent.prUrl,
+      hasUncommittedChanges: hasUncommitted,
+    });
+    if (delivery === 'stranded') {
+      counts.stranded++;
+    }
+  }
+
   // Build details only for filtered agents
   let maxTimestamp = since || new Date(0).toISOString();  // Track max timestamp for cursor
   const claudeLabels = allAgents.some((agent) => agent.agentType === 'claude')
@@ -486,25 +512,13 @@ export async function handleStatus(
       maxTimestamp = agentTimestamp;
     }
 
-    // Local worktrees only: a remote workspace_dir is a path on another host,
-    // so probing it here would be meaningless and noisy.
-    const shouldProbeWorktree =
-      agent.status === AgentStatus.COMPLETED &&
-      !agent.prUrl?.trim() &&
-      !agent.hostName &&
-      Boolean(agent.workspaceDir);
-    const hasUncommitted = shouldProbeWorktree
-      ? await hasUncommittedChanges(agent.workspaceDir!)
-      : false;
+    const hasUncommitted = uncommittedCache.get(agent.agentId) ?? false;
 
     const delivery = resolveTeammateDelivery({
       status: agent.status,
       prUrl: agent.prUrl,
       hasUncommittedChanges: hasUncommitted,
     });
-    if (delivery === 'stranded') {
-      counts.stranded++;
-    }
 
     const detail: AgentStatusDetail = {
       agent_id: agent.agentId,
