@@ -216,7 +216,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     description:
       'Whether the daemon may run on this device at all (secrets broker, browser IPC, watchdog, and the ' +
       'routines scheduler). Disabling is the top-level kill switch: nothing auto-starts the daemon while it ' +
-      'is set, including `routines add`/`routines start`/`routines catchup`/webhook triggers. ' +
+      'is set, including `routines add`/`routines start`/`routines catchup`/`monitors add`/webhook triggers. ' +
       '`agents daemon start` still starts it explicitly.',
   },
   {
@@ -921,9 +921,9 @@ export function isDaemonEnabled(): boolean {
 /**
  * Throw when the daemon is disabled on this machine, naming the setting and
  * the fix. Every AUTO-start surface (routines add/start/catchup/webhook,
- * `ensureDaemonStarted`) refuses with this before calling `startDaemon()`.
- * `agents daemon start` is the deliberate override and does NOT call this —
- * disable only blocks auto-start, mirroring `systemctl disable`.
+ * monitors add, `ensureDaemonStarted`) refuses with this before calling
+ * `startDaemon()`. `agents daemon start` is the deliberate override and does
+ * NOT call this — disable only blocks auto-start, mirroring `systemctl disable`.
  */
 export function assertDaemonEnabled(): void {
   if (isDaemonEnabled()) return;

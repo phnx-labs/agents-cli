@@ -47,6 +47,7 @@ import { IS_WINDOWS } from '../lib/platform/index.js';
 import { safeJoin } from '../lib/paths.js';
 import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { loadDevices } from '../lib/devices/registry.js';
+import { assertDaemonEnabled } from '../lib/device-config.js';
 import { setHelpSections } from '../lib/help.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 
@@ -148,12 +149,25 @@ function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readStat
   return chalk.gray(`checked ${liveness.checkCount}x · last ${checkedAgo} · no match yet`);
 }
 
-/** Start or reload the background daemon so a newly-added monitor is watched. */
-function ensureDaemonRunning(): void {
+/**
+ * Start or reload the background daemon so a newly-added monitor is watched.
+ * Returns false when auto-start was refused (`daemon.enabled=false`); the add
+ * itself already succeeded — the monitor is config and stays valid fleet-wide.
+ * The refusal names the setting and the fix. Mirrors `ensureSchedulerRunning`
+ * in commands/routines.ts (PHNX-2637).
+ */
+function ensureDaemonRunning(): boolean {
+  try {
+    assertDaemonEnabled();
+  } catch (err) {
+    // Loud stated skip, on stderr so --json stdout stays clean.
+    stderrLine(chalk.yellow((err as Error).message));
+    return false;
+  }
   if (isDaemonRunning()) {
     signalDaemonReload();
     stderrLine(chalk.gray('Daemon reloaded'));
-    return;
+    return true;
   }
   const result = startDaemon();
   if (result.pid) {
@@ -162,6 +176,7 @@ function ensureDaemonRunning(): void {
   } else {
     stderrLine(chalk.yellow('Could not start the daemon. Start it manually with: agents routines start'));
   }
+  return true;
 }
 
 /**
@@ -391,7 +406,7 @@ async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolea
 export function registerMonitorsCommands(program: Command): void {
   const monitorsCmd = program
     .command('monitors')
-    .description('Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add.');
+    .description('Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add unless daemon.enabled is false.');
 
   setHelpSections(monitorsCmd, {
     examples: `
@@ -422,7 +437,8 @@ export function registerMonitorsCommands(program: Command): void {
 
       The fired event is injected into a run/routine prompt as {event}.
       Pin the single OWNER device with --device (exactly-once). The daemon (shared
-      with routines) auto-starts on first add; manage it with 'agents routines start|stop'.
+      with routines) auto-starts on first add unless daemon.enabled is false on this
+      device; manage it with 'agents daemon start|stop' (or 'agents routines start|stop').
 
       v1 evaluates poll sources (command, poll, poll-http, file, device). Push
       sources (ws, webhook) are accepted but delivered through a receiver wired in
@@ -433,7 +449,7 @@ export function registerMonitorsCommands(program: Command): void {
   // ─── add ────────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('add [nameOrPath]')
-    .description('Create a monitor from inline flags or a YAML file. Auto-starts the daemon.')
+    .description('Create a monitor from inline flags or a YAML file. Auto-starts the daemon unless daemon.enabled is false.')
     // SOURCE
     .option('--watch <cmd>', 'Run a shell command; its stdout is the observation')
     .option('--poll <cmd...>', 'Re-run a command every interval: --poll "<cmd>" <interval> (e.g. 30s)')
@@ -495,8 +511,7 @@ export function registerMonitorsCommands(program: Command): void {
         await guardAgainstDuplicateMonitor(config, options.force === true);
         writeMonitor(config);
         console.log(chalk.green(`Monitor '${name}' added`));
-        ensureDaemonRunning();
-        await assertEnginePickup(config);
+        if (ensureDaemonRunning()) await assertEnginePickup(config);
         return;
       }
 
@@ -577,8 +592,7 @@ export function registerMonitorsCommands(program: Command): void {
       writeMonitor(config);
       console.log(chalk.green(`Monitor '${nameOrPath}' added`));
       console.log(chalk.gray(`  ${sourceLabel(source)} → [${condition.mode}] → ${actionLabel(action)} · owner: ${ownerLabel(config)}`));
-      ensureDaemonRunning();
-      await assertEnginePickup(config);
+      if (ensureDaemonRunning()) await assertEnginePickup(config);
     });
 
   // ─── list ────────────────────────────────────────────────────────────────────

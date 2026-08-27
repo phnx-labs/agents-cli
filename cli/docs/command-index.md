@@ -449,11 +449,11 @@ agents models tier set <selector> <tier> <model>  Pin a tier to a model. selecto
 agents modes [agentSpec]  Show which permission modes (--mode plan|edit|auto|skip) a harness supports for agents run / teams add
 ```
 
-## monitors — Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add.
+## monitors — Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add unless daemon.enabled is false.
 
 ```
-agents monitors                   Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add.
-agents monitors add [nameOrPath]  Create a monitor from inline flags or a YAML file. Auto-starts the daemon.
+agents monitors                   Durable event-triggered watchers: watch a source, detect a change, fire an action. The daemon auto-starts on first add unless daemon.enabled is false.
+agents monitors add [nameOrPath]  Create a monitor from inline flags or a YAML file. Auto-starts the daemon unless daemon.enabled is false.
 agents monitors device [name]     View or (re)pin the OWNER device — the single machine that evaluates + fires (exactly-once).
 agents monitors edit [name]       Open a monitor’s YAML in $EDITOR.
 agents monitors list              See all monitors: source, condition, action, owner, and last fire.
