@@ -45,8 +45,14 @@ Examples:
 
 Cost is computed offline from a versioned per-model price table (${PRICING_VERSION}).
 `)
-    .action(async (options: CostOptions) => {
-      await costAction(options);
+    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide by name
+    // with the `insights` parent's own options, so commander binds them to the
+    // parent at parse time and the leaf's plain opts() never sees them. Merging
+    // ancestor opts is what the sibling `insights mix` recipes already do
+    // (mix-commands.ts) — without it every flag on this command is silently
+    // dropped (e.g. `agents insights cost --json` printed the human table).
+    .action(async (_options: CostOptions, command: Command) => {
+      await costAction(command.optsWithGlobals() as CostOptions);
     });
 }
 

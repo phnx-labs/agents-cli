@@ -9,7 +9,10 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-output-test-
 process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');
-const { registerOutputCommand } = await import('./output.js');
+// Build the FULL `insights` parent (which owns --json/--since/--by) so the
+// parent↔leaf option-name collision this command hit in production is exercised,
+// not a bare stand-in parent that never collides (the gap that let the bug ship).
+const { registerInsightsCommand } = await import('../commands/insights.js');
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
 type SessionMeta = import('../lib/session/types.js').SessionMeta;
 
@@ -56,8 +59,7 @@ function seed(
 async function runOutput(args: string[]): Promise<string> {
   const program = new Command();
   program.exitOverride();
-  const insights = program.command('insights');
-  registerOutputCommand(insights);
+  registerInsightsCommand(program);
 
   const chunks: string[] = [];
   const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
@@ -136,6 +138,21 @@ describe('agents insights output', () => {
     const keys = d.breakdown.rows.map((r: any) => r.key);
     expect(keys).toContain('rush');
     expect(keys).toContain('agents-cli');
+  });
+
+  it('honors flags that collide by name with the insights parent (--json/--since/--by)', async () => {
+    // --json, --since and --by all exist on the `insights` PARENT too, so
+    // commander binds them there at parse time; the leaf must read them via
+    // optsWithGlobals() or every one is silently dropped. Before the fix,
+    // `insights output --json` printed the human table (invalid JSON) and
+    // `--by project` fell back to the default agent grouping.
+    const jsonOut = await runOutput(['--since', '2020-01-01', '--no-prs', '--json']);
+    expect(() => JSON.parse(jsonOut)).not.toThrow();
+    const byProject = JSON.parse(await runOutput(['--since', '2020-01-01', '--no-prs', '--by', 'project', '--json']));
+    expect(byProject.breakdown.by).toBe('project');
+    // A narrow --since must actually window the data (parent-captured flag reaches the leaf).
+    const narrow = JSON.parse(await runOutput(['--since', '2026-05-21T00:00:00.000Z', '--no-prs', '--json']));
+    expect(narrow.burn.sessionCount).toBe(2); // big0001 (2026-05-20) excluded
   });
 
   it('renders the burn/output table and shipped section in TTY mode', async () => {

@@ -131,8 +131,14 @@ The burn is split into input / cache-read / cache-write where the harness record
 (Claude/Codex/Gemini/Droid). --pricing no-cache reprices cached tokens at the input rate,
 so you can see what caching is saving. --json always carries both actual and no-cache costs.
 `)
-    .action(async (options: OutputOptions) => {
-      await outputAction(options);
+    // Read opts via optsWithGlobals(): `--json`/`--since`/`--by` collide by name
+    // with the `insights` parent's own options, so commander binds them to the
+    // parent at parse time and the leaf's plain opts() never sees them. Merging
+    // ancestor opts is what the sibling `insights mix` recipes already do
+    // (mix-commands.ts) — without it every flag on this command is silently
+    // dropped (e.g. `agents insights output --json` printed the human table).
+    .action(async (_options: OutputOptions, command: Command) => {
+      await outputAction(command.optsWithGlobals() as OutputOptions);
     });
 }
 

@@ -9,7 +9,10 @@ const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-cost-test-')
 process.env.HOME = TEST_HOME;
 
 const { Command } = await import('commander');
-const { registerCostCommand } = await import('./cost.js');
+// Build the FULL `insights` parent (which owns --json/--since/--by) so the
+// parent↔leaf option-name collision this command hit in production is exercised,
+// not a bare stand-in parent that never collides (the gap that let the bug ship).
+const { registerInsightsCommand } = await import('../commands/insights.js');
 const { upsertSession, closeDB } = await import('../lib/session/db.js');
 const { costOfUsage } = await import('../lib/pricing/index.js');
 type SessionMeta = import('../lib/session/types.js').SessionMeta;
@@ -47,8 +50,7 @@ function seed(
 async function runCost(args: string[]): Promise<string> {
   const program = new Command();
   program.exitOverride();
-  const insights = program.command('insights');
-  registerCostCommand(insights);
+  registerInsightsCommand(program);
 
   const chunks: string[] = [];
   const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation((c: any) => {
