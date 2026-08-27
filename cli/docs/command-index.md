@@ -240,7 +240,7 @@ agents devices capture                         Snapshot the live environment (ro
 agents devices config [name] [key] [value...]  Get, set, or unset a device’s settings (scheduler, agent cap, ssh overrides, auto-launch, notes). Bare opens an interactive settings menu (TTY) or prints the resolved config (piped). Per-device values live in the tracked devices/<name>/agents.yaml config: block; --fleet targets the fleet-wide defaults (central fleet.defaults.config) every device inherits unless it overrides the key.
 agents devices describe <name> [text...]       Show or set the one-line description of what a device is FOR ("gpu box — cuda 12.4"). Rendered as the tail column of `agents devices list` and synced fleet-wide. Same key as `agents devices config <name> description` — one store, two names.
 agents devices harnesses                       Per device, one row per installed agent@version: account, signed-in, quota, and a single ready verdict. SSH-probes each online box.
-agents devices ignore <name>                   Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).
+agents devices ignore <name>                   Dismiss a node and record the decision in this box's device doc (fleet.ignored), unioned fleet-wide (also removes it locally).
 agents devices ignored                         List dismissed tailscale nodes — what was dismissed, when, and on which machine.
 agents devices lease                           Manage the disposable cloud boxes used by `agents run --lease`.
 agents devices lease list                      List warm crabbox boxes you can reuse with `agents run --box <slug>`.
@@ -252,7 +252,7 @@ agents devices login                           Log agent CLIs into fleet boxes o
 agents devices pick                            Print the device automatic placement would choose for offloaded machine work (the suite, a build) — least-loaded, reachable, POSIX, never the box you are sitting at. Writes just the name to stdout so scripts can consume it.
 agents devices ping                            Live auth health: complete a real request for every agent account across the fleet (unlike the cached "signed in" flag). Writes the shared auth-health cache read by `agents view` and `fleet status`.
 agents devices ps                              List agent tasks dispatched to devices with `agents run --device <name> --no-follow`. Reconciles each still-`running` record against the remote before listing. View a log with `agents logs <id>`.
-agents devices register <name>                 Register a discovered node and sync the approval through agents.yaml fleet.discovery.
+agents devices register <name>                 Register a discovered node and record the approval in this box's device doc (fleet.discovery), unioned fleet-wide.
 agents devices remove <name>                   Remove a device from the registry.
 agents devices render                          Render the registry to ssh_config. Prints to stdout, or use --write to update ~/.ssh/config.d/agents.
 agents devices role [name] [role]              Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.

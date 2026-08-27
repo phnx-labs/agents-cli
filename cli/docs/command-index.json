@@ -8459,7 +8459,7 @@
           "name": "ignore",
           "path": "devices ignore",
           "aliases": [],
-          "description": "Dismiss a node and sync the decision through agents.yaml fleet.discovery (also removes it locally).",
+          "description": "Dismiss a node and record the decision in this box's device doc (fleet.ignored), unioned fleet-wide (also removes it locally).",
           "args": [
             {
               "name": "name",
@@ -8510,7 +8510,7 @@
             }
           ],
           "examples": "agents devices ignored          # what was dismissed, when, and on which machine\n      agents devices ignored --json   # machine-readable [{ name, ignoredAt, ignoredOn }]\n      agents devices unignore old-laptop   # undo a dismissal",
-          "notes": "Dismissals live in the tracked central agents.yaml (fleet.ignored) and\n      sync with 'agents repo push/pull', so a node dismissed on one box stays\n      dismissed everywhere. An ignored node is not a device — it never enters\n      the registry, so 'agents devices list' never shows it; this command is\n      where dismissals are visible.",
+          "notes": "Dismissals live in each box's tracked device doc\n      (devices/<host>/agents.yaml fleet.ignored) and sync with 'agents repo\n      push/pull'; the effective list is their cross-box union, so a node\n      dismissed on one box stays dismissed everywhere without the boxes ever\n      rewriting one shared file. An ignored node is not a device — it never\n      enters the registry, so 'agents devices list' never shows it; this command\n      is where dismissals are visible.",
           "subcommands": []
         },
         {
@@ -8944,7 +8944,7 @@
           "name": "register",
           "path": "devices register",
           "aliases": [],
-          "description": "Register a discovered node and sync the approval through agents.yaml fleet.discovery.",
+          "description": "Register a discovered node and record the approval in this box's device doc (fleet.discovery), unioned fleet-wide.",
           "args": [
             {
               "name": "name",
