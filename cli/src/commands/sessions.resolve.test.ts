@@ -41,7 +41,10 @@ describe('resolveSessionQuery indexed metadata coverage', () => {
         indexed: { ids: ['a7c1d88d-b543-48c1-993d-dd5cd8e210c9'], byId: true, completeId: true },
         rush: { ids: ['session_001fa16e-9f97-453d-b0f0-5c35317bcd04'], byId: true, completeId: true },
         absent: { ids: [], byId: true, completeId: true },
-        phrase: { ids: [], byId: false, completeId: false },
+        // PHNX-2767: a content phrase against an empty listing pool still
+        // hydrates the FTS hit. Id-shaped selectors (mention / prefix /
+        // noFallback) stay id-only and must not fall through to this path.
+        phrase: { ids: ['a7c1d88d-b543-48c1-993d-dd5cd8e210c9'], byId: false, completeId: false },
         mention: { ids: [], byId: true, completeId: false },
         prefix: { ids: ['cccc3333-1111-2222-3333-444455556666'], byId: true, completeId: false },
         noFallback: { ids: [], byId: true, completeId: false },

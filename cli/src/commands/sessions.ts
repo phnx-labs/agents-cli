@@ -2294,7 +2294,7 @@ export async function renderSessionPreview(
       await discoverSessions({ all: true, cwd: process.cwd(), limit: 5000, waitForScan: true }),
       scope,
     );
-    const localMatches = resolveSessionQuery(discovered, query, { indexFallback: false }).matches
+    const localMatches = resolveSessionQuery(discovered, query, { indexFallback: false, scope }).matches
       .map(session => ({ ...session, machine: session.machine || machineId() }));
     const exact = localMatches.find(session => selectorAllowsEarlyExit(query)
       && session.id.toLowerCase() === query.trim().toLowerCase());
@@ -3065,7 +3065,11 @@ async function sessionsAction(
     if (toolEvidenceMode) {
       const self = toolSelf!;
       const selectedSessions = searchQuery
-        ? filterSessionsByQuery(sessions, searchQuery)
+        ? filterSessionsByQuery(sessions, searchQuery, {
+            agent: options.agent,
+            project: options.project,
+            routine: options.routine,
+          })
         : sessions;
       const localSessions = selectedSessions;
       const mayFanOut = options.local !== true && process.env[NO_FANOUT_ENV] !== '1';
@@ -3176,7 +3180,9 @@ async function sessionsAction(
       // that merely MENTIONS the id, defeating exact remote resolution. A genuine
       // search phrase keeps the ranked metadata+content path.
       const filtered = searchQuery
-        ? resolveSessionQuery(sessions, searchQuery).matches
+        ? resolveSessionQuery(sessions, searchQuery, {
+            scope: { agent: options.agent, project: options.project, routine: options.routine },
+          }).matches
         : sessions;
       // JSON is the canonical picker contract: enrich the durable rows once
       // from the shared live cache so every consumer gets lifecycle/recovery
@@ -3285,7 +3291,14 @@ async function sessionsAction(
       const message = pathFilter
         ? `Search sessions (${path.basename(pathFilter)}):`
         : formatSearchMessage(options);
-      const picked = await pickSessionInteractive(sessions, message, searchQuery, hiddenCount);
+      const picked = await pickSessionInteractive(
+        sessions,
+        message,
+        searchQuery,
+        hiddenCount,
+        undefined,
+        { agent: options.agent, project: options.project, routine: options.routine },
+      );
       if (picked) {
         await handlePickedSession(picked);
         return;
@@ -3294,7 +3307,13 @@ async function sessionsAction(
     }
 
     // Non-interactive fallback (piped output) or --flat/--tree.
-    const filtered = searchQuery ? filterSessionsByQuery(sessions, searchQuery) : sessions;
+    const filtered = searchQuery
+      ? filterSessionsByQuery(sessions, searchQuery, {
+          agent: options.agent,
+          project: options.project,
+          routine: options.routine,
+        })
+      : sessions;
     const liveIndex = await maybeLiveIndex(options);
     printSessionTable(filtered, hiddenCount, options.tree === true, liveIndex);
     // Every listing path must say what it dropped — a hidden default that stays
@@ -4316,6 +4335,7 @@ export async function pickSessionInteractive(
   initialSearch?: string,
   hiddenCount = 0,
   enterHint?: string,
+  scope?: SessionSearchScope,
 ): Promise<PickedSession | null> {
   // The hidden-session footer is console.log'd above the Inquirer prompt, so it
   // scrolls the viewport the picker can't measure; tell the picker to reserve for
@@ -4335,7 +4355,7 @@ export async function pickSessionInteractive(
         // No query: show the full pool (picker viewport still paginates via pageSize).
         // Typing: search the full pool.
         if (!query.trim()) return sessions;
-        return filterSessionsByQuery(sessions, query);
+        return filterSessionsByQuery(sessions, query, scope);
       },
       labelFor: (s: SessionMeta, query: string) => formatPickerLabel(s, query, cols),
       pageSize: PICKER_RECENT_COUNT,
@@ -4726,6 +4746,17 @@ function formatSearchMessage(options: SessionFilterOptions): string {
 }
 
 /**
+ * Explicit `--agent` / `--project` / `--routine` flags. Distinct from the
+ * listing pool (cwd-scoped, default-capped) that PHNX-2767 hydrates past:
+ * these flags MUST still exclude FTS hits after that union.
+ */
+export type SessionSearchScope = {
+  agent?: string;
+  project?: string;
+  routine?: boolean | string;
+};
+
+/**
  * How a `sessions <query>` argument was resolved against the pool.
  *
  * `byId` records that the rows came from an id lookup, so only then does an
@@ -4750,7 +4781,7 @@ export interface SessionQueryResolution {
 export function resolveSessionQuery(
   pool: SessionMeta[],
   query: string,
-  options: { indexFallback?: boolean } = {},
+  options: { indexFallback?: boolean; scope?: SessionSearchScope } = {},
 ): SessionQueryResolution {
   // Normalize ONCE here. isCompleteSessionId trims but resolveSessionById does
   // not, so a padded id ("<uuid> ", e.g. pasted from a terminal) would classify
@@ -4774,7 +4805,7 @@ export function resolveSessionQuery(
     const matches = options.indexFallback === false ? [] : findSessionsById(normalized);
     return { matches, byId: true, completeId };
   }
-  return { matches: filterSessionsByQuery(pool, normalized), byId: false, completeId };
+  return { matches: filterSessionsByQuery(pool, normalized, options.scope), byId: false, completeId };
 }
 
 /** Explain an ambiguous resolution. Only a short id can be lengthened: a complete
@@ -4819,6 +4850,7 @@ export function fleetNotFoundMessage(query: string, deviceCount: number, unreach
 export function filterSessionsByQuery(
   sessions: SessionMeta[],
   query: string | undefined,
+  scope?: SessionSearchScope,
 ): SessionMeta[] {
   const trimmed = query?.trim().toLowerCase() || '';
   if (!trimmed) return sessions;
@@ -4830,7 +4862,9 @@ export function filterSessionsByQuery(
   }
 
   const terms = trimmed.split(/\s+/).filter(Boolean);
-  const contentIndex = searchContentIndex(sessions, trimmed);
+  // Hydrate FTS hits missing from the pool (PHNX-2767), then drop hits that
+  // fail --project/--agent/--routine so those flags are not undone by the union.
+  const contentIndex = scopedContentIndex(sessions, trimmed, scope);
 
   // If the query exactly matches a session label, short-circuit the structural
   // scorer (which would otherwise surface every session whose topic happens to
@@ -4921,10 +4955,15 @@ function scoreSessionQuery(session: SessionMeta, terms: string[]): number {
  * Without this, a query like "scoped search" could match sessions in BOTH
  * the project you specified AND elsewhere, producing an ambiguity error
  * even though the user already pointed at the correct scope.
+ *
+ * PHNX-2767 hydrates FTS hits missing from the listing pool *after* this
+ * runs, so callers that search must also pass the same scope into
+ * `filterSessionsByQuery` / `scopedContentIndex` or the union
+ * reintroduces the rows this function just dropped.
  */
 export function applyScopeFilters(
   sessions: SessionMeta[],
-  scope: { agent?: string; project?: string; routine?: boolean | string },
+  scope: SessionSearchScope,
 ): SessionMeta[] {
   let filtered = sessions;
 
@@ -4965,11 +5004,31 @@ export function applyScopeFilters(
   return filtered;
 }
 
+/**
+ * PHNX-2767 hydrates FTS hits missing from the listing pool. That union is
+ * unscoped on purpose (cwd/limit are a page of the index, not a filter).
+ * `--project` / `--agent` / `--routine` ARE filters: drop hydrated hits that
+ * fail them so content search cannot undo a scope the user already set.
+ */
+function scopedContentIndex(
+  sessions: SessionMeta[],
+  query: string,
+  scope?: SessionSearchScope,
+): Map<string, SessionMeta> {
+  const hits = searchContentIndex(sessions, query);
+  if (!scope || (!scope.agent && !scope.project && !scope.routine)) return hits;
+  const kept = new Map<string, SessionMeta>();
+  for (const [id, session] of hits) {
+    if (applyScopeFilters([session], scope).length > 0) kept.set(id, session);
+  }
+  return kept;
+}
+
 export function artifactLookupScope(
   agent?: string,
   project?: string,
   routine?: boolean | string,
-): { agent?: string; project?: string; routine?: boolean | string } {
+): SessionSearchScope {
   return { agent, project, routine };
 }
 
@@ -4992,7 +5051,7 @@ async function renderArtifactsGlobal(
     tracker.stop();
 
     const allSessions = applyScopeFilters(discovered, scope);
-    const { matches: queryMatches, byId, completeId } = resolveSessionQuery(allSessions, query);
+    const { matches: queryMatches, byId, completeId } = resolveSessionQuery(allSessions, query, { scope });
 
     if (queryMatches.length === 0) {
       spinner.stop();
@@ -5092,7 +5151,7 @@ async function renderOneSession(
     const allSessions = applyScopeFilters(discovered, scope);
     let session: SessionMeta | undefined;
 
-    const resolution = resolveSessionQuery(allSessions, query);
+    const resolution = resolveSessionQuery(allSessions, query, { scope });
     let queryMatches: SessionMeta[] = resolution.matches;
     let byId = resolution.byId;
     const completeId = resolution.completeId;
@@ -5105,7 +5164,7 @@ async function renderOneSession(
     // echoes the id in a resume prompt. Gate on looksLikeSessionId, not just
     // completeId, so a short id resolves to "no match" rather than fuzzy content.
     if (queryMatches.length === 0 && !looksLikeSessionId(query)) {
-      const contentResults = searchContentIndex(allSessions, query);
+      const contentResults = scopedContentIndex(allSessions, query, scope);
       if (contentResults.size > 0) {
         const matchedSessions = Array.from(contentResults.values())
           .sort((a, b) => (b._bm25Score ?? 0) - (a._bm25Score ?? 0));
@@ -5324,16 +5383,20 @@ export function fleetCandidatesByQuery(rows: SessionMeta[], query: string, trust
 }
 
 /** Resolve through the canonical metadata+content union used by keyword search. */
-function resolveIndexedMetadataRows(indexed: SessionMeta[], selector: string): SessionMeta[] {
+function resolveIndexedMetadataRows(
+  indexed: SessionMeta[],
+  selector: string,
+  scope?: SessionSearchScope,
+): SessionMeta[] {
   const alias = resolveSessionAlias(selector);
   if (alias.kind === 'resolved') {
-    return resolveSessionQuery(indexed, alias.sessionId, { indexFallback: false }).matches;
+    return resolveSessionQuery(indexed, alias.sessionId, { indexFallback: false, scope }).matches;
   }
   if (alias.kind === 'ambiguous') {
     const ids = new Set(alias.sessionIds.map(id => id.toLowerCase()));
     return indexed.filter(session => ids.has(session.id.toLowerCase()));
   }
-  return resolveSessionQuery(indexed, selector, { indexFallback: false }).matches;
+  return resolveSessionQuery(indexed, selector, { indexFallback: false, scope }).matches;
 }
 
 /**
@@ -5462,7 +5525,7 @@ export async function computeLocalMetadataMatches(
   const includeLocal = !scope.hosts?.length || shouldIncludeLocal(scope.hosts, localMachine);
   if (!includeLocal) return [];
 
-  const indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector);
+  const indexed = resolveIndexedMetadataRows(indexedRowsForSelector(selector, scope), selector, scope);
   if (indexed.length > 0 || !looksLikeSessionId(selector)) {
     return indexed.map(session => ({ ...session, machine: session.machine || localMachine }));
   }
@@ -5487,7 +5550,7 @@ export async function liveMetadataMatches(
 ): Promise<SessionMeta[]> {
   const load = deps.loadActive ?? loadLocalActiveSessions;
   const match = (metas: SessionMeta[]): SessionMeta[] =>
-    resolveIndexedMetadataRows(applyScopeFilters(metas, scope), selector);
+    resolveIndexedMetadataRows(applyScopeFilters(metas, scope), selector, scope);
   try {
     const cached = liveSessionMetas((await load()).sessions, self, Date.now());
     const hit = match(cached);
