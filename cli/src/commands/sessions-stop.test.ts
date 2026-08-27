@@ -47,6 +47,29 @@ describe.skipIf(skipReason)('sessions stop — tmux teardown', () => {
   });
 });
 
+describe('PHNX-3298 — stop resolves a unique local live id without a fleet wait', () => {
+  it('unique local UUID skips the fleet then resolveOne hits that row', async () => {
+    const { localLiveSelectorMatches, shouldSkipRemoteSweep } = await import('./go.js');
+    const { resolveOne } = await import('./detach-core.js');
+    const sid = 'c1a0de70-3298-4000-8000-000000003298';
+    const row = { context: 'local', kind: 'claude', sessionId: sid, status: 'running' } as unknown as ActiveSession;
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([row], sid))).toBe(true);
+    const r = resolveOne(new Map([[sid, row]]), sid);
+    expect('error' in r).toBe(false);
+    expect((r as ActiveSession).sessionId).toBe(sid);
+  });
+
+  it('two local 8-hex collisions fail closed without racing the fleet', async () => {
+    const { localLiveSelectorMatches, shouldSkipRemoteSweep } = await import('./go.js');
+    const { resolveOne } = await import('./detach-core.js');
+    const a = { context: 'local', kind: 'claude', sessionId: 'aaaaaaaa-1111-4000-8000-000000000001', status: 'running' } as unknown as ActiveSession;
+    const b = { context: 'local', kind: 'codex', sessionId: 'aaaaaaaa-2222-4000-8000-000000000002', status: 'running' } as unknown as ActiveSession;
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([a, b], 'aaaaaaaa'))).toBe(true);
+    const r = resolveOne(new Map([[a.sessionId!, a], [b.sessionId!, b]]), 'aaaaaaaa');
+    expect('error' in r && r.error).toMatch(/ambiguous/i);
+  });
+});
+
 describe('sessions stop — plain-process teardown', () => {
   it('SIGTERMs a non-tmux agent process by pid, then waits for it to exit', async () => {
     // A bare (non-tmux) interactive spawn: stop must signal the pid and confirm

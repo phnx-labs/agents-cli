@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildBackgroundArgv, resolveDetachTarget, resolveOne, BACKGROUND_NUDGE } from './detach-core.js';
+import { localLiveSelectorMatches, shouldSkipRemoteSweep } from './go.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
 function session(sessionId: string): ActiveSession {
@@ -63,6 +64,39 @@ describe('resolveOne', () => {
   it('errors (none) when nothing matches', () => {
     const r = resolveOne(map, 'zzz');
     expect('error' in r && r.error).toMatch(/no live session/i);
+  });
+});
+
+describe('PHNX-3298 — detach resolves a unique local live id without a fleet wait', () => {
+  it('unique full UUID: skip fleet, then resolveOne hits that row', () => {
+    const sid = 'c1a0de70-3298-4000-8000-000000003298';
+    const row = session(sid);
+    const matches = localLiveSelectorMatches([row], sid);
+    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+    const map = new Map([[sid, row]]);
+    const r = resolveOne(map, sid);
+    expect('error' in r).toBe(false);
+    expect((r as ActiveSession).sessionId).toBe(sid);
+  });
+
+  it('unique 8-hex: skip fleet, resolveOne hits the one local live row', () => {
+    const sid = 'c1a0de70-3298-4000-8000-000000003298';
+    const row = session(sid);
+    const matches = localLiveSelectorMatches([row, session('dddddddd-0000-4000-8000-000000000000')], 'c1a0de70');
+    expect(matches).toHaveLength(1);
+    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+    const map = new Map([[sid, row]]);
+    expect((resolveOne(map, 'c1a0de70') as ActiveSession).sessionId).toBe(sid);
+  });
+
+  it('two local 8-hex collisions fail closed (ambiguous) without racing the fleet', () => {
+    const a = session('aaaaaaaa-1111-4000-8000-000000000001');
+    const b = session('aaaaaaaa-2222-4000-8000-000000000002');
+    const matches = localLiveSelectorMatches([a, b], 'aaaaaaaa');
+    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+    const map = new Map([[a.sessionId!, a], [b.sessionId!, b]]);
+    const r = resolveOne(map, 'aaaaaaaa');
+    expect('error' in r && r.error).toMatch(/ambiguous/i);
   });
 });
 

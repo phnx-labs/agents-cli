@@ -1,5 +1,13 @@
 import { describe, it, expect } from 'vitest';
-import { describeWhere, filterLivePool, remoteAttachEndedNotice, type Where } from './go.js';
+import {
+  describeWhere,
+  filterLivePool,
+  remoteAttachEndedNotice,
+  localLiveSelectorMatches,
+  shouldSkipRemoteSweep,
+  isDefinitiveLiveMatch,
+  type Where,
+} from './go.js';
 import { SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
 import type { ActiveSession } from '../lib/session/active.js';
 
@@ -43,6 +51,46 @@ describe('describeWhere — which jump path a live session takes', () => {
   it('remote tmux beats the host check (a remote ghostty-hosted session still ssh-attaches)', () => {
     const w = describeWhere(s({ machine: 'box', host: 'ghostty', provenance: { mux: { kind: 'tmux', pane: '%9' } } as never }), self);
     expect(w.action).toContain('ssh');
+  });
+});
+
+describe('PHNX-3298 — skip fleet when local already answered a live selector', () => {
+  const uuid = 'c1a0de70-3298-4000-8000-000000003298';
+  const other = 'c1a0de70-3298-4000-8000-00000000aaaa';
+  const unrelated = 'dddddddd-0000-4000-8000-000000000000';
+
+  it('a unique local full UUID is a skip (zero SSH)', () => {
+    const local = [s({ sessionId: uuid })];
+    expect(localLiveSelectorMatches(local, uuid)).toHaveLength(1);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid))).toBe(true);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid.toUpperCase()))).toBe(true);
+  });
+
+  it('a unique-enough 8-hex with exactly one local live match skips the fleet', () => {
+    const local = [s({ sessionId: uuid }), s({ sessionId: unrelated })];
+    const matches = localLiveSelectorMatches(local, 'c1a0de70');
+    expect(matches).toHaveLength(1);
+    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+  });
+
+  it('two local matches fail closed without waiting for unanswered peers', () => {
+    const local = [s({ sessionId: uuid }), s({ sessionId: other })];
+    const matches = localLiveSelectorMatches(local, 'c1a0de70');
+    expect(matches).toHaveLength(2);
+    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+  });
+
+  it('a genuine miss still races the fleet', () => {
+    const local = [s({ sessionId: unrelated })];
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid))).toBe(false);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([], 'c1a0de70'))).toBe(false);
+  });
+
+  it('a full UUID is definitive on exact id only', () => {
+    expect(isDefinitiveLiveMatch(s({ sessionId: uuid }), uuid)).toBe(true);
+    expect(isDefinitiveLiveMatch(s({ sessionId: other }), uuid)).toBe(false);
+    expect(isDefinitiveLiveMatch(s({ sessionId: uuid }), 'c1a0de70')).toBe(true);
+    expect(isDefinitiveLiveMatch(s({ sessionId: uuid }), 'c1a0')).toBe(false);
   });
 });
 
