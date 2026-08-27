@@ -128,7 +128,7 @@ Why these eleven, and how much of each rests on measurement rather than judgemen
 | 4 · tier `--help` | 254 of 564 commands (45%) dead or near-dead; top 20 carry 70.4% | **Yes** — 9,223 sessions |
 | 5 · site checks | `is-agentic` scores 63/100; brand discoverability FAILED | **Yes** — raw scan committed |
 | 6 · demo | Usage limits is the only pain with 1M+ view posts | **Yes** — X engagement counts |
-| 6 · demo (what to film) | Rotation moves a run to an account with headroom and picks the work back up. It does **not** continue the same session: `exec.ts:2554` mints a new UUID, Claude-only, and the other five harnesses get a retry-with-context prompt. Headless runs only — `shouldArmRotationFailover` excludes interactive | **Yes** — read from the code |
+| 6 · demo (what to film) | Rotation moves a run to an account with headroom and picks the work back up. It does **not** continue the same session: `exec.ts:2558` mints a new UUID, Claude-only, and the other five harnesses get a retry-with-context prompt. Headless runs only — `shouldArmRotationFailover` excludes interactive | **Yes** — read from the code |
 | 6 · demo (competitive) | Rotation has two competitors — `claude-swap` (2.0k stars, Claude-only, a foreground loop you babysit) and `headroom` (99 stars, Claude+Codex). Neither demonstrates it, and neither pairs it with stall detection | **Yes** — live star and download counts |
 | 7 · skill/plugin | Installed skills enter agent context deterministically; `llms.txt` does not | Partly — sourced, not causal |
 | 8 · name cutover | Four names, two domains, two repo names; 17 stars | **Yes** |
