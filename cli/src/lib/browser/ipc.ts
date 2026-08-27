@@ -96,8 +96,8 @@ export class BrowserDaemonNotRunningError extends Error {
 export function formatBrowserDaemonNotRunningError(): string {
   return [
     'Browser daemon not running.',
-    'Start it with: agents browser start (auto-picks an installed browser)',
-    'Or pin a profile: agents browser start --profile <name>',
+    'Start it with: agents browser start (uses this machine\'s configured default browser)',
+    'Pick / pin a profile: agents browser use <name>  (or: agents browser start --profile <name>)',
     'List profiles: agents browser profiles list',
   ].join('\n');
 }

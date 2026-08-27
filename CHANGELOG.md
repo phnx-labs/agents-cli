@@ -16,6 +16,9 @@
   resolving it. The interactive `agents setup` browser pick still lets you choose
   and pin one — now with an explicit "None — this box uses the fleet hub" opt-out
   in place of the silent auto-detect.
+  A non-interactive / headless `agents setup browser` likewise no longer mints a
+  profile silently — it recognizes an existing one and otherwise defers to the
+  fleet hub.
 
 - **A fleet browser hub lets every box drive one shared logged-in browser with no `--device` (PHNX-2010).**
   New `browser.device` config key (user scope, so a single value in the central
