@@ -52,6 +52,14 @@ describe('monitorFingerprint', () => {
       .not.toBe(monitorFingerprint(watcher({ action: { type: 'run', agent: 'claude', prompt: 'merge it' } as any })));
   });
 
+  it('separates run actions that differ only by postcondition (PHNX-2842)', () => {
+    const run = { type: 'run' as const, agent: 'claude', prompt: 'merge it' };
+    expect(monitorFingerprint(watcher({ action: run as any })))
+      .not.toBe(monitorFingerprint(watcher({
+        action: { ...run, postcondition: 'gh pr view 1 --json state --jq .state | grep -qx MERGED' } as any,
+      })));
+  });
+
   it('separates watchers whose condition differs', () => {
     expect(monitorFingerprint(watcher()))
       .not.toBe(monitorFingerprint(watcher({ condition: { mode: 'match', match: 'fail' } as any })));

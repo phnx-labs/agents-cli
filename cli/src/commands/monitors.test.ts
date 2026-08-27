@@ -254,3 +254,114 @@ describe('monitors inspection JSON and stderr', () => {
     },
   );
 });
+
+/**
+ * PHNX-2842: `agents monitors runs` used to print `ok` for a completed agent
+ * that did nothing. Real CLI subprocess against an isolated HOME: fire
+ * recorded ok:true off a running snapshot, run later settled completed, and
+ * the postcondition (a real node process exiting 1) proves the intended
+ * effect did not happen.
+ */
+describe('monitors runs postcondition (PHNX-2842)', () => {
+  function writeRun(home: string, name: string, runId: string, status: string): void {
+    const dir = path.join(home, '.agents', '.history', 'runs', name, runId);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'meta.json'), JSON.stringify({
+      jobName: name,
+      runId,
+      agent: 'claude',
+      pid: null,
+      status,
+      startedAt: '2026-08-20T16:48:18.000Z',
+      completedAt: status === 'running' ? null : '2026-08-20T16:50:00.000Z',
+      exitCode: status === 'completed' ? 0 : 1,
+    }));
+  }
+
+  function writeRunFire(home: string, name: string, runId: string, postcondition: string): void {
+    const dir = path.join(home, '.agents', '.history', 'monitors', name, 'fires', '2026-08-20T16-48-18-000Z');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'event.json'), JSON.stringify({
+      monitorName: name,
+      firedAt: '2026-08-20T16:48:18.000Z',
+      summary: 'phnx-labs/agents-cli#1682',
+      payload: {},
+      runId,
+      action: 'run',
+      ok: true,
+      runStatusAtFire: 'running',
+      postcondition,
+    }));
+  }
+
+  function failPostcondition(): string {
+    return process.platform === 'win32'
+      ? `"${process.execPath}" -e "process.exit(1)"`
+      : `${JSON.stringify(process.execPath)} -e 'process.exit(1)'`;
+  }
+
+  it('runs prints "no effect" when the agent completed but the postcondition failed', () => {
+    const home = makeHome();
+    writeMonitor(home, {
+      name: 'merge-pr-1682',
+      enabled: true,
+      source: { type: 'poll', command: 'echo x', interval: '5m' },
+      condition: { mode: 'every' },
+      action: { type: 'run', agent: 'claude', prompt: 'merge {event}', postcondition: failPostcondition() },
+    });
+    writeRun(home, 'merge-pr-1682', 'run-noop', 'completed');
+    writeRunFire(home, 'merge-pr-1682', 'run-noop', failPostcondition());
+
+    const res = run(home, ['runs', 'merge-pr-1682']);
+    expect(res.status).toBe(0);
+    // Before the fix this line was `ok`. After: the postcondition failed, so
+    // the fire is visibly not success.
+    expect(res.stdout).toContain('no effect');
+    expect(res.stdout).not.toMatch(/\bok\b/);
+    expect(res.stdout).toContain('postcondition not met');
+  });
+
+  it('add --postcondition persists the command on the run action', () => {
+    const home = makeHome();
+    const deviceDir = path.join(home, '.agents', 'devices', 'testbox');
+    fs.mkdirSync(deviceDir, { recursive: true });
+    fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), 'config:\n  daemonEnabled: false\n');
+
+    const res = run(home, [
+      'add', 'merge-check',
+      '--poll', 'echo x', '5m',
+      '--every',
+      '--run', 'claude',
+      '--prompt', 'merge {event}',
+      '--postcondition', 'exit 0',
+    ], {
+      AGENTS_SYNC_MACHINE_ID: 'testbox',
+      AGENTS_MONITORS_LOCAL: '1',
+    });
+    const file = path.join(home, '.agents', 'monitors', 'merge-check.yml');
+    expect(fs.existsSync(file), `${res.stdout}\n${res.stderr}`).toBe(true);
+    const parsed = yaml.parse(fs.readFileSync(file, 'utf-8'));
+    expect(parsed.action.postcondition).toBe('exit 0');
+    expect(`${res.stdout}${res.stderr}`).not.toContain('no --postcondition');
+  });
+
+  it('add --run without --postcondition warns that completed-exit-0 still records as ok', () => {
+    const home = makeHome();
+    const deviceDir = path.join(home, '.agents', 'devices', 'testbox');
+    fs.mkdirSync(deviceDir, { recursive: true });
+    fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), 'config:\n  daemonEnabled: false\n');
+
+    const res = run(home, [
+      'add', 'investigate',
+      '--poll', 'echo fail', '30s',
+      '--match', 'fail',
+      '--run', 'claude',
+      '--prompt', 'diagnose {event}',
+    ], {
+      AGENTS_SYNC_MACHINE_ID: 'testbox',
+      AGENTS_MONITORS_LOCAL: '1',
+    });
+    expect(res.status).toBe(0);
+    expect(`${res.stdout}${res.stderr}`).toContain('no --postcondition');
+  });
+});

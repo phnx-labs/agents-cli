@@ -13,6 +13,7 @@ import {
   markDroughtNotified,
   getMonitorHistoryDir,
   resolveFireOutcome,
+  evaluatePostcondition,
 } from './state.js';
 import type { MonitorEvent } from './config.js';
 import { writeRunMeta, getJobRunsDir, type RunMeta } from '../scheduling/routines.js';
@@ -270,5 +271,137 @@ describe('resolveFireOutcome (RUSH-2690 — reconcile the frozen ok against the 
   it('a runId whose run record is missing/unreadable falls back to the frozen ok rather than throwing', () => {
     const fire = { ...event, runId: 'run-does-not-exist-on-disk', action: 'run', ok: true };
     expect(resolveFireOutcome(NAME, fire)).toEqual({ ok: true });
+  });
+});
+
+/**
+ * PHNX-2842: a `run` action that exits 0 is not success. The motivating
+ * incident: merge-on-green fired, `agents monitors runs` showed `ok`, and the
+ * PR stayed OPEN — the agent completed without merging. `completed` used to
+ * sit in OK_RUN_STATUSES next to `running`. A declared postcondition is what
+ * distinguishes "ran" from "the intended effect happened".
+ *
+ * Real disk I/O + a real shell: the postcondition is `/bin/sh -c` (or `cmd /c`)
+ * via `evaluatePostcondition`, the same seam command sources use. No mocks.
+ */
+describe('resolveFireOutcome (PHNX-2842 — completed is not ok unless the postcondition holds)', () => {
+  function nodeExit(code: number): string {
+    // evaluatePostcondition wraps this in /bin/sh -c or cmd /c.
+    return process.platform === 'win32'
+      ? `"${process.execPath}" -e "process.exit(${code})"`
+      : `${JSON.stringify(process.execPath)} -e 'process.exit(${code})'`;
+  }
+
+  function baseMeta(runId: string, status: RunMeta['status']): RunMeta {
+    return {
+      jobName: NAME,
+      runId,
+      agent: 'claude',
+      pid: null,
+      spawnedAt: Date.now(),
+      timeoutMs: 600_000,
+      status,
+      startedAt: '2026-08-20T16:48:18.000Z',
+      completedAt: status === 'running' ? null : '2026-08-20T16:50:00.000Z',
+      exitCode: status === 'running' ? null : 0,
+    } as RunMeta;
+  }
+
+  const event: MonitorEvent = {
+    monitorName: NAME,
+    firedAt: '2026-08-20T16:48:18.000Z',
+    summary: 'phnx-labs/agents-cli#1682',
+    payload: {},
+  };
+
+  it('the bug: fire recorded ok:true, run completed exit 0, postcondition fails — reconciled read is no-effect, not ok', () => {
+    const runId = 'run-merged-nothing';
+    const postcondition = nodeExit(1);
+    writeRunMeta(baseMeta(runId, 'completed'));
+    writeFireRecord(event, {
+      runId,
+      action: 'run',
+      ok: true,
+      runStatusAtFire: 'running',
+      postcondition,
+    });
+
+    const fire = listFires(NAME)[0]!;
+    const outcome = resolveFireOutcome(NAME, fire);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.runStatus).toBe('completed');
+    expect(outcome.effect).toBe('none');
+    expect(outcome.error).toMatch(/postcondition not met/);
+
+    // Persisted so a later listing does not re-exec the command.
+    const persisted = listFires(NAME)[0]!;
+    expect(persisted.postconditionOk).toBe(false);
+    expect(persisted.postconditionError).toMatch(/postcondition not met/);
+    // Frozen fire-time ok is left as the snapshot; display reads the reconciled field.
+    expect(persisted.ok).toBe(true);
+  });
+
+  it('a completed run whose postcondition exits 0 reads ok with effect met', () => {
+    const runId = 'run-merged';
+    const postcondition = nodeExit(0);
+    writeRunMeta(baseMeta(runId, 'completed'));
+    writeFireRecord(event, { runId, action: 'run', ok: true, postcondition });
+
+    const outcome = resolveFireOutcome(NAME, listFires(NAME)[0]!);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.runStatus).toBe('completed');
+    expect(outcome.effect).toBe('met');
+    expect(listFires(NAME)[0]!.postconditionOk).toBe(true);
+  });
+
+  it('does not run the postcondition while the run is still in flight', () => {
+    const runId = 'run-still-going';
+    const marker = `${getMonitorHistoryDir(NAME)}/must-not-run`;
+    const postcondition = process.platform === 'win32'
+      ? `echo ran> "${marker}" & exit 1`
+      : `touch ${JSON.stringify(marker)} && exit 1`;
+    writeRunMeta(baseMeta(runId, 'running'));
+    writeFireRecord(event, { runId, action: 'run', ok: true, postcondition });
+
+    const outcome = resolveFireOutcome(NAME, listFires(NAME)[0]!);
+    expect(outcome.ok).toBe(true);
+    expect(outcome.runStatus).toBe('running');
+    expect(outcome.effect).toBeUndefined();
+    expect(fs.existsSync(marker)).toBe(false);
+  });
+
+  it('a failed run is failed even when its postcondition would pass', () => {
+    const runId = 'run-failed-but-pr-merged-anyway';
+    writeRunMeta({ ...baseMeta(runId, 'failed'), exitCode: 1 });
+    writeFireRecord(event, { runId, action: 'run', ok: true, postcondition: nodeExit(0) });
+
+    const outcome = resolveFireOutcome(NAME, listFires(NAME)[0]!);
+    expect(outcome.ok).toBe(false);
+    expect(outcome.runStatus).toBe('failed');
+    expect(outcome.effect).toBeUndefined();
+    expect(listFires(NAME)[0]!.postconditionOk).toBeUndefined();
+  });
+
+  it('a completed run with no postcondition still reads ok (investigation monitors are not merge monitors)', () => {
+    const runId = 'run-investigate';
+    writeRunMeta(baseMeta(runId, 'completed'));
+    const fire = { ...event, runId, action: 'run' as const, ok: true };
+    expect(resolveFireOutcome(NAME, fire)).toEqual({ ok: true, runStatus: 'completed' });
+  });
+});
+
+describe('evaluatePostcondition', () => {
+  it('exit 0 is met', () => {
+    expect(evaluatePostcondition('exit 0')).toEqual({ ok: true });
+  });
+
+  it('exit 1 is not met and names the failure', () => {
+    const result = evaluatePostcondition('exit 1');
+    expect(result.ok).toBe(false);
+    expect(result.error).toMatch(/postcondition not met/);
+  });
+
+  it('an empty command fails loud rather than looking like success', () => {
+    expect(evaluatePostcondition('   ')).toEqual({ ok: false, error: 'postcondition not met: empty command' });
   });
 });

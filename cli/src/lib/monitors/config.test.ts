@@ -121,6 +121,31 @@ describe('validateMonitor — source/action requirements', () => {
     expect(errors.some((e) => /rateLimit\.max/.test(e))).toBe(true);
     expect(errors.some((e) => /rateLimit\.per/.test(e))).toBe(true);
   });
+
+  it('accepts a run action with a postcondition command (PHNX-2842)', () => {
+    expect(validateMonitor(base({
+      action: {
+        type: 'run',
+        agent: 'claude',
+        prompt: 'merge {event}',
+        postcondition: 'gh pr view 1682 --json state --jq .state | grep -qx MERGED',
+      },
+    }))).toEqual([]);
+  });
+
+  it('rejects an empty postcondition', () => {
+    const errors = validateMonitor(base({
+      action: { type: 'run', agent: 'claude', prompt: 'x', postcondition: '  ' },
+    }));
+    expect(errors.some((e) => /action\.postcondition must be a non-empty shell command/.test(e))).toBe(true);
+  });
+
+  it('rejects a postcondition on notify (already has a synchronous ok)', () => {
+    const errors = validateMonitor(base({
+      action: { type: 'notify', notifyChannel: 'telegram', postcondition: 'true' },
+    }));
+    expect(errors.some((e) => /action\.postcondition only applies to run or routine/.test(e))).toBe(true);
+  });
 });
 
 describe('parseInterval', () => {
