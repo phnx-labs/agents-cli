@@ -929,13 +929,16 @@ def main():
     # Terminal answers (human typed in the TUI) record an answered marker and
     # remove the block file so the feed stops showing it within one poll cycle.
     # The marker stays behind so a concurrent surface cannot double-answer.
+    # A resolution tombstone is written BEFORE unlink (matching TS recordAnswer)
+    # so a stale lifecycle re-read cannot resurrect this generation.
     if hook_event == "UserPromptSubmit":
         os.makedirs(answered_dir, exist_ok=True)
         marker = os.path.join(answered_dir, f"{block_id}.json")
+        now_iso = datetime.now(timezone.utc).isoformat()
         try:
             fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644)
             record = {
-                "answeredAt": datetime.now(timezone.utc).isoformat(),
+                "answeredAt": now_iso,
                 "answeredFrom": "terminal",
             }
             with os.fdopen(fd, "w") as f:
@@ -944,6 +947,25 @@ def main():
             pass
         except Exception:
             pass
+        # Tombstone first, then drop the open-block view. A missing/corrupt
+        # block means there is nothing to resolve; fail open.
+        existing = read_json(target)
+        if isinstance(existing, dict):
+            generation = existing.get("generation") or existing.get("ts")
+            if generation:
+                tombstone = {
+                    "blockId": block_id,
+                    "generation": generation,
+                    "resolvedAt": now_iso,
+                    "reason": "answered",
+                }
+                source_cursor = existing.get("sourceCursor")
+                if source_cursor:
+                    tombstone["sourceCursor"] = source_cursor
+                write_json(
+                    os.path.join(feed_dir, "resolutions", f"{block_id}.json"),
+                    tombstone,
+                )
         # Remove the visible block so the feed drops the answered question.
         try:
             os.unlink(target)

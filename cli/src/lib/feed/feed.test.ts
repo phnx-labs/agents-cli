@@ -20,11 +20,14 @@ import {
   getAnswerRecord,
   isBlockAnswered,
   listAskStats,
+  readResolution,
   type OpenBlock,
 } from './feed.js';
 import { classifyBlock, filterBlocksForFeed } from '../ask-classifier.js';
 import { isPhoneUrgent, DEFAULT_POLICY } from '../feed-policy.js';
 import { loadOperators } from '../operator.js';
+import { reconcileAttention } from './attention.js';
+import type { ActiveSession } from '../session/active.js';
 
 const hasPython = spawnSync('python3', ['--version']).status === 0;
 
@@ -834,6 +837,79 @@ describe('feed store', () => {
     expect(listBlocks(feedDir)).toEqual([]);
     expect(isBlockAnswered('block-session-terminal', feedDir)).toBe(true);
     expect(getAnswerRecord('block-session-terminal', feedDir)).toMatchObject({ answeredFrom: 'terminal' });
+  });
+
+  it.runIf(hasPython)('real hook UserPromptSubmit writes an answered tombstone so a stale re-read cannot resurrect (PHNX-3074)', () => {
+    // The Python terminal-answer path used to unlink the block with no
+    // resolutions/<id>.json tombstone. Once reconcileAttention is on the
+    // read path, a session engine still reporting waiting_input at the same
+    // cursor would resurrect the answered ask. This is the producer-side
+    // match of TS recordAnswer: tombstone BEFORE unlink.
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-terminal-tombstone-'));
+    const feedDir = path.join(home, '.agents', '.history', 'feed');
+    const sessionId = 'session-tombstone';
+    const blockId = blockIdForSession(sessionId);
+
+    const publish = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: sessionId,
+        hook_event_name: 'PreToolUse',
+        tool_input: { questions: [{ question: 'Choose?', options: [{ label: 'A' }] }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(publish.status).toBe(0);
+    const published = listBlocks(feedDir)[0];
+    expect(published).toBeDefined();
+    expect(published.sourceCursor?.lastActivityMs).toEqual(expect.any(Number));
+
+    const answer = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({ session_id: sessionId, hook_event_name: 'UserPromptSubmit' }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    expect(answer.status).toBe(0);
+    expect(listBlocks(feedDir)).toEqual([]);
+    expect(isBlockAnswered(blockId, feedDir)).toBe(true);
+
+    const tombstone = readResolution(blockId, feedDir);
+    expect(tombstone).toMatchObject({
+      blockId,
+      generation: published.ts,
+      reason: 'answered',
+      sourceCursor: published.sourceCursor,
+    });
+    expect(tombstone?.resolvedAt).toEqual(expect.any(String));
+
+    const cursorMs = published.sourceCursor!.lastActivityMs!;
+    const staleSession = {
+      context: 'terminal',
+      kind: 'claude',
+      status: 'running',
+      host: published.host,
+      sessionId,
+      activity: 'waiting_input',
+      awaitingReason: 'question',
+      question: { text: 'Choose?', reason: 'question', options: [{ label: 'A' }] },
+      lastActivityMs: cursorMs,
+    } as ActiveSession;
+
+    // Same cursor as the answered generation: a stale re-read, must stay gone.
+    expect(reconcileAttention({
+      session: staleSession,
+      resolution: tombstone,
+      nowMs: cursorMs + 10_000,
+    })).toBeUndefined();
+
+    // A strictly later turn is a new generation and is allowed through.
+    const fresh = reconcileAttention({
+      session: { ...staleSession, lastActivityMs: cursorMs + 1, question: { text: 'A later ask?', reason: 'question' } },
+      resolution: tombstone,
+      nowMs: cursorMs + 10_000,
+    });
+    expect(fresh).toBeDefined();
+    expect(fresh!.key).toBe(`${published.host}/${sessionId}/t${cursorMs + 1}`);
   });
 
   it.runIf(hasPython)('real hook clears stale answered marker when a new question is published', () => {
