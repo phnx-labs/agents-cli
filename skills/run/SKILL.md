@@ -129,9 +129,9 @@ Controls which installed version/account gets the work.
 
 | Strategy | Behavior |
 |----------|----------|
-| `pinned` (default) | Use the workspace/global pinned version |
-| `available` | Use pinned if usage available; otherwise switch to another signed-in version |
-| `balanced` | Distribute load across healthy accounts by remaining capacity |
+| `pinned` | Use the workspace/global pinned version. A logged-out default yields to a signed-in sibling on this device instead of dying; `--strategy pinned` still forces a rate-limited default |
+| `available` | Use pinned if it can run right now; otherwise switch to another signed-in version |
+| `balanced` (default) | Distribute load across healthy accounts by remaining capacity |
 
 ```bash
 agents run claude "..." --strategy balanced

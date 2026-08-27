@@ -2066,6 +2066,18 @@ Credential account selection adds three requirements to that funnel:
   (`lib/account-registry.ts`; `commands/exec.ts`; `lib/profiles.ts`;
   `lib/daemon/runner.ts`). Explicit `--env` remains the final env override. Cloud and
   lease placement MUST reject device-local accounts.
+- **EXEC-ACCOUNT-5 (MUST).** Unpinned version selection (`resolveRunVersion`) MUST
+  consult **this device's** per-version auth state. A logged-out (or revoked)
+  workspace/global default MUST yield to a signed-in sibling version on the
+  execution device instead of spawning into a credential-less home; if no
+  signed-in version exists, the run MUST fail loud naming each excluded
+  version. An explicit `@version` pin is unchanged. `--strategy pinned` remains
+  the escape hatch to force a *rate-limited* default, not a logged-out one
+  (`lib/accounting/rotate.ts`; `commands/exec.ts`). Off macOS, a Claude home
+  whose `.credentials.json` is missing (and which has no `.oauth_token`
+  setup-token) MUST report signed out even when leftover `.claude.json`
+  `oauthAccount` still names an email (`lib/agent-spec/agents.ts`
+  `isClaudeCredentialFileBlank`).
 
 Requirement keywords **MUST / MUST NOT / SHOULD / MAY** are used per
 [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119). Every requirement cites the
@@ -2832,6 +2844,15 @@ result; Then it returns claude's exit code directly without ever spawning
 codex, because `detectRateLimit` does not match auth-failure text
 (`lib/exec.ts:1977-1986,1698-1706`) — contrast a "5-hour limit" stderr, which
 does cascade.
+
+**GWT-E5b — Unpinned dispatch skips a logged-out default (PHNX-2685 / EXEC-ACCOUNT-5).**
+Given claude `2.1.219` is the pinned default and logged out on this device,
+and claude `2.1.187` is signed in on the same device; When `agents run claude
+"..."` (no `@version`) resolves a version; Then `resolveRunVersion` returns
+`2.1.187` under `pinned`, `available`, and `balanced`, and does not spawn
+`2.1.219`. Given every installed version is logged out; When the same unpinned
+run resolves; Then it fails loud with `exhausted` naming each version as
+`signed_out` rather than launching the default.
 
 **GWT-E6 — `--device` forwards actor env, refuses `--secrets`.**
 Given `agents run claude "..." --device workbox --secrets prod`; When the
