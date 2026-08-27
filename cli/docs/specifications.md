@@ -723,6 +723,32 @@ SSH access (§7); rendering sessions that no harness produced.
   (`lib/session/discover.ts` `searchContentIndex`; `commands/sessions.ts`
   `filterSessionsByQuery`/`scopedContentIndex`; tests
   `discover.search-content.test.ts`, `commands/sessions.render.test.ts`).
+- **SES-49 (MUST).** `session_text` MUST index the agent's own answer text
+  (`assistant` column), not only the user's prompt text (`content`), so a
+  content query matches a phrase that appears only in what the agent said.
+  Every harness parser that accumulates `content` for FTS MUST accumulate
+  `assistant` the same way, reusing that harness's existing meta/wrapper/
+  interrupt filters. `assistant` MUST carry a lower BM25 weight than `content`
+  (`BM25_WEIGHTS`) so an equivalent user-prompt match ranks above an
+  assistant-only match for the same term. `ftsSearch`'s FTS5-tier result MUST
+  include a short `snippet()` excerpt (auto-selected best-matching column) and
+  `searchContentIndex` MUST carry it onto the hydrated `SessionMeta.snippet`;
+  unlike `_matchedTerms`/`_bm25Score`, `snippet` MUST NOT be stripped from
+  `--json` output. A stored `scan_ledger.extractor_version` below the current
+  `CONTENT_INDEX_VERSION` MUST be treated as changed by the change-detector
+  (`filterChangedEntries`) independent of (mtime, size), and a Claude/Codex
+  resumable continuation recorded at an older extractor version MUST be
+  refused (forcing one full re-parse) rather than resumed from — the lever
+  that backfills `assistant` into every already-indexed session without a
+  destructive `DELETE FROM scan_ledger`. A schema migration that changes
+  `session_text`'s column set MUST preserve every existing row's
+  label/topic/project/content across the rebuild, not discard the whole FTS
+  index
+  (`lib/session/db.ts` `CONTENT_INDEX_VERSION`, `BM25_WEIGHTS`, `ftsSearch`,
+  `migrateSchema` v42, `upsertSessionsBatch`, `recordScans`;
+  `lib/session/discover.ts` `filterChangedEntries`, `searchContentIndex`,
+  `readClaudeMeta`, `readCodexMeta`; tests
+  `discover.assistant-content.test.ts`).
 - **SES-31 (MUST).** Tool-call evidence MUST be redacted before persistence and
   bounded to 16 KiB input, 1 KiB successful output, or 4 KiB error output.
   Raw evidence and shell source MUST be bounded to 64 KiB before redaction or
@@ -1338,6 +1364,25 @@ project `agents-cli` and one in another project; When
 runs; Then only the `agents-cli` session is in the result. The same holds for
 `--agent` (`lib/session/discover.search-content.test.ts`;
 `commands/sessions.render.test.ts`).
+
+**GWT-20 — A phrase the agent said, but the user never typed, is findable.**
+Given a Claude transcript whose only user turn is "why did the deploy fail"
+and whose assistant reply contains "grombulator flux capacitor overheated";
+When `agents sessions "grombulator flux capacitor overheated"` runs (or
+`ftsSearch` is called directly); Then the session is returned — before SES-49
+landed this returned zero hits despite the phrase being on disk
+(`lib/session/discover.assistant-content.test.ts`).
+
+**GWT-21 — Bumping the content extractor backfills existing sessions with no
+file change.**
+Given a session already indexed (its `scan_ledger` row at the current
+`CONTENT_INDEX_VERSION`) whose `session_text.assistant` is then cleared and
+whose ledger `extractor_version` is set back to an older value, with the
+transcript file itself left byte-for-byte unchanged; When the next scan runs;
+Then the session is re-extracted (same mtime/size, different stored version)
+and its assistant text is searchable again, and the ledger's
+`extractor_version` reads the current `CONTENT_INDEX_VERSION` afterward
+(`lib/session/discover.assistant-content.test.ts`).
 
 ---
 

@@ -82,7 +82,15 @@ its provenance, then records the new origin; it does not create two independent 
   content query unions FTS5 hits with the listing page so an indexed transcript
   is returned even when it missed the default cwd/limit window. `--project`,
   `--agent`, and `--routine` still filter that union — a content hit in another
-  project does not leak back in.
+  project does not leak back in. The index covers both sides of the
+  conversation: user prompts (`content`) and the agent's own answers
+  (`assistant`, weighted lower in ranking), so a phrase that only ever
+  appeared in what the agent said is still findable, not just what was asked.
+  A `--json` content-search hit carries a short highlighted `snippet` excerpt
+  from whichever column matched. `CONTENT_INDEX_VERSION` (`lib/session/db.ts`)
+  gates re-extraction independently of file mtime/size, so a future content
+  extractor improvement can backfill every already-indexed session on its next
+  scan without a destructive reset.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Insights and resource-usage analysis are projections; they never mutate transcripts.

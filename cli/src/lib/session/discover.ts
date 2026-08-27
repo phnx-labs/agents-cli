@@ -59,6 +59,7 @@ import {
   releaseScan,
   scanInProgressByLivePid,
   cacheLinearProject,
+  CONTENT_INDEX_VERSION,
   type ScanStamp,
   type DirStamp,
   type QueryOptions,
@@ -288,6 +289,8 @@ interface ClaudeSessionScan {
   entrypoint?: string;
   /** Concatenated user message text, ready to hand to FTS5. */
   contentText?: string;
+  /** Concatenated assistant-answer text, ready to hand to FTS5's `assistant` column. */
+  assistantText?: string;
   /** Durable state signals persisted to the index by the session-state engine. */
   prUrl?: string;
   prNumber?: number;
@@ -333,6 +336,7 @@ interface CodexSessionScan {
   durationMs?: number;
   lastActivity?: string;
   contentText?: string;
+  assistantText?: string;
   prUrl?: string;
   prNumber?: number;
   worktreeSlug?: string;
@@ -349,6 +353,8 @@ const cachedAgentVersions = new Map<SessionAgentId, Promise<string | undefined>>
 interface ScanEntry {
   meta: SessionMeta;
   content: string;
+  /** Assistant-answer text — see `upsertSessionsBatch`'s `assistantContent`. */
+  assistantContent?: string;
   scan: ScanStamp;
   /** Normalized events already produced while scanning; avoids reopening the transcript in the DB sink. */
   events?: SessionEvent[];
@@ -939,6 +945,7 @@ export function searchContentIndex(
       ...session,
       _matchedTerms: hit.matchedTerms,
       _bm25Score: hit.score,
+      snippet: hit.snippet,
     });
   }
   return result;
@@ -981,6 +988,13 @@ interface PreStatEntry {
  * stat. Same debounce and change-detection as filterChangedFiles; the raw
  * mtime is floored here so warm files match the ledger exactly as the stat path
  * does (Math.floor(stat.mtimeMs)).
+ *
+ * A file is also treated as "changed" — independent of (mtime, size) — when
+ * its ledger row's `extractor_version` is behind {@link CONTENT_INDEX_VERSION}.
+ * This is the lever that backfills a content-extractor improvement (e.g.
+ * indexing assistant answers, not just user prompts) into every already-scanned
+ * session on its next pass, without a `DELETE FROM scan_ledger` that would also
+ * discard the Claude/Codex resumable parser_state.
  */
 export function filterChangedEntries(
   entries: PreStatEntry[],
@@ -994,10 +1008,11 @@ export function filterChangedEntries(
       fileSize: entry.fileSize,
     };
     const prev = ledger.get(entry.filePath);
-    if (prev && prev.fileMtimeMs === scan.fileMtimeMs && prev.fileSize === scan.fileSize) {
+    const contentIndexStale = prev?.extractorVersion !== CONTENT_INDEX_VERSION;
+    if (prev && prev.fileMtimeMs === scan.fileMtimeMs && prev.fileSize === scan.fileSize && !contentIndexStale) {
       continue;
     }
-    if (prev && shouldDeferRecentAppend(prev, scan, now)) {
+    if (prev && !contentIndexStale && shouldDeferRecentAppend(prev, scan, now)) {
       continue;
     }
     out.push({ filePath: entry.filePath, scan });
@@ -1306,6 +1321,7 @@ async function readRoutineArchiveMeta(
 ): Promise<{
   meta: SessionMeta;
   content: string;
+  assistantContent?: string;
   events?: SessionEvent[];
   toolCalls?: IndexedToolCall[];
   toolIndexMode?: 'replace' | 'append';
@@ -1370,6 +1386,7 @@ async function scanRoutineArchivesIncremental(
       if (result) entries.push({
         meta: result.meta,
         content: result.content,
+        assistantContent: result.assistantContent,
         scan,
         events: result.events,
         toolCalls: result.toolCalls,
@@ -1526,6 +1543,7 @@ async function scanClaudeIncremental(onProgress?: (p: ScanProgress) => void): Pr
           entries.push({
             meta: result.meta,
             content: result.content,
+            assistantContent: result.assistantContent,
             scan,
             parserState: result.parserState,
             contentText: result.contentText,
@@ -1562,17 +1580,23 @@ async function readClaudeMeta(
   filePath: string,
   sessionId: string,
   scanStamp: ScanStamp,
-  priorRow: { parserState: string | null; fileMtimeMs: number } | undefined,
+  priorRow: { parserState: string | null; fileMtimeMs: number; extractorVersion?: number | null } | undefined,
   label?: string,
 ): Promise<{
   meta: SessionMeta;
   content: string;
+  assistantContent: string;
   parserState: string;
   contentText?: string;
   toolCalls?: IndexedToolCall[];
   toolIndexMode: 'replace' | 'append';
 } | null> {
-  const prior = parsePriorClaudeState(priorRow);
+  // A prior continuation extracted at an older CONTENT_INDEX_VERSION is missing
+  // whatever the current extractor adds (e.g. assistant-answer text) — resuming
+  // from it would fold only the NEWLY appended lines into that gap, never
+  // backfilling the file's earlier assistant text. Treat it as absent so the
+  // file gets one full from-offset-0 reparse instead.
+  const prior = priorRow?.extractorVersion === CONTENT_INDEX_VERSION ? parsePriorClaudeState(priorRow) : null;
   const { scan, newState, toolCalls, mode } = await scanClaudeSessionResumable(
     filePath,
     prior,
@@ -1682,6 +1706,7 @@ async function readClaudeMeta(
   return {
     meta,
     content: scan.contentText || '',
+    assistantContent: scan.assistantText || '',
     // Persist the continuation so the next scan of this file can resume from the
     // offset instead of a full reparse. content_text is the same accumulated user
     // doc, cached so the resume can hydrate userTexts without re-reading the file.
@@ -1836,6 +1861,7 @@ async function scanCodexIncremental(onProgress?: (p: ScanProgress) => void): Pro
         entries.push({
           meta: result.meta,
           content: result.content,
+          assistantContent: result.assistantContent,
           scan,
           parserState: result.parserState,
           contentText: result.contentText,
@@ -1938,10 +1964,11 @@ export async function readCodexMeta(
   resolveAccount?: () => string | undefined,
   currentVersion?: string,
   scanStamp?: ScanStamp,
-  priorRow?: { parserState: string | null; fileMtimeMs: number },
+  priorRow?: { parserState: string | null; fileMtimeMs: number; extractorVersion?: number | null },
 ): Promise<{
   meta: SessionMeta;
   content: string;
+  assistantContent: string;
   parserState?: string;
   contentText?: string;
   toolCalls?: IndexedToolCall[];
@@ -1958,7 +1985,10 @@ export async function readCodexMeta(
   let toolCalls: IndexedToolCall[] | undefined;
   let toolIndexMode: 'replace' | 'append' = 'replace';
   if (scanStamp) {
-    const prior = parsePriorCodexState(priorRow);
+    // See readClaudeMeta: a prior continuation from an older content extractor
+    // is missing what the current extractor adds, so it must not be resumed
+    // from — treat it as absent and force one full reparse.
+    const prior = priorRow?.extractorVersion === CONTENT_INDEX_VERSION ? parsePriorCodexState(priorRow) : null;
     const result = await scanCodexSessionResumable(
       filePath,
       prior,
@@ -2018,6 +2048,7 @@ export async function readCodexMeta(
   return {
     meta,
     content: scan.contentText || '',
+    assistantContent: scan.assistantText || '',
     // Persist the continuation so the next scan of this rollout resumes from the
     // offset instead of a full reparse; content_text caches the accumulated user
     // doc for the resume's hydrate. Absent when no stamp was supplied.
@@ -2099,7 +2130,7 @@ async function scanGeminiIncremental(onProgress?: (p: ScanProgress) => void): Pr
       const result = readGeminiMeta(filePath, hashDir, projectMap, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        entries.push({ meta: result.meta, content: result.content, scan });
+        entries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan });
       } else {
         // Gemini file without a sessionId — record scan so we don't re-parse it next run.
         touched.push({ filePath, scan });
@@ -2121,7 +2152,7 @@ function readGeminiMeta(
   hashDir: string,
   projectMap: Map<string, { name: string; path: string }>,
   currentVersion?: string,
-): { meta: SessionMeta; content: string } | null {
+): { meta: SessionMeta; content: string; assistantContent: string } | null {
   let session: any;
   try {
     session = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -2160,6 +2191,7 @@ function readGeminiMeta(
   let firstTsMs: number | undefined;
   let lastTsMs: number | undefined;
   const userTexts: string[] = [];
+  const assistantTexts: string[] = [];
 
   for (const message of messages) {
     if (message.type === 'user') {
@@ -2170,8 +2202,10 @@ function readGeminiMeta(
         if (!topic) topic = extractSessionTopic(text);
       }
     } else if (message.type === 'gemini') {
-      if (extractGeminiMessageText(message.content)) {
+      const text = extractGeminiMessageText(message.content);
+      if (text) {
         messageCount++;
+        assistantTexts.push(text);
       }
     }
 
@@ -2252,7 +2286,7 @@ function readGeminiMeta(
     costUsdNoCache: sawCost ? costUsdNoCache : undefined,
     durationMs,
   };
-  return { meta, content: userTexts.join('\n') };
+  return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
 }
 
 /** Build a hash-to-project mapping from Gemini's projects.json and history directories. */
@@ -2865,6 +2899,7 @@ interface RushSessionScan {
   agentId?: string;
   messageCount: number;
   contentText?: string;
+  assistantText?: string;
 }
 
 /** Incrementally re-scan changed Rush session files and upsert into the DB. */
@@ -2901,7 +2936,7 @@ async function scanRushIncremental(onProgress?: (p: ScanProgress) => void): Prom
       const sessionId = path.basename(path.dirname(filePath));
       const result = await readRushMeta(filePath, sessionId);
       if (result) {
-        entries.push({ meta: result.meta, content: result.content, scan });
+        entries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan });
       } else {
         touched.push({ filePath, scan });
       }
@@ -2920,7 +2955,7 @@ async function scanRushIncremental(onProgress?: (p: ScanProgress) => void): Prom
 async function readRushMeta(
   filePath: string,
   sessionId: string,
-): Promise<{ meta: SessionMeta; content: string } | null> {
+): Promise<{ meta: SessionMeta; content: string; assistantContent: string } | null> {
   const scan = await scanRushSession(filePath);
 
   const stat = safeStatSync(filePath);
@@ -2940,7 +2975,7 @@ async function readRushMeta(
     messageCount: scan.messageCount,
   };
 
-  return { meta, content: scan.contentText || '' };
+  return { meta, content: scan.contentText || '', assistantContent: scan.assistantText || '' };
 }
 
 /** Stream a Rush messages.jsonl file and extract scan-level metadata. */
@@ -2953,6 +2988,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
   let agentId: string | undefined;
   let messageCount = 0;
   const userTexts: string[] = [];
+  const assistantTexts: string[] = [];
 
   try {
     for await (const line of rl) {
@@ -2987,6 +3023,8 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
       if (parsed.role === 'user') {
         userTexts.push(cleaned);
         if (!topic) topic = extractSessionTopic(cleaned);
+      } else if (parsed.role === 'assistant') {
+        assistantTexts.push(cleaned);
       }
     }
   } finally {
@@ -3000,6 +3038,7 @@ async function scanRushSession(filePath: string): Promise<RushSessionScan> {
     agentId,
     messageCount,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
+    assistantText: assistantTexts.length > 0 ? assistantTexts.join('\n') : undefined,
   };
 }
 
@@ -3045,7 +3084,7 @@ async function scanHermesIncremental(onProgress?: (p: ScanProgress) => void): Pr
       const result = readHermesMeta(filePath);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        scanEntries.push({ meta: result.meta, content: result.content, scan });
+        scanEntries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan });
       } else {
         touched.push({ filePath, scan });
       }
@@ -3061,7 +3100,7 @@ async function scanHermesIncremental(onProgress?: (p: ScanProgress) => void): Pr
 }
 
 /** Parse a single Hermes session JSON file to extract session metadata. */
-function readHermesMeta(filePath: string): { meta: SessionMeta; content: string } | null {
+function readHermesMeta(filePath: string): { meta: SessionMeta; content: string; assistantContent: string } | null {
   let session: any;
   try {
     session = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
@@ -3074,6 +3113,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
 
   const messages = Array.isArray(session.messages) ? session.messages : [];
   const userTexts: string[] = [];
+  const assistantTexts: string[] = [];
   let topic: string | undefined;
   let messageCount = 0;
   for (const msg of messages) {
@@ -3083,6 +3123,8 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
     if (msg?.role === 'user') {
       userTexts.push(text);
       if (!topic) topic = extractSessionTopic(text);
+    } else if (msg?.role === 'assistant') {
+      assistantTexts.push(text);
     }
   }
 
@@ -3110,7 +3152,7 @@ function readHermesMeta(filePath: string): { meta: SessionMeta; content: string 
     messageCount: messageCount || (typeof session.message_count === 'number' ? session.message_count : undefined),
   };
 
-  return { meta, content: userTexts.join('\n') };
+  return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
 }
 
 /**
@@ -3173,7 +3215,7 @@ function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<vo
       const result = readMuseMeta(filePath);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        scanEntries.push({ meta: result.meta, content: result.content, scan });
+        scanEntries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan });
       } else {
         touched.push({ filePath, scan });
       }
@@ -3190,7 +3232,7 @@ function scanMuseIncremental(onProgress?: (p: ScanProgress) => void): Promise<vo
 }
 
 /** Parse a Muse session.jsonl for session metadata + first user prompt text. */
-function readMuseMeta(filePath: string): { meta: SessionMeta; content: string } | null {
+function readMuseMeta(filePath: string): { meta: SessionMeta; content: string; assistantContent: string } | null {
   // Path shape: .../sessions/YYYY/MM/DD/<uuid>/session.jsonl
   const sessionId = path.basename(path.dirname(filePath));
   if (!/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
@@ -3203,6 +3245,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string } 
   }
 
   const userTexts: string[] = [];
+  const assistantTexts: string[] = [];
   let topic: string | undefined;
   let messageCount = 0;
   let model: string | undefined;
@@ -3248,6 +3291,8 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string } 
     const event = payload?.event ?? payload;
     if (event?.kind === 'assistant_message_committed' && typeof event.text === 'string') {
       messageCount++;
+      const text = event.text.trim();
+      if (text) assistantTexts.push(text);
     }
     if (event?.kind === 'model_request_configured' && typeof event.model === 'string') {
       model = event.model;
@@ -3273,7 +3318,7 @@ function readMuseMeta(filePath: string): { meta: SessionMeta; content: string } 
     messageCount: messageCount || undefined,
   };
 
-  return { meta, content: userTexts.join('\n') };
+  return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n') };
 }
 
 /** Extract plain text from a Hermes message content field (string or list of parts). */
@@ -3305,6 +3350,7 @@ interface DroidSessionScan {
   durationMs?: number;
   lastActivity?: string;
   contentText?: string;
+  assistantText?: string;
 }
 
 /**
@@ -3339,7 +3385,7 @@ async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Pro
       const result = await readDroidMeta(filePath, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        entries.push({ meta: result.meta, content: result.content, scan });
+        entries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan });
       } else {
         touched.push({ filePath, scan });
       }
@@ -3358,7 +3404,7 @@ async function scanDroidIncremental(onProgress?: (p: ScanProgress) => void): Pro
 async function readDroidMeta(
   filePath: string,
   currentVersion?: string,
-): Promise<{ meta: SessionMeta; content: string } | null> {
+): Promise<{ meta: SessionMeta; content: string; assistantContent: string } | null> {
   const scan = await scanDroidSession(filePath);
   // The filename is the canonical session id; fall back to the session_start id.
   const sessionId = path.basename(filePath).replace(/\.jsonl$/, '') || scan.sessionId || '';
@@ -3406,7 +3452,7 @@ async function readDroidMeta(
     costUsdNoCache: costUsd > 0 ? costUsdNoCache : undefined,
     durationMs: scan.durationMs,
   };
-  return { meta, content: scan.contentText || '' };
+  return { meta, content: scan.contentText || '', assistantContent: scan.assistantText || '' };
 }
 
 /** Read model + token usage from a Droid `<uuid>.settings.json` sidecar. */
@@ -3454,6 +3500,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
   let firstTsMs: number | undefined;
   let lastTsMs: number | undefined;
   const userTexts: string[] = [];
+  const assistantTexts: string[] = [];
 
   try {
     for await (const line of rl) {
@@ -3500,6 +3547,8 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
       if (msg.role === 'user') {
         userTexts.push(text);
         if (!firstUserTopic) firstUserTopic = extractSessionTopic(text);
+      } else if (msg.role === 'assistant') {
+        assistantTexts.push(text);
       }
     }
   } finally {
@@ -3524,6 +3573,7 @@ async function scanDroidSession(filePath: string): Promise<DroidSessionScan> {
     durationMs,
     lastActivity: lastTsMs !== undefined ? new Date(lastTsMs).toISOString() : undefined,
     contentText: userTexts.length > 0 ? userTexts.join('\n') : undefined,
+    assistantText: assistantTexts.length > 0 ? assistantTexts.join('\n') : undefined,
   };
 }
 
@@ -3577,6 +3627,10 @@ interface ClaudeParseState {
   lastTsMs?: number;
   seenAssistantIds: Set<string>;
   userTexts: string[];
+  /** Assistant-answer text (#PHNX content-search), accumulated the same way as
+   *  `userTexts` but indexed into session_text's own lower-weighted `assistant`
+   *  column instead of `content` — see BM25_WEIGHTS. */
+  assistantTexts: string[];
   // Durable PR signal: set only when an actual `gh pr create` Bash *command*
   // runs (structural — the command field, not any prose mentioning it), then
   // capture the pull URL from a later tool_result's output.
@@ -3639,6 +3693,7 @@ export function initClaudeParseState(): ClaudeParseState {
     lastTsMs: undefined,
     seenAssistantIds: new Set<string>(),
     userTexts: [],
+    assistantTexts: [],
     sawPrCreate: false,
     prUrl: undefined,
     prNumber: undefined,
@@ -3831,6 +3886,9 @@ export function applyClaudeLine(state: ClaudeParseState, parsed: any): void {
   state.seenAssistantIds.add(logicalId);
   state.messageCount++;
 
+  const assistantText = extractClaudeAssistantText(parsed);
+  if (assistantText) state.assistantTexts.push(assistantText);
+
   const usageObj = parsed.message?.usage || parsed.usage;
   const usage = getClaudeUsageTotal(usageObj);
   if (usage !== null) {
@@ -3908,6 +3966,7 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
     durationMs,
     lastActivity: state.lastTsMs !== undefined ? new Date(state.lastTsMs).toISOString() : undefined,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    assistantText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
     prUrl: state.prUrl,
     prNumber: state.prNumber,
     worktreeSlug: worktree?.slug,
@@ -3967,7 +4026,12 @@ export interface ClaudeParserState {
   // v3 (RUSH-2287): added the burn-split accumulators + no-cache cost. A stale v2
   // blob is rejected by the `!== 3` guard and the session is re-parsed from byte 0,
   // which populates the new split correctly rather than resuming without it.
-  v: 4;
+  // v5: added `assistantContentText` (assistant-answer accumulator, alongside
+  // `contentText`). A stale v4 blob is rejected the same way, forcing one full
+  // reparse that backfills the new assistant text — belt-and-suspenders with
+  // scan_ledger.extractor_version, which gates resuming from it in the first
+  // place (see readClaudeMeta).
+  v: 5;
   /**
    * Fan-out tallies carried across a RESUMED parse (RUSH-3091/3095). They must
    * live in the durable blob: the resumable parser reads only new bytes, so
@@ -4012,6 +4076,7 @@ export interface ClaudeParserState {
   spawnedTeam?: string;
   ticketId?: string;
   contentText?: string;
+  assistantContentText?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
   toolCalls: ToolCallCollectorSnapshot;
@@ -4039,7 +4104,7 @@ export function serializeClaudeParserState(
     : allIds;
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 4,
+    v: 5,
     subAgents: state.subAgents,
     backgroundShells: state.backgroundShells,
     offset,
@@ -4081,6 +4146,7 @@ export function serializeClaudeParserState(
     // not be persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    assistantContentText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
     checklistEvents: state.checklistEvents,
     recentDirectoriesTouched: state.recentDirectoriesTouched,
     toolCalls: state.toolCollector.snapshot(),
@@ -4140,6 +4206,9 @@ export function hydrateClaudeParseState(prior: ClaudeParserState): ClaudeParseSt
     lastTsMs: prior.lastTsMs,
     seenAssistantIds: seen,
     userTexts: prior.contentText !== undefined && prior.contentText.length > 0 ? [prior.contentText] : [],
+    assistantTexts: prior.assistantContentText !== undefined && prior.assistantContentText.length > 0
+      ? [prior.assistantContentText]
+      : [],
     sawPrCreate: prior.sawPrCreate,
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
@@ -4303,7 +4372,7 @@ function parsePriorClaudeState(row: { parserState: string | null } | undefined):
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as ClaudeParserState;
-    if (parsed?.v !== 4 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 5 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -4351,6 +4420,8 @@ interface CodexParseState {
   firstTsMs?: number;
   lastTsMs?: number;
   userTexts: string[];
+  /** See ClaudeParseState.assistantTexts — same accumulate-and-lower-weight FTS treatment. */
+  assistantTexts: string[];
   // Straddle state: a `gh pr create` function_call marks intent; the pull URL
   // arrives in a later function_call_output.
   sawPrCreate: boolean;
@@ -4387,6 +4458,7 @@ export function initCodexParseState(): CodexParseState {
     firstTsMs: undefined,
     lastTsMs: undefined,
     userTexts: [],
+    assistantTexts: [],
     sawPrCreate: false,
     prUrl: undefined,
     prNumber: undefined,
@@ -4487,6 +4559,8 @@ function applyCodexLine(state: CodexParseState, parsed: any): void {
     if (role === 'user') {
       state.userTexts.push(text);
       if (!state.topic) state.topic = extractSessionTopic(text);
+    } else {
+      state.assistantTexts.push(text);
     }
     return;
   }
@@ -4566,6 +4640,7 @@ function finalizeCodexScan(state: CodexParseState): CodexSessionScan {
     durationMs,
     lastActivity: state.lastTsMs !== undefined ? new Date(state.lastTsMs).toISOString() : undefined,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    assistantText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
     prUrl: state.prUrl,
     prNumber: state.prNumber,
     worktreeSlug: worktree?.slug,
@@ -4617,7 +4692,9 @@ async function scanCodexSession(filePath: string): Promise<CodexSessionScan> {
  * finalize is identical after a resume.
  */
 export interface CodexParserState {
-  v: 2;
+  // v3: added `assistantContentText` (assistant-answer accumulator). A stale v2
+  // blob is rejected, forcing one full reparse — see ClaudeParserState's v5 note.
+  v: 3;
   offset: number;
   jsonlDroppingOversizedLine?: boolean;
   sessionId?: string;
@@ -4640,6 +4717,7 @@ export interface CodexParserState {
   spawnedTeam?: string;
   ticketId?: string;
   contentText?: string;
+  assistantContentText?: string;
   checklistEvents: SessionEvent[];
   recentDirectoriesTouched: string[];
   toolCalls: ToolCallCollectorSnapshot;
@@ -4657,7 +4735,7 @@ export function serializeCodexParserState(
 ): CodexParserState {
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
   return {
-    v: 2,
+    v: 3,
     offset,
     jsonlDroppingOversizedLine: jsonlDroppingOversizedLine || undefined,
     sessionId: state.sessionId,
@@ -4684,6 +4762,7 @@ export function serializeCodexParserState(
     // be persisted.
     ticketId: ticket?.id,
     contentText: state.userTexts.length > 0 ? state.userTexts.join('\n') : undefined,
+    assistantContentText: state.assistantTexts.length > 0 ? state.assistantTexts.join('\n') : undefined,
     checklistEvents: state.checklistEvents,
     recentDirectoriesTouched: state.recentDirectoriesTouched,
     toolCalls: state.toolCollector.snapshot(),
@@ -4715,6 +4794,9 @@ function hydrateCodexParseState(prior: CodexParserState): CodexParseState {
     firstTsMs: prior.firstTsMs,
     lastTsMs: prior.lastTsMs,
     userTexts: prior.contentText !== undefined && prior.contentText.length > 0 ? [prior.contentText] : [],
+    assistantTexts: prior.assistantContentText !== undefined && prior.assistantContentText.length > 0
+      ? [prior.assistantContentText]
+      : [],
     sawPrCreate: prior.sawPrCreate,
     prUrl: prior.prUrl,
     prNumber: prior.prNumber,
@@ -4865,7 +4947,7 @@ function parsePriorCodexState(row: { parserState: string | null } | undefined): 
   if (!row?.parserState) return null;
   try {
     const parsed = JSON.parse(row.parserState) as CodexParserState;
-    if (parsed?.v !== 2 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
+    if (parsed?.v !== 3 || typeof parsed.offset !== 'number' || parsed.toolCalls?.v !== 1) return null;
     return parsed;
   } catch {
     return null;
@@ -4976,6 +5058,31 @@ function extractClaudeUserText(parsed: any): string | undefined {
 /** Check whether a message is a local-command wrapper rather than real user input. */
 function isLocalCommandMessage(text: string): boolean {
   return /<local-command-caveat>|<bash-(input|stdout|stderr)>/i.test(text);
+}
+
+/**
+ * Extract the assistant's own answer text from a Claude JSONL assistant event —
+ * the reply text blocks, skipping tool_use/tool_result blocks and an
+ * interrupted turn, mirroring {@link extractClaudeUserText}'s filters. Unlike
+ * the user side (which keeps only the first text block), a single assistant
+ * turn can legitimately carry multiple text blocks around tool calls, so every
+ * one is joined.
+ */
+function extractClaudeAssistantText(parsed: any): string | undefined {
+  const content = parsed.message?.content;
+  if (typeof content === 'string') {
+    const text = content.trim();
+    return text && !text.startsWith('[Request interrupted') ? text : undefined;
+  }
+  if (!Array.isArray(content)) return undefined;
+
+  const text = content
+    .filter((block: any) => block.type === 'text')
+    .map((block: any) => String(block.text || '').trim())
+    .filter((value: string) => value && !value.startsWith('[Request interrupted'))
+    .join('\n');
+
+  return text || undefined;
 }
 
 /** Sum all token usage fields from a Claude assistant message's usage object. */
@@ -5156,7 +5263,7 @@ async function scanCursorIncremental(onProgress?: (p: ScanProgress) => void): Pr
       const result = readCursorMeta(filePath, currentVersion);
       if (result && !seen.has(result.meta.id)) {
         seen.add(result.meta.id);
-        entries.push({ meta: result.meta, content: result.content, scan, events: result.events });
+        entries.push({ meta: result.meta, content: result.content, assistantContent: result.assistantContent, scan, events: result.events });
       } else {
         touched.push({ filePath, scan });
       }
@@ -5215,7 +5322,7 @@ function readCursorChatMeta(filePath: string, sessionId: string): any | undefine
 export function readCursorMeta(
   filePath: string,
   currentVersion?: string,
-): { meta: SessionMeta; content: string; events: SessionEvent[] } | null {
+): { meta: SessionMeta; content: string; assistantContent: string; events: SessionEvent[] } | null {
   const sessionId = path.basename(filePath).replace(/\.jsonl$/, '');
   if (!sessionId || path.basename(path.dirname(filePath)) !== sessionId) return null;
 
@@ -5235,6 +5342,9 @@ export function readCursorMeta(
   const cwd = normalizeCwd(typeof chatMeta?.cwd === 'string' ? chatMeta.cwd : '');
   const userTexts = events
     .filter((event) => event.type === 'message' && event.role === 'user' && event.content)
+    .map((event) => event.content!);
+  const assistantTexts = events
+    .filter((event) => event.type === 'message' && event.role === 'assistant' && event.content)
     .map((event) => event.content!);
   const firstUserText = userTexts[0];
   const title = typeof chatMeta?.title === 'string'
@@ -5257,7 +5367,7 @@ export function readCursorMeta(
     todos: extractTodoProgressFromEvents(events),
   };
 
-  return { meta, content: userTexts.join('\n'), events };
+  return { meta, content: userTexts.join('\n'), assistantContent: assistantTexts.join('\n'), events };
 }
 
 // ---------------------------------------------------------------------------

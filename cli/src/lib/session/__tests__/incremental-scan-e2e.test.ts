@@ -539,7 +539,7 @@ describe('B-2 live incremental scan parity', () => {
     expect(row!.parserState, 'parser_state persisted').not.toBeNull();
     expect(row!.contentText, 'content_text persisted').not.toBeNull();
     const parsed = JSON.parse(row!.parserState!);
-    expect(parsed.v).toBe(4);
+    expect(parsed.v).toBe(5); // v5: added the assistantContentText accumulator (PHNX content-search)
     expect(typeof parsed.offset).toBe('number');
     const offsetAfterFirst = parsed.offset;
 

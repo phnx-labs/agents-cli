@@ -38,7 +38,20 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 41;
+export const SCHEMA_VERSION = 42;
+
+/**
+ * Bump to force the content extractor (assistant-answer text, alongside the
+ * user-prompt text every harness already accumulates) to re-derive on every
+ * session's next scan. Unlike RESOURCE_INDEX_VERSION this is read by the
+ * change-detector itself (`filterChangedEntries`, discover.ts) via
+ * `scan_ledger.extractor_version` — a stored version below this one is treated
+ * as "changed" even when the file's (mtime, size) are unchanged, so bumping it
+ * here backfills every existing session's assistant text on its next scan
+ * without a `DELETE FROM scan_ledger` (which would also throw away the
+ * resumable parser_state/content_text for Claude/Codex).
+ */
+export const CONTENT_INDEX_VERSION = 1;
 
 /**
  * Bump to force `agents sessions backfill resources` to re-derive every
@@ -66,10 +79,15 @@ function canonicalLedgerKey(filePath: string): string {
   }
 }
 
-// BM25 column weights for session_text: label > topic > project > content.
-// Higher weights make matches in that column rank higher.
-/** BM25 column weights for FTS5: label > topic > project > content. */
-const BM25_WEIGHTS = [5.0, 2.0, 1.5, 1.0] as const;
+// BM25 column weights for session_text: label > topic > project > content >
+// assistant. Higher weights make matches in that column rank higher.
+// `assistant` (the agent's own answers) is weighted BELOW `content` (the
+// user's prompts): a user's own words are a stronger signal of "this is the
+// session I meant" than the agent echoing/paraphrasing them back, so an
+// assistant-only match still surfaces but ranks behind an equivalent
+// user-prompt match.
+/** BM25 column weights for FTS5: label > topic > project > content > assistant. */
+const BM25_WEIGHTS = [5.0, 2.0, 1.5, 1.0, 0.5] as const;
 
 /** DDL for the sessions database (tables, indexes, FTS5 virtual table). */
 const SCHEMA = `
@@ -148,6 +166,7 @@ CREATE VIRTUAL TABLE IF NOT EXISTS session_text USING fts5(
   topic,
   project,
   content,
+  assistant,
   tokenize = 'unicode61 remove_diacritics 2'
 );
 
@@ -171,7 +190,13 @@ CREATE TABLE IF NOT EXISTS scan_ledger (
   -- doc so detectTicket + FTS can rebuild on append without re-reading the file.
   -- Written by B-2; B-1 only defines + round-trips them.
   parser_state TEXT,
-  content_text TEXT
+  content_text TEXT,
+  -- CONTENT_INDEX_VERSION this row's session_text content was last extracted
+  -- at. NULL (a pre-v42 row) never equals the current constant, so the
+  -- change-detector (filterChangedEntries) treats it as changed even when
+  -- (mtime, size) match — the lever that backfills assistant text into
+  -- existing sessions without wiping scan_ledger outright.
+  extractor_version INTEGER
 );
 
 -- Tracks the mtime + entry-count of every LEAF directory that directly holds
@@ -504,6 +529,14 @@ export interface ScanStamp {
   fileMtimeMs: number;
   fileSize: number;
   scannedAt?: number;
+  /**
+   * `scan_ledger.extractor_version` as of the last scan, when read from the
+   * ledger (undefined for a freshly-computed stamp that hasn't been persisted
+   * yet). Compared against {@link CONTENT_INDEX_VERSION} by
+   * `filterChangedEntries` (discover.ts) to force a re-extract independent of
+   * (mtime, size).
+   */
+  extractorVersion?: number | null;
 }
 
 /** Filter and pagination options for querying the sessions table. */
@@ -1231,6 +1264,50 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('harness')) db.exec(`ALTER TABLE sessions ADD COLUMN harness TEXT`);
   }
 
+  if (fromVersion < 42) {
+    // v41 -> v42: index the agent's ANSWERS, not just the user's prompts.
+    // session_text gains an `assistant` column (own FTS5 column, own lower
+    // BM25 weight — see BM25_WEIGHTS) and scan_ledger gains `extractor_version`
+    // so the change-detector can force a re-extract independent of
+    // (mtime, size). FTS5 can't ALTER a virtual table's column set, but unlike
+    // v1->v2 (which dropped the table and forced a blind full rescan of
+    // everything), the existing label/topic/project/content in every row is
+    // still exactly right — only `assistant` is missing. Rename the old table
+    // out of the way, create the new 6-column one, and copy the old rows back
+    // in (assistant defaults to '' until the extractor_version lever backfills
+    // it on that row's next scan) — search over label/topic/project/content
+    // never blacks out for the transient window it takes existing sessions to
+    // get rescanned, which can be a long time for a session whose transcript
+    // is otherwise cold.
+    db.exec(`ALTER TABLE session_text RENAME TO session_text_v41`);
+    db.exec(`
+      CREATE VIRTUAL TABLE session_text USING fts5(
+        session_id UNINDEXED,
+        label,
+        topic,
+        project,
+        content,
+        assistant,
+        tokenize = 'unicode61 remove_diacritics 2'
+      );
+    `);
+    db.exec(`
+      INSERT INTO session_text (session_id, label, topic, project, content, assistant)
+      SELECT session_id, label, topic, project, content, '' FROM session_text_v41
+    `);
+    db.exec(`DROP TABLE session_text_v41`);
+
+    const ledgerCols = db.prepare(`PRAGMA table_info(scan_ledger)`).all() as Array<{ name: string }>;
+    if (!ledgerCols.some(c => c.name === 'extractor_version')) {
+      db.exec(`ALTER TABLE scan_ledger ADD COLUMN extractor_version INTEGER`);
+    }
+    // No `DELETE FROM scan_ledger` — the new column is NULL on every existing
+    // row, which already never equals CONTENT_INDEX_VERSION, so every session
+    // re-extracts on its next scan while parser_state/content_text (the
+    // Claude/Codex resumable continuation) stay intact for rows that don't
+    // need a full reparse for any OTHER reason.
+  }
+
 }
 
 /**
@@ -1633,14 +1710,25 @@ export function getScanStampsForPaths(filePaths: string[]): Map<string, ScanStam
     const placeholders = chunk.map(() => '?').join(',');
     const rows = db
       .prepare(`
-        SELECT file_path, file_mtime_ms, file_size, scanned_at
+        SELECT file_path, file_mtime_ms, file_size, scanned_at, extractor_version
         FROM scan_ledger
         WHERE file_path IN (${placeholders})
       `)
-      .all(...chunk) as Array<{ file_path: string; file_mtime_ms: number; file_size: number; scanned_at: number }>;
+      .all(...chunk) as Array<{
+        file_path: string;
+        file_mtime_ms: number;
+        file_size: number;
+        scanned_at: number;
+        extractor_version: number | null;
+      }>;
 
     for (const row of rows) {
-      const stamp = { fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, scannedAt: row.scanned_at };
+      const stamp = {
+        fileMtimeMs: row.file_mtime_ms,
+        fileSize: row.file_size,
+        scannedAt: row.scanned_at,
+        extractorVersion: row.extractor_version,
+      };
       for (const original of canonicalToOriginals.get(row.file_path) || []) {
         result.set(original, stamp);
       }
@@ -1662,6 +1750,10 @@ interface ParserStateRow {
   fileMtimeMs: number;
   fileSize: number;
   scannedAt: number;
+  /** See {@link ScanStamp.extractorVersion}. A mismatch vs CONTENT_INDEX_VERSION
+   *  means this continuation predates the current content extractor and MUST
+   *  be treated as absent (forcing a full re-parse) rather than resumed from. */
+  extractorVersion: number | null;
 }
 
 /**
@@ -1692,7 +1784,7 @@ export function getParserStatesForPaths(filePaths: string[]): Map<string, Parser
     const placeholders = chunk.map(() => '?').join(',');
     const rows = db
       .prepare(`
-        SELECT file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text
+        SELECT file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text, extractor_version
         FROM scan_ledger
         WHERE file_path IN (${placeholders})
       `)
@@ -1703,6 +1795,7 @@ export function getParserStatesForPaths(filePaths: string[]): Map<string, Parser
         scanned_at: number;
         parser_state: string | null;
         content_text: string | null;
+        extractor_version: number | null;
       }>;
 
     for (const row of rows) {
@@ -1712,6 +1805,7 @@ export function getParserStatesForPaths(filePaths: string[]): Map<string, Parser
         fileMtimeMs: row.file_mtime_ms,
         fileSize: row.file_size,
         scannedAt: row.scanned_at,
+        extractorVersion: row.extractor_version,
       };
       for (const original of canonicalToOriginals.get(row.file_path) || []) {
         result.set(original, state);
@@ -1729,17 +1823,23 @@ export function recordScans(entries: Array<{ filePath: string; scan: ScanStamp }
   if (entries.length === 0) return;
   const db = getDB();
   const stmt = db.prepare(`
-    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at)
-    VALUES (?, ?, ?, ?)
+    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at, extractor_version)
+    VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       file_mtime_ms = excluded.file_mtime_ms,
       file_size = excluded.file_size,
-      scanned_at = excluded.scanned_at
+      scanned_at = excluded.scanned_at,
+      extractor_version = excluded.extractor_version
   `);
   const now = Date.now();
   const txn = db.transaction((items: typeof entries) => {
     for (const { filePath, scan } of items) {
-      stmt.run(canonicalLedgerKey(filePath), scan.fileMtimeMs, scan.fileSize, now);
+      // Stamped at the CURRENT content extractor version even for a file that
+      // yielded no session (malformed / no id): we ran today's extractor over
+      // it and it produced nothing, so it is current, not stale — otherwise a
+      // permanently-unparseable file would re-trigger "changed" on every scan
+      // forever once CONTENT_INDEX_VERSION is bumped.
+      stmt.run(canonicalLedgerKey(filePath), scan.fileMtimeMs, scan.fileSize, now, CONTENT_INDEX_VERSION);
     }
   });
   txn(entries);
@@ -2112,7 +2212,7 @@ function enrichCachedSessionMeta(meta: SessionMeta): SessionMeta {
 const deleteTextStmt = (db: Database.Database) =>
   db.prepare(`DELETE FROM session_text WHERE session_id = ?`);
 const insertTextStmt = (db: Database.Database) =>
-  db.prepare(`INSERT INTO session_text (session_id, label, topic, project, content) VALUES (?, ?, ?, ?, ?)`);
+  db.prepare(`INSERT INTO session_text (session_id, label, topic, project, content, assistant) VALUES (?, ?, ?, ?, ?, ?)`);
 // Read back the label the upsert actually stored (which may be the preserved
 // one, not the incoming blank) so the FTS label column stays consistent with
 // sessions.label after a bare rescan.
@@ -2159,7 +2259,7 @@ function resolveMachine(meta: SessionMeta): string {
  * Upsert a session row and replace its FTS5 content in a single transaction.
  * `content` is the tokenizable user-prompt text; pass '' to leave the row unsearchable.
  */
-export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp): void {
+export function upsertSession(meta: SessionMeta, content: string, scan?: ScanStamp, assistantContent = ''): void {
   meta = enrichCachedSessionMeta(meta);
   // Join the durable sessionId -> actor sidecar (RUSH-2019) when the caller
   // didn't already carry an actor, so a scanned transcript still attributes to a
@@ -2236,6 +2336,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
       meta.topic ?? '',
       meta.project ?? '',
       content ?? '',
+      assistantContent ?? '',
     );
   });
   txn();
@@ -2246,6 +2347,10 @@ export function upsertSessionsBatch(
   entries: Array<{
     meta: SessionMeta;
     content: string;
+    /** Assistant-answer text, accumulated the same way as `content` (the
+     *  user-prompt text) but stored in session_text's own `assistant` column
+     *  with a lower BM25 weight — see BM25_WEIGHTS. */
+    assistantContent?: string;
     scan?: ScanStamp;
     parserState?: string;
     contentText?: string;
@@ -2266,19 +2371,23 @@ export function upsertSessionsBatch(
   // stored owner on rescan.
   const actorIndex = loadSessionActorIndex();
   // Persist the Claude resumable-parse continuation (parser_state + content_text)
-  // alongside the stamp. On a full/incremental Claude parse the caller passes the
+  // alongside the stamp, plus the CURRENT content extractor version — a caller
+  // that reached this batch write ran today's extractor over the file, so the
+  // ledger row is current regardless of which branch (full/incremental)
+  // produced it. On a full/incremental Claude parse the caller passes the
   // serialized newState + accumulated user doc so the NEXT scan can resume from
   // the persisted offset (B-2). Other scanners pass neither, leaving both columns
   // NULL exactly as before — their ledger rows are unaffected.
   const ledger = db.prepare(`
-    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO scan_ledger (file_path, file_mtime_ms, file_size, scanned_at, parser_state, content_text, extractor_version)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(file_path) DO UPDATE SET
       file_mtime_ms = excluded.file_mtime_ms,
       file_size = excluded.file_size,
       scanned_at = excluded.scanned_at,
       parser_state = excluded.parser_state,
-      content_text = excluded.content_text
+      content_text = excluded.content_text,
+      extractor_version = excluded.extractor_version
   `);
 
   // Build a lookup from canonical file path → entry, used inside the write
@@ -2355,18 +2464,29 @@ export function upsertSessionsBatch(
       const chunk = paths.slice(i, i + CHUNK);
       const phs = chunk.map(() => '?').join(',');
       const rows = db
-        .prepare(`SELECT file_path, file_mtime_ms, file_size FROM scan_ledger WHERE file_path IN (${phs})`)
-        .all(...chunk) as Array<{ file_path: string; file_mtime_ms: number; file_size: number }>;
+        .prepare(`SELECT file_path, file_mtime_ms, file_size, extractor_version FROM scan_ledger WHERE file_path IN (${phs})`)
+        .all(...chunk) as Array<{ file_path: string; file_mtime_ms: number; file_size: number; extractor_version: number | null }>;
       for (const row of rows) {
         const entry = byPath.get(row.file_path);
-        if (entry && row.file_mtime_ms === entry.scan!.fileMtimeMs && row.file_size === entry.scan!.fileSize) {
+        // A concurrent writer's row only makes THIS entry redundant when it is
+        // current at CONTENT_INDEX_VERSION too — otherwise a (mtime, size) match
+        // alone would make the version lever a no-op: the very reason this batch
+        // was scheduled (a stale extractor_version) would be silently skipped as
+        // "someone else already indexed it", when what they indexed predates the
+        // current extractor.
+        if (
+          entry &&
+          row.file_mtime_ms === entry.scan!.fileMtimeMs &&
+          row.file_size === entry.scan!.fileSize &&
+          row.extractor_version === CONTENT_INDEX_VERSION
+        ) {
           alreadyIndexed.add(entry.meta.id);
         }
       }
     }
 
     for (const entry of items) {
-      const { meta, content, scan, parserState, contentText } = entry;
+      const { meta, content, assistantContent, scan, parserState, contentText } = entry;
       if (alreadyIndexed.has(meta.id)) continue;
       // Per-row guard: one malformed session (e.g. a required field that resolves to
       // NULL) must not abort the whole batch and take down the entire `agents sessions`
@@ -2454,6 +2574,7 @@ export function upsertSessionsBatch(
         meta.topic ?? '',
         meta.project ?? '',
         content ?? '',
+        assistantContent ?? '',
       );
       if (scan && meta.filePath) {
         ledger.run(
@@ -2463,6 +2584,7 @@ export function upsertSessionsBatch(
           now,
           parserState ?? null,
           contentText ?? null,
+          CONTENT_INDEX_VERSION,
         );
       }
       writtenEntries.push(entry);
@@ -3897,6 +4019,13 @@ interface FtsHit {
   sessionId: string;
   score: number;
   matchedTerms: string[];
+  /**
+   * A short bm25 `snippet()` excerpt around the best-matching column (label,
+   * topic, project, user content, or assistant answer), with the matched
+   * term(s) wrapped in `**…**`. Absent for a handle/label-tier hit (tiers 1-3
+   * below), which has no excerpt to show — the label itself IS the match.
+   */
+  snippet?: string;
 }
 
 /**
@@ -4015,21 +4144,31 @@ export function ftsSearch(input: string, limit = 200): FtsHit[] {
   }
 
   // Tier 4: FTS5 content match, skipping anything already surfaced via label.
+  // `snippet(session_text, -1, ...)` lets FTS5 pick the best-matching column
+  // itself (label/topic/project/content/assistant) rather than us guessing —
+  // a query that only matched in `assistant` (an agent-only answer) still gets
+  // an excerpt from the right column instead of an empty content snippet.
   if (expr) {
     try {
       const rows = db
         .prepare(`
-          SELECT session_id, bm25(session_text, ${BM25_WEIGHTS.join(', ')}) AS rank
+          SELECT session_id, bm25(session_text, ${BM25_WEIGHTS.join(', ')}) AS rank,
+                 snippet(session_text, -1, '**', '**', '…', 12) AS snip
           FROM session_text
           WHERE session_text MATCH ?
           ORDER BY rank ASC
           LIMIT ?
         `)
-        .all(expr, limit) as { session_id: string; rank: number }[];
+        .all(expr, limit) as { session_id: string; rank: number; snip: string | null }[];
 
       for (const r of rows) {
         if (seen.has(r.session_id)) continue;
-        hits.push({ sessionId: r.session_id, score: -r.rank, matchedTerms: terms });
+        hits.push({
+          sessionId: r.session_id,
+          score: -r.rank,
+          matchedTerms: terms,
+          snippet: r.snip?.trim() || undefined,
+        });
         seen.add(r.session_id);
       }
     } catch {

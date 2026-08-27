@@ -400,6 +400,14 @@ export interface SessionMeta {
   _matchedTerms?: string[];
   /** BM25 relevance score from the most recent content-index search */
   _bm25Score?: number;
+  /**
+   * A short highlighted excerpt (`**term**`) around the best-matching FTS5
+   * column (label/topic/project/user content/assistant answer) for the most
+   * recent content-index search. Unlike `_matchedTerms`/`_bm25Score` this is
+   * NOT stripped from `--json` output — it's the searchable-context payload a
+   * content-search result carries, not internal ranking bookkeeping.
+   */
+  snippet?: string;
 }
 
 /** Output format for rendering a session's content. */
