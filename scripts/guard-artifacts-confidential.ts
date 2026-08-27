@@ -23,8 +23,6 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 
-export const GUARD_VERSION = 'confidential-artifacts-v1';
-
 export interface GuardOptions {
   base?: string;
   head?: string;
@@ -243,6 +241,9 @@ function parseArgs(argv: string[]): GuardOptions & { help: boolean } {
       case '--repo-root': out.repoRoot = argv[++i]; break;
       case '--help': out.help = true; break;
     }
+  }
+  if ((out.base && !out.head) || (!out.base && out.head)) {
+    throw new Error('--base and --head must be supplied together');
   }
   return out;
 }
