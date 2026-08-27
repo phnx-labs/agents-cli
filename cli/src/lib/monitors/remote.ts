@@ -17,8 +17,9 @@
  * every one of them onto every box — the accumulation this guard exists to stop.
  */
 
-import { gatherRemoteAgentsJson } from '../remote-agents-json.js';
+import { gatherRemoteAgentsJson, type GatherRemoteAgentsJsonDeps } from '../remote-agents-json.js';
 import type { MonitorConfig } from './config.js';
+import { monitorFingerprint } from './fingerprint.js';
 
 /** Recursion guard: a peer answering the fan-out must not fan out again. */
 export const NO_MONITOR_FANOUT_ENV = 'AGENTS_MONITORS_LOCAL';
@@ -71,19 +72,44 @@ export interface FleetMonitorsResult {
   skipped: string[];
 }
 
+export interface GatherFleetMonitorsOptions {
+  /** When supplied, the fan-out aborts as soon as any peer returns a monitor with
+   *  this behavioral fingerprint. The miss path still waits for every peer so the
+   *  guard can prove absence fleet-wide. */
+  againstFingerprint?: string;
+  /** Optional test seam for the SSH boundary; production uses the real capture. */
+  deps?: GatherRemoteAgentsJsonDeps;
+  /** Optional explicit host list; production omits it and asks the device registry. */
+  hosts?: string[];
+}
+
 /**
  * Every monitor on every other registered device. Never throws: an unreachable
  * fleet degrades to an empty list plus the names we could not consult, and the
  * caller decides what to say about them.
+ *
+ * When {@link GatherFleetMonitorsOptions.againstFingerprint} is provided, a peer
+ * returning that fingerprint is a definitive clash: the remaining peers are
+ * SIGTERM'd immediately rather than burning the rest of the timeout budget.
+ * Absence of a clash still waits for the full fleet, because uniqueness is only
+ * knowable once every peer has answered.
  */
-export async function gatherFleetMonitors(): Promise<FleetMonitorsResult> {
+export async function gatherFleetMonitors(
+  options: GatherFleetMonitorsOptions = {},
+): Promise<FleetMonitorsResult> {
   try {
     const result = await gatherRemoteAgentsJson<RemoteMonitor>({
       args: ['monitors', 'list', '--json'],
       noFanoutEnv: NO_MONITOR_FANOUT_ENV,
+      hosts: options.hosts,
       parse: parseRemoteMonitors,
       quiet: true,
-    });
+      earlyExit: options.againstFingerprint
+        ? {
+            isDefinitive: (item) => monitorFingerprint(item.monitor) === options.againstFingerprint,
+          }
+        : undefined,
+    }, options.deps);
     return {
       monitors: result.items,
       skipped: [...result.skipped, ...result.parseFailed],
