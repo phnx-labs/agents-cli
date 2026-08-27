@@ -4,16 +4,26 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import * as yaml from 'yaml';
 import { Command } from 'commander';
+import { password } from '@inquirer/prompts';
 import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nativeIdentityFromSource, parseBundleKey, registerAccountsCommand, resolveLabelIdentity, runAccountsLabel, setDefaultAccount, writeClaudeInteractiveOauthToken } from './accounts.js';
 import { claudeAccountTokenKey } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
-import { addAccount, addNativeAccount, listNativeAccounts } from '../lib/account-registry.js';
+import { addAccount, addNativeAccount, listNativeAccounts, removeAccount } from '../lib/account-registry.js';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
 import { secretsKeychainItem, setKeychainBackendForTest, type KeychainBackend } from '../lib/secrets/index.js';
 import { _resetFileStoreForTest } from '../lib/secrets/filestore.js';
 import { bundleItemStore, keychainRef, writeBundle, writeBundleWithItems, type SecretsBundle } from '../lib/secrets/bundles.js';
+
+vi.mock('@inquirer/prompts', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@inquirer/prompts')>();
+  return { ...actual, password: vi.fn(actual.password) };
+});
+
+function cancelledPromptError(): Error {
+  return Object.assign(new Error('User force closed the prompt with 0 null'), { name: 'ExitPromptError' });
+}
 
 class MemoryKeychain implements KeychainBackend {
   values = new Map<string, string>();
@@ -132,6 +142,54 @@ describe('accounts add/inspect CLI errors', () => {
     expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
     expect(err.message).toContain("Secrets bundle 'locked-hold' is not unlocked in the secrets agent");
     expect(err.message).toContain('agents secrets unlock locked-hold');
+  });
+
+  async function runCancelledSecretPrompt(args: string[]): Promise<{ errors: string; thrown: unknown; exitCodes: number[] }> {
+    vi.mocked(password).mockRejectedValueOnce(cancelledPromptError());
+    const errors: string[] = [];
+    const exitCodes: number[] = [];
+    const program = new Command();
+    program.exitOverride();
+    registerAccountsCommand(program);
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const errSpy = vi.spyOn(console, 'error').mockImplementation((...a: unknown[]) => {
+      errors.push(a.map(String).join(' '));
+    });
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      exitCodes.push(code ?? 0);
+    }) as typeof process.exit);
+    let thrown: unknown;
+    try {
+      await program.parseAsync(['node', 'agents', 'accounts', ...args]);
+    } catch (err) {
+      thrown = err;
+    } finally {
+      logSpy.mockRestore();
+      errSpy.mockRestore();
+      exitSpy.mockRestore();
+    }
+    return { errors: errors.join('\n'), thrown, exitCodes };
+  }
+
+  it('cancelled add password prompt exits 130 silently, not as accounts.error', async () => {
+    const result = await runCancelledSecretPrompt([
+      'add', 'phnx-2578-cancel', '--provider', 'openrouter', '--auth', 'api-key',
+    ]);
+    expect(result.exitCodes).toEqual([130]);
+    expect(result.thrown).toBeUndefined();
+    expect(result.errors).not.toMatch(/force closed|accounts\.error|error:/i);
+  });
+
+  it('cancelled set-key password prompt exits 130 silently, not as accounts.error', async () => {
+    addAccount('phnx-2578-set-key', 'openrouter', 'api-key', 'sk-keep', getUserAgentsDir());
+    try {
+      const result = await runCancelledSecretPrompt(['set-key', 'phnx-2578-set-key']);
+      expect(result.exitCodes).toEqual([130]);
+      expect(result.thrown).toBeUndefined();
+      expect(result.errors).not.toMatch(/force closed|accounts\.error|error:/i);
+    } finally {
+      try { removeAccount('phnx-2578-set-key'); } catch { /* leftover from a failed add */ }
+    }
   });
 });
 

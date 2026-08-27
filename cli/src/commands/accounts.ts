@@ -32,6 +32,7 @@ async function runAccountsAction(command: Command, fn: () => void | Promise<void
   try {
     await fn();
   } catch (err) {
+    if (isPromptCancelled(err)) process.exit(130);
     cleanCommandError(command, err);
   }
 }
@@ -116,9 +117,17 @@ export function parseBundleKey(raw: string): { bundle: string; key: string } {
 
 function secretFromBundle(raw: string): string {
   const { bundle, key } = parseBundleKey(raw);
-  const value = readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' }).env[key];
-  if (!value) throw new Error(`Secrets bundle '${bundle}' does not contain key '${key}'.`);
-  return value;
+  return readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' }).env[key];
+}
+
+/** Interactive secret entry for add/set-key. Ctrl+C must not become accounts.error. */
+async function promptAccountSecret(message: string): Promise<string | null> {
+  try {
+    return await password({ message });
+  } catch (err) {
+    if (isPromptCancelled(err)) return null;
+    throw err;
+  }
 }
 
 function publicAccount(account: ReturnType<typeof inspectAccount>) {
@@ -443,7 +452,13 @@ export function registerAccountsCommand(program: Command): void {
         const auth = parseAuth(o.auth);
         const provider = getAccountProvider(o.provider);
         if (!provider.authKinds.includes(auth)) throw new Error(`Provider '${provider.provider}' does not support ${auth}. Supported: ${provider.authKinds.join(', ')}.`);
-        const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter ${provider.provider} ${auth} for '${name}':` });
+        const secret = o.fromSecrets
+          ? secretFromBundle(o.fromSecrets)
+          : await promptAccountSecret(`Enter ${provider.provider} ${auth} for '${name}':`);
+        if (secret === null) {
+          process.exit(130);
+          return;
+        }
         const account = addAccount(name, provider.provider, auth, secret, undefined, { baseUrl: o.baseUrl });
         console.log(chalk.green(`Added ${account.provider} ${account.auth} account '${account.name}'.`));
         console.log(chalk.gray(`Secret bundle '${account.name}' is the account and uses policy never, so agent launches never request Touch ID.`));
@@ -457,7 +472,13 @@ export function registerAccountsCommand(program: Command): void {
       await runAccountsAction(command, async () => {
         const account = findAccount(name);
         if (!account) throw new Error(`Unknown provider account '${name}'.`);
-        const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter new ${account.provider} ${account.auth} for '${name}':` });
+        const secret = o.fromSecrets
+          ? secretFromBundle(o.fromSecrets)
+          : await promptAccountSecret(`Enter new ${account.provider} ${account.auth} for '${name}':`);
+        if (secret === null) {
+          process.exit(130);
+          return;
+        }
         setAccountSecret(name, secret);
         console.log(chalk.green(`Updated credential for account '${name}'.`));
       });
