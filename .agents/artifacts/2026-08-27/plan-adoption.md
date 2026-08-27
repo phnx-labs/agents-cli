@@ -558,6 +558,11 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 ## Tracking
 
 - Plan source: `.agents/artifacts/2026-08-27/plan-adoption.md`
-- Evidence and reducers: `.agents/scratch/adoption-2026-08-27/` — `exec_mine.py`, `exec-report.txt`, `exec-usage.json`, `is-agentic-*.json`, `out-codex.md`, `out-kimi.md`, `report-adoption-2026-08-27.md`
+- Evidence, committed beside this plan in `.agents/artifacts/2026-08-27/adoption-evidence/`:
+  - `mine-command-usage.py` and `command-usage-report.txt` — the transcript reducer and its output
+  - `is-agentic-agi-cli.json` — the raw 118-check agent-readiness scan
+  - `research-x-market-grok.md` — live X engagement data, DIY reasons, distribution case studies
+  - `research-discoverability-codex.md` — llms.txt / AGENTS.md / MCP registries / skill marketplaces / AEO evidence
+  - `research-competitive-kimi.md` — 36-tool competitive sweep with live stars and download counts
 - Existing command reference: [share.agents-cli.sh — command reference](https://share.agents-cli.sh/muqsitnawaz/agents-cli-command-reference-rush-2396)
 - Live audit: [is-agentic.com/scan/agi-cli.sh](https://is-agentic.com/scan/agi-cli.sh)

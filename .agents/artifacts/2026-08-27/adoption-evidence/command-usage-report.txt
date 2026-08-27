@@ -1,0 +1,126 @@
+transcripts scanned: 11,304
+distinct commands actually executed: 404 / 564
+NEVER executed: 160 (28%)
+
+=== TOP 45 BY SESSION REACH (how many distinct sessions ran it) ===
+   923  sessions     5,743 runs   sessions
+   650  sessions     2,297 runs   secrets list
+   631  sessions     2,680 runs   browser start
+   565  sessions     8,103 runs   browser screenshot
+   466  sessions     1,471 runs   browser
+   436  sessions     2,815 runs   run
+   428  sessions     4,118 runs   secrets exec
+   424  sessions     4,022 runs   browser navigate
+   408  sessions       689 runs   browser profiles list
+   405  sessions    10,397 runs   browser evaluate
+   375  sessions     1,028 runs   browser done
+   340  sessions     6,602 runs   ssh
+   338  sessions       771 runs   secrets
+   317  sessions       825 runs   browser status
+   249  sessions     3,094 runs   browser refs
+   241  sessions       706 runs   secrets view
+   235  sessions     1,064 runs   repos
+   226  sessions     2,111 runs   browser click
+   204  sessions       744 runs   devices
+   197  sessions       905 runs   view
+   189  sessions       425 runs   teams
+   185  sessions       600 runs   browser tasks
+   174  sessions       773 runs   secrets export
+   160  sessions     1,452 runs   teams status
+   159  sessions     1,155 runs   teams add
+   156  sessions       436 runs   browser tabs
+   153  sessions       714 runs   feed post
+   140  sessions       516 runs   routines list
+   135  sessions       287 runs   browser stop
+   134  sessions       354 runs   add
+   132  sessions       264 runs   teams create
+   121  sessions       688 runs   browser type
+   113  sessions       691 runs   sync
+   111  sessions       769 runs   browser scroll
+   106  sessions       335 runs   devices list
+   104  sessions       295 runs   browser tab add
+   104  sessions       373 runs   secrets add
+    98  sessions       249 runs   secrets get
+    97  sessions       361 runs   doctor
+    97  sessions       438 runs   browser press
+    91  sessions       217 runs   computer
+    90  sessions       330 runs   secrets unlock
+    87  sessions       255 runs   browser console
+    85  sessions       221 runs   secrets create
+    84  sessions       166 runs   routines
+
+=== LONG TAIL: executed in <=2 distinct sessions ===
+100 commands
+accounts clear-default, accounts detach, accounts remove, accounts sync, artifacts share join, browser history, browser prune, browser responsebody, browser set device, browser stream, clis, clis install, clis list, commands remove, computer ax-action, computer focus, computer right-click, computer wait, daemon doctor, daemon enable, daemon funnel down, daemon reload, daemon services disable, daemon services enable, daemon webhooks, daemon webhooks list, daemon webhooks remove, devices accounts, devices apply, devices capture, devices register, devices render, devices run, devices unignore, events emit, harness add, harness edit, harness fork, harness list, harness remove, harness view, hooks profile, hooks remove, insights mix, logs audit, logs stats, mcp trust, memory list, menubar disable, modes, perf, permissions remove, permissions view, plugins marketplaces add, projects import, projects remove, projects save, pty resize, pty server, pty server start, pty server status, pty server stop, registry add, registry disable, registry remove, repos view, route, routines enable, routines stats, routines webhook, rules remove, rules switch, rules view, secrets import-keyring, secrets mcp, secrets rekey, secrets rename, secrets rotate-passphrase, secrets vault, sessions backfill tools, sessions fork, sessions import, sessions insights, sessions migrate, sessions migrations, sessions stop, sessions trace, setup browser, setup computer, setup mine, setup secrets, skills view, tmux send, trash restore, watchdog history, watchdog off, watchdog on, watchdog policy, webhooks serve, workflows remove
+
+=== NEVER EXECUTED ===
+160 commands
+accounts label, accounts logout, accounts name, accounts rename, accounts set-default, accounts set-key, accounts switch, artifacts share analytics, artifacts share delete, artifacts share revisions, artifacts share update, artifacts unshare, auth login, auth logout, auth space, auth space create, auth space invite, auth space list, auth space members, auth space remove, auth space role, auth whoami, browser profiles seed, browser profiles use, clis add, clis check, clis view, commands view, computer drag, computer sessions, config budget, config budget set, daemon disable, daemon funnel, daemon funnel status, daemon funnel up, daemon services restart, devices describe, devices ignored, devices lease prune, devices lease setup, devices lease stop, devices snapshot, events audit, events audit list, events audit verify, events rotate, events stats, feed answer, harness rename, hooks view, humans, humans show, humans show owner, insights browser-activity, insights cost, insights harness-mix, insights model-mix, insights output, insights recipes, insights secrets-hot, insights session-volume, insights token-ratio, insights tools-per-session, insights trends, logs rotate, mailboxes prune, mcp untrust, memory add, memory remove, memory view, models set, models tier, models tier clear, models tier list, models tier set, monitors device, monitors edit, open register, open status, open unregister, perf commands, perf friction, perf hooks, perf run, plugins marketplaces disable, plugins marketplaces enable, plugins marketplaces install, plugins marketplaces remove, plugins marketplaces rm, projects edit, projects pull, registry config, registry enable, repos disable, repos enable, repos init, repos push, repos remove, repos sync, route allow, route create, route link-account, route list, route remove, route show, route unlink-account, routines prune, secrets generate, secrets migrate, secrets openclaw-keychain, secrets openclaw-keychain migrate, secrets openclaw-keychain resolve, secrets vault lock, secrets vault unlock, sessions backfill, sessions backfill resources, sessions bookmark, sessions insights browser-activity, sessions insights harness-mix, sessions insights mix, sessions insights model-mix, sessions insights query, sessions insights recipes, sessions insights resource-mix, sessions insights secrets-hot, sessions insights session-volume, sessions insights token-ratio, sessions insights tools-per-session, sessions insights trends, sessions optimize, sessions share, setup alias, setup alias add, setup alias list, setup alias remove, setup beta, setup beta disable, setup beta enable, setup beta list, setup fleet, setup mine init, setup mine list, setup mine remove, setup mine toggle, setup status, setup watchdog, skills remove, subagents remove, subagents view, tmux kill-all, trace, traces, traces open, traces setup, traces status, traces sync, update list, watchdog rotate, webhooks
+
+=== GROUPS BY SESSION REACH ===
+   934  sessions
+   823  secrets
+   759  browser
+   436  run
+   340  ssh
+   271  teams
+   244  devices
+   239  repos
+   197  view
+   186  routines
+   182  feed
+   134  add
+   126  computer
+   113  sync
+   109  daemon
+    97  doctor
+    89  plugins
+    75  setup
+    73  use
+    71  config
+    66  list
+    65  notify
+    61  pty
+    51  monitors
+    47  message
+    47  skills
+    42  inspect
+    41  artifacts
+    33  mcp
+    33  commands
+    28  hooks
+    27  upgrade
+    27  menubar
+    25  logs
+    25  accounts
+    24  auth
+    22  prune
+    22  install
+    20  projects
+    20  permissions
+    17  rules
+    17  models
+    17  workflows
+    15  tmux
+    15  mailboxes
+    14  watchdog
+    14  import
+    11  subagents
+    11  send
+    10  search
+     9  feedback
+     9  registry
+     8  events
+     8  insights
+     7  trash
+     7  harness
+     6  restore
+     4  update
+     4  uninstall
+     3  clis
+     3  open
+     3  memory
+     2  perf
+     2  modes
+     1  webhooks
+     1  route
