@@ -35,15 +35,26 @@ on the keychain or vault backend fails loud. The daemon's `auth-sync` service pu
 local file-backed `auth` bundle to pinned fleet devices that lack it, always with the
 file backend so each destination auto-provisions its own machine-local key.
 
-**No credential populates a live Claude usage bar today.** A usage read resolves only
-this file-based setup-token, never the interactive login (RUSH-1822), and the
-setup-token itself lacks the `user:profile` scope a usage read requires (RUSH-2392) —
-the two constraints close on each other, so an account that is signed in interactively
-and nothing else stays `usage unavailable (no usage credential)` permanently, a state
-neither `/login` nor minting another setup-token changes. `agents view` names this
-state precisely instead of folding it into the generic `usage unavailable` bucket,
-which used to send operators back to `claude setup-token` for a remedy that cannot
-work (#2987); a cache that has not been read yet reports the distinct `usage pending`.
+**The usage-read credential is role-gated (USAGE-READ-1/2).** By default a usage read
+resolves only this file-based setup-token, never the interactive login (RUSH-1822) —
+the guarantee every background caller (daemon usage warm, auth-health probe, watchdog)
+keeps, since the fleet-logout revocation came from an unattended loop firing the
+interactive token at Anthropic. The setup-token itself lacks the `user:profile` scope a
+usage read requires (RUSH-2392), so on a `worker`/unmarked device — or any `--json` or
+piped reader — an account signed in interactively and nothing else reports `usage
+unavailable (no usage credential)`. `agents view` names that state precisely instead of
+folding it into the generic bucket, which used to send operators back to `claude
+setup-token` for a remedy that cannot work (#2987); a cache that has not been read yet
+reports the distinct `usage pending`.
+
+The one exception is a **foreground human `agents view` on a `personal` device**
+(`selfConfiguredDeviceRole() === 'personal'` **and** `process.stdout.isTTY`): the read
+falls through to the interactive OAuth login — the only credential carrying
+`user:profile` — so `agents view --refresh` repopulates a live session (5h) + week (7d)
+bar for every signed-in account. This mirrors the exec-credential role gate (EXEC-2a):
+the personal box authenticates from its interactive login; unattended loops and machine
+readers never touch it. A usage read never *refreshes* an access token — an expired
+interactive login reports `expired-credential`, not a silent refresh.
 
 Actors, audit events, and usage counters contain metadata only. Redaction is defense in
 depth, not permission to publish raw transcripts.

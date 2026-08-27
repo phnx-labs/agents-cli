@@ -4,6 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import {
   accountColumnLabel,
+  allowInteractiveUsageLogin,
   compareAccountOrderedVersions,
   joinViewColumns,
   pruneGroupKey,
@@ -292,5 +293,27 @@ describe('pruneGroupKey — duplicate detection identity', () => {
 
   it('returns null when there is no identity at all', () => {
     expect(pruneGroupKey({ accountKey: null, email: null })).toBeNull();
+  });
+});
+
+describe('allowInteractiveUsageLogin — the USAGE-READ-2 role + foreground gate', () => {
+  it('allows the interactive login only for a personal device at a human TTY', () => {
+    expect(allowInteractiveUsageLogin('personal', true)).toBe(true);
+  });
+
+  it('rejects a personal device when output is not a TTY (piped/scripted reader)', () => {
+    // A --json or piped run must never silently acquire the interactive credential,
+    // even on the user's own box — role alone is not sufficient (USAGE-READ-2).
+    expect(allowInteractiveUsageLogin('personal', false)).toBe(false);
+  });
+
+  it('rejects a worker device even at a TTY (RUSH-1822 guarantee: setup-token only)', () => {
+    expect(allowInteractiveUsageLogin('worker', true)).toBe(false);
+    expect(allowInteractiveUsageLogin('worker', false)).toBe(false);
+  });
+
+  it('rejects an unmarked device (undefined role is treated as non-personal)', () => {
+    expect(allowInteractiveUsageLogin(undefined, true)).toBe(false);
+    expect(allowInteractiveUsageLogin(undefined, false)).toBe(false);
   });
 });

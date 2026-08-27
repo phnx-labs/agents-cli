@@ -197,6 +197,48 @@ describe('loadClaudeOauth accessTokenCache never reads the interactive login', (
       setKeychainBackendForTest(prev);
     }
   });
+
+  it('WITH allowInteractiveLogin, an accessTokenCache read with no setup-token DOES read the interactive login (USAGE-READ-1)', async () => {
+    // The regression fix: a foreground human `agents view` on a personal device
+    // sets allowInteractiveLogin, and only then may the usage read fall through to
+    // the interactive login — the sole credential carrying the `user:profile`
+    // scope the usage endpoint requires. No setup-token is provisioned in this
+    // block, so the fall-through is the ONLY way to a credential.
+    const mem = new CountingBackend();
+    const prev = setKeychainBackendForTest(mem);
+    try {
+      seedSource(Date.now() + 60 * 60 * 1000); // interactive login present
+
+      const oauth = await loadClaudeOauth(HOME, {
+        accessTokenCache: true,
+        allowInteractiveLogin: true,
+      });
+
+      // The interactive credential is returned (its access token), and the source
+      // item WAS read — the opposite of the default accessTokenCache behavior.
+      expect(oauth?.accessToken).toBe('tok-live');
+      expect(mem.sourceReads).toBe(1);
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
+  });
+
+  it('allowInteractiveLogin still yields null when neither a setup-token nor an interactive login exists', async () => {
+    // Fail-safe: the opt-in only PERMITS the fall-through; it does not fabricate a
+    // credential. A signed-out home returns null even with the flag on.
+    const mem = new CountingBackend();
+    const prev = setKeychainBackendForTest(mem);
+    try {
+      // No seedSource(): nothing in the keychain, no .credentials.json.
+      const oauth = await loadClaudeOauth(HOME, {
+        accessTokenCache: true,
+        allowInteractiveLogin: true,
+      });
+      expect(oauth).toBeNull();
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
+  });
 });
 
 describe('loadClaudeOauth — file-based `auth` setup-token (Touch-ID-free usage read)', () => {
@@ -701,6 +743,44 @@ describe('a Claude usage read reports WHY it produced no snapshot', () => {
     // is why the reported remedy loop existed.
     expect(usage.error).not.toContain('sign in');
     expect(classifyUsageErrorKind(usage.error)).toBe('no-usage-credential');
+  });
+
+  it('WITH allowInteractiveLogin, an EXPIRED interactive login is read but reported expired — never refreshed (USAGE-READ-1)', async () => {
+    // The personal-device path (allowInteractiveLogin) DOES read the interactive
+    // login — proven here because the error flips from "no-usage-credential" to
+    // "expired-credential": getClaudeUsageInfo got PAST the missing-credential
+    // branch to the token-freshness check. And it still never rotates the
+    // single-use refresh token to read usage (RUSH-1822). Stays offline: an
+    // expired token returns before the fetch.
+    setKeychainToken(
+      getClaudeKeychainService(home),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'tok-stale', refreshToken: 'r', expiresAt: Date.now() - 60_000 },
+      })
+    );
+
+    const usage = await getUsageInfo('claude', { home, allowInteractiveLogin: true });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(usageExpiredCredentialError('Claude'));
+    expect(classifyUsageErrorKind(usage.error)).toBe('expired-credential');
+  });
+
+  it('does NOT read the interactive login when allowInteractiveLogin is unset (background default, RUSH-1822)', async () => {
+    // Same expired-login home, no flag: stays unprovisioned — the interactive
+    // credential is untouched for every background caller. This is the guarantee
+    // that stopped the fleet-wide logouts.
+    setKeychainToken(
+      getClaudeKeychainService(home),
+      JSON.stringify({
+        claudeAiOauth: { accessToken: 'tok-stale', refreshToken: 'r', expiresAt: Date.now() - 60_000 },
+      })
+    );
+
+    const usage = await getUsageInfo('claude', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toBe(usageNoClaudeUsageCredentialError());
   });
 });
 
@@ -1701,6 +1781,21 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
 
   describe('out_of_credits (tokens/credits exhausted — no clock)', () => {
     const usageKey = 'claude:org=oocred';
+    // These write Claude refusal markers via note*/clear* — isolate the Claude
+    // usage cache to a temp file so the suite never pollutes the developer's real
+    // ~/.agents/.cache/claude-usage.json (the exact hazard usage-backoff.ts documents).
+    let cacheDir: string;
+    let prevPath: string | null;
+
+    beforeEach(() => {
+      cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-oocred-'));
+      prevPath = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
+    });
+
+    afterEach(() => {
+      setClaudeUsageCachePathForTest(prevPath);
+      fs.rmSync(cacheDir, { recursive: true, force: true });
+    });
 
     it('persists a clock-less refusal that excludes the account and survives time', () => {
       noteClaudeOutOfCredits(usageKey);

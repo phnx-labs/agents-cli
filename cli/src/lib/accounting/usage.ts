@@ -402,6 +402,16 @@ interface UsageOptions {
    * setup-token, or `<home>/.claude/.credentials.json` only.
    */
   fileOnly?: boolean;
+  /**
+   * When true, a read that finds no file-based setup-token MAY fall through to
+   * Claude Code's interactive OAuth login (the only credential carrying
+   * `user:profile`, which `/api/oauth/usage` requires). OFF by default and set
+   * ONLY by a foreground human `agents view` on a `personal` device (see
+   * USAGE-READ-2). Every background caller — daemon usage warm, auth-health
+   * probe, watchdog — leaves it unset, preserving the RUSH-1822 guarantee that
+   * an unattended loop never transmits the interactive login to Anthropic.
+   */
+  allowInteractiveLogin?: boolean;
 }
 
 /** Canonical input for a single usage fetch operation. */
@@ -598,6 +608,14 @@ export const USAGE_FETCH_CONCURRENCY = 3;
 export interface UsageLookupOptions {
   forceRefresh?: boolean;
   fileOnly?: boolean;
+  /**
+   * Permit a foreground personal-device usage read to fall through to the
+   * interactive login when no setup-token exists (USAGE-READ-2). Set ONLY by
+   * `agents view` when `selfConfiguredDeviceRole() === 'personal'` and the
+   * output is a human TTY (not `--json`). Threads into `getClaudeUsageInfo` →
+   * `loadClaudeOauth`. Unset for every other lookup.
+   */
+  allowInteractiveLogin?: boolean;
 }
 
 export async function getUsageInfoByIdentity(
@@ -661,6 +679,7 @@ export async function getUsageInfoForIdentity(
       cliVersion: input.cliVersion,
       organizationId: input.info.organizationId,
       fileOnly: opts?.fileOnly,
+      allowInteractiveLogin: opts?.allowInteractiveLogin,
     });
   }
 
@@ -683,7 +702,9 @@ export async function getUsageInfoForIdentity(
   }
 
   // Explicit refresh: block on the shared device collector.
-  return fetchLiveUsageDeduped(input, usageKey, cached, opts?.fileOnly === true);
+  return fetchLiveUsageDeduped(input, usageKey, cached, opts?.fileOnly === true, {
+    allowInteractiveLogin: opts?.allowInteractiveLogin === true,
+  });
 }
 
 /**
@@ -696,6 +717,7 @@ async function fetchLiveUsageDeduped(
   usageKey: string,
   cached: UsageSnapshot | null,
   fileOnly: boolean,
+  opts?: { allowInteractiveLogin?: boolean },
 ): Promise<UsageInfo> {
   const existing = inFlightLiveFetches.get(usageKey);
   if (existing) return existing;
@@ -719,6 +741,7 @@ async function fetchLiveUsageDeduped(
         // throttled account cannot park the whole provider (RUSH-3036).
         usageScope: usageKey,
         fileOnly,
+        allowInteractiveLogin: opts?.allowInteractiveLogin === true,
       });
 
       if (usage.snapshot) {
@@ -1206,9 +1229,17 @@ async function getClaudeUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     // the interactive login (reading that ACL-bound token and firing it at the
     // usage API is what got it revoked — RUSH-1822). No setup-token => null =>
     // "usage pending". fileOnly additionally forbids the ACL keychain path.
+    //
+    // allowInteractiveLogin is the one sanctioned exception (USAGE-READ-1/2): a
+    // foreground human `agents view` on a `personal` device MAY fall through to
+    // the interactive login when no setup-token exists, because that login is the
+    // only credential carrying the `user:profile` scope the usage endpoint
+    // requires (the setup-token is user:inference → 403, RUSH-2392). It is unset
+    // for every background caller, so the RUSH-1822 guarantee is untouched there.
     const oauth = await loadClaudeOauth(options?.home, {
       accessTokenCache: true,
       fileOnly: options?.fileOnly === true,
+      allowInteractiveLogin: options?.allowInteractiveLogin === true,
     });
     if (!oauth?.accessToken) {
       // NOT the shared no-credential message: "sign in" is not a remedy here.
@@ -1983,7 +2014,7 @@ function deleteCachedClaudeOauth(service: string): void {
  */
 export async function loadClaudeOauth(
   home?: string,
-  opts?: { accessTokenCache?: boolean; fileOnly?: boolean }
+  opts?: { accessTokenCache?: boolean; fileOnly?: boolean; allowInteractiveLogin?: boolean }
 ): Promise<ClaudeOauthCredentials | null> {
   // Read-only usage/probe callers (accessTokenCache) authenticate ONLY with a
   // file-based setup-token from the `auth` bundle — never Claude Code's
@@ -2000,7 +2031,7 @@ export async function loadClaudeOauth(
       // the source of truth if it has actually been revoked.
       return { accessToken: setupToken };
     }
-    // No provisioned setup-token: a read-only usage/health probe MUST NOT fall
+    // No provisioned setup-token. A read-only usage/health probe MUST NOT fall
     // through to Claude Code's interactive login credential. The daemon's usage
     // (~60s) and auth-health (~3min) warms would otherwise read the ACL-bound
     // OAuth token and transmit it to api.anthropic.com/api/oauth/usage — an
@@ -2010,7 +2041,17 @@ export async function loadClaudeOauth(
     // (docs/secrets.md). Report unprovisioned (-> probe
     // token 'missing' -> auth-health 'unconfigured', benign for rotation); seed a
     // setup-token via the mint-auth path to restore usage/probe for the account.
-    return null;
+    //
+    // The single sanctioned exception (USAGE-READ-1/2): a foreground human
+    // `agents view` on a `personal` device sets allowInteractiveLogin, and only
+    // then do we fall through to the interactive-login read below — the one
+    // credential carrying `user:profile`, which the usage endpoint requires. This
+    // is a human running one command, not an unattended loop, so it is not the
+    // revocation risk RUSH-1822 fixed. Every background caller leaves the flag
+    // unset and still returns null here.
+    if (opts?.allowInteractiveLogin !== true) {
+      return null;
+    }
   }
 
   // Full-credential callers (isClaudeAuthValid -> getClaudeAccessToken)

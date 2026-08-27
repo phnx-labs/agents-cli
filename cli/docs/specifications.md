@@ -2283,6 +2283,35 @@ schema (`--json` passes through each agent's native stream format).
   Note this MUST NOT be read as "a login-deferring run never carries a token": no
   requirement yet strips an ambient value on that path when NO per-account token
   resolves, tracked as RUSH-2360.
+- **EXEC-2b — usage-read credential (MUST), the same role gate as EXEC-2a.** A
+  Claude *usage read* (`getClaudeUsageInfo` → `loadClaudeOauth` with
+  `accessTokenCache: true`, `lib/accounting/usage.ts`) selects its credential by an
+  explicit `allowInteractiveLogin` capability threaded from the caller, default
+  **closed**:
+  - When `allowInteractiveLogin` is unset/`false`, the read resolves the file-based
+    setup-token via `resolveClaudeSetupToken(home)` and, if none exists, MUST
+    `return null` — it MUST NOT read the interactive OAuth login (keychain /
+    `.credentials.json`). This is the RUSH-1822 guarantee and the behavior for
+    EVERY background caller (daemon usage warm `usage-refresh.ts`, auth-health probe
+    `auth-health.ts`, watchdog, `collectRunCandidates`).
+  - Only `agents view` sets the flag, and only for a **foreground human render on a
+    `personal` device**: `allowInteractiveUsageLogin(role, isTTY)` (`commands/view.ts`)
+    returns true iff `selfConfiguredDeviceRole() === 'personal'` AND
+    `process.stdout.isTTY`. A `--json`/piped reader (returns early via
+    `collectAgentsJson`, or non-TTY) and any `worker`/unmarked device MUST leave it
+    unset. Role alone is insufficient — a scripted refresh MUST NOT silently acquire
+    the interactive credential.
+  - With the flag set and no setup-token, `loadClaudeOauth` MUST fall through to the
+    interactive OAuth login and return it when present, so `agents view --refresh`
+    repopulates the session (5h) + week (7d) windows for every signed-in account. This
+    is the ONLY credential carrying `user:profile` (RUSH-2392), mirroring why EXEC-2a
+    defers a personal-device run to the login.
+  - A usage read MUST NOT refresh an access token
+    (`claudeUsageAccessTokenNoRefresh`): an expired interactive login reports
+    `expired-credential`, never a silent refresh. Window freshness
+    (`isCachedUsageWindowFresh`: session 300 min, week 10080 min) is unchanged — this
+    contract only restores the credential that lets `--refresh` recapture an expired
+    session window on a personal device.
 - **EXEC-3 (MUST).** `buildExecEnv` MUST set `AGENTS_MAILBOX_DIR` +
   `AGENT_SESSION_ID` + `AGENTS_SESSION_ID` when a valid session id is present
   (`lib/exec.ts:572-575`), `AGENTS_RUNTIME` to `terminal`/`headless` from

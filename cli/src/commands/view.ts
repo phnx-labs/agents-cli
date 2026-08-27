@@ -46,6 +46,7 @@ import {
   isUsageHeadlessScopeError,
 } from '../lib/accounting/usage.js';
 import type { FormatUsageSummaryOpts, UsageInfo } from '../lib/accounting/usage.js';
+import { selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../lib/device-config.js';
 import { readManifest } from '../lib/manifest.js';
 import {
   listInstalledVersions,
@@ -417,6 +418,34 @@ function renderHostClisSection(cwd: string): void {
   }
 }
 
+/**
+ * The USAGE-READ-2 decision, isolated from its runtime inputs so it can be
+ * tested directly: a usage read may fall through to the interactive OAuth login
+ * ONLY for a foreground human render on a `personal` device. Both conditions are
+ * required — role alone is not sufficient.
+ */
+export function allowInteractiveUsageLogin(
+  role: ConfiguredDeviceRole | undefined,
+  isTTY: boolean,
+): boolean {
+  return role === 'personal' && isTTY === true;
+}
+
+/**
+ * Whether this `agents view` invocation may fall through to the interactive
+ * OAuth login for a usage read (USAGE-READ-2). True only for a foreground human
+ * render on a `personal` device: the interactive login is the sole credential
+ * carrying the `user:profile` scope the usage endpoint needs, and a human
+ * running one command is not the unattended-loop revocation risk RUSH-1822
+ * fixed. The `--json` path never reaches these render functions (it returns
+ * early via `collectAgentsJson`), and a non-TTY (piped/scripted) run is excluded
+ * here too, so a machine reader can never silently acquire the interactive
+ * credential — role alone is not sufficient.
+ */
+function usageAllowInteractiveLogin(): boolean {
+  return allowInteractiveUsageLogin(selfConfiguredDeviceRole(), process.stdout.isTTY === true);
+}
+
 async function showInstalledVersions(
   filterAgentId?: AgentId,
   viewOpts?: { forceRefresh?: boolean },
@@ -542,7 +571,10 @@ async function showInstalledVersions(
       cliVersion,
       info,
     })),
-  ], { forceRefresh: viewOpts?.forceRefresh });
+  ], {
+    forceRefresh: viewOpts?.forceRefresh,
+    allowInteractiveLogin: usageAllowInteractiveLogin(),
+  });
 
   spinner.stop();
   console.log(chalk.bold('Installed Agent CLIs\n'));
@@ -1118,7 +1150,7 @@ async function showAgentResources(
       home,
       cliVersion: version,
       info: accountInfo,
-    });
+    }, { allowInteractiveLogin: usageAllowInteractiveLogin() });
     const accountLabel = accountColumnLabel(accountInfo);
     const emailStr = accountLabel ? chalk.cyan(`  ${accountLabel}`) : '';
     const status = chalk.green(version);
