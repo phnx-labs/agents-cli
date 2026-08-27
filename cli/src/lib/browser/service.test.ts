@@ -9,6 +9,7 @@ import * as state from '../state.js';
 import * as profiles from './profiles.js';
 import { query, _resetForTest } from '../feed/events.js';
 import { machineId } from '../machine-id.js';
+import { resolveFfmpeg } from './ffmpeg.js';
 
 const TEST_HOME = path.join(tmpdir(), 'agents-cli-browser-service-test');
 const TEST_AGENTS_DIR = path.join(TEST_HOME, '.agents');
@@ -657,8 +658,8 @@ describe('recordStop ffmpeg exit handling (#560)', () => {
 
 describe('browser recording frame pipe (PHNX-2600)', () => {
   it('catches a frame emitted before startScreencast responds and finalizes a playable WebM', async () => {
-    const ffmpeg = execFileSync('/bin/sh', ['-c', 'command -v ffmpeg'], { encoding: 'utf8' }).trim();
-    const ffprobe = execFileSync('/bin/sh', ['-c', 'command -v ffprobe'], { encoding: 'utf8' }).trim();
+    const ffmpeg = await resolveFfmpeg();
+    const ffprobe = path.join(path.dirname(ffmpeg), process.platform === 'win32' ? 'ffprobe.exe' : 'ffprobe');
     const jpegPath = path.join(TEST_HOME, 'frame.jpg');
     execFileSync(ffmpeg, [
       '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=320x180:rate=1',

@@ -9,9 +9,15 @@ let resolvedFfmpeg: Promise<string> | undefined;
 
 type Platform = NodeJS.Platform;
 
-function pathCandidates(env: NodeJS.ProcessEnv, platform: Platform): string[] {
+function canonicalDirs(platform: Platform): string[] {
+  if (platform === 'darwin') return ['/opt/homebrew/bin', '/usr/local/bin'];
+  if (platform === 'linux') return ['/usr/local/bin', '/usr/bin', '/snap/bin'];
+  return [];
+}
+
+function pathCandidates(env: NodeJS.ProcessEnv, platform: Platform, platformDirs: string[]): string[] {
   const names = platform === 'win32' ? ['ffmpeg.exe'] : ['ffmpeg'];
-  const dirs = (env.PATH ?? '').split(path.delimiter).filter(Boolean);
+  const dirs = [...new Set([...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...platformDirs])];
   return dirs.flatMap((dir) => names.map((name) => path.join(dir, name)));
 }
 
@@ -39,11 +45,15 @@ async function firstUsable(candidates: string[]): Promise<string | undefined> {
   return undefined;
 }
 
-function commandOnPath(name: string, env: NodeJS.ProcessEnv, platform: Platform): string | undefined {
+function commandOnPath(name: string, env: NodeJS.ProcessEnv, platform: Platform, platformDirs: string[]): string | undefined {
   const names = platform === 'win32' ? [`${name}.exe`, `${name}.cmd`, name] : [name];
-  for (const dir of (env.PATH ?? '').split(path.delimiter).filter(Boolean)) {
+  const dirs = [...new Set([...(env.PATH ?? '').split(path.delimiter).filter(Boolean), ...platformDirs])];
+  for (const dir of dirs) {
     for (const candidate of names.map((entry) => path.join(dir, entry))) {
-      if (fs.existsSync(candidate)) return candidate;
+      try {
+        fs.accessSync(candidate, platform === 'win32' ? fs.constants.F_OK : fs.constants.X_OK);
+        return candidate;
+      } catch { /* keep looking */ }
     }
   }
   return undefined;
@@ -64,19 +74,19 @@ function readOsRelease(): string {
 
 type InstallStep = { command: string; args: string[] };
 
-function installAttempt(platform: Platform, env: NodeJS.ProcessEnv, osRelease: string): InstallStep[] | undefined {
+function installAttempt(platform: Platform, env: NodeJS.ProcessEnv, osRelease: string, platformDirs: string[]): InstallStep[] | undefined {
   if (platform === 'darwin') {
-    const brew = commandOnPath('brew', env, platform);
+    const brew = commandOnPath('brew', env, platform, platformDirs);
     return brew ? [{ command: brew, args: ['install', 'ffmpeg'] }] : undefined;
   }
   if (platform === 'win32') {
-    const winget = commandOnPath('winget', env, platform);
+    const winget = commandOnPath('winget', env, platform, platformDirs);
     return winget ? [{ command: winget, args: ['install', '--id', 'Gyan.FFmpeg', '--exact', '--accept-source-agreements', '--accept-package-agreements'] }] : undefined;
   }
   if (platform !== 'linux') return undefined;
 
   if (/\b(ID|ID_LIKE)=(?:"[^"]*\b)?(?:ubuntu|debian)\b/m.test(osRelease)) {
-    const apt = commandOnPath('apt-get', env, platform);
+    const apt = commandOnPath('apt-get', env, platform, platformDirs);
     if (!apt) return undefined;
     if (typeof process.getuid === 'function' && process.getuid() === 0) {
       return [
@@ -84,7 +94,7 @@ function installAttempt(platform: Platform, env: NodeJS.ProcessEnv, osRelease: s
         { command: apt, args: ['install', '-y', 'ffmpeg'] },
       ];
     }
-    const sudo = commandOnPath('sudo', env, platform);
+    const sudo = commandOnPath('sudo', env, platform, platformDirs);
     return sudo ? [
       { command: sudo, args: ['-n', apt, 'update'] },
       { command: sudo, args: ['-n', apt, 'install', '-y', 'ffmpeg'] },
@@ -99,7 +109,7 @@ function installAttempt(platform: Platform, env: NodeJS.ProcessEnv, osRelease: s
     ['zypper', ['--non-interactive', 'install', 'ffmpeg']],
   ];
   for (const [name, args] of managers) {
-    const command = commandOnPath(name, env, platform);
+    const command = commandOnPath(name, env, platform, platformDirs);
     if (command) return [{ command, args }];
   }
   return undefined;
@@ -110,6 +120,8 @@ export async function resolveFfmpeg(options: {
   home?: string;
   platform?: Platform;
   osRelease?: string;
+  /** Override canonical executable directories, primarily for isolated verification. */
+  executableDirs?: string[];
 } = {}): Promise<string> {
   if (resolvedFfmpeg) return resolvedFfmpeg;
   resolvedFfmpeg = (async () => {
@@ -117,11 +129,12 @@ export async function resolveFfmpeg(options: {
     const home = options.home ?? os.homedir();
     const platform = options.platform ?? os.platform();
     const osRelease = options.osRelease ?? readOsRelease();
-    const candidates = [...pathCandidates(env, platform), ...managedCandidates(home, platform)];
+    const executableDirs = options.executableDirs ?? canonicalDirs(platform);
+    const candidates = [...pathCandidates(env, platform, executableDirs), ...managedCandidates(home, platform)];
     const existing = await firstUsable(candidates);
     if (existing) return existing;
 
-    const attempt = installAttempt(platform, env, osRelease);
+    const attempt = installAttempt(platform, env, osRelease, executableDirs);
     let failure = 'no supported automatic installer was found';
     if (attempt) {
       try {
@@ -132,7 +145,7 @@ export async function resolveFfmpeg(options: {
             windowsHide: true,
           });
         }
-        const installed = await firstUsable([...pathCandidates(env, platform), ...managedCandidates(home, platform)]);
+        const installed = await firstUsable([...pathCandidates(env, platform, executableDirs), ...managedCandidates(home, platform)]);
         if (installed) return installed;
         failure = `${path.basename(attempt.at(-1)!.command)} completed but ffmpeg is still unavailable`;
       } catch (error) {
