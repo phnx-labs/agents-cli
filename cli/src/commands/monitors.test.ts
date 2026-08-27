@@ -191,6 +191,40 @@ describe('monitors inspection JSON and stderr', () => {
     expect(res.stderr).toContain("action.type 'run' requires action.prompt");
   });
 
+  it('add does not auto-start the daemon when daemon.enabled=false (PHNX-2637)', () => {
+    const home = makeHome();
+    const deviceDir = path.join(home, '.agents', 'devices', 'testbox');
+    fs.mkdirSync(deviceDir, { recursive: true });
+    fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), 'config:\n  daemonEnabled: false\n');
+
+    const res = run(home, ['add', 'ci', '--poll', 'echo fail', '30s', '--match', 'fail', '--notify'], {
+      AGENTS_SYNC_MACHINE_ID: 'testbox',
+      AGENTS_MONITORS_LOCAL: '1',
+    });
+    const out = `${res.stdout}${res.stderr}`;
+    const pidPath = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+
+    try {
+      expect(res.status).toBe(0);
+      expect(out).toContain("Monitor 'ci' added");
+      expect(out).toContain('daemon.enabled=false');
+      expect(out).toContain('agents daemon enable');
+      expect(out).not.toContain('Daemon started');
+      // Refused auto-start must skip the 12s engine-pickup wait.
+      expect(out).not.toContain('waiting for the engine');
+      expect(fs.existsSync(path.join(home, '.agents', 'monitors', 'ci.yml'))).toBe(true);
+      expect(fs.existsSync(pidPath)).toBe(false);
+    } finally {
+      if (fs.existsSync(pidPath)) {
+        try {
+          const pid = Number.parseInt(fs.readFileSync(pidPath, 'utf-8').trim(), 10);
+          if (Number.isFinite(pid) && pid > 0) process.kill(pid, 'SIGTERM');
+        } catch { /* already gone */ }
+      }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
   // POSIX-only: uses `true` as a no-op $EDITOR; cmd.exe has no equivalent.
   it.skipIf(process.platform === 'win32')(
     'edit on a system built-in materializes a user copy and never writes the system mirror',
