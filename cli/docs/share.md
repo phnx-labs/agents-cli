@@ -77,8 +77,12 @@ plus the aliases below.
   `:252`).
 - `me`/`org` are Phoenix-only. A BYO `WRITE_TOKEN` can publish `public`/`unlisted`
   only — the Worker rejects `me`/`org` from a non-Phoenix caller with a `400`
-  (`worker-template.ts:94`–`97`), and the CLI surfaces a crisp `agents auth login`
-  hint before the round trip (`share.ts:187`).
+  (`worker-template.ts:94`–`97`). On the initial `share <file>` **publish** path
+  the CLI sends the visibility header unconditionally and surfaces the Worker's
+  raw `400` with a generic "check the write token / `agents artifacts setup`"
+  message (`publish.ts:770`) — no login pre-check. The in-place **`share
+  visibility`** edit path (below) is the one that pre-checks and emits a crisp
+  `agents auth login` hint before the round trip (`runShareEdit`, `share.ts:187`).
 
 ### `org` rejects public-inbox domains — the sharp edge
 
