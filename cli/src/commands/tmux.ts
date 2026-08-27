@@ -213,7 +213,7 @@ export function registerTmuxCommands(program: Command): void {
   const listCmd = tmux
     .command('list')
     .alias('ls')
-    .description('List live tmux sessions on the shared server. Prunes stale meta files as a side effect.')
+    .description('List live tmux sessions on the shared server (name, age, last screen line). Prunes stale meta files as a side effect.')
     .option('--socket <path>', 'Use a custom socket (default: shared server)')
     .option('--json', 'Output as JSON');
 
@@ -575,7 +575,6 @@ async function pickAndKillSessions(socket?: string): Promise<void> {
   try {
     chosen = await multiItemPicker<ListedSession>({
       message: 'Kill which tmux sessions?',
-      subtitle: chalk.gray('space to multi-select · preview is the last lines on that pane'),
       items: sessions,
       filter: (q) => {
         const needle = q.trim().toLowerCase();
