@@ -501,10 +501,12 @@ are hidden so a dismissed box is never silently absent; `agents devices unignore
 
 Native-account labels (`agents accounts label`) are the same kind of fleet-wide
 fact: they bind to a stable `(agent, identityKey)` (email / org key), not a
-device or a version. They live in tracked `~/.agents/accounts/native.yaml` and
-sync with `agents repo push/pull`, so `codex#personal` selects the same login
-on every box. `meta.accounts.native` is the device-local read cache (UUID ids
-for bindings); `readMeta` overlays the tracked file onto it.
+device or a version. They live on the central `accounts.native` rows in
+`~/.agents/agents.yaml` — already classified `central` and synced by
+`agents repo push/pull` — so `codex#personal` selects the same login on every
+box. A git merge of two independently labeled boxes can union two UUID rows for
+one identity; `accounts remove` / `rename` / `label` operate on every matching
+row so a sibling cannot silently survive.
 
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via

@@ -5,9 +5,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type KeychainBackend } from './secrets/index.js';
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
-import { addAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, readAccountRegistry, reconcileNativeAccountLabels, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
-import { nativeLabelsPath, readNativeLabels } from './account-labels.js';
+import { readMeta, updateMeta } from './state.js';
+import { addAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -30,22 +29,8 @@ describe('findUnifiedAccount does not touch the provider store for a native look
 });
 
 describe('native account labels', () => {
-  function clearNativeCache() {
-    updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } }));
-  }
-  function clearTrackedLabels() {
-    const file = nativeLabelsPath(getUserAgentsDir());
-    fs.rmSync(file, { force: true });
-    try { fs.rmdirSync(path.dirname(file)); } catch { /* not empty */ }
-  }
-  beforeEach(() => {
-    clearTrackedLabels();
-    clearNativeCache();
-  });
-  afterEach(() => {
-    clearTrackedLabels();
-    clearNativeCache();
-  });
+  beforeEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+  afterEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
 
   it('writes and resolves a manual label and the implicit email label', () => {
     const original = labelNativeAccount('codex', 'codex:user=1', 'user@example.com', 'work', 'version');
@@ -59,45 +44,69 @@ describe('native account labels', () => {
     expect(() => labelNativeAccount('kimi', 'kimi:opaque=1', undefined, undefined, 'version')).toThrow('pass a manual label');
   });
 
-  it('syncs the label through the tracked user-repo file keyed by agent and identityKey', () => {
-    labelNativeAccount('codex', 'codex:account=abc:user=def:org=ghi', 'you@example.com', 'personal', 'version');
-    const file = nativeLabelsPath(getUserAgentsDir());
-    expect(fs.existsSync(file)).toBe(true);
-    expect(readNativeLabels(getUserAgentsDir())).toEqual([
-      {
-        agent: 'codex',
-        identityKey: 'codex:account=abc:user=def:org=ghi',
-        name: 'personal',
-        identityLabel: 'you@example.com',
-        scope: 'version',
-      },
-    ]);
-
-    // Other box after `agents repo pull`: empty device-local cache, tracked file present.
-    clearNativeCache();
-    expect(findUnifiedAccount('personal', readMeta())).toMatchObject({
-      kind: 'native',
+  it('removeAccount deletes every central row for the resolved (agent, identityKey)', () => {
+    // Two independently labeled boxes merge via git into two UUID rows for one identity.
+    const identityKey = 'codex:account=dup:user=x:org=y';
+    const row = (id: string) => ({
+      id,
       name: 'personal',
-      agent: 'codex',
-      identityKey: 'codex:account=abc:user=def:org=ghi',
+      agent: 'codex' as const,
+      identityKey,
+      identityLabel: 'x@example.com',
+      scope: 'version' as const,
     });
+    updateMeta(meta => ({
+      ...meta,
+      accounts: {
+        ...meta.accounts,
+        native: {
+          'uuid-from-box-a': row('uuid-from-box-a'),
+          'uuid-from-box-b': row('uuid-from-box-b'),
+        },
+      },
+    }));
+    expect(findUnifiedAccount('personal', readMeta())).toMatchObject({ name: 'personal', identityKey });
+
+    removeAccount('personal');
+
+    expect(findUnifiedAccount('personal', readMeta())).toBeNull();
+    expect(findUnifiedAccount('uuid-from-box-a', readMeta())).toBeNull();
+    expect(findUnifiedAccount('uuid-from-box-b', readMeta())).toBeNull();
+    expect(listNativeAccounts(readMeta()).filter(account => account.identityKey === identityKey)).toEqual([]);
   });
 
-  it('seeds the tracked file from the device-local cache when the file is missing', () => {
-    labelNativeAccount('codex', 'codex:user=1', 'you@example.com', 'personal', 'version');
-    clearTrackedLabels();
-    expect(reconcileNativeAccountLabels()).toEqual({ seeded: 1 });
-    expect(readNativeLabels(getUserAgentsDir())).toMatchObject([
-      { agent: 'codex', identityKey: 'codex:user=1', name: 'personal' },
-    ]);
-    expect(reconcileNativeAccountLabels()).toEqual({ seeded: 0 });
-  });
+  it('renameAccount and labelNativeAccount rewrite every sibling row for the identity', () => {
+    const identityKey = 'codex:account=dup:user=x:org=y';
+    const row = (id: string, name: string) => ({
+      id,
+      name,
+      agent: 'codex' as const,
+      identityKey,
+      identityLabel: 'x@example.com',
+      scope: 'version' as const,
+    });
+    updateMeta(meta => ({
+      ...meta,
+      accounts: {
+        ...meta.accounts,
+        native: {
+          'uuid-from-box-a': row('uuid-from-box-a', 'personal'),
+          'uuid-from-box-b': row('uuid-from-box-b', 'personal'),
+        },
+      },
+    }));
 
-  it('fails loud when the tracked labels file is not a map', () => {
-    const file = nativeLabelsPath(getUserAgentsDir());
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, '- not a map\n');
-    expect(() => readNativeLabels(getUserAgentsDir())).toThrow(/Native-account labels corrupted/);
+    renameAccount('personal', 'home');
+    expect(findUnifiedAccount('personal', readMeta())).toBeNull();
+    const renamed = listNativeAccounts(readMeta()).filter(account => account.identityKey === identityKey);
+    expect(renamed).toHaveLength(2);
+    expect(renamed.every(account => account.name === 'home')).toBe(true);
+
+    labelNativeAccount('codex', identityKey, 'x@example.com', 'desk', 'version');
+    const relabeled = listNativeAccounts(readMeta()).filter(account => account.identityKey === identityKey);
+    expect(relabeled).toHaveLength(2);
+    expect(relabeled.every(account => account.name === 'desk')).toBe(true);
+    expect(findUnifiedAccount('home', readMeta())).toBeNull();
   });
 });
 

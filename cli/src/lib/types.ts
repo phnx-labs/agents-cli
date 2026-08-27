@@ -886,9 +886,9 @@ export interface Meta {
   accounts?: {
     defaults?: Partial<Record<AgentId, string>>;
     /**
-     * Named harness-owned identities (device-local read cache). Metadata only;
-     * OAuth credentials stay in the harness home. Fleet-wide labels sync via
-     * tracked `accounts/native.yaml`, keyed by (agent, identityKey).
+     * Named harness-owned identities. Metadata only; OAuth credentials stay in
+     * the harness home. Central-synced via agents.yaml; labels bind to
+     * `(agent, identityKey)`.
      */
     native?: Record<string, {
       id: string;

@@ -33,7 +33,6 @@ import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic
 import type { Meta, RegistryType } from './types.js';
 import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 import { machineId } from './machine-id.js';
-import { nativeLabelsPath, overlayNativeAccountLabels } from './account-labels.js';
 
 const HOME = process.env.HOME ?? os.homedir();
 
@@ -890,8 +889,8 @@ export function getVersionResourcesPath(): string {
 }
 
 /**
- * Combined cache stamp across Meta sources: central + system agents.yaml, this
- * machine's device pins, version-resources tracking, and native-account labels.
+ * Combined cache stamp across all four Meta sources: central + system
+ * agents.yaml, this machine's device pins, and the version-resources tracking.
  * A delimited string, NOT a numeric sum — summing down-scaled epoch-ms values
  * loses precision (float64 rounds sub-unit terms away at ~1.75e12), so a change
  * in any one file must contribute at full resolution.
@@ -901,8 +900,7 @@ function currentMetaStamp(): string {
     + '|' + safeMtimeMs(SYSTEM_META_FILE)
     + '|' + safeMtimeMs(getDeviceMetaPath())
     + '|' + safeMtimeMs(getDevicePinsPath())
-    + '|' + safeMtimeMs(getVersionResourcesPath())
-    + '|' + safeMtimeMs(nativeLabelsPath(USER_AGENTS_DIR));
+    + '|' + safeMtimeMs(getVersionResourcesPath());
 }
 
 /** Memoize a parsed Meta against the current file mtimes. */
@@ -1174,8 +1172,6 @@ function writeMetaUnlocked(meta: Meta): void {
  *     not overlaid here)
  *   - `versions:` from the history JSON (wholesale replace; falls back to
  *     whatever central carried when the history file doesn't exist yet)
- *   - native-account labels from the tracked `accounts/native.yaml` (fleet-wide
- *     names keyed by agent+identityKey; the UUID registry is the read cache)
  */
 function overlayMachineLocal(meta: Meta): Meta {
   const pinsPath = getDevicePinsPath();
@@ -1226,7 +1222,6 @@ function overlayMachineLocal(meta: Meta): Meta {
       if (vr) meta.versions = vr;
     } catch { /* ignore malformed history file */ }
   }
-  overlayNativeAccountLabels(meta, USER_AGENTS_DIR);
   return meta;
 }
 

@@ -8,7 +8,6 @@ import { classifyAttachTarget, groupLabelIdentities, listSwitchableAccounts, nat
 import { claudeAccountTokenKey } from '../lib/claude-account-token.js';
 import { getVersionHomePath } from '../lib/installations/versions.js';
 import { addAccount, addNativeAccount, listNativeAccounts } from '../lib/account-registry.js';
-import { removeNativeLabel } from '../lib/account-labels.js';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import { getUserAgentsDir, readMeta, updateMeta } from '../lib/state.js';
 import { applyGlobalHelpConventions } from '../lib/help.js';
@@ -66,18 +65,12 @@ describe('accounts switch + native naming honesty-gate', () => {
   let secretsRoot: string;
 
   const TEST_NATIVE_NAMES = ['claude-native-default', 'antigravity-home'];
-  const clearTestNativeAccounts = (): void => {
-    const base = getUserAgentsDir();
-    for (const account of listNativeAccounts(readMeta()).filter(item => TEST_NATIVE_NAMES.includes(item.name))) {
-      removeNativeLabel(account.agent, account.identityKey, base);
-    }
-    updateMeta(meta => {
-      const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
-        !TEST_NATIVE_NAMES.includes(account.name),
-      ));
-      return { ...meta, accounts: { ...meta.accounts, native } };
-    });
-  };
+  const clearTestNativeAccounts = (): void => updateMeta(meta => {
+    const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
+      !TEST_NATIVE_NAMES.includes(account.name),
+    ));
+    return { ...meta, accounts: { ...meta.accounts, native } };
+  });
 
   beforeEach(() => {
     clearTestNativeAccounts();
@@ -330,18 +323,12 @@ describe('accounts label bare-harness selection (injected collector, the resolve
     candidate('9.9.2', 'b@example.com', 'codex:acct=b'),
   ];
 
-  const removeTestLabels = (): void => {
-    const base = getUserAgentsDir();
-    for (const account of listNativeAccounts(readMeta()).filter(item => TEST_LABELS.includes(item.name))) {
-      removeNativeLabel(account.agent, account.identityKey, base);
-    }
-    updateMeta(meta => {
-      const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
-        !TEST_LABELS.includes(account.name),
-      ));
-      return { ...meta, accounts: { ...meta.accounts, native } };
-    });
-  };
+  const removeTestLabels = (): void => updateMeta(meta => {
+    const native = Object.fromEntries(Object.entries(meta.accounts?.native ?? {}).filter(([, account]) =>
+      !TEST_LABELS.includes(account.name),
+    ));
+    return { ...meta, accounts: { ...meta.accounts, native } };
+  });
 
   beforeEach(removeTestLabels);
   afterEach(() => {
