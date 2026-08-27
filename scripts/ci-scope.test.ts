@@ -23,6 +23,7 @@ import {
   formatGitHubOutputs,
   loadOwnershipManifest,
   matchGlob,
+  parseRenameAwareNameStatus,
   planIsFailing,
   proofFromPlan,
   relatedTestFiles,
@@ -496,6 +497,83 @@ describe('selectImpact policy', () => {
   });
 });
 
+describe('rename-aware changed files (PHNX-3200)', () => {
+  test('parseRenameAwareNameStatus: R100 selects nothing; edited rename + copy select the new path', () => {
+    const z = [
+      'R100', 'cli/src/old.ts', 'cli/lib/old.ts', // pure move -> nothing
+      'M', 'cli/src/b.ts', // modified -> b
+      'R080', 'cli/src/c.ts', 'cli/lib/c.ts', // rename with edits -> new path
+      'A', 'cli/src/d.ts', // added -> d
+      'D', 'cli/src/e.ts', // deleted -> e (consumer exempts it from zero-selection)
+      'C100', 'cli/src/f.ts', 'cli/src/f-copy.ts', // copy -> the new path
+      '',
+    ].join('\0');
+    // Emitted in source order; the R100 move contributes nothing.
+    expect(parseRenameAwareNameStatus(z)).toEqual([
+      'cli/src/b.ts',
+      'cli/lib/c.ts',
+      'cli/src/d.ts',
+      'cli/src/e.ts',
+      'cli/src/f-copy.ts',
+    ]);
+  });
+
+  function initRenameHistory(
+    setup: (repo: string) => void,
+    mutate: (repo: string) => void,
+  ): { repo: string; base: string; head: string } {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-ci-rename-'));
+    const repo = join(dir, 'repo');
+    mkdirSync(repo);
+    git(repo, 'init', '-b', 'main');
+    setup(repo);
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-m', 'base');
+    const base = git(repo, 'rev-parse', 'HEAD');
+    mutate(repo);
+    git(repo, 'add', '-A');
+    git(repo, 'commit', '-m', 'head');
+    const head = git(repo, 'rev-parse', 'HEAD');
+    return { repo, base, head };
+  }
+
+  test('a pure git mv is moved-not-changed: it selects neither the old nor the new path', () => {
+    const { repo, base, head } = initRenameHistory(
+      (r) => writeFixture(r, 'cli/src/foo.ts', 'export const foo = 1;\n'),
+      (r) => {
+        mkdirSync(join(r, 'cli/lib'), { recursive: true });
+        renameSync(join(r, 'cli/src/foo.ts'), join(r, 'cli/lib/foo.ts'));
+      },
+    );
+    try {
+      const changed = changedFilesBetween(base, head, repo);
+      expect(changed).not.toContain('cli/src/foo.ts');
+      expect(changed).not.toContain('cli/lib/foo.ts');
+      expect(changed).toEqual([]);
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+
+  test('a rename WITH an edit selects the new path (content changed there)', () => {
+    const { repo, base, head } = initRenameHistory(
+      (r) => writeFixture(r, 'cli/src/foo.ts', 'a\nb\nc\nd\ne\nf\ng\nh\n'),
+      (r) => {
+        mkdirSync(join(r, 'cli/lib'), { recursive: true });
+        renameSync(join(r, 'cli/src/foo.ts'), join(r, 'cli/lib/foo.ts'));
+        writeFileSync(join(r, 'cli/lib/foo.ts'), 'a\nb\nc\nCHANGED\ne\nf\ng\nh\n');
+      },
+    );
+    try {
+      const changed = changedFilesBetween(base, head, repo);
+      expect(changed).toContain('cli/lib/foo.ts');
+      expect(changed).not.toContain('cli/src/foo.ts');
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+});
+
 describe('metadata-class diffs stop selecting the full suite (RUSH-2666)', () => {
   function initPackageJsonHistory(before: object, after: object): { repo: string; base: string; head: string } {
     const dir = mkdtempSync(join(tmpdir(), 'agents-ci-pkg-'));
@@ -820,7 +898,12 @@ test('changedFilesBetween ignores changes made only on the updated base branch',
   }
 });
 
-test('changedFilesBetween keeps both sides of a cross-component rename', () => {
+test('changedFilesBetween treats a pure cross-component move as moved-not-changed (PHNX-3200)', () => {
+  // Was: `--no-renames` reported this as a delete of the old path PLUS an add of
+  // the new one, so a pure move read as two changed files (and the #3033 flatten
+  // of ~2100 files read as ~2100 changes → suite=cli-full). Rename-aware, a
+  // 100%-similarity move selects nothing: the content is unchanged, and any
+  // importer whose path broke shows up as its own content change.
   const repo = mkdtempSync(join(tmpdir(), 'agents-ci-rename-'));
   try {
     git(repo, 'init', '-b', 'main');
@@ -838,8 +921,7 @@ test('changedFilesBetween keeps both sides of a cross-component rename', () => {
     const head = git(repo, 'rev-parse', 'HEAD');
 
     const files = changedFilesBetween(base, head, repo);
-    expect(files.sort()).toEqual([oldPath, newPath].sort());
-    expect(classifyCiScope(files, REPO)).toMatchObject({ cli: true, windows: false });
+    expect(files).toEqual([]);
   } finally {
     rmSync(repo, { recursive: true, force: true });
   }

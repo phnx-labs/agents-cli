@@ -235,14 +235,56 @@ export function classifyPackageJsonChange(
   }
 }
 
+// Rename-aware changed-file parse (PHNX-3200). `--no-renames` reported a `git mv`
+// as an add of the new path PLUS a delete of the old one, so a pure structural
+// move (the #3033 flatten renamed ~2100 files 100%) read as ~2100 *changed* files
+// — selecting suite=cli-full and tripping zero-selection on every moved source
+// that carried no test at its new path. Reading rename-aware `--name-status`
+// instead, a 100%-similarity `R` pair is a move, not a change: it selects nothing.
+// A rename WITH edits (similarity < 100) changed content at the new path, so the
+// new path is selected; a copy introduces new content at its destination, so it
+// is selected too.
+export function parseRenameAwareNameStatus(z: string): string[] {
+  const tokens = z.split('\0');
+  const out: string[] = [];
+  let i = 0;
+  while (i < tokens.length) {
+    const status = tokens[i];
+    if (!status) {
+      i++;
+      continue;
+    }
+    const code = status[0];
+    if (code === 'R' || code === 'C') {
+      // `R<score>\0<old>\0<new>` — a rename/copy consumes three fields.
+      const score = Number.parseInt(status.slice(1), 10);
+      const to = tokens[i + 2];
+      i += 3;
+      // A pure move (100%) changed no content — select nothing for the pair. A
+      // copy (C) or a rename-with-edits (score < 100) changed content at `to`.
+      if (to && (code === 'C' || !(score === 100))) out.push(to);
+    } else {
+      // A / M / D / T: `<status>\0<path>`.
+      const path = tokens[i + 1];
+      i += 2;
+      if (path) out.push(path);
+    }
+  }
+  return out;
+}
+
 export function changedFilesBetween(base: string, head: string, cwd = process.cwd()): string[] {
   const proc = Bun.spawnSync({
     cmd: [
       'git',
       'diff',
-      '--name-only',
-      '--no-renames',
-      '--diff-filter=ACMRD',
+      // Rename-aware: git pairs an add+delete it recognizes (default 50%
+      // similarity) as a single `R<score>` entry, so a structural move stops
+      // reading as two changed files. Sub-threshold moves stay add+delete, which
+      // is correct — they really did change.
+      '--find-renames',
+      '--name-status',
+      '--diff-filter=ACMRTD',
       '-z',
       `${base}...${head}`,
     ],
@@ -253,7 +295,7 @@ export function changedFilesBetween(base: string, head: string, cwd = process.cw
   if (proc.exitCode !== 0) {
     throw new Error(Buffer.from(proc.stderr).toString('utf8').trim());
   }
-  return Buffer.from(proc.stdout).toString('utf8').split('\0').filter(Boolean);
+  return parseRenameAwareNameStatus(Buffer.from(proc.stdout).toString('utf8'));
 }
 
 export function trackedFiles(cwd: string): string[] {
