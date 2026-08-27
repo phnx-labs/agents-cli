@@ -54,6 +54,7 @@ import {
   querySessions,
   countSessions,
   ftsSearch,
+  getSessionById,
   tryClaimScan,
   releaseScan,
   scanInProgressByLivePid,
@@ -911,8 +912,15 @@ export function resolveSessionById(sessions: SessionMeta[], idQuery: string): Se
 // ---------------------------------------------------------------------------
 
 /**
- * Run an FTS5 search over the DB and intersect with the given session list,
- * preserving the existing SessionMeta[] contract so sessions.ts is unchanged.
+ * Run an FTS5 search over the DB and union hits with the given session list.
+ *
+ * The listing pool is a minority of the index — cwd-scoped, default-capped at
+ * 50, and skipping whole classes of indexed transcript — so intersecting FTS
+ * hits with it dropped grep-visible sessions that the index already found
+ * (PHNX-2767: `agents sessions "tmux pane"` returned 0 while the project
+ * transcripts matched). Hits already in the pool keep the caller's SessionMeta;
+ * hits the pool missed are hydrated from the index so a content query returns
+ * the transcript FTS matched.
  */
 export function searchContentIndex(
   sessions: SessionMeta[],
@@ -925,7 +933,7 @@ export function searchContentIndex(
   const byId = new Map(sessions.map(s => [s.id, s]));
   const result = new Map<string, SessionMeta>();
   for (const hit of hits) {
-    const session = byId.get(hit.sessionId);
+    const session = byId.get(hit.sessionId) ?? getSessionById(hit.sessionId);
     if (!session) continue;
     result.set(hit.sessionId, {
       ...session,
