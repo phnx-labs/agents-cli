@@ -14191,8 +14191,8 @@
           "negate": false
         }
       ],
-      "examples": "# CI went red → triage it (poll a command, diff, fire an agent)\n      agents monitors add ci-red \\\n        --poll 'gh pr checks 1119 --json name,bucket' 30s --match 'fail' \\\n        --run claude --prompt 'CI failed on #1119: {event}. Diagnose and fix.' \\\n        --device yosemite-s0\n\n      # SSL cert issued → notify (poll an HTTPS endpoint every 8h)\n      agents monitors add cert-issued \\\n        --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \\\n        --match 'issued' --notify --device zion\n\n      # Dry-run: evaluate the source once and show what it would emit (no action)\n      agents monitors test ci-red\n\n      # A fleet box going loaded → spin up an agent\n      agents monitors add box-loaded --watch-device yosemite-s0 --match loaded \\\n        --run claude --prompt 'yosemite-s0 is loaded: {event}. Investigate.'",
-      "notes": "A monitor is a routine whose trigger is a watched SOURCE instead of a clock.\n      It has three parts:\n        - SOURCE    (--watch, --poll, --poll-http, --ws, --watch-file, --watch-device, --on)\n        - CONDITION (--on-change [default], --match <re>, --every; --dedupe-key)\n        - ACTION    (--run <agent> --prompt, --routine, --notify, --webhook-out)\n\n      The fired event is injected into a run/routine prompt as {event}.\n      Pin the single OWNER device with --device (exactly-once). The daemon (shared\n      with routines) auto-starts on first add unless daemon.enabled is false on this\n      device; manage it with 'agents daemon start|stop' (or 'agents routines start|stop').\n\n      v1 evaluates poll sources (command, poll, poll-http, file, device). Push\n      sources (ws, webhook) are accepted but delivered through a receiver wired in\n      a follow-up.",
+      "examples": "# CI went red → triage it (poll a command, diff, fire an agent)\n      agents monitors add ci-red \\\n        --poll 'gh pr checks 1119 --json name,bucket' 30s --match 'fail' \\\n        --run claude --prompt 'CI failed on #1119: {event}. Diagnose and fix.' \\\n        --device yosemite-s0\n\n      # Merge-on-green: the fire is ok only if the PR actually merged\n      agents monitors add merge-1682 \\\n        --poll 'gh pr view 1682 --json state --jq .state' 2m --match OPEN \\\n        --run claude --prompt 'Rebase-merge #1682: {event}' \\\n        --postcondition 'gh pr view 1682 --json state --jq .state | grep -qx MERGED'\n\n      # SSL cert issued → notify (poll an HTTPS endpoint every 8h)\n      agents monitors add cert-issued \\\n        --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \\\n        --match 'issued' --notify --device zion\n\n      # Dry-run: evaluate the source once and show what it would emit (no action)\n      agents monitors test ci-red\n\n      # A fleet box going loaded → spin up an agent\n      agents monitors add box-loaded --watch-device yosemite-s0 --match loaded \\\n        --run claude --prompt 'yosemite-s0 is loaded: {event}. Investigate.'",
+      "notes": "A monitor is a routine whose trigger is a watched SOURCE instead of a clock.\n      It has three parts:\n        - SOURCE    (--watch, --poll, --poll-http, --ws, --watch-file, --watch-device, --on)\n        - CONDITION (--on-change [default], --match <re>, --every; --dedupe-key)\n        - ACTION    (--run <agent> --prompt, --routine, --notify, --webhook-out)\n                    --postcondition <cmd> on --run/--routine asserts the effect\n                    happened (exit 0) after the agent settles; otherwise the\n                    fire records as \"no effect\", not ok.\n\n      The fired event is injected into a run/routine prompt as {event}.\n      Pin the single OWNER device with --device (exactly-once). The daemon (shared\n      with routines) auto-starts on first add unless daemon.enabled is false on this\n      device; manage it with 'agents daemon start|stop' (or 'agents routines start|stop').\n\n      v1 evaluates poll sources (command, poll, poll-http, file, device). Push\n      sources (ws, webhook) are accepted but delivered through a receiver wired in\n      a follow-up.",
       "subcommands": [
         {
           "name": "add",
@@ -14392,6 +14392,15 @@
               "flags": "--action-timeout <t>",
               "description": "Kill the --run action if it runs longer than this (e.g. 10m)",
               "long": "--action-timeout",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--postcondition <cmd>",
+              "description": "Shell command that must exit 0 after a --run/--routine action settles; otherwise the fire records as no-effect, not ok. {event} is replaced with the fired event summary",
+              "long": "--postcondition",
               "required": true,
               "optional": false,
               "variadic": false,

@@ -31,7 +31,7 @@ import {
   readLiveness,
   markDroughtNotified,
 } from './state.js';
-import { dispatchAction, type DispatchResult } from './dispatch.js';
+import { dispatchAction, injectEvent, type DispatchResult } from './dispatch.js';
 import { sendToOwner } from '../notify.js';
 import { readRunMeta } from '../scheduling/routines.js';
 
@@ -342,12 +342,20 @@ export class MonitorEngine {
     // (state.ts) never trusts this field — it re-reads the run fresh instead.
     const runStatusAtFire = result.runId ? readRunMeta(monitor.name, result.runId)?.status : undefined;
 
+    // Snapshot the postcondition with `{event}` already interpolated so a later
+    // `resolveFireOutcome` can assert the stated effect without re-reading YAML
+    // (PHNX-2842). Notify/webhook-out have no run to settle, so they skip this.
+    const postcondition = (result.kind === 'run' || result.kind === 'routine') && monitor.action.postcondition
+      ? injectEvent(monitor.action.postcondition, event)
+      : undefined;
+
     writeFireRecord(event, {
       ...(result.runId ? { runId: result.runId } : {}),
       action: result.kind,
       ok: result.ok,
       ...(result.error ? { error: result.error } : {}),
       ...(runStatusAtFire ? { runStatusAtFire } : {}),
+      ...(postcondition ? { postcondition } : {}),
     });
     writeState(monitor.name, decision.value, decision.dedupeKey, { lastFiredAt: event.firedAt, fireTimes });
 

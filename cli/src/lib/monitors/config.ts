@@ -108,6 +108,17 @@ export interface ActionConfig {
   notifyChannel?: string;
   /** webhook-out: URL to POST the event to. */
   url?: string;
+  /**
+   * Shell command that must exit 0 after a `run`/`routine` action settles.
+   * Asserts the stated effect actually happened (PHNX-2842) — e.g.
+   * `gh pr view 1682 --json state --jq .state | grep -qx MERGED`. `{event}` is
+   * replaced with the fired event summary, same as the prompt. Evaluated once
+   * the dispatched run is no longer `running`; a failed check makes the fire
+   * `ok: false` with effect `none` (`postcondition not met`), not a healthy
+   * `completed`. Notify/webhook-out already have a synchronous ok and refuse
+   * this field.
+   */
+  postcondition?: string;
 }
 
 /** Full monitor configuration (persisted as YAML in ~/.agents/monitors/). */
@@ -386,6 +397,13 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
         new URL(action.url);
       } catch {
         errors.push(`action.url must be an absolute URL (got ${JSON.stringify(action.url)})`);
+      }
+    }
+    if (action.postcondition !== undefined) {
+      if (action.type !== 'run' && action.type !== 'routine') {
+        errors.push("action.postcondition only applies to run or routine actions");
+      } else if (typeof action.postcondition !== 'string' || action.postcondition.trim() === '') {
+        errors.push('action.postcondition must be a non-empty shell command');
       }
     }
   }

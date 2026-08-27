@@ -14,6 +14,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { createHash } from 'crypto';
+import { spawnSync } from 'child_process';
 import { getMonitorsHistoryDir, ensureAgentsDir } from '../state.js';
 import { safeJoin } from '../paths.js';
 import { readRunMeta, type RunMeta } from '../scheduling/routines.js';
@@ -262,6 +263,16 @@ export interface FireRecord extends MonitorEvent {
    * run fresh on every call instead of trusting this snapshot.
    */
   runStatusAtFire?: RunMeta['status'];
+  /**
+   * The action's postcondition command, snapshotted at fire time with `{event}`
+   * already interpolated (PHNX-2842). `resolveFireOutcome` runs this once the
+   * dispatched run has settled `completed`.
+   */
+  postcondition?: string;
+  /** Result of the postcondition check, persisted after the first evaluation. */
+  postconditionOk?: boolean;
+  /** stderr/stdout snippet when `postconditionOk` is false. */
+  postconditionError?: string;
 }
 
 /** List a monitor's fire history, chronologically ascending. */
@@ -286,8 +297,8 @@ export function listFires(name: string): FireRecord[] {
   return fires;
 }
 
-/** Run statuses that read as a healthy fire: still in flight, or settled clean. */
-const OK_RUN_STATUSES = new Set<RunMeta['status']>(['running', 'completed']);
+/** Cap a display-time postcondition so `monitors runs` cannot hang on a stuck command. */
+const POSTCONDITION_TIMEOUT_MS = 15_000;
 
 /** The reconciled outcome of one fire, resolved against the run's live status. */
 export interface ReconciledFireOutcome {
@@ -295,11 +306,63 @@ export interface ReconciledFireOutcome {
   ok: boolean;
   /** The run's live terminal status, when a runId is present and resolvable. */
   runStatus?: RunMeta['status'];
+  /**
+   * Present when a `completed` run had a postcondition to assert (PHNX-2842).
+   * `met` = the command exited 0; `none` = ran but the intended effect did not
+   * happen (the fire must not read as `ok`).
+   */
+  effect?: 'met' | 'none';
+  /** Why the fire is not ok, when the postcondition failed. */
+  error?: string;
+}
+
+/**
+ * Run a fire's postcondition command. Exit 0 means the intended effect happened;
+ * anything else (nonzero, timeout, spawn error, empty command) is "no effect".
+ * Real `/bin/sh -c` (or `cmd /c`) — the same seam command sources use.
+ */
+export function evaluatePostcondition(command: string): { ok: boolean; error?: string } {
+  const trimmed = command.trim();
+  if (!trimmed) return { ok: false, error: 'postcondition not met: empty command' };
+
+  const [bin, args] = process.platform === 'win32'
+    ? ['cmd', ['/c', trimmed]]
+    : ['/bin/sh', ['-c', trimmed]];
+
+  const result = spawnSync(bin as string, args as string[], {
+    encoding: 'utf-8',
+    timeout: POSTCONDITION_TIMEOUT_MS,
+    maxBuffer: 8 * 1024 * 1024,
+    env: { ...process.env, CLICOLOR: '0', NO_COLOR: '1', FORCE_COLOR: '0' },
+  });
+
+  if (result.status === 0) return { ok: true };
+
+  if (result.error) {
+    const err = result.error as NodeJS.ErrnoException;
+    if (err.code === 'ETIMEDOUT') {
+      return { ok: false, error: `postcondition not met: timed out after ${POSTCONDITION_TIMEOUT_MS / 1000}s` };
+    }
+    return { ok: false, error: `postcondition not met: ${err.message}` };
+  }
+
+  const detail = (result.stderr || result.stdout || '').trim().replace(/\s+/g, ' ').slice(0, 200);
+  const exit = result.status ?? 'unknown';
+  return { ok: false, error: `postcondition not met${detail ? `: ${detail}` : ` (exit ${exit})`}` };
+}
+
+/** Persist the postcondition result onto the existing fire record. Frozen `ok` is left as the fire-time snapshot. */
+function persistPostcondition(fire: FireRecord, result: { ok: boolean; error?: string }): void {
+  writeFireRecord(fire, {
+    postconditionOk: result.ok,
+    ...(result.error ? { postconditionError: result.error } : {}),
+  });
 }
 
 /**
  * Reconcile a fire's frozen `ok` against its dispatched run's REAL, current
- * status — the render-time fix for RUSH-2690.
+ * status — the render-time fix for RUSH-2690 — and, when the run has settled
+ * `completed`, against a declared postcondition (PHNX-2842).
  *
  * `writeFireRecord` (this module) persists `ok` once, at fire time, from
  * `dispatchAction`'s synchronous return. For a `run`/`routine` action that
@@ -315,10 +378,44 @@ export interface ReconciledFireOutcome {
  * A fire with no `runId` (a `notify`/`webhook-out` action, or a `run`/`routine`
  * dispatch that never got a runId at all) has nothing to reconcile against —
  * its frozen `ok` is the only signal and is returned as-is.
+ *
+ * `completed` is not success by itself. An agent that exits 0 without doing
+ * the job (merge-on-green that never merged) used to record `ok` because
+ * `OK_RUN_STATUSES` treated `completed` as healthy. When the fire carries a
+ * `postcondition` command, this function runs it once the run has settled and
+ * returns `ok: false, effect: 'none'` when it fails — distinguishing "ran but
+ * no effect" from a working fire. The result is persisted on the fire record
+ * so later listings do not re-exec the command.
  */
 export function resolveFireOutcome(jobName: string, fire: FireRecord): ReconciledFireOutcome {
   if (!fire.runId) return { ok: fire.ok !== false };
   const run = readRunMeta(jobName, fire.runId);
   if (!run) return { ok: fire.ok !== false };
-  return { ok: OK_RUN_STATUSES.has(run.status), runStatus: run.status };
+  if (run.status === 'running') return { ok: true, runStatus: run.status };
+  if (run.status !== 'completed') return { ok: false, runStatus: run.status };
+
+  if (!fire.postcondition) return { ok: true, runStatus: 'completed' };
+
+  if (fire.postconditionOk === true) {
+    return { ok: true, runStatus: 'completed', effect: 'met' };
+  }
+  if (fire.postconditionOk === false) {
+    return {
+      ok: false,
+      runStatus: 'completed',
+      effect: 'none',
+      ...(fire.postconditionError ? { error: fire.postconditionError } : {}),
+    };
+  }
+
+  const result = evaluatePostcondition(fire.postcondition);
+  persistPostcondition(fire, result);
+  fire.postconditionOk = result.ok;
+  if (result.error) fire.postconditionError = result.error;
+  return {
+    ok: result.ok,
+    runStatus: 'completed',
+    effect: result.ok ? 'met' : 'none',
+    ...(result.error ? { error: result.error } : {}),
+  };
 }

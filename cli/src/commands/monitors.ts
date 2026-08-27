@@ -80,6 +80,29 @@ function sourceLabel(source: MonitorSource): string {
   }
 }
 
+/** Warn when a run/routine action has no postcondition — completed-exit-0 still records as ok (PHNX-2842). */
+function warnMissingPostcondition(action: ActionConfig): void {
+  if ((action.type === 'run' || action.type === 'routine') && !action.postcondition) {
+    stderrLine(chalk.yellow(
+      `  Note: ${action.type} has no --postcondition — a completed agent that did nothing will still record as ok. Add --postcondition '<cmd>' that exits 0 when the intended effect happened.`,
+    ));
+  }
+}
+
+/** Reconciled one-line outcome for a fire (ok / no effect / failed). */
+function fireOutcomeDisplay(name: string, f: ReturnType<typeof listFires>[number]): { label: string; note: string } {
+  const rec = resolveFireOutcome(name, f);
+  if (rec.ok) return { label: chalk.green('ok'), note: '' };
+  if (rec.effect === 'none') {
+    const note = rec.error ? chalk.gray(`    ${rec.error}`) : '';
+    return { label: chalk.yellow('no effect'), note };
+  }
+  const corrected = f.ok !== false && rec.runStatus
+    ? chalk.yellow(` (run ${rec.runStatus})`)
+    : '';
+  return { label: chalk.red('failed') + corrected, note: '' };
+}
+
 /** A one-line human label for a monitor's action. */
 function actionLabel(action: ActionConfig): string {
   switch (action.type) {
@@ -300,9 +323,14 @@ function buildAction(options: Record<string, any>): ActionConfig {
     if (options.mode) action.mode = options.mode;
     if (options.effort) action.effort = options.effort;
     if (options.actionTimeout) action.timeout = options.actionTimeout;
+    if (options.postcondition) action.postcondition = options.postcondition;
     chosen.push(action);
   }
-  if (options.routine) chosen.push({ type: 'routine', routine: options.routine });
+  if (options.routine) {
+    const action: ActionConfig = { type: 'routine', routine: options.routine };
+    if (options.postcondition) action.postcondition = options.postcondition;
+    chosen.push(action);
+  }
   if (options.notify !== undefined) {
     // --notify may be a bare flag (notify the owner) or carry a channel that
     // overrides notify.owner.channel. Left unset, the send resolves the owner
@@ -318,6 +346,10 @@ function buildAction(options: Record<string, any>): ActionConfig {
   }
   if (chosen.length > 1) {
     stderrLine(chalk.red(`Exactly one action is allowed; got ${chosen.map((c) => c.type).join(', ')}`));
+    process.exit(1);
+  }
+  if (options.postcondition && chosen[0].type !== 'run' && chosen[0].type !== 'routine') {
+    stderrLine(chalk.red('--postcondition only applies to --run or --routine'));
     process.exit(1);
   }
   return chosen[0];
@@ -416,6 +448,12 @@ export function registerMonitorsCommands(program: Command): void {
         --run claude --prompt 'CI failed on #1119: {event}. Diagnose and fix.' \\
         --device yosemite-s0
 
+      # Merge-on-green: the fire is ok only if the PR actually merged
+      agents monitors add merge-1682 \\
+        --poll 'gh pr view 1682 --json state --jq .state' 2m --match OPEN \\
+        --run claude --prompt 'Rebase-merge #1682: {event}' \\
+        --postcondition 'gh pr view 1682 --json state --jq .state | grep -qx MERGED'
+
       # SSL cert issued → notify (poll an HTTPS endpoint every 8h)
       agents monitors add cert-issued \\
         --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \\
@@ -434,6 +472,9 @@ export function registerMonitorsCommands(program: Command): void {
         - SOURCE    (--watch, --poll, --poll-http, --ws, --watch-file, --watch-device, --on)
         - CONDITION (--on-change [default], --match <re>, --every; --dedupe-key)
         - ACTION    (--run <agent> --prompt, --routine, --notify, --webhook-out)
+                    --postcondition <cmd> on --run/--routine asserts the effect
+                    happened (exit 0) after the agent settles; otherwise the
+                    fire records as "no effect", not ok.
 
       The fired event is injected into a run/routine prompt as {event}.
       Pin the single OWNER device with --device (exactly-once). The daemon (shared
@@ -475,6 +516,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--mode <mode>', 'Execution mode for --run: plan, edit, auto, or skip')
     .option('--effort <effort>', 'Reasoning effort for --run: low | medium | high | xhigh | max | auto')
     .option('--action-timeout <t>', 'Kill the --run action if it runs longer than this (e.g. 10m)')
+    .option('--postcondition <cmd>', 'Shell command that must exit 0 after a --run/--routine action settles; otherwise the fire records as no-effect, not ok. {event} is replaced with the fired event summary')
     .option('--routine <name>', 'Fire an existing routine on change')
     .option('--notify [channel]', 'Notify the owner (notify.owner); [channel] overrides the owner channel')
     .option('--webhook-out <url>', 'POST the event to this URL')
@@ -511,6 +553,7 @@ export function registerMonitorsCommands(program: Command): void {
         await guardAgainstDuplicateMonitor(config, options.force === true);
         writeMonitor(config);
         console.log(chalk.green(`Monitor '${name}' added`));
+        warnMissingPostcondition(config.action);
         if (ensureDaemonRunning()) await assertEnginePickup(config);
         return;
       }
@@ -592,6 +635,7 @@ export function registerMonitorsCommands(program: Command): void {
       writeMonitor(config);
       console.log(chalk.green(`Monitor '${nameOrPath}' added`));
       console.log(chalk.gray(`  ${sourceLabel(source)} → [${condition.mode}] → ${actionLabel(action)} · owner: ${ownerLabel(config)}`));
+      warnMissingPostcondition(action);
       if (ensureDaemonRunning()) await assertEnginePickup(config);
     });
 
@@ -677,7 +721,7 @@ export function registerMonitorsCommands(program: Command): void {
           state,
           liveness,
           stalled: isStalled(monitor, liveness),
-          recentFires,
+          recentFires: recentFires.map((f) => ({ ...f, reconciled: resolveFireOutcome(name, f) })),
         });
         return;
       }
@@ -705,9 +749,10 @@ export function registerMonitorsCommands(program: Command): void {
       if (recentFires.length > 0) {
         console.log(chalk.bold('\nRecent fires'));
         for (const f of recentFires) {
-          // Reconciled against the run's real status — see `runs`, above (RUSH-2690).
-          const { ok } = resolveFireOutcome(name, f);
-          console.log(`  ${chalk.gray(f.firedAt)}  ${f.action ?? '?'}  ${ok ? chalk.green('ok') : chalk.red('failed')}`);
+          // Reconciled against the run's real status + postcondition (RUSH-2690, PHNX-2842).
+          const { label, note } = fireOutcomeDisplay(name, f);
+          console.log(`  ${chalk.gray(f.firedAt)}  ${f.action ?? '?'}  ${label}`);
+          if (note) console.log(note);
         }
       }
     });
@@ -874,23 +919,16 @@ export function registerMonitorsCommands(program: Command): void {
       }
       console.log(chalk.bold(`Fire history: ${name}\n`));
       for (const f of fires.slice(-20)) {
-        // Reconcile against the run's REAL, current status (RUSH-2690) rather
-        // than trusting the frozen `ok` written at fire time — `dispatchAction`
-        // only sees a synchronous 'running' snapshot before the run has
-        // actually settled, so a run that later fails/times out/never produces
-        // output would otherwise read `ok` here forever while `agents monitors
-        // logs` (which reads the run record fresh) already shows the truth.
-        const { ok, runStatus } = resolveFireOutcome(name, f);
-        const outcome = ok ? chalk.green('ok') : chalk.red('failed');
-        // Surface the divergence explicitly when the frozen write disagreed
-        // with the reconciled read — the exact "fire says ok, run says
-        // otherwise" symptom RUSH-2690 reported.
-        const corrected = f.ok !== false && !ok && runStatus
-          ? chalk.yellow(` (run ${runStatus})`)
-          : '';
+        // Reconcile against the run's REAL, current status (RUSH-2690) and a
+        // declared postcondition (PHNX-2842) rather than trusting the frozen
+        // `ok` written at fire time — `dispatchAction` only sees a synchronous
+        // 'running' snapshot before the run has actually settled, and a
+        // `completed` agent that did nothing used to read `ok` here forever.
+        const { label, note } = fireOutcomeDisplay(name, f);
         const runRef = f.runId ? chalk.gray(`  run ${f.runId}`) : '';
-        console.log(`  ${f.firedAt}  ${(f.action ?? '?').padEnd(12)} ${outcome}${corrected}${runRef}`);
+        console.log(`  ${f.firedAt}  ${(f.action ?? '?').padEnd(12)} ${label}${runRef}`);
         console.log(chalk.gray(`    ${f.summary.slice(0, 100)}`));
+        if (note) console.log(note);
       }
     });
 
