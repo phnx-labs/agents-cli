@@ -1,0 +1,1 @@
+- **Traces insight group-by dimensions (PHNX-3141).** `cli/src/lib/traces/segments.ts` derives the console bar axes — agent (model × harness), task type, failure timing — and the time-to-first-tool latency insight (`firstToolMs` p50/p90/p99/max). Pure functions; the sync integrator wires them into the shard. Source: `cli/src/lib/traces/segments.ts`.
