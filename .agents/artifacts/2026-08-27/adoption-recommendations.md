@@ -83,7 +83,7 @@ So this is not a feature roadmap. It is eleven repairs, ordered so the cheapest 
   <rect x="520" y="371" width="48" height="15" fill="#5f8f1f"/>
   <text x="580" y="383" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="11.5">4-8h · that order, or `agents upgrade` breaks</text>
 
-  <text x="30" y="412" fill="#666" font-family="ui-monospace,monospace" font-size="11">The demo is the thing week 3 spends. Nobody owns rotation-plus-resume on camera.</text>
+  <text x="30" y="412" fill="#666" font-family="ui-monospace,monospace" font-size="11">The demo is what week 3 spends. Two narrow rotation competitors exist (claude-swap, headroom) — neither shows it on camera.</text>
 
   <line x1="500" y1="436" x2="500" y2="454" stroke="#555" stroke-width="1.5" marker-end="url(#ar)"/>
 
@@ -128,6 +128,7 @@ Why these eleven, and how much of each rests on measurement rather than judgemen
 | 4 · tier `--help` | 254 of 564 commands (45%) dead or near-dead; top 20 carry 70.4% | **Yes** — 9,223 sessions |
 | 5 · site checks | `is-agentic` scores 63/100; brand discoverability FAILED | **Yes** — raw scan committed |
 | 6 · demo | Usage limits is the only pain with 1M+ view posts | **Yes** — X engagement counts |
+| 6 · demo (competitive) | Rotation has two competitors — `claude-swap` (2.0k stars, Claude-only, a foreground loop you babysit) and `headroom` (99 stars, Claude+Codex). Neither demonstrates it, and neither pairs it with stall detection | **Yes** — live star and download counts |
 | 7 · skill/plugin | Installed skills enter agent context deterministically; `llms.txt` does not | Partly — sourced, not causal |
 | 8 · name cutover | Four names, two domains, two repo names; 17 stars | **Yes** |
 | 9-11 · distribution | Show HN was the spark for Conductor and container-use | **Yes** — points, dated |
