@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -535,6 +536,55 @@ describe.skipIf(process.platform === 'win32')('generateSystemdUnit', () => {
     const segs = systemdPath(generateSystemdUnit(path.join(nodeDir, 'agents')));
     expect(segs.length).toBe(new Set(segs).size);
     expect(segs[0]).toBe(nodeDir);
+  });
+
+  it('pins ~/.rush/bin and ~/.local/bin so `which rush` succeeds under the daemon (PHNX-3075)', () => {
+    // systemd/launchd pin PATH and never source ~/.profile, so a login-shell
+    // install at ~/.rush/bin/rush is invisible to the daemon. The notify
+    // preflight (`which rush` in providers/rush.ts) then fails forever while
+    // `agents notify --dry-run` from a login shell reports ok. Reproduce that
+    // split against the generated unit PATH, not a mocked lookup.
+    const sandboxHome = fs.mkdtempSync(path.join(os.tmpdir(), 'agd-3075-path-'));
+    const prevHome = process.env.HOME;
+    const prevRealHome = process.env.AGENTS_REAL_HOME;
+    process.env.HOME = sandboxHome;
+    process.env.AGENTS_REAL_HOME = sandboxHome;
+    const rushDir = path.join(sandboxHome, '.rush', 'bin');
+    const localDir = path.join(sandboxHome, '.local', 'bin');
+    const rushBin = path.join(rushDir, 'rush');
+    fs.mkdirSync(rushDir, { recursive: true });
+    fs.writeFileSync(rushBin, '#!/bin/sh\nexit 0\n');
+    fs.chmodSync(rushBin, 0o755);
+    try {
+      const unitSegs = systemdPath(generateSystemdUnit());
+      const plistSegs = launchdPath(generateLaunchdPlist());
+      for (const segs of [unitSegs, plistSegs]) {
+        expect(segs[0]).toBe(path.dirname(getAgentsBinPath()));
+        expect(segs).toContain(rushDir);
+        expect(segs).toContain(localDir);
+        expect(segs.indexOf(rushDir)).toBeGreaterThan(0);
+        expect(segs.indexOf(rushDir)).toBeLessThan(segs.indexOf('/usr/bin'));
+      }
+
+      const found = spawnSync('which', ['rush'], {
+        encoding: 'utf-8',
+        env: { PATH: unitSegs.join(':') },
+      });
+      expect(found.status).toBe(0);
+      expect(found.stdout.trim()).toBe(rushBin);
+
+      const withoutUserBins = unitSegs.filter((d) => d !== rushDir && d !== localDir);
+      const missed = spawnSync('which', ['rush'], {
+        encoding: 'utf-8',
+        env: { PATH: withoutUserBins.join(':') },
+      });
+      expect(missed.status).not.toBe(0);
+      expect(missed.stdout.trim()).not.toBe(rushBin);
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME; else process.env.HOME = prevHome;
+      if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME; else process.env.AGENTS_REAL_HOME = prevRealHome;
+      fs.rmSync(sandboxHome, { recursive: true, force: true });
+    }
   });
 
   it('pins a JavaScript install to the Node runtime that installed the service', () => {

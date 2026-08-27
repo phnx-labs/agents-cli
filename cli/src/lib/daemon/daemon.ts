@@ -29,6 +29,7 @@ import { startHostedWebhookReceivers, type HostedWebhookReceivers } from '../dae
 import { secretsBrokerSocketPath, brokerPidAlive } from '../secrets/agent.js';
 import { redactSecrets } from '../redact.js';
 import { getAgentsBinPath, getCliLaunch, BUN_VIRTUAL_ROOT } from '../cli-entry.js';
+import { localBinDir } from '../platform/posixpath.js';
 import { isSchedulerEnabled, assertSchedulerEnabled, isDaemonEnabled, resolveBrowserTaskIdleMs } from '../device-config.js';
 import { reapTerminalRoutineProcesses } from '../routine-process-cleanup.js';
 import { recordSubsystemOk, recordSubsystemError, recordSubsystemErrorReason, readSubsystemHealth, SUBSYSTEM_DAEMON_START } from '../daemon-health.js';
@@ -1816,9 +1817,23 @@ function daemonNodeBinDir(): string {
 }
 
 /**
+ * Login-shell user-bin dirs a service-manager-started daemon would otherwise
+ * miss. systemd/launchd pin PATH and never source `~/.profile`, so they never
+ * see `~/.rush/bin` (where `rush` lands) or `~/.local/bin` (XDG user-bin).
+ * Monitor `notify` and dispatched `agents run` children inherit this PATH;
+ * without these dirs the rush-backed owner channel fails with
+ * `rush CLI not found on PATH` (PHNX-3075) while an interactive shell on the
+ * same box succeeds. Uses the same HOME the manifest bakes (RUSH-2639).
+ */
+function daemonUserBinDirs(): string[] {
+  const home = serviceManifestHomeEnv().HOME;
+  return [path.join(home, '.rush', 'bin'), localBinDir(home)];
+}
+
+/**
  * The full PATH value the daemon service manifest pins, in order: the directory
- * of the `agents` shim itself FIRST, then the Node runtime dir, then the
- * platform's system dirs.
+ * of the `agents` shim itself FIRST, then the Node runtime dir, then login-shell
+ * user-bin dirs (`~/.rush/bin`, `~/.local/bin`), then the platform's system dirs.
  *
  * The shim's own dir must lead so a scheduled `command` routine that shells out
  * to the bare name `agents` (`/bin/sh -c 'agents repo pull system'`) resolves the
@@ -1829,12 +1844,19 @@ function daemonNodeBinDir(): string {
  *
  * The Node runtime dir stays second so the shim's shebang (`#!/usr/bin/env node`)
  * still resolves the exact Node that installed the service — never an ancient
- * system node or a pruned nvm version. Deduped across the whole list, so a
+ * system node or a pruned nvm version. User-bin dirs sit after that pair so a
+ * `~/.local/bin/agents` cannot shadow the daemon binary, but `rush` (and other
+ * login-shell CLIs) still resolve. Deduped across the whole list, so a
  * Node/shim dir that already appears among the system dirs (e.g. a
  * `/usr/local/bin` install) never doubles.
  */
 function daemonPathValue(agentsBin: string, systemDirs: readonly string[]): string {
-  return [...new Set([path.dirname(agentsBin), daemonNodeBinDir(), ...systemDirs])].join(':');
+  return [...new Set([
+    path.dirname(agentsBin),
+    daemonNodeBinDir(),
+    ...daemonUserBinDirs(),
+    ...systemDirs,
+  ])].join(':');
 }
 
 /**
