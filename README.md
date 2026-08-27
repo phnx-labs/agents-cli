@@ -1287,6 +1287,7 @@ agents artifacts share list --scope me                      # just the owner-onl
 agents artifacts share edit fleet --label "Final fleet plan" --meta status=final
 agents artifacts share revisions fleet                      # prior versions kept under a slug
 agents artifacts share visibility fleet me                  # re-scope a published page in place (public|unlisted|me|org)
+agents artifacts share open fleet                           # open your page signed in, so its in-page visibility control is live
 agents artifacts share status                               # show the endpoint
 agents artifacts unshare fleet                              # take a published link (+ its OG cover) down
 ```
@@ -1309,7 +1310,11 @@ stranger is redirected to sign in, then 404s). `share visibility <target> <level
 re-scopes an **already-published** page in place — the slug/URL is preserved and the
 body is untouched (a metadata-only change, like `share edit`, so no revision) — so you
 can promote a draft to `public` or pull a link back to `me`/`org` without re-publishing
-(`me`/`org` need a Phoenix session; `org` needs a workspace domain). Sign-in is a
+(`me`/`org` need a Phoenix session; `org` needs a workspace domain). The served page
+also carries an **in-page visibility control** — a chip you can switch right on the page
+— but it is interactive only for the signed-in owner, and a plain link has no login;
+`share open <target>` mints a short-lived, single-use login ticket and opens your page
+with it so the chip becomes a live dropdown. Sign-in is a
 single **Phoenix ID** (Google-only device-code OAuth, `agents auth login`) — see
 [`docs/share.md`](cli/docs/share.md) for the full identity + visibility model.
 **BYO Cloudflare** remains: `setup` reads

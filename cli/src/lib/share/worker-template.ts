@@ -1314,6 +1314,25 @@ async function verifySelfTicket(ticket, env) {
   return { userId: userId, email: email };
 }
 
+// Single-use enforcement for a self-signed ticket: claim its signature the first
+// time it is redeemed, and reject any later presentation of the same ticket. The
+// HMAC + short TTL stop forgery and bound the window, but without this a ticket the
+// CLI printed (--json / --no-open / a browser-open failure) could be replayed by
+// anyone who captured that output before it expired, minting the owner's 7-day
+// cookie a second time. Get-then-put mirrors claimHandle's one-time-claim pattern;
+// the marker rides a __-prefixed key (GET-blocked, excluded from every listing).
+async function consumeSelfTicket(env, sig) {
+  if (!sig) return false;
+  const key = '__ticket-used/' + sig;
+  const existing = await env.BUCKET.get(key);
+  if (existing) return false;
+  await env.BUCKET.put(key, '1', {
+    httpMetadata: { contentType: 'text/plain' },
+    customMetadata: { visibility: 'unlisted' },
+  });
+  return true;
+}
+
 async function identityFromCookie(request, env) {
   const secret = typeof env.WRITE_TOKEN === 'string' ? env.WRITE_TOKEN : '';
   if (!secret) return null;
@@ -1373,9 +1392,17 @@ async function resolveViewer(request, env, url) {
   if (cookieId) return { identity: cookieId };
   const ticket = url.searchParams.get('phoenix_ticket');
   if (!ticket) return {};
-  // Prefer the locally-verifiable self-signed ticket (PHNX-3370, no network);
-  // fall back to the external identity-server redeem for tickets it issued.
-  const redeemed = (await verifySelfTicket(ticket, env)) || (await redeemTicket(ticket, env));
+  // Prefer the locally-verifiable self-signed ticket (PHNX-3370, no network), and
+  // enforce single use by claiming its signature on first redemption — a captured
+  // ticket replayed within its TTL finds it already spent. Fall back to the
+  // external identity-server redeem for tickets it issued.
+  let redeemed = await verifySelfTicket(ticket, env);
+  if (redeemed) {
+    const sig = ticket.slice(ticket.lastIndexOf('.') + 1);
+    if (!(await consumeSelfTicket(env, sig))) redeemed = null;
+  } else {
+    redeemed = await redeemTicket(ticket, env);
+  }
   if (!redeemed) return { error: json({ error: 'invalid ticket' }, 401) };
   const cookie = await signShareCookie(redeemed, env);
   if (!cookie) return { error: json({ error: 'phoenix login is not configured' }, 401) };

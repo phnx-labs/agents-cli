@@ -268,6 +268,33 @@ describe('worker PATCH route against real R2 (miniflare, PHNX-3278 blocker #4)',
     expect(ownerHtml).toContain('data-ash-chip');
   });
 
+  it('redeems a login ticket only ONCE — a replay within its TTL is spent (PHNX-3370)', async () => {
+    const { realBucket, worker } = await setup();
+    const env = { WRITE_TOKEN: 'secret', BUCKET: wrapBucketForDirectFetch(realBucket) };
+    worker.hooks.verifyPhoenixToken = async (req: Request) => (/^Bearer phoenix-bearer/i.test(req.headers.get('authorization') || '') ? { userId: 'u-octocat', email: 'octocat@example.com' } : null);
+    await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer secret', 'content-type': 'text/html; charset=utf-8' },
+      body: '<html><head><title>Plan</title></head><body>ok</body></html>',
+    }), env);
+    const mint = await worker.default.fetch(new Request('https://share.test/__ticket', {
+      method: 'POST', headers: { authorization: 'Bearer phoenix-bearer-xyz' },
+    }), env);
+    const ticket = (await mint.json() as { ticket: string }).ticket;
+    const u = 'https://share.test/octocat/plan?phoenix_ticket=' + encodeURIComponent(ticket);
+
+    // First redemption: 302 + cookie.
+    const first = await worker.default.fetch(new Request(u), env);
+    expect(first.status).toBe(302);
+    expect(first.headers.get('set-cookie') || '').toContain('__Host-phoenix_share=');
+
+    // Second redemption of the SAME ticket: spent — no cookie, no owner control.
+    const second = await worker.default.fetch(new Request(u), env);
+    expect(second.status).toBe(200);
+    expect(second.headers.get('set-cookie')).toBeNull();
+    expect(await second.text()).not.toContain('ash-chip-own');
+  });
+
   it('rejects a tampered login ticket rather than trusting it (PHNX-3370)', async () => {
     const { realBucket, worker } = await setup();
     const env = { WRITE_TOKEN: 'secret', BUCKET: wrapBucketForDirectFetch(realBucket) };
