@@ -27,6 +27,8 @@ import {
   type RotateResult,
   type FailoverArmingContext,
 } from './rotate.js';
+import { getVersionsDir } from '../state.js';
+import { invalidateInstalledVersionsCache } from '../installations/versions.js';
 import { runWithFallback } from '../exec.js';
 import type { AgentId } from '../types.js';
 import {
@@ -939,11 +941,125 @@ describe('resolveRunVersion — fail-loud signal on zero healthy (RUSH-2132)', (
     expect(resolved.exhausted).toBeUndefined();
   });
 
-  it('pinned never probes accounts and never reports exhausted — behavior unchanged', async () => {
-    const resolved = await resolveRunVersion('claude', 'pinned', process.cwd(), async () => {
-      throw new Error('pinned must not probe accounts');
-    });
+  it('pinned still uses a signed-in default without rotating', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-2685-pin-healthy-'));
+    fs.writeFileSync(path.join(cwd, 'agents.yaml'), 'agents:\n  claude: "2.1.219"\n');
+    const pinned = candidate({ version: '2.1.219' });
+    const other = candidate({ version: '2.1.187' });
+    const resolved = await resolveRunVersion('claude', 'pinned', cwd, async () => [pinned, other]);
+    expect(resolved.version).toBe('2.1.219');
     expect(resolved.rotation).toBeNull();
     expect(resolved.exhausted).toBeUndefined();
+    fs.rmSync(cwd, { recursive: true, force: true });
   });
+
+  it('pinned still forces a rate-limited default (the throttle escape hatch)', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-2685-pin-limited-'));
+    fs.writeFileSync(path.join(cwd, 'agents.yaml'), 'agents:\n  claude: "2.1.219"\n');
+    const pinned = candidate({ version: '2.1.219', usageStatus: 'rate_limited' });
+    const other = candidate({ version: '2.1.187' });
+    const resolved = await resolveRunVersion('claude', 'pinned', cwd, async () => [pinned, other]);
+    expect(resolved.version).toBe('2.1.219');
+    expect(resolved.rotation).toBeNull();
+    expect(resolved.exhausted).toBeUndefined();
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe('resolveRunVersion — skip a logged-out default (PHNX-2685)', () => {
+  let cwd: string;
+  afterEach(() => {
+    if (cwd) fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  function pinDefault(version: string): string {
+    cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-2685-loggedout-'));
+    fs.writeFileSync(path.join(cwd, 'agents.yaml'), `agents:\n  claude: "${version}"\n`);
+    return cwd;
+  }
+
+  it('pinned picks a signed-in sibling instead of launching a logged-out default', async () => {
+    const project = pinDefault('2.1.219');
+    const loggedOut = candidate({ version: '2.1.219', signedIn: false });
+    const authed = candidate({ version: '2.1.187' });
+    const resolved = await resolveRunVersion('claude', 'pinned', project, async () => [loggedOut, authed]);
+    expect(resolved.version).toBe('2.1.187');
+    expect(resolved.rotation?.picked.version).toBe('2.1.187');
+    expect(resolved.rotation?.excluded.map((c) => c.version)).toContain('2.1.219');
+    expect(resolved.exhausted).toBeUndefined();
+  });
+
+  it('pinned also yields a revoked default to a signed-in sibling', async () => {
+    const project = pinDefault('2.1.219');
+    const revoked = candidate({ version: '2.1.219', authVerdict: 'revoked' });
+    const authed = candidate({ version: '2.1.187' });
+    const resolved = await resolveRunVersion('claude', 'pinned', project, async () => [revoked, authed]);
+    expect(resolved.version).toBe('2.1.187');
+    expect(resolved.rotation?.picked.version).toBe('2.1.187');
+  });
+
+  it('pinned with a logged-out default and no signed-in sibling fails loud (exhausted)', async () => {
+    const project = pinDefault('2.1.219');
+    const loggedOut = candidate({ version: '2.1.219', signedIn: false });
+    const alsoOut = candidate({ version: '2.1.187', signedIn: false });
+    const resolved = await resolveRunVersion('claude', 'pinned', project, async () => [loggedOut, alsoOut]);
+    expect(resolved.rotation).toBeNull();
+    expect(resolved.exhausted?.map((c) => c.version).sort()).toEqual(['2.1.187', '2.1.219']);
+  });
+
+  // Real version homes + real collectRunCandidates. Off macOS the credential
+  // floor keys off `.credentials.json`; a default with leftover `.claude.json`
+  // oauthAccount and no token file used to look signed-in and die at spawn.
+  it.skipIf(process.platform === 'darwin')(
+    'collectRunCandidates + pinned skip a real logged-out default home',
+    async () => {
+      const project = pinDefault('2.1.219');
+      const planted: string[] = [];
+      const plant = (version: string, creds: boolean) => {
+        const dir = path.join(getVersionsDir(), 'claude', version);
+        planted.push(dir);
+        const pkgRoot = path.join(dir, 'node_modules', '@anthropic-ai', 'claude-code');
+        fs.mkdirSync(path.join(dir, 'node_modules', '.bin'), { recursive: true });
+        fs.mkdirSync(path.join(pkgRoot, 'bin'), { recursive: true });
+        fs.writeFileSync(path.join(dir, 'package.json'), JSON.stringify({ name: `agents-claude-${version}`, private: true }));
+        fs.writeFileSync(
+          path.join(pkgRoot, 'package.json'),
+          JSON.stringify({ name: '@anthropic-ai/claude-code', version, bin: { claude: 'bin/claude-launcher' } }),
+        );
+        fs.writeFileSync(path.join(dir, 'node_modules', '.bin', 'claude'), '#!/bin/sh\nexit 0\n');
+        fs.writeFileSync(path.join(pkgRoot, 'bin', 'claude-launcher'), 'REAL BINARY');
+        const home = path.join(dir, 'home');
+        fs.mkdirSync(path.join(home, '.claude'), { recursive: true });
+        fs.writeFileSync(
+          path.join(home, '.claude.json'),
+          JSON.stringify({
+            oauthAccount: {
+              emailAddress: `${version}@example.com`,
+              accountUuid: `acct-${version}`,
+              organizationUuid: `org-${version}`,
+              organizationType: 'claude_max',
+            },
+          }),
+        );
+        if (creds) {
+          fs.writeFileSync(
+            path.join(home, '.claude', '.credentials.json'),
+            JSON.stringify({ claudeAiOauth: { accessToken: 'at-real', refreshToken: 'rt-real', expiresAt: 1 } }),
+          );
+        }
+      };
+      try {
+        plant('2.1.219', false);
+        plant('2.1.187', true);
+        invalidateInstalledVersionsCache('claude');
+        const resolved = await resolveRunVersion('claude', 'pinned', project);
+        expect(resolved.version).toBe('2.1.187');
+        expect(resolved.rotation?.picked.version).toBe('2.1.187');
+        expect(resolved.rotation?.excluded.some((c) => c.version === '2.1.219' && !c.signedIn)).toBe(true);
+      } finally {
+        for (const dir of planted) fs.rmSync(dir, { recursive: true, force: true });
+        invalidateInstalledVersionsCache('claude');
+      }
+    },
+  );
 });

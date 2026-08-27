@@ -900,12 +900,6 @@ export async function selectAvailableVersion(
 }
 
 /**
- * Resolve the version `agents run` should use when the caller did not pin
- * one with `@version`. The caller supplies the effective strategy; if that
- * strategy cannot find a usable candidate, fall back to the pinned
- * workspace/global version.
- */
-/**
  * Record a rotation pick so parallel callers see it as recently-used.
  * Writes a stamp file per agent — lightweight, no locking needed since
  * a torn write just means the next reader sees a stale timestamp (harmless).
@@ -930,6 +924,19 @@ function readRotationStamp(agent: AgentId): string | null {
   return null;
 }
 
+/**
+ * Resolve the version `agents run` should use when the caller did not pin
+ * one with `@version`. The caller supplies the effective strategy.
+ *
+ * `pinned` still prefers the workspace/global default, but it MUST NOT launch
+ * a logged-out (or revoked) default when the same device holds a signed-in
+ * version that can run — that was a silent 1-second death on fleet workers
+ * whose default home had no credential (PHNX-2685). A rate-limited pin is
+ * still honoured: `--strategy pinned` remains the escape hatch to force the
+ * default through a throttle. When the default is auth-blocked and nothing
+ * else is healthy, `exhausted` is set so the caller fails loud instead of
+ * spawning into a credential-less home.
+ */
 export async function resolveRunVersion(
   agent: AgentId,
   strategy: RunStrategy,
@@ -939,21 +946,47 @@ export async function resolveRunVersion(
   version: string | null;
   rotation: RotateResult | null;
   /**
-   * Set when a non-pinned strategy found ZERO healthy candidates among the
-   * installed versions: the full excluded set, so callers fail loud with
-   * per-account reasons instead of launching the exhausted pinned default
-   * (RUSH-2132). Undefined for pinned, for successful picks, and when no
-   * version is installed at all (the pre-existing not-installed path — there
-   * is no account to be "unhealthy").
+   * Set when a strategy found ZERO healthy candidates among the installed
+   * versions: the full excluded set, so callers fail loud with per-account
+   * reasons instead of launching the exhausted pinned default (RUSH-2132).
+   * Also set for `pinned` when the default is logged out / revoked and no
+   * signed-in alternative exists (PHNX-2685). Undefined for successful picks
+   * and when no version is installed at all (the pre-existing not-installed
+   * path — there is no account to be "unhealthy").
    */
   exhausted?: RotateCandidate[];
 }> {
   const fallback = resolveVersion(agent, cwd);
+  const candidates = await collect(agent);
+
   if (strategy === 'pinned') {
+    const pinnedCandidate = fallback
+      ? candidates.find((c) => c.version === fallback)
+      : undefined;
+    // Auth-blocked pin: the home cannot authenticate, so launching it is a
+    // guaranteed miss. Prefer a signed-in sibling on this device.
+    if (pinnedCandidate && isSignInRecoverable(readinessFromCandidate(pinnedCandidate))) {
+      const rotation = pickAvailableCandidate(candidates, fallback);
+      if (rotation) {
+        emit('rotation.resolved', {
+          module: 'rotate',
+          agent,
+          version: rotation.picked.version,
+          strategy,
+          healthy: rotation.healthy.length,
+          excluded: rotation.excluded.length,
+        });
+        return { version: rotation.picked.version, rotation };
+      }
+      return {
+        version: fallback,
+        rotation: null,
+        exhausted: candidates.length > 0 ? candidates : undefined,
+      };
+    }
     return { version: fallback, rotation: null };
   }
 
-  const candidates = await collect(agent);
   const rotation = strategy === 'available'
     ? pickAvailableCandidate(candidates, fallback)
     : pickBalancedCandidate(candidates);

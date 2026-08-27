@@ -928,13 +928,13 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         Interactive plan (omit the prompt) works everywhere it is listed.
 
       Run strategy (set via --strategy or run.<agent>.strategy in agents.yaml):
-        pinned     use the workspace/global pinned version
+        pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)
         available  use pinned if it can run right now; otherwise switch to another signed-in version
         balanced   distribute load across healthy accounts by remaining capacity (default)
         A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the 'agents view' badge.
         --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.
-        Zero healthy accounts under balanced/available exits nonzero naming each
-        excluded account and the earliest window reset — use --strategy pinned to force.
+        Zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each
+        excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.
 
       'auto' harness (agents run auto): picks the host (14d usage affinity,
       unless --device is given), the harness (installed CLIs weighted by
@@ -2719,13 +2719,15 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
       }
       const strategy = options.balanced ? 'balanced' : explicitStrategy ?? configuredStrategy;
 
-      // Strategy only applies to bare agent invocations. Explicit @version and
-      // profiles already define their execution target. A --fallback chain does
-      // NOT pin the primary: it only names where to cascade on a rate limit, so
-      // the bare primary still resolves through the strategy — otherwise every
+      // Strategy applies to bare (unpinned) invocations. Explicit @version and
+      // profiles already name the target. A --fallback chain does NOT pin the
+      // primary: it only names where to cascade on a rate limit, so the bare
+      // primary still resolves through the strategy — otherwise every
       // `agents run claude --fallback codex` run lands on the pinned default
       // account and account rotation silently stops (the gh-monitor heal bug).
-      if (!accountPickerRequested && !configuredAccount && (strategy !== 'pinned' || options.balanced || explicitStrategy)) {
+      // `pinned` still resolves so a logged-out default can yield to a signed-in
+      // sibling on this device (PHNX-2685); an explicit @version pin is unchanged.
+      if (!accountPickerRequested && !configuredAccount && (!version || strategy !== 'pinned' || options.balanced || explicitStrategy)) {
         if (version) {
           process.stderr.write(chalk.yellow(`[agents] strategy ${strategy} ignored: version ${version} is pinned\n`));
         } else if (fromProfile) {
