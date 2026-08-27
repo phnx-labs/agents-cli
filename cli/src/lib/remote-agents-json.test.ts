@@ -191,4 +191,62 @@ describe('gatherRemoteAgentsJson early-exit + cancellation', () => {
 
     expect(result.items.map(r => r.id).sort()).toEqual(['peer-a', 'peer-b']);
   });
+
+  // PHNX-3292 widened isDefinitiveMatch/selectorAllowsEarlyExit past full UUID
+  // to a live tmux alias and an exact 8-hex short id — both name at most one
+  // session PER ANSWERING peer, so the trade above (label rows stay all-settle)
+  // does not apply to them the same way. These two tests pin the accepted risk
+  // documented on isDefinitiveMatch: a peer that has genuinely not answered YET
+  // when the abort fires is invisible to the uniqueness check (same stance
+  // SES-9a already takes for an unreachable peer post-sweep) — but a peer that
+  // HAS answered, even a beat before the abort takes effect, still contributes
+  // its row, so a real collision between two ANSWERED peers is never hidden.
+  it('PHNX-3292: a genuinely slower peer sharing the short id is cancelled, not surfaced as a collision (accepted risk)', async () => {
+    const capture: SshCaptureFn = (target, _cmd, { signal }) => new Promise((resolve) => {
+      if (target === FAST) { resolve({ code: 0, stdout: JSON.stringify([{ id: 'session-a', shortId: '0145ab8f' }]) }); return; }
+      // SLOW never answers on its own — it also holds a session with the SAME
+      // short id, but only settles via the abort, modelling "has not answered yet".
+      if (signal?.aborted) { resolve({ code: null, stdout: '' }); return; }
+      signal?.addEventListener('abort', () => resolve({ code: null, stdout: '' }), { once: true });
+    });
+
+    const result = await gatherRemoteAgentsJson<{ id: string; shortId: string }>({
+      args: ['sessions', '--resolve-safe-v1', '0145ab8f', '--json'],
+      noFanoutEnv: 'X',
+      hosts: [FAST, SLOW],
+      quiet: true,
+      timeoutMs: 60_000,
+      parse: (stdout) => (stdout ? JSON.parse(stdout) : []),
+      earlyExit: { isDefinitive: (item) => item.shortId === '0145ab8f' },
+    }, { capture });
+
+    // Only the fast, answered peer's row comes back — the slower peer's
+    // colliding session is invisible, the accepted PHNX-3292 trade.
+    expect(result.items).toEqual([{ id: 'session-a', shortId: '0145ab8f' }]);
+    expect(result.skipped).toEqual([]); // cancelled, not reported unreachable
+  });
+
+  it('PHNX-3292: two peers that BOTH answer before the abort lands still surface the collision', async () => {
+    // Both peers resolve immediately (no artificial delay), so their captures
+    // settle in the same microtask sweep — modelling two REACHABLE peers that
+    // both answered, not one that is still in flight.
+    const capture: SshCaptureFn = (target) => new Promise((resolve) => {
+      if (target === FAST) resolve({ code: 0, stdout: JSON.stringify([{ id: 'session-a', shortId: '0145ab8f' }]) });
+      else resolve({ code: 0, stdout: JSON.stringify([{ id: 'session-b', shortId: '0145ab8f' }]) });
+    });
+
+    const result = await gatherRemoteAgentsJson<{ id: string; shortId: string }>({
+      args: ['sessions', '--resolve-safe-v1', '0145ab8f', '--json'],
+      noFanoutEnv: 'X',
+      hosts: [FAST, SLOW],
+      quiet: true,
+      parse: (stdout) => (stdout ? JSON.parse(stdout) : []),
+      earlyExit: { isDefinitive: (item) => item.shortId === '0145ab8f' },
+    }, { capture });
+
+    // Both distinct sessions' rows are present — the caller's uniqueness gate
+    // (metadataResolveOutcome/fleetCandidatesByQuery) is what turns this into
+    // an `ambiguous` outcome, not gatherRemoteAgentsJson itself.
+    expect(result.items.map((r) => r.id).sort()).toEqual(['session-a', 'session-b']);
+  });
 });

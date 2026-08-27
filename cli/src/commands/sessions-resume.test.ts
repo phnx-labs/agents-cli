@@ -1,10 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import { randomBytes } from 'node:crypto';
 import {
   buildSessionLifecycleArgs,
   isDirectResumeSelector,
   resolveResumePacking,
   resumeHostMismatch,
   resumeUsesLifecycleDispatch,
+  sessionsResumeAction,
 } from './sessions-resume.js';
 import { sessionMatchesQuery } from './sessions-browser.js';
 import type { SessionMeta } from '../lib/session/types.js';
@@ -137,5 +139,49 @@ describe('resume picker filter (in-memory, no DB)', () => {
     const s = { id: 'x', shortId: 'x', agent: 'claude', topic: 'test topic', cwd: '/tmp' } as SessionMeta;
     expect(sessionMatchesQuery(s, 'test')).toBe(true);
     expect(sessionMatchesQuery(s, 'notfound')).toBe(false);
+  });
+});
+
+describe('sessionsResumeAction — the PHNX-3292 local gate wiring (real tmux socket, no mocking)', () => {
+  // Random suffix so this can never collide with a genuinely live pane on the
+  // machine running the suite. attachLocalLiveSelector reads the REAL default
+  // tmux socket (list-sessions / has-session — read-only), so this alias must
+  // be one no live session will ever hold.
+  const randomAlias = (): string => `ag-claude-${randomBytes(4).toString('hex')}`;
+
+  it('a bare alias resume with no live local pane falls through to strict resume instead of hanging', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const priorExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      // No live pane for this alias -> attachLocalLiveSelector returns false ->
+      // falls through to runStrictResume -> resolveSessionMetadataValue finds
+      // nothing locally or on the (empty, sandboxed-HOME) fleet -> reports
+      // "No session matching", never a silent hang or a thrown error.
+      await sessionsResumeAction(randomAlias(), undefined, {});
+      expect(errSpy.mock.calls.flat().join('\n')).toContain('No session matching');
+      expect(process.exitCode).toBe(1);
+    } finally {
+      errSpy.mockRestore();
+      process.exitCode = priorExitCode;
+    }
+  });
+
+  it('the same miss with --device scopes the gate off, still falls through cleanly', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const priorExitCode = process.exitCode;
+    process.exitCode = undefined;
+    try {
+      // shouldAttachLocalTmuxAliasBeforeFleet is false whenever hosts.length > 0
+      // (rule 4: --device skips the local gate entirely) — attachLocalLiveSelector
+      // never touches the local tmux socket here, and the selector still resolves
+      // (as not-found) rather than hanging.
+      await sessionsResumeAction(randomAlias(), undefined, { device: 'nonexistent-device-xyz' });
+      expect(errSpy.mock.calls.flat().join('\n')).toMatch(/No session matching|unreachable/);
+      expect(process.exitCode).toBe(1);
+    } finally {
+      errSpy.mockRestore();
+      process.exitCode = priorExitCode;
+    }
   });
 });

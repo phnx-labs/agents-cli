@@ -5403,9 +5403,11 @@ export function metadataResolveOutcome(
   //     6-char word like `facade` or `decade` is not treated as an identifier.
   // A label stays fail-closed at any length: labels are free-form and collide by
   // design, so one hit there really is a guess.
-  // (RUSH-2203's early-exit stays UUID-only — see isDefinitiveMatch — because
-  // that cancels the sweep mid-flight, where a peer that has not answered YET is
-  // still expected to answer. Here the sweep is already over.)
+  // (RUSH-2203's early-exit — see isDefinitiveMatch — cancels the sweep
+  // mid-flight, where a peer that has not answered YET is still expected to
+  // answer, so it stays narrower than this post-sweep gate even though
+  // PHNX-3292 widened it past UUID to alias/8-hex too. Here the sweep is
+  // already over.)
   if (isUniqueEnoughSelector(selector) && candidates.length === 1) {
     return { kind: 'resolved', session: candidates[0].hits[0].session };
   }

@@ -141,7 +141,7 @@ export function registerSessionsResumeCommand(sessionsCmd: Command): void {
   });
 }
 
-async function sessionsResumeAction(
+export async function sessionsResumeAction(
   query: string | undefined,
   prompt: string | undefined,
   options: ResumeOptions,
