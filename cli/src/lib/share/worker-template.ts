@@ -508,22 +508,34 @@ function phoenixHandle(auth) {
 // First writer of a handle owns it. Later PUTs from the same userId are fine;
 // a different userId whose email local-part collides gets 409, not a silent overwrite.
 async function assertHandleOwner(bucket, handle, userId) {
-  // Pages under the handle already stamp customMetadata.owner = userId.
-  // Treat that as the source of truth so a colliding local-part cannot
-  // PUT/DELETE another account's objects even if the claim object is missing.
+  // The __handles/<handle> claim object is the authoritative first-writer record
+  // of ownership. When it exists it decides ownership OUTRIGHT: the recorded
+  // userId may write, anyone else is refused. Consult it FIRST — a stray page
+  // under the namespace stamped with a different owner (e.g. a BYO WRITE_TOKEN
+  // publish, which stamps owner = SHARE_NAMESPACE rather than a userId, or a page
+  // published under the same human's earlier userId before a re-auth) must not
+  // lock the rightful claim holder out of their own handle (PHNX-3291).
+  const key = '__handles/' + handle;
+  const existing = await bucket.get(key);
+  if (existing) {
+    const claimed = existing.customMetadata && existing.customMetadata.userId;
+    if (claimed && claimed !== userId) {
+      return { error: json({ error: 'handle taken', handle: handle }, 409) };
+    }
+    return {};
+  }
+  // No claim object yet — fall back to the page-owner scan so a colliding email
+  // local-part cannot PUT/DELETE another account's objects in the window before
+  // the claim exists. (claimHandle writes the claim on the first Phoenix PUT.)
+  // Only a DIFFERENT Phoenix userId blocks: a BYO WRITE_TOKEN publish stamps
+  // owner = the namespace (=== handle) rather than a userId, so it is not a rival
+  // identity and must not lock the handle's first Phoenix claimant out (PHNX-3291).
   const list = await bucket.list({ prefix: handle + '/', include: ['customMetadata'] });
   for (const o of list.objects || []) {
     const owner = o.customMetadata && o.customMetadata.owner;
-    if (owner && owner !== userId) {
+    if (owner && owner !== userId && owner !== handle) {
       return { error: json({ error: 'handle taken', handle: handle }, 409) };
     }
-  }
-  const key = '__handles/' + handle;
-  const existing = await bucket.get(key);
-  if (!existing) return {};
-  const claimed = existing.customMetadata && existing.customMetadata.userId;
-  if (claimed && claimed !== userId) {
-    return { error: json({ error: 'handle taken', handle: handle }, 409) };
   }
   return {};
 }

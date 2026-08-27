@@ -697,6 +697,60 @@ describe('Phoenix PUT auth + visibility (RUSH-3135)', () => {
     expect(obj?.customMetadata.visibility).toBe('public');
   });
 
+  it('does not lock the Phoenix handle owner out because a BYO page stamped owner=namespace (PHNX-3291)', async () => {
+    // The exact regression: the handle is legitimately claimed by a Phoenix
+    // userId, but a later BYO WRITE_TOKEN publish stamps owner = the namespace
+    // string. The old page-owner scan then 409'd the rightful claim holder on
+    // every subsequent publish. The claim object must stay authoritative.
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'user-1', email: 'octocat@a.com' });
+    const first = await worker.default.fetch(
+      new Request('https://share.test/octocat/one', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html' },
+        body: 'one',
+      }),
+      env,
+    );
+    expect(first.status).toBe(200);
+    // A BYO publish lands under the same namespace, owner = 'octocat' (not a userId).
+    await put(worker, env, 'octocat/byo-page', '<h1>byo</h1>');
+    expect(store.get('octocat/byo-page')?.customMetadata.owner).toBe('octocat');
+    // The rightful Phoenix owner republishes — must succeed, not 409.
+    const again = await worker.default.fetch(
+      new Request('https://share.test/octocat/two', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html' },
+        body: 'two',
+      }),
+      env,
+    );
+    expect(again.status).toBe(200);
+    expect(store.has('octocat/two')).toBe(true);
+  });
+
+  it('lets a first Phoenix publish claim a handle used only by BYO WRITE_TOKEN pages (PHNX-3291)', async () => {
+    // No claim object yet, only BYO pages (owner = namespace). The fallback
+    // page-owner scan must ignore the BYO namespace stamp so the first Phoenix
+    // publish can claim its own handle instead of 409ing on its own BYO pages.
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/byo-a', '<h1>a</h1>');
+    expect(store.get('octocat/byo-a')?.customMetadata.owner).toBe('octocat');
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'user-1', email: 'octocat@a.com' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/first', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html' },
+        body: 'first',
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(store.has('octocat/first')).toBe(true);
+  });
+
   it('unlisted GET carries X-Robots-Tag: noindex; public GET does not', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
