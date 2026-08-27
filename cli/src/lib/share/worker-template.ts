@@ -1,7 +1,8 @@
 // The Cloudflare Worker that fronts the R2 share bucket.
 //
 // One tiny Worker does both sides:
-//   - PUT  /<username>/<slug>  — bearer-gated by TWO principals (not a fallback):
+//   - PUT  /<username>/<slug>  — write-gated by authorizeWrite's THREE principals
+//     (not a fallback chain — each is a distinct legitimate identity):
 //       1. Static WRITE_TOKEN (BYO Cloudflare) — checked first when the presented
 //          bearer equals env.WRITE_TOKEN. owner = env.SHARE_NAMESPACE or the
 //          path's first segment.
@@ -12,8 +13,14 @@
 //          so one user cannot write another's prefix (403 namespace mismatch).
 //          A __handles/<handle> claim binds the handle to the first userId that
 //          writes it; a different userId gets 409 handle taken.
+//       3. __share HMAC cookie — the signed-in viewer's identity cookie (same
+//          {userId,email} identityFromCookie verifies for GET). Lets the shared
+//          page's inline visibility control PATCH with credentials:'include' and
+//          no bearer; SameSite=Lax blocks it cross-site, and the same namespace/
+//          owner checks confine it to the holder's own pages. Applies to PUT,
+//          PATCH, and DELETE alike, since all three share authorizeWrite.
 //     A managed deployment sets PHOENIX_ID_BASE; BYO sets WRITE_TOKEN; the
-//     platform endpoint may set both. Fail loud (401) when neither authenticates.
+//     platform endpoint may set both. Fail loud (401) when none authenticates.
 //     Writes the body to R2 via the BUCKET binding, storing visibility
 //     (public|unlisted|me|org), owner, org_domain (org only), an optional
 //     expires-at, plus provenance (agent/session/host/repo/date), a label, and
@@ -321,7 +328,11 @@ export default {
       // ?revisions=json must not leak that the page exists.
       if (segments.length === 2 && url.searchParams.get('revisions') === 'json') {
         const canonical = await env.BUCKET.get(path);
-        if (canonical) {
+        // Only a me/org canonical needs the viewer resolved — and only there does
+        // a phoenix_ticket failure gate the response, exactly as before this route
+        // shared resolveViewer with the page GET. A public/unlisted revision list
+        // never invoked ticket redemption, so a stale ticket must not 401 it.
+        if (canonical && isIdentityGated((canonical.customMetadata && canonical.customMetadata.visibility) || 'public')) {
           const viewer = await resolveViewer(request, env, url);
           if (viewer.redirect) return viewer.redirect;
           if (viewer.error) return viewer.error;
@@ -346,12 +357,15 @@ export default {
       }
       // Resolve the viewer ONCE — needed both to gate me/org reads AND to decide
       // whether THIS viewer OWNS this namespace (the interactive visibility
-      // control below). resolveViewer only redirects/errors on a phoenix_ticket
-      // in the URL, which is meaningful on every visibility, so honoring it here
-      // is safe and lets a ticket landing on any page set the identity cookie.
+      // control below). A successful phoenix_ticket redemption (redirect: set the
+      // identity cookie, strip the ticket) is honored on ANY page. But a ticket
+      // FAILURE (expired/consumed/unreachable) must only gate a page that needs
+      // identity — a public/unlisted page never invoked ticket redemption before
+      // this refactor, so a stale ticket there must serve anonymously, not 401.
+      const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
       const viewer = await resolveViewer(request, env, url);
       if (viewer.redirect) return viewer.redirect;
-      if (viewer.error) return viewer.error;
+      if (viewer.error && isIdentityGated(visibility)) return viewer.error;
       const identity = viewer.identity || null;
       const denied = gateVisibility(url, env, obj, identity);
       if (denied) return denied;
@@ -359,7 +373,6 @@ export default {
       // an interactive visibility control; everyone else keeps the static cue.
       const isOwner = !!identity && handleFromEmail(identity.email) === firstSeg;
       const ownerDomain = identity ? emailDomain(identity.email) : '';
-      const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
       const headers = new Headers();
       obj.writeHttpMetadata(headers);
       headers.set('etag', obj.httpEtag);

@@ -1943,4 +1943,48 @@ describe('owner interactive visibility control + page stats (bar live)', () => {
     await c.settle();
     expect(html).toContain('updated <b>just now</b>');
   });
+
+  it('a stale/invalid phoenix_ticket on a public page serves anonymously, not 401 (resolveViewer-once regression)', async () => {
+    // Before resolveViewer moved to run on every GET, a public page never invoked
+    // ticket redemption — so a stray/expired/consumed ticket in the URL (a
+    // link-preview bot on the pre-redirect URL, a double-open, a Phoenix blip) was
+    // ignored and the page always served. The refactor must preserve that: a
+    // ticket FAILURE only gates a page that needs identity.
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    await put(worker, env, 'octocat/public-page', '<html><body>hello public</body></html>');
+    worker.hooks.verifyPhoenixToken = async () => null;
+    globalThis.fetch = (async () => new Response('nope', { status: 401 })) as typeof fetch; // ticket redeem fails
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/public-page?phoenix_ticket=stale'), env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('hello public');
+    expect(html).toContain('agents-share-bar');
+  });
+
+  it('a stale/invalid phoenix_ticket on a me page STILL 401s (identity genuinely required)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'alice/secret', '<html><body>mine</body></html>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+    worker.hooks.verifyPhoenixToken = async () => null;
+    globalThis.fetch = (async () => new Response('nope', { status: 401 })) as typeof fetch;
+    const res = await worker.default.fetch(new Request('https://share.test/alice/secret?phoenix_ticket=stale'), env);
+    expect(res.status).toBe(401);
+    expect(await res.json()).toMatchObject({ error: 'invalid ticket' });
+  });
+
+  it('a stale phoenix_ticket on a public ?revisions=json serves the list, not 401 (regression)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    await put(worker, env, 'octocat/plan', '<html><body>v1</body></html>');
+    await put(worker, env, 'octocat/plan', '<html><body>v2</body></html>');
+    worker.hooks.verifyPhoenixToken = async () => null;
+    globalThis.fetch = (async () => new Response('nope', { status: 401 })) as typeof fetch;
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plan?revisions=json&phoenix_ticket=stale'), env);
+    expect(res.status).toBe(200);
+    const payload = await res.json();
+    expect(payload.count).toBe(1);
+  });
 });
