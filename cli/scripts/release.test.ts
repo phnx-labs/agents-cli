@@ -302,6 +302,34 @@ describeRelease('release.sh --device flag', () => {
   });
 });
 
+describeRelease('release.sh: non-interactive --apply guard (PHNX-3176)', () => {
+  it('fails loud on --apply from a non-TTY without --yes, instead of exiting 0', () => {
+    // runRelease uses spawnSync, whose default stdio is a pipe -- stdin is not a
+    // TTY, exactly the backgrounded-release repro. Before this guard, the [y/N]
+    // confirmation EOF-declined and the script exited 0 having published nothing,
+    // so a caller that checked $? believed a release shipped when none did.
+    const { status, out } = runRelease('9.9.9', '--apply');
+    expect(status).not.toBe(0);
+    expect(out).toMatch(/--yes/);
+    expect(out).toMatch(/not a TTY|interactive terminal/);
+    expect(out).toMatch(/published nothing/);
+  });
+
+  it('does not trip the guard in dry-run (no --apply)', () => {
+    // A non-interactive dry-run is legitimate (CI preview); the guard is scoped to
+    // --apply, which is the only mode that reaches the confirmation.
+    const { out } = runRelease('9.9.9');
+    expect(out).not.toMatch(/needs an interactive terminal/);
+  });
+
+  it('--yes is the sanctioned non-interactive escape (guard names it, parser accepts it)', () => {
+    expect(RELEASE_SH).toContain('--yes|-y) YES=true');
+    // The guard excludes the internal re-exec phases, which inherit the
+    // already-checked stdin and must not re-require --yes.
+    expect(RELEASE_SH).toContain('! $HOME_BASE_PHASE && ! $ORCHESTRATION_PHASE && [ ! -t 0 ]');
+  });
+});
+
 describeDeviceResolution('release.sh --device resolution', () => {
   it('defaults the home base to mac-mini when --device is omitted', () => {
     const { out } = runRelease('1.2.3', '--home-base-phase');

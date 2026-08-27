@@ -188,6 +188,21 @@ readonly RELEASE_HOME_BASE="${DEVICE:-$RELEASE_HOME_BASE_DEFAULT}"
 ON_HOME_BASE=false
 [[ "$THIS_HOST" == "$RELEASE_HOME_BASE" ]] && ON_HOME_BASE=true
 
+# Fail LOUDLY on a non-interactive --apply that cannot answer the [y/N] gate.
+# The confirmation below (`read -r -p ... yn`) runs in the orchestration phase; a
+# closed/non-TTY stdin returns EOF there, `yn` stays empty, the [y/N] default
+# declines, and the script exits 0 having published NOTHING. A caller that
+# backgrounds the release, checks $?, and sees 0 then believes a release shipped
+# when none did -- exactly how a silent version gap opens (PHNX-3176). Catch it
+# HERE, in the invoking process (the only entry with neither phase flag) and
+# before the first mutation, so a backgrounded run dies immediately instead of at
+# the gate after a full dry-run. --yes is the sanctioned non-interactive path; the
+# internal --home-base-phase / --orchestration-phase re-execs inherit this
+# already-checked stdin and must not re-require it.
+if $APPLY && ! $YES && ! $HOME_BASE_PHASE && ! $ORCHESTRATION_PHASE && [ ! -t 0 ]; then
+  die "--apply needs an interactive terminal to confirm, or --yes to skip the prompt. stdin is not a TTY, so the [y/N] confirmation cannot be answered -- refusing to exit 0 having published nothing. Re-run with --yes to publish non-interactively."
+fi
+
 # The caller's checkout is never the orchestration workspace. It may be a dirty
 # shared main checkout or an agent's feature worktree; either way, release-owned
 # isolation keeps unrelated work out of the release index and avoids contending
