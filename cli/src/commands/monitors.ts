@@ -370,8 +370,8 @@ async function guardAgainstDuplicateMonitor(config: MonitorConfig, force: boolea
   // triggers. Identity is the arguments, so the claim has to be fleet-wide —
   // different arguments (another PR) are not a clash and still pass.
   if (process.env[NO_MONITOR_FANOUT_ENV]) return;
-  const fleet = await gatherFleetMonitors();
   const mine = monitorFingerprint(config);
+  const fleet = await gatherFleetMonitors({ againstFingerprint: mine });
   const clash = fleet.monitors.find((r) => monitorFingerprint(r.monitor) === mine);
   if (clash) {
     stderrLine(chalk.red(`Monitor '${clash.monitor.name}' on ${chalk.bold(clash.machine)} already watches this exact source and fires the same action.`));

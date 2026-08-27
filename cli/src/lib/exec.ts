@@ -1418,6 +1418,14 @@ export interface TmuxWrapContext {
   remoteDispatch: boolean;
   /** Whether a tmux binary is on PATH. */
   tmuxAvailable: boolean;
+  /**
+   * True when this process has a real TTY to attach (`stdout.isTTY`).
+   * A piped `agents run --interactive` (session-tracker tests, CI) has none:
+   * wrapping then treating the failed attach as Ctrl-b d leaked live panes
+   * for a week on yosemite-s0 (PHNX-3293). Remote dispatch still wraps
+   * without a TTY — `--device --no-follow` *wants* a detached pane.
+   */
+  hasTty: boolean;
 }
 
 /**
@@ -1467,6 +1475,11 @@ export function resolveTmuxWrap(ctx: TmuxWrapContext): TmuxWrapDecision {
   // remote box would be worse than an undurable run the user asked for.
   if (ctx.raw) return { kind: 'bare' };
   if (ctx.noTmuxEnv) return { kind: 'bare' };
+  // Local interactive with no TTY cannot attach. Wrapping anyway creates a
+  // detached pane, attach returns immediately, and resolveAfterAttach treats
+  // the still-alive pane as Ctrl-b d — the session-tracker test leak.
+  // Remote dispatch is the exception: --no-follow *intends* a detached pane.
+  if (!ctx.hasTty && !ctx.remoteDispatch) return { kind: 'bare' };
   if (!ctx.configEnabled && !ctx.remoteDispatch) return { kind: 'bare' };
   // Fail loud rather than launch a remote agent that a blink would kill: the
   // caller refuses the run instead of starting work that cannot be recovered.
@@ -1942,6 +1955,7 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
     configEnabled: isTmuxEnabled(),
     remoteDispatch: process.env[REMOTE_INTERACTIVE_ENV] === '1',
     tmuxAvailable: isTmuxInstalled(),
+    hasTty: !!process.stdout.isTTY,
   });
   if (tmuxWrap.kind === 'undurable') {
     // Refuse rather than start work a blink would destroy. This is the ONLY

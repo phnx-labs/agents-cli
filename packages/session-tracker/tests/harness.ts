@@ -1,4 +1,4 @@
-import { spawn, ChildProcess } from 'child_process';
+import { spawn, spawnSync, ChildProcess } from 'child_process';
 import { randomUUID } from 'crypto';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -152,6 +152,13 @@ export async function killAndCleanup(run: SpawnRun): Promise<void> {
     /* ignore */
   }
 
+  // A tmux-wrapped `agents run --interactive` on a worker (tmux.enabled)
+  // used to leave the pane alive after this SIGTERM — the wrapper died,
+  // the detached session did not (PHNX-3293, 100+ week-old Claudes on s0
+  // sitting on "trust this folder" in /tmp/session-tracker-test-*). Kill
+  // any pane whose cwd is this run's directory.
+  killTmuxSessionsForCwd(run.cwd);
+
   // Remove the temp cwd we created (if we created one).
   if (run.cwd.startsWith(path.join(os.tmpdir(), 'session-tracker-test-'))) {
     try {
@@ -159,6 +166,28 @@ export async function killAndCleanup(run: SpawnRun): Promise<void> {
     } catch {
       /* ignore */
     }
+  }
+}
+
+/** Tear down leftover agents-cli tmux panes whose working directory is `cwd`. */
+function killTmuxSessionsForCwd(cwd: string): void {
+  const sock = path.join(os.homedir(), '.agents/.cache/helpers/tmux/server.sock');
+  if (!fs.existsSync(sock)) return;
+  const listed = spawnSync('tmux', ['-S', sock, 'list-panes', '-a', '-F', '#{session_name}\t#{pane_current_path}'], {
+    encoding: 'utf8',
+    timeout: 5000,
+  });
+  if (listed.status !== 0 || !listed.stdout) return;
+  const names = new Set<string>();
+  for (const line of listed.stdout.split('\n')) {
+    const tab = line.indexOf('\t');
+    if (tab < 0) continue;
+    const name = line.slice(0, tab);
+    const paneCwd = line.slice(tab + 1);
+    if (paneCwd === cwd && name.startsWith('ag-')) names.add(name);
+  }
+  for (const name of names) {
+    spawnSync('tmux', ['-S', sock, 'kill-session', '-t', `=${name}`], { encoding: 'utf8', timeout: 3000 });
   }
 }
 

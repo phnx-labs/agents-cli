@@ -90,13 +90,25 @@ export interface RemoteActiveResult {
  * `opts.quiet` suppresses the per-device stderr line for callers that report
  * skipped peers once, compactly, themselves.
  */
-export async function gatherRemoteActive(hosts?: string[], opts?: { quiet?: boolean }): Promise<RemoteActiveResult> {
+export async function gatherRemoteActive(
+  hosts?: string[],
+  opts?: {
+    quiet?: boolean;
+    /**
+     * Opt-in first-hit abort. Omitted by default so `--active`, projects, and
+     * `focus` with no id keep all-settle. Detach/stop pass this for a unique
+     * live id so a reachable hit does not wait out sleeping peers.
+     */
+    earlyExit?: { isDefinitive: (item: ActiveSession, machine: string) => boolean };
+  },
+): Promise<RemoteActiveResult> {
   const result = await gatherRemoteAgentsJson({
     args: ['sessions', '--active', '--json'],
     noFanoutEnv: NO_FANOUT_ENV,
     hosts,
     parse: parseRemoteActive,
     quiet: opts?.quiet,
+    earlyExit: opts?.earlyExit,
   });
   return {
     sessions: result.items,

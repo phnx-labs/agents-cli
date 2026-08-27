@@ -134,3 +134,43 @@ describe('gatherRemoteActive — surfaces skipped/discoveryFailed instead of dro
     vi.resetModules();
   });
 });
+
+describe('gatherRemoteActive — earlyExit is opt-in, default all-settle', () => {
+  it('forwards earlyExit when the caller opts in (detach/stop unique live id)', async () => {
+    vi.resetModules();
+    const gatherRemoteAgentsJson = vi.fn(async () => ({
+      items: [],
+      deviceCount: 1,
+      skipped: [],
+      parseFailed: [],
+      discoveryFailed: false,
+    }));
+    vi.doMock('../../remote-agents-json.js', () => ({ gatherRemoteAgentsJson }));
+    const { gatherRemoteActive } = await import('../remote-active.js');
+    const isDefinitive = () => true;
+    await gatherRemoteActive(undefined, { earlyExit: { isDefinitive } });
+    expect(gatherRemoteAgentsJson).toHaveBeenCalledWith(
+      expect.objectContaining({ earlyExit: { isDefinitive } }),
+    );
+    vi.doUnmock('../../remote-agents-json.js');
+    vi.resetModules();
+  });
+
+  it('omits earlyExit by default so --active / browse stay all-settle', async () => {
+    vi.resetModules();
+    const gatherRemoteAgentsJson = vi.fn(async () => ({
+      items: [],
+      deviceCount: 1,
+      skipped: [],
+      parseFailed: [],
+      discoveryFailed: false,
+    }));
+    vi.doMock('../../remote-agents-json.js', () => ({ gatherRemoteAgentsJson }));
+    const { gatherRemoteActive } = await import('../remote-active.js');
+    await gatherRemoteActive();
+    const arg = gatherRemoteAgentsJson.mock.calls[0]?.[0] as { earlyExit?: unknown };
+    expect(arg.earlyExit).toBeUndefined();
+    vi.doUnmock('../../remote-agents-json.js');
+    vi.resetModules();
+  });
+});

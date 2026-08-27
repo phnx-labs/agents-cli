@@ -14,7 +14,7 @@
  */
 import fs from 'node:fs';
 import chalk from 'chalk';
-import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, listSessions, runTmux } from '../tmux/index.js';
+import { attachTmux, ensureSessionHookRepaired, getDefaultSocketPath, hasSession, listSessions, runTmux, teardownIfAgentExited } from '../tmux/index.js';
 import { isAgentTmuxAlias } from './types.js';
 
 export type TmuxAliasState = 'not-an-alias' | 'no-server' | 'absent' | 'dead' | 'live';
@@ -100,6 +100,7 @@ export async function attachLiveTmuxAlias(selector: string): Promise<boolean> {
   // deleted; attach-time repair is what closes the gap now (RUSH-2435).
   await ensureSessionHookRepaired(selector, socket);
   const code = await attachTmux({ socket, args: ['attach-session', '-t', `=${selector}`] });
+  await teardownIfAgentExited(selector, socket);
   process.exitCode = code;
   return true;
 }

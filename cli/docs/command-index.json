@@ -28267,14 +28267,14 @@
           "negate": false
         }
       ],
-      "examples": "# Verify tmux is installed\n      agents tmux check\n\n      # Start a detached agent session\n      agents tmux new claude-debug --cmd \"agents run claude\" --cwd ~/code/myrepo\n\n      # Attach (replaces this shell with the tmux client)\n      agents tmux attach claude-debug\n\n      # Inspect remotely without attaching\n      agents tmux capture claude-debug --lines 200\n\n      # Send a slash command from a script\n      agents tmux send claude-debug \"/clear\"\n\n      # Clean up\n      agents tmux kill claude-debug",
+      "examples": "# Verify tmux is installed\n      agents tmux check\n\n      # Start a detached agent session\n      agents tmux new claude-debug --cmd \"agents run claude\" --cwd ~/code/myrepo\n\n      # Attach (replaces this shell with the tmux client)\n      agents tmux attach claude-debug\n\n      # Inspect remotely without attaching\n      agents tmux capture claude-debug --lines 200\n\n      # Send a slash command from a script\n      agents tmux send claude-debug \"/clear\"\n\n      # Clean up one by name, or pick from a list that shows each pane's last lines\n      agents tmux kill claude-debug\n      agents tmux kill",
       "notes": "Storage:\n        Shared server socket: ~/.agents/.cache/helpers/tmux/server.sock\n        Per-session meta:     ~/.agents/.cache/helpers/tmux/<name>.json\n\n      Session names accept [A-Za-z0-9_-] up to 64 characters. tmux disallows\n      '.' and ':' in names since those address windows and panes.\n\n      Existing tmux sessions you started outside of agents-cli are NOT\n      visible here unless you point them at the same socket via --socket.",
       "subcommands": [
         {
           "name": "attach",
           "path": "tmux attach",
           "aliases": [],
-          "description": "Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d).",
+          "description": "Attach to a running session. Replaces this shell with the tmux client until you detach (Ctrl-b d) or the agent exits (session is then torn down).",
           "args": [
             {
               "name": "name",
@@ -28467,11 +28467,11 @@
           "name": "kill",
           "path": "tmux kill",
           "aliases": [],
-          "description": "Kill one tmux session. Idempotent — exits 0 even if the session was already gone.",
+          "description": "Kill one tmux session, or pick from a list that shows each pane's last screen. Idempotent.",
           "args": [
             {
               "name": "name",
-              "required": true,
+              "required": false,
               "variadic": false,
               "description": ""
             }
@@ -28497,6 +28497,8 @@
               "negate": false
             }
           ],
+          "examples": "# Kill by name\n      agents tmux kill ag-claude-04a1307c\n\n      # Pick from live panes — preview shows the last lines on screen\n      # (trust-folder stall, weekly-limit dialog, real work)\n      agents tmux kill",
+          "notes": "With no name, the picker captures each pane so you can tell a leaked\n      first-run dialog from an agent that is still working. Space multi-selects;\n      enter kills the checked rows (or the highlighted one if none are checked).\n      Ctrl-b d still keeps a live session; exiting the agent tears it down.",
           "subcommands": []
         },
         {
@@ -28543,7 +28545,7 @@
           "aliases": [
             "ls"
           ],
-          "description": "List live tmux sessions on the shared server. Prunes stale meta files as a side effect.",
+          "description": "List live tmux sessions on the shared server (name, age, last screen line). Prunes stale meta files as a side effect.",
           "args": [],
           "options": [
             {

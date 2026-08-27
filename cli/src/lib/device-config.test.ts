@@ -425,6 +425,7 @@ describe('tmux gate (tmux.enabled on this device)', () => {
       configEnabled: isTmuxEnabled(),
       remoteDispatch: false,
       tmuxAvailable: true,
+      hasTty: true,
     }).kind).toBe('bare');
   });
 

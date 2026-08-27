@@ -20,6 +20,7 @@ import path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { getActiveSessions, findSessionFileForKind, sessionProcessIsLocal, sessionProcessHost, type ActiveSession } from '../lib/session/active.js';
+import { isSessionIdShape } from '../lib/session/pid-registry.js';
 import { gatherRemoteActive } from '../lib/session/remote-active.js';
 import { discoverSessions } from '../lib/session/discover.js';
 import { deriveShortId } from '../lib/session/short-id.js';
@@ -32,6 +33,7 @@ import {
   filterSessionsByQuery,
   formatPickerLabel,
   pickerColumnsFor,
+  isUniqueEnoughSelector,
   type LiveStatusFilter,
 } from './sessions.js';
 import { buildPreview } from './sessions-picker.js';
@@ -40,7 +42,7 @@ import { isPromptCancelled } from './utils.js';
 import { focusAction } from './focus.js';
 import { machineId } from '../lib/session/sync/config.js';
 import { attachTmux, runTmux } from '../lib/tmux/binary.js';
-import { ensureSessionHookRepaired, paneExitStatus } from '../lib/tmux/session.js';
+import { ensureSessionHookRepaired, paneExitStatus, teardownIfAgentExited } from '../lib/tmux/session.js';
 import { getDefaultSocketPath } from '../lib/tmux/paths.js';
 import { sshExec, sshStream, assertValidSshTarget, shellQuote, SSH_CONN_FAILURE_CODE } from '../lib/ssh-exec.js';
 import { connectionEndedNotice } from '../lib/hosts/reconnect.js';
@@ -84,6 +86,51 @@ export function filterLivePool(
 }
 
 /**
+ * Live rows whose session id starts with `selector` (case-insensitive prefix).
+ * Same match `resolveOne` uses, so skip-fleet and resolve stay aligned.
+ */
+export function localLiveSelectorMatches(sessions: ActiveSession[], selector: string): ActiveSession[] {
+  const q = selector.toLowerCase();
+  return sessions.filter((s) => (s.sessionId ?? '').toLowerCase().startsWith(q));
+}
+
+/**
+ * Skip `gatherRemoteActive` when local already answered the selector:
+ * two local matches fail closed without waiting for a sleeping peer that
+ * might collide; a single local hit skips only when the selector is a full
+ * UUID or unique-enough 8-hex (`isUniqueEnoughSelector`). A shorter unique
+ * local prefix still races the fleet so a remote collision can fail closed.
+ * Zero matches still race the fleet.
+ */
+export function shouldSkipRemoteSweep(localMatches: ActiveSession[], selector: string): boolean {
+  if (localMatches.length >= 2) return true;
+  if (localMatches.length === 1) return isUniqueEnoughSelector(selector);
+  return false;
+}
+
+/**
+ * First-hit abort predicate for a live-id fleet race. A full UUID is globally
+ * unique so the first exact hit is the only hit. A unique-enough live prefix
+ * (8+ chars, the tmux `ag-<agent>-<8hex>` short id) aborts remaining SSH once
+ * a reachable peer answers — unanswered boxes must not delay (PHNX-3298).
+ * Shorter prefixes stay all-settle.
+ */
+export function isDefinitiveLiveMatch(session: ActiveSession, selector: string): boolean {
+  const id = (session.sessionId ?? '').toLowerCase();
+  const q = selector.trim().toLowerCase();
+  if (!id || !q) return false;
+  if (isSessionIdShape(q)) return id === q;
+  return q.length >= 8 && id.startsWith(q);
+}
+
+function liveSelectorEarlyExit(
+  selector: string | undefined,
+): { isDefinitive: (item: ActiveSession, machine: string) => boolean } | undefined {
+  if (!selector || !isUniqueEnoughSelector(selector)) return undefined;
+  return { isDefinitive: (item) => isDefinitiveLiveMatch(item, selector) };
+}
+
+/**
  * Live jump targets (local + remote), keyed by session id. Cloud is excluded by
  * default (it has no local pid to attach), but `detach` opts in with
  * `includeCloud` so it can resolve a cloud id and refuse it with a clear message
@@ -92,18 +139,31 @@ export function filterLivePool(
  * `hosts` scopes the sweep to named devices — the fan-out only dials them, and the
  * pool is then filtered to `s.machine ∈ hosts` so a stray local row can't leak in.
  * `statuses` narrows to the live-state words `--active` uses (orphan/crashed/…).
+ * `selector` (detach/stop) skips fleet SSH when local already has a unique live
+ * id or a local collision; omit it for browse (`focus` with no id) so the picker
+ * still all-settles.
  */
 export async function gatherLiveTargets(
   local: boolean,
-  opts: { includeCloud?: boolean; hosts?: string[]; statuses?: LiveStatusFilter[] } = {},
+  opts: { includeCloud?: boolean; hosts?: string[]; statuses?: LiveStatusFilter[]; selector?: string } = {},
 ): Promise<{ self: string; activeById: Map<string, ActiveSession> }> {
   const self = machineId();
   const localActive = await getActiveSessions();
   for (const s of localActive) if (!s.machine) s.machine = self;
   let active = localActive;
-  if (!local) {
+  const skipRemote = local || (opts.selector
+    ? shouldSkipRemoteSweep(
+        opts.hosts?.length
+          ? filterLivePool(localLiveSelectorMatches(localActive, opts.selector), { hosts: opts.hosts })
+          : localLiveSelectorMatches(localActive, opts.selector),
+        opts.selector,
+      )
+    : false);
+  if (!skipRemote) {
     try {
-      const remote = await gatherRemoteActive(opts.hosts);
+      const remote = await gatherRemoteActive(opts.hosts, {
+        earlyExit: liveSelectorEarlyExit(opts.selector),
+      });
       active = dedupeByMachineSession([...localActive, ...remote.sessions]);
     } catch { /* remote sweep is best-effort */ }
   }
@@ -370,7 +430,9 @@ export async function jumpTo(s: ActiveSession, self: string, fallback: Unreachab
     // — the 5-min daemon reconcile that used to cover this was deleted;
     // attach-time repair is what closes the gap now (RUSH-2435).
     if (session) await ensureSessionHookRepaired(session, socket);
-    process.exit(await attachTmux({ socket, args: ['attach-session', '-t', tgt] }));
+    const code = await attachTmux({ socket, args: ['attach-session', '-t', tgt] });
+    if (session) await teardownIfAgentExited(session, socket);
+    process.exit(code);
   }
 
   // Path A: local Ghostty — focus its tab (Cmd+N via System Events).

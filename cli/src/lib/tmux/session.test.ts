@@ -30,6 +30,7 @@ import {
   sendKeys,
   setSessionHook,
   slugifyName,
+  teardownIfAgentExited,
   splitPane,
   AGENT_HOOK_SCHEMA,
   agentPaneDiedHook,
@@ -452,6 +453,21 @@ describe.skipIf(skipReason)('tmux session lifecycle', () => {
     expect(await hasSession('short', socket)).toBe(true);
     const screen = await capturePane({ name: 'short', socket, lines: 10 });
     expect(screen).toContain('BRIEF');
+  });
+
+  it('teardownIfAgentExited kills a remain-on-exit husk and keeps a live pane (PHNX-3293)', async () => {
+    // The attach verbs used to return from tmux attach and leave the husk.
+    // After attach returns, dead pane → kill; live pane (Ctrl-b d) → keep.
+    await createSession({ name: 'husk-teardown', cmd: 'echo HUSK && true', socket });
+    await wait(400);
+    expect(await hasSession('husk-teardown', socket)).toBe(true);
+    expect(await teardownIfAgentExited('husk-teardown', socket)).toBe('killed');
+    expect(await hasSession('husk-teardown', socket)).toBe(false);
+
+    await createSession({ name: 'live-keep', cmd: 'sleep 30', socket });
+    expect(await hasSession('live-keep', socket)).toBe(true);
+    expect(await teardownIfAgentExited('live-keep', socket)).toBe('kept');
+    expect(await hasSession('live-keep', socket)).toBe(true);
   });
 
   it('setSessionHook reports whether tmux accepted the hook', async () => {
