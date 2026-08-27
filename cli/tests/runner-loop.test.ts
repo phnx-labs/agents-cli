@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, rmSync, mkdtempSync } from 'fs';
+import { mkdirSync, rmSync, mkdtempSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import type { JobConfig } from '../src/lib/scheduling/routines.js';
@@ -123,6 +123,28 @@ describe('executeJob — loop driver (issue #400)', () => {
 
     // Loop driver must not have been invoked.
     expect(calls.length).toBe(0);
+  });
+
+  it('stamps harnessName on loop ExecOptions for a custom-harness profile (PHNX-2935)', async () => {
+    // The loop path resolves the profile to its host agent and spawns
+    // in-process via runLoop — it never re-enters `agents run <name>`, so
+    // ExecOptions.harnessName must be set here or a deepseek loop-routine
+    // is recorded as claude.
+    mkdirSync(join(hoistedState.TEST_DIR, 'profiles'), { recursive: true });
+    writeFileSync(
+      join(hoistedState.TEST_DIR, 'profiles', 'deepseek.yml'),
+      'name: deepseek\nhost:\n  agent: claude\nenv:\n  ANTHROPIC_MODEL: deepseek/deepseek-chat-v3-0324\n',
+    );
+    const calls: ExecOptions[] = [];
+    const result = await executeJob(makeConfig({
+      agent: 'deepseek',
+      loop: { maxIterations: 1, interval: '0' },
+    }), makeLoopDeps(calls));
+
+    expect(result.meta.status).toBe('completed');
+    expect(calls.length).toBe(1);
+    expect(calls[0].agent).toBe('claude');
+    expect(calls[0].harnessName).toBe('deepseek');
   });
 
   it('marks status failed when runLoop stops with error', async () => {
