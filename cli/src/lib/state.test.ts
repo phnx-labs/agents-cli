@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import * as yaml from 'yaml';
 
 // state.ts resolves HOME and the device id at import time, so we point both at a
 // throwaway temp dir and re-import the module fresh for each test. This
@@ -202,5 +203,79 @@ describe('getProjectAgentsDir does not treat a DotAgents-repo clone as a project
     fs.mkdirSync(path.join(projAgents, 'rules'), { recursive: true });
 
     expect(getProjectAgentsDir(proj)).toBe(projAgents);
+  });
+});
+
+describe('serializeCentral heals a frozen top-level header (PHNX-3315)', () => {
+  beforeEach(() => {
+    TMP = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-state-header-'));
+    process.env.HOME = TMP;
+    process.env.AGENTS_SYNC_MACHINE_ID = 'testbox';
+    process.env.AGENTS_DEVICES_DIR = path.join(TMP, '.agents', '.history', 'devices');
+  });
+  afterEach(() => {
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+    delete process.env.AGENTS_DEVICES_DIR;
+    try { fs.rmSync(TMP, { recursive: true, force: true }); } catch { /* best-effort */ }
+  });
+
+  // The pre-rename header the top-level agents.yaml froze on: repo `agents-cli`
+  // (not `agi-cli`) and no `$schema:` line. A hand-written body comment sits below
+  // it — the yaml library folds that whole block onto the first key's comment,
+  // which is exactly why the header cannot be healed via doc.commentBefore.
+  const STALE = [
+    '# agents-cli metadata',
+    '# Auto-generated - do not edit manually',
+    '# https://github.com/phnx-labs/agents-cli',
+    '',
+    '# Fleet-wide notification routing (hand-written)',
+    'notify:',
+    '  owner: someone@example.com',
+    'share:',
+    '  endpoint: https://share.example',
+    '',
+  ].join('\n');
+
+  it('rewrites the header to current on a central write, keeping body comments + every key', async () => {
+    const { updateMeta } = await freshState();
+    writeCentral(STALE);
+
+    // Any central mutation routes through serializeCentral.
+    updateMeta((m) => ({ ...m, fleet: { devices: {}, defaults: { config: { maxAgents: 7 } } } }));
+
+    const central = fs.readFileSync(centralPath(), 'utf-8');
+
+    // Header healed to the current META_HEADER (agi-cli + the $schema line), and
+    // the pre-rename URL line is gone — exactly once, not duplicated.
+    expect(central).toContain('# https://github.com/phnx-labs/agi-cli');
+    expect(central).toContain(
+      'yaml-language-server: $schema=https://raw.githubusercontent.com/phnx-labs/agi-cli/main/cli/schema/agents-yaml.schema.json',
+    );
+    expect(central).not.toContain('# https://github.com/phnx-labs/agents-cli');
+    expect((central.match(/# agents-cli metadata/g) ?? []).length).toBe(1);
+
+    // Hand-written body comment survives the rewrite.
+    expect(central).toContain('# Fleet-wide notification routing (hand-written)');
+
+    // No config keys lost; the freshly-set central key landed.
+    const parsed = yaml.parse(central);
+    expect(parsed.notify).toEqual({ owner: 'someone@example.com' });
+    expect(parsed.share).toEqual({ endpoint: 'https://share.example' });
+    expect(parsed.fleet.defaults.config.maxAgents).toBe(7);
+  });
+
+  it('is byte-stable once healed — a later no-op central write does not touch the file', async () => {
+    const { updateMeta } = await freshState();
+    writeCentral(STALE);
+
+    // First write heals the header and adds a central key.
+    updateMeta((m) => ({ ...m, fleet: { devices: {}, defaults: { config: { maxAgents: 3 } } } }));
+    const healed = fs.readFileSync(centralPath(), 'utf-8');
+    expect(healed).toContain('agi-cli');
+
+    // A subsequent central write that changes nothing must leave the bytes
+    // identical — no re-header, no churn, so `agents sync` never sees a dirty file.
+    updateMeta((m) => ({ ...m }));
+    expect(fs.readFileSync(centralPath(), 'utf-8')).toBe(healed);
   });
 });

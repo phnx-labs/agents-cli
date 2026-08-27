@@ -1014,6 +1014,32 @@ const KNOWN_META_KEYS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Rewrite a frozen `agents.yaml` header to the current {@link META_HEADER}.
+ *
+ * `serializeCentral` parses the existing file to preserve its hand-written body
+ * comments, but that also preserves the leading metadata header verbatim, so a
+ * top-level file written before the agi-cli rename (or before the `$schema` line
+ * existed) keeps its stale header forever — every freshly-written device doc gets
+ * the current header while the shared file is left behind (PHNX-3315).
+ *
+ * The header is healed TEXTUALLY, on the already-serialized string, rather than
+ * via `doc.commentBefore`: the `yaml` library folds the whole leading comment
+ * block onto the FIRST key's `commentBefore` when that key already carries a
+ * hand-written comment, so the header is not reliably the document comment — but
+ * it is always the top block of the output. Strip a leading `agents-cli metadata`
+ * header (any pre-rename variant, with or without the `$schema` line — the URL
+ * and schema lines are matched specifically so a hand-written body comment is
+ * never mistaken for a header line) and prepend the canonical header. A file with
+ * no recognizable header simply gains one. Body comments, which sit below the
+ * blank line that terminates the header, are untouched.
+ */
+function healMetaHeader(serialized: string): string {
+  const headerBlock =
+    /^# agents-cli metadata\n# Auto-generated - do not edit manually\n(?:# (?:https:\/\/github\.com\/phnx-labs\/[^\n]*|yaml-language-server: \$schema=[^\n]*)\n)*\n?/;
+  return META_HEADER + serialized.replace(headerBlock, '');
+}
+
+/**
  * Serialize the central (synced) meta to `agents.yaml` WITHOUT destroying the
  * hand-written comments in the committed file.
  *
@@ -1068,17 +1094,24 @@ function serializeCentral(central: Record<string, unknown>): string {
       changed = true;
     }
   }
-  // No central field changed → keep the file byte-identical (comments intact), so
-  // writeIfChanged skips it and the churn loop never starts.
-  if (!changed) return existing;
-  // Everything cleared → header only (never leave a flow `{}` behind).
-  // Otherwise stringifyDoc: it still normalizes a legacy flow root (`{}`) to
-  // block, so edited nodes do not render flow (`disabledCommands: [ teams ]`
-  // instead of a `- teams` block list), but it no longer forces block on a
-  // normal document — that flattened committed flow sequences and made this
-  // writer disagree with feed.ts/activity.ts/migrate.ts on the same file
-  // (RUSH-2505). parseDocument still preserves comments + key ordering.
-  return isEmpty ? META_HEADER : stringifyDoc(doc);
+  // Everything cleared → header only (never leave a flow `{}` behind); this also
+  // heals a stale header-only file to the current one. Byte-stable when the file
+  // is already exactly the current header.
+  if (isEmpty) return existing === META_HEADER ? existing : META_HEADER;
+  // Serialize the edited doc when a central key changed, otherwise keep the exact
+  // existing bytes, then heal the header on that string. stringifyDoc still
+  // normalizes a legacy flow root (`{}`) to block, so edited nodes do not render
+  // flow (`disabledCommands: [ teams ]` instead of a `- teams` block list), but it
+  // no longer forces block on a normal document — that flattened committed flow
+  // sequences and made this writer disagree with feed.ts/activity.ts/migrate.ts on
+  // the same file (RUSH-2505). parseDocument still preserves body comments + key
+  // ordering.
+  const healed = healMetaHeader(changed ? stringifyDoc(doc) : existing);
+  // No central field changed AND the header was already current → healed equals
+  // the existing bytes, so returning them keeps the file byte-identical (comments
+  // intact): writeIfChanged skips it and the churn loop never starts. A stale
+  // header makes healed differ, so it is rewritten once and byte-stable after.
+  return healed === existing ? existing : healed;
 }
 
 function writeMetaUnlocked(meta: Meta): void {
