@@ -22,7 +22,7 @@ Five decisions. Two of them are yours and nobody else's.
 1. **DECISION 1 — the name.** The product answers to `agents-cli`, `agi-cli`, `AGI CLI`, and the binary `agents`. Recommendation: **Agents CLI wins**, everything else redirects.
 2. **DECISION 2 — the license claim.** `DESIGN.md:4` here, and `llms.txt` on the live site (which lives in the separate `agent-cli-web` repo), both say "open source (Apache-2.0)". `LICENSE` is FSL-1.1-Apache-2.0, and `README.md:1652` already states that correctly. Recommendation: **fix the two wrong strings**; relicensing is a separate, larger call.
 3. **The wedge.** Lead with *rotate accounts and resume through the limit*, not with teams, worktrees, or browser. Worktrees are table stakes in 2026 and Conductor and Orca own the pictures.
-4. **The cut, and the door.** `agents --help` currently names 26 of 69 groups and points at none of the other 43. Order the 26 into a 10-group front door *and* add the full-listing pointer git has had for twenty years. No command is deleted.
+4. **The cut, and the door.** `agents --help` names 45 of 69 groups and never mentions the other 24 — including `ssh`, the 5th most-used group in the CLI. Order the front door into 10 groups *and* add the full-listing pointer git has had for twenty years. No command is deleted.
 5. **What we do NOT do.** No `agents.txt`, no experimental MCP server cards, no Wikipedia page, no Product Hunt as the spark. Evidence for each below.
 
 ## Purpose
@@ -106,7 +106,7 @@ for c in git bun deno supabase gh kubectl docker vercel agents; do
 done
 ```
 
-| CLI | Named in `--help` | Total command groups | Pointer to the rest? |
+| CLI | Entries in `--help` | Total command groups | Pointer to the rest? |
 |---|---:|---:|---|
 | `git` | 23 | hundreds | Yes — `--help` ends with *"'git help -a' … list available subcommands"* |
 | `bun` | 20 | — | — |
@@ -119,10 +119,22 @@ done
 | **`agents`** | **26** | **69** | **No** |
 
 <div class="artifact-callout artifact-callout-warn">
-<strong>The surface problem is not the count — it is the missing door.</strong> An earlier draft of this plan claimed <code>agents</code> shows 69 entries; the one-liner actually returns <strong>26</strong>. The 69 is the true group total from <code>cli/docs/command-index.json</code>, and mixing the two was an error. The corrected picture is worse, not better: <code>agents --help</code> <em>names 26 of its 69 groups and points at none of the other 43</em>. Grepping its output for a full-listing pointer returns one unrelated <code>--names</code> example. So <code>ssh</code>, <code>repos</code>, <code>auth</code>, <code>notify</code> and twenty-plus other groups are reachable only if you already know they exist. git names about the same number, 23, but tells you where the rest live.
+<strong>The surface problem is not the count — it is the missing door.</strong> Two drafts of this plan got this wrong before it was measured properly. The first claimed <code>agents --help</code> shows 69 entries (that is the group total from <code>cli/docs/command-index.json</code>, not the help output). The second claimed it names 26 of 69 (that is the one-liner's row count, which only matches the aligned two-column entries). Measured exactly — regex-matching each of the 69 group names against the real help text — <code>agents --help</code> <strong>names 45 of its 69 groups and never mentions the other 24</strong>, with no pointer to a full listing. Grepping its output for one returns a single unrelated <code>--names</code> example. git names about the same number of entries, 23, but closes by telling you where the rest live.
 </div>
 
-That reframes the fix. Tiering `--help` is only half of it; the half that actually matters is adding the pointer git has had for twenty years.
+And the 24 that go unmentioned are not the obscure tail. Ranked by the session-reach measurement above, and reproducible with `adoption-evidence/help-coverage.py`:
+
+| Unnamed in `--help` | Sessions reached | Rank among all 69 groups |
+|---|---:|---|
+| `ssh` | 368 | **5th** |
+| `repos` | 246 | **8th** |
+| `computer` | 132 | 13th |
+| `notify` | 92 | 18th |
+| `list` | 67 | 22nd |
+| `monitors` | 54 | 24th |
+| `message` | 48 | 26th |
+
+`agents ssh` is the fifth most-used group in the entire CLI and a developer reading `--help` will never learn it exists. That reframes the fix: tiering the front door is only half of it, and the half that actually matters is adding the pointer git has had for twenty years, so the other 24 groups stop being invisible.
 
 ## Evidence 2: the entity is fragmented across four names
 
@@ -216,7 +228,7 @@ Reasons 1 and 2 are both arguments **for** a CLI and **against** a GUI. That is 
 Downloads are npm `last-week` (2026-08-19 to 08-25) except where noted; Go- and Homebrew-distributed tools have no npm figure and show `—`, which means missing data, not zero. Happy's figure is for the `happy` package, which it migrated to from `happy-coder` (the deprecated alias still shows 501/week — quoting that one would understate a live competitor).
 
 <div class="artifact-callout">
-<strong>A supporting data point, not the headline.</strong> At 2,961 npm downloads a week, agents-cli sits in the same order of magnitude as Happy (5,736/week) — a live, thriving peer with 23.5k stars to its 17. Two caveats keep this from carrying more weight than that. Vibe Kanban's 1,495/week is the flattering comparison and is excluded from the claim, because it is a sunsetting project. And this package's own release cadence inflates its number by up to ~10% (bounded in <a href="#risks">Risks</a>). The thesis does not rest here: it rests on 17 stars against peers at 2.8k-54.8k, four names for one product, a false open-source claim, a FAILED brand-discoverability check, and a front door that names 26 of 69 groups with no pointer to the rest. Those are all independently verified and none of them are download counts.
+<strong>A supporting data point, not the headline.</strong> At 2,961 npm downloads a week, agents-cli sits in the same order of magnitude as Happy (5,736/week) — a live, thriving peer with 23.5k stars to its 17. Two caveats keep this from carrying more weight than that. Vibe Kanban's 1,495/week is the flattering comparison and is excluded from the claim, because it is a sunsetting project. And this package's own release cadence inflates its number by up to ~10% (bounded in <a href="#risks">Risks</a>). The thesis does not rest here: it rests on 17 stars against peers at 2.8k-54.8k, four names for one product, a false open-source claim, a FAILED brand-discoverability check, and a front door that never mentions 24 of its 69 groups, including the fifth most-used one. Those are all independently verified and none of them are download counts.
 </div>
 
 Note the graveyard: Terragon shut down Jan 2026, Crystal deprecated Feb 2026, Vibe Kanban's company Apr 2026. **Every dead one was a desktop GUI.** The survivors are a CLI-shaped install or a phone client.
@@ -274,7 +286,7 @@ The adoption funnel as it exists today, and where each stage leaks. This is the 
 
   <rect x="16" y="278" width="470" height="58" rx="4" fill="#141414" stroke="#333"/>
   <text x="32" y="302" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="14">4 · Installs, runs `agents --help`</text>
-  <text x="32" y="322" fill="#666" font-family="ui-monospace,monospace" font-size="12">26 of 69 groups named · no pointer to the rest</text>
+  <text x="32" y="322" fill="#666" font-family="ui-monospace,monospace" font-size="12">45 of 69 groups named · 24 invisible · no pointer</text>
   <line x1="486" y1="307" x2="556" y2="307" stroke="#f87171" stroke-width="1.5" marker-end="url(#ahl)"/>
   <rect x="560" y="282" width="344" height="50" rx="4" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.5"/>
   <text x="576" y="302" fill="#f87171" font-family="ui-monospace,monospace" font-size="12">Cannot find the 11% that matter.</text>
@@ -532,7 +544,7 @@ Skip `openapi.json`, `json-error-responses`, and `function-calling`. Those check
 
 | Surface | Before | After |
 |---|---|---|
-| `agents --help` | Names 26 of 69 groups, unordered, no pointer to the other 43 | 4 "start here" plus 6 "every day", plus a pointer to all 69 |
+| `agents --help` | Names 45 of 69 groups, unordered; 24 never mentioned, no pointer | 4 "start here" plus 6 "every day", plus a pointer to all 69 |
 | `agents commands` | Lists installed slash commands | Also the documented door to the full 564-command index |
 | npm description | "One CLI for all your AI coding agents…" | Pain-first, names the harnesses |
 | `agents-cli.sh` | 301 to `agi-cli.sh` | Canonical; `agi-cli.sh` 301s here |
@@ -584,6 +596,11 @@ sed -n '/USAGE TIERS/,/dead or near-dead/p' /tmp/a.txt   # expect 63/117/130/98/
 # 1. Surface: the front door is small, the full index still reachable
 agents --help | grep -cE '^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}'   # expect <= 12, was 69
 agents commands --index --json | jq '.commands'    # expect 564, unchanged
+
+# 1b. The invisible groups: which of the 69 does --help never name?
+python3 .agents/artifacts/2026-08-27/adoption-evidence/help-coverage.py
+#     today: names 45, never mentions 24 (ssh #5, repos #8, computer #13)
+#     after: 0 never-mentioned, or a pointer that reaches them
 bash cli/scripts/verify-command-index.sh           # index still matches registry
 
 # 2. Identity: one canonical entity
@@ -620,6 +637,7 @@ End-to-end proof for the demo is the recording itself: a real run hitting a real
 
 - Plan source: `.agents/artifacts/2026-08-27/plan-adoption.md`
 - Evidence, committed beside this plan in `.agents/artifacts/2026-08-27/adoption-evidence/`:
+  - `help-coverage.py` — which of the 69 groups `agents --help` actually names
   - `mine-command-usage.py`, `command-usage-report.txt`, `command-usage.json` — the transcript reducer, its printed report, and the raw per-command counts. Every number the plan cites is printed by the script; re-run it to reproduce them.
   - `is-agentic-agi-cli.json` — the raw 118-check agent-readiness scan
   - `research-x-market-grok.md` — live X engagement data, DIY reasons, distribution case studies
