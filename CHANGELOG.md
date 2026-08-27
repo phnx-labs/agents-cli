@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **CI guard blocks confidential GTM/monetization content from public `.agents/artifacts/` (PHNX-3033).** The required Linux PR check now runs `scripts/guard-artifacts-confidential.ts`, which fails loud when a staged file under `.agents/artifacts/<yyyy-mm-dd>/` (not the gitignored `.agents/artifacts/private/`) matches sensitive-strategy filename or content signals — GTM, monetization, pricing models, revenue/ARR/MRR/churn figures, launch venues, stars playbooks, or competitor intel. The error points authors to `.agents/artifacts/private/` or a private repo. Source: `scripts/guard-artifacts-confidential.ts`, `scripts/guard-artifacts-confidential.test.ts`, `.github/workflows/tests.yml`.
+
 - **`agents monitors add` refuses immediately when a reachable peer already has the same watcher (PHNX-3299).** The fleet duplicate guard used to collect every peer before reporting a clash, so a single slow box forced the full 12-second timeout even when another peer had already answered with the same fingerprint. The fan-out now aborts remaining SSH captures the moment a peer reports a matching monitor, while the no-match path still waits for the whole fleet so uniqueness can be proved. Source: `cli/src/commands/monitors.ts`, `cli/src/lib/monitors/remote.ts`.
 - **A bare `agents browser start` no longer auto-detects and silently creates a
   logged-out `auto-chrome` profile — the default browser is now a choice you make

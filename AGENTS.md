@@ -305,6 +305,14 @@ built from messages or an address book — anonymizing it would destroy it. Put 
 `.agents/artifacts/private/`, which `.gitignore` excludes, and keep it in the repo so the
 work stays with the project instead of drifting into `/tmp` or a home directory.
 
+**Confidential GTM, monetization, pricing, revenue, and competitor material never lands in
+public artifacts.** Files whose names or content signal go-to-market strategy, pricing
+models, revenue/ARR/MRR/churn figures, launch venues, GitHub stars playbooks, or competitor
+intelligence belong in `.agents/artifacts/private/` or a private repo — never in the
+committed `.agents/artifacts/<yyyy-mm-dd>/` tree. The required Linux PR check runs
+`scripts/guard-artifacts-confidential.ts` and fails loud with the offending paths and the
+right home if one is staged.
+
 ## Conventions (repo-wide)
 
 - **`AGENTS.md` is the canonical memory file.** `CLAUDE.md` / `GEMINI.md` are symlinks
