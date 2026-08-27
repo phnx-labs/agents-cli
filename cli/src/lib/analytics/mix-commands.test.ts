@@ -9,7 +9,10 @@ import * as path from 'path';
 import { Command } from 'commander';
 import Database from '../sqlite.js';
 import { closeUsageDb, recordUsage } from './usage-db.js';
-import { registerMixCommands } from './mix-commands.js';
+// Build the FULL `insights` parent (which owns --json/--since/--by) so the
+// parent↔leaf option-name collision these commands hit in production is
+// exercised, not a bare stand-in parent that never collides.
+import { registerInsightsCommand } from '../../commands/insights.js';
 
 const tmpDirs: string[] = [];
 let prevNoTrack: string | undefined;
@@ -91,9 +94,7 @@ describe('insights mix registration', () => {
   it('agents insights mix prints the counter board without a deprecation line', async () => {
     const program = new Command();
     program.exitOverride();
-    const insights = program.command('insights');
-    insights.action(() => { /* bare insights unused here */ });
-    registerMixCommands(insights);
+    registerInsightsCommand(program);
 
     const { out, err } = await capture(async () => {
       await program.parseAsync(['node', 'agents', 'insights', 'mix', '--json']);
@@ -108,9 +109,7 @@ describe('insights mix registration', () => {
   it('agents insights harness-mix runs a single recipe', async () => {
     const program = new Command();
     program.exitOverride();
-    const insights = program.command('insights');
-    insights.action(() => {});
-    registerMixCommands(insights);
+    registerInsightsCommand(program);
 
     const { out, err } = await capture(async () => {
       await program.parseAsync(['node', 'agents', 'insights', 'harness-mix', '--json']);
@@ -126,9 +125,7 @@ describe('nested insights trends alias of mix', () => {
   it('returns the mix dashboard without a deprecation line', async () => {
     const program = new Command();
     program.exitOverride();
-    const insights = program.command('insights');
-    insights.action(() => {});
-    registerMixCommands(insights);
+    registerInsightsCommand(program);
 
     const { out, err } = await capture(async () => {
       await program.parseAsync(['node', 'agents', 'insights', 'trends', '--json']);
@@ -138,4 +135,21 @@ describe('nested insights trends alias of mix', () => {
     expect(parsed.window.days).toBe(7);
     expect(parsed.sections.length).toBeGreaterThan(0);
   });
+});
+
+describe('insights subcommands honor --json despite the parent-option collision', () => {
+  // --json collides by long-name with the `insights` parent, so commander binds
+  // it to the parent; each leaf must read optsWithGlobals() or it prints the
+  // human table (invalid for machine callers). Regression for the whole group.
+  for (const sub of ['mix', 'trends', 'recipes', 'query', 'harness-mix']) {
+    it(`agents insights ${sub} --json emits parseable JSON`, async () => {
+      const program = new Command();
+      program.exitOverride();
+      registerInsightsCommand(program);
+      const { out } = await capture(async () => {
+        await program.parseAsync(['node', 'agents', 'insights', sub, '--json']);
+      });
+      expect(() => JSON.parse(out)).not.toThrow();
+    });
+  }
 });

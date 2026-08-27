@@ -96,7 +96,10 @@ export function registerMixCommands(parent: Command): void {
     .option('--days <n>', 'Days of history to include', '7')
     .option('--json', 'Emit JSON instead of tables')
     .action(function summary(this: Command) {
-      const o = this.opts() as MixOpts;
+      // optsWithGlobals(): --json collides by name with the `insights` parent, so
+      // commander binds it to the parent and this.opts() never sees it. Merging
+      // ancestor opts is what the per-recipe leaves below already do.
+      const o = this.optsWithGlobals() as MixOpts;
       renderMixDashboard(parseMixDays(o.days), Boolean(o.json), banner);
     });
 
@@ -129,7 +132,8 @@ export function registerMixCommands(parent: Command): void {
   parent.command('recipes')
     .description('List baked mix-recipe ids')
     .option('--json', 'Emit JSON')
-    .action((o: { json?: boolean }) => {
+    .action(function recipes(this: Command) {
+      const o = this.optsWithGlobals() as { json?: boolean };
       const list = listRecipes();
       if (o.json) {
         console.log(JSON.stringify(list, null, 2));
@@ -148,7 +152,8 @@ export function registerMixCommands(parent: Command): void {
     .option('--days <n>', 'Days of history', '7')
     .option('--limit <n>', 'Max rows', '40')
     .option('--json', 'Emit JSON')
-    .action((o: { kind?: string; name?: string; event?: string; days?: string; limit?: string; json?: boolean }) => {
+    .action(function query(this: Command) {
+      const o = this.optsWithGlobals() as { kind?: string; name?: string; event?: string; days?: string; limit?: string; json?: boolean };
       const win = analyticsWindow(parseMixDays(o.days));
       const kind = o.kind && (USAGE_KINDS as readonly string[]).includes(o.kind)
         ? o.kind as UsageKind
@@ -192,8 +197,9 @@ export function registerMixCommands(parent: Command): void {
       .option('--days <n>', 'Days of history', '7')
       .option('--json', 'Emit JSON')
       .action(function recipeAction(this: Command) {
-        const parentOpts = this.parent?.opts?.() as MixOpts | undefined;
-        const o = { ...parentOpts, ...(this.opts() as MixOpts) };
+        // optsWithGlobals() merges the `insights` parent opts, so the name-colliding
+        // --json/--since reach this leaf (see the sibling commands above).
+        const o = this.optsWithGlobals() as MixOpts;
         const win = analyticsWindow(parseMixDays(o.days));
         const section = runRecipe(id as RecipeId, win);
         if (o.json) {
@@ -215,7 +221,7 @@ export function registerMixCommands(parent: Command): void {
     .option('--days <n>', 'Days of history to include', '7')
     .option('--json', 'Emit JSON instead of tables')
     .action(function summary(this: Command) {
-      const o = this.opts() as MixOpts;
+      const o = this.optsWithGlobals() as MixOpts;
       renderMixDashboard(parseMixDays(o.days), Boolean(o.json), banner);
     });
   setHelpSections(trends, {
