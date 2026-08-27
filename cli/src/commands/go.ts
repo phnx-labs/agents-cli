@@ -33,6 +33,7 @@ import {
   filterSessionsByQuery,
   formatPickerLabel,
   pickerColumnsFor,
+  isUniqueEnoughSelector,
   type LiveStatusFilter,
 } from './sessions.js';
 import { buildPreview } from './sessions-picker.js';
@@ -94,12 +95,17 @@ export function localLiveSelectorMatches(sessions: ActiveSession[], selector: st
 }
 
 /**
- * Skip `gatherRemoteActive` when local already answered the selector: one unique
- * hit is enough, and two local matches fail closed without waiting for a
- * sleeping peer that might collide. Zero matches still race the fleet.
+ * Skip `gatherRemoteActive` when local already answered the selector:
+ * two local matches fail closed without waiting for a sleeping peer that
+ * might collide; a single local hit skips only when the selector is a full
+ * UUID or unique-enough 8-hex (`isUniqueEnoughSelector`). A shorter unique
+ * local prefix still races the fleet so a remote collision can fail closed.
+ * Zero matches still race the fleet.
  */
-export function shouldSkipRemoteSweep(localMatches: ActiveSession[]): boolean {
-  return localMatches.length >= 1;
+export function shouldSkipRemoteSweep(localMatches: ActiveSession[], selector: string): boolean {
+  if (localMatches.length >= 2) return true;
+  if (localMatches.length === 1) return isUniqueEnoughSelector(selector);
+  return false;
 }
 
 /**
@@ -120,9 +126,7 @@ export function isDefinitiveLiveMatch(session: ActiveSession, selector: string):
 function liveSelectorEarlyExit(
   selector: string | undefined,
 ): { isDefinitive: (item: ActiveSession, machine: string) => boolean } | undefined {
-  if (!selector) return undefined;
-  const q = selector.trim().toLowerCase();
-  if (!isSessionIdShape(q) && q.length < 8) return undefined;
+  if (!selector || !isUniqueEnoughSelector(selector)) return undefined;
   return { isDefinitive: (item) => isDefinitiveLiveMatch(item, selector) };
 }
 
@@ -152,6 +156,7 @@ export async function gatherLiveTargets(
         opts.hosts?.length
           ? filterLivePool(localLiveSelectorMatches(localActive, opts.selector), { hosts: opts.hosts })
           : localLiveSelectorMatches(localActive, opts.selector),
+        opts.selector,
       )
     : false);
   if (!skipRemote) {

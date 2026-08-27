@@ -53,7 +53,7 @@ describe('PHNX-3298 — stop resolves a unique local live id without a fleet wai
     const { resolveOne } = await import('./detach-core.js');
     const sid = 'c1a0de70-3298-4000-8000-000000003298';
     const row = { context: 'local', kind: 'claude', sessionId: sid, status: 'running' } as unknown as ActiveSession;
-    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([row], sid))).toBe(true);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([row], sid), sid)).toBe(true);
     const r = resolveOne(new Map([[sid, row]]), sid);
     expect('error' in r).toBe(false);
     expect((r as ActiveSession).sessionId).toBe(sid);
@@ -64,7 +64,7 @@ describe('PHNX-3298 — stop resolves a unique local live id without a fleet wai
     const { resolveOne } = await import('./detach-core.js');
     const a = { context: 'local', kind: 'claude', sessionId: 'aaaaaaaa-1111-4000-8000-000000000001', status: 'running' } as unknown as ActiveSession;
     const b = { context: 'local', kind: 'codex', sessionId: 'aaaaaaaa-2222-4000-8000-000000000002', status: 'running' } as unknown as ActiveSession;
-    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([a, b], 'aaaaaaaa'))).toBe(true);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([a, b], 'aaaaaaaa'), 'aaaaaaaa')).toBe(true);
     const r = resolveOne(new Map([[a.sessionId!, a], [b.sessionId!, b]]), 'aaaaaaaa');
     expect('error' in r && r.error).toMatch(/ambiguous/i);
   });

@@ -62,28 +62,42 @@ describe('PHNX-3298 — skip fleet when local already answered a live selector',
   it('a unique local full UUID is a skip (zero SSH)', () => {
     const local = [s({ sessionId: uuid })];
     expect(localLiveSelectorMatches(local, uuid)).toHaveLength(1);
-    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid))).toBe(true);
-    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid.toUpperCase()))).toBe(true);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid), uuid)).toBe(true);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid.toUpperCase()), uuid.toUpperCase())).toBe(true);
   });
 
   it('a unique-enough 8-hex with exactly one local live match skips the fleet', () => {
     const local = [s({ sessionId: uuid }), s({ sessionId: unrelated })];
     const matches = localLiveSelectorMatches(local, 'c1a0de70');
     expect(matches).toHaveLength(1);
-    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+    expect(shouldSkipRemoteSweep(matches, 'c1a0de70')).toBe(true);
+  });
+
+  it('a unique 4-hex local hit still races the fleet (remote may collide)', () => {
+    const local = [s({ sessionId: uuid })];
+    const matches = localLiveSelectorMatches(local, 'c1a0');
+    expect(matches).toHaveLength(1);
+    expect(shouldSkipRemoteSweep(matches, 'c1a0')).toBe(false);
   });
 
   it('two local matches fail closed without waiting for unanswered peers', () => {
     const local = [s({ sessionId: uuid }), s({ sessionId: other })];
     const matches = localLiveSelectorMatches(local, 'c1a0de70');
     expect(matches).toHaveLength(2);
-    expect(shouldSkipRemoteSweep(matches)).toBe(true);
+    expect(shouldSkipRemoteSweep(matches, 'c1a0de70')).toBe(true);
+  });
+
+  it('two local 4-hex collisions fail closed without racing the fleet', () => {
+    const local = [s({ sessionId: uuid }), s({ sessionId: other })];
+    const matches = localLiveSelectorMatches(local, 'c1a0');
+    expect(matches).toHaveLength(2);
+    expect(shouldSkipRemoteSweep(matches, 'c1a0')).toBe(true);
   });
 
   it('a genuine miss still races the fleet', () => {
     const local = [s({ sessionId: unrelated })];
-    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid))).toBe(false);
-    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([], 'c1a0de70'))).toBe(false);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches(local, uuid), uuid)).toBe(false);
+    expect(shouldSkipRemoteSweep(localLiveSelectorMatches([], 'c1a0de70'), 'c1a0de70')).toBe(false);
   });
 
   it('a full UUID is definitive on exact id only', () => {

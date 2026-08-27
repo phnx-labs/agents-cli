@@ -90,9 +90,14 @@ describe.skipIf(tmuxSkip)('gatherLiveTargets — skip fleet on unique local live
     expect(activeById.get(SESSION_ID)?.sessionId).toBe(SESSION_ID);
   });
 
+  it('a unique 4-hex local hit still races the fleet so a remote collision can fail closed', async () => {
+    await gatherLiveTargets(false, { selector: SHORT.slice(0, 4), includeCloud: true });
+    expect(gatherRemoteActiveMock).toHaveBeenCalledOnce();
+  });
+
   it('a genuine miss still races the fleet', async () => {
     await gatherLiveTargets(false, {
-      selector: 'ffffffff-3298-4000-8000-00000000miss',
+      selector: 'ffffffff-3298-4000-8000-00000000ffff',
       includeCloud: true,
     });
     expect(gatherRemoteActiveMock).toHaveBeenCalledOnce();
