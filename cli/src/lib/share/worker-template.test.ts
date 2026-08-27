@@ -1305,3 +1305,98 @@ describe('attribution bar injected on served HTML pages', () => {
     expect(html).not.toContain('<script>evil()</script>');
   });
 });
+
+describe('viewer wrapper for non-HTML assets', () => {
+  it('wraps an image in a viewer page (with the bar) for a BROWSER navigation', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/pic.png', 'PNGBYTES', { 'content-type': 'image/png', 'x-share-agent': 'Claude' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/pic.png', { headers: { accept: 'text/html,application/xhtml+xml' } }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('agents-share-bar'); // attribution bar present
+    expect(html).toContain('Made with Claude');
+    // media element points back at ?raw so it loads the bytes, not the viewer
+    expect(html).toContain('<img src="/octocat/pic.png?raw=1"');
+    expect(html).toContain('pic.png'); // title/name
+  });
+
+  it('serves the RAW bytes to a non-browser fetch (Accept without text/html) — no wrapper', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/pic.png', 'PNGBYTES', { 'content-type': 'image/png' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/pic.png', { headers: { accept: 'image/png,*/*' } }),
+      env,
+    );
+    const body = await res.text();
+    expect(body).toBe('PNGBYTES');
+    expect(body).not.toContain('agents-share-bar');
+    expect(res.headers.get('content-type')).toBe('image/png');
+  });
+
+  it('?raw returns bytes even for a browser (the embed/OG escape hatch)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/pic.png', 'PNGBYTES', { 'content-type': 'image/png' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/pic.png?raw=1', { headers: { accept: 'text/html' } }),
+      env,
+    );
+    const body = await res.text();
+    expect(body).toBe('PNGBYTES');
+    expect(body).not.toContain('agents-share-bar');
+  });
+
+  it('uses <video> for video and <iframe> for pdf', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/clip.mp4', 'MP4', { 'content-type': 'video/mp4' });
+    await put(worker, env, 'octocat/doc.pdf', 'PDF', { 'content-type': 'application/pdf' });
+    const vid = await (await worker.default.fetch(new Request('https://share.test/octocat/clip.mp4', { headers: { accept: 'text/html' } }), env)).text();
+    expect(vid).toContain('<video src="/octocat/clip.mp4?raw=1"');
+    const pdf = await (await worker.default.fetch(new Request('https://share.test/octocat/doc.pdf', { headers: { accept: 'text/html' } }), env)).text();
+    expect(pdf).toContain('<iframe src="/octocat/doc.pdf?raw=1"');
+  });
+
+  it('does not wrap a non-viewable asset (JSON) — served raw', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/data.json', '{"a":1}', { 'content-type': 'application/json' });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/data.json', { headers: { accept: 'text/html' } }), env);
+    const body = await res.text();
+    expect(body).toBe('{"a":1}');
+    expect(body).not.toContain('agents-share-bar');
+  });
+
+  it('me/org gate still applies to the viewer — anonymous browser is bounced, not shown', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    // Respect the bearer so an anonymous request genuinely has no identity.
+    worker.hooks.verifyPhoenixToken = async (req: Request) =>
+      (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '')
+        ? { userId: 'u1', email: 'octocat@a.com' }
+        : null;
+    const put1 = await worker.default.fetch(
+      new Request('https://share.test/octocat/secret.png', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer p', 'content-type': 'image/png', 'x-share-visibility': 'me' },
+        body: 'PNG',
+      }),
+      env,
+    );
+    expect(put1.status).toBe(200);
+    // anonymous browser navigation → gate fires (302 login), never the viewer
+    const anon = await worker.default.fetch(new Request('https://share.test/octocat/secret.png', { headers: { accept: 'text/html' } }), env);
+    expect(anon.status).toBe(302);
+    // owner browser → viewer
+    const owner = await worker.default.fetch(new Request('https://share.test/octocat/secret.png', { headers: { authorization: 'Bearer p', accept: 'text/html' } }), env);
+    expect(owner.status).toBe(200);
+    expect(await owner.text()).toContain('agents-share-bar');
+  });
+});

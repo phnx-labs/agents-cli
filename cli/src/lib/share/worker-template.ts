@@ -255,17 +255,34 @@ export default {
         if (visibility === 'unlisted') headers.set('X-Robots-Tag', 'noindex');
       }
       if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
-      // HTML pages get an attribution bar injected at serve time (who shared it,
-      // what made it, when, and — the point — a visual VISIBILITY cue). All read
-      // from the object's stamped metadata; non-HTML assets (images, JSON, the OG
-      // cover) are served byte-for-byte. The body changes, so the R2 etag no
-      // longer matches — drop it rather than serve a lying validator.
-      const isHtmlPage = (headers.get('content-type') || '').indexOf('text/html') !== -1;
-      if (isHtmlPage) {
-        const rawHtml = await obj.text();
-        const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg);
-        headers.delete('etag');
-        return new Response(withBar, { status: 200, headers });
+      const ctype = headers.get('content-type') || '';
+      // ?raw ALWAYS returns the stored bytes untouched — the escape hatch for
+      // <img src>, OG crawlers, iframes, and anyone embedding the asset. The
+      // media element inside the viewer below points back at ?raw for exactly this.
+      const wantsRaw = url.searchParams.get('raw') != null;
+      if (!wantsRaw) {
+        // HTML pages get the attribution bar injected at serve time (who shared
+        // it, what made it, when, and — the point — a visual VISIBILITY cue), all
+        // from stamped metadata. The body changes, so the R2 etag no longer
+        // matches — drop it rather than serve a lying validator.
+        if (ctype.indexOf('text/html') !== -1) {
+          const rawHtml = await obj.text();
+          const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg);
+          headers.delete('etag');
+          return new Response(withBar, { status: 200, headers });
+        }
+        // A BROWSER navigating directly to a non-HTML asset (image / video /
+        // audio / pdf) gets a lightweight viewer page carrying the same bar. A
+        // non-browser fetch (Accept without text/html — <img>, OG crawler, curl)
+        // falls through to the raw bytes, so embedding is never broken.
+        const kind = viewableAssetKind(ctype);
+        if (kind && acceptsHtml(request)) {
+          const viewer = renderAssetViewer(url.pathname, kind, obj.customMetadata || {}, firstSeg);
+          const vheaders = new Headers(headers);
+          vheaders.set('content-type', 'text/html; charset=utf-8');
+          vheaders.delete('etag');
+          return new Response(viewer, { status: 200, headers: vheaders });
+        }
       }
       return new Response(obj.body, { status: 200, headers });
     }
@@ -552,6 +569,47 @@ function injectAttributionBar(html, meta, handle) {
     return html.slice(0, at) + bar + html.slice(at);
   }
   return bar + html;
+}
+
+function acceptsHtml(request) {
+  return (request.headers.get('accept') || '').indexOf('text/html') !== -1;
+}
+
+// Assets we can embed in a viewer page. Everything else (JSON, .txt, arbitrary
+// downloads) is served raw — there is nothing useful to wrap it in.
+function viewableAssetKind(contentType) {
+  var ct = (contentType || '').toLowerCase();
+  if (ct.indexOf('image/') === 0) return 'image';
+  if (ct.indexOf('video/') === 0) return 'video';
+  if (ct.indexOf('audio/') === 0) return 'audio';
+  if (ct.indexOf('application/pdf') === 0) return 'pdf';
+  return '';
+}
+
+// A minimal dark viewer page: the attribution bar on top, the asset centered
+// below. The media element points back at THIS url with ?raw so it loads the
+// stored bytes (not the viewer recursively) — and that ?raw fetch re-runs the
+// same me/org gate, so a private asset stays private inside its own viewer.
+function renderAssetViewer(pathname, kind, meta, handle) {
+  var rawUrl = escapeHtml(pathname + '?raw=1');
+  var name = '';
+  try { name = decodeURIComponent(pathname.split('/').pop() || 'file'); } catch (e) { name = pathname.split('/').pop() || 'file'; }
+  var bar = renderAttributionBar(meta, handle);
+  var media = '';
+  if (kind === 'image') media = '<img src="' + rawUrl + '" alt="' + escapeHtml(name) + '">';
+  else if (kind === 'video') media = '<video src="' + rawUrl + '" controls playsinline></video>';
+  else if (kind === 'audio') media = '<audio src="' + rawUrl + '" controls></audio>';
+  else if (kind === 'pdf') media = '<iframe src="' + rawUrl + '" title="' + escapeHtml(name) + '"></iframe>';
+  return '<!doctype html><html><head><meta charset="utf-8">' +
+    '<meta name="viewport" content="width=device-width,initial-scale=1">' +
+    '<title>' + escapeHtml(name) + '</title>' +
+    '<style>html,body{margin:0;background:#0f0f11}' +
+    'body{min-height:100vh;display:flex;align-items:center;justify-content:center;padding:16px;box-sizing:border-box}' +
+    '.ashv{max-width:100%;max-height:calc(100vh - 90px);display:flex;align-items:center;justify-content:center}' +
+    '.ashv img,.ashv video{max-width:100%;max-height:calc(100vh - 90px);display:block;border-radius:8px;box-shadow:0 10px 40px rgba(0,0,0,.5)}' +
+    '.ashv audio{width:min(90vw,560px)}' +
+    '.ashv iframe{width:min(94vw,1000px);height:calc(100vh - 90px);border:0;border-radius:8px;background:#fff}' +
+    '</style></head><body>' + bar + '<div class="ashv">' + media + '</div></body></html>';
 }
 
 function json(body, status) {
