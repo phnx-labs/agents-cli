@@ -10,6 +10,8 @@ import { readFileSync } from 'node:fs';
 import { basename } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { hostname as osHostname } from 'node:os';
+import { createHash } from 'node:crypto';
+import { readSession } from '../identity/client.js';
 import { readShareConfig, type ShareConfig } from './config.js';
 import { resolveGitHubUsername } from '../git.js';
 import { resolveShareBackend, sanitizeShareNamespace, type ResolveShareBackendOpts } from './backend.js';
@@ -74,6 +76,12 @@ export interface PublishOptions {
   writeToken?: string;
   /** DI seam for tests — override `readSession()`. `null` means signed out. */
   session?: import('../identity/client.js').PhoenixSession | null;
+  /**
+   * Override the sharer's avatar URL stamped on the object (test seam). When
+   * omitted it is derived from the signed-in email via {@link resolveShareAvatar};
+   * an empty string suppresses the stamp (initials-only bar).
+   */
+  avatar?: string;
   /** Force the BYO Cloudflare path even when signed in. */
   byo?: boolean;
   /** DI seam for tests — override the real HTTP PUT. */
@@ -160,6 +168,7 @@ export const RESERVED_META_KEYS = [
   'host',
   'repo',
   'date',
+  'avatar',
   'label',
   'label-source',
 ] as const;
@@ -185,6 +194,28 @@ export function resolveShareProvenance(
     repo: gitRepoName(opts.dir ?? process.cwd()),
     date: (opts.now ?? new Date()).toISOString().slice(0, 10),
   };
+}
+
+/**
+ * The sharer's avatar URL, stamped so the share bar can show a real profile
+ * picture instead of only the initials circle. We key a Gravatar on the SHA-256
+ * of the signed-in user's lowercased email (Gravatar resolves either MD5 or
+ * SHA-256), with `d=404` so Gravatar returns 404 for a user who has none — the
+ * bar's `<img>` onerror then falls back to the initials circle. Only the hash
+ * lands in public metadata, never the raw email. Returns '' when signed out
+ * (BYO without a Phoenix session), leaving the bar on the initials circle.
+ *
+ * `opts.session === null` means "explicitly signed out" (a test seam / BYO) and
+ * yields ''; `undefined` reads the real persisted session.
+ */
+export function resolveShareAvatar(
+  opts: { session?: import('../identity/client.js').PhoenixSession | null } = {},
+): string {
+  const session = opts.session !== undefined ? opts.session : readSession();
+  const email = session?.email?.trim().toLowerCase();
+  if (!email) return '';
+  const hash = createHash('sha256').update(email).digest('hex');
+  return `https://www.gravatar.com/avatar/${hash}?d=404&s=52`;
 }
 
 /**
@@ -620,6 +651,7 @@ export async function publishToEndpoint(
   const unlisted = visibility === 'unlisted';
   const pageUrl = `${endpoint.baseUrl.replace(/\/+$/, '')}/${key}`;
   const provenance = opts.provenance ?? resolveShareProvenance();
+  const avatarUrl = opts.avatar ?? resolveShareAvatar({ session: opts.session });
   const meta = opts.meta ?? {};
 
   const put =
@@ -670,6 +702,7 @@ export async function publishToEndpoint(
   if (provenance.host) metadataPreview.host = provenance.host;
   if (provenance.repo) metadataPreview.repo = provenance.repo;
   if (provenance.date) metadataPreview.date = provenance.date;
+  if (avatarUrl) metadataPreview.avatar = avatarUrl;
   assertMetadataSize(metadataPreview);
 
   const authHeaders = (contentType: string): Record<string, string> => {
@@ -684,6 +717,7 @@ export async function publishToEndpoint(
     if (provenance.host) h['x-share-host'] = toHeaderValue(provenance.host);
     if (provenance.repo) h['x-share-repo'] = toHeaderValue(provenance.repo);
     if (provenance.date) h['x-share-date'] = toHeaderValue(provenance.date);
+    if (avatarUrl) h['x-share-avatar'] = toHeaderValue(avatarUrl);
     h['x-share-label'] = toHeaderValue(label);
     h['x-share-label-source'] = labelSource;
     // Per VALUE, before JSON.stringify — folding the serialized form would rewrite

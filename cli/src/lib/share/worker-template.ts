@@ -125,6 +125,7 @@ export default {
       const host = request.headers.get('x-share-host') || '';
       const repo = request.headers.get('x-share-repo') || '';
       const date = request.headers.get('x-share-date') || '';
+      const avatar = request.headers.get('x-share-avatar') || '';
       const label = request.headers.get('x-share-label') || '';
       const labelSource = request.headers.get('x-share-label-source') || '';
       let extraMeta = {};
@@ -157,6 +158,7 @@ export default {
       if (host) customMetadata['host'] = host;
       if (repo) customMetadata['repo'] = repo;
       if (date) customMetadata['date'] = date;
+      if (avatar) customMetadata['avatar'] = avatar;
       if (label) customMetadata['label'] = label;
       if (labelSource) customMetadata['label-source'] = labelSource;
 
@@ -476,7 +478,7 @@ async function renderRevisions(bucket, origin, key, method, identityGated) {
 // before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
 // One list, reused both to strip a same-named --meta collision on write and
 // to split arbitrary --meta entries back out on read.
-var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'label', 'label-source'];
+var RESERVED_METADATA_KEYS = ['expires-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source'];
 var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
 var SHARE_COOKIE = '__Host-phoenix_share';
 var SHARE_COOKIE_MAX_AGE = 604800;
@@ -522,9 +524,35 @@ function visibilityChip(visibility, orgDomain) {
   return { icon: VIS_ICON.public, label: 'Public', color: '#30a46c' };
 }
 
+// A deterministic hue (0-359) from the handle, so a given sharer always gets the
+// same initials-circle colour without any stored palette.
+function avatarHue(s) {
+  var h = 0;
+  for (var i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) % 360;
+  return h;
+}
+
+// The avatar slot is ALWAYS rendered: a coloured initials circle derived from the
+// handle. When the object carries an avatar URL (a Gravatar the CLI stamps at
+// publish, or any future hosted photo), a real img is layered on top; onerror
+// removes it so the initials underneath show through when the photo 404s. There
+// is no CSP on the share page, so the inline onerror fallback is honoured.
+function renderAvatar(handle, avatarUrl) {
+  var h = (handle || '').trim();
+  var initial = escapeHtml((h.charAt(0) || '?').toUpperCase());
+  var bg = 'hsl(' + avatarHue(h) + ',48%,42%)';
+  var inner = '<span class="ash-av-i">' + initial + '</span>';
+  if (avatarUrl) {
+    inner += '<img class="ash-av-img" src="' + escapeHtml(avatarUrl) + '" alt="" loading="lazy" ' +
+      'referrerpolicy="no-referrer" onerror="this.remove()">';
+  }
+  return '<span class="ash-avatar" style="background:' + bg + ' !important" aria-hidden="true">' + inner + '</span>';
+}
+
 function renderAttributionBar(meta, handle) {
   var cm = meta || {};
   var chip = visibilityChip(cm.visibility || 'public', cm.org_domain);
+  var avatar = renderAvatar(handle, cm.avatar);
   var left = '';
   // The handle is already the public URL namespace, so surfacing it leaks nothing new.
   if (handle) left += 'Shared by <strong>' + escapeHtml(handle) + '</strong>';
@@ -547,6 +575,9 @@ function renderAttributionBar(meta, handle) {
     'padding:8px 16px !important;background:#0b0b0c !important;color:#e8e8e8 !important;border-bottom:1px solid #23232a !important;box-shadow:0 1px 3px rgba(0,0,0,.35) !important;' +
     'font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif !important}' +
     '.agents-share-bar *{box-sizing:border-box;font-family:inherit}' +
+    '.agents-share-bar .ash-avatar{flex:none;position:relative;width:26px;height:26px;border-radius:50% !important;overflow:hidden;display:inline-flex;align-items:center;justify-content:center;color:#fff !important;font-weight:600;font-size:12px;line-height:1;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}' +
+    '.agents-share-bar .ash-av-i{color:#fff !important}' +
+    '.agents-share-bar .ash-av-img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;border-radius:50% !important}' +
     '.agents-share-bar .ash-left{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#cfd3d9 !important}' +
     '.agents-share-bar strong{color:#fff !important;font-weight:600}' +
     '.agents-share-bar .ash-dot{opacity:.4;margin:0 4px}' +
@@ -555,6 +586,7 @@ function renderAttributionBar(meta, handle) {
     '.agents-share-bar .ash-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid;font-weight:600;font-size:12px;white-space:nowrap}' +
     '.agents-share-bar .ash-chip svg{flex:none;vertical-align:middle}' +
     '</style>' +
+    avatar +
     '<span class="ash-left">' + left + '</span>' +
     '<span class="ash-right">' + right + '</span>' +
     '</div>';

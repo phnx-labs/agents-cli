@@ -1304,6 +1304,50 @@ describe('attribution bar injected on served HTML pages', () => {
     expect(html).toContain('&lt;script&gt;evil()&lt;/script&gt;');
     expect(html).not.toContain('<script>evil()</script>');
   });
+
+  it('ALWAYS renders an avatar slot (initials circle) even with no avatar metadata', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/plain', '<html><body>z</body></html>');
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plain'), env);
+    const html = await res.text();
+    // the avatar element is present...
+    expect(html).toContain('<span class="ash-avatar"');
+    // ...carries the handle's uppercase initial...
+    expect(html).toContain('<span class="ash-av-i">O</span>');
+    // ...and with no avatar URL stamped there is no <img> photo layer (the
+    // .ash-av-img CSS class is always in the <style> block; the ELEMENT is not).
+    expect(html).not.toContain('<img class="ash-av-img"');
+  });
+
+  it('layers a real photo <img> over the initials when an avatar URL is stamped', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    const avatar = 'https://www.gravatar.com/avatar/abc123?d=404&s=52';
+    await put(worker, env, 'octocat/pic', '<html><body>z</body></html>', { 'x-share-avatar': avatar });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/pic'), env);
+    const html = await res.text();
+    expect(html).toContain('<img class="ash-av-img"');
+    // the URL is HTML-attribute-escaped (& -> &amp;), which the browser decodes
+    // back to the real query string when it fetches the photo.
+    expect(html).toContain('src="https://www.gravatar.com/avatar/abc123?d=404&amp;s=52"');
+    // onerror falls back to the initials circle beneath when the photo 404s
+    expect(html).toContain('onerror="this.remove()"');
+    // the initials circle is still underneath
+    expect(html).toContain('<span class="ash-av-i">O</span>');
+  });
+
+  it('escapes a crafted avatar URL — no HTML/attribute injection through the photo layer', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/evil', '<html><body>z</body></html>', {
+      'x-share-avatar': 'https://x/"><script>bad()</script>',
+    });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/evil'), env);
+    const html = await res.text();
+    expect(html).not.toContain('"><script>bad()</script>');
+    expect(html).toContain('&lt;script&gt;bad()&lt;/script&gt;');
+  });
 });
 
 describe('viewer wrapper for non-HTML assets', () => {

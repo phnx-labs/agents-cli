@@ -1,5 +1,6 @@
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join, basename } from 'node:path';
@@ -18,6 +19,7 @@ import {
   publishToEndpoint,
   buildShareKey,
   resolveShareProvenance,
+  resolveShareAvatar,
   parseMetaEntries,
   assertMetadataSize,
   deriveLabel,
@@ -98,6 +100,9 @@ describe('publishFile', () => {
       // Suppress auto-captured provenance (agent/session/host/repo/date) so the
       // test is deterministic regardless of the ambient env it runs in.
       provenance: {},
+      // Likewise pin the session to signed-out so the ambient login on the box
+      // running the suite can't leak an x-share-avatar into the exact-header map.
+      session: null,
       config: {
         baseUrl: 'https://share.example',
         accountId: 'acct',
@@ -440,6 +445,64 @@ describe('publishToEndpoint', () => {
     expect(visibility).toBe('public');
     expect(result.visibility).toBe('public');
     expect(result.unlisted).toBeUndefined();
+  });
+
+  it('stamps x-share-avatar (Gravatar of the signed-in email) so the bar can show a real photo', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-avatar-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    let avatar = '';
+    await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'shown',
+        githubUser: 'octocat',
+        expire: 'never',
+        cover: false,
+        session: { access_token: 'pid_alice', userId: 'alice', email: 'Alice@Example.com' },
+        uploader: async (_u, _b, headers) => {
+          avatar = headers['x-share-avatar'] ?? '';
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    // resolveShareAvatar lowercases the email before hashing, so a mixed-case
+    // address yields the same Gravatar as its canonical lowercased form.
+    expect(avatar).toBe(resolveShareAvatar({ session: { access_token: 'x', email: 'alice@example.com' } }));
+    expect(avatar).toContain('https://www.gravatar.com/avatar/');
+    expect(avatar).toContain('d=404');
+  });
+
+  it('omits x-share-avatar when signed out (no session email) — bar stays on the initials circle', async () => {
+    const htmlPath = join(mkdtempSync(join(tmpdir(), 'agents-share-noavatar-')), 'plan.html');
+    writeFileSync(htmlPath, '<h1>ok</h1>');
+    const headersSeen: Record<string, string> = {};
+    await publishToEndpoint(
+      htmlPath,
+      { baseUrl: 'https://share.example', token: 'tok' },
+      {
+        slug: 'shown',
+        githubUser: 'octocat',
+        expire: 'never',
+        cover: false,
+        session: null,
+        uploader: async (_u, _b, headers) => {
+          Object.assign(headersSeen, headers);
+          return { ok: true, status: 200 };
+        },
+      },
+    );
+    expect(headersSeen['x-share-avatar']).toBeUndefined();
+  });
+
+  it('resolveShareAvatar: SHA-256 Gravatar for an email, empty for a signed-out session', () => {
+    expect(resolveShareAvatar({ session: null })).toBe('');
+    expect(resolveShareAvatar({ session: { access_token: 'x' } })).toBe('');
+    // Gravatar resolves either an MD5 or a SHA-256 hash of the lowercased email.
+    const digest = createHash('sha256').update('alice@example.com').digest('hex');
+    expect(resolveShareAvatar({ session: { access_token: 'x', email: 'alice@example.com' } })).toBe(
+      `https://www.gravatar.com/avatar/${digest}?d=404&s=52`,
+    );
   });
 
   it('maps visibility: unlisted the same as the unlisted boolean', async () => {
