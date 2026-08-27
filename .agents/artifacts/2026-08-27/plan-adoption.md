@@ -22,7 +22,7 @@ Five decisions. Two of them are yours and nobody else's.
 1. **DECISION 1 — the name.** The product answers to `agents-cli`, `agi-cli`, `AGI CLI`, and the binary `agents`. Recommendation: **Agents CLI wins**, everything else redirects.
 2. **DECISION 2 — the license claim.** `DESIGN.md:4` here, and `llms.txt` on the live site (which lives in the separate `agent-cli-web` repo), both say "open source (Apache-2.0)". `LICENSE` is FSL-1.1-Apache-2.0, and `README.md:1652` already states that correctly. Recommendation: **fix the two wrong strings**; relicensing is a separate, larger call.
 3. **The wedge.** Lead with *rotate accounts and resume through the limit*, not with teams, worktrees, or browser. Worktrees are table stakes in 2026 and Conductor and Orca own the pictures.
-4. **The cut.** Reduce the *first-run* surface from 69 groups to 10 without deleting a single command. Help tiering, not deprecation.
+4. **The cut, and the door.** `agents --help` currently names 26 of 69 groups and points at none of the other 43. Order the 26 into a 10-group front door *and* add the full-listing pointer git has had for twenty years. No command is deleted.
 5. **What we do NOT do.** No `agents.txt`, no experimental MCP server cards, no Wikipedia page, no Product Hunt as the spark. Evidence for each below.
 
 ## Purpose
@@ -532,7 +532,7 @@ Skip `openapi.json`, `json-error-responses`, and `function-calling`. Those check
 
 | Surface | Before | After |
 |---|---|---|
-| `agents --help` | 69 groups, unordered by importance | 4 "start here" plus 6 "every day" plus a pointer |
+| `agents --help` | Names 26 of 69 groups, unordered, no pointer to the other 43 | 4 "start here" plus 6 "every day", plus a pointer to all 69 |
 | `agents commands` | Lists installed slash commands | Also the documented door to the full 564-command index |
 | npm description | "One CLI for all your AI coding agents…" | Pain-first, names the harnesses |
 | `agents-cli.sh` | 301 to `agi-cli.sh` | Canonical; `agi-cli.sh` 301s here |
