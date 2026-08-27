@@ -18,14 +18,15 @@ function runCli(args: string[]): string {
 }
 
 describe('prune command', () => {
-  it('surfaces prune in top-level help', () => {
-    const helpText = runCli(['--help']);
+  it('surfaces prune in the complete help, pointed to from the curated root help', () => {
+    // The root --help is a curated front-door list; it points to --help-all for the
+    // full command set, where prune (a non-front-door command) is listed.
+    const rootHelp = runCli(['--help']);
+    expect(rootHelp).toContain('--help-all');
 
-    expect(helpText).toContain('prune <agent>[@version]');
-    expect(helpText).toContain('Uninstall a version');
-    expect(helpText).toContain('remove <agent>[@version]');
-    expect(helpText).toContain('Alias for prune');
-    expect(helpText).toContain('prune cleanup [target]');
+    const helpText = runCli(['--help-all']);
+    expect(helpText).toContain('prune [options] <specs...>');
+    expect(helpText).toContain('Uninstall agent CLI versions');
   });
 
   it('shows dedicated help for version prune', () => {

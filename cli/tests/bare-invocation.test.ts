@@ -30,7 +30,7 @@ describe('bare `agents` invocation', () => {
       encoding: 'utf-8',
     });
 
-    expect(result.stdout).toContain('Usage: agents [command] [options]');
+    expect(result.stdout).toContain('Usage: agents [options] [command]');
     expect(result.stdout).toContain('Quick start:');
     expect(result.status).toBe(0);
   });
