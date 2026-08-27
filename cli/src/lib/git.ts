@@ -954,6 +954,259 @@ export async function adoptRepo(
   }
 }
 
+
+/**
+ * Device-local record of the user config repo's remote URL, kept OUTSIDE the git
+ * tree so it survives a lost `.git` (`.history/` is gitignored runtime state).
+ * This is what lets `agents repo sync user` adopt-in-place a box that was healthy
+ * once and later lost its checkout, without the operator re-typing the URL.
+ */
+function userRepoRemoteRecordPath(dir: string): string {
+  return path.join(dir, '.history', 'user-repo-remote.json');
+}
+
+/** Read an origin remote URL from a git dir, or null when there is none. */
+function readOriginUrl(dir: string): string | null {
+  if (!isGitRepo(dir)) return null;
+  try {
+    const url = execFileSync('git', ['-C', dir, 'config', '--get', 'remote.origin.url'], {
+      encoding: 'utf-8',
+    }).trim();
+    return url || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Persist the user repo's remote URL to device-local runtime state so a future
+ * adopt-in-place can recover it after a `.git` loss. Best-effort — a write
+ * failure never blocks a sync.
+ */
+export function recordUserRepoRemote(dir: string, url: string): void {
+  try {
+    const file = userRepoRemoteRecordPath(dir);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ url }, null, 2) + '\n', { mode: 0o600 });
+  } catch {
+    /* runtime cache write is best-effort */
+  }
+}
+
+/**
+ * Resolve the user config repo's remote URL WITHOUT hardcoding it, for the
+ * adopt-in-place self-heal. In priority order:
+ *   1. an existing `origin` remote on the dir (a partial repo that kept its
+ *      `.git` but drifted) — the same source `agents repo sync` already reads;
+ *   2. the `AGENTS_USER_REPO_URL` env override (a fresh/never-cloned box);
+ *   3. the device-local record written by a prior healthy sync (a box that lost
+ *      its `.git` but kept `.history/` runtime state).
+ * Returns null when none is known — the caller then guides the operator to
+ * `agents repo pull user <git-url>` instead of crashing.
+ */
+export function resolveUserRepoRemoteUrl(dir: string): string | null {
+  const fromOrigin = readOriginUrl(dir);
+  if (fromOrigin) return fromOrigin;
+
+  const fromEnv = process.env.AGENTS_USER_REPO_URL?.trim();
+  if (fromEnv) return fromEnv;
+
+  try {
+    const raw = fs.readFileSync(userRepoRemoteRecordPath(dir), 'utf-8');
+    const url = (JSON.parse(raw) as { url?: string }).url?.trim();
+    if (url) return url;
+  } catch {
+    /* no record yet */
+  }
+  return null;
+}
+
+/**
+ * Decide whether a local top-level `agents.yaml` is a stale install stub that
+ * should be restored from the committed copy, vs. a legitimately customized file
+ * that must be preserved.
+ *
+ * The stub a partial install leaves behind (createDefaultMeta + a few config
+ * writes) is strictly SHORTER than the committed config AND missing whole
+ * top-level blocks the committed one carries (`config:` / `hooks:` — the fleet
+ * browser hub and hook registrations). Device-specific settings live in
+ * `devices/<host>/agents.yaml`, never here, so restoring the top-level file is
+ * safe. A file that already carries those blocks (or is longer) is treated as a
+ * real local edit and left alone — it surfaces as a modified path instead.
+ */
+export function isStaleAgentsYamlStub(local: string, committed: string): boolean {
+  if (local.trim() === committed.trim()) return false;
+  const shorter = local.split('\n').length < committed.split('\n').length;
+  const missingBlock =
+    (/^config:/m.test(committed) && !/^config:/m.test(local)) ||
+    (/^hooks:/m.test(committed) && !/^hooks:/m.test(local));
+  return shorter && missingBlock;
+}
+
+export interface AdoptInPlaceResult {
+  success: boolean;
+  commit: string;
+  /** Tracked files that were absent locally and materialized from origin/main. */
+  materialized: number;
+  /** True when the stale-stub top-level agents.yaml was restored from origin. */
+  reconciledAgentsYaml: boolean;
+  /**
+   * Tracked paths whose local copy differs from origin/main and was NOT touched
+   * — un-gitignored local edits surfaced rather than silently overwritten.
+   */
+  localEdits: string[];
+  error?: string;
+}
+
+/**
+ * Adopt an EXISTING, non-git (or origin-less) `~/.agents` directory in place —
+ * git-back it against its remote WITHOUT re-cloning and WITHOUT destroying the
+ * runtime state it carries (`.cache` / `.history` / `scratch` / `.system`, all
+ * gitignored). The self-heal for a partial install (PHNX-3301): the current code
+ * hard-fails with "Not a git repo", and the only manual fix is a destructive
+ * re-clone that wipes that runtime state.
+ *
+ * Plumbing-only, so it never trips the fleet git-guard (no `reset` / `checkout
+ * <branch>` / `stash` / `git config`):
+ *   1. `git init` + point HEAD at `main`.
+ *   2. `git remote add origin <url>`.
+ *   3. `git fetch origin main`.
+ *   4. `git update-ref refs/heads/main origin/main`; set upstream to origin/main.
+ *   5. `git read-tree origin/main` — index = origin/main, working tree untouched.
+ *   6. Materialize only the tracked files MISSING from the working tree
+ *      (`checkout-index` on that set) — existing local files are never overwritten.
+ *   7. Reconcile the top-level `agents.yaml`: restore it from origin/main only
+ *      when the local copy is a stale stub ({@link isStaleAgentsYamlStub}).
+ *
+ * Idempotent: a second run finds the remote/refs already present and simply
+ * re-materializes nothing. Any tracked path with real local edits is returned in
+ * `localEdits` (surfaced, never clobbered).
+ */
+export async function adoptRepoInPlace(
+  dir: string,
+  remoteUrl: string,
+): Promise<AdoptInPlaceResult> {
+  const empty: AdoptInPlaceResult = {
+    success: false,
+    commit: '',
+    materialized: 0,
+    reconciledAgentsYaml: false,
+    localEdits: [],
+  };
+  const trimmed = remoteUrl.trim();
+  try {
+    // The URL is always a resolved git remote (origin / env / record), never a
+    // `gh:` shorthand — so skip parseSource (which THROWS on ssh:// and rewrites
+    // git@github -> https, breaking SSH-key-only auth). assertSafeGitTransport
+    // still blocks the dangerous transports (ext::, file://, option injection)
+    // while permitting https / ssh / scp-style / a local bare repo.
+    assertSafeGitTransport(trimmed);
+    if (!fs.existsSync(dir)) {
+      return { ...empty, error: `Target directory does not exist: ${dir}` };
+    }
+    // Non-interactive git — fail fast on a missing credential instead of hanging
+    // on a prompt (same rationale as adoptRepo).
+    process.env.GIT_TERMINAL_PROMPT = '0';
+
+    const git = simpleGit(dir);
+
+    // 1. init + HEAD -> main (idempotent: init on an existing repo is a no-op).
+    //    Set HEAD via symbolic-ref rather than `init -b main` so it works on git
+    //    < 2.28, and lands on `main` even if the repo already initialized as
+    //    `master`.
+    if (!isGitRepo(dir)) await git.init();
+    await git.raw(['symbolic-ref', 'HEAD', 'refs/heads/main']);
+
+    // 2. origin — add only when absent, so a re-run keeps the existing remote.
+    const remotes = await git.getRemotes(true);
+    if (!remotes.some((r) => r.name === 'origin')) {
+      await git.raw(['remote', 'add', 'origin', trimmed]);
+    }
+
+    // 3-4. fetch, plant the local main on origin/main, set upstream.
+    await git.raw(['fetch', 'origin', 'main']);
+    await git.raw(['update-ref', 'refs/heads/main', 'origin/main']);
+    await git.raw(['branch', '--set-upstream-to=origin/main', 'main']);
+
+    // 5. index = origin/main, working tree untouched.
+    await git.raw(['read-tree', 'origin/main']);
+
+    // 6. Materialize only the tracked files MISSING on disk. Passing the explicit
+    //    missing set (never `checkout-index -a`) guarantees no existing local
+    //    file — a stub agents.yaml, a modified rule — is overwritten. Chunked to
+    //    stay under the argv limit on a cold box where most files are missing.
+    const tracked = (await git.raw(['ls-files', '-z'])).split('\0').filter(Boolean);
+    const missing = tracked.filter((rel) => !fs.existsSync(path.join(dir, rel)));
+    for (let i = 0; i < missing.length; i += 500) {
+      await git.raw(['checkout-index', '-f', '--', ...missing.slice(i, i + 500)]);
+    }
+
+    // 7. Reconcile a stale-stub top-level agents.yaml from origin/main. `restore`
+    //    is plumbing the git-guard allows; it rewrites only this one path.
+    let reconciledAgentsYaml = false;
+    if (tracked.includes('agents.yaml')) {
+      const abs = path.join(dir, 'agents.yaml');
+      const local = fs.existsSync(abs) ? fs.readFileSync(abs, 'utf-8') : '';
+      const committed = await git.raw(['show', 'origin/main:agents.yaml']);
+      if (isStaleAgentsYamlStub(local, committed)) {
+        await git.raw(['restore', '--source=origin/main', '--', 'agents.yaml']);
+        reconciledAgentsYaml = true;
+      }
+    }
+
+    // Surface — never silently keep — any tracked path whose local copy still
+    // differs from origin/main after the reconcile (real un-gitignored edits).
+    const dirty = (await git.raw(['status', '--porcelain', '--untracked-files=no']))
+      .split('\n')
+      .map((l) => l.slice(3).trim())
+      .filter(Boolean);
+
+    installGithooksSymlinks(dir);
+    recordUserRepoRemote(dir, trimmed);
+
+    const commit = (await git.raw(['rev-parse', '--short', 'HEAD'])).trim();
+    return {
+      success: true,
+      commit,
+      materialized: missing.length,
+      reconciledAgentsYaml,
+      localEdits: dirty,
+    };
+  } catch (err) {
+    return { ...empty, error: (err as Error).message };
+  }
+}
+
+/**
+ * Self-heal entry point for the USER config repo: when `dir` is not a git repo
+ * (or is a repo with no `origin`), resolve its remote URL and adopt it in place;
+ * otherwise return null (nothing to adopt — the normal sync path runs). Returns a
+ * failed result carrying `needsUrl` when the URL cannot be resolved, so the
+ * caller can print the `agents repo pull user <git-url>` remediation instead of
+ * the old "Not a git repo" crash.
+ */
+export async function adoptUserRepoIfNeeded(
+  dir: string,
+  opts: { explicitUrl?: string } = {},
+): Promise<(AdoptInPlaceResult & { needsUrl?: boolean }) | null> {
+  const hasOrigin = isGitRepo(dir) && readOriginUrl(dir) !== null;
+  if (hasOrigin) return null;
+
+  const url = opts.explicitUrl?.trim() || resolveUserRepoRemoteUrl(dir);
+  if (!url) {
+    return {
+      success: false,
+      commit: '',
+      materialized: 0,
+      reconciledAgentsYaml: false,
+      localEdits: [],
+      needsUrl: true,
+      error: `${displayHomePath(dir)} is not a git repo and no remote URL is known.`,
+    };
+  }
+  return adoptRepoInPlace(dir, url);
+}
+
 /**
  * Check if the repo's origin points to the system repo.
  */

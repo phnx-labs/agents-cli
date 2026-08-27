@@ -70,7 +70,7 @@ import { formatKeptProjectResources } from '../lib/project-resources.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
 import { addHostOption } from '../lib/hosts/option.js';
-import { syncRepoGit } from '../lib/git.js';
+import { syncRepoGit, adoptUserRepoIfNeeded, recordUserRepoRemote, resolveUserRepoRemoteUrl } from '../lib/git.js';
 import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
 import { registerStatusCommand } from './status.js';
 
@@ -295,6 +295,34 @@ async function runRepoGitSync(
   }
 
   if (!quiet && !json) outLog(chalk.bold(`Syncing ${repo} repo…`) + chalk.gray(` (${target.dir})`));
+
+  // Self-heal a non-git / partial user checkout in place before the git sync
+  // (PHNX-3301) — otherwise syncRepoGit hard-fails with "Not a git repo" and the
+  // only fix is a destructive re-clone. Only the user repo adopts: system is
+  // cloned by setup, extras by `repo add`.
+  if (repo === 'user') {
+    const adopted = await adoptUserRepoIfNeeded(target.dir);
+    if (adopted && !adopted.success) {
+      const hint = adopted.needsUrl
+        ? ' — git-back it: agents repo pull user <git-url>'
+        : '';
+      if (json) {
+        emitJson({ ok: false, mode: 'repo-git', repo, error: `${adopted.error}${hint}` });
+      } else {
+        errLog(chalk.red(`sync ${repo} failed: ${adopted.error}`));
+        if (adopted.needsUrl) errLog(chalk.gray('  git-back it: agents repo pull user <git-url>'));
+      }
+      process.exitCode = 1;
+      return;
+    }
+    if (adopted?.success && !quiet && !json) {
+      outLog(chalk.green(`  adopted ${repo} in place → ${adopted.commit} (${adopted.materialized} file(s) materialized${adopted.reconciledAgentsYaml ? ', agents.yaml reconciled' : ''})`));
+      if (adopted.localEdits.length > 0) {
+        outLog(chalk.yellow(`  kept ${adopted.localEdits.length} local edit(s): ${adopted.localEdits.slice(0, 5).join(', ')}${adopted.localEdits.length > 5 ? ', …' : ''}`));
+      }
+    }
+  }
+
   const result = await syncRepoGit(target.dir, { push: target.push });
 
   if (!result.success) {
@@ -316,6 +344,13 @@ async function runRepoGitSync(
       pushed: !!result.pushed,
     });
     return;
+  }
+
+  // Record the resolved remote so a future partial box (lost .git) can adopt in
+  // place without the operator re-typing the URL (PHNX-3301).
+  if (repo === 'user') {
+    const u = resolveUserRepoRemoteUrl(target.dir);
+    if (u) recordUserRepoRemote(target.dir, u);
   }
 
   if (!quiet) {
@@ -388,9 +423,24 @@ async function runInteractiveReconcile(
   for (const repo of repos) {
     const target = resolveRepoGitTarget(repo);
     if (!target) continue;
+    // Adopt a non-git / partial user checkout in place before pulling (PHNX-3301).
+    if (repo === 'user') {
+      const adopted = await adoptUserRepoIfNeeded(target.dir);
+      if (adopted?.success) {
+        outLog(chalk.gray(`  adopted user in place → ${adopted.commit} (${adopted.materialized} file(s) materialized)`));
+      } else if (adopted && !adopted.success) {
+        outLog(chalk.yellow(`  ! user: ${adopted.error}${adopted.needsUrl ? ' — agents repo pull user <git-url>' : ''}`));
+        continue;
+      }
+    }
     const res = await syncRepoGit(target.dir, { push: false });
-    if (res.success) outLog(chalk.gray(`  pulled ${repo} → ${res.commit}`));
-    else outLog(chalk.yellow(`  ! ${repo}: ${(res.error ?? 'pull failed').split('\n')[0]}`));
+    if (res.success) {
+      outLog(chalk.gray(`  pulled ${repo} → ${res.commit}`));
+      if (repo === 'user') {
+        const u = resolveUserRepoRemoteUrl(target.dir);
+        if (u) recordUserRepoRemote(target.dir, u);
+      }
+    } else outLog(chalk.yellow(`  ! ${repo}: ${(res.error ?? 'pull failed').split('\n')[0]}`));
   }
 
   // 2. One selection spanning the chosen repos.

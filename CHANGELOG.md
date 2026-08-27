@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **`agents repo sync user` self-heals a non-git or partial `~/.agents` by adopting it in place — no re-clone, no data loss (PHNX-3301).**
+  When the user-layer checkout lost (or never had) its `.git`, sync hard-failed
+  with `Not a git repo: ~/.agents`, and the only fix was a destructive re-clone
+  that wiped runtime state (`.cache` / `.history` / `scratch` / device config). It
+  now git-backs the existing directory in place with plumbing only (`init` /
+  `remote` / `fetch` / `update-ref` / `read-tree` / `checkout-index` / `restore`,
+  so it never trips the fleet git-guard): materializes only the MISSING tracked
+  files, restores a stale-stub top-level `agents.yaml` from origin, preserves
+  gitignored runtime state, and surfaces (never clobbers) real local edits. The
+  remote URL is resolved from an existing `origin`, `AGENTS_USER_REPO_URL`, or a
+  device-local record left by a prior healthy sync — never hardcoded. `agents sync
+  status` now flags a non-git `~/.agents` as a distinct drift state ("not a git
+  repo — will adopt on next sync") instead of burying it as "N missing".
+
 - **A fleet browser hub lets every box drive one shared logged-in browser with no `--device` (PHNX-2010).**
   New `browser.device` config key (user scope, so a single value in the central
   `agents.yaml` syncs fleet-wide). When set, a bare `agents browser start` forwards to

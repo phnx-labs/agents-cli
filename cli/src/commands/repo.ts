@@ -65,6 +65,9 @@ import {
   isGitRepo,
   isSystemRepoOrigin,
   adoptRepo,
+  adoptUserRepoIfNeeded,
+  recordUserRepoRemote,
+  resolveUserRepoRemoteUrl,
   getRemoteUrl,
   sameGitRemote,
   displayHomePath,
@@ -1298,8 +1301,28 @@ Examples:
       }
       for (const t of targets) {
         if (!fs.existsSync(t.dir) || !isGitRepo(t.dir)) {
-          console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
-          continue;
+          // The user repo self-heals in place instead of being skipped: adopt a
+          // non-git / partial checkout against its remote, preserving runtime
+          // state, then fall through to the normal sync (PHNX-3301). System is
+          // cloned by setup and extras by `repo add`, so those still skip.
+          if (t.alias === 'user' && fs.existsSync(t.dir)) {
+            const spinner = ora(`Adopting ${formatRepoTarget(t.alias, t.dir)} in place...`).start();
+            const adopted = await adoptUserRepoIfNeeded(t.dir);
+            if (!adopted || !adopted.success) {
+              spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${adopted?.error ?? 'adopt failed'}`);
+              if (adopted?.needsUrl) console.log(chalk.gray('  git-back it: agents repo pull user <git-url>'));
+              process.exitCode = 1;
+              continue;
+            }
+            spinner.succeed(`${formatRepoTarget(t.alias, t.dir)}: adopted in place → ${adopted.commit} (${adopted.materialized} file(s) materialized${adopted.reconciledAgentsYaml ? ', agents.yaml reconciled' : ''})`);
+            if (adopted.localEdits.length > 0) {
+              console.log(chalk.yellow(`  kept ${adopted.localEdits.length} local edit(s): ${adopted.localEdits.slice(0, 5).join(', ')}${adopted.localEdits.length > 5 ? ', …' : ''}`));
+            }
+            // Now a git repo — fall through to the normal sync below.
+          } else {
+            console.log(chalk.yellow(`  ${t.alias}: not a git repo, skipping`));
+            continue;
+          }
         }
         const push = t.alias !== 'system';
         const spinner = ora(`Syncing ${formatRepoTarget(t.alias, t.dir)}...`).start();
@@ -1308,6 +1331,8 @@ Examples:
           const pushed = result.pushed ? ' (pushed)' : '';
           spinner.succeed(`${formatRepoTarget(t.alias, t.dir)}: ${result.commit}${pushed}`);
           if (t.alias === 'user') {
+            const u = resolveUserRepoRemoteUrl(t.dir);
+            if (u) recordUserRepoRemote(t.dir, u);
             const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
             await reconcileDeviceDiscoveryPolicies();
           }

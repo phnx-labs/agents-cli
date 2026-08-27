@@ -91,6 +91,13 @@ export function registerStatusCommand(syncCmd: Command): void {
     } else {
       console.log(`  ${'.system repo'.padEnd(28)} ${chalk.green('up to date')}`);
     }
+    // A non-git / partial ~/.agents is its own drift state, not a per-agent
+    // "N missing" — surface it distinctly so the real problem isn't buried (PHNX-3301).
+    if (status.user.notGitRepo) {
+      console.log(
+        `  ${'~/.agents (user repo)'.padEnd(28)} ${chalk.yellow('not a git repo — will adopt on next `agents repo sync user`')}`,
+      );
+    }
     if (status.agents.length === 0) {
       console.log(chalk.gray('  (no installed agent versions)'));
     }
