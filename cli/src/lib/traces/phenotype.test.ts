@@ -98,19 +98,20 @@ describe('deriveOutcome', () => {
     expect(detailed.reason).toContain('without a landing or test signal');
   });
 
-  it('returns merged when an explicit merge signal is present', () => {
-    const session = loadFixture('019fcfad-7df4-7351-a58f-7527778a34b5');
+  it('returns merged when a shell step actually runs a merge command', () => {
+    const session = loadFixture('01a03a4f-cd04-7970-9294-ecef5e6d58b9');
     expect(deriveOutcome(session)).toBe('merged');
     const detailed = deriveOutcomeDetailed(session);
     expect(detailed.confidence).toBe('high');
     expect(detailed.reason).toContain('explicit merge signal');
   });
 
-  it('returns tests-green for completed sessions with test steps', () => {
-    const session = loadFixture('019fcff4-e7dc-7252-8ef8-7ddf037ec0c2');
+  it('returns tests-green when a shell step actually runs a test binary', () => {
+    const session = loadFixture('019fd5d1-64fa-70c3-a443-d816ac386c1f');
     expect(deriveOutcome(session)).toBe('tests-green');
     const detailed = deriveOutcomeDetailed(session);
     expect(detailed.outcome).toBe('tests-green');
+    expect(detailed.confidence).toBe('medium');
   });
 
   it('returns abandoned for errored sessions with long stalls and no recovery', () => {

@@ -71,7 +71,6 @@ const READ_PLAN_TOOLS = new Set([
   'web_fetch',
   'WebSearch',
   'FetchURL',
-  'thinking',
   'TaskCreate',
   'todo_write',
 ]);
@@ -156,8 +155,17 @@ function stepText(step: SessionDetail['steps'][number]): string {
   return `${step.label ?? ''} ${step.detail ?? ''}`.trim().toLowerCase();
 }
 
-function hasSignal(session: SessionDetail, type: OutcomeSignalType): boolean {
+function isShellStep(step: SessionDetail['steps'][number]): boolean {
+  return SHELL_TOOLS.has(step.tool ?? step.lane);
+}
+
+function hasSignal(
+  session: SessionDetail,
+  type: OutcomeSignalType,
+  toolFilter?: Set<string>,
+): boolean {
   for (const step of session.steps) {
+    if (toolFilter && !toolFilter.has(step.tool ?? step.lane)) continue;
     const text = stepText(step);
     for (const signal of OUTCOME_SIGNALS) {
       if (signal.type === type && signal.pattern.test(text)) return true;
@@ -171,6 +179,9 @@ function signalCounts(session: SessionDetail): Record<OutcomeSignalType, number>
   for (const step of session.steps) {
     const text = stepText(step);
     for (const signal of OUTCOME_SIGNALS) {
+      // Merge/test signals must come from an actual shell/exec step, otherwise
+      // a grep pattern or read_file detail false-positives as a landing signal.
+      if ((signal.type === 'merge' || signal.type === 'test') && !isShellStep(step)) continue;
       if (signal.pattern.test(text)) counts[signal.type]++;
     }
   }
@@ -192,30 +203,14 @@ function signalCounts(session: SessionDetail): Record<OutcomeSignalType, number>
 function isFailureToAct(session: SessionDetail): boolean {
   if (session.meta.tools === 0 && session.meta.turns <= 2) return true;
   const substantive = substantiveSteps(session);
-  if (substantive.length === 0) return true;
-  const onlyThinkingOrHuman = substantive.every(
-    (s) => s.lane === 'think' || HUMAN_FACING_TOOLS.has(s.tool ?? s.lane),
-  );
-  if (onlyThinkingOrHuman) return true;
-  const lastSubstantive = substantive[substantive.length - 1];
-  if (HUMAN_FACING_TOOLS.has(lastSubstantive.tool ?? lastSubstantive.lane)) {
-    const afterAsk = substantive.filter((s) => s.ordinal > lastSubstantive.ordinal).length;
-    if (afterAsk === 0) return true;
-  }
-  return false;
+  return substantive.length === 0;
 }
 
 function reasonFailureToAct(session: SessionDetail): string {
   if (session.meta.tools === 0 && session.meta.turns <= 2) {
     return `no tool use (${session.meta.tools} tools, ${session.meta.turns} turns)`;
   }
-  const substantive = substantiveSteps(session);
-  if (substantive.length === 0) return 'no substantive tool steps';
-  const lastSubstantive = substantive[substantive.length - 1];
-  if (HUMAN_FACING_TOOLS.has(lastSubstantive.tool ?? lastSubstantive.lane)) {
-    return `ended on human-facing tool ${lastSubstantive.tool ?? lastSubstantive.lane}`;
-  }
-  return 'only thinking or human-facing tool use';
+  return 'no substantive tool steps';
 }
 
 /**
@@ -323,7 +318,9 @@ const PHENOTYPE_RULES: PhenotypeRule[] = [
 
 /** High-confidence merge when explicit merge command/signal exists and session completed. */
 function isMerged(session: SessionDetail): boolean {
-  return session.meta.outcome === 'completed' && hasSignal(session, 'merge');
+  // Only a shell/exec step can produce a real merge signal; grep patterns and
+  // read_file details must not count.
+  return session.meta.outcome === 'completed' && hasSignal(session, 'merge', SHELL_TOOLS);
 }
 
 function mergedReason(session: SessionDetail): string {
@@ -338,6 +335,7 @@ function mergedReason(session: SessionDetail): string {
 function isTestsGreen(session: SessionDetail): boolean {
   if (session.meta.outcome !== 'completed') return false;
   const testSteps = session.steps.filter((s) => {
+    if (!isShellStep(s)) return false;
     const text = stepText(s);
     return OUTCOME_SIGNALS.some((sig) => sig.type === 'test' && sig.pattern.test(text));
   });
@@ -350,6 +348,7 @@ function isTestsGreen(session: SessionDetail): boolean {
 
 function testsGreenConfidence(session: SessionDetail): OutcomeResult['confidence'] {
   const testSteps = session.steps.filter((s) => {
+    if (!isShellStep(s)) return false;
     const text = stepText(s);
     return OUTCOME_SIGNALS.some((sig) => sig.type === 'test' && sig.pattern.test(text));
   });
