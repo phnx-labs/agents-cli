@@ -176,6 +176,17 @@ describe('compact root help', () => {
     expect(commandEntries.length).toBeLessThanOrEqual(12);
   });
 
+  it('resolves every front-door group name to a real registered command', async () => {
+    const program = await buildRootForHelp();
+    const registered = new Set(program.commands.map((c) => c.name()));
+
+    for (const group of FRONT_DOOR_COMMAND_GROUPS) {
+      for (const name of group.names) {
+        expect(registered.has(name), `${name} is a registered top-level command`).toBe(true);
+      }
+    }
+  });
+
   it('lists every command when compact mode is off', async () => {
     const program = await buildRootForHelp({ compact: false });
     const help = program.helpInformation();

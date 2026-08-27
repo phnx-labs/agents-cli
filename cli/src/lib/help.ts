@@ -196,7 +196,7 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
     if (compactRootHelp.get(cmd)) {
       output = output.concat([
         'Commands:',
-        '  See "agents --help-all" for every command.',
+        `  See "${cmd.name()} --help-all" for every command.`,
         '',
       ]);
     } else if (remaining.length > 0) {

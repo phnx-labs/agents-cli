@@ -89,7 +89,7 @@ describe('mine command (white-label)', () => {
 
     const branded = run(home, ['--help'], 'jack').out;
     expect(branded).toContain('Usage: jack');
-    expect(branded).toContain('jack setup');
+    expect(branded).toMatch(/^ {2}setup /m);
     // The disabled command's own listing line is gone under the brand…
     expect(branded).not.toMatch(/^ {2}teams /m);
 
