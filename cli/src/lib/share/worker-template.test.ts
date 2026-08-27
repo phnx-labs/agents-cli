@@ -147,7 +147,7 @@ describe('lazy managed OG cover', () => {
     expect(first.headers.get('content-type')).toBe('image/png');
     expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
     expect(png.length).toBeGreaterThan(10_000);
-    expect(store.get('octocat/plan.png')?.customMetadata).toMatchObject({ visibility: 'public', 'og-title': 'Launch plan' });
+    expect(store.get('octocat/plan.png')?.customMetadata).toMatchObject({ visibility: 'public', 'og-title': 'Launch plan', 'og-generated': 'true' });
 
     worker.hooks.renderOgCard = async () => { throw new Error('cache miss'); };
     const cached = await worker.default.fetch(new Request('https://share.test/octocat/plan.png?raw=1', { headers: { accept: 'image/png' } }), env);
@@ -175,6 +175,80 @@ describe('lazy managed OG cover', () => {
     const cover = await worker.default.fetch(new Request('https://share.test/octocat/private.png'), env);
     expect(cover.status).toBe(page.status);
     expect(store.has('octocat/private.png')).toBe(false);
+  });
+
+  it('invalidates generated covers across public→me→public visibility changes', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    (env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+    const owner = { userId: 'u1', email: 'octocat@acme.com' };
+    worker.hooks.verifyPhoenixToken = async (request: Request) => request.headers.get('authorization') ? owner : null;
+    const published = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html', 'x-share-visibility': 'public' },
+      body: '<title>Plan</title>',
+    }), env);
+    expect(published.status).toBe(200);
+
+    const publicCover = await worker.default.fetch(new Request('https://share.test/octocat/plan.png'), env);
+    expect(publicCover.status).toBe(200);
+    expect(store.get('octocat/plan.png')?.customMetadata['og-generated']).toBe('true');
+
+    const makePrivate = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'me' }),
+    }), env);
+    expect(makePrivate.status).toBe(200);
+    expect(store.has('octocat/plan.png')).toBe(false);
+
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const anonymousPrivateCover = await worker.default.fetch(new Request('https://share.test/octocat/plan.png'), env);
+    expect(anonymousPrivateCover.status).not.toBe(200);
+    expect(store.has('octocat/plan.png')).toBe(false);
+
+    worker.hooks.verifyPhoenixToken = async (request: Request) => request.headers.get('authorization') ? owner : null;
+    const ownerPrivateCover = await worker.default.fetch(new Request('https://share.test/octocat/plan.png', {
+      headers: { authorization: 'Bearer phoenix' },
+    }), env);
+    expect(ownerPrivateCover.status).toBe(200);
+    expect(store.get('octocat/plan.png')?.customMetadata).toMatchObject({ visibility: 'me', 'og-generated': 'true' });
+
+    const makePublic = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'public' }),
+    }), env);
+    expect(makePublic.status).toBe(200);
+    expect(store.has('octocat/plan.png')).toBe(false);
+
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const regeneratedPublicCover = await worker.default.fetch(new Request('https://share.test/octocat/plan.png'), env);
+    expect(regeneratedPublicCover.status).toBe(200);
+    expect(store.get('octocat/plan.png')?.customMetadata).toMatchObject({ visibility: 'public', 'og-generated': 'true' });
+  });
+
+  it('retains an explicitly uploaded sibling when canonical visibility changes', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    (env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@acme.com' });
+    const published = await worker.default.fetch(new Request('https://share.test/octocat/byo', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html', 'x-share-visibility': 'public' },
+      body: '<title>BYO</title>',
+    }), env);
+    expect(published.status).toBe(200);
+    await put(worker, env, 'octocat/byo.png', 'EXPLICIT', { 'content-type': 'image/png' });
+
+    const patch = await worker.default.fetch(new Request('https://share.test/octocat/byo', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'me' }),
+    }), env);
+    expect(patch.status).toBe(200);
+    expect(store.get('octocat/byo.png')?.body.toString()).toBe('EXPLICIT');
+    expect(store.get('octocat/byo.png')?.customMetadata['og-generated']).toBeUndefined();
   });
 });
 
