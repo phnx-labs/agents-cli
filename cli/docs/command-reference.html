@@ -2554,13 +2554,13 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
         interactive plan (omit the prompt) works everywhere it is listed.
 
       run strategy (set via --strategy or run.&lt;agent&gt;.strategy in agents.yaml):
-        pinned     use the workspace/global pinned version
+        pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)
         available  use pinned if it can run right now; otherwise switch to another signed-in version
         balanced   distribute load across healthy accounts by remaining capacity (default)
         a version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the &#39;agents view&#39; badge.
         --balanced is shorthand for --strategy balanced. ignored when @version is pinned, when a profile is used, or with --fallback.
-        zero healthy accounts under balanced/available exits nonzero naming each
-        excluded account and the earliest window reset — use --strategy pinned to force.
+        zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each
+        excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.
 
       &#39;auto&#39; harness (agents run auto): picks the host (14d usage affinity,
       unless --device is given), the harness (installed clis weighted by
@@ -2665,13 +2665,13 @@ agents run auto --device yosemite-s0 &quot;fix the flaky test&quot;   # pin the 
         Interactive plan (omit the prompt) works everywhere it is listed.
 
       Run strategy (set via --strategy or run.&lt;agent&gt;.strategy in agents.yaml):
-        pinned     use the workspace/global pinned version
+        pinned     use the workspace/global pinned version; if that version is logged out on this device, pick a signed-in sibling instead of dying (an explicit @version pin is unchanged)
         available  use pinned if it can run right now; otherwise switch to another signed-in version
         balanced   distribute load across healthy accounts by remaining capacity (default)
         A version/account is skipped when it is rate-limited right now — any usage window (incl. the 5-hour session window) at 100%, matching the &#39;agents view&#39; badge.
         --balanced is shorthand for --strategy balanced. Ignored when @version is pinned, when a profile is used, or with --fallback.
-        Zero healthy accounts under balanced/available exits nonzero naming each
-        excluded account and the earliest window reset — use --strategy pinned to force.
+        Zero healthy accounts under balanced/available (or a logged-out pinned default with no signed-in sibling) exits nonzero naming each
+        excluded account and the earliest window reset — use --strategy pinned to force a rate-limited default; a logged-out default is never forced.
 
       &#39;auto&#39; harness (agents run auto): picks the host (14d usage affinity,
       unless --device is given), the harness (installed CLIs weighted by
