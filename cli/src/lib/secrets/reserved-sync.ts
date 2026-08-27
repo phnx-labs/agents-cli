@@ -19,6 +19,8 @@ import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { sshTargetFor } from '../devices/connect.js';
 import { isHostPinned, managedKnownHostsPath } from '../devices/known-hosts.js';
 import { machineId, normalizeHost } from '../session/sync/config.js';
+import { probeDevice } from '../fleet/apply.js';
+import type { DeviceProbe } from '../fleet/types.js';
 
 export interface AuthSyncDevice {
   name: string;
@@ -62,14 +64,45 @@ export interface AuthSyncResult {
   errors: Array<{ device: string; message: string }>;
 }
 
+export interface AuthSyncProbe {
+  reachable: boolean;
+  remoteHasAuth: boolean;
+}
+
 export interface AuthSyncDeps {
   inspectLocal?: () => { exists: boolean; ok: boolean };
   listDevices?: () => DeviceProfile[];
   localName?: string;
   isPinned?: (name: string) => boolean;
-  remoteHasAuth?: (device: string) => boolean;
+  /**
+   * Per-device reachability + auth presence. Default: `probeDevice({ withSecrets: true })`
+   * — the same remote-presence probe `fleet apply` uses in `decideSecretPush`.
+   */
+  probe?: (device: DeviceProfile) => AuthSyncProbe;
   push?: (bundle: string, host: string) => PushBundleResult;
   sshTarget?: (device: DeviceProfile) => string;
+}
+
+/**
+ * Map a `fleet apply` device probe onto the auth-sync skip/push inputs.
+ *
+ * Presence is an own-property check on `remoteBundles` (same gate as
+ * `decideSecretPush`): a missing listing, a parse failure, or a prototype
+ * name must all mean "not present, so push" — never "present, so skip".
+ */
+export function authPresenceFromProbe(probe: DeviceProbe): AuthSyncProbe {
+  return {
+    reachable: probe.reachable,
+    remoteHasAuth: !!(
+      probe.remoteBundles &&
+      Object.prototype.hasOwnProperty.call(probe.remoteBundles, AUTH_BUNDLE_NAME)
+    ),
+  };
+}
+
+/** Production default: live SSH probe of reachability + `secrets list --json`. */
+export function defaultAuthSyncProbe(device: DeviceProfile): AuthSyncProbe {
+  return authPresenceFromProbe(probeDevice(device, { withSecrets: true }));
 }
 
 function defaultDevices(): DeviceProfile[] {
@@ -90,15 +123,27 @@ export function syncReservedAuthBundle(deps: AuthSyncDeps = {}): AuthSyncResult 
     (d) => normalizeHost(d.name) !== localName,
   );
   const pinned = deps.isPinned ?? ((name: string) => isHostPinned(name, managedKnownHostsPath()));
-  const hasAuth = deps.remoteHasAuth ?? (() => false);
+  const probe = deps.probe ?? defaultAuthSyncProbe;
   const plan = planAuthBundlePush(
     localOk,
-    devices.map((d) => ({
-      name: d.name,
-      reachable: true,
-      pinned: pinned(d.name),
-      remoteHasAuth: hasAuth(d.name),
-    })),
+    devices.map((d) => {
+      // No live probe until we know a push is even possible: missing local auth
+      // skips every device, and an unpinned host is refused before we SSH.
+      if (!localOk) {
+        return { name: d.name, reachable: true, pinned: pinned(d.name), remoteHasAuth: false };
+      }
+      const isPinnedDev = pinned(d.name);
+      if (!isPinnedDev) {
+        return { name: d.name, reachable: true, pinned: false, remoteHasAuth: false };
+      }
+      const p = probe(d);
+      return {
+        name: d.name,
+        reachable: p.reachable,
+        pinned: true,
+        remoteHasAuth: p.remoteHasAuth,
+      };
+    }),
   );
 
   const pushed: string[] = [];
