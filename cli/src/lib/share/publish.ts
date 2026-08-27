@@ -333,11 +333,17 @@ export function toHeaderValue(text: string): string {
 }
 
 /**
- * Whether {@link toHeaderValue} would lose information for this text — i.e. it
- * carries a code point above latin1 (U+00FF), the exact range `fetch`'s
- * ByteString cannot hold and the fold therefore transliterates or drops. A plain
- * accented latin1 name (`José`, é = U+00E9) is NOT lossy and needs no companion;
- * an em dash, a curly quote, an emoji, or any CJK/Arabic/Hindi text is.
+ * Whether text carries a code point above latin1 (U+00FF) — the meaningful
+ * display content `fetch`'s ByteString cannot hold, which {@link toHeaderValue}
+ * therefore transliterates or drops. This is the range worth carrying in the
+ * percent-encoded companion: an em dash, a curly quote, an emoji, or any
+ * CJK/Arabic/Hindi text. A plain accented latin1 name (`José`, é = U+00E9) is
+ * NOT lossy and needs no companion.
+ *
+ * `toHeaderValue` ALSO strips C0/C1 control characters (below U+0020, and
+ * U+007F–U+009F), which this deliberately does not flag: a raw ANSI/control
+ * sequence is not display text and must not be reconstructed into a page's
+ * rendered metadata, so it stays dropped on both the old and new Worker paths.
  */
 export function needsUnicodeCompanion(text: string): boolean {
   return /[^\u0000-\u00ff]/.test(text);
