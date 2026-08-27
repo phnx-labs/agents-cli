@@ -598,6 +598,13 @@ describe('asRemoteSecretFindings — a remote box\'s secret hygiene, forwarded (
     expect(asRemoteSecretFindings([rc], 'm1').map((f) => f.kind)).toEqual(['rc-secret-export']);
   });
 
+  it('forwards auth-bundle-wrong-backend — a remote keychain-backed auth bundle', () => {
+    const auth = { ...good, kind: 'auth-bundle-wrong-backend' };
+    const out = asRemoteSecretFindings([auth], 'm7');
+    expect(out.map((f) => f.kind)).toEqual(['auth-bundle-wrong-backend']);
+    expect(out[0].remediation).toContain('secrets create auth --backend file');
+  });
+
   it('drops kinds the aggregator recomputes, so nothing is reported twice', () => {
     // Sign-in and divergence rows are rebuilt centrally from the inventory;
     // forwarding them too would double every one.

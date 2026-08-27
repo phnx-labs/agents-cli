@@ -280,7 +280,7 @@ is `logout-unprovable`,
 `missing-resource`, `content-drift`, `never-synced`, `stale`, `repo-behind`,
 `repo-drift`, `version-skew`, `fleet-resource-gap`, `hook-runtime-visibility-unavailable`, `orphan`, `duplicate-hook`,
 `duplicate-hook-drift`, `host-cli-missing`, `host-cli-invalid`,
-`rc-secret-export`, `env-secret-export`, `exec-policy`, `stale-cli` and `binary-shadow`. (RUSH-2162 moved
+`rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli` and `binary-shadow`. (RUSH-2162 moved
 `never-synced` and `duplicate-hook-drift` to warning — both are stale-sync states
 one `agents sync` resolves.)
 
@@ -992,8 +992,8 @@ release offloads macOS signing to a sign host over SSH, which needs the `apple.c
 secrets bundle *on that host*. Push it with the **file backend** —
 `agents secrets export apple.com --device <signer> --remote-backend file` (**no
 passphrase required** — the remote keys it under a machine-local key it
-auto-provisions and reads it headlessly; set `AGENTS_SECRETS_PASSPHRASE` locally only
-to opt into a shared off-disk key, forwarded over ssh stdin) — **not** the default
+auto-provisions and reads it headlessly; `AGENTS_SECRETS_PASSPHRASE` is never
+forwarded) — **not** the default
 keychain backend: a
 macOS login keychain is locked under headless SSH, so a keychain-backed push lands
 the bundle metadata but no readable secret items (`secrets export --device` now

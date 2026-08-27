@@ -20,6 +20,7 @@ import { isHostPinned, managedKnownHostsPath } from '../lib/devices/known-hosts.
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
 import { readFleetFile, resolveDesired } from '../lib/fleet/manifest.js';
 import { snapshotAuth } from '../lib/fleet/auth-sync.js';
+import { AUTH_BUNDLE_NAME } from '../lib/secrets/bundles.js';
 import {
   agentIdOf,
   diffFleet,
@@ -29,6 +30,7 @@ import {
   sourceHome,
   expandAllSpecs,
   rosterNeedsVersions,
+  fleetSecretsBundles,
   type SourceAuth,
   type DeviceApplyResult,
 } from '../lib/fleet/apply.js';
@@ -247,7 +249,9 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   // One extra `secrets list --json` per device, and only when it can change the
   // plan: the manifest declares bundles AND provisioning is on. Same cost
   // discipline as `withVersions` — a fleet that uses no bundles never pays it.
-  const withSecrets = opts.provisionSecrets === true && (manifest.secrets?.bundles?.length ?? 0) > 0;
+  const secretsBundles = fleetSecretsBundles(manifest.secrets?.bundles);
+  const withSecrets = (opts.provisionSecrets === true && secretsBundles.length > 0)
+    || secretsBundles.includes(AUTH_BUNDLE_NAME);
   console.log(chalk.gray(`Probing ${desired.length} device(s)…`));
   const probeList = await pool(desired, 6, async (d) => probeDevice(nameToProfile.get(d.device)!, { withVersions, withSecrets }));
   const probes = new Map<string, DeviceProbe>(probeList.map((p) => [p.device, p]));
@@ -256,7 +260,7 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   let plan = diffFleet(desired, probes, {
     targetCliVersion,
     sourceAuth,
-    secretsBundles: manifest.secrets?.bundles,
+    secretsBundles,
     provisionSecrets: opts.provisionSecrets === true,
     forceSecrets: opts.force === true,
     // Portable secret values only ever go to a host whose key is already pinned.

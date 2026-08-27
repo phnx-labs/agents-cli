@@ -63,7 +63,7 @@ drift.
 `hook-runtime-visibility-unavailable`, `missing-resource`, `content-drift`,
 `never-synced`, `stale`, `repo-behind`, `repo-drift`, `fleet-resource-gap`,
 `version-skew`, `orphan`, `duplicate-hook`, `duplicate-hook-drift`, `host-cli-missing`,
-`host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `exec-policy`, `stale-cli`,
+`host-cli-invalid`, `rc-secret-export`, `env-secret-export`, `auth-bundle-wrong-backend`, `exec-policy`, `stale-cli`,
 `binary-shadow`.
 
 The split is provability and blast radius: a critical is something the operator can act

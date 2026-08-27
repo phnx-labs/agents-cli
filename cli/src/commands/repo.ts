@@ -1224,6 +1224,14 @@ export function registerRepoCommands(program: Command): void {
           result.unresolved.length ? `${result.unresolved.length} approved but unavailable` : null,
         ].filter(Boolean);
         if (parts.length > 0) console.log(chalk.gray(`Device policy: ${parts.join(' · ')}`));
+        const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
+        const auth = syncReservedAuthBundle();
+        if (auth.pushed.length > 0) {
+          console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
+        }
+        for (const err of auth.errors) {
+          console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
+        }
       }
     });
 
@@ -1266,6 +1274,16 @@ export function registerRepoCommands(program: Command): void {
           spinner.succeed(
             `${formatRepoTarget(t.alias, t.dir, result.branch)}: ${result.detail ?? 'pushed'}`,
           );
+          if (t.alias === 'user') {
+            const { syncReservedAuthBundle } = await import('../lib/secrets/reserved-sync.js');
+            const auth = syncReservedAuthBundle();
+            if (auth.pushed.length > 0) {
+              console.log(chalk.gray(`Auth bundle: pushed to ${auth.pushed.join(', ')}`));
+            }
+            for (const err of auth.errors) {
+              console.error(chalk.yellow(`Auth bundle: ${err.device}: ${err.message}`));
+            }
+          }
         } else {
           spinner.fail(`${formatRepoTarget(t.alias, t.dir)}: ${result.error}`);
           // A failed repo must fail the command. Without this, `agents fleet run

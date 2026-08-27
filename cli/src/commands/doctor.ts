@@ -68,6 +68,7 @@ import {
   type VersionResourceReport,
 } from '../lib/doctor-diff.js';
 import { checkVersionHookWiring, inspectDuplicateVersionHooks, registerHooksToSettings, repairManagedHookRuntimeArtifacts, type DuplicateVersionHook, type HookRuntimeRepairReport, type HookWiringReport } from '../lib/hooks/install.js';
+import { inspectReservedAuthBundle } from '../lib/secrets/bundles.js';
 import { isVersionIsolated } from '../lib/installations/versions.js';
 import { computeDrift, checkSyncStatus, countOrphans, computeSourceBehind, type SyncStatusRow, type OrphanRow } from '../lib/drift.js';
 import { readAuthHealthCache, summarizeHostAuth } from '../lib/auth-health.js';
@@ -226,7 +227,7 @@ interface RemoteDoctorPayload {
  * file and line. Run `agents doctor` on that box for the specifics — the
  * message says so.
  */
-const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'ssh-key-enrollment'] as const;
+const REMOTE_FORWARDED_KINDS = ['rc-secret-export', 'env-secret-export', 'auth-bundle-wrong-backend', 'ssh-key-enrollment'] as const;
 type RemoteForwardedKind = typeof REMOTE_FORWARDED_KINDS[number];
 
 /** Canonical, locally-authored text for a forwarded kind. Never the remote's. */
@@ -235,6 +236,8 @@ const REMOTE_SECRET_MESSAGE: Record<RemoteForwardedKind, string> = {
     + ' — run `agents doctor` there for the file and line',
   'env-secret-export': 'AGENTS_SECRETS_PASSPHRASE is set in this box\'s process environment'
     + ' — run `agents doctor` there for detail',
+  'auth-bundle-wrong-backend': "reserved secrets bundle 'auth' exists but is not file-backed"
+    + ' — run `agents doctor` there to recreate it',
   'ssh-key-enrollment': 'Windows OpenSSH key enrollment is invalid'
     + ' — run `agents doctor` on this box for the effective path or ACL failure',
 };
@@ -575,6 +578,7 @@ async function runDevicesDoctor(opts: DoctorOptions): Promise<void> {
         hostClis: toHostCliInput(listCliStatus(cwd)),
         rcSecrets: scanUserRcFiles(),
         masterPassphraseInEnv: masterPassphraseInEnv(),
+        authBundleWrongBackend: !inspectReservedAuthBundle().ok,
         execPolicy: process.platform === 'win32'
           ? { platform: process.platform, policy: getEffectiveExecutionPolicy() }
           : undefined,
@@ -1933,6 +1937,7 @@ export function registerDoctorCommand(program: Command): void {
           hostClis: toHostCliInput(hostClis),
           rcSecrets: scanUserRcFiles(),
           masterPassphraseInEnv: masterPassphraseInEnv(),
+          authBundleWrongBackend: !inspectReservedAuthBundle().ok,
           // getEffectiveExecutionPolicy spawns powershell — a doomed process on
           // POSIX, where the advisory never applies. Probe only on Windows.
           execPolicy: process.platform === 'win32'

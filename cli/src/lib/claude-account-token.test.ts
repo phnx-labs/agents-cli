@@ -9,9 +9,15 @@ import {
   resolveClaudeSetupToken,
 } from './claude-account-token.js';
 import { buildExecEnv } from './exec.js';
-import { bundleItemStore, keychainRef, writeBundle, type SecretsBundle } from './secrets/bundles.js';
+import {
+  ReservedBundleWrongBackendError,
+  bundleItemStore,
+  keychainRef,
+  writeBundle,
+  type SecretsBundle,
+} from './secrets/bundles.js';
 import { _resetFileStoreForTest, fileStore, fileStoreItemPath } from './secrets/filestore.js';
-import { secretsKeychainItem } from './secrets/index.js';
+import { secretsKeychainItem, setKeychainBackendForTest, setKeychainServiceHashingForTest, type KeychainBackend } from './secrets/index.js';
 import { getVersionHomePath } from './installations/versions.js';
 
 const PASS = 'claude-account-token-test-pass';
@@ -184,6 +190,30 @@ describe('resolveClaudeSetupToken', () => {
     writeAuthBundle({ [claudeAccountTokenKey('alpha@example.com')]: blob });
 
     expect(resolveClaudeSetupToken(home)).toBeNull();
+  });
+
+  it('throws instead of returning null when auth exists on the keychain backend (SEC-GAP-3)', () => {
+    const home = makeHome('alpha@example.com');
+    const store = new Map<string, string>();
+    const mem: KeychainBackend = {
+      has: (item) => store.has(item),
+      get: (item) => {
+        const v = store.get(item);
+        if (v === undefined) throw new Error(`missing ${item}`);
+        return v;
+      },
+      set: (item, value) => { store.set(item, value); },
+      delete: (item) => store.delete(item),
+      list: (prefix) => [...store.keys()].filter((k) => k.startsWith(prefix)),
+    };
+    const prev = setKeychainBackendForTest(mem);
+    setKeychainServiceHashingForTest(null);
+    try {
+      store.set('agents-cli.bundles.auth', JSON.stringify({ name: 'auth', vars: {} }));
+      expect(() => resolveClaudeSetupToken(home)).toThrow(ReservedBundleWrongBackendError);
+    } finally {
+      setKeychainBackendForTest(prev);
+    }
   });
 
   it('buildExecEnv injects the token keyed to the selected version home account', () => {

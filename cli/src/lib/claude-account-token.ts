@@ -2,7 +2,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { bundleBackend, bundleExists, readAndResolveBundleEnv } from './secrets/bundles.js';
+import {
+  AUTH_BUNDLE_NAME,
+  ReservedBundleWrongBackendError,
+  bundleBackend,
+  bundleExists,
+  readAndResolveBundleEnv,
+} from './secrets/bundles.js';
 import { fileStoreItemPath } from './secrets/filestore.js';
 import { secretsKeychainItem } from './secrets/index.js';
 
@@ -14,7 +20,7 @@ import { secretsKeychainItem } from './secrets/index.js';
  * bare key, so one account's token can't be misapplied to another in a
  * multi-account fleet.
  */
-const AUTH_BUNDLE = 'auth';
+const AUTH_BUNDLE = AUTH_BUNDLE_NAME;
 
 /**
  * A well-formed Claude OAuth setup-token: the `sk-ant-oat01-` prefix followed by
@@ -95,7 +101,14 @@ export function resolveClaudeSetupToken(home?: string): string | null {
     // would misapply one account's setup-token to another.
     const email = readClaudeAccountEmail(home);
     if (!email) return null;
-    if (!bundleExists(AUTH_BUNDLE) || bundleBackend(AUTH_BUNDLE) !== 'file') return null;
+    if (!bundleExists(AUTH_BUNDLE)) return null;
+    const backend = bundleBackend(AUTH_BUNDLE);
+    if (backend !== 'file') {
+      // SEC-GAP-3: a keychain/vault-backed `auth` used to return null here, so
+      // usage/probe fell through to the interactive login (Touch ID) with no
+      // hint that the seeded setup-token was being ignored.
+      throw new ReservedBundleWrongBackendError(AUTH_BUNDLE, backend);
+    }
     const cacheKey = home ?? os.homedir();
     const item = secretsKeychainItem(AUTH_BUNDLE, claudeAccountTokenKey(email));
     const credentialPath = fileStoreItemPath(item);
@@ -121,7 +134,8 @@ export function resolveClaudeSetupToken(home?: string): string | null {
     // The credential changed during both decrypt attempts. Fail closed rather
     // than return a token whose current file fingerprint was never observed.
     return null;
-  } catch {
+  } catch (err) {
+    if (err instanceof ReservedBundleWrongBackendError) throw err;
     return null;
   }
 }

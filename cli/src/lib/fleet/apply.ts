@@ -11,6 +11,7 @@
 import * as os from 'os';
 import type { DeviceProfile } from '../devices/registry.js';
 import { pushBundleToHost, type RemoteBackend } from '../secrets/push.js';
+import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle, isReservedBundleName } from '../secrets/bundles.js';
 import { deviceIdentityArgs, sshTargetFor } from '../devices/connect.js';
 import { readyProbe, bootstrapAgentsCli } from '../hosts/ready.js';
 import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
@@ -108,6 +109,21 @@ export interface SourceAuth {
   bound: Set<string>;
   /** The captured file payloads, keyed by agent. */
   filesByAgent: Map<string, AuthFilePayload[]>;
+}
+
+/**
+ * Bundles `fleet apply` considers for push. The reserved file-backed `auth`
+ * bundle is always included when it exists locally — it is the fleet-shared
+ * setup-token store and must not wait on `--provision-secrets` / a manifest
+ * list (PHNX-2371).
+ */
+export function fleetSecretsBundles(declared: string[] | undefined): string[] {
+  const out = [...(declared ?? [])];
+  const auth = inspectReservedAuthBundle();
+  if (auth.exists && auth.ok && !out.includes(AUTH_BUNDLE_NAME)) {
+    out.push(AUTH_BUNDLE_NAME);
+  }
+  return out;
 }
 
 export interface DiffContext {
@@ -260,6 +276,10 @@ export interface SecretPushDecision {
  * auto-provisions its OWN machine-local key — so each box ends up with an
  * unshared at-rest key and NO passphrase is forwarded. That is the direct
  * alternative to the fleet-wide shared secret this ticket exists to remove.
+ *
+ * The reserved `auth` bundle is the exception: it is always file-backed
+ * (SEC-GAP-3) and is pushed even without `--provision-secrets`, because it is
+ * the one fleet-shared setup-token store (PHNX-2371).
  */
 export function decideSecretPush(
   bundle: string,
@@ -268,10 +288,11 @@ export function decideSecretPush(
   ctx: DiffContext,
 ): SecretPushDecision {
   const device = desired.device;
-  const backend: RemoteBackend = probe.platform === 'linux' ? 'file' : 'keychain';
+  const reserved = isReservedBundleName(bundle);
+  const backend: RemoteBackend = reserved || probe.platform === 'linux' ? 'file' : 'keychain';
   const manual = `recreate secrets bundle '${bundle}' (\`agents ssh ${device} -- secrets create ${bundle}\`)`;
 
-  if (!ctx.provisionSecrets) {
+  if (!ctx.provisionSecrets && !reserved) {
     return { push: false, backend, reason: `${manual} — or re-run with --provision-secrets to push it` };
   }
   if (!probe.reachable) {
@@ -511,7 +532,7 @@ export function reconcileDevice(row: DeviceDiff, device: DeviceProfile, ctx: Exe
       ok = false;
       continue;
     }
-    const backend: RemoteBackend = device.platform === 'linux' ? 'file' : 'keychain';
+    const backend: RemoteBackend = isReservedBundleName(bundle) || device.platform === 'linux' ? 'file' : 'keychain';
     try {
       const out = pushBundleToHost(bundle, target, {
         remoteBackend: backend,

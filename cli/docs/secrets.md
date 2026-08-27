@@ -29,6 +29,12 @@ platform prompts. Expensive or failure-prone work remains outside the daemon's c
 loop. Remote use transports values on demand to an authenticated target and never turns
 them into synced plaintext.
 
+The reserved `auth` bundle is file-backed by construction: it holds long-lived Claude
+setup-tokens that usage/probe and unattended workers read without Touch ID. Creating it
+on the keychain or vault backend fails loud. The daemon's `auth-sync` service pushes a
+local file-backed `auth` bundle to pinned fleet devices that lack it, always with the
+file backend so each destination auto-provisions its own machine-local key.
+
 Actors, audit events, and usage counters contain metadata only. Redaction is defense in
 depth, not permission to publish raw transcripts.
 
@@ -55,7 +61,8 @@ revision of this page recommended it.
 <!-- /docs-hygiene:allow-master-key-discussion -->
 
 <!-- docs-hygiene:allow-master-key-discussion -->
-The one legitimate use is `agents secrets export --device`, which forwards
-`AGENTS_SECRETS_PASSPHRASE` over ssh stdin so the remote can key its own store. It is
-opt-in, never written to disk on either side, and never persisted in an environment.
+`agents secrets export --device --remote-backend file` never forwards
+`AGENTS_SECRETS_PASSPHRASE`. The remote auto-provisions its own machine-local key
+so headless reads work. Forwarding that env var used to key destination ciphertext
+to a secret the remote daemon did not hold, while import still printed success.
 <!-- /docs-hygiene:allow-master-key-discussion -->

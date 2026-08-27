@@ -26,7 +26,7 @@
  *              never-synced · stale · repo-behind · repo-drift · version-skew ·
  *              fleet-resource-gap · hook-runtime-visibility-unavailable · orphan · duplicate-hook ·
  *              duplicate-hook-drift · host-cli-missing · host-cli-invalid ·
- *              rc-secret-export · env-secret-export · exec-policy · stale-cli ·
+ *              rc-secret-export · env-secret-export · auth-bundle-wrong-backend · exec-policy · stale-cli ·
  *              binary-shadow.
  *   (RUSH-2162 moved never-synced and duplicate-hook-drift to WARNING: both are
  *   stale-sync states one `agents sync` resolves, not "needs you now".)
@@ -126,6 +126,7 @@ export const ALL_FINDING_KINDS = [
   'duplicate-hook-drift',// …with differing content, so a stale copy can disagree
   'rc-secret-export',    // credential-shaped export in a shell rc file
   'env-secret-export',   // the file-store master key live in THIS process's env
+  'auth-bundle-wrong-backend', // reserved `auth` bundle exists but is not file-backed
   'exec-policy',         // Windows execution policy blocks agents.ps1
   'ssh-key-enrollment',  // Windows OpenSSH public-key path/content/ACL is invalid
   'stale-cli',
@@ -175,6 +176,7 @@ export const FINDING_SEVERITY: Record<FindingKind, FindingSeverity> = {
   'host-cli-invalid': 'warning',
   'rc-secret-export': 'warning',
   'env-secret-export': 'warning',
+  'auth-bundle-wrong-backend': 'warning',
   'exec-policy': 'warning',
   'ssh-key-enrollment': 'critical',
   'stale-cli': 'warning',
@@ -323,6 +325,8 @@ export function remediationFor(finding: DoctorFinding): string {
       // that inherited it — an editor, a tmux server, the agents daemon — and
       // each keeps handing it to new children until IT restarts.
       return 'unset at the source, then restart every process that inherited it (shells, editor, tmux, agents daemon)';
+    case 'auth-bundle-wrong-backend':
+      return 'agents secrets delete auth --yes && agents secrets create auth --backend file';
     case 'exec-policy':
       return 'Set-ExecutionPolicy -Scope CurrentUser RemoteSigned';
     case 'ssh-key-enrollment':
@@ -414,6 +418,10 @@ export interface LocalFindingInputs {
    *  scan reports clean while the leak is still in flight (RUSH-1968). Never the
    *  value — only whether it is set. */
   masterPassphraseInEnv?: boolean;
+  /** True when the reserved `auth` bundle exists on a non-file backend
+   *  (SEC-GAP-3): usage/probe ignores the setup-tokens and falls through to
+   *  Touch ID. Collected by `inspectReservedAuthBundle`. */
+  authBundleWrongBackend?: boolean;
   /** The effective PowerShell execution policy and the platform it was read on.
    *  Only `win32` yields a finding — the `agents.ps1` launcher is Windows-only. */
   execPolicy?: { platform: NodeJS.Platform; policy: string | null };
@@ -651,6 +659,9 @@ export function buildLocalFindings(input: LocalFindingInputs): DoctorFinding[] {
   const envFinding = envSecretFinding(device, input.masterPassphraseInEnv ?? false);
   if (envFinding) out.push(envFinding);
 
+  const authFinding = authBundleWrongBackendFinding(device, input.authBundleWrongBackend ?? false);
+  if (authFinding) out.push(authFinding);
+
   // Windows execution policy blocking the generated agents.ps1 launcher.
   const policyFinding = execPolicyFinding(device, input.execPolicy);
   if (policyFinding) out.push(policyFinding);
@@ -820,6 +831,15 @@ function envSecretFinding(device: string, present: boolean): DoctorFinding | nul
       + 'child inherits it and any same-user process can read it from /proc/<pid>/environ. '
       + 'It outlives the shell rc line that set it, so deleting that line is not enough. '
       + '(Expected inside a release sign context, which sets it deliberately.)',
+  });
+}
+
+function authBundleWrongBackendFinding(device: string, present: boolean): DoctorFinding | null {
+  if (!present) return null;
+  return finding({
+    severity: FINDING_SEVERITY['auth-bundle-wrong-backend'], kind: 'auth-bundle-wrong-backend', device,
+    message: "reserved secrets bundle 'auth' exists but is not file-backed — "
+      + 'usage/probe ignores the setup-tokens and falls through to the interactive login',
   });
 }
 
@@ -1197,6 +1217,7 @@ function warningSubject(f: DoctorFinding): string {
   if (f.kind === 'orphan') return 'orphans';
   if (f.kind === 'rc-secret-export') return 'shell rc';
   if (f.kind === 'env-secret-export') return 'environment';
+  if (f.kind === 'auth-bundle-wrong-backend') return 'auth bundle';
   if (f.kind === 'exec-policy') return 'PowerShell';
   if (f.kind === 'fleet-resource-gap') return 'fleet gap';
   if (f.kind === 'host-cli-missing') return 'host CLIs';

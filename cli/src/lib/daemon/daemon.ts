@@ -44,6 +44,7 @@ import { WatchdogService } from './watchdog-service.js';
 import { DeviceProbeService } from './device-probe-service.js';
 import { SelfHealService } from './self-heal-service.js';
 import { KeychainReapService } from './keychain-reap-service.js';
+import { AuthSyncService } from './auth-sync-service.js';
 import { StateDirCheckService } from './state-dir-check-service.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
@@ -933,6 +934,9 @@ export async function runDaemon(): Promise<void> {
 
   if (isEnabled('keychain-reap')) supervisor.register(new KeychainReapService());
   else log('INFO', 'Keychain-reap service disabled');
+
+  if (isEnabled('auth-sync')) supervisor.register(new AuthSyncService());
+  else log('INFO', 'Auth-sync service disabled');
 
   await supervisor.startAll({ log });
   activeServiceSupervisor = supervisor;

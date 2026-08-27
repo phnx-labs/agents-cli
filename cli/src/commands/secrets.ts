@@ -59,6 +59,9 @@ import {
   validateSecretType,
   writeBundle,
   writeBundleWithItems,
+  assertFileBundleDecryptable,
+  isReservedBundleName,
+  ReservedBundleWrongBackendError,
   type SecretsBackend,
   type SecretsBundle,
   type SecretsPolicy,
@@ -978,7 +981,12 @@ export function resolveImportBundle(
   synced = false,
   force = false,
 ): SecretsBundle {
-  const requestedBackend = synced ? 'vault' : resolveBackendOpt(backendOpt);
+  if (isReservedBundleName(name) && (synced || (backendOpt && backendOpt !== 'file'))) {
+    throw new ReservedBundleWrongBackendError(name, synced ? 'vault' : resolveBackendOpt(backendOpt));
+  }
+  const requestedBackend = isReservedBundleName(name)
+    ? 'file'
+    : (synced ? 'vault' : resolveBackendOpt(backendOpt));
   if (bundleExists(name)) {
     // readBundleIfDecryptable nulls ONLY on BundleUndecryptableError; a locked
     // keychain or logged-out vault still throws, so a recoverable state can
@@ -1025,6 +1033,9 @@ function applyEnvToBundle(
     writeBundleWithItems(bundle, storedItems);
   } else {
     writeBundle(bundle);
+  }
+  if (added > 0) {
+    assertFileBundleDecryptable(bundle.name, Object.keys(env).filter((k) => k in bundle.vars));
   }
   return { added, skipped };
 }
@@ -1704,7 +1715,16 @@ export function registerSecretsCommands(program: Command): void {
         // inherits the configured default (`hold`) instead of being pinned.
         const policyOpt = opts.policy ?? opts.tier;
         const policy = policyOpt ? parsePolicyOpt(policyOpt) : undefined;
-        const backend = opts.synced ? 'vault' : resolveBackendOpt(opts.backend);
+        let backend = opts.synced ? 'vault' : resolveBackendOpt(opts.backend);
+        if (isReservedBundleName(resolvedName)) {
+          // Reserved `auth` is file-backed by construction. Omitting --backend
+          // still forces file even when agents.yaml defaults to keychain; an
+          // explicit non-file backend fails loud (SEC-GAP-3).
+          if (opts.synced || (opts.backend && opts.backend !== 'file')) {
+            throw new ReservedBundleWrongBackendError(resolvedName, backend);
+          }
+          backend = 'file';
+        }
         if (bundleExists(resolvedName) && !opts.force) {
           console.error(chalk.red(`Bundle '${resolvedName}' already exists. Use --force to overwrite.`));
           process.exit(1);
@@ -2283,7 +2303,7 @@ Examples:
     .option('--to-1password', 'Push every key in the bundle as a PASSWORD item in a 1Password vault')
     .option('--vault <name>', '1Password vault name (used with --to-1password)')
     .option('--device <target...>', 'Push the bundle over SSH to this device (host alias or user@host); repeatable for multiple machines')
-    .option('--remote-backend <backend>', 'Backend for the bundle on the remote device (with --device): keychain (default) or file. file is headless-readable via the remote\'s machine-local key; it forwards AGENTS_SECRETS_PASSPHRASE over stdin only if set (opt-in).', 'keychain')
+    .option('--remote-backend <backend>', 'Backend for the bundle on the remote device (with --device): keychain (default) or file. file is headless-readable via the remote\'s machine-local key and never forwards AGENTS_SECRETS_PASSPHRASE.', 'keychain')
     .option('--force', 'Overwrite existing keys/items on the target (used with --to-1password and --device)')
     .option('--to-file <path>', `Write the bundle as an AES-256-GCM encrypted offline file (needs ${SYNC_PASSPHRASE_ENV}; symmetric counterpart of import --from-file)`)
     .action(async (bundleName: string | undefined, opts: {
@@ -2331,15 +2351,18 @@ Examples:
             console.error(chalk.red("--remote-backend vault is not supported; use 'keychain' or 'file'."));
             process.exit(1);
           }
-          const remoteBackend: RemoteBackend = parsedBackend;
-          // For a file-backed remote bundle a passphrase is OPTIONAL. The file
-          // store is passphrase-free by default: with AGENTS_SECRETS_PASSPHRASE
-          // unset the remote `import --backend file` auto-provisions the remote's
-          // own machine-local key (0600 under ~/.agents/.secrets-key/), so reads
-          // are HEADLESS. We forward the LOCAL AGENTS_SECRETS_PASSPHRASE only when
-          // the operator opts in by setting it. Forcing a shared passphrase would
-          // defeat headless reads, so we no longer require one.
-          const remotePassphrase = remoteBackend === 'file' ? (process.env.AGENTS_SECRETS_PASSPHRASE ?? '') : '';
+          let remoteBackend: RemoteBackend = parsedBackend;
+          if (isReservedBundleName(resolvedBundleName)) {
+            if (opts.remoteBackend && opts.remoteBackend !== 'file') {
+              throw new ReservedBundleWrongBackendError(resolvedBundleName, parsedBackend);
+            }
+            remoteBackend = 'file';
+          }
+          // File-backend export NEVER forwards AGENTS_SECRETS_PASSPHRASE
+          // (PHNX-2371). Forwarding it keys the remote ciphertext to a secret
+          // the destination daemon does not hold, so later headless reads fail
+          // while import still prints "Imported N key(s)". The remote
+          // auto-provisions its own machine-local key instead.
           // Resolve ONCE for N hosts — reading a bundle can prompt, and doing it
           // per host would prompt per host.
           //
@@ -2358,7 +2381,6 @@ Examples:
             const out = pushResolvedBundleToHost(resolvedForPush, resolvedBundleName, host, {
               remoteBackend,
               force: opts.force,
-              passphrase: remotePassphrase,
               operation: 'ssh export',
             });
             if (!out.ok) {

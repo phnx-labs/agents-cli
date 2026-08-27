@@ -1857,17 +1857,14 @@ normative — a change that widens or narrows a cell is a spec change.
 - **SEC-GAP-2.** The `env:`-ref allowlist control exists (`envAllowlist` on
   `ResolveOptions`, `lib/secrets/index.ts` ~`:1392,1411`) but no command wires it
   up — `env:` refs are effectively unrestricted today. Either wire it or remove it.
-- **SEC-GAP-3 (partially closed).** `auth` IS reserved in code now, but only by
-  the consumer, not by the secrets layer: `claude-account-token.ts:17` pins
-  `AUTH_BUNDLE = 'auth'` and reads it for Claude setup-tokens (EXEC-2a), and it
-  is honored ONLY when file-backed — a keychain- or vault-backed bundle of the
-  same name is ignored rather than rejected (`claude-account-token.ts:98`). The
-  secrets layer itself still has no reserved-bundle-name concept; the only
-  reserved concept there remains `RESERVED_ENV_NAMES` (env keys, not bundle
-  names, `lib/secrets/bundles.ts:273-277`). So `agents secrets create auth` with
-  the wrong backend still succeeds and silently does nothing for auth. Remaining
-  work: either reserve the name in the secrets layer (and fail loud on a
-  non-file backend) or drop the convention.
+- **SEC-GAP-3 (closed).** `auth` is reserved in the secrets layer
+  (`AUTH_BUNDLE_NAME` / `RESERVED_BUNDLE_NAMES`, `lib/secrets/bundles.ts`).
+  `writeBundle` and `agents secrets create/import auth` refuse a non-file
+  backend with `ReservedBundleWrongBackendError` (the recreate command in the
+  message). `resolveClaudeSetupToken` throws that same error instead of
+  returning null, so usage/probe cannot silently fall through to Touch ID.
+  `agents doctor` emits `auth-bundle-wrong-backend` for an existing
+  keychain/vault-backed `auth` bundle.
 - **SEC-GAP-4.** The broker's per-request capability-token auth (SEC-18) is not
   reflected in `secrets.md` / `secrets-agent-process-model.md`, which still
   describe only the same-UID/socket-permission model.
@@ -2031,6 +2028,23 @@ Then `shareRuntimeEnv` resolves the token `agentOnly` and returns undefined with
 a Touch ID sheet (`lib/share/config.ts`), so the launch is silent — and a `share`
 bundle created by `agents artifacts setup` is `never`-tier (no-ACL), so the token is
 injected silently with no unlock at all.
+
+**GWT-S15 — reserved `auth` bundle is file-backed or fails loud (SEC-GAP-3).**
+Given no `auth` bundle; When `agents secrets create auth` (or `create auth
+--backend keychain`); Then the bundle is created file-backed, or the keychain
+attempt throws `ReservedBundleWrongBackendError` naming
+`agents secrets create auth --backend file`. Given an existing keychain-backed
+`auth` bundle; When `resolveClaudeSetupToken` runs; Then it throws that error
+instead of returning null, and `agents doctor` emits
+`auth-bundle-wrong-backend`.
+
+**GWT-S16 — `auth` fleet sync never forwards AGENTS_SECRETS_PASSPHRASE (PHNX-2371).**
+Given a local file-backed `auth` bundle and a pinned fleet device without it;
+When the daemon `auth-sync` tick (or `fleet apply` / `repo push user`) pushes
+it; Then the remote import is `--backend file` with no
+`AGENTS_SECRETS_PASSPHRASE` prologue, the destination auto-provisions its
+machine-local key, and the push read-back-verifies decryptability (a
+decrypt failure is an error, not "Imported N key(s)").
 
 ---
 

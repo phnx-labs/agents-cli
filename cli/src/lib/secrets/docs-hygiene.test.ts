@@ -21,7 +21,7 @@
  *
  * - **The doc marks its own exceptions.** The passages that legitimately discuss
  *   the master-key export — the warning that forbids it, and `export --device`,
- *   which really does forward the master key to key a remote's own store — are
+ *   which used to forward the master key and now must document that it does not — are
  *   wrapped in `<!-- docs-hygiene:allow-master-key-discussion -->`. Everything
  *   outside a marked region is held to the rules with no escape hatch, so a new
  *   rc-file mention fails until an author consciously marks it. Region count,
@@ -218,7 +218,7 @@ describe('docs/secrets.md hygiene (RUSH-1968)', () => {
   it('keeps its exceptions few, small, paired, and reviewed', () => {
     // A marked region is a DELIBERATE override — text inside it is exempt from
     // every check. That is the point (the warning must name what it forbids,
-    // and `export --device` really does forward the master key), and it is also
+    // and `export --device` must say it does not forward the master key), and it is also
     // the design's soft spot, so it is pinned by count, pairing, and size.
     const text = doc();
     const opens = text.split(ALLOW_OPEN).length - 1;

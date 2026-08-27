@@ -26,7 +26,8 @@ export type DaemonServiceId =
   | 'watchdog'
   | 'device-probe'
   | 'state-dir-check'
-  | 'session-index';
+  | 'session-index'
+  | 'auth-sync';
 
 /** Human-readable metadata for each service. */
 export interface DaemonServiceDef {
@@ -95,6 +96,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'session-index',
     title: 'Session-index warm',
     description: 'Keeps this host\'s transcript index current so a locally-started session is discoverable within seconds.',
+  },
+  {
+    id: 'auth-sync',
+    title: 'Auth bundle sync',
+    description: 'Pushes the reserved file-backed auth bundle (setup-tokens) to pinned fleet devices that do not yet have it.',
   },
 ];
 

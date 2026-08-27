@@ -54,6 +54,17 @@ function localInput(over: Partial<LocalFindingInputs> = {}): LocalFindingInputs 
 }
 
 describe('severity rubric', () => {
+  it('a keychain-backed auth bundle is a WARNING and names the recreate command', () => {
+    const findings = buildLocalFindings(localInput({ authBundleWrongBackend: true }));
+    const f = findings.find((x) => x.kind === 'auth-bundle-wrong-backend');
+    expect(f?.severity).toBe('warning');
+    expect(f?.device).toBe('boxA');
+    expect(f?.message).toContain("reserved secrets bundle 'auth'");
+    expect(f?.message).toContain('not file-backed');
+    expect(f?.remediation).toBe('agents secrets delete auth --yes && agents secrets create auth --backend file');
+    expect(buildLocalFindings(localInput({})).some((x) => x.kind === 'auth-bundle-wrong-backend')).toBe(false);
+  });
+
   it('a binary shadow is a WARNING and names the shadowing install', () => {
     const findings = buildLocalFindings(localInput({
       binaryShadows: [

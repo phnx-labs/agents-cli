@@ -21,6 +21,7 @@ import {
   makeHome,
   run,
 } from './daemon-test-harness.js';
+import { DAEMON_SERVICE_IDS } from '../lib/daemon-services.js';
 
 const describeDaemon = DAEMON_TESTS_SUPPORTED ? describe : describe.skip;
 
@@ -50,7 +51,7 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
     expect(Array.isArray(payload.services)).toBe(true);
     // No daemon has ever run in this HOME, so every service is "stopped" and
     // none has a real supervisor-reported state yet.
-    expect(payload.services.length).toBe(12); // DAEMON_SERVICE_IDS.length (daemon-services.ts)
+    expect(payload.services.length).toBe(DAEMON_SERVICE_IDS.length);
     const sessionIndex = payload.services.find((s) => s.id === 'session-index');
     expect(sessionIndex).toBeDefined();
     expect(sessionIndex!.enabled).toBe(true);

@@ -290,6 +290,17 @@ describe('diffFleet — secrets surfacing', () => {
     expect(decideSecretPush('attio', desired[0], probe('windows'), ctx).backend).toBe('keychain');
   });
 
+  it('the reserved auth bundle is always file-backed and skips --provision-secrets', () => {
+    const probe = (platform: string): DeviceProbe =>
+      ({ device: 's1', reachable: true, platform, cliVersion: CLI, installedAgents: ['codex'] });
+    const ctx = { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']), secretsBundles: ['auth'], isHostPinned: () => true };
+    expect(decideSecretPush('auth', desired[0], probe('macos'), ctx)).toEqual({
+      push: true, backend: 'file', reason: '',
+    });
+    expect(decideSecretPush('auth', desired[0], probe('linux'), ctx).backend).toBe('file');
+    expect(decideSecretPush('attio', desired[0], probe('macos'), ctx).push).toBe(false);
+  });
+
   it('emits nothing for secrets when the profile declares no bundles', () => {
     const plan = diffFleet(desired, converged, { targetCliVersion: CLI, sourceAuth: srcAuth(['codex']) });
     expect(plan.actions.filter((a) => a.kind === 'needs-secret')).toEqual([]);

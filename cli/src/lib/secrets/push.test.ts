@@ -157,18 +157,16 @@ describe('planPushTransport — which transport a backend/OS pair selects', () =
     expect(t.input).toBe(RESOLVED.dotenv);
   });
 
-  it('carries an opt-in passphrase on stdin, never in the command line', () => {
-    // A value in argv is readable from any process list, so the shared-key opt-in
-    // reads it off the FIRST stdin line instead.
+  it('drops a caller-supplied passphrase rather than forwarding it (PHNX-2371)', () => {
     const t = planPushTransport(RESOLVED, 'apple.com', 'push-test-linux', {
       remoteBackend: 'file',
       passphrase: 'push-test-passphrase',
       operation: 'push.test',
     });
     if (t.kind !== 'ssh') throw new Error('unreachable');
+    expect(t.remoteCmd).not.toContain('AGENTS_SECRETS_PASSPHRASE');
     expect(t.remoteCmd).not.toContain('push-test-passphrase');
-    expect(t.remoteCmd).toContain('IFS= read -r AGENTS_SECRETS_PASSPHRASE');
-    expect(t.input).toBe(`push-test-passphrase\n${RESOLVED.dotenv}`);
+    expect(t.input).toBe(RESOLVED.dotenv);
   });
 });
 

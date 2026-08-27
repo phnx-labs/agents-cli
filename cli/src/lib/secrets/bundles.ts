@@ -256,6 +256,93 @@ export const RESERVED_ENV_NAMES = new Set([
   'TMPDIR', 'TMP', 'TEMP', 'LOGNAME', 'UID', 'EUID', 'HOSTNAME',
 ]);
 
+/**
+ * The reserved FILE-BACKED bundle that holds long-lived Claude setup-tokens.
+ * Usage/probe reads authenticate with these instead of the ACL-bound login item,
+ * so they never pop Touch ID and they can cross the fleet. A keychain- or
+ * vault-backed bundle of this name is a misconfiguration: the consumer used to
+ * return null (SEC-GAP-3) and silently fall through to Touch ID.
+ */
+export const AUTH_BUNDLE_NAME = 'auth';
+export const AUTH_BUNDLE_BACKEND: SecretsBackend = 'file';
+export const RESERVED_BUNDLE_NAMES = new Set([AUTH_BUNDLE_NAME]);
+
+export function isReservedBundleName(name: string): boolean {
+  return RESERVED_BUNDLE_NAMES.has(name.trim().toLowerCase());
+}
+
+/** Thrown when a reserved bundle is written or resolved on the wrong backend. */
+export class ReservedBundleWrongBackendError extends Error {
+  readonly bundle: string;
+  readonly backend: SecretsBackend;
+  constructor(bundle: string, backend: SecretsBackend) {
+    super(
+      `Bundle '${bundle}' is reserved for file-backed setup-tokens (headless, fleet-shareable). ` +
+      `A ${backend}-backed '${bundle}' bundle is ignored by usage/probe instead of authenticating. ` +
+      `Recreate it as file-backed: agents secrets delete ${bundle} --yes && agents secrets create ${bundle} --backend file`,
+    );
+    this.name = 'ReservedBundleWrongBackendError';
+    this.bundle = bundle;
+    this.backend = backend;
+  }
+}
+
+/** Fail loud when `name` is reserved and `backend` is not the required one. */
+export function assertReservedBundleBackend(name: string, backend: SecretsBackend): void {
+  if (!isReservedBundleName(name)) return;
+  if (backend !== AUTH_BUNDLE_BACKEND) {
+    throw new ReservedBundleWrongBackendError(name, backend);
+  }
+}
+
+/**
+ * Presence + backend of the reserved `auth` bundle. `ok` is true when the
+ * bundle is absent (nothing to fix) or present and file-backed.
+ */
+export function inspectReservedAuthBundle(): {
+  exists: boolean;
+  backend: SecretsBackend | null;
+  ok: boolean;
+} {
+  if (!bundleExists(AUTH_BUNDLE_NAME)) {
+    return { exists: false, backend: null, ok: true };
+  }
+  const backend = bundleBackend(AUTH_BUNDLE_NAME);
+  return { exists: true, backend, ok: backend === AUTH_BUNDLE_BACKEND };
+}
+
+/**
+ * After a file-backed import, actually decrypt the keys and fail if any are
+ * unreadable. Import used to print "Imported N key(s)" from the write tally
+ * alone — ciphertext sealed under a forwarded AGENTS_SECRETS_PASSPHRASE that
+ * the destination daemon does not hold still counted as success.
+ */
+export function assertFileBundleDecryptable(name: string, keys: string[]): void {
+  if (keys.length === 0) return;
+  if (bundleBackend(name) !== 'file') return;
+  let env: Record<string, string>;
+  try {
+    ({ env } = readAndResolveBundleEnv(name, { caller: 'import-verify', agentOnly: true, keyMode: 'storage' }));
+  } catch (err) {
+    throw new Error(
+      `Imported '${name}' reported success but the file store could not decrypt it. ` +
+      `${(err as Error).message} Typically because AGENTS_SECRETS_PASSPHRASE was forwarded ` +
+      `and this process does not hold it. Re-import without that env var.`,
+    );
+  }
+  const missing = keys.filter((k) => {
+    const v = env[k];
+    return typeof v !== 'string' || v.length === 0;
+  });
+  if (missing.length === 0) return;
+  throw new Error(
+    `Imported '${name}' reported success but ${missing.length} key(s) are unreadable ` +
+    `(${missing.slice(0, 5).join(', ')}${missing.length > 5 ? ', …' : ''}). ` +
+    `The destination store could not decrypt them — typically because AGENTS_SECRETS_PASSPHRASE ` +
+    `was forwarded and this process does not hold it. Re-import without that env var.`,
+  );
+}
+
 export function bundleToEnvPrefix(name: string): string {
   return name.replace(/[-\.]/g, '_').toUpperCase();
 }
@@ -540,6 +627,7 @@ interface PreparedBundleWrite {
 function prepareBundleWrite(bundle: SecretsBundle): PreparedBundleWrite {
   validateBundleName(bundle.name);
   const backend: SecretsBackend = bundle.backend ?? 'keychain';
+  assertReservedBundleBackend(bundle.name, backend);
   if (backend === 'vault') assertVaultBackendUsable(bundle.name);
   for (const key of Object.keys(bundle.vars)) {
     validateEnvKey(key);

@@ -69,14 +69,9 @@ export interface PushBundleOptions {
   /** Overwrite a key that already exists on the remote. */
   force?: boolean;
   /**
-   * Forwarded to the remote as the FIRST stdin line for the FILE backend only,
-   * and only when non-empty.
-   *
-   * Empty is the DEFAULT and the good path: the remote's file store then
-   * auto-provisions its own machine-local key (0600, `~/.agents/.secrets-key/`)
-   * and reads headlessly. Setting this keys the remote bundle under a shared
-   * off-disk secret instead — an opt-in, never a requirement. Requiring one is
-   * what pushed operators toward exporting the master key fleet-wide (RUSH-1968).
+   * Ignored. File-backend export never forwards AGENTS_SECRETS_PASSPHRASE
+   * (PHNX-2371); the remote auto-provisions its own machine-local key.
+   * Kept on the options type so existing callers that passed one still compile.
    */
   passphrase?: string;
   /** Label for the audit trail — `export --device` vs `fleet apply`. */
@@ -187,7 +182,6 @@ export function planPushTransport(
       return { kind: 'refuse', message: 'file backend export to a Windows target is not yet supported' };
     }
     const { remoteCmd, input } = buildRemoteFileImportCommand(bundle, resolved.dotenv, {
-      passphrase: opts.passphrase ?? '',
       force: opts.force,
       policyNever: opts.policyNever,
     });
@@ -257,20 +251,27 @@ export function pushResolvedBundleToHost(
     return fail(`remote import failed (exit ${res.code})${msg ? `: ${msg}` : ''}`);
   }
 
-  // A keychain-backed push to a macOS remote over headless SSH can land the
-  // bundle metadata but no READABLE value items: the remote login keychain is
-  // locked in the non-interactive SSH context, so Security accepts the write but
-  // the biometry-ACL'd item is unreadable — and the remote `import` still exits
-  // 0. Read it back the way a release will and FAIL LOUDLY, rather than leave a
-  // metadata-only bundle that breaks later with "stored item not found". The
-  // file backend is headless-readable by construction, so it is skipped.
-  if (opts.remoteBackend === 'keychain') {
-    const verdict = verifyRemoteKeychainPush(host, bundle, Object.keys(resolved.env), { osLookupName: host, secret: true });
-    if (!verdict.ok) {
-      return fail(verdict.kind === 'locked-keychain'
-        ? keychainWriteFailureMessage(host, bundle, verdict.reason)
-        : `pushed '${bundle}' but could not verify it on the remote: ${verdict.reason}`);
+  // A successful remote import is not proof the keys are readable. Two silent
+  // failures hide behind exit 0:
+  //   - keychain: a macOS login keychain is locked under headless SSH, so the
+  //     write lands metadata but no readable value items.
+  //   - file: a forwarded AGENTS_SECRETS_PASSPHRASE keys ciphertext to a secret
+  //     the destination daemon does not hold (PHNX-2371).
+  // Read the bundle back the way a later resolve will and FAIL LOUDLY.
+  const verdict = verifyRemoteKeychainPush(host, bundle, Object.keys(resolved.env), { osLookupName: host, secret: true });
+  if (!verdict.ok) {
+    if (opts.remoteBackend === 'keychain' && verdict.kind === 'locked-keychain') {
+      return fail(keychainWriteFailureMessage(host, bundle, verdict.reason));
     }
+    if (opts.remoteBackend === 'file') {
+      return fail(
+        `${host}: pushed '${bundle}' but the remote could not decrypt it (${verdict.reason}). ` +
+        `File-backend export never forwards AGENTS_SECRETS_PASSPHRASE — the remote keys ` +
+        `the bundle under its own machine-local key. If the destination still cannot read, ` +
+        `unset a stale AGENTS_SECRETS_PASSPHRASE there (\`agents doctor\`).`,
+      );
+    }
+    return fail(`pushed '${bundle}' but could not verify it on the remote: ${verdict.reason}`);
   }
 
   for (const step of planLiteralRestoration(bundle, opts.literalValues)) {
