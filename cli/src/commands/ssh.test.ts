@@ -261,6 +261,21 @@ describe('devices ignored (RUSH-3062 surface)', () => {
     expect(run(['devices', 'unignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'zion' }).status).toBe(0);
     expect(run(['devices', 'ignored']).stdout).toContain('No ignored nodes');
   });
+
+  it('warns (never falsely succeeds) when unignore runs on a box that did not record the dismissal (PHNX-3315)', () => {
+    guardedHome();
+    expect(run(['devices', 'add', 'old-laptop', 'operator@old-laptop.internal', '--platform', 'linux']).status).toBe(0);
+    // Dismissed on box 'zion' only.
+    expect(run(['devices', 'ignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'zion' }).status).toBe(0);
+
+    // Un-ignore from a DIFFERENT box cannot touch zion's doc; it must say so
+    // rather than print a misleading success — the node is still ignored.
+    const r = run(['devices', 'unignore', 'old-laptop'], { AGENTS_SYNC_MACHINE_ID: 'other' });
+    expect(r.stderr + r.stdout).toContain('still dismissed on');
+    expect(r.stderr + r.stdout).toContain('zion');
+    expect(r.stdout).not.toContain('No longer ignoring');
+    expect(run(['devices', 'ignored']).stdout).toContain('old-laptop');
+  });
 });
 
 describe('devices auto-launch preferences (per-device doc store)', () => {

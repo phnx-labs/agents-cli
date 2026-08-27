@@ -1334,11 +1334,22 @@ function registerDevicesCommands(program: Command): void {
           console.error(chalk.red(`'${name}' is not a current tailscale node. See 'agents devices sync'.`));
           process.exit(1);
         }
-        await removeIgnored(name); // a re-registered node is no longer dismissed
+        await removeIgnored(name); // clear THIS box's dismissal, if any
         const d = await upsertDevice(name, nodeToDeviceInput(node));
         setDeviceDiscoveryStatus(name, 'approved');
         clearPendingSentinel(name); // drop the notification immediately
         console.log(chalk.green(`Registered '${name}'`) + chalk.gray(` (${d.platform})`));
+        // A dismissal on another box still wins the union (ignored beats
+        // approved), so approving here does not un-dismiss it fleet-wide — say so
+        // rather than imply the node is now discoverable everywhere (PHNX-3315).
+        const otherDismissals = loadIgnoredEntries().filter((e) => e.name === name);
+        if (otherDismissals.length > 0 || getDeviceDiscoveryStatus(name) === 'ignored') {
+          const boxes = [...new Set(otherDismissals.map((e) => e.ignoredOn))].sort().join(', ') || 'another box';
+          console.error(
+            chalk.yellow(`Note: '${name}' is still dismissed on: ${boxes}, so it stays ignored fleet-wide`) +
+              chalk.gray(` until you run \`agents devices unignore ${name}\` there.`),
+          );
+        }
       } catch (err: any) {
         console.error(chalk.red(err.message));
         process.exit(1);
@@ -1365,13 +1376,28 @@ function registerDevicesCommands(program: Command): void {
     .command('unignore <name>')
     .description('Undo `ignore`: allow a node to be discovered and registered again.')
     .action(async (name: string) => {
-      const portableWasIgnored = getDeviceDiscoveryStatus(name) === 'ignored';
-      const ok = await removeIgnored(name);
-      if (!ok && !portableWasIgnored) {
+      const wasIgnored =
+        getDeviceDiscoveryStatus(name) === 'ignored' || loadIgnoredEntries().some((e) => e.name === name);
+      // A box can edit only its OWN device doc (PHNX-3315), so this clears just
+      // this box's dismissal/approval decision.
+      await removeIgnored(name);
+      setDeviceDiscoveryStatus(name, undefined);
+      // Re-evaluate the cross-box union AFTER clearing our slice: another box's
+      // dismissal keeps the node ignored fleet-wide (ignored beats approved), so
+      // never report a false "no longer ignoring" — name the box(es) to clear.
+      const remaining = loadIgnoredEntries().filter((e) => e.name === name);
+      if (remaining.length > 0 || getDeviceDiscoveryStatus(name) === 'ignored') {
+        const boxes = [...new Set(remaining.map((e) => e.ignoredOn))].sort().join(', ') || 'another box';
+        console.error(
+          chalk.yellow(`Cleared this box's decision, but '${name}' is still dismissed on: ${boxes}.`) +
+            chalk.gray(`\nRun \`agents devices unignore ${name}\` there too to clear it fleet-wide.`),
+        );
+        return;
+      }
+      if (!wasIgnored) {
         console.error(chalk.gray(`'${name}' was not ignored.`));
         return;
       }
-      setDeviceDiscoveryStatus(name, undefined);
       console.log(chalk.green(`No longer ignoring '${name}'`) + chalk.gray(' — run `agents devices sync` to register it.'));
     });
 

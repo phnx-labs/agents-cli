@@ -1288,21 +1288,42 @@ function overlayMachineLocal(meta: Meta): Meta {
       // These populate the `device*` keys the writers read-modify-write; the
       // effective UNION across all boxes is computed separately by
       // lib/devices/device-docs.ts, not here (this overlay is this box only).
-      const df = (dm as { fleet?: { discovery?: unknown; ignored?: unknown } })?.fleet;
-      if (df && typeof df === 'object' && !Array.isArray(df)) {
-        const discovery = df.discovery && typeof df.discovery === 'object' && !Array.isArray(df.discovery)
-          ? (df.discovery as Record<string, 'approved' | 'ignored'>) : undefined;
-        const ignored = Array.isArray(df.ignored)
-          ? (df.ignored as NonNullable<Meta['deviceFleet']>['ignored']) : undefined;
+      // A malformed block on THIS box's own doc is a HARD error, exactly like
+      // `routines` below and the cross-box union readers (device-docs.ts): a
+      // silent drop would let the next writeMetaUnlocked round-trip overwrite the
+      // whole block with just the new entry, discarding the rest on this box's
+      // tracked file (PHNX-3315).
+      const isMap = (v: unknown): v is Record<string, unknown> =>
+        !!v && typeof v === 'object' && !Array.isArray(v);
+      const dmRaw = dm as { fleet?: unknown; hosts?: unknown; accounts?: unknown };
+      if (dmRaw.fleet !== undefined) {
+        if (!isMap(dmRaw.fleet)) throw new Error(`Device config corrupted at ${devicePath}: fleet must be a map.`);
+        const df = dmRaw.fleet as { discovery?: unknown; ignored?: unknown };
+        if (df.discovery !== undefined && !isMap(df.discovery)) {
+          throw new Error(`Device config corrupted at ${devicePath}: fleet.discovery must be a map.`);
+        }
+        if (df.ignored !== undefined && !Array.isArray(df.ignored)) {
+          throw new Error(`Device config corrupted at ${devicePath}: fleet.ignored must be a list.`);
+        }
+        const discovery = df.discovery as Record<string, 'approved' | 'ignored'> | undefined;
+        const ignored = df.ignored as NonNullable<Meta['deviceFleet']>['ignored'] | undefined;
         if (discovery || ignored) meta.deviceFleet = { ...(discovery ? { discovery } : {}), ...(ignored ? { ignored } : {}) };
       }
-      if (dm?.hosts && typeof dm.hosts === 'object' && !Array.isArray(dm.hosts)) {
-        meta.deviceHosts = { ...meta.deviceHosts, ...(dm.hosts as Meta['hosts']) };
+      if (dmRaw.hosts !== undefined) {
+        if (!isMap(dmRaw.hosts)) throw new Error(`Device config corrupted at ${devicePath}: hosts must be a map.`);
+        meta.deviceHosts = { ...meta.deviceHosts, ...(dmRaw.hosts as Meta['hosts']) };
       }
-      if (dm?.accounts && typeof dm.accounts === 'object' && !Array.isArray(dm.accounts)) {
-        const acc = dm.accounts as NonNullable<Meta['deviceAccounts']>;
-        const native = acc.native && typeof acc.native === 'object' && !Array.isArray(acc.native) ? acc.native : undefined;
-        const bindings = acc.bindings && typeof acc.bindings === 'object' && !Array.isArray(acc.bindings) ? acc.bindings : undefined;
+      if (dmRaw.accounts !== undefined) {
+        if (!isMap(dmRaw.accounts)) throw new Error(`Device config corrupted at ${devicePath}: accounts must be a map.`);
+        const acc = dmRaw.accounts as { native?: unknown; bindings?: unknown };
+        if (acc.native !== undefined && !isMap(acc.native)) {
+          throw new Error(`Device config corrupted at ${devicePath}: accounts.native must be a map.`);
+        }
+        if (acc.bindings !== undefined && !isMap(acc.bindings)) {
+          throw new Error(`Device config corrupted at ${devicePath}: accounts.bindings must be a map.`);
+        }
+        const native = acc.native as NonNullable<Meta['deviceAccounts']>['native'] | undefined;
+        const bindings = acc.bindings as NonNullable<Meta['deviceAccounts']>['bindings'] | undefined;
         if (native || bindings) meta.deviceAccounts = { ...(native ? { native } : {}), ...(bindings ? { bindings } : {}) };
       }
       if (Object.prototype.hasOwnProperty.call(dm, 'routines')) {

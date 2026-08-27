@@ -139,4 +139,15 @@ describe('LocalHostProvider device-scoping (PHNX-3315)', () => {
     expect((await p.list()).map((h) => h.name)).not.toContain('mine');
     expect(fs.readFileSync(peer, 'utf-8')).toContain('theirs'); // peer doc never rewritten
   });
+
+  it("throws on a malformed hosts block in this box's own device doc rather than silently dropping it", async () => {
+    process.env.AGENTS_SYNC_MACHINE_ID = 'boxa';
+    const doc = path.join(home, '.agents', 'devices', 'boxa', 'agents.yaml');
+    fs.mkdirSync(path.dirname(doc), { recursive: true });
+    fs.writeFileSync(doc, 'hosts:\n  - 1\n  - 2\n'); // a list, not a map — corruption
+    const p = await freshProvider();
+    // A silent drop would let the next register() overwrite the block with only
+    // the new host; instead the read fails loudly (PHNX-3315).
+    await expect(p.list()).rejects.toThrow(/corrupted/);
+  });
 });
