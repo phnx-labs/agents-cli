@@ -109,17 +109,27 @@ rg = subprocess.Popen(
 
 inv = collections.Counter()
 sess = collections.defaultdict(set)
-per_harness = collections.Counter()
-scanned_per_harness = collections.Counter()
+per_harness = collections.defaultdict(set)
+scanned_per_harness = collections.defaultdict(set)
 nfiles = 0
+seen_ids = set()
+
+
+def session_id(path):
+    """The transcript filename is the session identity across duplicate copies."""
+    return os.path.basename(path)
 for fp in rg.stdout:
     fp = fp.strip()
     if not fp:
         continue
     nfiles += 1
+    sid = session_id(fp)
     parts = fp.split("/versions/")
-    harness = parts[1].split("/")[0] if len(parts) > 1 else "(not under versions/)"
-    scanned_per_harness[harness] += 1
+    harness = parts[1].split("/")[0] if len(parts) > 1 else "(duplicate store: backups/ or runs/)"
+    scanned_per_harness[harness].add(sid)
+    if sid in seen_ids:          # same session, another copy — skip entirely
+        continue
+    seen_ids.add(sid)
     matched_here = False
     for obj in records(fp):
         for cmd in extract(obj, []):
@@ -127,26 +137,31 @@ for fp in rg.stdout:
                 c = canon(m.group(1).split())
                 if c:
                     inv[c] += 1
-                    sess[c].add(fp)
+                    sess[c].add(sid)
                     matched_here = True
     if matched_here:
-        per_harness[harness] += 1
+        per_harness[harness].add(sid)
 
 reach = {k: len(v) for k, v in sess.items()}
 total_exec = sum(inv.values())
 ranked = sorted(inv.items(), key=lambda x: -x[1])
 never = sorted(paths - set(inv))
 
-json.dump({"files_scanned": nfiles, "total_executions": total_exec,
-           "invocations": dict(inv), "transcript_reach": reach,
-           "scanned_per_harness": dict(scanned_per_harness),
-           "transcripts_with_hits_per_harness": dict(per_harness),
+json.dump({"files_seen": nfiles, "distinct_sessions": len(seen_ids),
+           "duplicate_copies_skipped": nfiles - len(seen_ids),
+           "total_executions": total_exec,
+           "invocations": dict(inv), "session_reach": reach,
+           "distinct_sessions_per_harness": {k: len(v) for k, v in scanned_per_harness.items()},
+           "sessions_with_hits_per_harness": {k: len(v) for k, v in per_harness.items()},
            "surface": sorted(paths)},
           open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "command-usage.json"), "w"),
           indent=1)
 
 o = sys.stdout
-print(f"transcripts scanned:                {nfiles:,}", file=o)
+print(f"transcript files seen:              {nfiles:,}", file=o)
+print(f"DISTINCT sessions (deduped by id):  {len(seen_ids):,}", file=o)
+print(f"duplicate copies skipped:           {nfiles - len(seen_ids):,}"
+      f"  (backups/ and runs/ keep repeat copies of the same session)", file=o)
 print(f"total `agents` executions matched:  {total_exec:,}", file=o)
 print(f"distinct commands ever executed:    {len(inv)} / {len(paths)}", file=o)
 print(f"NEVER executed:                     {len(never)} ({100*len(never)/len(paths):.0f}%)\n", file=o)
@@ -160,25 +175,25 @@ t50 = len([k for k, v in reach.items() if v >= 50])
 t10 = len([k for k, v in reach.items() if 10 <= v <= 49])
 t3 = len([k for k, v in reach.items() if 3 <= v <= 9])
 t1 = len([k for k, v in reach.items() if v <= 2])
-print(f"  50+ transcripts   (daily driver)  {t50}", file=o)
-print(f"  10-49 transcripts (occasional)    {t10}", file=o)
-print(f"  3-9 transcripts   (rare)          {t3}", file=o)
-print(f"  1-2 transcripts   (near-dead)     {t1}", file=o)
+print(f"  50+ sessions   (daily driver)  {t50}", file=o)
+print(f"  10-49 sessions (occasional)    {t10}", file=o)
+print(f"  3-9 sessions   (rare)          {t3}", file=o)
+print(f"  1-2 sessions   (near-dead)     {t1}", file=o)
 print(f"  never executed                    {len(never)}", file=o)
 print(f"  TOTAL                             {t50+t10+t3+t1+len(never)} (surface = {len(paths)})", file=o)
 print(f"  dead or near-dead ({t1}+{len(never)})    {t1+len(never)} "
       f"({100*(t1+len(never))/len(paths):.0f}% of the surface)", file=o)
 
 print("\n=== COVERAGE BY HARNESS — read this before trusting the tiers ===", file=o)
-print(f"{'harness':<24}{'scanned':>9}{'with hits':>11}", file=o)
+print(f"{'harness':<40}{'sessions':>10}{'with hits':>11}", file=o)
 for k in sorted(set(scanned_per_harness) | set(per_harness),
-                key=lambda x: -scanned_per_harness[x]):
-    print(f"{k:<24}{scanned_per_harness[k]:>9,}{per_harness[k]:>11,}", file=o)
+                key=lambda x: -len(scanned_per_harness[x])):
+    print(f"{k:<40}{len(scanned_per_harness[k]):>10,}{len(per_harness[k]):>11,}", file=o)
 print("\nSQLite-backed transcript stores are not read by this script.", file=o)
 
 print("\n=== TOP 45 BY TRANSCRIPT REACH ===", file=o)
 for k, v in sorted(reach.items(), key=lambda x: -x[1])[:45]:
-    print(f"{v:>6} transcripts  {inv[k]:>8,} runs   {k}", file=o)
+    print(f"{v:>6} sessions  {inv[k]:>8,} runs   {k}", file=o)
 
 print("\n=== EXECUTED IN <=2 TRANSCRIPTS ===", file=o)
 tail = sorted([k for k, v in reach.items() if v <= 2])
@@ -190,6 +205,6 @@ print(f"{len(never)} commands\n" + ", ".join(never), file=o)
 g = collections.defaultdict(set)
 for k, v in sess.items():
     g[k.split()[0]] |= v
-print("\n=== GROUPS BY TRANSCRIPT REACH ===", file=o)
+print("\n=== GROUPS BY SESSION REACH ===", file=o)
 for k, v in sorted(g.items(), key=lambda x: -len(x[1])):
     print(f"{len(v):>6}  {k}", file=o)
