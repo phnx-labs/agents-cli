@@ -34,6 +34,7 @@ import { loadManifest } from './staleness/index.js';
 import { getSystemAgentsDir, getUserAgentsDir } from './state.js';
 import * as fs from 'fs';
 import { isGitRepo, readOriginUrl } from './git.js';
+import { detectConfigDrift, type ConfigDrift } from './config-drift.js';
 
 /**
  * One stable status per resource, unified across every surface.
@@ -91,6 +92,9 @@ export interface UserRepoStatus {
 export interface UnifiedSyncStatus {
   system: SystemRepoStatus;
   user: UserRepoStatus;
+  /** Config drift: has this box drained its device-scoped state, or is it still
+   *  carrying per-box state in the shared top-level agents.yaml? (PHNX-3315) */
+  config: ConfigDrift;
   agents: AgentVersionStatus[];
   totals: {
     drifted: number;
@@ -219,6 +223,7 @@ export async function computeSyncStatus(
 
   const system = await getSystemRepoStatus();
   const user = await getUserRepoStatus();
+  const config = detectConfigDrift();
 
   const agentsNeedingSync = new Set<AgentId>();
   let drifted = 0, missing = 0, orphan = 0, versionsNeedingSync = 0, versionsNeverSynced = 0;
@@ -236,6 +241,7 @@ export async function computeSyncStatus(
   return {
     system,
     user,
+    config,
     agents,
     totals: {
       drifted,

@@ -118,6 +118,23 @@ export function registerStatusCommand(syncCmd: Command): void {
       );
     }
 
+    // Config drift is its OWN class, not a per-agent "N missing": a box that has
+    // not folded its device-scoped state still carries a stale top-level header or
+    // a lingering central fleet/hosts/accounts/browser block. Surface it distinctly
+    // so an un-drained box is SEEN here instead of via a mystery pull conflict
+    // (PHNX-3315).
+    if (status.config.staleHeader || status.config.centralLeaks.length > 0) {
+      console.log(
+        `  ${'config (device-scoped)'.padEnd(28)} ${chalk.yellow('not drained — heals on this box\'s next config write / `agents sync`')}`,
+      );
+      if (status.config.staleHeader) {
+        console.log(chalk.gray('    · top-level agents.yaml header is stale (pre-rename)'));
+      }
+      for (const leak of status.config.centralLeaks) {
+        console.log(chalk.gray(`    · central ${leak} should be device-scoped`));
+      }
+    }
+
     // Hand off to the shared interactive/apply flow (summary already printed above).
     await promptDriftSync({ cwd, yes: opts.yes, status, quiet: true });
   });
