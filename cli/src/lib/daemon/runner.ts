@@ -1511,10 +1511,17 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // Workflows run via `agents run <workflow>` which delegates to claude under the hood.
   // Use 'claude' as the effective agent for report extraction and metadata when workflow is set.
   // (command jobs branched out earlier, so config.agent is set on the non-workflow path.)
+  // Custom harness/profile name (e.g. `deepseek`) stays on harnessName; the
+  // HOST CLI is effectiveAgent. The loop path spawns in-process via runLoop
+  // and never re-enters `agents run`, so it must stamp harnessName itself
+  // (PHNX-2935) — same field commands/exec.ts sets on ExecOptions.
+  const harnessName = !config.workflow && config.agent && isCustomHarnessName(config.agent)
+    ? config.agent
+    : undefined;
   const effectiveAgent: AgentId = config.workflow
     ? 'claude'
-    : isCustomHarnessName(config.agent!)
-      ? readProfile(config.agent!).host.agent
+    : harnessName
+      ? readProfile(harnessName).host.agent
       : config.agent! as AgentId;
   if (!dispatchesViaAgentsRun(config)) {
     const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
@@ -1580,6 +1587,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
     const spawnEnv = buildRoutineSpawnEnv(baseEnv, effectiveAgent, primaryVersion, config.timezone, overlayHome);
     const execOptions: ExecOptions = {
       agent: effectiveAgent,
+      harnessName,
       // Routine-supported self-updating CLIs (Cursor/Droid) use one global
       // binary; a versioned shim would point at a nonexistent isolated install.
       version: isSelfUpdatingAgent(effectiveAgent) ? undefined : primaryVersion,
