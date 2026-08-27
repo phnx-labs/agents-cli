@@ -20,7 +20,12 @@ export interface ViewJsonVersion {
   plan: string | null;
   usageStatus: 'available' | 'rate_limited' | 'out_of_credits' | null;
   overageCredits?: { amount: number; currency: string } | null;
-  /** Human-readable usage refresh error, when the live refresh could not populate a snapshot. */
+  /**
+   * Human-readable reason a usage snapshot is absent: a live-refresh failure, or
+   * (without `--refresh`, on a never-cached account) a plain "not collected yet"
+   * pending state. Always a full sentence — never the internal `'stale'` cache
+   * sentinel, which `usageErrorForDisplay` normalizes away (PHNX-3348).
+   */
   usageError?: string | null;
   windows: Array<{
     key: 'session' | 'week' | 'sonnet_week' | 'month';

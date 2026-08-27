@@ -44,6 +44,7 @@ import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
   isUsageHeadlessScopeError,
+  usageErrorForDisplay,
 } from '../lib/accounting/usage.js';
 import type { FormatUsageSummaryOpts, UsageInfo } from '../lib/accounting/usage.js';
 import { selfConfiguredDeviceRole, type ConfiguredDeviceRole } from '../lib/device-config.js';
@@ -1527,7 +1528,7 @@ export async function collectAgentsJson(
       plan: info.plan,
       usageStatus: info.usageStatus,
       overageCredits: info.overageCredits,
-      usageError: usageInfo?.error ?? null,
+      usageError: usageErrorForDisplay(usageInfo?.error),
       windows: snapshot
         ? snapshot.windows.map((w) => ({
             key: w.key,
