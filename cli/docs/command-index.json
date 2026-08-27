@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 567,
+  "commands": 568,
   "root": {
     "name": "agents",
     "path": "",
@@ -1141,6 +1141,101 @@
               "subcommands": []
             },
             {
+              "name": "edit",
+              "path": "artifacts share edit",
+              "aliases": [],
+              "description": "Edit a published share's label or arbitrary metadata without republishing its body.",
+              "args": [
+                {
+                  "name": "target",
+                  "required": true,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
+              "options": [
+                {
+                  "flags": "--for-user <user>",
+                  "description": "namespace for resolving a bare slug (default: your namespace)",
+                  "long": "--for-user",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--label <text>",
+                  "description": "set or replace the display label",
+                  "long": "--label",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--remove-label",
+                  "description": "remove the display label",
+                  "long": "--remove-label",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "--meta <key=value>",
+                  "description": "merge a metadata entry (repeatable)",
+                  "long": "--meta",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": []
+                },
+                {
+                  "flags": "--replace-meta <key=value>",
+                  "description": "replace all arbitrary metadata with these entries (repeatable)",
+                  "long": "--replace-meta",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": []
+                },
+                {
+                  "flags": "--remove-meta <key>",
+                  "description": "remove an arbitrary metadata key (repeatable)",
+                  "long": "--remove-meta",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": []
+                },
+                {
+                  "flags": "--edit-json",
+                  "description": "emit the machine-readable edit result",
+                  "long": "--edit-json",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "examples": "# Change only the gallery/list title\n      agents artifacts share edit q3-plan --label \"Q3 fleet plan\"\n\n      # Merge metadata, or deliberately replace/remove it\n      agents artifacts share edit q3-plan --meta status=final --meta ticket=PHNX-3278\n      agents artifacts share edit q3-plan --replace-meta kind=plan --replace-meta status=final\n      agents artifacts share edit q3-plan --remove-meta status",
+              "notes": "Metadata edits preserve the exact published body, content type/HTTP metadata,\n  publication time, visibility, expiry, provenance, cover, and retained revisions. --meta merges;\n  --replace-meta replaces all arbitrary metadata; --remove-meta deletes named keys.\n  Reserved Worker/provenance keys cannot be changed through metadata flags.\n  Edited labels and metadata values are scanned for emails and credential-shaped\n  strings the same way publish is — pass --force to write them anyway.",
+              "subcommands": []
+            },
+            {
               "name": "join",
               "path": "artifacts share join",
               "aliases": [],
@@ -1220,6 +1315,16 @@
                   "negate": false
                 },
                 {
+                  "flags": "--meta <key=value>",
+                  "description": "filter by an exact arbitrary metadata entry (repeatable)",
+                  "long": "--meta",
+                  "required": true,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false,
+                  "defaultValue": []
+                },
+                {
                   "flags": "--list-json",
                   "description": "emit the machine-readable listing (slug, url, size, contentType, publishedAt, expiresAt, label, agent, session, host, repo, revisionCount, meta)",
                   "long": "--list-json",
@@ -1239,8 +1344,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --list-json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --for-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"",
-              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). Signed-in users list the\n  managed endpoint (share.agents-cli.sh/<handle>); otherwise BYO. It reads the\n  endpoint's JSON listing route, which ships with the current Worker template. If\n  a BYO Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains filter the fetched listing client-side;\n  --list-json's count reflects the filtered set.",
+              "examples": "# Everything you've published, newest first\n      agents artifacts share list\n\n      # Machine-readable — e.g. pull every still-public URL with jq\n      agents artifacts share list --list-json | jq -r '.objects[].url'\n\n      # List another namespace\n      agents artifacts share list --for-user octocat\n\n      # Narrow by who/what published it\n      agents artifacts share list --agent claude\n      agents artifacts share list --label-contains \"fleet plan\"\n      agents artifacts share list --meta kind=plan --meta status=final",
+              "notes": "Lists the ACTIVE pages in your namespace — expired links and the sibling .png OG\n  covers are omitted (it mirrors the public gallery). Signed-in users list the\n  managed endpoint (share.agents-cli.sh/<handle>); otherwise BYO. It reads the\n  endpoint's JSON listing route, which ships with the current Worker template. If\n  a BYO Worker predates this feature the command says so and points you at 'agents\n  artifacts share update' (RUSH-2449) rather than returning a wrong or empty result\n  — see 'agents artifacts share status' for whether an update is due.\n\n  --agent/--session/--label-contains/--meta filter the fetched listing client-side;\n  --list-json's count reflects the filtered set.",
               "subcommands": []
             },
             {
