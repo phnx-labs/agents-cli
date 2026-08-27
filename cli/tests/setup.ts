@@ -17,6 +17,7 @@ import * as path from 'node:path';
 import { afterAll } from 'vitest';
 import { seedHermeticE2eWinHost } from './seed-e2e-win-host.js';
 import { shouldArmHermeticGuards } from './hermetic-guards.js';
+import { assertNoUnauthorizedOpenerSpawn, installOpenerSandbox } from './opener-sandbox.js';
 
 // The REAL developer home, captured before anything below overrides it — the
 // baseline every leak tripwire in this file compares against.
@@ -56,6 +57,19 @@ process.env.USERPROFILE = sandboxHome;
 // child processes launched through login shells/service managers may restore
 // HOME to the account home, but they still inherit AGENTS_REAL_HOME.
 process.env.AGENTS_REAL_HOME = sandboxHome;
+
+// PHNX-3072: sandbox desktop openers the same way HOME is sandboxed — at the
+// fork boundary, before any test file's imports run. PATH was previously left
+// alone, so a test that reached a real spawn('open' | 'xdg-open') resolved the
+// developer's binary. That shipped: open-url.test.ts drove the non-injected
+// viewer path, every Mac `bun run test` opened example.com, and Linux CI
+// stayed green because xdg-open was absent. The specific test was fixed in
+// #2937; this closes the class. Stub binaries prepended to PATH catch a
+// PATH-resolved spawn (and any child that inherits env: {...process.env}).
+// The afterAll tripwire fails the file unless AGENTS_TEST_ALLOW_OPENER=1.
+// This is a prefix, not a cage: git/node/the CLI still resolve from the rest
+// of PATH. See tests/opener-sandbox.ts.
+installOpenerSandbox({ tmp });
 
 // Broker: pin the socket dir to a fork-private temp path so nothing in this
 // fork — nor any CLI subprocess it spawns with inherited env — can reach the
@@ -196,6 +210,12 @@ const claudeSettingsBefore = fs.existsSync(realClaudeSettings)
 
 afterAll(() => {
   try {
+    // PHNX-3072: local, not CI-only. The original opener leak was invisible
+    // on Linux CI (xdg-open absent) and only hurt developers running the
+    // suite. A quiet runner is irrelevant — the tripwire is "did this fork
+    // spawn a desktop opener", which a live daemon cannot false-positive.
+    assertNoUnauthorizedOpenerSpawn();
+
     // RUSH-3007: these tripwires assume "CI" means a quiet, single-tenant
     // runner with no concurrent writer to the real ~/.agents. That's false
     // for release-attestation-produce.sh, which used to need CI=true just to
