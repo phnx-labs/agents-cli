@@ -30,7 +30,7 @@ import { getConfigSymlinkVersion } from '../installations/shims.js';
 import { SESSION_AGENTS } from './types.js';
 import { deriveShortId } from './short-id.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount, type ClaudeAccountIndex } from './claude-accounts.js';
-import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, classifyUserPrompt } from './prompt.js';
+import { extractSessionTopic, extractSlashCommandName, extractSlashCommandFromToolInput, cleanGeneratedSessionLabel } from './prompt.js';
 import { isBackgroundShellStart, isSkillInvocation, extractSkills, extractSlashCommands, isSubAgentTool } from './highlights.js';
 import { parseAntigravity, parseCursor, splitSessionFilePath } from './parse.js';
 import { extractPrUrl, detectWorktree, detectTicket, isPrCreateCommand, detectSpawnedTeam, isTicketCreateTool, extractCreatedTicket, extractRecentDirectoriesTouched, extractTodoProgressFromEvents } from './state.js';
@@ -3872,15 +3872,10 @@ export function finalizeClaudeScan(state: ClaudeParseState): ClaudeSessionScan {
   // A topic is the first meaningful prompt. Harness-owned names travel in the
   // separate label field so consumers can replace an early topic once Claude's
   // generated title (or a later `/rename`) arrives.
-  // Claude's generated `ai-title` is derived from the first turn, so a session
-  // opened with a skill gets named after the injected "Base directory for this
-  // skill: …" line instead of its task — and that name then wins on every
-  // surface for the session's whole life. `classifyUserPrompt` reports `skill`
-  // only for that injected line, so collapse it to `/<skill>`. A `/rename`
-  // (`custom-title`) is the user's own words and is never rewritten.
-  const generated = classifyUserPrompt(state.aiTitle ?? '');
-  const label = state.customTitle
-    || (generated.kind === 'skill' ? generated.clean : state.aiTitle);
+  // Generated titles (Claude `ai-title`, Cursor `chatMeta.title`) go through
+  // one shared cleaner so a skill-preamble echo collapses to `/<skill>`. A
+  // `/rename` (`custom-title`) is the user's own words and is never rewritten.
+  const label = state.customTitle || cleanGeneratedSessionLabel(state.aiTitle);
   const worktree = detectWorktree(state.cwd, state.gitBranch);
   const ticket = detectTicket(state.userTexts.join('\n') || undefined, state.gitBranch);
 
@@ -5234,8 +5229,8 @@ export function readCursorMeta(
     .filter((event) => event.type === 'message' && event.role === 'user' && event.content)
     .map((event) => event.content!);
   const firstUserText = userTexts[0];
-  const title = typeof chatMeta?.title === 'string' && chatMeta.title.trim()
-    ? chatMeta.title.trim()
+  const title = typeof chatMeta?.title === 'string'
+    ? cleanGeneratedSessionLabel(chatMeta.title)
     : undefined;
 
   const meta: SessionMeta = {

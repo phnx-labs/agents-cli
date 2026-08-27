@@ -238,6 +238,27 @@ export function classifyUserPrompt(
   return { clean: display, kind: 'text' };
 }
 
+/**
+ * Collapse a harness-generated session title when it is injected skill
+ * scaffolding; otherwise leave the title as the harness wrote it.
+ *
+ * Claude's `ai-title` and Cursor's `chatMeta.title` are both derived from the
+ * first turn, so a session opened with a skill gets named after the injected
+ * "Base directory for this skill: …" line. {@link classifyUserPrompt} reports
+ * `kind: 'skill'` only for that line, so collapse it to `/<skill>`. Empty or
+ * whitespace-only input yields `undefined` so the caller falls through to the
+ * first-prompt topic.
+ *
+ * A user-authored title (Claude `/rename` / `custom-title`) is never passed
+ * here — the caller keeps it verbatim.
+ */
+export function cleanGeneratedSessionLabel(title: string | undefined): string | undefined {
+  const trimmed = title?.trim();
+  if (!trimmed) return undefined;
+  const classified = classifyUserPrompt(trimmed);
+  return classified.kind === 'skill' ? classified.clean : trimmed;
+}
+
 /** Extract a one-line topic from a raw user message, or undefined if the message is pure noise. */
 export function extractSessionTopic(raw: string): string | undefined {
   if (!raw.trim()) return undefined;
