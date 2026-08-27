@@ -449,6 +449,64 @@ describe('custom harness names take precedence over native agent ids', () => {
   });
 });
 
+describe('opencode custom harness emits --model for its pinned model (PHNX-2577)', () => {
+  it('agents run <opencode-harness> includes --model <pin> on the host argv', () => {
+    // Repro: `agents harness fork opencode oc-test --model openai/gpt-5.4-mini`
+    // then `agents run oc-test` used to spawn `opencode run --agent plan …`
+    // with no --model, so OpenCode fell back to its configured default.
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'exec-opencode-model-'));
+    const binDir = path.join(root, 'bin');
+    fs.mkdirSync(binDir, { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', '.system', '.git'), { recursive: true });
+    fs.mkdirSync(path.join(root, '.agents', 'profiles'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.agents', 'agents.yaml'), 'agents: {}\n');
+    fs.writeFileSync(
+      path.join(root, '.agents', 'profiles', 'oc-test.yml'),
+      [
+        'name: oc-test',
+        'host:',
+        '  agent: opencode',
+        'env:',
+        '  OPENCODE_MODEL: openai/gpt-5.4-mini',
+        '',
+      ].join('\n'),
+    );
+    const spawnLog = path.join(root, 'spawn.json');
+    const opencode = path.join(binDir, process.platform === 'win32' ? 'opencode.cmd' : 'opencode');
+    fs.writeFileSync(
+      opencode,
+      process.platform === 'win32'
+        ? '@echo {"type":"result","subtype":"success","is_error":false,"result":"OK"}\r\n'
+        : '#!/usr/bin/env node\n'
+          + 'require("fs").writeFileSync(process.env.HOME + "/spawn.json", JSON.stringify({argv: process.argv.slice(2)}));\n'
+          + 'process.stdout.write(\'{"type":"result","subtype":"success","is_error":false,"result":"OK"}\\n\');\n',
+      { mode: 0o755 },
+    );
+    try {
+      const tsxImport = pathToFileURL(createRequire(import.meta.url).resolve('tsx')).href;
+      const result = spawnSync(
+        'node',
+        ['--import', tsxImport, path.resolve(import.meta.dirname, '..', 'index.ts'), 'run', 'oc-test', 'hi', '--mode', 'plan', '--cwd', root],
+        {
+          cwd: path.resolve(import.meta.dirname, '..', '..'),
+          env: { ...process.env, HOME: root, PATH: `${binDir}${path.delimiter}${process.env.PATH ?? ''}` },
+          encoding: 'utf8',
+        },
+      );
+      expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+      expect(result.stderr).toContain("Resolved custom harness 'oc-test' -> opencode");
+      expect(result.stderr).toMatch(/Running:.*--model openai\/gpt-5\.4-mini/);
+      expect(fs.existsSync(spawnLog), `missing spawn log; stderr=${result.stderr}`).toBe(true);
+      const spawned = JSON.parse(fs.readFileSync(spawnLog, 'utf8')) as { argv: string[] };
+      const modelIdx = spawned.argv.indexOf('--model');
+      expect(modelIdx).toBeGreaterThan(-1);
+      expect(spawned.argv[modelIdx + 1]).toBe('openai/gpt-5.4-mini');
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 /**
  * RUSH-2339 — `agents run <agent>` on a machine without that harness.
  *

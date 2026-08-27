@@ -114,6 +114,15 @@ describe('profileModelEnvKey', () => {
     expect(profileModelEnvKey(p)).toBe('OPENAI_MODEL');
   });
 
+  it('returns OPENCODE_MODEL as a first-class key, not the *_MODEL suffix fallback', () => {
+    const p: Profile = {
+      name: 'p',
+      host: { agent: 'opencode' },
+      env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
+    };
+    expect(profileModelEnvKey(p)).toBe('OPENCODE_MODEL');
+  });
+
   it('falls back to any *_MODEL suffix when no known key matches', () => {
     const p: Profile = {
       name: 'p',
@@ -435,6 +444,45 @@ describe("resolveProfileForRun resolves cost tiers against the profile's OWN mod
     const resolved = resolveProfileForRun('kimi');
     expect(resolved.env.ANTHROPIC_MODEL).toBe('moonshotai/kimi-k2.5');
     expect(resolved.resolvedModel).toBeUndefined();
+  });
+});
+
+describe('resolveProfileForRun copies an OpenCode pin into resolvedModel (PHNX-2577)', () => {
+  it('surfaces OPENCODE_MODEL as resolvedModel so callers emit --model', () => {
+    writeProfile({
+      name: 'oc-test',
+      host: { agent: 'opencode' },
+      env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
+    });
+
+    const resolved = resolveProfileForRun('oc-test');
+    expect(resolved.agent).toBe('opencode');
+    expect(resolved.env.OPENCODE_MODEL).toBe('openai/gpt-5.4-mini');
+    expect(resolved.resolvedModel).toBe('openai/gpt-5.4-mini');
+  });
+
+  it('does not overwrite an explicit --model on an OpenCode profile', () => {
+    writeProfile({
+      name: 'oc-test',
+      host: { agent: 'opencode' },
+      env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
+    });
+
+    const resolved = resolveProfileForRun('oc-test', 'anthropic/claude-sonnet-4-6');
+    expect(resolved.env.OPENCODE_MODEL).toBe('openai/gpt-5.4-mini');
+    expect(resolved.resolvedModel).toBeUndefined();
+  });
+
+  it('leaves a discarded cost-tier token alone so the exec.ts discard guard still fires', () => {
+    writeProfile({
+      name: 'oc-test',
+      host: { agent: 'opencode' },
+      env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
+    });
+
+    const resolved = resolveProfileForRun('oc-test', 'best');
+    expect(resolved.resolvedModel).toBeUndefined();
+    expect(resolved.env.OPENCODE_MODEL).toBe('openai/gpt-5.4-mini');
   });
 });
 

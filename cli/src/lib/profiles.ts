@@ -254,6 +254,7 @@ const MODEL_ENV_KEYS = [
   'OPENAI_MODEL',
   'GEMINI_MODEL',
   'GROK_MODEL',
+  'OPENCODE_MODEL',
 ] as const;
 
 /** Return the configured model env value for display. */
@@ -675,13 +676,14 @@ export interface ResolvedProfileRun {
    */
   tierNote?: string;
   /**
-   * Set when `requestedModel` was a tier token AND this profile resolved it
-   * against its own `models:` map. Callers that forward a `--model` value
-   * downstream (e.g. as `ExecOptions.model`) should substitute this in place
-   * of the original tier token — exec.ts's native tier block only knows how
-   * to resolve a tier against the HOST agent's own catalog, which is the
-   * wrong catalog for a profile's own harness identity. Undefined both when
-   * no tier was requested and when tier resolution degraded (see `tierNote`).
+   * Concrete model id callers should forward as `ExecOptions.model`. Set when:
+   * - `requestedModel` was a cost-tier token resolved against this profile's
+   *   `models:` map, OR
+   * - no `--model` was requested and this is an OpenCode host whose pin lives
+   *   in `OPENCODE_MODEL` (OpenCode does not read that env var, so the pin
+   *   has to become `--model` on the argv).
+   * Undefined when the caller already passed a concrete `--model`, or when
+   * tier resolution degraded (see `tierNote`).
    */
   resolvedModel?: string;
 }
@@ -753,6 +755,16 @@ export function resolveProfileForRun(name: string, requestedModel?: string): Res
     // guard (the "cost tiers don't apply to profile ..." discard) still sees
     // the raw tier token downstream and handles the message -- this function
     // doesn't compete with that canonical fallback for the no-opt-in case.
+  }
+  // OpenCode does not honor OPENCODE_MODEL (unlike claude/codex/gemini/grok,
+  // whose host CLIs read their MODEL env var). Copy the pin into resolvedModel
+  // so callers set ExecOptions.model and buildExecCommand emits `--model`.
+  // An explicit `--model` (including a cost-tier token the caller may still
+  // discard) wins and is left alone.
+  if (resolved.resolvedModel === undefined && !requestedModel && profile.host.agent === 'opencode') {
+    const envKey = profileModelEnvKey(profile) ?? modelEnvKeyForHost('opencode');
+    const pinned = env[envKey];
+    if (pinned) resolved.resolvedModel = pinned;
   }
   return resolved;
 }

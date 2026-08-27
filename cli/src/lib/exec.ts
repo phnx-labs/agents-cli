@@ -984,8 +984,13 @@ export function buildExecCommand(options: ExecOptions): string[] {
   // that maps to reasoning effort on a single-model harness (e.g. Grok, where the
   // tier IS the effort dial). `modelVersion` is null when no version resolves;
   // `tierModel` is the concrete model a tier resolved to (null => drop the flag).
+  // Prefer the user's explicit --model. Codex falls back to ~/.codex/config.toml
+  // (per-version CODEX_HOME may not carry that setting). OpenCode has no model
+  // env var — a custom-harness pin lives in OPENCODE_MODEL and must become
+  // `--model` here, or the host silently uses its configured default (PHNX-2577).
   const effectiveModel = options.model
-    ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined);
+    ?? (options.agent === 'codex' ? readCodexConfiguredModel() : undefined)
+    ?? (options.agent === 'opencode' ? options.env?.OPENCODE_MODEL : undefined);
   const modelVersion = effectiveModel && template.modelFlag
     ? (options.version || resolveVersion(options.agent, options.cwd || process.cwd()))
     : null;
@@ -1099,12 +1104,8 @@ export function buildExecCommand(options: ExecOptions): string[] {
     cmd.push('--session-id', options.sessionId);
   }
 
-  // Add model. Prefer the user's explicit --model. Otherwise, for Codex, fall
-  // back to the model configured in the user's active ~/.codex/config.toml:
-  // Codex runs under a per-version CODEX_HOME (see buildExecEnv) that may not
-  // carry that setting, so without this it silently defaults to gpt-5.3-codex,
-  // which a ChatGPT-tier account can't use (HTTP 400). Forwarding keeps the
-  // user's default model setup for both `agents run` and `agents teams`.
+  // Add model. `effectiveModel` already preferred --model, then Codex's
+  // configured default, then an OpenCode custom-harness pin (OPENCODE_MODEL).
   if (effectiveModel && template.modelFlag) {
     if (tierResolved) {
       // Cost tier (cheap|default|best|ultra) -> a concrete model this harness+

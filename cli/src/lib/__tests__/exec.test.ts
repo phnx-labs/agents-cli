@@ -776,6 +776,34 @@ describeExec('buildExecCommand', () => {
         fs.rmSync(tmp, { recursive: true, force: true });
       }
     });
+
+    it('opencode custom-harness pin in OPENCODE_MODEL is forwarded as --model (PHNX-2577)', () => {
+      // OpenCode does not read OPENCODE_MODEL. A custom harness stores its pin
+      // there; buildExecCommand must emit --model or the host uses its default.
+      const cmd = buildExecCommand(opts({
+        agent: 'opencode',
+        env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
+      }));
+      const idx = cmd.indexOf('--model');
+      expect(idx).toBeGreaterThan(-1);
+      expect(cmd[idx + 1]).toBe('openai/gpt-5.4-mini');
+    });
+
+    it('opencode explicit --model wins over OPENCODE_MODEL in env', () => {
+      const cmd = buildExecCommand(opts({
+        agent: 'opencode',
+        model: 'anthropic/claude-sonnet-4-6',
+        env: { OPENCODE_MODEL: 'openai/gpt-5.4-mini' },
+      }));
+      const idx = cmd.indexOf('--model');
+      expect(idx).toBeGreaterThan(-1);
+      expect(cmd[idx + 1]).toBe('anthropic/claude-sonnet-4-6');
+    });
+
+    it('opencode with no --model and no OPENCODE_MODEL omits the flag (host default)', () => {
+      const cmd = buildExecCommand(opts({ agent: 'opencode' }));
+      expect(cmd).not.toContain('--model');
+    });
   });
 
   // --- Reasoning effort flags ---
