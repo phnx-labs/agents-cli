@@ -700,8 +700,21 @@ describe('disabled secrets broker fails loud before keychain fallback', () => {
     else process.env.AGENTS_SECRETS_NO_AGENT = prevNoAgent;
   });
 
-  it('throws a clear error on keychain-backed reads when the broker is disabled', () => {
+  it('throws a clear error on ACL-protected keychain reads when the broker is disabled', () => {
     const name = `disabled-${randomBytes(4).toString('hex')}`;
+    writeBundleWithItems(
+      { name, policy: 'hold', vars: { TOKEN: 'keychain:TOKEN' } },
+      new Map([[secretsKeychainItem(name, 'TOKEN'), 'secret-value']]),
+    );
+    const b = readBundle(name);
+    b.backend = 'keychain';
+    writeBundle(b);
+    expect(isSecretsBrokerEnabled()).toBe(false);
+    expect(() => readAndResolveBundleEnv(name)).toThrow(/Secrets broker is disabled/);
+  });
+
+  it('reads a verified no-ACL bundle directly when the optional broker is disabled', () => {
+    const name = `disabled-noacl-${randomBytes(4).toString('hex')}`;
     writeBundleWithItems(
       { name, policy: 'never', vars: { TOKEN: 'keychain:TOKEN' } },
       new Map([[secretsKeychainItem(name, 'TOKEN'), 'secret-value']]),
@@ -710,7 +723,7 @@ describe('disabled secrets broker fails loud before keychain fallback', () => {
     b.backend = 'keychain';
     writeBundle(b);
     expect(isSecretsBrokerEnabled()).toBe(false);
-    expect(() => readAndResolveBundleEnv(name)).toThrow(/Secrets broker is disabled/);
+    expect(readAndResolveBundleEnv(name, { agentOnly: true }).env).toEqual({ TOKEN: 'secret-value' });
   });
 
   it('still allows direct keychain reads when AGENTS_SECRETS_NO_AGENT=1', () => {

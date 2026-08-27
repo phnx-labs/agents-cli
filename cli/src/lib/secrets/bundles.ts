@@ -1568,7 +1568,7 @@ export function readAndResolveBundleEnv(
   // If the secrets broker is explicitly disabled and this bundle would otherwise
   // fall through to a keychain read (Touch ID prompt), fail loud now. Never-policy
   // bundles are verified below and remain silent; vault/file backends are unaffected.
-  if (backend === 'keychain' && !isSecretsBrokerEnabled() && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
+  if (backend === 'keychain' && !verifiedNoAclBundle && !isSecretsBrokerEnabled() && process.env.AGENTS_SECRETS_NO_AGENT !== '1') {
     throw new Error(
       `Secrets broker is disabled — re-enable with 'agents daemon services enable secrets-broker'. ` +
       `If you meant to read directly from the keychain, set AGENTS_SECRETS_NO_AGENT=1.`

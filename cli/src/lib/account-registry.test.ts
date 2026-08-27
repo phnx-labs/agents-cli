@@ -180,6 +180,20 @@ describe('credential account registry (bundle-canonical)', () => {
     });
   });
 
+  it('resolves a policy-never account when the optional secrets broker is disabled', () => {
+    const previousConfigDir = process.env.AGENTS_DAEMON_CONFIG_DIR;
+    const configDir = fs.mkdtempSync(path.join(root, 'daemon-config-'));
+    fs.writeFileSync(path.join(configDir, 'services.yaml'), 'services:\n  secrets-broker: false\n', 'utf8');
+    process.env.AGENTS_DAEMON_CONFIG_DIR = configDir;
+    try {
+      addAccount('headless', 'openrouter', 'api-key', 'sk-or-secret', root);
+      expect(resolveCredentialAccount('headless', 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe('sk-or-secret');
+    } finally {
+      if (previousConfigDir === undefined) delete process.env.AGENTS_DAEMON_CONFIG_DIR;
+      else process.env.AGENTS_DAEMON_CONFIG_DIR = previousConfigDir;
+    }
+  });
+
   it('injects a per-account BASE_URL override over the provider default', () => {
     addAccount('gw', 'openrouter', 'api-key', 'sk-or-secret', root, { baseUrl: 'https://gateway.internal/api' });
     expect(inspectAccount('gw', root).baseUrl).toBe('https://gateway.internal/api');
