@@ -17,15 +17,16 @@
  *   agents tmux send <name>[:pane] <keys> [--no-enter] [--raw]
  *   agents tmux capture <name>[:pane] [--lines N] [--ansi]
  *   agents tmux info <name>    [--json]
- *   agents tmux kill <name>
+ *   agents tmux kill [name]    no name → picker with live pane preview
  *   agents tmux kill-all       [--yes]
  */
 
 import type { Command } from 'commander';
 import chalk from 'chalk';
-import { truncate } from '../lib/format.js';
+import { truncate, isInteractiveTerminal, isPromptCancelled } from '../lib/format.js';
 import * as path from 'path';
 import { setHelpSections } from '../lib/help.js';
+import { multiItemPicker } from '../lib/picker.js';
 import {
   assertTmuxAvailable,
   attachTmux,
@@ -48,6 +49,7 @@ import {
   TmuxCommandError,
   TmuxSessionError,
   TmuxUnavailableError,
+  type ListedSession,
   type SessionMeta,
 } from '../lib/tmux/index.js';
 
@@ -74,8 +76,9 @@ export function registerTmuxCommands(program: Command): void {
       # Send a slash command from a script
       agents tmux send claude-debug "/clear"
 
-      # Clean up
+      # Clean up one by name, or pick from a list that shows each pane's last lines
       agents tmux kill claude-debug
+      agents tmux kill
     `,
     notes: `
       Storage:
@@ -217,19 +220,28 @@ export function registerTmuxCommands(program: Command): void {
   listCmd.action(async (opts) => {
     await guardTmux(async () => {
       const sessions = await listSessions({ socket: opts.socket });
-      if (opts.json) {
-        console.log(JSON.stringify(sessions));
+      if (sessions.length === 0) {
+        if (opts.json) {
+          console.log('[]');
+          return;
+        }
+        console.log(chalk.gray('No tmux sessions.'));
         return;
       }
-      if (sessions.length === 0) {
-        console.log(chalk.gray('No tmux sessions.'));
+      const screens = await captureScreens(sessions, opts.socket);
+      if (opts.json) {
+        console.log(JSON.stringify(sessions.map((s) => ({
+          ...s,
+          preview: tmuxScreenSnippet(screens.get(s.name) ?? ''),
+        }))));
         return;
       }
       for (const s of sessions) {
         const age = formatAge(Date.now() / 1000 - s.createdAtTmux);
-        const cmd = s.meta?.cmd ? chalk.gray(`  ${truncate(s.meta.cmd, 60)}`) : '';
         const attached = s.attached ? chalk.green(' [attached]') : '';
-        console.log(`  ${chalk.bold(s.name)}  ${s.windows}w  ${age}${attached}${cmd}`);
+        const snippet = tmuxScreenSnippet(screens.get(s.name) ?? '');
+        const preview = snippet ? chalk.gray(`  ${snippet}`) : '';
+        console.log(`  ${chalk.bold(s.name)}  ${s.windows}w  ${age}${attached}${preview}`);
       }
     });
   });
@@ -387,16 +399,37 @@ export function registerTmuxCommands(program: Command): void {
   // ─── kill ───────────────────────────────────────────────────────────────────
 
   const killCmd = tmux
-    .command('kill <name>')
-    .description('Kill one tmux session. Idempotent — exits 0 even if the session was already gone.')
+    .command('kill [name]')
+    .description('Kill one tmux session, or pick from a list that shows each pane\'s last screen. Idempotent.')
     .option('--socket <path>', 'Use a custom socket (default: shared server)');
 
-  killCmd.action(async (name, opts) => {
+  setHelpSections(killCmd, {
+    examples: `
+      # Kill by name
+      agents tmux kill ag-claude-04a1307c
+
+      # Pick from live panes — preview shows the last lines on screen
+      # (trust-folder stall, weekly-limit dialog, real work)
+      agents tmux kill
+    `,
+    notes: `
+      With no name, the picker captures each pane so you can tell a leaked
+      first-run dialog from an agent that is still working. Space multi-selects;
+      enter kills the checked rows (or the highlighted one if none are checked).
+      Ctrl-b d still keeps a live session; exiting the agent tears it down.
+    `,
+  });
+
+  killCmd.action(async (name: string | undefined, opts) => {
     await guardTmux(async () => {
-      const killed = await killSession(name, opts.socket);
-      if (!killed) {
-        console.log(chalk.gray(`No session "${name}" — nothing to do.`));
+      if (name) {
+        const killed = await killSession(name, opts.socket);
+        if (!killed) {
+          console.log(chalk.gray(`No session "${name}" — nothing to do.`));
+        }
+        return;
       }
+      await pickAndKillSessions(opts.socket);
     });
   });
 
@@ -461,6 +494,120 @@ function collectLabel(value: string, acc: Record<string, string>): Record<string
   if (eq === -1) return acc;
   acc[value.slice(0, eq)] = value.slice(eq + 1);
   return acc;
+}
+
+/** Last useful line of a pane capture — what `tmux ls` shows so a name isn't a black box. */
+export function tmuxScreenSnippet(raw: string, max = 72): string {
+  const lines = raw
+    .split('\n')
+    .map((l) => l.replace(/\s+/g, ' ').trim())
+    .filter((l) => l.length > 0 && !/^[─═│┃┌┐└┘╰╯╭╮\s|-]+$/.test(l) && !/enter to confirm|esc to cancel|tab:next/i.test(l));
+  const tail = lines.slice(-8);
+  const preferred = [...tail].reverse().find((l) =>
+    /[?❯]|trust this folder|weekly limit|needs.you|waiting/i.test(l),
+  );
+  return truncate(preferred ?? tail[tail.length - 1] ?? '', max);
+}
+
+/** Last non-empty lines of a pane capture, for the kill-picker preview. */
+export function tmuxScreenPreview(raw: string, maxLines = 16): string {
+  return raw
+    .split('\n')
+    .map((l) => l.replace(/\s+$/, ''))
+    .filter((l) => l.length > 0)
+    .slice(-maxLines)
+    .join('\n');
+}
+
+export function formatTmuxKillLabel(s: ListedSession, snippet: string, nowMs = Date.now()): string {
+  const age = formatAge(nowMs / 1000 - s.createdAtTmux);
+  const agent = s.meta?.labels?.agent;
+  const bits = [s.name, age];
+  if (agent) bits.push(agent);
+  if (snippet) bits.push(snippet);
+  return bits.join('  ');
+}
+
+export function formatTmuxKillPreview(s: ListedSession, raw: string, nowMs = Date.now()): string {
+  const age = formatAge(nowMs / 1000 - s.createdAtTmux);
+  const agent = s.meta?.labels?.agent;
+  const header = [
+    chalk.bold(s.name),
+    agent ? chalk.cyan(agent) : '',
+    chalk.gray(age),
+    s.attached ? chalk.green('attached') : chalk.gray('detached'),
+  ].filter(Boolean).join('  ');
+  const meta = [
+    s.meta?.cwd ? `cwd  ${s.meta.cwd}` : '',
+    s.meta?.cmd ? `cmd  ${truncate(s.meta.cmd, 80)}` : '',
+  ].filter(Boolean).join('\n');
+  const body = tmuxScreenPreview(raw) || chalk.gray('(empty pane)');
+  return [header, meta, '', chalk.gray('── last screen ──'), body].filter((line) => line !== '').join('\n');
+}
+
+async function captureScreens(sessions: ListedSession[], socket?: string): Promise<Map<string, string>> {
+  const rows = await Promise.all(sessions.map(async (s) => {
+    try {
+      const raw = await capturePane({ name: s.name, socket, lines: 40 });
+      return [s.name, raw] as const;
+    } catch {
+      return [s.name, ''] as const;
+    }
+  }));
+  return new Map(rows);
+}
+
+async function pickAndKillSessions(socket?: string): Promise<void> {
+  if (!isInteractiveTerminal()) {
+    console.error(chalk.red('Pass a session name, or run from a TTY to pick from a list with pane previews.'));
+    console.error(chalk.gray('  agents tmux ls          # names + last screen line'));
+    console.error(chalk.gray('  agents tmux kill <name>'));
+    process.exitCode = 1;
+    return;
+  }
+  const sessions = await listSessions({ socket });
+  if (sessions.length === 0) {
+    console.log(chalk.gray('No tmux sessions.'));
+    return;
+  }
+  const screens = await captureScreens(sessions, socket);
+  let chosen: ListedSession[] | null;
+  try {
+    chosen = await multiItemPicker<ListedSession>({
+      message: 'Kill which tmux sessions?',
+      subtitle: chalk.gray('space to multi-select · preview is the last lines on that pane'),
+      items: sessions,
+      filter: (q) => {
+        const needle = q.trim().toLowerCase();
+        if (!needle) return sessions;
+        return sessions.filter((s) => {
+          const hay = [
+            s.name,
+            s.meta?.labels?.agent,
+            s.meta?.cwd,
+            s.meta?.cmd,
+            screens.get(s.name),
+          ].join(' ').toLowerCase();
+          return hay.includes(needle);
+        });
+      },
+      labelFor: (s) => formatTmuxKillLabel(s, tmuxScreenSnippet(screens.get(s.name) ?? '')),
+      keyFor: (s) => s.name,
+      buildPreview: (s) => formatTmuxKillPreview(s, screens.get(s.name) ?? ''),
+      pageSize: 12,
+      emptyMessage: 'No sessions match.',
+      enterHint: 'kill',
+    });
+  } catch (err) {
+    if (isPromptCancelled(err)) return;
+    throw err;
+  }
+  if (!chosen || chosen.length === 0) return;
+  for (const s of chosen) {
+    const killed = await killSession(s.name, socket);
+    if (killed) console.log(chalk.gray(`Killed ${s.name}`));
+    else console.log(chalk.gray(`No session "${s.name}" — already gone.`));
+  }
 }
 
 function formatAge(secs: number): string {
