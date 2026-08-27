@@ -24,9 +24,9 @@ import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
 import type { AgentId, Meta } from './types.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
-import { bundleExists, deleteBundle, listBundles, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
+import { bundleExists, deleteBundle, listBundles, readAndResolveBundleEnv, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
-import { accountSecretItem, buildAccountBundle, parseAccountBundle, type AccountSchemaRecord } from './account-schema.js';
+import { accountSecretItem, buildAccountBundle, parseAccountBundle, secretVarFor, type AccountSchemaRecord } from './account-schema.js';
 
 export interface CredentialAccount {
   id: string;
@@ -493,6 +493,18 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
   }
   const envVar = account.auth === 'setup-token' ? 'CLAUDE_CODE_OAUTH_TOKEN' : adapter.envFor(host, account.auth);
   if (!hasKeychainToken(account.secretRef)) throw new Error(`Credential for account '${account.name}' is missing on this device. Add it with 'agents accounts set-key ${account.name}'.`);
+  const secretVar = secretVarFor(account.auth);
+  // Account bundles are policy `never`, so their value items carry no biometry
+  // ACL. Resolve through the bundle path that verifies that policy and attests
+  // `silentNoAcl` to the headless keychain guard. Calling getKeychainToken()
+  // directly makes a headless --account launch reject the prompt-free item as
+  // if it required Touch ID before the helper ever reads it (PHNX-2939).
+  const secret = readAndResolveBundleEnv(account.name, {
+    keys: [secretVar],
+    keyMode: 'storage',
+    agentOnly: true,
+    caller: 'accounts resolve',
+  }).env[secretVar];
   const connectionEnv = { ...adapter.connectionEnvFor(host) };
   if (account.baseUrl) {
     const baseUrlEnv = adapter.baseUrlEnvFor(host);
@@ -504,7 +516,7 @@ export function resolveCredentialAccount(name: string, host: AgentId, expectedPr
     name: account.name,
     provider: account.provider,
     auth: account.auth,
-    env: { ...connectionEnv, [envVar]: getKeychainToken(account.secretRef) },
+    env: { ...connectionEnv, [envVar]: secret },
   };
 }
 

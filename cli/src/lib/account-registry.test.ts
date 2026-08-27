@@ -158,6 +158,7 @@ describe('credential account registry (bundle-canonical)', () => {
     expect(meta.vars.API_KEY).toBe('keychain:API_KEY');
     expect(typeof meta.vars.ACCOUNT_ID).toBe('string');
     expect(blobs[0]).not.toContain('sk-or-secret'); // secret bytes never in metadata
+    expect(keychain.noAcl.get(secretsKeychainItem('work', 'API_KEY'))).toBe(true);
   });
 
   it('refuses to overwrite an ordinary secrets bundle with the same name', () => {
