@@ -115,7 +115,12 @@ export interface OpenBlock {
   source?: AttentionSource;
   /** Lifecycle state. Derived from the answer/continue markers when absent — see {@link deriveBlockState}. */
   state?: AttentionState;
-  /** Where in the source this block's generation sits — carried onto its resolution tombstone. */
+  /**
+   * Where in the source this block's generation sits — stamped at write time
+   * (`buildDeclaredBlock`, the feed-publish hook) and carried onto its resolution
+   * tombstone. Without a write-time cursor a new generation is suppressed whenever
+   * `session.lastActivityMs` is unresolvable (cloud / remote / index-lag).
+   */
   sourceCursor?: SourceCursor;
   /** Indexed launch origin, added at read time when the live session is known. */
   origin?: 'cli' | 'routine';
@@ -630,6 +635,9 @@ export interface DeclareBlockInput {
  * `costOfDelay: high` because a declared block is, by definition, an agent that
  * has already stopped making progress — that is what makes it worth interrupting
  * someone over, and what `feed --dispatch`'s urgency filter keys off.
+ *
+ * `sourceCursor` is stamped from `ts` at write time so a fresh generation is
+ * comparable even when the live session's `lastActivityMs` is unresolvable.
  */
 export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInput): OpenBlock {
   const text = input.text.trim().replace(/\s+/g, ' ');
@@ -656,6 +664,9 @@ export function buildDeclaredBlock(agent: DeclaringAgent, input: DeclareBlockInp
     generation: ts,
     source: 'declared',
     state: 'open',
+    // Write-time cursor so a new generation is not suppressed when
+    // session.lastActivityMs is unresolvable (cloud / remote / index-lag).
+    sourceCursor: { lastActivityMs: Date.parse(ts) },
     kind: 'declared',
     questions: [{ text, header: 'Needs you', ...(options.length ? { options } : {}) }],
     blockClass: input.safeDefault ? 'approval' : 'decision',
@@ -1027,7 +1038,9 @@ def main():
         os.environ.get("AGENTS_MAILBOX_DIR", "").rstrip("/")
     ) or session_id
 
-    now_iso = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(timezone.utc)
+    now_iso = now.isoformat()
+    now_ms = int(now.timestamp() * 1000)
     stats_path = os.path.join(asks_dir, f"{safe_session_id}.json")
     stats = read_json(stats_path) or {}
     recent = stats.get("recentAskTimestamps") if isinstance(stats, dict) else []
@@ -1061,6 +1074,9 @@ def main():
         "host": host,
         "runtime": runtime,
         "ts": now_iso,
+        # Write-time cursor so a new generation is not suppressed when
+        # session.lastActivityMs is unresolvable (cloud / remote / index-lag).
+        "sourceCursor": {"lastActivityMs": now_ms},
         "questions": normalized_questions,
         "kind": kind,
     }
