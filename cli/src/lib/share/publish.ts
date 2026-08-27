@@ -313,10 +313,13 @@ const HEADER_TRANSLITERATIONS: Array<[RegExp, string]> = [
  * The transliterations above cover what actually shows up; anything else outside
  * latin1 is dropped, and a value that transliterates to nothing at all (a title
  * written entirely in a non-latin script) degrades to a marker rather than an
- * empty header. Lossy on purpose: carrying full Unicode needs percent-encoding
- * here AND a matching decode in the Worker, which every already-deployed Worker
- * would render as `%E2%80%A6` until its operator ran `agents artifacts share
- * update` — tracked as RUSH-2786.
+ * empty header. This value is the **latin1-safe floor** every Worker can read: a
+ * pre-Unicode Worker only ever sees `x-share-<field>`, so it MUST stay folded.
+ * Full Unicode rides ALONGSIDE it in a percent-encoded companion header
+ * (`toPercentHeaderValue` / {@link needsUnicodeCompanion}), which a new Worker
+ * opts into via `x-share-encoding: percent` and an old one ignores — so a
+ * Japanese/emoji title renders in full on an updated Worker and still folds
+ * gracefully everywhere else (PHNX-2786).
  */
 export function toHeaderValue(text: string): string {
   let safe = text;
@@ -327,6 +330,27 @@ export function toHeaderValue(text: string): string {
   // content and lost all of it to the latin1 fold.
   if (safe) return safe;
   return text.trim() ? '(unnamed)' : '';
+}
+
+/**
+ * Whether {@link toHeaderValue} would lose information for this text — i.e. it
+ * carries a code point above latin1 (U+00FF), the exact range `fetch`'s
+ * ByteString cannot hold and the fold therefore transliterates or drops. A plain
+ * accented latin1 name (`José`, é = U+00E9) is NOT lossy and needs no companion;
+ * an em dash, a curly quote, an emoji, or any CJK/Arabic/Hindi text is.
+ */
+export function needsUnicodeCompanion(text: string): boolean {
+  return /[^\u0000-\u00ff]/.test(text);
+}
+
+/**
+ * Percent-encode a single-line free-text value for the `x-share-<field>-u`
+ * companion header. Whitespace is collapsed first (matching the folded value's
+ * single-line shape), then `encodeURIComponent` makes it pure-ASCII and
+ * header-safe. The Worker recovers the original with `decodeURIComponent`.
+ */
+export function toPercentHeaderValue(text: string): string {
+  return encodeURIComponent(text.replace(/\s+/g, ' ').trim());
 }
 
 /**
@@ -715,27 +739,47 @@ export async function publishToEndpoint(
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
     h['x-share-visibility'] = visibility;
-    // Every free-text header goes through toHeaderValue: a non-latin1 code point
-    // anywhere in a label, a repo name, or a --meta value throws inside fetch and
-    // crashes the publish outright.
-    if (provenance.agent) h['x-share-agent'] = toHeaderValue(provenance.agent);
-    if (provenance.session) h['x-share-session'] = toHeaderValue(provenance.session);
-    if (provenance.host) h['x-share-host'] = toHeaderValue(provenance.host);
-    if (provenance.repo) h['x-share-repo'] = toHeaderValue(provenance.repo);
-    if (provenance.date) h['x-share-date'] = toHeaderValue(provenance.date);
-    if (avatarUrl) h['x-share-avatar'] = toHeaderValue(avatarUrl);
-    h['x-share-label'] = toHeaderValue(label);
+    // Two headers per free-text field, backward-compatible by construction
+    // (PHNX-2786): `x-share-<field>` always carries the latin1-safe folded value
+    // an already-deployed Worker reads verbatim, and — only when the fold is lossy
+    // (a curly quote, em dash, emoji, CJK/Arabic/Hindi) — a percent-encoded
+    // `x-share-<field>-u` companion carries the full Unicode. A new Worker opts
+    // into the companions via `x-share-encoding: percent`; an old one ignores the
+    // unknown headers and keeps folding gracefully. The floor also keeps the
+    // ByteString crash fixed: a non-latin1 code point never reaches a raw header.
+    let unicodeCompanion = false;
+    const setText = (name: string, value: string) => {
+      h[name] = toHeaderValue(value);
+      if (needsUnicodeCompanion(value)) {
+        h[`${name}-u`] = toPercentHeaderValue(value);
+        unicodeCompanion = true;
+      }
+    };
+    if (provenance.agent) setText('x-share-agent', provenance.agent);
+    if (provenance.session) setText('x-share-session', provenance.session);
+    if (provenance.host) setText('x-share-host', provenance.host);
+    if (provenance.repo) setText('x-share-repo', provenance.repo);
+    if (provenance.date) setText('x-share-date', provenance.date);
+    if (avatarUrl) setText('x-share-avatar', avatarUrl);
+    setText('x-share-label', label);
     h['x-share-label-source'] = labelSource;
     // Per VALUE, before JSON.stringify — folding the serialized form would rewrite
     // a curly quote inside a value into a bare `"`, which is structural in JSON and
     // makes the Worker's JSON.parse throw. It swallows that error, so every --meta
-    // key would silently vanish on a 200.
+    // key would silently vanish on a 200. The companion carries the whole raw meta
+    // object percent-encoded once, so a new Worker recovers full-Unicode keys AND
+    // values in one JSON.parse rather than per-field.
     if (Object.keys(meta).length > 0) {
       const headerMeta = Object.fromEntries(
         Object.entries(meta).map(([k, v]) => [toHeaderValue(k), toHeaderValue(v)]),
       );
       h['x-share-meta'] = JSON.stringify(headerMeta);
+      if (Object.entries(meta).some(([k, v]) => needsUnicodeCompanion(k) || needsUnicodeCompanion(v))) {
+        h['x-share-meta-u'] = encodeURIComponent(JSON.stringify(meta));
+        unicodeCompanion = true;
+      }
     }
+    if (unicodeCompanion) h['x-share-encoding'] = 'percent';
     if (opts.noRevision) h['x-share-no-revision'] = '1';
     return h;
   };

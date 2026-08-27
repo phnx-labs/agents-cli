@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { Miniflare, type R2Bucket } from 'miniflare';
 import { afterEach, describe, expect, it } from 'vitest';
 import { renderWorkerScript } from './worker-template.js';
+import { toHeaderValue, toPercentHeaderValue } from './publish.js';
 
 // PHNX-3278 review blocker #4: worker-template.test.ts drives the real route
 // logic but against an in-memory Map standing in for R2 — a Map has no
@@ -172,6 +173,42 @@ describe('worker PATCH route against real R2 (miniflare, PHNX-3278 blocker #4)',
 
     const final = await realBucket.get('octocat/plan');
     expect(await final!.text()).toBe('v2-race-body');
+  });
+
+  it('decodes the full-Unicode companion headers into stored metadata (PHNX-2786)', async () => {
+    const { realBucket, worker } = await setup();
+    const env = { WRITE_TOKEN: 'secret', BUCKET: wrapBucketForDirectFetch(realBucket) };
+
+    const label = '会話の記録 🚀'; // all-CJK + emoji: the fold degrades this to (unnamed)
+    const meta = { mood: 'shipped 🚀', title: '会話' }; // full-Unicode --meta VALUES
+    // Build the PUT headers exactly as publish.ts's authHeaders does: latin1 floor
+    // + percent companion + the opt-in flag. This is the real CLI wire format.
+    const headers: Record<string, string> = {
+      authorization: 'Bearer secret',
+      'content-type': 'text/html; charset=utf-8',
+      'x-share-label': toHeaderValue(label),
+      'x-share-label-u': toPercentHeaderValue(label),
+      'x-share-meta': JSON.stringify(Object.fromEntries(Object.entries(meta).map(([k, v]) => [toHeaderValue(k), toHeaderValue(v)]))),
+      'x-share-meta-u': encodeURIComponent(JSON.stringify(meta)),
+      'x-share-encoding': 'percent',
+    };
+    // The floor is genuinely lossy for this input — proving the companion is what carries it.
+    expect(headers['x-share-label']).toBe('(unnamed)');
+
+    const putRes = await worker.default.fetch(new Request('https://share.test/octocat/jp', {
+      method: 'PUT',
+      headers,
+      body: 'exact-body',
+    }), env);
+    expect(putRes.status).toBe(200);
+
+    const stored = await realBucket.get('octocat/jp');
+    expect(stored).not.toBeNull();
+    expect(await stored!.text()).toBe('exact-body');
+    // The Worker preferred the decoded companions over the folded floor.
+    expect(stored!.customMetadata!.label).toBe('会話の記録 🚀');
+    expect(stored!.customMetadata!.mood).toBe('shipped 🚀');
+    expect(stored!.customMetadata!.title).toBe('会話');
   });
 
   it('a real R2 onlyIf.etagMatches wants the bare etag, not the quoted httpEtag (regression guard)', async () => {

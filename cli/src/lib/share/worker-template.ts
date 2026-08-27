@@ -134,22 +134,58 @@ export default {
       // never smuggle through on a publish that carries no agent/session/host/
       // repo/date at all — e.g. a human publishing outside an agent session, or
       // outside a git checkout.
-      const agent = request.headers.get('x-share-agent') || '';
-      const session = request.headers.get('x-share-session') || '';
-      const host = request.headers.get('x-share-host') || '';
-      const repo = request.headers.get('x-share-repo') || '';
-      const date = request.headers.get('x-share-date') || '';
-      const avatar = request.headers.get('x-share-avatar') || '';
-      const label = request.headers.get('x-share-label') || '';
+      // Full-Unicode headers (PHNX-2786): the CLI always sends the latin1-safe
+      // x-share-<field> (what a pre-Unicode Worker read), and when the fold was
+      // lossy ALSO a percent-encoded x-share-<field>-u companion plus an
+      // x-share-encoding: percent opt-in. Prefer the decoded companion when the
+      // opt-in is present, so a Japanese/emoji title/label/--meta renders in full
+      // instead of (unnamed) or a dropped glyph; a malformed companion falls
+      // back to the folded value rather than failing the publish.
+      const usePercent = (request.headers.get('x-share-encoding') || '') === 'percent';
+      const readText = (name) => {
+        const folded = request.headers.get('x-share-' + name) || '';
+        if (usePercent) {
+          const encoded = request.headers.get('x-share-' + name + '-u');
+          if (encoded) {
+            try {
+              return decodeURIComponent(encoded);
+            } catch (e) {
+              return folded;
+            }
+          }
+        }
+        return folded;
+      };
+      const agent = readText('agent');
+      const session = readText('session');
+      const host = readText('host');
+      const repo = readText('repo');
+      const date = readText('date');
+      const avatar = readText('avatar');
+      const label = readText('label');
       const labelSource = request.headers.get('x-share-label-source') || '';
       let extraMeta = {};
-      const metaHeader = request.headers.get('x-share-meta');
-      if (metaHeader) {
+      // The -u meta companion carries the whole raw object percent-encoded, so a
+      // single decode+parse recovers full-Unicode keys and values; fall back to
+      // the per-value-folded x-share-meta when it is absent or malformed.
+      const metaEncoded = usePercent ? request.headers.get('x-share-meta-u') : null;
+      if (metaEncoded) {
         try {
-          const parsed = JSON.parse(metaHeader);
+          const parsed = JSON.parse(decodeURIComponent(metaEncoded));
           if (parsed && typeof parsed === 'object') extraMeta = parsed;
-        } catch {
-          // malformed --meta header — ignore rather than fail the whole publish
+        } catch (e) {
+          // malformed unicode meta companion — fall through to the folded header
+        }
+      }
+      if (!Object.keys(extraMeta).length) {
+        const metaHeader = request.headers.get('x-share-meta');
+        if (metaHeader) {
+          try {
+            const parsed = JSON.parse(metaHeader);
+            if (parsed && typeof parsed === 'object') extraMeta = parsed;
+          } catch {
+            // malformed --meta header — ignore rather than fail the whole publish
+          }
         }
       }
       const customMetadata = { ...extraMeta };

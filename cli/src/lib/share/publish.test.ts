@@ -25,6 +25,8 @@ import {
   deriveLabel,
   sanitizeLabel,
   toHeaderValue,
+  needsUnicodeCompanion,
+  toPercentHeaderValue,
   redactEmails,
   RESERVED_META_KEYS,
 } from './publish.js';
@@ -1403,6 +1405,81 @@ describe('toHeaderValue', () => {
 
   it('keeps latin1 accents, which headers can carry', () => {
     expect(toHeaderValue('Malmö café')).toBe('Malmö café');
+  });
+});
+
+describe('needsUnicodeCompanion (PHNX-2786)', () => {
+  it('is false for text the latin1 fold carries losslessly', () => {
+    expect(needsUnicodeCompanion('Q3 fleet plan')).toBe(false);
+    expect(needsUnicodeCompanion('Malmö café')).toBe(false); // é/ö are ≤ U+00FF
+    expect(needsUnicodeCompanion('')).toBe(false);
+  });
+
+  it('is true whenever a code point above latin1 would be transliterated or dropped', () => {
+    expect(needsUnicodeCompanion('the plan — done…')).toBe(true); // em dash + ellipsis
+    expect(needsUnicodeCompanion('ship it 🚀')).toBe(true); // emoji
+    expect(needsUnicodeCompanion('会話の記録')).toBe(true); // CJK
+    expect(needsUnicodeCompanion('مرحبا')).toBe(true); // Arabic
+  });
+});
+
+describe('toPercentHeaderValue (PHNX-2786)', () => {
+  it('round-trips full Unicode through decodeURIComponent, header-safe', () => {
+    for (const input of ['会話の記録', 'ship it 🚀', 'مرحبا بالعالم', 'the plan — it’s done…']) {
+      const encoded = toPercentHeaderValue(input);
+      expect(() => new Headers({ 'x-share-label-u': encoded })).not.toThrow();
+      expect([...encoded].every((ch) => ch.codePointAt(0)! <= 255)).toBe(true);
+      expect(decodeURIComponent(encoded)).toBe(input.replace(/\s+/g, ' ').trim());
+    }
+  });
+});
+
+describe('publishToEndpoint full-Unicode companion headers (PHNX-2786)', () => {
+  async function publishWith(opts: { label?: string; meta?: Record<string, string> }) {
+    const dir = mkdtempSync(join(tmpdir(), 'share-unicode-'));
+    const file = join(dir, 'page.html');
+    writeFileSync(file, '<html><head><title>t</title></head><body>ok</body></html>');
+    let headers: Record<string, string> = {};
+    await publishToEndpoint(file, { baseUrl: 'https://share.example', token: 't' }, {
+      slug: 'u-page',
+      githubUser: 'octocat',
+      cover: false,
+      analytics: false,
+      provenance: {},
+      ...opts,
+      uploader: async (url, _b, h) => {
+        headers = h;
+        return { ok: true, status: 200, url };
+      },
+    });
+    return headers;
+  }
+
+  it('carries a CJK label folded AND percent-encoded, with the opt-in flag', async () => {
+    const h = await publishWith({ label: '会話の記録' });
+    // Old-Worker floor: the plain header stays latin1-safe (never crashes fetch).
+    expect(h['x-share-label']).toBe('(unnamed)');
+    expect([...h['x-share-label']].every((ch) => ch.codePointAt(0)! <= 255)).toBe(true);
+    // New-Worker path: the companion recovers the real title.
+    expect(h['x-share-encoding']).toBe('percent');
+    expect(decodeURIComponent(h['x-share-label-u'])).toBe('会話の記録');
+  });
+
+  it('emits NO companion and NO opt-in flag for a purely latin1 label', async () => {
+    const h = await publishWith({ label: 'Malmö café' });
+    expect(h['x-share-label']).toBe('Malmö café');
+    expect(h['x-share-label-u']).toBeUndefined();
+    expect(h['x-share-encoding']).toBeUndefined();
+  });
+
+  it('carries an emoji-bearing --meta value in the -u companion as raw JSON', async () => {
+    const h = await publishWith({ meta: { mood: 'shipped 🚀', title: '会話' } });
+    // Folded meta stays parseable and latin1-safe for an old Worker...
+    expect(() => JSON.parse(h['x-share-meta'])).not.toThrow();
+    expect([...h['x-share-meta']].every((ch) => ch.codePointAt(0)! <= 255)).toBe(true);
+    // ...and the companion carries the full Unicode for a new one.
+    expect(h['x-share-encoding']).toBe('percent');
+    expect(JSON.parse(decodeURIComponent(h['x-share-meta-u']))).toEqual({ mood: 'shipped 🚀', title: '会話' });
   });
 });
 
