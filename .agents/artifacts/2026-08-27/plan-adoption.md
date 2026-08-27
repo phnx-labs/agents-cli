@@ -602,6 +602,11 @@ jq '.commands, .groups' cli/docs/command-index.json  # expect 564 and 69, unchan
 python3 .agents/artifacts/2026-08-27/adoption-evidence/help-coverage.py
 #     today: names 40, never mentions 29 (ssh #5, repos #8, computer #13)
 #     after: 0 never-mentioned, or a pointer that reaches them
+
+# 1c. The same claim without trusting that script at all. The four flagship
+#     examples must print 0 today; the control group must not.
+for g in ssh repos computer notify; do echo "$g $(agents --help | grep -cw $g)"; done
+for g in sessions run teams secrets browser; do echo "$g $(agents --help | grep -cw $g)"; done
 bash cli/scripts/verify-command-index.sh           # index still matches registry
 
 # 2. Identity: one canonical entity
