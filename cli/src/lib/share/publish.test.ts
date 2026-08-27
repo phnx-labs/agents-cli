@@ -1064,6 +1064,11 @@ describe('renderWorkerScript', () => {
             body: item.body,
             customMetadata: item.customMetadata,
             httpEtag: '"etag"',
+            // Real R2 objects expose text()/arrayBuffer(); the Worker reads text()
+            // to inject the attribution bar into served HTML, so the fake must too.
+            // Response handles a string, Buffer, or ReadableStream body uniformly.
+            text: async () => (item.body == null ? '' : await new Response(item.body as never).text()),
+            arrayBuffer: async () => (item.body == null ? new ArrayBuffer(0) : await new Response(item.body as never).arrayBuffer()),
             writeHttpMetadata(headers: Headers) {
               if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
             },
@@ -1202,6 +1207,11 @@ describe('renderWorkerScript', () => {
             body: item.body,
             customMetadata: item.customMetadata,
             httpEtag: '"etag"',
+            // Real R2 objects expose text()/arrayBuffer(); the Worker reads text()
+            // to inject the attribution bar into served HTML, so the fake must too.
+            // Response handles a string, Buffer, or ReadableStream body uniformly.
+            text: async () => (item.body == null ? '' : await new Response(item.body as never).text()),
+            arrayBuffer: async () => (item.body == null ? new ArrayBuffer(0) : await new Response(item.body as never).arrayBuffer()),
             writeHttpMetadata(headers: Headers) {
               if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
             },
