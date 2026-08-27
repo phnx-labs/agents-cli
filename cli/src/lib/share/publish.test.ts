@@ -30,7 +30,7 @@ import {
   redactEmails,
   RESERVED_META_KEYS,
 } from './publish.js';
-import { renderWorkerScript } from './worker-template.js';
+import { renderWorkerScript, renderWorkerSource } from './worker-template.js';
 import { DEFAULT_SHARE_DOMAIN } from './config.js';
 
 describe('attachOgCover', () => {
@@ -148,15 +148,18 @@ describe('publishFile', () => {
     const file = join(dir, 'plan.html');
     writeFileSync(file, '<!doctype html><title>Plan</title>', 'utf-8');
     const uploads: Array<{ url: string; headers: Record<string, string> }> = [];
+    let publishedBody = '';
+    const capturer = vi.fn(async () => { throw new Error('managed publish must not launch a browser'); });
 
     const result = await publishFile(file, {
       slug: 'plan',
-      cover: false,
+      capturer,
       provenance: {},
       expire: 'never',
       session: { access_token: 'pid_alice', userId: 'alice', email: 'alice@example.com' },
-      uploader: async (url, _body, headers) => {
+      uploader: async (url, body, headers) => {
         uploads.push({ url, headers });
+        publishedBody = body.toString('utf8');
         return { ok: true, status: 200, url };
       },
     });
@@ -166,6 +169,10 @@ describe('publishFile', () => {
     expect(uploads[0].url).toBe(`https://${DEFAULT_SHARE_DOMAIN}/alice/plan`);
     expect(uploads[0].headers.authorization).toBe('Bearer pid_alice');
     expect(uploads[0].headers['x-share-visibility']).toBe('public');
+    expect(uploads[0].headers['x-share-og-title']).toBe('Plan');
+    expect(publishedBody).toContain(`og:image" content="https://${DEFAULT_SHARE_DOMAIN}/alice/plan.png`);
+    expect(result.coverUrl).toBe(`https://${DEFAULT_SHARE_DOMAIN}/alice/plan.png`);
+    expect(capturer).not.toHaveBeenCalled();
   });
 
   it('rewrites file:// TOC links and inlines sibling images before PUT (RUSH-3224)', async () => {
@@ -1079,7 +1086,8 @@ describe('slugify', () => {
 });
 
 describe('renderWorkerScript', () => {
-  const src = renderWorkerScript();
+  const src = renderWorkerSource();
+  const bundledSrc = renderWorkerScript();
   it('gates writes on the WRITE_TOKEN and serves reads publicly', () => {
     expect(src).toContain('env.WRITE_TOKEN');
     expect(src).toContain("request.method === 'PUT'");
@@ -1100,7 +1108,7 @@ describe('renderWorkerScript', () => {
 
   it('supports per-user namespaces and renders a gallery at /<user>', async () => {
     const worker = await import(
-      `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+      `data:text/javascript;base64,${Buffer.from(bundledSrc).toString('base64')}#${Date.now()}`
     );
     const store = new Map<string, {
       body: BodyInit | null;
@@ -1188,7 +1196,7 @@ describe('renderWorkerScript', () => {
     try {
       vi.setSystemTime(new Date('2026-07-22T00:00:00.000Z'));
       const worker = await import(
-        `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+        `data:text/javascript;base64,${Buffer.from(bundledSrc).toString('base64')}#${Date.now()}`
       );
       const store = new Map<string, {
         body: BodyInit | null;
@@ -1243,7 +1251,7 @@ describe('renderWorkerScript', () => {
 
   it('still resolves legacy flat slugs for backward compatibility', async () => {
     const worker = await import(
-      `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+      `data:text/javascript;base64,${Buffer.from(bundledSrc).toString('base64')}#${Date.now()}`
     );
     const store = new Map<string, {
       body: BodyInit | null;
@@ -1306,7 +1314,7 @@ describe('renderWorkerScript', () => {
     try {
       vi.setSystemTime(new Date('2026-07-22T00:00:00.000Z'));
       const worker = await import(
-        `data:text/javascript;base64,${Buffer.from(src).toString('base64')}#${Date.now()}`
+        `data:text/javascript;base64,${Buffer.from(bundledSrc).toString('base64')}#${Date.now()}`
       );
       const store = new Map<string, {
         body: BodyInit | null;

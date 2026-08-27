@@ -101,14 +101,23 @@ function makeEnv() {
   return { env, store };
 }
 
+let loadedWorker: Promise<any> | undefined;
+let originalHooks: Record<string, unknown> | undefined;
+
 async function loadWorker() {
   // The Worker source is an ES module. A data: URI used to work, but HMAC
   // cookie helpers pushed it past bun's NameTooLong limit for data URLs.
-  const src = renderWorkerScript();
-  const dir = mkdtempSync(join(tmpdir(), 'share-worker-'));
-  const file = join(dir, `worker-${Date.now()}-${Math.random().toString(36).slice(2)}.mjs`);
-  writeFileSync(file, src);
-  return import(pathToFileURL(file).href);
+  if (!loadedWorker) {
+    const src = renderWorkerScript();
+    const dir = mkdtempSync(join(tmpdir(), 'share-worker-'));
+    const file = join(dir, 'worker.mjs');
+    writeFileSync(file, src);
+    loadedWorker = import(pathToFileURL(file).href);
+  }
+  const worker = await loadedWorker;
+  if (!originalHooks) originalHooks = { ...worker.hooks };
+  Object.assign(worker.hooks, originalHooks);
+  return worker;
 }
 
 async function put(worker: any, env: any, key: string, body: string, headers: Record<string, string> = {}) {
@@ -122,6 +131,52 @@ async function put(worker: any, env: any, key: string, body: string, headers: Re
   );
   expect(res.status).toBe(200);
 }
+
+describe('lazy managed OG cover', () => {
+  it('renders a real 1200x630 PNG once and serves the cached R2 object thereafter', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/plan', '<!doctype html><title>Launch plan</title><meta name="description" content="Ship it safely">', {
+      'x-share-og-title': 'Launch plan',
+      'x-share-og-description': 'Ship it safely',
+    });
+
+    const first = await worker.default.fetch(new Request('https://share.test/octocat/plan.png', { headers: { accept: 'image/png' } }), env);
+    const png = Buffer.from(await first.arrayBuffer());
+    expect(first.status).toBe(200);
+    expect(first.headers.get('content-type')).toBe('image/png');
+    expect(png.subarray(0, 8)).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(png.length).toBeGreaterThan(10_000);
+    expect(store.get('octocat/plan.png')?.customMetadata).toMatchObject({ visibility: 'public', 'og-title': 'Launch plan' });
+
+    worker.hooks.renderOgCard = async () => { throw new Error('cache miss'); };
+    const cached = await worker.default.fetch(new Request('https://share.test/octocat/plan.png?raw=1', { headers: { accept: 'image/png' } }), env);
+    expect(Buffer.from(await cached.arrayBuffer())).toEqual(png);
+
+    await put(worker, env, 'octocat/plan', '<title>Updated plan</title>', { 'x-share-og-title': 'Updated plan' });
+    expect(store.has('octocat/plan.png')).toBe(false);
+  });
+
+  it('applies the canonical me visibility gate before rendering a missing cover', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    (env as any).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async (request: Request) => request.headers.get('authorization')
+      ? { userId: 'u1', email: 'octocat@acme.com' }
+      : null;
+    const putPrivate = await worker.default.fetch(new Request('https://share.test/octocat/private', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html', 'x-share-visibility': 'me' },
+      body: '<title>Private</title>',
+    }), env);
+    expect(putPrivate.status).toBe(200);
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const page = await worker.default.fetch(new Request('https://share.test/octocat/private'), env);
+    const cover = await worker.default.fetch(new Request('https://share.test/octocat/private.png'), env);
+    expect(cover.status).toBe(page.status);
+    expect(store.has('octocat/private.png')).toBe(false);
+  });
+});
 
 describe('worker JSON listing route (GET /<user>?format=json)', () => {
   afterEach(() => vi.useRealTimers());

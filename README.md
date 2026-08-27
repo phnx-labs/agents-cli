@@ -1299,7 +1299,10 @@ Cloudflare account, bucket, or write token — and `share status` / `list` / `re
 / `unshare` talk to that same endpoint. The handle is the local-part of the signed-in
 email (`muqsitnawaz@gmail.com` → `muqsitnawaz`); the page slug is readable plus a
 short view-id. HTML is stored as one object: local images are inlined, `file://` TOC
-links become in-page hashes, so the published page is actually viewable. `--visibility unlisted` (hidden aliases
+links become in-page hashes, so the published page is actually viewable. The managed
+Worker lazily renders and caches the branded 1200×630 Open Graph card at `<slug>.png`,
+so publishing from Linux does not require a local Chromium; BYO endpoints keep the
+local screenshot fallback. `--visibility unlisted` (hidden aliases
 `--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
 and the Worker sends `X-Robots-Tag: noindex`. `--visibility me` is visible only to
 you (the signed-in owner); `--visibility org` is visible to anyone at your email

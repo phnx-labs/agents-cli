@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { scanCaches } from './capture.js';
+import { candidateBrowsers, scanCaches } from './capture.js';
 
 const tmpdirs: string[] = [];
 
@@ -14,6 +14,20 @@ function mkhome() {
 
 afterEach(() => {
   while (tmpdirs.length) rmSync(tmpdirs.pop()!, { recursive: true, force: true });
+  delete process.env.AGENTS_SHARE_BROWSER;
+  delete process.env.PUPPETEER_EXECUTABLE_PATH;
+});
+
+describe('candidateBrowsers explicit override', () => {
+  it('fails loud when AGENTS_SHARE_BROWSER names a missing executable', () => {
+    process.env.AGENTS_SHARE_BROWSER = join(tmpdir(), 'definitely-missing-agents-share-browser');
+    expect(() => candidateBrowsers()).toThrow(/AGENTS_SHARE_BROWSER.*does not exist/);
+  });
+
+  it('fails loud when PUPPETEER_EXECUTABLE_PATH names a missing executable', () => {
+    process.env.PUPPETEER_EXECUTABLE_PATH = join(tmpdir(), 'definitely-missing-puppeteer-browser');
+    expect(() => candidateBrowsers()).toThrow(/PUPPETEER_EXECUTABLE_PATH.*does not exist/);
+  });
 });
 
 function touch(path: string) {
