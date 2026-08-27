@@ -33,6 +33,7 @@ import { isTmuxEnabled, selfConfiguredDeviceRole } from './device-config.js';
 import { machineId } from './machine-id.js';
 import { shellQuote } from './ssh-exec.js';
 import { codexEditWritableRoots, codexPolicyArgs } from './codex-policy.js';
+import { probeUnprivilegedUserns, type UsernsStatus } from './linux-userns.js';
 import { resolveClaudeSetupToken } from './claude-account-token.js';
 import { applyAddDirs } from './add-dir.js';
 import { applyActiveRulesPresetAtRun } from './rules/run-sync.js';
@@ -209,6 +210,55 @@ export function defaultModeFor(agent: AgentId): Mode {
 /** Safe mode used when the user did not provide --mode or a configured default. */
 export function implicitModeFor(agent: AgentId): ExecMode {
   return agent === 'codex' ? 'edit' : 'plan';
+}
+
+/**
+ * Preflight for Codex's Linux sandbox. Codex ≥0.146 sandboxes `read-only` and
+ * `workspace-write` runs with a bundled bubblewrap that needs an unprivileged
+ * user namespace; on a box that restricts it (Ubuntu 24.04
+ * `apparmor_restrict_unprivileged_userns=1`) bwrap dies with "setting up uid map:
+ * Permission denied" and a HEADLESS codex run lands zero tools — no file writes,
+ * no shell — while still reporting a completed turn. That silent under-delivery
+ * is what breaks `agents teams` codex teammates (always headless + workspace-write)
+ * and headless `agents run codex` alike on the fleet. Returns a loud, actionable
+ * message to fail the launch with instead of spawning that doomed run; returns
+ * null when the run is fine to proceed.
+ *
+ * Deliberately scoped: only `codex`, only Linux, only a HEADLESS run (an
+ * interactive TUI surfaces the bwrap error to the operator itself), and only a
+ * SANDBOXED mode — `skip` is codex `--dangerously-bypass-approvals-and-sandbox`,
+ * which uses no bwrap and is unaffected. The intended auto=workspace-write config
+ * is never weakened here; the run fails loud rather than silently downgrading.
+ * PHNX-3285.
+ */
+export function codexSandboxPreflight(args: {
+  agent: AgentId;
+  platform: NodeJS.Platform;
+  interactive: boolean;
+  mode: Mode;
+  userns: UsernsStatus;
+  machine: string;
+}): string | null {
+  if (args.agent !== 'codex') return null;
+  if (args.platform !== 'linux') return null;
+  if (args.interactive) return null;
+  if (args.mode === 'skip') return null;
+  if (args.userns.state !== 'blocked') return null;
+
+  const reason = args.userns.reason ?? 'unprivileged user namespaces are restricted';
+  return (
+    `codex's Linux sandbox can't start on ${args.machine}: ${reason}, so codex's ` +
+    `bundled bubblewrap fails with "bwrap: setting up uid map: Permission denied" ` +
+    `and a headless run lands zero tools. (PHNX-3285)\n` +
+    `\n` +
+    `Enable it once on this box — keeps codex's workspace-write sandbox intact:\n` +
+    `  echo 'kernel.apparmor_restrict_unprivileged_userns=0' | sudo tee /etc/sysctl.d/60-codex-userns.conf\n` +
+    `  sudo sysctl --system\n` +
+    `  # verify: unshare --user --map-root-user true   (exit 0 = fixed)\n` +
+    `(agents-cli ships cli/scripts/enable-codex-sandbox.sh to apply + verify this.)\n` +
+    `\n` +
+    `Or run codex WITHOUT a filesystem sandbox instead: add --mode skip.`
+  );
 }
 
 /** Reasoning effort levels passed to agents that support them. 'auto' defers to the agent's default. */
@@ -1901,6 +1951,28 @@ async function spawnAgent(options: ExecOptions): Promise<SpawnResult> {
   const timeoutMs = options.timeout ? parseTimeout(options.timeout) : undefined;
   const piped = !process.stdout.isTTY;
   const interactive = resolveInteractive(options);
+
+  // Fail loud before spawning a headless codex whose Linux sandbox can't start —
+  // otherwise it burns a turn and lands zero tools (PHNX-3285). Cheap gate first
+  // so the userns probe (one `unshare`) runs only for the exact case it applies to
+  // (codex + Linux + headless + a sandboxed mode), never for every spawn.
+  if (options.agent === 'codex' && process.platform === 'linux' && !interactive) {
+    const codexMode = options.mode ? normalizeMode(options.mode) : defaultModeFor(options.agent);
+    if (codexMode !== 'skip') {
+      const message = codexSandboxPreflight({
+        agent: options.agent,
+        platform: process.platform,
+        interactive,
+        mode: codexMode,
+        userns: probeUnprivilegedUserns(),
+        machine: machineId(),
+      });
+      if (message) {
+        process.stderr.write(`\x1b[31m${message}\x1b[0m\n`);
+        return { exitCode: 1, stdout: '', stderr: message };
+      }
+    }
+  }
 
   // Budget live kill-switch (issue #346). For headless runs we incrementally
   // parse stream-json usage off stdout, accumulate cost, and kill the child the

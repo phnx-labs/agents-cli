@@ -556,6 +556,38 @@ blanket rules map to `~/.openclaw/openclaw.json` `tools.alsoAllow`/`tools.deny`,
 sessions/config; `agents add gemini`, `agents import gemini`, and
 `agents sync gemini` fail and point users to Antigravity.
 
+### Codex's Linux sandbox needs unprivileged user namespaces (PHNX-3285)
+
+Codex ≥0.146 is the **only** harness that sandboxes its own tool calls on Linux
+with a bundled **bubblewrap** — it extracts `codex-linux-sandbox` + `bwrap` per run
+and sets up mounts inside a fresh unprivileged **user namespace** (`--unshare-user`,
+then a `/proc/self/uid_map` write) for both `read-only` and `workspace-write` modes
+(only `skip` = `--dangerously-bypass-approvals-and-sandbox` uses no bwrap). The
+legacy Landlock backend is gone (`use_linux_sandbox_bwrap` is `removed`,
+`use_legacy_landlock` panics under the permission-profile model), so bwrap is the
+only Linux sandbox path. grok/kimi/cursor/etc. do **not** sandbox this way, so this
+is codex-specific.
+
+Ubuntu 23.10+ ships `kernel.apparmor_restrict_unprivileged_userns=1`, which denies
+that userns to an unconfined binary — bwrap then dies with `bwrap: setting up uid
+map: Permission denied`, and a **headless** codex run (an `agents teams` codex
+teammate, or `agents run codex` — always headless + sandboxed) lands **zero tools**
+while still reporting a completed turn. `spawnAgent` preflights this before the
+spawn (`codexSandboxPreflight` in [`src/lib/exec.ts`](src/lib/exec.ts), probing
+[`src/lib/linux-userns.ts`](src/lib/linux-userns.ts)) and **fails loud** with the
+one-time fix instead of silently under-delivering. Scope is deliberate: codex +
+Linux + headless + a sandboxed (non-`skip`) mode only — an interactive TUI surfaces
+the bwrap error itself, `--mode skip` uses no sandbox, and macOS/Windows never hit
+it. The intended `auto` = workspace-write + `approval_policy=never` config is never
+weakened.
+
+The one-time fix keeps the sandbox intact — re-enable unprivileged userns per box:
+[`scripts/enable-codex-sandbox.sh`](scripts/enable-codex-sandbox.sh) writes the
+`kernel.apparmor_restrict_unprivileged_userns=0` sysctl drop-in, applies it, and
+re-probes to confirm it took. Run it once per fleet worker
+(`sudo bash cli/scripts/enable-codex-sandbox.sh`, or fan out with
+`agents ssh <box> 'sudo bash -s' < cli/scripts/enable-codex-sandbox.sh`).
+
 ## Source layout
 
 ```
