@@ -26,6 +26,11 @@ jobs:
         with:
           fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - name: Guard public artifacts against confidential strategy leaks
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: bun scripts/guard-artifacts-confidential.ts --base "$BASE_SHA" --head "$HEAD_SHA"
       - name: Pin release-matrix trigger policy, .agents/ layout, and the impact gate
         run: bun test ./.github/workflows/ ./scripts/ci-bench/
       - name: Impact plan

@@ -226,9 +226,12 @@ groups:
       - scripts/ci-scope.test.ts
       - scripts/ci-impact-bench.ts
       - scripts/ci-bench/**
+      - scripts/guard-artifacts-confidential.ts
+      - scripts/guard-artifacts-confidential.test.ts
       - cli/ci/test-ownership.yaml
       - .github/workflows/tests.yml
       - .github/workflows/tests-gate.test.ts
+      - .githooks/pre-commit
     checks: [impact-tests, workflow-policy]
 
   - id: session-tracker
