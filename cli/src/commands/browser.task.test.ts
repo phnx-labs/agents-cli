@@ -198,4 +198,34 @@ describe('start --device validates the declaration (T3)', () => {
     // Did NOT try to auto-pick / require a browser on THIS machine.
     expect(err).not.toMatch(/No supported browser found/);
   });
+
+  // PHNX-3289 review BLOCKER: the guard must not resolve a LOCAL default when the
+  // caller named no profile. Multi-device fixture — zion declares `agents`, and
+  // THIS box (testbox) carries a local `auto-chrome` default. Pre-fix, a bare
+  // `--device zion` ran the unguarded `resolveProfileRef(undefined)`, which falls
+  // back to the local `auto-chrome`, then validated THAT against zion and failed
+  // with "does not declare browser profile auto-chrome" — a fresh false failure on
+  // the very browserless-forward path this PR exists to fix. (The earlier
+  // `ghost`-device test uses an empty devices dir, so `resolveProfileRef(undefined)`
+  // returns undefined there and never exercises this fallback.) The forward must
+  // ignore the local default and route straight to the target.
+  it('a bare --device start ignores this box\'s local default profile (multi-device)', async () => {
+    writeYaml(deviceFile('zion'), {
+      browser: { agents: { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9222'] } },
+    });
+    writeYaml(deviceFile('testbox'), {
+      browser: { 'auto-chrome': { browser: 'chrome', endpoints: ['cdp://127.0.0.1:9333'] } },
+    });
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockExit();
+    await expect(
+      run(['start', '--device', 'zion', '--task', 'post']),
+    ).rejects.toThrow(/process.exit 1/);
+    const err = error.mock.calls.map((c) => String(c[0])).join('\n');
+    // Did NOT resolve + validate the LOCAL default against the target.
+    expect(err).not.toMatch(/does not declare browser profile/);
+    expect(err).not.toMatch(/No supported browser found/);
+    // Reached the remote dispatch instead.
+    expect(err).toMatch(/Unknown device "zion"/);
+  });
 });

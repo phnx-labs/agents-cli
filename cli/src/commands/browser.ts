@@ -1646,7 +1646,12 @@ function registerTaskCommands(browser: Command): void {
           // declarations before we round-trip. A bare start carries no name to
           // validate — the target picks its own default — so it forwards
           // straight through, which is exactly what unblocks a browserless box.
-          const forwardProfile = await resolveProfileRef(opts.profile);
+          // Only resolve when the caller actually named a profile: passing an
+          // undefined ref would let `resolveProfileRef` fall back to THIS box's
+          // configured/auto-detected default (matching the ~4 other call sites
+          // in this file), and validating that local name against the target
+          // re-introduces the exact false failure this reorder fixes.
+          const forwardProfile = opts.profile ? await resolveProfileRef(opts.profile) : undefined;
           if (forwardProfile) {
             try {
               assertDeviceDeclaresProfile(deviceName, forwardProfile);

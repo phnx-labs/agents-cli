@@ -4,6 +4,7 @@ import * as net from 'net';
 import * as path from 'path';
 import {
   BrowserDaemonNotRunningError,
+  clearDeadSocketFile,
   formatBrowserDaemonNotRunningError,
   getSocketPath,
   isDaemonReachable,
@@ -506,4 +507,50 @@ describe('resetBrowserDaemon (wedge recovery)', () => {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   }, 20_000);
+});
+
+// PHNX-3289 review SHOULD: the socket-clearing step is liveness-checked to close
+// the TOCTOU window — between the quiesce loop deciding "unreachable" and the
+// unlink, a concurrent `browser start` can rebind the same path, and an
+// unconditional unlink would delete a LIVE daemon's socket. `clearDeadSocketFile`
+// re-probes immediately before unlinking, so a socket that is listening again is
+// left intact.
+describe('clearDeadSocketFile (liveness-checked unlink)', () => {
+  it('removes a genuinely dead socket file', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    writeFileSync(socketPath, '');
+    const endpoint = ipcEndpoint(socketPath);
+
+    const cleared = await clearDeadSocketFile(endpoint, socketPath);
+
+    expect(cleared).toBe(true);
+    const { existsSync } = await import('fs');
+    expect(existsSync(socketPath)).toBe(false);
+  });
+
+  it('does NOT unlink a socket a daemon rebound (the TOCTOU a race would hit)', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    // A real listener on the endpoint — the "someone rebound during the reset
+    // window" state. Its own bind created the socket file.
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
+    try {
+      const cleared = await clearDeadSocketFile(ipcEndpoint(socketPath), socketPath);
+
+      // The live listener's socket was left intact and it is still reachable.
+      expect(cleared).toBe(false);
+      const { existsSync } = await import('fs');
+      expect(existsSync(socketPath)).toBe(true);
+      expect(await isDaemonReachable()).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('reports not-cleared when there is no socket file', async () => {
+    const socketPath = getSocketPath();
+    expect(await clearDeadSocketFile(ipcEndpoint(socketPath), socketPath)).toBe(false);
+  });
 });

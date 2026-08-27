@@ -256,22 +256,34 @@ export async function resetBrowserDaemon(): Promise<BrowserDaemonResetResult> {
   // daemon left behind, so the next `start` binds clean instead of unlinking it
   // blindly. (Named pipes vanish with their owning process, so Windows has no
   // stale file to clear.)
-  let socketCleared = false;
-  if (!IS_WINDOWS) {
-    const socketPath = getSocketPath();
-    if (fs.existsSync(socketPath)) {
-      try {
-        fs.unlinkSync(socketPath);
-        socketCleared = true;
-      } catch {
-        // Raced with a fresh start that already claimed it — the goal (no stale
-        // socket) still holds, so treat it as cleared rather than failing.
-        socketCleared = !fs.existsSync(socketPath);
-      }
-    }
-  }
+  const socketCleared = IS_WINDOWS ? false : await clearDeadSocketFile(endpoint, getSocketPath());
 
   return { wasRunning, socketCleared };
+}
+
+/**
+ * Remove a leftover browser socket FILE, but only when nothing is listening on
+ * it — re-probing liveness IMMEDIATELY before the unlink to close the TOCTOU
+ * window (PHNX-3289 review). Between {@link resetBrowserDaemon}'s quiesce loop
+ * deciding the endpoint was unreachable and this unlink, a concurrent
+ * `browser start` could bind a NEW listener on the same path; an unconditional
+ * unlink would then delete a LIVE daemon's socket — the exact two-servers orphan
+ * this function exists to prevent. A listener seen here means the wedge is already
+ * resolved (a fresh daemon owns the path), so its socket is left intact. Returns
+ * true only when a genuinely dead file was removed.
+ */
+export async function clearDeadSocketFile(endpoint: string, socketPath: string): Promise<boolean> {
+  if (!fs.existsSync(socketPath)) return false;
+  // A listener bound again since the quiesce loop → do not touch its socket.
+  if (await probeDaemon(endpoint)) return false;
+  try {
+    fs.unlinkSync(socketPath);
+    return true;
+  } catch {
+    // Raced with a fresh start that already claimed it — the goal (no stale
+    // socket) still holds, so report cleared only when it is genuinely gone.
+    return !fs.existsSync(socketPath);
+  }
 }
 
 /**
