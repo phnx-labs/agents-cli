@@ -99,9 +99,9 @@ describe('config drift detection (PHNX-3315 P3)', () => {
     const { detectConfigDrift } = await freshDrift();
     expect(detectConfigDrift().centralLeaks).toContain('accounts (device-scoped)');
 
-    // A fleet-scoped identity is NOT a leak — it belongs in the shared file.
+    // A version-scoped identity is NOT a leak — it belongs in the shared file.
     writeCentral(
-      CANONICAL_HEADER + 'accounts:\n  native:\n    acct-2:\n      scope: fleet\n      handle: shared\n',
+      CANONICAL_HEADER + 'accounts:\n  native:\n    acct-2:\n      scope: version\n      handle: shared\n',
     );
     const { detectConfigDrift: detect2 } = await freshDrift();
     expect(detect2().centralLeaks).not.toContain('accounts (device-scoped)');

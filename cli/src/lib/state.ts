@@ -1149,13 +1149,7 @@ export function readTopLevelUserMeta(): Record<string, unknown> | null {
  * newer CLI — in place instead of relocating it to this box's device doc.
  */
 function readCentralKeys(): ReadonlySet<string> {
-  try {
-    const parsed = yaml.parse(fs.readFileSync(META_FILE, 'utf-8'));
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return new Set(Object.keys(parsed as Record<string, unknown>));
-    }
-  } catch { /* absent or malformed — no foreign keys to protect */ }
-  return new Set();
+  return new Set(Object.keys(readTopLevelUserMeta() ?? {}));
 }
 
 /**
@@ -1243,6 +1237,10 @@ function serializeCentral(central: Record<string, unknown>): string {
  * read-snapshot-then-separately-lock race that {@link updateMeta} would impose.
  */
 export function writeMetaUnlocked(meta: Meta): void {
+  // INVARIANT: every key destructured here must also be in BESPOKE_DEVICE_KEYS (and
+  // vice versa) — a bespoke device key that is classified but NOT pulled out here
+  // would fall into `central`, and the generic router skips it (BESPOKE_DEVICE_KEY_SET),
+  // so it would silently sync to the shared file. Keep the two lists in lockstep.
   const { agents, isolatedAgents, versions, deviceRoutines, deviceConfig, deviceBrowser, deviceFleet, deviceHosts, deviceAccounts, projectRoot, ...central } = meta;
 
   // Write the machine-local files FIRST, then strip central — so a crash mid-write

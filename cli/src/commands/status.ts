@@ -125,7 +125,7 @@ export function registerStatusCommand(syncCmd: Command): void {
     // (PHNX-3315).
     if (status.config.staleHeader || status.config.centralLeaks.length > 0) {
       console.log(
-        `  ${'config (device-scoped)'.padEnd(28)} ${chalk.yellow('not drained — heals on this box\'s next config write / `agents sync`')}`,
+        `  ${'config (device-scoped)'.padEnd(28)} ${chalk.yellow('not drained — folds automatically on normal `agents` use here (idempotent)')}`,
       );
       if (status.config.staleHeader) {
         console.log(chalk.gray('    · top-level agents.yaml header is stale (pre-rename)'));

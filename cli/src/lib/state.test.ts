@@ -146,6 +146,19 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
     expect(doc).not.toContain('futureCentralKey'); // never pushed into the device doc
   });
 
+  it('does not surface a legacy device-doc `defaultBrowserProfile:` onto Meta (generic overlay exclusion, PHNX-3315 P3)', async () => {
+    const { readMeta } = await freshState();
+
+    // A pre-migration device doc: a bare top-level `defaultBrowserProfile:` the
+    // config migration later folds into `config:`. The generic overlay must NOT
+    // surface it onto Meta (it never was before P3) — BESPOKE_DEVICE_DOC_KEYS
+    // excludes it. Deleting that exclusion would fail this test.
+    fs.mkdirSync(path.dirname(devicePath()), { recursive: true });
+    fs.writeFileSync(devicePath(), 'defaultBrowserProfile: work\n');
+
+    expect((readMeta() as any).defaultBrowserProfile).toBeUndefined();
+  });
+
 });
 
 describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
