@@ -364,6 +364,17 @@ export function syncClaudeProjectMemoryDir(versionHome: string, cwd: string = pr
   }
 
   fs.mkdirSync(projectDir, { recursive: true });
-  fs.symlinkSync(canonicalDir, nativeMemoryDir, process.platform === 'win32' ? 'junction' : undefined);
+  try {
+    fs.symlinkSync(canonicalDir, nativeMemoryDir, process.platform === 'win32' ? 'junction' : undefined);
+  } catch (err) {
+    // A concurrent sync (e.g. two `agents run claude` launches racing on a
+    // first-ever project) can win this exact link between our lstat above
+    // and this call. If it landed the same canonical target, that's the
+    // outcome we wanted — treat it as success rather than throwing.
+    if ((err as NodeJS.ErrnoException)?.code !== 'EEXIST') throw err;
+    let racedTarget: string | undefined;
+    try { racedTarget = fs.readlinkSync(nativeMemoryDir); } catch { /* not even a symlink — fall through to rethrow */ }
+    if (racedTarget !== canonicalDir) throw err;
+  }
 }
 

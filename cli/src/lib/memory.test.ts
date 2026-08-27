@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { spawnSync } from 'child_process';
+import { spawnSync, spawn } from 'child_process';
 import { memoryTargetDir } from './memory.js';
 import { claudeProjectDirName } from './project-key.js';
 
@@ -47,6 +47,24 @@ function runMemory(home: string, expression: string): unknown {
   }
   const line = (child.stdout || '').trim().split('\n').filter(Boolean).pop() || 'null';
   return JSON.parse(line);
+}
+
+/** Same as {@link runMemory}, but async and non-blocking — for racing two real processes. */
+function runMemoryAsync(home: string, expression: string): Promise<{ status: number | null; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      tsxBin,
+      ['-e', `
+        import * as memory from ${JSON.stringify(memoryModuleUrl)};
+        ${expression};
+      `],
+      { env: { ...process.env, HOME: home } },
+    );
+    let stderr = '';
+    child.stderr?.on('data', (d) => { stderr += d.toString(); });
+    child.on('error', reject);
+    child.on('close', (status) => resolve({ status, stderr }));
+  });
 }
 
 describe('memory resource (RUSH-1330)', () => {
@@ -219,5 +237,29 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
     runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`);
     expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
     expect(fs.readlinkSync(nativeDirA)).toBe(targetBefore);
+  });
+
+  it('two concurrent first-time syncs of the same project race without throwing', async () => {
+    const home = makeTempHome();
+    const cwd = path.join(home, 'projects', 'my-repo');
+    const key = claudeProjectDirName(path.resolve(cwd));
+    const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
+    const nativeDirA = path.join(versionHomeA, '.claude', 'projects', key, 'memory');
+
+    // Two real processes syncing the SAME never-before-synced version home —
+    // both see nothing at nativeDirA and race to create the symlink
+    // (reproduces the EEXIST a second `agents run claude` launch can hit).
+    const expr = `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`;
+    const [a, b] = await Promise.all([
+      runMemoryAsync(home, expr),
+      runMemoryAsync(home, expr),
+    ]);
+
+    expect(a.status, a.stderr).toBe(0);
+    expect(b.status, b.stderr).toBe(0);
+    expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
+
+    const canonicalDir = runMemory(home, `memory.getClaudeProjectMemoryDir(${JSON.stringify(cwd)})`) as string;
+    expect(fs.realpathSync(nativeDirA)).toBe(fs.realpathSync(canonicalDir));
   });
 });
