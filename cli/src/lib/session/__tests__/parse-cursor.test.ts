@@ -105,6 +105,39 @@ describe('Cursor session parsing and discovery metadata', () => {
     expect(result!.events).toEqual(parseCursor(transcriptPath));
   });
 
+  test('collapses a scaffolded chatMeta.title to the skill, matching Claude ai-title', () => {
+    // Cursor writes its own auto-title into chats/.../meta.json independently of
+    // the Claude JSONL ai-title path. The same skill-preamble echo that PR #2995
+    // cleaned for Claude must collapse here too — label wins on every surface.
+    const metaPath = path.join(root, '.cursor', 'chats', 'workspace-hash', SESSION_ID, 'meta.json');
+    fs.mkdirSync(path.dirname(metaPath), { recursive: true });
+    fs.writeFileSync(metaPath, JSON.stringify({
+      schemaVersion: 1,
+      createdAtMs: 1785654071336,
+      hasConversation: true,
+      title: 'Base directory for this skill: /home/u/.agents/.history/versions/claude/2.1.207/home/.claude/skills/continue',
+      updatedAtMs: 1785668144486,
+      cwd: '/tmp/public-project',
+    }));
+
+    const result = readCursorMeta(transcriptPath);
+    expect(result).not.toBeNull();
+    expect(result!.meta.label).toBe('/continue');
+  });
+
+  test('leaves a Cursor title that merely names a skills/ path unchanged', () => {
+    const metaPath = path.join(root, '.cursor', 'chats', 'workspace-hash', SESSION_ID, 'meta.json');
+    fs.mkdirSync(path.dirname(metaPath), { recursive: true });
+    fs.writeFileSync(metaPath, JSON.stringify({
+      title: 'rewrite the skills/continue docs',
+      cwd: '/tmp/public-project',
+    }));
+
+    const result = readCursorMeta(transcriptPath);
+    expect(result).not.toBeNull();
+    expect(result!.meta.label).toBe('rewrite the skills/continue docs');
+  });
+
   test('indexes transcript-only archives without inventing cwd or title', () => {
     const result = readCursorMeta(transcriptPath);
     expect(result).not.toBeNull();

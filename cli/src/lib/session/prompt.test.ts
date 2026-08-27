@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
+import { extractSessionTopic, cleanSessionPrompt, classifyUserPrompt, cleanGeneratedSessionLabel, isSyntheticUserMessage, HEADLESS_PLAN_MODE_PREFIX } from './prompt.js';
 
 describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
   it('folds a standalone screenshot path (with spaces) to [image]', () => {
@@ -52,6 +52,29 @@ describe('classifyUserPrompt (a "You" line that drops path noise)', () => {
     const r = classifyUserPrompt(long);
     expect(r.kind).toBe('text');
     expect(r.clean.length).toBeGreaterThan(300);
+  });
+});
+
+describe('cleanGeneratedSessionLabel (harness auto-title → SessionMeta.label)', () => {
+  it('collapses the injected skill-basedir line to /<skill>', () => {
+    expect(cleanGeneratedSessionLabel(
+      'Base directory for this skill: /home/u/.agents/.history/versions/claude/2.1.207/home/.claude/skills/continue',
+    )).toBe('/continue');
+  });
+
+  it('leaves an ordinary generated title unchanged', () => {
+    expect(cleanGeneratedSessionLabel('Session command audit')).toBe('Session command audit');
+  });
+
+  it('does not rewrite a title that merely names a skills/ path', () => {
+    expect(cleanGeneratedSessionLabel('rewrite the skills/continue docs'))
+      .toBe('rewrite the skills/continue docs');
+  });
+
+  it('returns undefined for empty or whitespace-only titles', () => {
+    expect(cleanGeneratedSessionLabel(undefined)).toBeUndefined();
+    expect(cleanGeneratedSessionLabel('')).toBeUndefined();
+    expect(cleanGeneratedSessionLabel('   ')).toBeUndefined();
   });
 });
 
