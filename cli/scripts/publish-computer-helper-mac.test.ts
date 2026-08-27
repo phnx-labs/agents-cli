@@ -9,6 +9,12 @@ const SH = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   'publish-computer-helper-mac.sh',
 );
+// The publish script computes + uploads a computer-mac source input-digest sidecar
+// (PHNX-2943), which shells release-manifest.sh — the fixture must carry it too.
+const MANIFEST_SCRIPT = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  'release-manifest.sh',
+);
 
 /**
  * The tag IS the publish action for the macOS helper, exactly as it is for
@@ -213,6 +219,14 @@ describe('publish-computer-helper-mac.sh', () => {
     // Real one would unlock this machine's signing keychain; the publish logic
     // under test does not need it.
     fs.writeFileSync(path.join(repo, 'cli', 'scripts', 'headless-sign-context.sh'), ': # no-op\n');
+    // The publish script now records the source input-digest of the helper it built
+    // and uploads it as a sidecar (PHNX-2943). That shells release-manifest.sh over
+    // the computer-mac source tree, so both must exist in the fixture repo.
+    fs.copyFileSync(MANIFEST_SCRIPT, path.join(repo, 'cli', 'scripts', 'release-manifest.sh'));
+    fs.chmodSync(path.join(repo, 'cli', 'scripts', 'release-manifest.sh'), 0o755);
+    fs.mkdirSync(path.join(repo, 'native', 'computer-mac', 'Sources'), { recursive: true });
+    fs.writeFileSync(path.join(repo, 'native', 'computer-mac', 'Sources', 'dummy.swift'), '// dummy\n');
+    fs.writeFileSync(path.join(repo, 'native', 'computer-mac', 'Package.swift'), '// swift package\n');
 
     const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${binDir}:${process.env.PATH}` };
     env.APPLE_ID = 'stub@example.invalid';
@@ -246,6 +260,14 @@ describe('publish-computer-helper-mac.sh', () => {
     expect(ghArgs).toMatch(new RegExp(`release create ${tag.replace('/', '\\/')}`));
     expect(ghArgs).toMatch(/release upload/);
     expect(ghArgs).toMatch(/ComputerHelper\.app\.zip/);
+    // The source input-digest sidecar rides the same upload so the attestation
+    // producer can verify the published binary was built from this source (PHNX-2943).
+    expect(ghArgs).toMatch(/computer-mac-input-digest\.txt/);
+    const sidecar = fs.readFileSync(
+      path.join(repo, 'native', 'computer-mac', 'dist', 'computer-mac-input-digest.txt'),
+      'utf-8',
+    ).trim();
+    expect(sidecar).toMatch(/^sha256:[0-9a-f]{64}$/);
   });
 
   it('resumes when the tag is already on origin but no release exists', () => {

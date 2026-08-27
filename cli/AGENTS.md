@@ -1134,6 +1134,22 @@ they are still the right gate for a *helper* release — they just no longer blo
 tarball. Rebuild a helper only when its own sources change; the input digest in
 [`scripts/release-manifest.sh`](scripts/release-manifest.sh) is what decides that.
 
+**computer-mac records itself from its published release, not a local rebuild
+(PHNX-2943).** Unlike keychain/menubar (which this producer builds+signs in the
+Darwin block), `computer-mac` is signed on the separate
+[`scripts/publish-computer-helper-mac.sh`](scripts/publish-computer-helper-mac.sh)
+path and is never rebuilt in `release-attestation-produce.sh`. When its source
+drifts, the producer records the **published** `computer-mac/v<floor>` binary — but
+only after proving that binary was built from the current source: the publish
+script uploads a `computer-mac-input-digest.txt` sidecar naming the source it built
+from, and the producer records the row only when that equals the current source
+digest, verifying the downloaded zip against its `.sha256` first. A mismatch, a
+missing sidecar (a pre-PHNX-2943 release), or an undownloadable release **fails
+closed** with the exact `publish-computer-helper-mac.sh` command — never binding a
+new source digest to an unproven binary. Before this, the producer just died on
+drift and the publish script recorded nothing, so the "republish then re-run"
+advice looped forever (hit live cutting 1.22.43).
+
 **Menu-bar helper** ([`menubar/`](menubar) → `bin/MenubarHelper.app`) is built and
 verified the same way — built into `bin/`, published as a release asset on its own
 `menubar/v<x.y.z>` tag, gated when that asset is cut by

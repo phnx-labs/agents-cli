@@ -120,6 +120,20 @@ ASSET_SHA="$ASSET_ZIP.sha256"
 [ -f "$ASSET_ZIP" ] || die "expected asset not produced: $ASSET_ZIP (was the build notarized?)"
 [ -f "$ASSET_SHA" ] || die "expected checksum not produced: $ASSET_SHA"
 
+# Record the SOURCE input-digest THIS build was produced from, and publish it as a
+# sidecar asset (PHNX-2943). The release attestation producer never rebuilds
+# computer-mac; when its source drifts it has to record the published binary against
+# the CURRENT source digest. Binding a new source digest to whatever binary happens
+# to sit on the floor tag would attest a STALE build, so the producer needs proof
+# the published binary was built from that exact source. Publishing the digest this
+# build came from is that proof: the producer compares it to the current source and
+# only records on a match, else fails closed. See release-attestation-produce.sh.
+ASSET_DIGEST_TXT="$HELPER_DIR/dist/computer-mac-input-digest.txt"
+CM_INPUT_DIGEST="$(bash "$CLI_DIR/scripts/release-manifest.sh" input-digest --repo-root "$REPO_ROOT" --helper computer-mac)" \
+  || die "could not compute computer-mac source input-digest"
+printf '%s\n' "$CM_INPUT_DIGEST" > "$ASSET_DIGEST_TXT"
+log "computer-mac source input-digest: $CM_INPUT_DIGEST"
+
 # Cut the tag, THEN the release. `gh release create --verify-tag` refuses to
 # invent a tag that does not exist on the remote, and nothing else pushes
 # `computer-mac/v<x.y.z>`: release.sh delegates helper tagging to "where the
@@ -149,7 +163,7 @@ if ! gh release view "$TAG" --repo "$REPO_SLUG" >/dev/null 2>&1; then
 fi
 
 log "Uploading assets to $TAG..."
-gh release upload "$TAG" "$ASSET_ZIP" "$ASSET_SHA" --clobber --repo "$REPO_SLUG" \
+gh release upload "$TAG" "$ASSET_ZIP" "$ASSET_SHA" "$ASSET_DIGEST_TXT" --clobber --repo "$REPO_SLUG" \
   || die "gh release upload failed"
 
-log "Published $(basename "$ASSET_ZIP") + .sha256 to $TAG"
+log "Published $(basename "$ASSET_ZIP") + .sha256 + computer-mac-input-digest.txt to $TAG"

@@ -485,6 +485,53 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
     fi
   }
 
+  # PHNX-2943: record computer-mac from its PUBLISHED release instead of dead-ending.
+  # This producer never rebuilds computer-mac (it is signed on a separate macOS
+  # path), so when its source drifts and there is no prior record to carry forward,
+  # the old code DIED telling the operator to run publish-computer-helper-mac.sh and
+  # re-run -- but that script recorded nothing, so the re-run hit the identical die.
+  # It now records the published binary, but ONLY after proving that binary was built
+  # from THIS source: publish-computer-helper-mac.sh publishes a
+  # `computer-mac-input-digest.txt` sidecar naming the source it built from, and we
+  # require it to equal the current source digest before recording. A mismatch (or a
+  # floor release predating the sidecar, or an undownloadable release) means the
+  # published helper is stale or unverifiable -- fail CLOSED with the publish command,
+  # never bind a new source digest to an unproven binary.
+  record_computer_mac_from_published() {
+    local want_digest="$1" floor tag dl pub_digest zip sha_file want_sha got_sha
+    floor="$(bun -e "console.log((await import('./src/lib/helper-versions.ts')).helperFloor('computer-mac'))" 2>/dev/null)" \
+      || die "could not read the computer-mac floor from src/lib/helper-versions.ts"
+    tag="computer-mac/v$floor"
+    dl="$WT/.cm-helper-dl"
+    rm -rf "$dl"; mkdir -p "$dl"
+    # FAIL CLOSED on any download failure -- an unauthenticated / offline / rate-limited
+    # gh must not read as "nothing published"; that would strand a real release.
+    gh release download "$tag" \
+      --pattern 'computer-mac-input-digest.txt' \
+      --pattern 'ComputerHelper.app.zip' \
+      --pattern 'ComputerHelper.app.zip.sha256' \
+      --dir "$dl" >/dev/null 2>&1 \
+      || die "helper computer-mac input changed and the published release $tag could not be downloaded -- run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh <x.y.z>' on a macOS signing box, bump the computer-mac floor in src/lib/helper-versions.ts, then re-run this producer"
+    [[ -f "$dl/computer-mac-input-digest.txt" ]] \
+      || die "helper computer-mac input changed and the published $tag carries no computer-mac-input-digest.txt (built before PHNX-2943) -- re-publish computer-mac with the current scripts/publish-computer-helper-mac.sh so the producer can verify the source it was built from, then re-run this producer"
+    pub_digest="$(tr -d '[:space:]' < "$dl/computer-mac-input-digest.txt")"
+    [[ "$pub_digest" == "$want_digest" ]] \
+      || die "helper computer-mac input changed and the published $tag was built from a DIFFERENT source (published ${pub_digest#sha256:} != current ${want_digest#sha256:}) -- recording it would attest a stale binary. Run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh <x.y.z>' from THIS tree, bump the computer-mac floor, then re-run this producer"
+    zip="$dl/ComputerHelper.app.zip"
+    sha_file="$dl/ComputerHelper.app.zip.sha256"
+    [[ -f "$zip" && -f "$sha_file" ]] \
+      || die "published $tag is missing ComputerHelper.app.zip or its .sha256"
+    want_sha="$(awk '{print $1}' "$sha_file")"
+    got_sha="$(manifest_asset_sha256 "$zip")"
+    [[ "$want_sha" == "$got_sha" ]] \
+      || die "downloaded ComputerHelper.app.zip sha $got_sha != published $want_sha in $tag -- refusing to record a corrupt download"
+    scripts/release-manifest.sh put --file "$MANIFEST_FILE" --helper computer-mac \
+      --helper-version "$floor" --input-digest "$want_digest" \
+      --asset-digest "sha256:$got_sha" --asset-path "$zip" --platform darwin \
+      >/dev/null || die "failed to record computer-mac in the manifest"
+    green "Recorded computer-mac from published $tag (input ${want_digest#sha256:}, asset ${got_sha:0:12})"
+  }
+
   for helper in computer-mac keychain menubar; do
     helper_digest="$(scripts/release-manifest.sh input-digest --repo-root "$WT" --helper "$helper")" \
       || die "could not compute input digest for helper $helper"
@@ -498,7 +545,10 @@ if [[ "$WITH_HELPERS" == true && -x scripts/release-manifest.sh ]]; then
       keychain) asset="bin/Agents CLI.app/Contents/MacOS/Agents CLI" ;;
       menubar)  asset="bin/MenubarHelper.app/Contents/MacOS/AGI Menu" ;;
       computer-mac)
-        die "helper computer-mac input changed but this producer never rebuilds it -- run 'agents secrets exec apple.com -- scripts/publish-computer-helper-mac.sh <x.y.z>' on a macOS signing box (the version is the HELPER's own, and is required; bump the computer-mac floor in src/lib/helper-versions.ts after), then re-run this producer so the new digest is recorded"
+        # Never rebuilt here -- record it from its published, source-verified release
+        # (or fail closed). Fully handled in the function; skip the generic asset+put.
+        record_computer_mac_from_published "$helper_digest"
+        continue
         ;;
     esac
     [[ -f "$asset" ]] \

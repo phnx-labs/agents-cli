@@ -104,6 +104,11 @@ function buildFixture(root: string, opts: { failSuite?: boolean; suite?: 'greenW
     [
       '#!/usr/bin/env bash',
       'if [[ "$1" == "--version" ]]; then echo "1.2.3"; exit 0; fi',
+      // PHNX-2943: the producer reads the computer-mac floor via `bun -e "…helperFloor…"`.
+      // Real bun evaluates cli/src/lib/helper-versions.ts; the stub returns the same
+      // floor the fixture's helper-versions.ts declares (1.0.0), so the fetch targets
+      // computer-mac/v1.0.0 exactly as production does.
+      'if [[ "$1" == "-e" ]]; then echo "1.0.0"; exit 0; fi',
       'if [[ "$1" == "install" ]]; then exit 0; fi',
       'if [[ "$1" == "run" && "$2" == "test" ]]; then',
       // RUSH-3007: the producer must run the suite with AGENTS_ATTEST_PRODUCER=1
@@ -559,6 +564,20 @@ function buildManifestFixture(root: string): ReturnType<typeof buildFixture> & {
   fs.writeFileSync(path.join(caller, 'native/computer-mac/scripts/build.sh'), '#!/usr/bin/env bash\n');
   fs.writeFileSync(path.join(caller, 'native/computer-mac/Package.swift'), '// swift package\n');
 
+  // The producer reads the computer-mac floor from this module to know which
+  // published helper release to verify+record against (PHNX-2943). A minimal
+  // standalone copy is enough — helperFloor/helperTag are pure and import nothing.
+  fs.mkdirSync(path.join(caller, 'cli/src/lib'), { recursive: true });
+  fs.writeFileSync(
+    path.join(caller, 'cli/src/lib/helper-versions.ts'),
+    [
+      "const FLOORS = { 'computer-mac': '1.0.0', keychain: '1.0.0', menubar: '1.0.0', 'computer-win': '1.0.0' };",
+      'export function helperFloor(h) { return FLOORS[h]; }',
+      "export function helperTag(h, v) { return `${h}/v${v}`; }",
+      '',
+    ].join('\n'),
+  );
+
   fs.writeFileSync(path.join(caller, 'cli/scripts/build-keychain-helper.sh'), '#!/usr/bin/env bash\n');
   fs.writeFileSync(path.join(caller, 'cli/scripts/keychain-entitlements.plist'), '<plist/>\n');
   fs.writeFileSync(path.join(caller, 'cli/scripts/verify-keychain-helper.sh'), '#!/usr/bin/env bash\n');
@@ -819,40 +838,109 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(result.status, out).toBe(0);
   });
 
-  it('still fails closed when the seeded computer-mac record does not match this tree', () => {
-    const root = tmp('attest-produce-manifest-seed-drift-');
-    const fx = buildManifestFixture(root);
-    const staleManifest = priorReleaseManifest(root, 'sha256:' + 'b'.repeat(64));
-    fs.writeFileSync(
-      path.join(fx.fakebin, 'gh'),
-      '#!/usr/bin/env bash\n' +
-        'if [[ "$1" == release && "$2" == list ]]; then echo v9.9.8; exit 0; fi\n' +
-        'if [[ "$1" == release && "$2" == view ]]; then echo 0; exit 0; fi\n' +
-        'if [[ "$1" == release && "$2" == download ]]; then\n' +
-        '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done\n' +
-        `  cat > "$dir/release-manifest.json" <<'MANIFEST'\n${staleManifest}\nMANIFEST\n` +
-        '  exit 0\n' +
-        'fi\n' +
-        'exit 1\n',
-    );
+  // PHNX-2943: when computer-mac drifts and has no prior record to carry forward,
+  // the producer records it from its PUBLISHED release — but only after the release's
+  // `computer-mac-input-digest.txt` sidecar proves the published binary was built from
+  // THIS source. These stubs model `gh release download computer-mac/v1.0.0`; the seed
+  // is failed (`release list` exit 1) so computer-mac genuinely reaches the drift path.
+  //
+  // `sidecar` is the source digest the published release claims it was built from;
+  // pass fx.manifestDigests['computer-mac'] to match this tree, anything else to force
+  // a mismatch. `omitSidecar` publishes the zip WITHOUT the sidecar (a pre-PHNX-2943
+  // release). `failDownload` makes the download itself fail (gh offline/unauth).
+  const stubComputerMacRelease = (
+    fx: ReturnType<typeof buildManifestFixture>,
+    opts: { sidecar?: string; omitSidecar?: boolean; failDownload?: boolean } = {},
+  ) => {
+    const lines = [
+      '#!/usr/bin/env bash',
+      // No seed: force computer-mac onto the drift path so the published-release
+      // record path is what runs.
+      'if [[ "$1" == release && "$2" == list ]]; then exit 1; fi',
+      'if [[ "$1" == release && "$2" == download ]]; then',
+    ];
+    if (opts.failDownload) {
+      lines.push('  echo "gh: offline" >&2; exit 1');
+    } else {
+      lines.push(
+        '  dir=""; for ((i=1;i<=$#;i++)); do [[ "${!i}" == --dir ]] && { j=$((i+1)); dir="${!j}"; }; done',
+        "  printf 'computer-helper-zip-bytes\\n' > \"$dir/ComputerHelper.app.zip\"",
+        '  ( cd "$dir" && { command -v sha256sum >/dev/null 2>&1 && sha256sum ComputerHelper.app.zip || shasum -a 256 ComputerHelper.app.zip; } ) > "$dir/ComputerHelper.app.zip.sha256"',
+      );
+      if (!opts.omitSidecar) {
+        lines.push(`  printf '%s\\n' ${JSON.stringify(opts.sidecar ?? '')} > "$dir/computer-mac-input-digest.txt"`);
+      }
+      lines.push('  exit 0');
+    }
+    lines.push('fi', 'exit 1', '');
+    fs.writeFileSync(path.join(fx.fakebin, 'gh'), lines.join('\n'));
     fs.chmodSync(path.join(fx.fakebin, 'gh'), 0o755);
+  };
+
+  it('records computer-mac from its published release when the sidecar proves it was built from this source', () => {
+    const root = tmp('attest-produce-cm-record-');
+    const fx = buildManifestFixture(root);
+    stubComputerMacRelease(fx, { sidecar: fx.manifestDigests['computer-mac'] });
 
     const result = runProduceWithHelpers(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).toBe(0);
+    expect(out).toContain('Recorded computer-mac from published computer-mac/v1.0.0');
 
-    expect(result.status).not.toBe(0);
-    expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
+    const manifestFile = path.join(fx.store, 'release-manifest.json');
+    const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf-8'));
+    // Recorded against the CURRENT source digest and the published binary's sha,
+    // keyed to the helper's own floor version (not the CLI's).
+    expect(manifest.helpers['computer-mac'].inputDigest).toBe(fx.manifestDigests['computer-mac']);
+    expect(manifest.helpers['computer-mac'].helperVersion).toBe('1.0.0');
+    expect(manifest.helpers['computer-mac'].assetDigest).toMatch(/^sha256:[0-9a-f]{64}$/);
+
+    // The consumer accepts it: require checks the recorded input-digest still
+    // matches this tree's source.
+    const required = spawnSync(
+      'bash',
+      [MANIFEST_SCRIPT, 'require', '--file', manifestFile, '--helper', 'computer-mac', '--repo-root', fx.caller],
+      { encoding: 'utf-8' },
+    );
+    expect(required.status, required.stdout + required.stderr).toBe(0);
   });
 
-  it('fails closed when computer-mac drifts with no prior record to carry forward', () => {
-    const root = tmp('attest-produce-manifest-drift-');
+  it('fails closed when the published release was built from a DIFFERENT source (stale binary)', () => {
+    const root = tmp('attest-produce-cm-mismatch-');
     const fx = buildManifestFixture(root);
-    // No seeded manifest at all: computer-mac has no recorded digest, and this
-    // producer never rebuilds it, so it must refuse rather than ship a stale
-    // or missing helper record.
+    // The published sidecar claims a source that is not this tree — recording it
+    // would attest a stale binary against changed source.
+    stubComputerMacRelease(fx, { sidecar: 'sha256:' + 'b'.repeat(64) });
+
     const result = runProduceWithHelpers(fx);
-    expect(result.status).not.toBe(0);
-    expect(result.stdout + result.stderr).toContain('helper computer-mac input changed');
-    expect(result.stdout + result.stderr).toContain('publish-computer-helper-mac.sh');
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).not.toBe(0);
+    expect(out).toContain('built from a DIFFERENT source');
+    expect(out).toContain('publish-computer-helper-mac.sh');
+  });
+
+  it('fails closed when the published release predates the input-digest sidecar', () => {
+    const root = tmp('attest-produce-cm-nosidecar-');
+    const fx = buildManifestFixture(root);
+    stubComputerMacRelease(fx, { omitSidecar: true });
+
+    const result = runProduceWithHelpers(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).not.toBe(0);
+    expect(out).toContain('carries no computer-mac-input-digest.txt');
+    expect(out).toContain('publish-computer-helper-mac.sh');
+  });
+
+  it('fails closed when the published release cannot be downloaded (gh offline)', () => {
+    const root = tmp('attest-produce-cm-dlfail-');
+    const fx = buildManifestFixture(root);
+    stubComputerMacRelease(fx, { failDownload: true });
+
+    const result = runProduceWithHelpers(fx);
+    const out = result.stdout + result.stderr;
+    expect(result.status, out).not.toBe(0);
+    expect(out).toContain('could not be downloaded');
+    expect(out).toContain('publish-computer-helper-mac.sh');
   });
 
   it('skips the helper manifest by default even when computer-mac would fail closed', () => {
