@@ -519,20 +519,25 @@ function renderAttributionBar(meta, handle) {
   // page's own CSS can never wash the bar out (inline beats a page stylesheet);
   // the rest is a namespaced style block with !important on every colour so a
   // broad page rule (span selector to black, etc.) cannot make the text vanish.
+  // FIXED, full-viewport-width chrome (not sticky-inside-body — that inherited the
+  // page's max-width/margins and rendered as a floating box). html padding-top
+  // pushes the whole page down by the bar's height; flex-wrap:nowrap + ellipsis on
+  // the left keeps the bar exactly one line tall so the push height stays correct.
   return '<div class="agents-share-bar" role="contentinfo" aria-label="Sharing details" ' +
     'style="background:#0b0b0c !important;color:#e8e8e8 !important">' +
     '<style>' +
-    '.agents-share-bar{all:initial;position:sticky;top:0;left:0;right:0;z-index:2147483647;box-sizing:border-box;display:flex !important;align-items:center;gap:12px;flex-wrap:wrap;' +
-    'padding:8px 16px !important;background:#0b0b0c !important;color:#e8e8e8 !important;border-bottom:1px solid #24242b !important;' +
-    'font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif !important}' +
+    'html{padding-top:38px !important}' +
+    '.agents-share-bar{all:initial;position:fixed !important;top:0 !important;left:0 !important;right:0 !important;width:100% !important;z-index:2147483647 !important;box-sizing:border-box;display:flex !important;align-items:center;gap:12px;flex-wrap:nowrap;' +
+    'padding:8px 16px !important;background:#0b0b0c !important;color:#e8e8e8 !important;border-bottom:1px solid #23232a !important;box-shadow:0 1px 3px rgba(0,0,0,.35) !important;' +
+    'font:13px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif !important}' +
     '.agents-share-bar *{box-sizing:border-box;font-family:inherit}' +
-    '.agents-share-bar .ash-left{display:flex;align-items:center;gap:8px;min-width:0;color:#cfd3d9 !important}' +
+    '.agents-share-bar .ash-left{flex:1 1 auto;min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:#cfd3d9 !important}' +
     '.agents-share-bar strong{color:#fff !important;font-weight:600}' +
-    '.agents-share-bar .ash-dot{opacity:.4;margin:0 3px}' +
-    '.agents-share-bar .ash-right{margin-left:auto;display:flex;align-items:center;gap:12px}' +
+    '.agents-share-bar .ash-dot{opacity:.4;margin:0 4px}' +
+    '.agents-share-bar .ash-right{flex:none;display:flex;align-items:center;gap:12px}' +
     '.agents-share-bar .ash-date{color:#9096a0 !important}' +
     '.agents-share-bar .ash-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid;font-weight:600;font-size:12px;white-space:nowrap}' +
-    '.agents-share-bar .ash-chip svg{flex:none}' +
+    '.agents-share-bar .ash-chip svg{flex:none;vertical-align:middle}' +
     '</style>' +
     '<span class="ash-left">' + left + '</span>' +
     '<span class="ash-right">' + right + '</span>' +

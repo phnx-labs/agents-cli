@@ -1269,6 +1269,20 @@ describe('attribution bar injected on served HTML pages', () => {
     expect(html).toContain('Anyone at acme.com');
   });
 
+  it('renders as fixed full-viewport-width chrome and pushes page content down (not a floating box)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    // a page whose body is a narrow centered column — the case that previously
+    // constrained the bar into a floating box.
+    await put(worker, env, 'octocat/narrow', '<html><head><style>body{max-width:600px;margin:40px auto}</style></head><body><h1>x</h1></body></html>');
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/narrow'), env);
+    const html = await res.text();
+    expect(html).toContain('position:fixed');
+    expect(html).toContain('width:100%');
+    // pushes the page down so the fixed bar never overlaps content
+    expect(html).toContain('html{padding-top:');
+  });
+
   it('does NOT inject the bar into a non-HTML asset', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
