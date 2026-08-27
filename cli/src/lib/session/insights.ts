@@ -24,6 +24,7 @@
 import type { SessionEvent } from './types.js';
 import { computeSummaryStats, shortenModel } from './render.js';
 import { classifyFileChanges, EDIT_TOOLS, WRITE_TOOLS } from './digest.js';
+import { bucketKey } from './bash-command.js';
 
 /** File extension → language label. Mirrors the set `/insights` attributes by. */
 const LANGUAGE_BY_EXT: Record<string, string> = {
@@ -137,6 +138,20 @@ export interface InsightFacets {
   assistantTurns: number;
   toolCount: number;
   errorCount: number;
+  /**
+   * Shell invocations bucketed by the actual executable + first subcommand token, not
+   * lumped under the harness tool name. `bucketKey` collapses each command to
+   * `git commit`, `gh pr`, `agents ssh`, `find`, `ssh→git pull`, … so the tool mix says
+   * which binary ran, not just that `Bash` did. Cross-harness: keyed on `e.command`,
+   * which the codex parser sets for `exec_command` too, so it is not Claude-`Bash`-only.
+   */
+  bashCommands: Record<string, number>;
+  /**
+   * Same bucketing for the shell command that was running when a tool call failed —
+   * turns one `failed tool loop: Bash` line into per-binary failure counts
+   * (`git reconcile`, `find`, `gh`) so the friction is attributable to a command.
+   */
+  bashCommandFailures: Record<string, number>;
   /** Deterministic evidence buckets used by the actions-forward report. */
   frictionSignals: Record<string, number>;
   correctionSignals: Record<string, number>;
@@ -153,6 +168,7 @@ function emptyFacets(): InsightFacets {
     shellCommandsSeen: 0,
     messageHours: new Array(24).fill(0), userTurns: 0, assistantTurns: 0,
     toolCount: 0, errorCount: 0,
+    bashCommands: {}, bashCommandFailures: {},
     frictionSignals: {}, correctionSignals: {}, automationSignals: {},
   };
 }
@@ -247,6 +263,9 @@ export function computeInsightFacets(
   /** Shortened model id of the last assistant activity (for stall attribution). */
   let lastAssistantModel: string | null = null;
   let lastFailedTool: string | null = null;
+  // Most recent shell command seen per tool, so an `error` event (which carries the
+  // failing tool name but not its command) can attribute the failure to a binary.
+  const lastCommandByTool: Record<string, string> = {};
 
   for (const e of events) {
     const ts = new Date(e.timestamp).getTime();
@@ -270,12 +289,17 @@ export function computeInsightFacets(
         }
         break;
 
-      case 'error':
+      case 'error': {
         bump(f.errorCategories, categorizeError(e.content ?? e.output ?? ''));
         if (e.tool && e.tool === lastFailedTool) bump(f.frictionSignals, `failed tool loop: ${e.tool}`);
+        // Attribute the failure to the binary of that tool's most recent command,
+        // so `Bash` failures split into `git reconcile`/`find`/`gh` rather than one lump.
+        const failedCmd = e.tool ? lastCommandByTool[e.tool] : undefined;
+        if (failedCmd) bump(f.bashCommandFailures, bucketKey(failedCmd));
         lastFailedTool = e.tool ?? null;
         classifyFriction(e.content ?? e.output ?? '', f.frictionSignals);
         break;
+      }
 
       case 'tool_result':
         if (e.success !== false && e.outcome !== 'error') lastFailedTool = null;
@@ -345,6 +369,8 @@ export function computeInsightFacets(
           f.gitCommits += countGitOp(e.command, 'commit');
           f.gitPushes += countGitOp(e.command, 'push');
           classifyAutomation(e.command, f.automationSignals);
+          bump(f.bashCommands, bucketKey(e.command));
+          if (toolName) lastCommandByTool[toolName] = e.command;
         }
         break;
       }
@@ -518,6 +544,8 @@ export function mergeFacets(into: InsightFacets, add: InsightFacets): void {
   for (const [k, v] of Object.entries(add.languages)) bump(into.languages, k, v);
   for (const [k, v] of Object.entries(add.slashCommands)) bump(into.slashCommands, k, v);
   for (const [k, v] of Object.entries(add.errorCategories)) bump(into.errorCategories, k, v);
+  for (const [k, v] of Object.entries(add.bashCommands ?? {})) bump(into.bashCommands, k, v);
+  for (const [k, v] of Object.entries(add.bashCommandFailures ?? {})) bump(into.bashCommandFailures, k, v);
   for (const [k, v] of Object.entries(add.frictionSignals ?? {})) bump(into.frictionSignals, k, v);
   for (const [k, v] of Object.entries(add.correctionSignals ?? {})) bump(into.correctionSignals, k, v);
   for (const [k, v] of Object.entries(add.automationSignals ?? {})) bump(into.automationSignals, k, v);

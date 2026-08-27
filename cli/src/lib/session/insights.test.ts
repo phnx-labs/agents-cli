@@ -64,6 +64,39 @@ describe('computeInsightFacets', () => {
     expect(f.gitPushes).toBe(2);
   });
 
+  it('buckets shell commands by binary + subcommand, not under the harness tool name', () => {
+    const f = computeInsightFacets([
+      tool(0, 'Bash', {}, 'git commit -m "x"'),
+      tool(1, 'Bash', {}, 'git commit -m "y"'),
+      tool(2, 'Bash', {}, 'gh pr create --fill'),
+      tool(3, 'Bash', {}, 'find . -name "*.ts"'),
+      // A path executable and an ssh wrapper resolve by basename / wrapped target.
+      tool(4, 'Bash', {}, '/usr/bin/git status'),
+      tool(5, 'Bash', {}, 'ssh box git pull'),
+      // Cross-harness: codex sets `command` on exec_command, not a Claude `Bash`.
+      tool(6, 'exec_command', {}, 'agents sessions --active'),
+    ], 0);
+    expect(f.bashCommands['git commit']).toBe(2);
+    // Two-level tools bucket by their first subcommand token (gh/agents/git).
+    expect(f.bashCommands['gh pr']).toBe(1);
+    expect(f.bashCommands['find']).toBe(1);
+    expect(f.bashCommands['git status']).toBe(1);
+    expect(f.bashCommands['ssh→git pull']).toBe(1);
+    // The exec_command's command string still buckets — not lost as a non-Bash tool.
+    expect(f.bashCommands['agents sessions']).toBe(1);
+  });
+
+  it('attributes a failed tool call to the binary of that tool’s last command', () => {
+    const f = computeInsightFacets([
+      tool(0, 'Bash', {}, 'find .agents -iname "*eval*"'),
+      { type: 'error', agent: 'claude', timestamp: at(1), tool: 'Bash', content: 'Command failed' },
+      tool(2, 'Bash', {}, 'gh pr list'),
+      { type: 'error', agent: 'claude', timestamp: at(3), tool: 'Bash', content: 'rate limit exceeded' },
+    ], 0);
+    expect(f.bashCommandFailures['find']).toBe(1);
+    expect(f.bashCommandFailures['gh pr']).toBe(1);
+  });
+
   it('derives line deltas from Edit and Write arguments', () => {
     const f = computeInsightFacets([
       tool(0, 'Edit', { file_path: '/r/a.ts', old_string: 'one\ntwo', new_string: 'one\ntwo\nthree\nfour' }),

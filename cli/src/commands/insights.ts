@@ -317,6 +317,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   for (const g of groups) mergeFacets(all, g.facets);
 
   renderCounts('Top tools', topEntries(all.toolCounts, 8), out);
+  // The `Bash`/`exec` bar above says a shell ran; this says WHICH binary — git, gh,
+  // agents, find, ssh→git — so the tool mix is actionable rather than one lump.
+  renderCounts('Shell commands', topEntries(all.bashCommands, 12), out);
   renderCounts('Languages', topEntries(all.languages, 6), out);
   renderCounts('Models', topEntries(all.models, 6), out);
 
@@ -353,6 +356,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
   }
 
   renderCounts('Friction / thrash', topEntries(all.frictionSignals, 10), out);
+  // Which shell binary was failing when a `failed tool loop: Bash` fired — makes the
+  // loop attributable (`git reconcile`, `find`, `gh`) instead of a bare tool name.
+  renderCounts('Shell command failures', topEntries(all.bashCommandFailures, 8), out);
   renderCounts('Dissatisfaction / corrections', topEntries(all.correctionSignals, 10), out);
   renderCounts('Automatable repeats', topEntries(all.automationSignals, 10), out);
   renderCounts('Harness split', harnesses, out);
@@ -369,6 +375,9 @@ function renderReport(groups: GroupReport[], dim: GroupDim, meta: ReportMeta, ac
       out.push(`  ${padToWidth(action.priority, 7)} ${padToWidth(action.category, 11)} ` +
         `${String(action.evidenceCount).padStart(8)}  ${padToWidth(action.sampleSessionIds.join(', '), 25)} ${action.action}`);
     }
+    // This report is aggregate by contract (SES-IF-4c); a sample id above drills into
+    // one session's timeline via the per-session surface, not a single-session mode here.
+    out.push(chalk.gray('  drill into a sample session:  agents sessions trace <id>'));
   }
 
   // Output
