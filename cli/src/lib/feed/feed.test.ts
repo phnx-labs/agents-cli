@@ -225,6 +225,16 @@ describe('feed store', () => {
     expect(noCwd.project).toBeUndefined();
   });
 
+  it('buildDeclaredBlock stamps sourceCursor from ts at write time', () => {
+    const ts = '2026-08-27T12:00:00.000Z';
+    const block = buildDeclaredBlock(
+      { sessionId: 's-cursor', mailboxId: 'm1', host: 'zion', runtime: 'claude' },
+      { text: 'Need a decision?', ts },
+    );
+    expect(block.sourceCursor).toEqual({ lastActivityMs: Date.parse(ts) });
+    expect(block.generation).toBe(ts);
+  });
+
   it.runIf(hasPython)('real hook publishes every question and runtime into the shared feed', () => {
     const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-hook-'));
     const mailbox = path.join(home, '.agents', '.history', 'mailbox', 'session-123');
@@ -286,6 +296,27 @@ describe('feed store', () => {
     const blocks = listBlocks(path.join(home, '.agents', '.history', 'feed'));
     expect(blocks).toHaveLength(1);
     expect(blocks[0].project).toBe('agents-cli');
+  });
+
+  it.runIf(hasPython)('real hook stamps sourceCursor at publish time', () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-feed-hook-cursor-'));
+    const before = Date.now();
+    const result = spawnSync('python3', ['-c', FEED_PUBLISH_HOOK_SCRIPT], {
+      input: JSON.stringify({
+        session_id: 'session-cursor',
+        tool_input: { questions: [{ question: 'Which approach?' }] },
+      }),
+      env: { ...process.env, HOME: home },
+      encoding: 'utf-8',
+    });
+    const after = Date.now();
+    expect(result.status).toBe(0);
+    const blocks = listBlocks(path.join(home, '.agents', '.history', 'feed'));
+    expect(blocks).toHaveLength(1);
+    const cursor = blocks[0].sourceCursor?.lastActivityMs;
+    expect(typeof cursor).toBe('number');
+    expect(cursor).toBeGreaterThanOrEqual(before - 1000);
+    expect(cursor).toBeLessThanOrEqual(after + 1000);
   });
 
   it.runIf(hasPython)('real hook publishes waiting notifications with routing identity', () => {

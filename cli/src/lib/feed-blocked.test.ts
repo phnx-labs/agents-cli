@@ -73,6 +73,7 @@ describe('buildDeclaredBlock', () => {
     expect(read[0].kind).toBe('declared');
     expect(read[0].questions[0].text).toBe('force-push denied by git-guard on PR #1749');
     expect(read[0].sessionId).toBe(AGENT.sessionId);
+    expect(read[0].sourceCursor).toEqual({ lastActivityMs: Date.parse(block.ts) });
   });
 });
 

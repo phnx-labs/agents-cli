@@ -238,6 +238,39 @@ describe('reconcileAttention', () => {
     expect(item).toBeDefined();
   });
 
+  it('a new declared block is not suppressed when the session cursor is unresolvable', () => {
+    // PHNX-3073: coveredByResolution defaults to suppress when the candidate has
+    // no comparable sourceCursor.lastActivityMs. A declared block must stamp its
+    // own cursor at write time so a fresh generation is not buried by a prior
+    // tombstone while lastActivityMs is missing (cloud / remote / index-lag).
+    const ts = '2026-08-27T12:00:00.000Z';
+    const block = buildDeclaredBlock(
+      { sessionId: 'sess-cloud', mailboxId: 'mbx', host: 'zion', runtime: 'claude' },
+      { text: 'Need a new decision?', ts },
+    );
+    expect(block.sourceCursor?.lastActivityMs).toBe(Date.parse(ts));
+
+    const resolution: AttentionResolution = {
+      blockId: blockIdForSession('sess-cloud'),
+      generation: '2026-08-27T11:00:00.000Z',
+      resolvedAt: '2026-08-27T11:05:00.000Z',
+      sourceCursor: { lastActivityMs: Date.parse('2026-08-27T11:00:00.000Z') },
+      reason: 'answered',
+    };
+
+    const item = reconcileAttention({
+      block,
+      // No lastActivityMs — the session-derived fallback cannot prove advancement.
+      session: session({ sessionId: 'sess-cloud', activity: 'working' }),
+      resolution,
+      nowMs: Date.parse(ts),
+    });
+    expect(item).toBeDefined();
+    expect(item!.kind).toBe('declared');
+    expect(item!.key).toBe(`zion/sess-cloud/${ts}`);
+    expect(item!.sourceCursor?.lastActivityMs).toBe(Date.parse(ts));
+  });
+
   it('an open block whose generation was already resolved cannot resurrect', () => {
     // The write-ordering window the plan names: the tombstone is appended BEFORE
     // the open-block view is cleared, so a still-'open' block of the resolved
