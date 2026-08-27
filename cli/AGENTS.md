@@ -32,7 +32,12 @@ spanMs/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
 `whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
 rich per-device `index.json`. The index contains duration/error statistics,
 ranked attention flags, metadata/tool-mix topic buckets, and structured tool
-failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**:
+failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**.
+Group-by dimensions for the console insight bar are pure functions in
+[`src/lib/traces/segments.ts`](src/lib/traces/segments.ts): `deriveAgent`
+(model × harness), `classifyTaskType`, `failureTiming`, and `computeLatency`
+(time-to-first-tool percentiles from `steps[0].startMs`). The sync integrator
+wires them into the shard.
 
 | Field | Type | Description |
 |---|---|---|
