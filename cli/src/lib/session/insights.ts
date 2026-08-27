@@ -302,7 +302,12 @@ export function computeInsightFacets(
       }
 
       case 'tool_result':
-        if (e.success !== false && e.outcome !== 'error') lastFailedTool = null;
+        if (e.success !== false && e.outcome !== 'error') {
+          lastFailedTool = null;
+          // Drop the succeeded tool's remembered command so a later failing call that
+          // carries no command of its own is not misattributed to this stale binary.
+          if (e.tool) delete lastCommandByTool[e.tool];
+        }
         break;
 
       case 'message':

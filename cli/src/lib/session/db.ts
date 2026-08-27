@@ -423,8 +423,8 @@ CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(st
  * re-derives on the next `agents insights` instead of silently reporting stale
  * numbers alongside fresh ones. Same role as RESOURCE_INDEX_VERSION.
  */
-/** Bump when facet extraction changes so cached rows recompute (stalls-by-model v6). */
-export const INSIGHTS_EXTRACTOR_VERSION = 6;
+/** Bump when facet extraction changes so cached rows recompute (shell-command-by-binary v7). */
+export const INSIGHTS_EXTRACTOR_VERSION = 7;
 export const SESSION_TOPIC_EXTRACTOR_VERSION = 1;
 const PREVIEW_EXTRACTOR_VERSION = 1;
 

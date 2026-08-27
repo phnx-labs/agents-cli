@@ -97,6 +97,19 @@ describe('computeInsightFacets', () => {
     expect(f.bashCommandFailures['gh pr']).toBe(1);
   });
 
+  it('does not misattribute a failure to a prior succeeded command with no command of its own', () => {
+    const f = computeInsightFacets([
+      tool(0, 'Bash', {}, 'find . -name test'),
+      { type: 'tool_result', agent: 'claude', timestamp: at(1), tool: 'Bash', success: true } as SessionEvent,
+      // A later Bash call that carries no command string, then fails: the succeeded
+      // `find` must not be credited with this failure.
+      tool(2, 'Bash', {}),
+      { type: 'error', agent: 'claude', timestamp: at(3), tool: 'Bash', content: 'Command failed' },
+    ], 0);
+    expect(f.bashCommandFailures['find']).toBeUndefined();
+    expect(Object.keys(f.bashCommandFailures)).toHaveLength(0);
+  });
+
   it('derives line deltas from Edit and Write arguments', () => {
     const f = computeInsightFacets([
       tool(0, 'Edit', { file_path: '/r/a.ts', old_string: 'one\ntwo', new_string: 'one\ntwo\nthree\nfour' }),
