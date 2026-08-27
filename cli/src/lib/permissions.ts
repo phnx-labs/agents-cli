@@ -156,6 +156,25 @@ export function convertDenyToCodexRules(deny: string[]): string | null {
 }
 
 /**
+ * Write `.codex/rules/agents-deny.rules` to match `deny`, or delete it when
+ * the current set has nothing to forbid. The reader (PHNX-2703) now surfaces
+ * this file, so a later apply with an empty deny must not leave a stale
+ * forbid behind — `agents permissions list codex` would keep reporting it.
+ */
+function syncCodexDenyRules(configDir: string, deny: string[] | undefined): void {
+  const rulesPath = path.join(configDir, 'rules', CODEX_RULES_FILENAME);
+  const rulesContent = deny && deny.length > 0 ? convertDenyToCodexRules(deny) : null;
+  if (rulesContent) {
+    fs.mkdirSync(path.dirname(rulesPath), { recursive: true });
+    fs.writeFileSync(rulesPath, rulesContent, 'utf-8');
+    return;
+  }
+  if (fs.existsSync(rulesPath)) {
+    fs.unlinkSync(rulesPath);
+  }
+}
+
+/**
  * Ensure central permissions directory exists.
  */
 function ensurePermissionsDir(): void {
@@ -1442,15 +1461,7 @@ function applyCodexPermissions(
 
     fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
 
-    // Write .rules file for deny permissions
-    if (set.deny && set.deny.length > 0) {
-      const rulesContent = convertDenyToCodexRules(set.deny);
-      if (rulesContent) {
-        const rulesDir = path.join(configDir, 'rules');
-        fs.mkdirSync(rulesDir, { recursive: true });
-        fs.writeFileSync(path.join(rulesDir, CODEX_RULES_FILENAME), rulesContent, 'utf-8');
-      }
-    }
+    syncCodexDenyRules(configDir, set.deny);
 
     return { success: true };
   } catch (err) {
@@ -1588,15 +1599,7 @@ export function applyPermissionsToVersion(
 
       fs.writeFileSync(configPath, TOML.stringify(config as any), 'utf-8');
 
-      // Write .rules file for deny permissions
-      if (set.deny && set.deny.length > 0) {
-        const rulesContent = convertDenyToCodexRules(set.deny);
-        if (rulesContent) {
-          const rulesDir = path.join(configDir, 'rules');
-          fs.mkdirSync(rulesDir, { recursive: true });
-          fs.writeFileSync(path.join(rulesDir, CODEX_RULES_FILENAME), rulesContent, 'utf-8');
-        }
-      }
+      syncCodexDenyRules(configDir, set.deny);
 
       return { success: true };
     }
