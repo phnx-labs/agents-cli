@@ -70,7 +70,7 @@ export const hooks = {
 };
 
 export default {
-  async fetch(request, env) {
+  async fetch(request, env, ctx) {
     const url = new URL(request.url);
     const path = decodeURIComponent(url.pathname.replace(/^\\/+/, ''));
 
@@ -322,7 +322,10 @@ export default {
       if (segments.length === 2 && url.searchParams.get('revisions') === 'json') {
         const canonical = await env.BUCKET.get(path);
         if (canonical) {
-          const denied = await gateRestrictedGet(request, env, url, canonical);
+          const viewer = await resolveViewer(request, env, url);
+          if (viewer.redirect) return viewer.redirect;
+          if (viewer.error) return viewer.error;
+          const denied = gateVisibility(url, env, canonical, viewer.identity || null);
           if (denied) return denied;
         }
         return renderRevisions(
@@ -341,8 +344,21 @@ export default {
         await env.BUCKET.delete(path);
         return new Response('gone — this link has expired', { status: 410, headers: { 'content-type': 'text/plain' } });
       }
-      const denied = await gateRestrictedGet(request, env, url, obj);
+      // Resolve the viewer ONCE — needed both to gate me/org reads AND to decide
+      // whether THIS viewer OWNS this namespace (the interactive visibility
+      // control below). resolveViewer only redirects/errors on a phoenix_ticket
+      // in the URL, which is meaningful on every visibility, so honoring it here
+      // is safe and lets a ticket landing on any page set the identity cookie.
+      const viewer = await resolveViewer(request, env, url);
+      if (viewer.redirect) return viewer.redirect;
+      if (viewer.error) return viewer.error;
+      const identity = viewer.identity || null;
+      const denied = gateVisibility(url, env, obj, identity);
       if (denied) return denied;
+      // The owner of the namespace (their handle === the first path segment) gets
+      // an interactive visibility control; everyone else keeps the static cue.
+      const isOwner = !!identity && handleFromEmail(identity.email) === firstSeg;
+      const ownerDomain = identity ? emailDomain(identity.email) : '';
       const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
       const headers = new Headers();
       obj.writeHttpMetadata(headers);
@@ -365,7 +381,28 @@ export default {
       // longer matches — drop it rather than serve a lying validator.
       if (ctype.indexOf('text/html') !== -1) {
         const rawHtml = await obj.text();
-        const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg);
+        // Per-slug view counter (RUSH view stats). Stored as a SEPARATE R2 object
+        // (__views/<path>) so it never rewrites the page object — a rewrite would
+        // reset obj.uploaded and corrupt "last updated". The __-prefix key is GET-
+        // blocked for direct requests and lives outside every <user>/ list prefix,
+        // so it never leaks into the gallery/listing/revisions. Count only a real
+        // visitor's page view: not ?raw (an embed/OG fetch), not the owner's own
+        // view, and never HEAD (which returned above). The write rides
+        // ctx.waitUntil so it never blocks the response; the displayed count folds
+        // in the current view so the visitor sees themselves included.
+        const wantsRaw = url.searchParams.get('raw') != null;
+        const counting = !wantsRaw && !isOwner;
+        const storedViews = await readViews(env, path);
+        const views = storedViews + (counting ? 1 : 0);
+        if (counting && ctx && typeof ctx.waitUntil === 'function') {
+          ctx.waitUntil(writeViews(env, path, views));
+        }
+        const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg, {
+          isOwner,
+          ownerDomain,
+          views,
+          uploaded: obj.uploaded,
+        });
         headers.delete('etag');
         return new Response(withBar, { status: 200, headers });
       }
@@ -378,11 +415,14 @@ export default {
       const wantsRaw = url.searchParams.get('raw') != null;
       const kind = viewableAssetKind(ctype);
       if (!wantsRaw && kind && acceptsHtml(request)) {
-        const viewer = renderAssetViewer(url.pathname, kind, obj.customMetadata || {}, firstSeg);
+        const viewerPage = renderAssetViewer(url.pathname, kind, obj.customMetadata || {}, firstSeg, {
+          isOwner,
+          ownerDomain,
+        });
         const vheaders = new Headers(headers);
         vheaders.set('content-type', 'text/html; charset=utf-8');
         vheaders.delete('etag');
-        return new Response(viewer, { status: 200, headers: vheaders });
+        return new Response(viewerPage, { status: 200, headers: vheaders });
       }
       return new Response(obj.body, { status: 200, headers });
     }
@@ -645,6 +685,76 @@ var VIS_ICON = {
   public: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>',
 };
 
+// Eye glyph for the view-count stat; caret for the owner's interactive chip.
+var STAT_EYE_ICON = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+var CARET_ICON = '<svg class="ash-caret" viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m6 9 6 6 6-6"/></svg>';
+
+// The owner-only browser script that turns the visibility chip into a live
+// control. Self-contained IIFE, namespaced under .agents-share-bar; injected only
+// when the viewer owns the namespace. It reads the current level and each level's
+// icon/color/label straight from the rendered menu DOM (no embedded config), then
+// PATCHes the SAME in-place edit route the CLI uses — method PATCH, JSON body
+// { visibility } — with credentials:'include' so the viewer's __share cookie /
+// Phoenix identity rides. Optimistic: flip the chip + spinner, then a green check
+// on 2xx or revert + the server's error text on failure (an org-on-public-inbox
+// 400 surfaces verbatim). The share page sets no CSP, so inline JS is fine.
+var ASH_OWNER_JS = \`(function(){
+  var root = document.querySelector('.agents-share-bar');
+  if(!root) return;
+  var chip = root.querySelector('[data-ash-chip]');
+  var menu = root.querySelector('[data-ash-menu]');
+  var toast = root.querySelector('[data-ash-toast]');
+  if(!chip || !menu || !toast) return;
+  var labelEl = chip.querySelector('[data-ash-label]');
+  var chipIc = chip.querySelector('[data-ash-chip-ic]');
+  var busy = false;
+  function opts(){ return menu.querySelectorAll('[data-ash-opt]'); }
+  function currentKey(){ var s = menu.querySelector('.ash-opt.ash-sel'); return s ? s.getAttribute('data-ash-opt') : ''; }
+  function labelFor(key){ var a = opts(); for(var i=0;i<a.length;i++){ if(a[i].getAttribute('data-ash-opt')===key){ var b = a[i].querySelector('b'); return b ? b.textContent : key; } } return key; }
+  function open(){ menu.classList.add('ash-open'); menu.setAttribute('aria-hidden','false'); }
+  function close(){ menu.classList.remove('ash-open'); menu.setAttribute('aria-hidden','true'); }
+  chip.addEventListener('click', function(e){ e.stopPropagation(); if(menu.classList.contains('ash-open')) close(); else open(); });
+  menu.addEventListener('click', function(e){ e.stopPropagation(); });
+  document.addEventListener('click', close);
+  document.addEventListener('keydown', function(e){ if(e.key==='Escape') close(); });
+  function draw(key){
+    var sel = null, a = opts();
+    for(var i=0;i<a.length;i++){ var on = a[i].getAttribute('data-ash-opt')===key; a[i].classList.toggle('ash-sel', on); if(on) sel = a[i]; }
+    if(!sel) return;
+    var ic = sel.querySelector('.ash-opt-ic');
+    var color = ic ? ic.style.color : '';
+    if(color){ chip.style.color = color; chip.style.borderColor = color + '66'; }
+    if(chipIc && ic) chipIc.innerHTML = ic.innerHTML;
+    var b = sel.querySelector('b');
+    if(labelEl && b) labelEl.textContent = b.textContent;
+  }
+  function say(inner, cls){ toast.innerHTML = inner; toast.className = 'ash-toast ash-show' + (cls ? ' ' + cls : ''); }
+  function fade(ms){ setTimeout(function(){ toast.className = 'ash-toast'; }, ms); }
+  function pick(key){
+    close();
+    var prev = currentKey();
+    if(busy || !key || key===prev) return;
+    busy = true;
+    draw(key);
+    var name = labelFor(key);
+    say('<span class="ash-spin"></span> Saving…');
+    fetch(location.pathname, { method:'PATCH', credentials:'include', headers:{'content-type':'application/json'}, body: JSON.stringify({ visibility: key }) })
+      .then(function(res){ return res.json().then(function(j){ return { ok: res.ok, status: res.status, body: j }; }, function(){ return { ok: res.ok, status: res.status, body: {} }; }); })
+      .then(function(r){
+        busy = false;
+        if(r.ok){ say('<span class="ash-ok">\\u2713</span> Now ' + name, 'ash-good'); fade(1600); }
+        else {
+          draw(prev);
+          var msg = (r.body && r.body.error) ? String(r.body.error) : ('Could not update (HTTP ' + r.status + ')');
+          say('<span class="ash-err">\\u2715</span> ' + msg.replace(/[<>&]/g, ' '), 'ash-bad');
+          fade(4000);
+        }
+      }, function(){ busy = false; draw(prev); say('<span class="ash-err">\\u2715</span> Network error \\u2014 not saved', 'ash-bad'); fade(4000); });
+  }
+  var a = opts();
+  for(var i=0;i<a.length;i++){ (function(el){ el.addEventListener('click', function(e){ e.stopPropagation(); pick(el.getAttribute('data-ash-opt')); }); })(a[i]); }
+})();\`;
+
 function visibilityChip(visibility, orgDomain) {
   if (visibility === 'me') return { icon: VIS_ICON.me, label: 'Only you', color: '#f59e0b' };
   if (visibility === 'org') return { icon: VIS_ICON.org, label: 'Anyone at ' + escapeHtml(orgDomain || 'your organization'), color: '#5b9dff' };
@@ -677,15 +787,92 @@ function renderAvatar(handle, avatarUrl) {
   return '<span class="ash-avatar" style="background:' + bg + ' !important" aria-hidden="true">' + inner + '</span>';
 }
 
-function renderAttributionBar(meta, handle) {
+// A compact relative time for the "last updated" stat: "just now", "2h ago",
+// "3d ago", or an ISO date once past ~30 days. Accepts a Date or a parseable
+// string (R2's obj.uploaded is a Date).
+function relativeTime(when) {
+  var then = when instanceof Date ? when.getTime() : Date.parse(when);
+  if (!then || isNaN(then)) return '';
+  var diff = Date.now() - then;
+  if (diff < 0) diff = 0;
+  var minute = 60000, hour = 3600000, day = 86400000;
+  if (diff < minute) return 'just now';
+  if (diff < hour) return Math.floor(diff / minute) + 'm ago';
+  if (diff < day) return Math.floor(diff / hour) + 'h ago';
+  if (diff < 30 * day) return Math.floor(diff / day) + 'd ago';
+  return new Date(then).toISOString().slice(0, 10);
+}
+
+// The four visibility levels the owner can pick, in menu order. Descriptions
+// mirror the approved mockup. org always appears — a public-inbox owner still
+// sees it and lets the server's 400 drive the failure message (never a hidden
+// client-side rule). orgDomain is the owner's own email domain when known.
+function visibilityLevels(orgDomain) {
+  return [
+    { key: 'public', label: 'Public', color: '#30a46c', icon: VIS_ICON.public, desc: 'Anyone with the link · preview card · listed in your gallery' },
+    { key: 'unlisted', label: 'Unlisted', color: '#9aa0a6', icon: VIS_ICON.unlisted, desc: 'Anyone with the link · no card · hidden from your gallery' },
+    { key: 'me', label: 'Only you', color: '#f59e0b', icon: VIS_ICON.me, desc: 'Sign-in required · only your account can open it' },
+    { key: 'org', label: 'Anyone at ' + escapeHtml(orgDomain || 'your org'), color: '#5b9dff', icon: VIS_ICON.org, desc: 'Anyone signed in with a ' + escapeHtml(orgDomain || 'workspace-domain') + ' account' },
+  ];
+}
+
+function renderVisibilityMenu(current, orgDomain) {
+  var rows = visibilityLevels(orgDomain).map(function (l) {
+    return '<button type="button" class="ash-opt' + (l.key === current ? ' ash-sel' : '') + '" data-ash-opt="' + l.key + '" role="menuitemradio" aria-checked="' + (l.key === current ? 'true' : 'false') + '">' +
+      '<span class="ash-opt-ic" style="color:' + l.color + '">' + l.icon + '</span>' +
+      '<span class="ash-opt-t"><b>' + l.label + '</b><span>' + l.desc + '</span></span>' +
+      '<span class="ash-rd"></span></button>';
+  }).join('');
+  return '<div class="ash-menu" data-ash-menu role="menu" aria-hidden="true"><h4>Who can see this</h4>' + rows + '</div>';
+}
+
+function renderOwnerScript() {
+  return '<script>' + ASH_OWNER_JS + '</script>';
+}
+
+// opts: { isOwner, ownerDomain, views, uploaded } — all optional. isOwner turns
+// the visibility chip into a live control (inline dropdown, Variation A) and
+// injects the owner-only CSS/JS; views/uploaded render the right-side stats
+// cluster. With no opts the bar is exactly today's static strip.
+function renderAttributionBar(meta, handle, opts) {
+  var o = opts || {};
   var cm = meta || {};
-  var chip = visibilityChip(cm.visibility || 'public', cm.org_domain);
+  var visibility = cm.visibility || 'public';
+  var chip = visibilityChip(visibility, cm.org_domain);
   var avatar = renderAvatar(handle, cm.avatar);
   var left = '';
   // The handle is already the public URL namespace, so surfacing it leaks nothing new.
   if (handle) left += 'Shared by <strong>' + escapeHtml(handle) + '</strong>';
   if (cm.agent) left += (left ? '<span class="ash-dot">·</span>' : '') + 'Made with ' + escapeHtml(cm.agent);
-  var right = '<span class="ash-chip" style="color:' + chip.color + ';border-color:' + chip.color + '66">' + chip.icon + '<span>' + chip.label + '</span></span>';
+
+  // Stats cluster (👁 <n> views · updated <rel>) — right side, left of the chip.
+  var stats = '';
+  var statBits = '';
+  if (o.views != null) {
+    statBits += STAT_EYE_ICON + '<b>' + escapeHtml(String(o.views)) + '</b> ' + (Number(o.views) === 1 ? 'view' : 'views');
+  }
+  if (o.uploaded) {
+    var rel = relativeTime(o.uploaded);
+    if (rel) statBits += (statBits ? '<span class="ash-statsep">·</span>' : '') + 'updated <b>' + escapeHtml(rel) + '</b>';
+  }
+  if (statBits) stats = '<span class="ash-stats" title="page stats">' + statBits + '</span>';
+
+  // The visibility chip: an interactive control for the owner, a static cue for
+  // everyone else (unchanged from today).
+  var chipHtml;
+  var menu = '';
+  var script = '';
+  if (o.isOwner) {
+    chipHtml = '<span class="ash-chip ash-chip-own" data-ash-chip tabindex="0" role="button" aria-haspopup="menu" ' +
+      'style="color:' + chip.color + ';border-color:' + chip.color + '66">' +
+      '<span data-ash-chip-ic>' + chip.icon + '</span><span data-ash-label>' + chip.label + '</span>' + CARET_ICON + '</span>';
+    menu = renderVisibilityMenu(visibility, o.ownerDomain);
+    script = renderOwnerScript();
+  } else {
+    chipHtml = '<span class="ash-chip" style="color:' + chip.color + ';border-color:' + chip.color + '66">' + chip.icon + '<span>' + chip.label + '</span></span>';
+  }
+
+  var right = stats + chipHtml;
   if (cm.date) right += '<span class="ash-date">' + escapeHtml(cm.date) + '</span>';
   // The load-bearing background + base colour ride an INLINE style so the host
   // page's own CSS can never wash the bar out (inline beats a page stylesheet);
@@ -713,15 +900,48 @@ function renderAttributionBar(meta, handle) {
     '.agents-share-bar .ash-date{color:#9096a0 !important}' +
     '.agents-share-bar .ash-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid;font-weight:600;font-size:12px;white-space:nowrap}' +
     '.agents-share-bar .ash-chip svg{flex:none;vertical-align:middle}' +
+    '.agents-share-bar .ash-stats{display:inline-flex;align-items:center;gap:5px;color:#9aa0a6 !important;font-size:12px;white-space:nowrap}' +
+    '.agents-share-bar .ash-stats b{color:#c9ced6 !important;font-weight:600}' +
+    '.agents-share-bar .ash-stats svg{flex:none;opacity:.85}' +
+    '.agents-share-bar .ash-statsep{opacity:.35;margin:0 3px}' +
+    (o.isOwner ? OWNER_BAR_CSS : '') +
     '</style>' +
     avatar +
     '<span class="ash-left">' + left + '</span>' +
     '<span class="ash-right">' + right + '</span>' +
-    '</div>';
+    menu +
+    (o.isOwner ? '<div class="ash-toast" data-ash-toast></div>' : '') +
+    '</div>' +
+    script;
 }
 
-function injectAttributionBar(html, meta, handle) {
-  var bar = renderAttributionBar(meta, handle);
+// Owner-only chip/menu/toast styling, added to the bar's <style> only when the
+// viewer owns the namespace. Namespaced under .agents-share-bar with !important
+// so the host page's CSS can't wash it out; z-index rides the bar's own stacking.
+var OWNER_BAR_CSS =
+  '.agents-share-bar .ash-chip-own{cursor:pointer;transition:background .12s}' +
+  '.agents-share-bar .ash-chip-own:hover{background:rgba(255,255,255,.06)}' +
+  '.agents-share-bar .ash-caret{opacity:.6;margin-left:1px;flex:none}' +
+  '.agents-share-bar .ash-menu{position:absolute !important;top:calc(100% + 6px);right:12px;min-width:286px;max-width:calc(100vw - 24px);background:#151517 !important;border:1px solid #2a2a30 !important;border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:6px;z-index:2147483647;display:none;text-align:left}' +
+  '.agents-share-bar .ash-menu.ash-open{display:block}' +
+  '.agents-share-bar .ash-menu h4{margin:6px 8px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#7c8290 !important;font-weight:700}' +
+  '.agents-share-bar .ash-opt{display:flex;width:100%;text-align:left;align-items:flex-start;gap:10px;padding:8px;border:0;background:none;border-radius:8px;cursor:pointer;color:#e8e8e8 !important;font:inherit;font-size:13px}' +
+  '.agents-share-bar .ash-opt:hover{background:rgba(255,255,255,.05)}' +
+  '.agents-share-bar .ash-opt-ic{flex:none;width:26px;height:26px;border-radius:7px;display:inline-flex;align-items:center;justify-content:center;background:rgba(255,255,255,.06)}' +
+  '.agents-share-bar .ash-opt-t{flex:1;min-width:0}' +
+  '.agents-share-bar .ash-opt-t b{display:block;font-size:13px;font-weight:600;color:#f0f1f3 !important}' +
+  '.agents-share-bar .ash-opt-t span{display:block;font-size:11.5px;color:#9096a0 !important;line-height:1.35;margin-top:1px;white-space:normal}' +
+  '.agents-share-bar .ash-rd{flex:none;width:16px;height:16px;border-radius:50%;border:2px solid #4a4f59;margin-top:3px}' +
+  '.agents-share-bar .ash-opt.ash-sel .ash-rd{border-color:#5b9dff;background:radial-gradient(circle at center,#5b9dff 0 5px,transparent 6px)}' +
+  '.agents-share-bar .ash-toast{position:absolute !important;top:calc(100% + 6px);right:12px;max-width:calc(100vw - 24px);background:#151517 !important;border:1px solid #2a2a30 !important;color:#e8e8e8 !important;font-size:12px;padding:7px 12px;border-radius:9px;display:none;align-items:center;gap:7px;z-index:2147483647}' +
+  '.agents-share-bar .ash-toast.ash-show{display:inline-flex}' +
+  '.agents-share-bar .ash-spin{width:12px;height:12px;border:2px solid rgba(255,255,255,.25);border-top-color:#fff;border-radius:50%;animation:ash-sp .6s linear infinite;display:inline-block;flex:none}' +
+  '@keyframes ash-sp{to{transform:rotate(360deg)}}' +
+  '.agents-share-bar .ash-ok{color:#30a46c;font-weight:700}' +
+  '.agents-share-bar .ash-err{color:#ff6b6b;font-weight:700}';
+
+function injectAttributionBar(html, meta, handle, opts) {
+  var bar = renderAttributionBar(meta, handle, opts);
   var m = /<body[^>]*>/i.exec(html);
   if (m) {
     var at = m.index + m[0].length;
@@ -749,11 +969,11 @@ function viewableAssetKind(contentType) {
 // below. The media element points back at THIS url with ?raw so it loads the
 // stored bytes (not the viewer recursively) — and that ?raw fetch re-runs the
 // same me/org gate, so a private asset stays private inside its own viewer.
-function renderAssetViewer(pathname, kind, meta, handle) {
+function renderAssetViewer(pathname, kind, meta, handle, opts) {
   var rawUrl = escapeHtml(pathname + '?raw=1');
   var name = '';
   try { name = decodeURIComponent(pathname.split('/').pop() || 'file'); } catch (e) { name = pathname.split('/').pop() || 'file'; }
-  var bar = renderAttributionBar(meta, handle);
+  var bar = renderAttributionBar(meta, handle, opts);
   var media = '';
   if (kind === 'image') media = '<img src="' + rawUrl + '" alt="' + escapeHtml(name) + '">';
   else if (kind === 'video') media = '<video src="' + rawUrl + '" controls playsinline></video>';
@@ -872,17 +1092,45 @@ function isIdentityGated(visibility) {
   return visibility === 'me' || visibility === 'org';
 }
 
-async function gateRestrictedGet(request, env, url, obj) {
+// Gate a me/org read given the ALREADY-RESOLVED viewer identity. Pure/sync: the
+// caller resolves the viewer once (it also needs the identity for the ownership
+// check) and both the page GET and the ?revisions=json path share this gate.
+function gateVisibility(url, env, obj, identity) {
   const visibility = (obj.customMetadata && obj.customMetadata.visibility) || 'public';
   if (!isIdentityGated(visibility)) return null;
-  const viewer = await resolveViewer(request, env, url);
-  if (viewer.redirect) return viewer.redirect;
-  if (viewer.error) return viewer.error;
-  if (!viewer.identity) return bounceToLogin(url, env);
-  if (!viewerMayRead(visibility, obj.customMetadata, viewer.identity)) {
+  if (!identity) return bounceToLogin(url, env);
+  if (!viewerMayRead(visibility, obj.customMetadata, identity)) {
     return new Response('not found', { status: 404, headers: { 'content-type': 'text/plain' } });
   }
   return null;
+}
+
+// Per-slug view counter, stored as a SEPARATE R2 object under __views/<path> so
+// counting a view never rewrites the page object (which would reset its uploaded
+// timestamp and corrupt "last updated"). Best-effort telemetry: a read/write
+// failure must never break page serving, so both degrade to a no-op rather than
+// throwing. R2 has no atomic increment, so two simultaneous views can race and
+// lose a count — acceptable for an approximate visitor count.
+async function readViews(env, path) {
+  try {
+    const obj = await env.BUCKET.get('__views/' + path);
+    if (!obj) return 0;
+    const raw = typeof obj.text === 'function' ? await obj.text() : '';
+    const n = parseInt(raw, 10);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+async function writeViews(env, path, count) {
+  try {
+    await env.BUCKET.put('__views/' + path, String(count), {
+      httpMetadata: { contentType: 'text/plain; charset=utf-8' },
+    });
+  } catch {
+    // best-effort: a failed counter write must never surface to the visitor
+  }
 }
 
 function viewerMayRead(visibility, meta, identity) {
@@ -1056,17 +1304,28 @@ async function defaultVerifyPhoenixToken(request, env) {
   return { userId: body.userId, email: typeof body.email === 'string' ? body.email : '' };
 }
 
-// Two legitimate principals: WRITE_TOKEN equality first (admin/BYO), otherwise
-// the bearer is a Phoenix token and we verify it. 401 when neither authenticates.
+// Write principals, in order: WRITE_TOKEN equality (admin/BYO), then a Phoenix
+// bearer, then the signed-in viewer's __share cookie. The cookie is an
+// HMAC-signed {userId,email} proof (identityFromCookie verifies it), which lets
+// the shared page's inline visibility control PATCH with credentials:'include'
+// and no bearer — the browser has the identity cookie, not a token. It cannot be
+// abused cross-site: the cookie is SameSite=Lax, which blocks it from riding a
+// cross-origin non-GET (CSRF), and namespace/owner enforcement on PUT/PATCH/
+// DELETE still confines a cookie holder to their own pages. 401 when none apply.
 async function authorizeWrite(request, env) {
   const presented = (request.headers.get('authorization') || '').replace(/^Bearer\\s+/i, '');
-  if (!presented) return { error: json({ error: 'unauthorized' }, 401) };
-  if (env.WRITE_TOKEN && safeEqual(presented, env.WRITE_TOKEN)) {
-    return { kind: 'byo', owner: env.SHARE_NAMESPACE || 'byo' };
+  if (presented) {
+    if (env.WRITE_TOKEN && safeEqual(presented, env.WRITE_TOKEN)) {
+      return { kind: 'byo', owner: env.SHARE_NAMESPACE || 'byo' };
+    }
+    const claims = await hooks.verifyPhoenixToken(request, env);
+    if (claims && typeof claims.userId === 'string' && claims.userId) {
+      return { kind: 'phoenix', owner: claims.userId, email: typeof claims.email === 'string' ? claims.email : '' };
+    }
   }
-  const claims = await hooks.verifyPhoenixToken(request, env);
-  if (claims && typeof claims.userId === 'string' && claims.userId) {
-    return { kind: 'phoenix', owner: claims.userId, email: typeof claims.email === 'string' ? claims.email : '' };
+  const cookieId = await identityFromCookie(request, env);
+  if (cookieId && cookieId.userId) {
+    return { kind: 'phoenix', owner: cookieId.userId, email: typeof cookieId.email === 'string' ? cookieId.email : '' };
   }
   return { error: json({ error: 'unauthorized' }, 401) };
 }

@@ -1732,3 +1732,215 @@ describe('viewer wrapper for non-HTML assets', () => {
     expect(await owner.text()).toContain('agents-share-bar');
   });
 });
+
+describe('owner interactive visibility control + page stats (bar live)', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+    vi.useRealTimers();
+  });
+
+  // A minimal ExecutionContext: collect waitUntil promises so a test can await
+  // the background counter write the same way the Workers runtime settles it.
+  function makeCtx() {
+    const tasks: Array<Promise<unknown>> = [];
+    return {
+      ctx: { waitUntil: (p: Promise<unknown>) => { tasks.push(Promise.resolve(p)); } },
+      settle: () => Promise.all(tasks),
+    };
+  }
+
+  async function putAsPhoenix(
+    worker: any,
+    env: any,
+    key: string,
+    body: string,
+    identity: { userId: string; email: string },
+    visibility: 'public' | 'unlisted' | 'me' | 'org',
+  ) {
+    worker.hooks.verifyPhoenixToken = async () => identity;
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = env.PHOENIX_ID_BASE || 'https://phoenix.test';
+    const res = await worker.default.fetch(
+      new Request(`https://share.test/${key}`, {
+        method: 'PUT',
+        headers: { authorization: 'Bearer phoenix', 'content-type': 'text/html; charset=utf-8', 'x-share-visibility': visibility },
+        body,
+      }),
+      env,
+    );
+    expect(res.status).toBe(200);
+  }
+
+  it('owner GET renders the inline dropdown + PATCH-calling JS; non-owner and anonymous GETs get the static cue only', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'octocat/report', '<html><body><h1>the page</h1></body></html>', { userId: 'u1', email: 'octocat@acme.com' }, 'public');
+
+    // Owner (viewer handle === namespace) — the interactive control.
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@acme.com' });
+    const ownerHtml = await (await worker.default.fetch(new Request('https://share.test/octocat/report', { headers: { authorization: 'Bearer p' } }), env)).text();
+    expect(ownerHtml).toContain('agents-share-bar');
+    expect(ownerHtml).toContain('data-ash-menu');          // the dropdown menu
+    expect(ownerHtml).toContain('data-ash-chip');          // interactive chip
+    expect(ownerHtml).toContain('data-ash-opt="public"');  // all four levels
+    expect(ownerHtml).toContain('data-ash-opt="unlisted"');
+    expect(ownerHtml).toContain('data-ash-opt="me"');
+    expect(ownerHtml).toContain('data-ash-opt="org"');
+    expect(ownerHtml).toContain("method:'PATCH'");          // the PATCH-calling JS
+    expect(ownerHtml).toContain("credentials:'include'");
+    // org is always offered — a public-inbox owner still sees it and lets the
+    // server's 400 drive the failure (no hidden client-side rule).
+    expect(ownerHtml).toContain('data-ash-opt="org"');
+
+    // A different signed-in viewer is NOT the owner — static cue, no control.
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u2', email: 'bob@acme.com' });
+    const otherHtml = await (await worker.default.fetch(new Request('https://share.test/octocat/report', { headers: { authorization: 'Bearer b' } }), env)).text();
+    expect(otherHtml).toContain('agents-share-bar');
+    expect(otherHtml).toContain('Public');
+    expect(otherHtml).not.toContain('data-ash-menu');
+    expect(otherHtml).not.toContain("method:'PATCH'");
+
+    // Anonymous — same static cue.
+    worker.hooks.verifyPhoenixToken = async () => null;
+    const anonHtml = await (await worker.default.fetch(new Request('https://share.test/octocat/report'), env)).text();
+    expect(anonHtml).toContain('agents-share-bar');
+    expect(anonHtml).not.toContain('data-ash-menu');
+    expect(anonHtml).not.toContain('data-ash-chip');
+    expect(anonHtml).not.toContain("method:'PATCH'");
+  });
+
+  it('a visibility change through the same PATCH route the bar calls updates the chip on the next GET', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await putAsPhoenix(worker, env, 'octocat/plan', '<html><body>plan</body></html>', { userId: 'u1', email: 'octocat@acme.com' }, 'public');
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@acme.com' });
+
+    const before = await (await worker.default.fetch(new Request('https://share.test/octocat/plan', { headers: { authorization: 'Bearer p' } }), env)).text();
+    expect(before).toContain('data-ash-label>Public<');
+
+    // Exactly what the bar's JS sends: PATCH with a JSON { visibility } body.
+    const patch = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer p', 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'unlisted' }),
+    }), env);
+    expect(patch.status).toBe(200);
+    expect(await patch.json()).toMatchObject({ visibility: 'unlisted', previousVisibility: 'public' });
+
+    const after = await (await worker.default.fetch(new Request('https://share.test/octocat/plan', { headers: { authorization: 'Bearer p' } }), env)).text();
+    expect(after).toContain('data-ash-label>Unlisted<');
+    expect(after).not.toContain('data-ash-label>Public<');
+  });
+
+  it('authenticates the bar PATCH by the __share cookie alone (no bearer) — the credentials:include path', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    await putAsPhoenix(worker, env, 'alice/plan', '<html><body>p</body></html>', { userId: 'alice', email: 'alice@acme.com' }, 'me');
+
+    // Redeem a ticket to obtain the signed __share cookie a browser would carry.
+    worker.hooks.verifyPhoenixToken = async () => null;
+    globalThis.fetch = (async () => new Response(JSON.stringify({ userId: 'alice', email: 'alice@acme.com' }), { status: 200 })) as typeof fetch;
+    const redeem = await worker.default.fetch(new Request('https://share.test/alice/plan?phoenix_ticket=tix'), env);
+    expect(redeem.status).toBe(302);
+    const setCookie = (typeof redeem.headers.getSetCookie === 'function' ? redeem.headers.getSetCookie()[0] : redeem.headers.get('set-cookie')) || '';
+    const cookie = setCookie.split(';')[0]!;
+    globalThis.fetch = originalFetch;
+
+    // PATCH with ONLY the cookie — no Authorization header — must succeed.
+    const patch = await worker.default.fetch(new Request('https://share.test/alice/plan', {
+      method: 'PATCH',
+      headers: { cookie, 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'unlisted' }),
+    }), env);
+    expect(patch.status).toBe(200);
+    expect(store.get('alice/plan')?.customMetadata.visibility).toBe('unlisted');
+  });
+
+  it('surfaces the server error text when the change is rejected (org on a public inbox)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@gmail.com' });
+    await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PUT',
+      headers: { authorization: 'Bearer p', 'content-type': 'text/html', 'x-share-visibility': 'public' },
+      body: '<html><body>x</body></html>',
+    }), env);
+    // The very error the bar reverts on and shows: org from a public inbox 400s.
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/plan', {
+      method: 'PATCH',
+      headers: { authorization: 'Bearer p', 'content-type': 'application/json' },
+      body: JSON.stringify({ visibility: 'org' }),
+    }), env);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: 'org visibility cannot use a public email domain', domain: 'gmail.com' });
+  });
+
+  it('counts a visitor view into __views/<path>, excludes owner/?raw/HEAD, and never leaks the counter key', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    await put(worker, env, 'octocat/live', '<html><body>live</body></html>');
+
+    // Two anonymous visitor GETs each increment the separate counter object.
+    for (let i = 0; i < 2; i++) {
+      const c = makeCtx();
+      await worker.default.fetch(new Request('https://share.test/octocat/live'), env, c.ctx);
+      await c.settle();
+    }
+    expect(store.get('__views/octocat/live')?.body.toString()).toBe('2');
+    // The page object itself was never rewritten (its uploaded stays intact).
+    expect(Array.from(store.keys()).filter((k) => k.startsWith('octocat/live/rev-'))).toEqual([]);
+
+    // A third visitor GET shows the current count folding in this view.
+    const c3 = makeCtx();
+    const html3 = await (await worker.default.fetch(new Request('https://share.test/octocat/live'), env, c3.ctx)).text();
+    await c3.settle();
+    expect(html3).toContain('<b>3</b> views');
+    expect(store.get('__views/octocat/live')?.body.toString()).toBe('3');
+
+    // Owner GET does NOT increment (the count reflects real visitors).
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@acme.com' });
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    const co = makeCtx();
+    await worker.default.fetch(new Request('https://share.test/octocat/live', { headers: { authorization: 'Bearer p' } }), env, co.ctx);
+    await co.settle();
+    expect(store.get('__views/octocat/live')?.body.toString()).toBe('3');
+    worker.hooks.verifyPhoenixToken = async () => null;
+
+    // ?raw (embed/OG fetch) does not increment.
+    const cr = makeCtx();
+    await worker.default.fetch(new Request('https://share.test/octocat/live?raw=1'), env, cr.ctx);
+    await cr.settle();
+    expect(store.get('__views/octocat/live')?.body.toString()).toBe('3');
+
+    // HEAD does not increment.
+    const ch = makeCtx();
+    await worker.default.fetch(new Request('https://share.test/octocat/live', { method: 'HEAD' }), env, ch.ctx);
+    await ch.settle();
+    expect(store.get('__views/octocat/live')?.body.toString()).toBe('3');
+
+    // The counter key never appears in the gallery / JSON listing / revisions...
+    const listing = await (await worker.default.fetch(new Request('https://share.test/octocat?format=json'), env)).json();
+    expect(listing.objects.map((o: any) => o.slug)).toEqual(['live']);
+    expect(JSON.stringify(listing)).not.toContain('__views');
+    const gallery = await (await worker.default.fetch(new Request('https://share.test/octocat'), env)).text();
+    expect(gallery).not.toContain('__views');
+    const revs = await (await worker.default.fetch(new Request('https://share.test/octocat/live?revisions=json'), env)).json();
+    expect(JSON.stringify(revs)).not.toContain('__views');
+
+    // ...and a direct GET of the counter key is blocked by its __ prefix.
+    const direct = await worker.default.fetch(new Request('https://share.test/__views/octocat/live'), env);
+    expect(direct.status).toBe(404);
+  });
+
+  it('renders a relative "updated" time in the stats cluster from the object uploaded timestamp', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/fresh', '<html><body>x</body></html>');
+    const c = makeCtx();
+    const html = await (await worker.default.fetch(new Request('https://share.test/octocat/fresh'), env, c.ctx)).text();
+    await c.settle();
+    expect(html).toContain('updated <b>just now</b>');
+  });
+});

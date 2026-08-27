@@ -110,6 +110,37 @@ Every HTML page also carries an always-on **attribution bar** injected at serve
 time that shows the visibility as a visual cue; `?raw` does not strip it
 (`worker-template.ts:366`).
 
+The bar also carries a right-side **stats cluster** — `👁 <n> views · updated
+<rel>` — and, for the page **owner**, a **live visibility control**
+(`renderAttributionBar`, `worker-template.ts`):
+
+- **Views** are a per-slug visitor count kept in a **separate** R2 object at
+  `__views/<user>/<slug>`, incremented on each canonical HTML page view via
+  `ctx.waitUntil` so it never blocks the response and never rewrites the page
+  object (a rewrite would reset `uploaded` and corrupt "last updated"). The
+  owner's own views and `?raw`/embed fetches are **not** counted, so the number
+  reflects real visitors. The `__`-prefix key is GET-blocked for direct requests
+  and lives outside every `<user>/` list prefix, so it never appears in the
+  gallery, JSON listing, or revisions (`readViews`/`writeViews`,
+  `worker-template.ts`).
+- **Last updated** is the object's `uploaded` timestamp rendered as a compact
+  relative time ("just now" / "2h ago" / "3d ago" / an ISO date past ~30 days).
+- **Owner control.** When the requesting viewer OWNS the namespace — resolved
+  with the existing `resolveViewer` and `handleFromEmail(viewer.email) ===`
+  the namespace handle — the visibility chip becomes an inline dropdown of the
+  four levels. Selecting one PATCHes the **same in-place edit route** as
+  `share visibility` (JSON `{ visibility }` body) with `credentials:'include'`,
+  so the viewer's `__share` cookie / Phoenix identity authenticates it
+  (`authorizeWrite` accepts that HMAC-signed cookie as a write principal; it is
+  `SameSite=Lax`, so it can't ride a cross-site PATCH). The chip flips
+  optimistically with a spinner, then a green check on success or reverts and
+  shows the **server's** error text on failure (e.g. org from a public-inbox
+  domain 400s). Everyone else keeps the static read-only cue.
+
+All of this is a pure Worker-template change, so a deployed endpoint reads
+`outdated` until its owner redeploys with `agents artifacts share update` (no new
+bindings — it reuses R2 and the existing PATCH route).
+
 ## Listing hidden pages — `share list --scope` / `--all`
 
 By default `agents artifacts share list` mirrors the **public gallery** — it lists

@@ -1093,7 +1093,7 @@ describe('renderWorkerScript', () => {
   });
   it('is a module Worker (default export fetch)', () => {
     expect(src).toContain('export default');
-    expect(src).toContain('async fetch(request, env)');
+    expect(src).toContain('async fetch(request, env, ctx)');
   });
 
   it('supports per-user namespaces and renders a gallery at /<user>', async () => {
