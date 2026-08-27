@@ -367,10 +367,6 @@
 
 ## 1.22.50
 
-### Added
-
-- **`agents artifacts share edit` updates a published page's label and metadata without rewriting its body (PHNX-3278).** `--label` / `--remove-label` and `--meta` / `--replace-meta` / `--remove-meta` PATCH the Worker; publication time, visibility, expiry, provenance, cover, and revisions stay put. `share list --meta key=value` filters the listing. Edited labels and metadata values go through the same email/credential scan as publish (`--force` to bypass). A concurrent republish during the edit returns 409 instead of rolling the body back. Phoenix edits fail closed when the object has no owner stamp.
-
 ### Fixed
 
 - **Teams now persist observed teammate failure evidence and keep independent DAG branches moving.** Placement, local/remote launch, cloud dispatch, dependency, and process-exit failures carry a stable code, sanitized message, exit code, retryability, and observation time in `teams status` text/JSON. A runnable node with a durable placement failure fails independently; a node blocked only by pool capacity or load stays pending with retryable evidence so a later wave can launch it. Descendants name failed or missing `--after` blockers instead of spinning until `--max-waves`. `teams start` (no `--watch`) reports teammates that failed during the wave in a `Failed this wave` section (JSON: `failed[]` with evidence) and exits non-zero when a wave produced only failures. Because a failed launch now keeps its record (evidence) instead of deleting it, re-running the identical `teams add --name <name>` after a failure requires `teams remove <team> <name>` first.
