@@ -450,7 +450,8 @@ CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(st
  */
 /** Bump when facet extraction changes so cached rows recompute (shell-command-by-binary v7). */
 export const INSIGHTS_EXTRACTOR_VERSION = 7;
-export const SESSION_TOPIC_EXTRACTOR_VERSION = 1;
+/** Bump when classifyTopic's output changes so cached topics recompute (human task taxonomy v2). */
+export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
 const PREVIEW_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
