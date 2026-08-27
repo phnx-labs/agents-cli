@@ -132,7 +132,7 @@ could not be confirmed at all.
 | Uzi | 581 | MIT | stale since 2025-06-04 | none |
 | **Terragon** | **256** | Apache-2.0 | **shut down 2026-02-09** | **$25 / $50 per mo** |
 | Sculptor (Imbue) | 218 | MIT | alive | free beta |
-| **agi-cli** | **15** | Apache-2.0 | alive, pushed today | none |
+| **agi-cli** | **15** | FSL-1.1-Apache-2.0 | alive, pushed today | none |
 
 ## Figure
 

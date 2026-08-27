@@ -7,7 +7,7 @@
  * a GitHub issue) hears nothing at all. So a post can also be mirrored outward.
  *
  * Sinks are **argv templates from config**, never hardcoded integrations. This
- * CLI ships Apache-2.0 and must not depend on one person's tracker or messaging
+ * CLI ships under FSL-1.1-Apache-2.0 and must not depend on one person's tracker or messaging
  * stack; declaring `[linear, update, "{ticket}", --comment, "{text}"]` in
  * `agents.yaml` keeps the coupling in the operator's config where it belongs,
  * and lets someone else point the same mechanism at `jira`, `gh issue comment`,

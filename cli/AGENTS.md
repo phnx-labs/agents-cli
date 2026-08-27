@@ -12,7 +12,7 @@ This is the **internal architecture** map. The user-facing feature tour is
 plugins, browser, secrets, routines, pty). This file covers the design choices,
 module map, build, and release mechanics the README does not.
 
-> Phoenix Labs OSS · Apache-2.0. Repo-wide policy (conventions, code review, security)
+> Phoenix Labs · FSL-1.1-Apache-2.0. Repo-wide policy (conventions, code review, security)
 > lives in the root [AGENTS.md](../AGENTS.md).
 
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for

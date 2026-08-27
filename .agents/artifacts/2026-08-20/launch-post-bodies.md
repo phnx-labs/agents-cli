@@ -83,7 +83,7 @@ Numbers in the bodies below, and where each comes from:
 | --- | --- |
 | 16 harnesses | `apps/cli/AGENTS.md` harness parity list |
 | 3,703 session transcripts | `find ~/.agents/.history/versions -name '*.jsonl'` |
-| Apache-2.0 | `LICENSE` |
+| FSL-1.1-Apache-2.0 | `LICENSE` |
 | **Several accounts per harness, headroom-scheduled** | `agents view` output — **but see the correction below; this one does not currently hold** |
 
 Every Show HN statistic quoted in this document (title-feature means, the 65-85
@@ -171,7 +171,7 @@ Some specifics:
 - Several accounts of the same harness rotate under one policy, picked by
   remaining headroom.
 
-Apache-2.0. It is a power-user tool and the docs assume you already run agents
+Source-available under FSL-1.1-Apache-2.0; each release becomes Apache-2.0 after two years. It is a power-user tool and the docs assume you already run agents
 daily. Happy to go into the scheduling or the session model.
 ```
 
@@ -267,7 +267,7 @@ It is harness-agnostic — it drives Claude, Codex, and Gemini, but it will driv
 local model through OpenCode just as happily, which is the configuration I would
 actually recommend if you are trying to keep everything on your own metal.
 
-Apache-2.0. Genuinely interested in what breaks for people running fully local.
+Source-available under FSL-1.1-Apache-2.0; each release becomes Apache-2.0 after two years. Genuinely interested in what breaks for people running fully local.
 ```
 
 ### Sequence

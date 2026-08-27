@@ -19,4 +19,4 @@ npm install -g @phnx-labs/agents-cli
 
 Docs and source: <https://github.com/phnx-labs/agi-cli>
 
-Apache-2.0 © Phoenix Labs
+FSL-1.1-Apache-2.0 © Phoenix Labs. Each release becomes Apache-2.0 after two years.
