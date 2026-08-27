@@ -251,6 +251,11 @@ testless:
   - cli/scripts/build-keychain-helper.sh
   - cli/scripts/companion-shim/bin/agents.js
   - cli/scripts/companion-shim/scripts/postinstall.js
+  # One-time per-box fleet fix (PHNX-3285): re-enables unprivileged userns so
+  # codex's Linux sandbox works. It mutates host security posture under sudo, so
+  # it can't be unit-tested here; its detection logic lives in linux-userns.ts,
+  # which IS tested.
+  - cli/scripts/enable-codex-sandbox.sh
   - cli/scripts/headless-sign-context.sh
   - cli/scripts/install-helper.js
   - cli/scripts/release-changelog.ts
