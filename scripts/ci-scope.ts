@@ -239,32 +239,39 @@ export function classifyPackageJsonChange(
 // as an add of the new path PLUS a delete of the old one, so a pure structural
 // move (the #3033 flatten renamed ~2100 files 100%) read as ~2100 *changed* files
 // — selecting suite=cli-full and tripping zero-selection on every moved source
-// that carried no test at its new path. Reading rename-aware `--name-status`
-// instead, a 100%-similarity `R` pair is a move, not a change: it selects nothing.
-// A rename WITH edits (similarity < 100) changed content at the new path, so the
-// new path is selected; a copy introduces new content at its destination, so it
-// is selected too.
-export function parseRenameAwareNameStatus(z: string): string[] {
+// that carried no test at its new path. A 100%-similarity move is not a change,
+// so it should select nothing.
+//
+// Parses `git diff --raw -z` (NOT `--name-status`): the raw metadata carries the
+// old and new file MODE, which `--name-status` hides. A `git mv foo.sh bar.sh &&
+// chmod +x bar.sh` is `R100` by content-similarity but flips the executable bit
+// — a real change to a script this repo runs directly. So the destination is
+// selected whenever content changed (similarity < 100) OR the mode changed, and
+// only a truly identical move (same content AND same mode) selects nothing.
+export function parseRenameAwareRawDiff(z: string): string[] {
   const tokens = z.split('\0');
   const out: string[] = [];
   let i = 0;
   while (i < tokens.length) {
-    const status = tokens[i];
-    if (!status) {
+    const meta = tokens[i];
+    // Each record's metadata is one field: ":<oldmode> <newmode> <oldsha> <newsha> <status>".
+    if (!meta || meta[0] !== ':') {
       i++;
       continue;
     }
+    const parts = meta.slice(1).split(' ');
+    const oldMode = parts[0];
+    const newMode = parts[1];
+    const status = parts[4] ?? '';
     const code = status[0];
     if (code === 'R' || code === 'C') {
-      // `R<score>\0<old>\0<new>` — a rename/copy consumes three fields.
+      // A rename/copy carries two paths: `<meta>\0<old>\0<new>`.
       const score = Number.parseInt(status.slice(1), 10);
       const to = tokens[i + 2];
       i += 3;
-      // A pure move (100%) changed no content — select nothing for the pair. A
-      // copy (C) or a rename-with-edits (score < 100) changed content at `to`.
-      if (to && (code === 'C' || !(score === 100))) out.push(to);
+      if (to && (score < 100 || oldMode !== newMode)) out.push(to);
     } else {
-      // A / M / D / T: `<status>\0<path>`.
+      // A / M / D / T carry one path: `<meta>\0<path>`.
       const path = tokens[i + 1];
       i += 2;
       if (path) out.push(path);
@@ -281,9 +288,11 @@ export function changedFilesBetween(base: string, head: string, cwd = process.cw
       // Rename-aware: git pairs an add+delete it recognizes (default 50%
       // similarity) as a single `R<score>` entry, so a structural move stops
       // reading as two changed files. Sub-threshold moves stay add+delete, which
-      // is correct — they really did change.
+      // is correct — they really did change. `--raw` (not `--name-status`) is
+      // what carries the per-file mode, so a rename that also flips +x is not
+      // mistaken for a no-op move.
+      '--raw',
       '--find-renames',
-      '--name-status',
       '--diff-filter=ACMRTD',
       '-z',
       `${base}...${head}`,
@@ -295,7 +304,7 @@ export function changedFilesBetween(base: string, head: string, cwd = process.cw
   if (proc.exitCode !== 0) {
     throw new Error(Buffer.from(proc.stderr).toString('utf8').trim());
   }
-  return parseRenameAwareNameStatus(Buffer.from(proc.stdout).toString('utf8'));
+  return parseRenameAwareRawDiff(Buffer.from(proc.stdout).toString('utf8'));
 }
 
 export function trackedFiles(cwd: string): string[] {

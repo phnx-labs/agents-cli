@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -23,7 +24,7 @@ import {
   formatGitHubOutputs,
   loadOwnershipManifest,
   matchGlob,
-  parseRenameAwareNameStatus,
+  parseRenameAwareRawDiff,
   planIsFailing,
   proofFromPlan,
   relatedTestFiles,
@@ -498,23 +499,24 @@ describe('selectImpact policy', () => {
 });
 
 describe('rename-aware changed files (PHNX-3200)', () => {
-  test('parseRenameAwareNameStatus: R100 selects nothing; edited rename + copy select the new path', () => {
+  test('parseRenameAwareRawDiff: a same-mode R100 selects nothing; edits and a mode flip select the new path', () => {
+    // `git diff --raw -z` records: ":<oldmode> <newmode> <oldsha> <newsha> <status>" then path(s).
     const z = [
-      'R100', 'cli/src/old.ts', 'cli/lib/old.ts', // pure move -> nothing
-      'M', 'cli/src/b.ts', // modified -> b
-      'R080', 'cli/src/c.ts', 'cli/lib/c.ts', // rename with edits -> new path
-      'A', 'cli/src/d.ts', // added -> d
-      'D', 'cli/src/e.ts', // deleted -> e (consumer exempts it from zero-selection)
-      'C100', 'cli/src/f.ts', 'cli/src/f-copy.ts', // copy -> the new path
+      ':100644 100644 aaa bbb R100', 'cli/src/old.ts', 'cli/lib/old.ts', // pure move, same mode -> nothing
+      ':100644 100644 aaa bbb M', 'cli/src/b.ts', // modified -> b
+      ':100644 100644 aaa bbb R080', 'cli/src/c.ts', 'cli/lib/c.ts', // rename with edits -> new
+      ':000000 100644 000 ddd A', 'cli/src/d.ts', // added -> d
+      ':100644 000000 eee 000 D', 'cli/src/e.ts', // deleted -> e (consumer exempts from zero-selection)
+      ':100644 100755 fff ggg R100', 'cli/scripts/g.sh', 'cli/lib/g.sh', // move + chmod +x: R100 by content, mode flipped -> new
       '',
     ].join('\0');
-    // Emitted in source order; the R100 move contributes nothing.
-    expect(parseRenameAwareNameStatus(z)).toEqual([
+    // Source order; the same-mode R100 move contributes nothing, the +x move does.
+    expect(parseRenameAwareRawDiff(z)).toEqual([
       'cli/src/b.ts',
       'cli/lib/c.ts',
       'cli/src/d.ts',
       'cli/src/e.ts',
-      'cli/src/f-copy.ts',
+      'cli/lib/g.sh',
     ]);
   });
 
@@ -550,6 +552,26 @@ describe('rename-aware changed files (PHNX-3200)', () => {
       expect(changed).not.toContain('cli/src/foo.ts');
       expect(changed).not.toContain('cli/lib/foo.ts');
       expect(changed).toEqual([]);
+    } finally {
+      rmSync(dirname(repo), { recursive: true, force: true });
+    }
+  });
+
+  test('a rename that also flips the executable bit selects the new path (R100 by content, mode changed)', () => {
+    // git reports this as R100 (content identical), but chmod +x is a real change
+    // to a script the repo runs directly -- --name-status would have hidden it.
+    const { repo, base, head } = initRenameHistory(
+      (r) => writeFixture(r, 'cli/scripts/tool.sh', '#!/usr/bin/env bash\necho hi\n'),
+      (r) => {
+        mkdirSync(join(r, 'cli/lib'), { recursive: true });
+        renameSync(join(r, 'cli/scripts/tool.sh'), join(r, 'cli/lib/tool.sh'));
+        chmodSync(join(r, 'cli/lib/tool.sh'), 0o755);
+      },
+    );
+    try {
+      const changed = changedFilesBetween(base, head, repo);
+      expect(changed).toContain('cli/lib/tool.sh');
+      expect(changed).not.toContain('cli/scripts/tool.sh');
     } finally {
       rmSync(dirname(repo), { recursive: true, force: true });
     }
