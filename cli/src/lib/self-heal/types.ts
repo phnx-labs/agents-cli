@@ -15,6 +15,7 @@
 export type HealCheckId =
   | 'resources'
   | 'hook-runtime'
+  | 'hook-manifest'
   | 'shims'
   | 'shadowing'
   | 'path';

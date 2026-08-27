@@ -15,6 +15,7 @@ import type {
 } from './types.js';
 import { resourcesCheck } from './checks/resources.js';
 import { hookRuntimeCheck } from './checks/hook-runtime.js';
+import { hookManifestCheck } from './checks/hook-manifest.js';
 import { shimsCheck } from './checks/shims.js';
 import { shadowingCheck } from './checks/shadowing.js';
 import { pathCheck } from './checks/path.js';
@@ -27,6 +28,9 @@ export const HEAL_CHECKS: HealCheck[] = [
   shadowingCheck,
   pathCheck,
   hookRuntimeCheck,
+  // Detect-only, after the runtime shim repair: a shim can be healthy while the
+  // manifest entry that should have produced it resolves nowhere.
+  hookManifestCheck,
   resourcesCheck,
 ];
 
