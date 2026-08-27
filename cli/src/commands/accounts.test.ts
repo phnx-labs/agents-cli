@@ -42,6 +42,99 @@ describe('accounts credential import', () => {
   });
 });
 
+/**
+ * PHNX-2578: add --from-secrets and inspect used to throw a raw Error that
+ * bootstrap rethrows as an uncaught Node stack dump. They must fail as a
+ * commander CLI error (code accounts.error) with the user-facing message.
+ */
+describe('accounts add/inspect CLI errors', () => {
+  let secretsRoot: string;
+  let previousMetaIndex: string | undefined;
+  let previousNoAgent: string | undefined;
+
+  async function runAccounts(args: string[]): Promise<string> {
+    const program = new Command();
+    program.exitOverride();
+    registerAccountsCommand(program);
+    const chunks: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...a: unknown[]) => {
+      chunks.push(a.map(String).join(' '));
+    });
+    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      await program.parseAsync(['node', 'agents', 'accounts', ...args]);
+    } finally {
+      log.mockRestore();
+      err.mockRestore();
+    }
+    return chunks.join('\n');
+  }
+
+  async function captureAccountsError(args: string[]): Promise<{ code?: string; exitCode?: number; message: string }> {
+    try {
+      await runAccounts(args);
+      throw new Error('expected accounts command to fail');
+    } catch (err) {
+      const e = err as { code?: string; exitCode?: number; message: string };
+      return { code: e.code, exitCode: e.exitCode, message: e.message };
+    }
+  }
+
+  beforeEach(() => {
+    secretsRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-accounts-cli-err-'));
+    previousMetaIndex = process.env.AGENTS_SECRETS_META_INDEX_FILE;
+    previousNoAgent = process.env.AGENTS_SECRETS_NO_AGENT;
+    process.env.AGENTS_SECRETS_META_INDEX_FILE = path.join(secretsRoot, 'bundle-index.json');
+    process.env.AGENTS_SECRETS_NO_AGENT = '1';
+    _resetFileStoreForTest({ fileDir: path.join(secretsRoot, 'secrets'), passphrase: 'accounts-cli-err' });
+    setKeychainBackendForTest(new MemoryKeychain());
+  });
+
+  afterEach(() => {
+    setKeychainBackendForTest(null);
+    _resetFileStoreForTest();
+    if (previousMetaIndex === undefined) delete process.env.AGENTS_SECRETS_META_INDEX_FILE;
+    else process.env.AGENTS_SECRETS_META_INDEX_FILE = previousMetaIndex;
+    if (previousNoAgent === undefined) delete process.env.AGENTS_SECRETS_NO_AGENT;
+    else process.env.AGENTS_SECRETS_NO_AGENT = previousNoAgent;
+    vi.restoreAllMocks();
+    fs.rmSync(secretsRoot, { recursive: true, force: true });
+  });
+
+  it('inspect of an unknown account is a clean CLI error, not an uncaught throw', async () => {
+    const err = await captureAccountsError(['inspect', 'phnx-2578-not-an-account']);
+    expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
+    expect(err.message).toContain("Unknown account 'phnx-2578-not-an-account'");
+  });
+
+  it('add --from-secrets against a missing bundle is a clean CLI error', async () => {
+    const err = await captureAccountsError([
+      'add', 'phnx-2578-missing',
+      '--provider', 'openrouter',
+      '--auth', 'api-key',
+      '--from-secrets', 'does-not-exist:KEY',
+    ]);
+    expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
+    expect(err.message).toMatch(/Secrets bundle 'does-not-exist'/);
+  });
+
+  it('add --from-secrets against a locked keychain bundle is a clean CLI error', async () => {
+    writeBundleWithItems(
+      { name: 'locked-hold', policy: 'hold', vars: { KEY: 'keychain:KEY' } },
+      new Map([[secretsKeychainItem('locked-hold', 'KEY'), 'secret-value']]),
+    );
+    const err = await captureAccountsError([
+      'add', 'phnx-2578-locked',
+      '--provider', 'openrouter',
+      '--auth', 'api-key',
+      '--from-secrets', 'locked-hold:KEY',
+    ]);
+    expect(err).toMatchObject({ code: 'accounts.error', exitCode: 1 });
+    expect(err.message).toContain("Secrets bundle 'locked-hold' is not unlocked in the secrets agent");
+    expect(err.message).toContain('agents secrets unlock locked-hold');
+  });
+});
+
 describe('classifyAttachTarget', () => {
   it('rejects a completely unknown target', () => {
     expect(() => classifyAttachTarget('totally-unknown-xyz-123')).toThrow('Unknown attach target');

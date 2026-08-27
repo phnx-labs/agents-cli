@@ -27,6 +27,15 @@ function cleanCommandError(command: Command, err: unknown): never {
   command.error(err instanceof Error ? err.message : String(err), { exitCode: 1, code: 'accounts.error' });
 }
 
+/** Turn a thrown user-facing Error into commander's clean CLI error instead of Node's stack dump. */
+async function runAccountsAction(command: Command, fn: () => void | Promise<void>): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    cleanCommandError(command, err);
+  }
+}
+
 function parseInstallation(raw: string): { agent: AgentId; version: string } {
   const at = raw.lastIndexOf('@');
   if (at < 1 || at === raw.length - 1) throw new Error(`Expected <agent>@<version>, got '${raw}'.`);
@@ -107,7 +116,9 @@ export function parseBundleKey(raw: string): { bundle: string; key: string } {
 
 function secretFromBundle(raw: string): string {
   const { bundle, key } = parseBundleKey(raw);
-  return readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' }).env[key];
+  const value = readAndResolveBundleEnv(bundle, { keys: [key], keyMode: 'storage', agentOnly: true, caller: 'accounts import' }).env[key];
+  if (!value) throw new Error(`Secrets bundle '${bundle}' does not contain key '${key}'.`);
+  return value;
 }
 
 function publicAccount(account: ReturnType<typeof inspectAccount>) {
@@ -414,8 +425,12 @@ export function registerAccountsCommand(program: Command): void {
   const accounts = program.command('accounts').description('Browse native logins and manage provider account bundles')
     .option('--json', 'Machine-readable account metadata')
     .option('--fleet', 'Show harness-native signed-in identities across reachable devices')
-    .action((o: { json?: boolean; fleet?: boolean }) => printAccounts(!!o.json, !!o.fleet));
-  accounts.command('list').description('List credential accounts').option('--json', 'Machine-readable account metadata').action((o: { json?: boolean }, command: Command) => printAccounts(!!(o.json || command.optsWithGlobals().json)));
+    .action(async (o: { json?: boolean; fleet?: boolean }, command: Command) => {
+      await runAccountsAction(command, () => printAccounts(!!o.json, !!o.fleet));
+    });
+  accounts.command('list').description('List credential accounts').option('--json', 'Machine-readable account metadata').action(async (o: { json?: boolean }, command: Command) => {
+    await runAccountsAction(command, () => printAccounts(!!(o.json || command.optsWithGlobals().json)));
+  });
 
   accounts.command('add <name>')
     .description('Add a durable API key, setup token, or bearer token')
@@ -423,67 +438,72 @@ export function registerAccountsCommand(program: Command): void {
     .requiredOption('--auth <type>', 'Credential type: api-key | setup-token | bearer-token')
     .option('--base-url <url>', 'Optional endpoint override stored with the account')
     .option('--from-secrets <bundle:key>', 'Import from an existing agents secrets entry')
-    .action(async (name: string, o: { provider: string; auth: string; baseUrl?: string; fromSecrets?: string }) => {
-      const auth = parseAuth(o.auth);
-      const provider = getAccountProvider(o.provider);
-      if (!provider.authKinds.includes(auth)) throw new Error(`Provider '${provider.provider}' does not support ${auth}. Supported: ${provider.authKinds.join(', ')}.`);
-      const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter ${provider.provider} ${auth} for '${name}':` });
-      const account = addAccount(name, provider.provider, auth, secret, undefined, { baseUrl: o.baseUrl });
-      console.log(chalk.green(`Added ${account.provider} ${account.auth} account '${account.name}'.`));
-      console.log(chalk.gray(`Secret bundle '${account.name}' is the account and uses policy never, so agent launches never request Touch ID.`));
+    .action(async (name: string, o: { provider: string; auth: string; baseUrl?: string; fromSecrets?: string }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const auth = parseAuth(o.auth);
+        const provider = getAccountProvider(o.provider);
+        if (!provider.authKinds.includes(auth)) throw new Error(`Provider '${provider.provider}' does not support ${auth}. Supported: ${provider.authKinds.join(', ')}.`);
+        const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter ${provider.provider} ${auth} for '${name}':` });
+        const account = addAccount(name, provider.provider, auth, secret, undefined, { baseUrl: o.baseUrl });
+        console.log(chalk.green(`Added ${account.provider} ${account.auth} account '${account.name}'.`));
+        console.log(chalk.gray(`Secret bundle '${account.name}' is the account and uses policy never, so agent launches never request Touch ID.`));
+      });
     });
 
   accounts.command('set-key <name>')
     .description('Rotate an account credential without changing its identity')
     .option('--from-secrets <bundle:key>', 'Import from an existing agents secrets entry')
-    .action(async (name: string, o: { fromSecrets?: string }) => {
-      const account = findAccount(name);
-      if (!account) throw new Error(`Unknown provider account '${name}'.`);
-      const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter new ${account.provider} ${account.auth} for '${name}':` });
-      setAccountSecret(name, secret);
-      console.log(chalk.green(`Updated credential for account '${name}'.`));
+    .action(async (name: string, o: { fromSecrets?: string }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const account = findAccount(name);
+        if (!account) throw new Error(`Unknown provider account '${name}'.`);
+        const secret = o.fromSecrets ? secretFromBundle(o.fromSecrets) : await password({ message: `Enter new ${account.provider} ${account.auth} for '${name}':` });
+        setAccountSecret(name, secret);
+        console.log(chalk.green(`Updated credential for account '${name}'.`));
+      });
     });
 
   accounts.command('view <name>').alias('inspect').description('Show safe account metadata, custody, and attachments').option('--json', 'Machine-readable output').action(async (name: string, o: { json?: boolean }, command: Command) => {
-    const meta = readMeta();
-    const unified = findUnifiedAccount(name, meta);
-    if (!unified) throw new Error(`Unknown account '${name}'.`);
-    const account = unified.kind === 'provider'
-      ? { ...publicAccount(inspectAccount(unified.name)), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
-      : { ...unified, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
-    if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(account, null, 2));
-    console.log(chalk.bold(account.name));
-    console.log(`  kind: ${account.kind}`);
-    console.log(`  id: ${account.id}`);
-    console.log(`  custody: ${account.custody}`);
-    if (account.kind === 'provider') {
-      console.log(`  provider: ${account.provider}`);
-      console.log(`  auth: ${account.auth}`);
-      console.log(`  credential: ${account.secretPresent ? 'present on this device' : 'missing on this device'}`);
-    } else {
-      console.log(`  identity: ${account.identityLabel ?? account.identityKey}`);
-      console.log(`  scope: ${account.scope}`);
-    }
-    console.log(`  attached: ${account.attached.length ? account.attached.join(', ') : 'none'}`);
+    await runAccountsAction(command, async () => {
+      const meta = readMeta();
+      const unified = findUnifiedAccount(name, meta);
+      if (!unified) throw new Error(`Unknown account '${name}'.`);
+      const account = unified.kind === 'provider'
+        ? { ...publicAccount(inspectAccount(unified.name)), custody: 'agents secrets (policy never)', attached: accountBindings(unified.id, meta) }
+        : { ...unified, custody: `${unified.agent} (not stored by agents-cli)`, attached: accountBindings(unified.id, meta) };
+      if (o.json || command.optsWithGlobals().json) return console.log(JSON.stringify(account, null, 2));
+      console.log(chalk.bold(account.name));
+      console.log(`  kind: ${account.kind}`);
+      console.log(`  id: ${account.id}`);
+      console.log(`  custody: ${account.custody}`);
+      if (account.kind === 'provider') {
+        console.log(`  provider: ${account.provider}`);
+        console.log(`  auth: ${account.auth}`);
+        console.log(`  credential: ${account.secretPresent ? 'present on this device' : 'missing on this device'}`);
+      } else {
+        console.log(`  identity: ${account.identityLabel ?? account.identityKey}`);
+        console.log(`  scope: ${account.scope}`);
+      }
+      console.log(`  attached: ${account.attached.length ? account.attached.join(', ') : 'none'}`);
+    });
   });
 
   accounts.command('name <source> <name>')
     .description('Name a signed-in native installation without copying its OAuth credentials')
     .action(async (source: string, name: string, _o: unknown, command: Command) => {
-      try {
+      await runAccountsAction(command, async () => {
         const identity = await nativeIdentityFromSource(source);
         const account = addNativeAccount(name, identity.agent, identity.identityKey, identity.identityLabel, identity.scope);
         console.log(chalk.green(`Named ${source} as ${account.name}.`));
         if (account.scope === 'device') console.log(chalk.gray(`${identity.agent} authentication is device-scoped; attach '${account.name}' to '${identity.agent}', not an individual version.`));
-      } catch (err) { cleanCommandError(command, err); }
+      });
     });
 
   const labelCmd = accounts.command('label <source> [label]')
     .description('Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version')
     .option('--account <email-or-id>', 'Native identity to label when the harness has multiple logins')
     .action(async (source: string, label: string | undefined, o: { account?: string }, command: Command) => {
-      try { await runAccountsLabel(source, label, o); }
-      catch (err) { cleanCommandError(command, err); }
+      await runAccountsAction(command, () => runAccountsLabel(source, label, o));
     });
   setHelpSections(labelCmd, {
     examples: `agents accounts label codex work
@@ -495,147 +515,160 @@ agents run codex#work`,
 
   accounts.command('attach <account> <target>')
     .description('Attach a named account to a native installation or custom harness')
-    .action(async (name: string, target: string) => {
-      const meta = readMeta();
-      const account = findUnifiedAccount(name, meta);
-      if (!account) throw new Error(`Unknown account '${name}'.`);
-      if (account.kind === 'native') assertNativeAccountNameable(account.agent);
-      // Validate the target exists before mutating any binding.
-      const t = classifyAttachTarget(target);
-      const targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
-      if (account.kind === 'native') {
-        // A provider-backed profile injects provider env at spawn, which would run
-        // under a different credential than the native identity claims — refuse it.
-        if (t.kind === 'profile' && t.profile.provider) {
-          throw new Error(`Custom harness '${target}' is provider-backed (${t.profile.provider}); it cannot host the native login account '${account.name}'. Attach a matching provider account instead.`);
-        }
-        if (targetAgent !== account.agent) throw new Error(`Account '${account.name}' is a ${account.agent} login; '${target}' runs ${targetAgent}.`);
-        if (account.scope === 'device') {
-          if (t.kind !== 'device-agent') throw new Error(`${account.agent} authentication is device-scoped. Attach it with 'agents accounts attach ${account.name} ${account.agent}'.`);
+    .action(async (name: string, target: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const meta = readMeta();
+        const account = findUnifiedAccount(name, meta);
+        if (!account) throw new Error(`Unknown account '${name}'.`);
+        if (account.kind === 'native') assertNativeAccountNameable(account.agent);
+        // Validate the target exists before mutating any binding.
+        const t = classifyAttachTarget(target);
+        const targetAgent = t.kind === 'profile' ? t.profile.host.agent : t.agent;
+        if (account.kind === 'native') {
+          // A provider-backed profile injects provider env at spawn, which would run
+          // under a different credential than the native identity claims — refuse it.
+          if (t.kind === 'profile' && t.profile.provider) {
+            throw new Error(`Custom harness '${target}' is provider-backed (${t.profile.provider}); it cannot host the native login account '${account.name}'. Attach a matching provider account instead.`);
+          }
+          if (targetAgent !== account.agent) throw new Error(`Account '${account.name}' is a ${account.agent} login; '${target}' runs ${targetAgent}.`);
+          if (account.scope === 'device') {
+            if (t.kind !== 'device-agent') throw new Error(`${account.agent} authentication is device-scoped. Attach it with 'agents accounts attach ${account.name} ${account.agent}'.`);
+          } else {
+            if (t.kind !== 'installation') throw new Error(`${account.agent} authentication is per-version. Attach '${account.name}' to a specific ${account.agent}@<version>.`);
+            const identity = await nativeIdentityFromSource(target);
+            if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
+          }
         } else {
-          if (t.kind !== 'installation') throw new Error(`${account.agent} authentication is per-version. Attach '${account.name}' to a specific ${account.agent}@<version>.`);
-          const identity = await nativeIdentityFromSource(target);
-          if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
+          // Provider account: it must be able to authenticate the target's harness.
+          getAccountProvider(account.provider).envFor(targetAgent, account.auth);
         }
-      } else {
-        // Provider account: it must be able to authenticate the target's harness.
-        getAccountProvider(account.provider).envFor(targetAgent, account.auth);
-      }
-      bindAccount(name, target);
-      writeClaudeInteractiveOauthToken(t, targetAgent);
-      console.log(chalk.green(`Attached ${account.name} to ${target}.`));
+        bindAccount(name, target);
+        writeClaudeInteractiveOauthToken(t, targetAgent);
+        console.log(chalk.green(`Attached ${account.name} to ${target}.`));
+      });
     });
 
   accounts.command('detach <account> <target>')
     .description('Remove one account attachment')
-    .action((name: string, target: string) => {
-      unbindAccount(name, target);
-      // With the binding gone, no setup-token resolves for this version home, so this
-      // clears any .oauth_token the attach left behind (else interactive runs would keep
-      // authenticating as the just-detached account).
-      try {
-        const t = classifyAttachTarget(target);
-        writeClaudeInteractiveOauthToken(t, t.kind === 'profile' ? t.profile.host.agent : t.agent);
-      } catch { /* an unresolvable target has no version home to clean */ }
-      console.log(chalk.green(`Detached ${name} from ${target}.`));
+    .action(async (name: string, target: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => {
+        unbindAccount(name, target);
+        // With the binding gone, no setup-token resolves for this version home, so this
+        // clears any .oauth_token the attach left behind (else interactive runs would keep
+        // authenticating as the just-detached account).
+        try {
+          const t = classifyAttachTarget(target);
+          writeClaudeInteractiveOauthToken(t, t.kind === 'profile' ? t.profile.host.agent : t.agent);
+        } catch { /* an unresolvable target has no version home to clean */ }
+        console.log(chalk.green(`Detached ${name} from ${target}.`));
+      });
     });
 
-  accounts.command('rename <old> <new>').description('Rename an account without changing its stable id').action((oldName: string, newName: string) => renameAccount(oldName, newName));
-  accounts.command('remove <name>').description('Remove an account and its device-local credential').action((name: string) => removeAccount(name));
+  accounts.command('rename <old> <new>').description('Rename an account without changing its stable id').action(async (oldName: string, newName: string, _o: unknown, command: Command) => {
+    await runAccountsAction(command, () => { renameAccount(oldName, newName); });
+  });
+  accounts.command('remove <name>').description('Remove an account and its device-local credential').action(async (name: string, _o: unknown, command: Command) => {
+    await runAccountsAction(command, () => { removeAccount(name); });
+  });
 
   accounts.command('set-default <agent> <name>')
     .description('Use this account for a harness when --account is omitted')
-    .action((agentRaw: string, name: string, _o: unknown, command: Command) => {
-      try {
+    .action(async (agentRaw: string, name: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => {
         const { agent, account } = setDefaultAccount(agentRaw, name);
         console.log(chalk.green(`${agent} now uses account '${account.name}' unless --account overrides it.`));
-      } catch (err) { cleanCommandError(command, err); }
+      });
     });
 
   const switchCmd = accounts.command('switch <harness> [account]')
     .description('Pick the default account for a harness')
     .option('--json', 'Machine-readable account list or the resulting default')
     .action(async (harness: string, account: string | undefined, o: { json?: boolean }, command: Command) => {
-      try { await runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) }); }
-      catch (err) { cleanCommandError(command, err); }
+      await runAccountsAction(command, () => runAccountsSwitch(harness, account, { json: !!(o.json || command.optsWithGlobals().json) }));
     });
 
   accounts.command('clear-default <agent>')
     .description('Return a harness to native login or balanced account selection')
-    .action((agentRaw: string) => {
-      parseHarness(agentRaw);
-      updateMeta(meta => {
-        const defaults = { ...meta.accounts?.defaults };
-        delete defaults[agentRaw as AgentId];
-        return { ...meta, accounts: { ...meta.accounts, defaults } };
+    .action(async (agentRaw: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, () => {
+        parseHarness(agentRaw);
+        updateMeta(meta => {
+          const defaults = { ...meta.accounts?.defaults };
+          delete defaults[agentRaw as AgentId];
+          return { ...meta, accounts: { ...meta.accounts, defaults } };
+        });
+        console.log(chalk.green(`Cleared the default account for ${agentRaw}.`));
       });
-      console.log(chalk.green(`Cleared the default account for ${agentRaw}.`));
     });
 
   accounts.command('logout <target>')
     .description('Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.')
-    .action(async (target: string) => {
-      const provider = findAccount(target);
-      if (provider) {
-        throw new Error(
-          `Account '${provider.name}' uses ${provider.auth}, not OAuth. Remove it with: agents accounts remove ${provider.name}`,
-        );
-      }
-      const agentRaw = target.split('@')[0];
-      if (!ALL_AGENT_IDS.includes(agentRaw as AgentId)) {
-        throw new Error(
-          `Unknown target '${target}'. Pass a native harness (claude, codex, …) or a provider account name. Provider API-key accounts use \`agents accounts remove\`.`,
-        );
-      }
-      const agent = agentRaw as AgentId;
-      const { spawnSync } = await import('child_process');
-      const { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } = await import('../lib/installations/versions.js');
-      const installed = listInstalledVersions(agent);
-      const version = getGlobalDefault(agent) ?? installed[installed.length - 1];
-      if (!version) throw new Error(`No installed version of ${agent}. Install one with: agents add ${agent}`);
-      const bin = getBinaryPath(agent, version);
-      const home = getVersionHomePath(agent, version);
-      const result = spawnSync(bin, ['logout'], {
-        env: { ...process.env, HOME: home },
-        stdio: 'inherit',
+    .action(async (target: string, _o: unknown, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const provider = findAccount(target);
+        if (provider) {
+          throw new Error(
+            `Account '${provider.name}' uses ${provider.auth}, not OAuth. Remove it with: agents accounts remove ${provider.name}`,
+          );
+        }
+        const agentRaw = target.split('@')[0];
+        if (!ALL_AGENT_IDS.includes(agentRaw as AgentId)) {
+          throw new Error(
+            `Unknown target '${target}'. Pass a native harness (claude, codex, …) or a provider account name. Provider API-key accounts use \`agents accounts remove\`.`,
+          );
+        }
+        const agent = agentRaw as AgentId;
+        const { spawnSync } = await import('child_process');
+        const { getBinaryPath, getGlobalDefault, getVersionHomePath, listInstalledVersions } = await import('../lib/installations/versions.js');
+        const installed = listInstalledVersions(agent);
+        const version = getGlobalDefault(agent) ?? installed[installed.length - 1];
+        if (!version) throw new Error(`No installed version of ${agent}. Install one with: agents add ${agent}`);
+        const bin = getBinaryPath(agent, version);
+        const home = getVersionHomePath(agent, version);
+        const result = spawnSync(bin, ['logout'], {
+          env: { ...process.env, HOME: home },
+          stdio: 'inherit',
+        });
+        if (result.error) throw result.error;
+        if ((result.status ?? 1) !== 0) {
+          throw new Error(
+            `${agent} logout exited ${result.status ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
+          );
+        }
+        console.log(chalk.green(`Signed out native ${agent} login (${version}).`));
       });
-      if (result.error) throw result.error;
-      if ((result.status ?? 1) !== 0) {
-        throw new Error(
-          `${agent} logout exited ${result.status ?? 'null'}. If this harness has no logout verb, sign out from its own UI.`,
-        );
-      }
-      console.log(chalk.green(`Signed out native ${agent} login (${version}).`));
     });
 
   accounts.command('sync <name> [device]')
     .description('Copy one provider account bundle to a worker device')
     .option('--device <device>', 'Deprecated destination form; use the positional device')
     .option('--force', 'Replace matching keys on the destination')
-    .action(async (name: string, deviceArg: string | undefined, o: { device?: string; force?: boolean }) => {
-      const device = deviceArg ?? o.device;
-      if (!device) throw new Error('Missing destination device. Usage: agents accounts sync <account> <device>.');
-      const account = findAccount(name);
-      if (!account) throw new Error(`Unknown provider account '${name}'.`);
-      const sshTarget = await resolveHostSshTarget(device);
-      assertCredentialTransportHostPinned(sshTarget);
-      const remoteBackend = resolveRemoteOsSync(device) === 'win32' ? 'keychain' : 'file';
-      const literalValues = {
-        ACCOUNT_ID: account.id,
-        PROVIDER: account.provider,
-        AUTH_TYPE: account.auth,
-        ...(account.baseUrl ? { BASE_URL: account.baseUrl } : {}),
-      };
-      const result = pushBundleToHost(account.name, device, {
-        remoteBackend,
-        force: o.force,
-        operation: 'accounts sync',
-        policyNever: true,
-        agentOnly: false,
-        literalValues,
+    .action(async (name: string, deviceArg: string | undefined, o: { device?: string; force?: boolean }, command: Command) => {
+      await runAccountsAction(command, async () => {
+        const device = deviceArg ?? o.device;
+        if (!device) throw new Error('Missing destination device. Usage: agents accounts sync <account> <device>.');
+        const account = findAccount(name);
+        if (!account) throw new Error(`Unknown provider account '${name}'.`);
+        const sshTarget = await resolveHostSshTarget(device);
+        assertCredentialTransportHostPinned(sshTarget);
+        const remoteBackend = resolveRemoteOsSync(device) === 'win32' ? 'keychain' : 'file';
+        const literalValues = {
+          ACCOUNT_ID: account.id,
+          PROVIDER: account.provider,
+          AUTH_TYPE: account.auth,
+          ...(account.baseUrl ? { BASE_URL: account.baseUrl } : {}),
+        };
+        const result = pushBundleToHost(account.name, device, {
+          remoteBackend,
+          force: o.force,
+          operation: 'accounts sync',
+          policyNever: true,
+          agentOnly: false,
+          literalValues,
+        });
+        if (!result.ok) throw new Error(`${result.message}\nRetry: agents accounts sync ${account.name} ${device}${o.force ? ' --force' : ''}`);
+        console.log(chalk.green(`${account.name} synced to ${device} (${result.keyCount} keys, ${remoteBackend} backend, policy never).`));
       });
-      if (!result.ok) throw new Error(`${result.message}\nRetry: agents accounts sync ${account.name} ${device}${o.force ? ' --force' : ''}`);
-      console.log(chalk.green(`${account.name} synced to ${device} (${result.keyCount} keys, ${remoteBackend} backend, policy never).`));
     });
 
   setHelpSections(switchCmd, {
