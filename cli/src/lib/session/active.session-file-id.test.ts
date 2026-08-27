@@ -27,8 +27,8 @@ const originalUserProfile = process.env.USERPROFILE;
 // folders/… . `latestSessionFileForCwd` realpaths the cwd it queries by
 // (db.ts:2605) while the upsert stores it raw (db.ts:2274), so an unresolved
 // temp path stores one spelling and queries another and the id-less fallback
-// silently finds nothing. The macOS CI leg only runs on release/** branches, so
-// this would have gone green here and red on the release PR.
+// silently finds nothing. The macOS CI leg only runs on the nightly matrix, so
+// this would have gone green here and red on the next nightly run.
 const testHome = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-active-file-id-')));
 process.env.HOME = testHome;
 process.env.USERPROFILE = testHome;

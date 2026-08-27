@@ -186,7 +186,7 @@ describeDaemon('agents daemon — services, broker, webhooks', () => {
     // `services --json` publishes it as `health` (daemon.ts:547, and :454 for
     // `status --json`). Asserting `record` here read an absent key as undefined,
     // so this test could never pass on macOS — and since the macOS legs only run
-    // on release/** branches, it stayed invisible until a release PR ran.
+    // on the nightly matrix, it stayed invisible until a nightly run.
     const payload = JSON.parse(services.stdout) as { secretsBroker: { reachable: boolean; health: unknown } };
     expect(payload.secretsBroker.reachable).toBe(false);
     expect(payload.secretsBroker.health).toBeNull();
