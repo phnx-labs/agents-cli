@@ -13,7 +13,10 @@ import {
 import {
   LAZY_COMMAND_NAMES,
   buildFullCommandTree,
+  registerAllCommands,
 } from '../../cli/command-registry.js';
+import { configureRootCommand } from './root-command.js';
+import { Command } from 'commander';
 
 describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
   it('covers every top-level name and alias the real command modules register', async () => {
@@ -91,5 +94,16 @@ describe('KNOWN_TOP_LEVEL_COMMANDS', () => {
 
     expect(names).toContain('webhooks');
     expect(names).not.toContain('webhook');
+  });
+
+  it('registerAllCommands loads the same visible tree onto an existing program', async () => {
+    const program = configureRootCommand(new Command(), 'agents', '0.0.0');
+    await registerAllCommands(program);
+    const names = program.commands.map((command) => command.name());
+    expect(names.length).toBeGreaterThan(50);
+    expect(names).toContain('ssh');
+    expect(names).toContain('repos');
+    expect(names).toContain('computer');
+    expect(names).toContain('notify');
   });
 });

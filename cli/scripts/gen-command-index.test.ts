@@ -88,7 +88,7 @@ describe('command index generation', () => {
   it('captures the root agents metadata and global options', async () => {
     const root = rootNode(await buildFullCommandTree());
     expect(root.name).toBe('agents');
-    expect(root.description).toBe('Environment manager for AI agents');
+    expect(root.description).toContain('Install, configure, run, and dispatch AI coding agents');
     expect(root.options.map((option) => option.long)).toContain('--version');
     expect(root.options.map((option) => option.long)).toContain('--verbose');
     expect(root.options.map((option) => option.long)).toContain('--help');

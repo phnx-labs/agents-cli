@@ -7,7 +7,7 @@
     "name": "agents",
     "path": "",
     "aliases": [],
-    "description": "Environment manager for AI agents",
+    "description": "Install, configure, run, and dispatch AI coding agents from one place.\nWorks with Claude, Codex, Antigravity, Cursor, OpenCode, OpenClaw, and Droid.",
     "args": [],
     "options": [
       {

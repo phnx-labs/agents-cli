@@ -1,7 +1,13 @@
 import { Command } from 'commander';
 import { describe, expect, it } from 'vitest';
 
-import { applyGlobalHelpConventions, registerCommandGroups, setHelpSections } from './help.js';
+import {
+  applyGlobalHelpConventions,
+  FRONT_DOOR_COMMAND_GROUPS,
+  registerCommandGroups,
+  setCompactRootHelp,
+  setHelpSections,
+} from './help.js';
 
 function buildTestCommand(opts: { examples?: string; notes?: string } = {}): Command {
   const root = new Command('agents');
@@ -140,5 +146,60 @@ describe('registerCommandGroups', () => {
     expect(help).not.toContain('Ghost group:');
     expect(help).toContain('Inspect:');
     expect(help).not.toContain('Commands:');
+  });
+});
+
+describe('compact root help', () => {
+  async function buildRootForHelp(opts: { compact?: boolean } = {}): Promise<Command> {
+    const { buildFullCommandTree } = await import('../cli/command-registry.js');
+    const program = await buildFullCommandTree();
+    applyGlobalHelpConventions(program);
+    registerCommandGroups(program, FRONT_DOOR_COMMAND_GROUPS);
+    if (opts.compact !== false) {
+      setCompactRootHelp(program);
+    }
+    return program;
+  }
+
+  it('renders front-door groups and a pointer to the full surface', async () => {
+    const program = await buildRootForHelp();
+    const help = program.helpInformation();
+
+    expect(help).toContain('Quick start:');
+    expect(help).toContain('Most-used:');
+    expect(help).toContain('See "agents --help-all" for every command.');
+
+    // Only the front-door commands are listed as entries; the pointer replaces
+    // the remaining Commands section. The regex approximates the acceptance
+    // check from the ticket: indented lowercase command terms.
+    const commandEntries = help.match(/^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}/gm) ?? [];
+    expect(commandEntries.length).toBeLessThanOrEqual(12);
+  });
+
+  it('lists every command when compact mode is off', async () => {
+    const program = await buildRootForHelp({ compact: false });
+    const help = program.helpInformation();
+
+    expect(help).toContain('Quick start:');
+    expect(help).toContain('Most-used:');
+    expect(help).toContain('Commands:');
+    expect(help).not.toContain('See "agents --help-all" for every command.');
+
+    // The full tree has many more than the front-door groups.
+    const commandEntries = help.match(/^\s{2,6}[a-z][a-z0-9_:-]+\s{2,}/gm) ?? [];
+    expect(commandEntries.length).toBeGreaterThan(12);
+  });
+
+  it('still lists hidden/disabled commands under Commands when compact mode is off', async () => {
+    const root = new Command('agents');
+    root.command('setup').description('Set up.');
+    root.command('ssh').description('SSH.');
+    applyGlobalHelpConventions(root);
+    registerCommandGroups(root, FRONT_DOOR_COMMAND_GROUPS);
+    const help = root.helpInformation();
+
+    expect(help).toContain('Quick start:');
+    expect(help).toContain('Commands:');
+    expect(help).toContain('ssh');
   });
 });

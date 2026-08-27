@@ -82,10 +82,16 @@ import {
   LAZY_COMMAND_NAMES,
   KNOWN_TOP_LEVEL_COMMANDS,
   RETIRED_TOP_LEVEL_COMMANDS,
+  registerAllCommands,
   type ModuleLoader,
 } from './cli/command-registry.js';
 import { closestTopLevelCommand } from './lib/startup/spellcheck.js';
-import { applyGlobalHelpConventions } from './lib/help.js';
+import {
+  applyGlobalHelpConventions,
+  FRONT_DOOR_COMMAND_GROUPS,
+  registerCommandGroups,
+  setCompactRootHelp,
+} from './lib/help.js';
 import { renderWhatsNew } from './lib/whats-new.js';
 import { IS_WINDOWS } from './lib/platform/index.js';
 import { getCliLaunch } from './lib/cli-entry.js';
@@ -102,6 +108,8 @@ import { hasHostRoutingFlag } from './lib/hosts/routing-flag.js';
 const BRAND = resolveBrandName();
 
 const program = configureRootCommand(new Command(), BRAND, VERSION);
+registerCommandGroups(program, FRONT_DOOR_COMMAND_GROUPS);
+program.option('--help-all', 'Show help for all commands');
 
 // ─── Audit backbone ────────────────────────────────────────────────────────────
 // One choke point logs every `agents <module> <cmd>` invocation to the structured
@@ -203,130 +211,6 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
     // Best-effort completion record; the start line is the durable audit fact.
   }
 });
-
-/**
- * Skin the static root help for a brand: rewrite the visible `agents` command
- * examples to the brand name and drop lines for commands this brand disabled.
- * A no-op for the unbranded `agents` CLI with nothing disabled.
- */
-function brandRootHelp(raw: string): string {
-  let text = raw;
-  if (BRAND !== 'agents') {
-    text = text
-      .replace(/Usage: agents /g, `Usage: ${BRAND} `)
-      .replace(/^ {2}agents /gm, `  ${BRAND} `)
-      .replace(/Run 'agents /g, `Run '${BRAND} `);
-  }
-  const disabled = disabledCommandsForActiveBrand();
-  if (disabled.size > 0) {
-    text = text
-      .split('\n')
-      .filter((line) => {
-        const m = line.match(/^ {2}([a-z][\w-]*)/);
-        return !(m && disabled.has(m[1]));
-      })
-      .join('\n');
-  }
-  return text;
-}
-
-// Custom help for the main program only
-const originalHelpInformation = program.helpInformation.bind(program);
-program.helpInformation = function () {
-  if (this.name() === BRAND && !this.parent) {
-    return brandRootHelp(`Usage: agents [command] [options]
-
-Install, configure, run, and dispatch AI coding agents from one place.
-Works with Claude, Codex, Antigravity, Cursor, OpenCode, OpenClaw, and Droid.
-
-Quick start:
-  agents setup                    First-time setup (interactive); setup beta enables preview features
-  agents view                     See what's installed
-  agents run <agent> ["prompt"]   Run an agent (interactive without prompt, headless with)
-  agents sessions                 Browse past sessions across all agents
-
-Agent versions:
-  add <agent>[@version]           Install an agent CLI (e.g. agents add grok or agents add codex)
-  import <agent>                  Adopt an existing global install (npm/homebrew) into agents-cli
-  update <agent>[@version]        Move an installed agent to a new release, keeping its name (agents-cli itself is 'agents upgrade')
-  prune <agent>[@version]         Uninstall a version
-  remove <agent>[@version]        Alias for prune
-  use <agent>@<version>           Set the default version
-  prune cleanup [target]          Remove orphan resources and older duplicate version installs
-  trash                           Inspect and restore soft-deleted version directories
-  view [agent[@version]]          List versions, inspect one in detail, or --merged for the cross-layer resource surface
-  inspect <target>                Deep details for one agent+version, or a DotAgents repo (user|system|project|alias|path)
-
-Agent configuration (synced across versions):
-  rules                           Instructions given to agents (CLAUDE.md, etc.)
-  commands                        Slash commands (/commit, /test, etc.)
-  skills                          Knowledge packs (SKILL.md + supporting files)
-  mcp                             MCP servers (stdio or HTTP)
-  permissions                     Allow/deny rules for tool calls
-  hooks                           Shell scripts that run on agent events (hooks.yaml in agents.yaml)
-  subagents                       Named sub-agent definitions
-  plugins                         Bundles of skills, hooks, and scripts
-
-Packages:
-  search <query>                  Find MCP servers and skills in registries
-  install <pkg>                   Install from registry (mcp:name, skill:user/repo)
-
-Run and dispatch:
-  run <agent|profile> [prompt]    Run an agent. Omit prompt for interactive mode.
-  config                          Configure run defaults, project root, device options, and spend caps (config budget)
-  teams                           Coordinate multiple agents on shared work
-  routines                        Run agents on a cron schedule (scheduler auto-starts)
-  daemon                          Runtime status/control for the always-on daemon (secrets broker, browser IPC, scheduler)
-  webhook                         Receive signed GitHub/Linear webhooks for trigger routines
-  funnel                          Expose a webhook receiver through Tailscale Funnel
-  sessions                        Browse, search, and replay past runs (live-search in TTY; grouped by workspace)
-  logs [id]                       Show a run's log — host-dispatch task or session; -f to follow
-  browser                         Automate a browser — navigate, click, screenshot, console, network
-  pty                             Drive interactive terminal programs (REPLs, TUIs) via a persistent PTY session
-  artifacts                       Publish what an agent made (plans, reports, visuals) to a shareable link
-
-Observe (read the fleet — no store merge):
-  feed                            Needs-you inbox (open blocks waiting on you); agent posts = feed --filter updates
-  sessions --active               Live agents (who is running right now)
-  events                          Unified ops + activity event trail
-  events audit                    Dispatched-run outcomes (alias of events --include runs)
-  sync status                     Sync/drift only (not the live fleet snapshot)
-  devices snapshot                One-process inventory + active sessions poll
-
-Credentials (harness keys):
-  harness                         Custom (host CLI + model + auth) harnesses; replaces former profiles command
-  secrets                         Keychain-backed env bundles; synced vault: secrets vault unlock|lock
-  accounts                        Provider credentials, setup-token mint, native OAuth logout
-
-Diagnostics:
-  doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate
-  usage [agent]                   Show rate-limit and quota usage per agent
-  insights                        How work looks — behaviour (default), mix, cost, and output
-  perf                            Latency rollups (hooks, commands, runs) from the disposable perf warehouse
-
-Config sync:
-  repo pull [alias]               Git pull a repo (system | user | <extra>)
-  sync [agent]                    Re-materialize installed version homes; --local to skip fetching
-  repo init --path <dir>          Scaffold your own editable repo from a template
-  repo add <path|gh:user/repo>    Merge an extra repo after the system repo
-
-Automation tips:
-  Pass explicit names/IDs         Avoid pickers: agents sessions <id> --markdown
-  Use --yes for defaults          Auto-accept sync/default prompts on add/use/pull
-  Use --names for central items   e.g. agents commands add --names review-pr,debug
-  Use agent@version targets       e.g. --agents grok@0.1.218,claude@2.1.79,codex@default
-  Non-TTY shells apply defaults   Omitted required selections fail with a plain hint
-
-Options:
-  -V, --version                   Show version number
-  -h, --help                      Show help
-  --verbose                       Show startup self-heal details on stderr
-
-System config lives in ~/.agents/.system/. Run 'agents <command> --help' for details.
-`);
-  }
-  return originalHelpInformation();
-};
 
 /** Compare two semver version strings. Returns 1 if a > b, -1 if a < b, 0 if equal. */
 function compareVersions(a: string, b: string): number {
@@ -658,17 +542,17 @@ async function checkForUpdates(): Promise<void> {
 
 async function maybeBootstrapShimIntegration(
   requestedCommand: string | undefined,
-  helpOrVersionRequested: boolean,
+  isDocumentationRequest: boolean,
   verboseStartup: boolean,
 ): Promise<void> {
   if (!verboseStartup && (!process.stdin.isTTY || !process.stdout.isTTY)) {
     return;
   }
   // Pure documentation paths must never trigger interactive repair — mirrors
-  // the helpOrVersionRequested gate around ensureInitialized below. Covers
+  // the isDocumentationRequest gate around ensureInitialized below. Covers
   // both bare `agents --version` (requestedCommand === undefined) and
   // `agents <subcommand> --help` (requestedCommand === subcommand name).
-  if (helpOrVersionRequested) {
+  if (isDocumentationRequest) {
     return;
   }
   if (requestedCommand === 'sync' || requestedCommand === 'refresh-rules') {
@@ -1053,11 +937,13 @@ if (passedArgs[0] === 'sessions') {
 }
 const requestedCommand = passedArgs.find((arg) => !arg.startsWith('-'));
 const verboseStartup = passedArgs.includes('--verbose');
+const helpAllRequested = passedArgs.includes('--help-all');
 // Help and version output are pure documentation — they must never gate on
 // setup, otherwise `agents <cmd> --help` becomes useless on a fresh box.
 const helpOrVersionRequested = passedArgs.some(
   (arg) => arg === '--help' || arg === '-h' || arg === '--version' || arg === '-V',
 );
+const isDocumentationRequest = helpOrVersionRequested || helpAllRequested;
 
 // White-label: a brand can hide built-in top-level commands. A hidden command
 // must behave as if it doesn't exist under this brand (unknown-command +
@@ -1080,7 +966,7 @@ const requestedIsDisabled = requestedCommand !== undefined && brandDisabled.has(
 // argv — free next to the module graph it avoids on the majority path.
 if (
   requestedCommand !== undefined &&
-  !helpOrVersionRequested &&
+  !isDocumentationRequest &&
   !requestedIsDisabled &&
   hasHostRoutingFlag(passedArgs)
 ) {
@@ -1093,6 +979,12 @@ if (
 // Register only the command(s) this invocation actually uses. Lazy commands
 // (sessions/teams/cloud) are handled after applyGlobalHelpConventions below.
 const isLazyRequest = requestedCommand !== undefined && LAZY_COMMAND_NAMES.has(requestedCommand);
+// Root help (--help, --help-all, or bare invocation) needs the full command tree
+// so the formatter can render real descriptions and the compact front-door
+// pointer can point at the real remaining surface.
+const rootHelpRequested =
+  requestedCommand === undefined &&
+  (helpAllRequested || passedArgs.includes('--help') || passedArgs.includes('-h') || passedArgs.length === 0);
 // Set when the requested name maps to no command. Spellcheck uses the plain
 // KNOWN_TOP_LEVEL_COMMANDS string set — never registerAllEagerCommands just to
 // build the candidate list (RUSH-2329; was 250-330ms of module evaluation).
@@ -1100,20 +992,25 @@ let requestedIsUnknown = false;
 if (requestedIsDisabled) {
   // Brand hid this command: resolve as unknown without loading the full tree.
   requestedIsUnknown = true;
+} else if (rootHelpRequested) {
+  await registerAllCommands(program);
 } else if (requestedCommand !== undefined && !isLazyRequest) {
   const known = await registerEagerForRequest(requestedCommand);
   if (!known) {
     requestedIsUnknown = true;
   }
 }
-// When requestedCommand is undefined (bare invocation, --version, --help, -h) no
-// command modules are needed: --version is built in and the root help text is a
-// static string.
 
 // Mirror main: help conventions are applied after the eager command tree and
 // before the lazy commands, so the latter inherit the root's custom help
 // formatter instead of getting the per-command recursive pass.
 applyGlobalHelpConventions(program);
+
+// Compact root help shows only the measured front-door groups plus a pointer to
+// the full surface. --help-all disables compact mode so every command is listed.
+if (!helpAllRequested) {
+  setCompactRootHelp(program);
+}
 
 // Lazy commands pull in the SQLite-backed session/cloud stack; register them
 // only when explicitly requested, keeping lightweight commands off that path.
@@ -1148,7 +1045,7 @@ if (isLazyRequest && !requestedIsDisabled) {
       await registerEagerForRequest(closest);
     }
 
-    if (!helpOrVersionRequested && hasHostRoutingFlag(passedArgs)) {
+    if (!isDocumentationRequest && hasHostRoutingFlag(passedArgs)) {
       const { maybeRunOnHost } = await import('./lib/hosts/passthrough.js');
       if (await maybeRunOnHost(closest, passedArgs)) {
         process.exit(process.exitCode ?? 0);
@@ -1174,10 +1071,19 @@ if (brandDisabled.size > 0) {
   }
 }
 
-// Pure documentation paths (--version / --help / -h) return immediately: skip
-// the update check (PATH scan + cache read) and the detached background sync
-// (spawns a child process) that every other invocation runs.
-if (!helpOrVersionRequested) {
+// --help-all is a custom root option: render the full (non-compact) tree and
+// exit before migrations/update checks. It is not the built-in --help, so
+// commander would otherwise treat a bare program-with-subcommands as missing a
+// command and exit with an error after displaying help.
+if (helpAllRequested) {
+  program.outputHelp();
+  process.exit(0);
+}
+
+// Pure documentation paths (--version / --help / -h / --help-all) return
+// immediately: skip the update check (PATH scan + cache read) and the detached
+// background sync (spawns a child process) that every other invocation runs.
+if (!isDocumentationRequest) {
   // Run update check before parsing so the upgrade notice/prompt precedes output.
   await checkForUpdates();
 
@@ -1222,11 +1128,11 @@ const SETUP_EXEMPT_COMMANDS = new Set(['setup', 'help', 'uninstall']);
 // would otherwise skip this step on every existing install. Idempotent —
 // no-ops when legacy is missing or already a symlink.
 //
-// Skipped for --help/--version (RUSH-2454): pure documentation paths must not
-// load any migration graph. Loaded from migrate-fold.js (leaf: fs + createLink),
-// not migrate.js, so a real command pays only the fold hop unless the v20
-// sentinel is missing and runMigration() is required below.
-if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
+// Skipped for --help/--version/--help-all (RUSH-2454): pure documentation paths
+// must not load any migration graph. Loaded from migrate-fold.js (leaf: fs +
+// createLink), not migrate.js, so a real command pays only the fold hop unless
+// the v20 sentinel is missing and runMigration() is required below.
+if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest) {
   try {
     const { foldLegacySystemRepo } = await import('./lib/migrate-fold.js');
     foldLegacySystemRepo();
@@ -1237,7 +1143,7 @@ if (
   !firstRun &&
   requestedCommand &&
   !SETUP_EXEMPT_COMMANDS.has(requestedCommand) &&
-  !helpOrVersionRequested
+  !isDocumentationRequest
 ) {
   const { ensureInitialized } = await import('./commands/setup.js');
   await ensureInitialized(program);
@@ -1250,12 +1156,13 @@ if (
 // AGENTS_SKIP_MIGRATION=1 disables the bootstrap-time run for tests and
 // scripted invocations that prepare their own legacy fixtures.
 //
-// Skipped for --help/--version (RUSH-2454): same pure-docs gate as fold, the
-// update check, background sync, ensureInitialized, and the menu-bar self-heal.
-// The sentinel check itself is pure fs and does not load migrate.js — only a
-// missing/stale sentinel pays for `await import('./lib/installations/migrate.js')` (which
-// pulls the hosts/routine/teams/daemon/menubar graph).
-if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
+// Skipped for --help/--version/--help-all (RUSH-2454): same pure-docs gate as
+// fold, the update check, background sync, ensureInitialized, and the menu-bar
+// self-heal. The sentinel check itself is pure fs and does not load migrate.js
+// — only a missing/stale sentinel pays for
+// `await import('./lib/installations/migrate.js')` (which pulls the
+// hosts/routine/teams/daemon/menubar graph).
+if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !isDocumentationRequest) {
   try {
     const sentinel = getMigratedSentinelPath();
     // Sentinel is keyed to the migration SCHEMA version, not the binary version.
@@ -1287,14 +1194,14 @@ if (process.env.AGENTS_SKIP_MIGRATION !== '1' && !helpOrVersionRequested) {
 // a lightweight startup self-heal (two existsSync checks then return) rather
 // than a migration-sentinel bump, so it covers fresh installs AND upgrades
 // without re-running the full migration for the whole user base (issue #20).
-// Skipped for --help/--version: those are pure documentation paths, so they
-// pay neither the dynamic import (child_process, the version/layout resolver,
-// the bundle installer) nor the self-heal's filesystem checks — same gate the
-// update check, background sync, and ensureInitialized above already use.
+// Skipped for --help/--version/--help-all: those are pure documentation paths,
+// so they pay neither the dynamic import (child_process, the version/layout
+// resolver, the bundle installer) nor the self-heal's filesystem checks — same
+// gate the update check, background sync, and ensureInitialized above already use.
 if (
   process.platform === 'darwin' &&
   process.env.AGENTS_SKIP_MIGRATION !== '1' &&
-  !helpOrVersionRequested
+  !isDocumentationRequest
 ) {
   try {
     const { installMenubarLaunchAgentOnUpgrade } = await import('./lib/menubar/install-menubar.js');
@@ -1313,7 +1220,7 @@ if (passedArgs.length === 0) {
 }
 
 try {
-  await maybeBootstrapShimIntegration(requestedCommand, helpOrVersionRequested, verboseStartup);
+  await maybeBootstrapShimIntegration(requestedCommand, isDocumentationRequest, verboseStartup);
   await program.parseAsync();
 } catch (err) {
   if (err instanceof Error && err.name === 'ExitPromptError') {

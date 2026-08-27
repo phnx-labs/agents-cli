@@ -239,6 +239,15 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
 export async function buildFullCommandTree(): Promise<Command> {
   const packageJson = JSON.parse(readFileSync(fileURLToPath(new URL('../../package.json', import.meta.url)), 'utf8')) as { version: string };
   const program = configureRootCommand(new Command(), 'agents', packageJson.version);
+  await registerAllCommands(program);
+  return program;
+}
+
+/**
+ * Register every module in {@link COMMAND_LOADERS} onto the given program.
+ * Used by help paths that need the complete visible command tree.
+ */
+export async function registerAllCommands(program: Command): Promise<void> {
   const done = new Set<ModuleLoader>();
   for (const loaders of Object.values(COMMAND_LOADERS)) {
     for (const loader of loaders) {
@@ -247,5 +256,4 @@ export async function buildFullCommandTree(): Promise<Command> {
       (await loader())(program);
     }
   }
-  return program;
 }

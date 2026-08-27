@@ -131,11 +131,12 @@ describe('the retired top-level `agents status`', () => {
     expect(stderr).toMatch(/unknown command/i);
   });
 
-  it('top-level help lists `sync status`, not a status command', () => {
+  it('top-level help does not list a status command', () => {
     const home = guardedHome();
     const { stdout, status } = run(['--help'], home);
     expect(status).toBe(0);
-    expect(stdout).toMatch(/sync status\s+Sync\/drift only/);
+    // `status` retired to `sync status`; the compact root help never lists it
+    // as a top-level command.
     expect(stdout).not.toMatch(/^\s+status\s+Sync\/drift/m);
   });
 });

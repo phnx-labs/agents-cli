@@ -25,6 +25,30 @@ export function registerCommandGroups(parent: Command, groups: readonly CommandG
   commandGroupRegistry.set(parent, groups);
 }
 
+/**
+ * Front-door command groups shown on `agents --help`. Derived from measured
+ * reach: tier 1 = setup/run/sessions/view, tier 2 = teams/browser/secrets/
+ * devices/accounts/add. The remaining groups stay discoverable through the
+ * pointer rendered below these groups.
+ */
+export const FRONT_DOOR_COMMAND_GROUPS: readonly CommandGroup[] = [
+  {
+    title: 'Quick start',
+    names: ['setup', 'view', 'run', 'sessions'],
+  },
+  {
+    title: 'Most-used',
+    names: ['teams', 'browser', 'secrets', 'devices', 'accounts', 'add'],
+  },
+];
+
+const compactRootHelp = new WeakMap<Command, boolean>();
+
+/** Mark the root program so its help only renders front-door groups + a pointer. */
+export function setCompactRootHelp(program: Command): void {
+  compactRootHelp.set(program, true);
+}
+
 /** Examples + Notes blocks attached to a command via setHelpSections. */
 export interface HelpSections {
   examples?: string;
@@ -169,7 +193,13 @@ function formatHelpCommandsFirst(cmd: Command, helper: Help): string {
       output = output.concat([`${title}:`, formatList(subs.map(renderCommand)), '']);
     }
     const remaining = visibleCommands.filter((s) => !placed.has(s.name()));
-    if (remaining.length > 0) {
+    if (compactRootHelp.get(cmd)) {
+      output = output.concat([
+        'Commands:',
+        '  See "agents --help-all" for every command.',
+        '',
+      ]);
+    } else if (remaining.length > 0) {
       output = output.concat(['Commands:', formatList(remaining.map(renderCommand)), '']);
     }
   } else if (visibleCommands.length > 0) {
