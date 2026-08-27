@@ -5,6 +5,7 @@ import * as path from 'path';
 import { pathToFileURL } from 'url';
 import { spawnSync } from 'child_process';
 import { memoryTargetDir } from './memory.js';
+import { claudeProjectDirName } from './project-key.js';
 
 const tempDirs: string[] = [];
 
@@ -33,9 +34,9 @@ function runMemory(home: string, expression: string): unknown {
       import * as memory from ${JSON.stringify(memoryModuleUrl)};
       const result = ${expression};
       if (result && typeof result.then === 'function') {
-        result.then((r) => console.log(JSON.stringify(r)));
+        result.then((r) => console.log(JSON.stringify(r === undefined ? null : r)));
       } else {
-        console.log(JSON.stringify(result));
+        console.log(JSON.stringify(result === undefined ? null : result));
       }
     `,
     ],
@@ -149,4 +150,74 @@ describe('memory resource (RUSH-1330)', () => {
     expect(names).not.toContain('MEMORY');
   });
 
+});
+
+describe('claude native per-project memory sync (PHNX-2817)', () => {
+  it('a note written under one version home is visible under another', () => {
+    const home = makeTempHome();
+    const cwd = path.join(home, 'projects', 'my-repo');
+    const key = claudeProjectDirName(path.resolve(cwd));
+    const nativeDirA = path.join(home, 'versions', 'claude', 'v-a', 'home', '.claude', 'projects', key, 'memory');
+    const nativeDirB = path.join(home, 'versions', 'claude', 'v-b', 'home', '.claude', 'projects', key, 'memory');
+    const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
+    const versionHomeB = path.join(home, 'versions', 'claude', 'v-b', 'home');
+
+    runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`);
+    expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
+
+    fs.writeFileSync(path.join(nativeDirA, 'note.md'), '# note\nwritten under v-a\n', 'utf-8');
+
+    runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeB)}, ${JSON.stringify(cwd)})`);
+    expect(fs.lstatSync(nativeDirB).isSymbolicLink()).toBe(true);
+
+    const seenUnderB = path.join(nativeDirB, 'note.md');
+    expect(fs.existsSync(seenUnderB)).toBe(true);
+    expect(fs.readFileSync(seenUnderB, 'utf-8')).toContain('written under v-a');
+
+    // Same canonical target — not two independent copies.
+    const canonicalDir = runMemory(home, `memory.getClaudeProjectMemoryDir(${JSON.stringify(cwd)})`) as string;
+    expect(fs.realpathSync(nativeDirA)).toBe(fs.realpathSync(canonicalDir));
+    expect(fs.realpathSync(nativeDirB)).toBe(fs.realpathSync(canonicalDir));
+  });
+
+  it('migrates a pre-existing real directory\'s content instead of discarding it', () => {
+    const home = makeTempHome();
+    const cwd = path.join(home, 'projects', 'my-repo');
+    const key = claudeProjectDirName(path.resolve(cwd));
+    const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
+    const nativeDirA = path.join(versionHomeA, '.claude', 'projects', key, 'memory');
+
+    // Simulate the bug today: a real directory already holding a note, no symlink.
+    fs.mkdirSync(nativeDirA, { recursive: true });
+    fs.writeFileSync(path.join(nativeDirA, 'existing-note.md'), '# existing\nfrom before the fix\n', 'utf-8');
+
+    runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`);
+
+    expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
+    expect(fs.readFileSync(path.join(nativeDirA, 'existing-note.md'), 'utf-8')).toContain('from before the fix');
+
+    const canonicalDir = runMemory(home, `memory.getClaudeProjectMemoryDir(${JSON.stringify(cwd)})`) as string;
+    expect(fs.existsSync(path.join(canonicalDir, 'existing-note.md'))).toBe(true);
+
+    // A second version home syncing afterward sees the migrated note too.
+    const versionHomeB = path.join(home, 'versions', 'claude', 'v-b', 'home');
+    const nativeDirB = path.join(versionHomeB, '.claude', 'projects', key, 'memory');
+    runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeB)}, ${JSON.stringify(cwd)})`);
+    expect(fs.readFileSync(path.join(nativeDirB, 'existing-note.md'), 'utf-8')).toContain('from before the fix');
+  });
+
+  it('is idempotent — re-syncing an already-linked dir is a no-op', () => {
+    const home = makeTempHome();
+    const cwd = path.join(home, 'projects', 'my-repo');
+    const key = claudeProjectDirName(path.resolve(cwd));
+    const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
+    const nativeDirA = path.join(versionHomeA, '.claude', 'projects', key, 'memory');
+
+    runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`);
+    const targetBefore = fs.readlinkSync(nativeDirA);
+
+    runMemory(home, `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`);
+    expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
+    expect(fs.readlinkSync(nativeDirA)).toBe(targetBefore);
+  });
 });

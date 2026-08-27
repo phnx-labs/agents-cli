@@ -20,9 +20,11 @@ import {
   getSystemAgentsDir,
   getProjectAgentsDir,
   ensureAgentsDir,
+  getRuntimeStateDir,
 } from './state.js';
 import { agentConfigDirName } from './agents.js';
 import { supports } from './capabilities.js';
+import { claudeProjectDirName } from './project-key.js';
 
 export interface MemoryFact {
   /** Filename without .md (slug). */
@@ -303,5 +305,65 @@ export function syncMemoryToVersionHome(
   } catch { /* best-effort */ }
 
   return written;
+}
+
+/**
+ * Canonical shared dir for Claude Code's NATIVE per-project auto-memory —
+ * `<versionHome>/.claude/projects/<project-key>/memory/*.md`, the freeform
+ * notes Claude writes for itself during a session. Distinct from the layered
+ * `memory` resource above (~/.agents/memory/ facts synced into
+ * `.claude/memory/`): this dir is keyed by project (via
+ * {@link claudeProjectDirName}), not by agent version, and Claude Code itself
+ * decides what goes in it — agents-cli only makes the directory
+ * version-independent, never writes into it.
+ */
+export function getClaudeProjectMemoryDir(cwd: string): string {
+  const projectKey = claudeProjectDirName(path.resolve(cwd));
+  return path.join(getRuntimeStateDir(), 'claude-project-memory', projectKey);
+}
+
+/**
+ * Make Claude Code's native per-project memory dir version-independent by
+ * symlinking `<versionHome>/.claude/projects/<project-key>/memory/` into the
+ * one canonical dir every installed Claude version's home shares for this
+ * project (PHNX-2817). Without this, `getVersionHomePath` gives every
+ * installed version its own isolated HOME, so a note written under one
+ * version is invisible under another — the directory is just empty there.
+ *
+ * Idempotent and safe to call on every sync: a dir already linked to the
+ * canonical target is left alone; a PRE-EXISTING real directory with content
+ * (the common case today, since this bug has always left one behind) has its
+ * files migrated into the canonical dir first — never discarded — before
+ * being replaced by the symlink.
+ */
+export function syncClaudeProjectMemoryDir(versionHome: string, cwd: string = process.cwd()): void {
+  const projectKey = claudeProjectDirName(path.resolve(cwd));
+  const canonicalDir = path.join(getRuntimeStateDir(), 'claude-project-memory', projectKey);
+  const projectDir = path.join(versionHome, agentConfigDirName('claude'), 'projects', projectKey);
+  const nativeMemoryDir = path.join(projectDir, 'memory');
+
+  fs.mkdirSync(canonicalDir, { recursive: true, mode: 0o700 });
+
+  let existing: fs.Stats | undefined;
+  try {
+    existing = fs.lstatSync(nativeMemoryDir);
+  } catch { /* nothing there yet */ }
+
+  if (existing?.isSymbolicLink()) {
+    let currentTarget: string | undefined;
+    try { currentTarget = fs.readlinkSync(nativeMemoryDir); } catch { /* dangling link */ }
+    if (currentTarget === canonicalDir) return; // already wired correctly
+    fs.unlinkSync(nativeMemoryDir); // stale/foreign link — replace below
+  } else if (existing?.isDirectory()) {
+    // Migrate first (never clobber content already promoted to canonical by
+    // an earlier-synced version home), then remove the now-redundant copy.
+    fs.cpSync(nativeMemoryDir, canonicalDir, { recursive: true, force: false, errorOnExist: false });
+    fs.rmSync(nativeMemoryDir, { recursive: true, force: true });
+  } else if (existing) {
+    return; // an unexpected file at this path — leave it alone rather than destroy it
+  }
+
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.symlinkSync(canonicalDir, nativeMemoryDir, process.platform === 'win32' ? 'junction' : undefined);
 }
 

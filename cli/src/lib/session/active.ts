@@ -53,6 +53,7 @@ import { classifyHostLink, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host
 import { mapBounded } from '../concurrency.js';
 import { linearIssueUrl } from './linear.js';
 import { viewingInLabel } from './viewing-in.js';
+import { claudeProjectDirName } from '../project-key.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -903,11 +904,6 @@ function readLiveTerminals(): LiveTerminalEntry[] {
     }
   }
   return Array.from(merged.values());
-}
-
-/** Convert an absolute cwd to the Claude-project folder name (slashes and dots → dashes). */
-function claudeProjectDirName(cwd: string): string {
-  return cwd.replace(/[/.]/g, '-');
 }
 
 /**

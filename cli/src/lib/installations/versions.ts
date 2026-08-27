@@ -86,7 +86,7 @@ import {
   shouldInstallCommandAsSkill,
 } from '../command-skills.js';
 import { getWriter, getDetector } from '../staleness/registry.js';
-import { syncMemoryToVersionHome } from '../memory.js';
+import { syncMemoryToVersionHome, syncClaudeProjectMemoryDir } from '../memory.js';
 import { listPluginSkillNames, resolveCommandSource, resolveSkillSource } from '../staleness/writers/sources.js';
 import { syncProjectResourcesToAgent } from '../project-resources.js';
 import { installClaudeStatusLine } from '../claude-statusline.js';
@@ -3157,6 +3157,15 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   // into capable agent version homes on every full or partial sync.
   if (supports(agent, 'memory', version).ok) {
     syncMemoryToVersionHome(agent, versionHome, cwd);
+  }
+
+  // Claude Code's own NATIVE per-project auto-memory (.claude/projects/<key>/memory/,
+  // PHNX-2817) is a separate, unmanaged directory Claude writes into itself — make it
+  // version-independent the same way project-level rules already are, via a shared
+  // symlink, so a note survives an agent version upgrade instead of vanishing into a
+  // fresh, empty version home.
+  if (agent === 'claude') {
+    syncClaudeProjectMemoryDir(versionHome, cwd);
   }
 
   // Prune resources deleted from source (RUSH-2438). Runs only on a repo-scope

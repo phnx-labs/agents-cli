@@ -115,6 +115,27 @@ and participate after the user repo.
 editing a symlink target directly gets stomped on the next sync. The sync writes
 the right file name per supported agent (`OPENCODE.md`, `.cursorrules`, etc.).
 
+**"Memory" names three distinct, unrelated mechanisms — don't conflate them.**
+Besides the rules file above, `agents memory` ([`src/lib/memory.ts`](src/lib/memory.ts))
+is a layered resource — `~/.agents/memory/*.md` facts fanned out into each
+capable version home (`.claude/memory/`, `.codex/memories/`, …) by
+`syncMemoryToVersionHome`. Separately, Claude Code's own **native** per-project
+auto-memory — `.claude/projects/<project-key>/memory/*.md`, freeform notes
+Claude writes into itself during a session — is neither a `ResourceKind` nor
+populated by agents-cli at all. Because `getVersionHomePath` gives every
+installed version its own isolated HOME, that native dir used to be a THIRD,
+unmanaged, per-version copy: a note written under one Claude version was
+invisible under another (PHNX-2817). `syncClaudeProjectMemoryDir`
+(`src/lib/memory.ts`, wired into `syncResourcesToVersion`,
+[`src/lib/installations/versions.ts`](src/lib/installations/versions.ts))
+fixes this the same way project-level rules are version-independent: every
+version home's copy is a symlink into one canonical dir
+(`~/.agents/.cache/state/claude-project-memory/<project-key>/`, keyed by the
+same cwd-to-dash-name encoding Claude Code itself uses,
+`claudeProjectDirName` in [`src/lib/project-key.ts`](src/lib/project-key.ts)) —
+no merge/copy step, no drift, a pre-existing real directory's content is
+migrated into the canonical dir once rather than discarded.
+
 ### 3. Capability table gates per-agent writes
 
 `supports(agent, cap, version?)` in [`src/lib/capabilities.ts`](src/lib/capabilities.ts)

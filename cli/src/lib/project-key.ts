@@ -22,6 +22,18 @@ import * as path from 'path';
 const WORKTREE_SEGMENT = '/.agents/worktrees/';
 
 /**
+ * Convert an absolute cwd to Claude Code's own project-folder name under
+ * `~/.claude/projects/` (slashes and dots become dashes) — the encoding
+ * Claude Code itself performs to name each project's session-transcript and
+ * native-memory directory. Pure, no filesystem: session discovery and
+ * native-memory sync both derive from this so they agree on one directory
+ * for a given cwd.
+ */
+export function claudeProjectDirName(cwd: string): string {
+  return cwd.replace(/[/.]/g, '-');
+}
+
+/**
  * Resolve a stable project key from a working directory, or `undefined` when
  * the path carries nothing usable (empty, `/`, whitespace).
  */
