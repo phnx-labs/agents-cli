@@ -350,12 +350,6 @@ else
 fi
 green "Packed $TGZ_NAME (sha256:$TGZ_DIGEST)"
 
-# suite is "selected", not "full" or a producer-invented name: release.sh
-# never passes --suite to `release-attestation.sh require`
-# (bind_tree_lock_policy defaults an unset --suite to "selected"), so a record
-# tagged anything else is invisible to it, key-for-key correct on tree/lock/
-# policy or not. Running the full suite here satisfies "selected" -- it is a
-# superset -- but the record must still speak the consumer's vocabulary.
 ATTEST_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest.XXXXXX.json")"
 if [[ -n "$INHERIT_BASE" ]]; then
   # Derive the record from the green base: it verifies the release tree differs
