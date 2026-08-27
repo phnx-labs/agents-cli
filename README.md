@@ -1300,11 +1300,19 @@ email (`muqsitnawaz@gmail.com` → `muqsitnawaz`); the page slug is readable plu
 short view-id. HTML is stored as one object: local images are inlined, `file://` TOC
 links become in-page hashes, so the published page is actually viewable. `--visibility unlisted` (hidden aliases
 `--unlisted` / `--private`) is a capability URL: GET still works, the gallery hides it,
-and the Worker sends `X-Robots-Tag: noindex`. `share visibility <target> <level>`
+and the Worker sends `X-Robots-Tag: noindex`. `--visibility me` is visible only to
+you (the signed-in owner); `--visibility org` is visible to anyone at your email
+**domain** — derived from your own address, so it needs a **workspace** Google
+account and is refused on a public-inbox domain (`gmail.com`, `outlook.com`,
+`icloud.com`, …). Both need a Phoenix session and are identity-gated at read time (a
+stranger is redirected to sign in, then 404s). `share visibility <target> <level>`
 re-scopes an **already-published** page in place — the slug/URL is preserved and the
 body is untouched (a metadata-only change, like `share edit`, so no revision) — so you
 can promote a draft to `public` or pull a link back to `me`/`org` without re-publishing
-(`me`/`org` need a Phoenix session). **BYO Cloudflare** remains: `setup` reads
+(`me`/`org` need a Phoenix session; `org` needs a workspace domain). Sign-in is a
+single **Phoenix ID** (Google-only device-code OAuth, `agents auth login`) — see
+[`docs/share.md`](cli/docs/share.md) for the full identity + visibility model.
+**BYO Cloudflare** remains: `setup` reads
 a Cloudflare API token from your `cloudflare.com` secrets bundle (or `--token`), creates
 an R2 bucket, uploads a tiny Worker, and enables the free `*.workers.dev` subdomain (or
 maps `--domain share.example.com` when the token owns the zone). Writes are bearer-gated

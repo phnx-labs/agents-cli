@@ -20,12 +20,31 @@ core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferen
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes.
 
+`agents artifacts share` publishes an artifact under a **single Phoenix ID**
+identity (Google-only device-code OAuth via `agents auth login`,
+`src/lib/identity/client.ts` `PhoenixSession` — there is no separate GetRush
+account and no Supabase). The URL namespace is the signed-in email's local-part
+(`handleFromEmail`, `src/lib/share/backend.ts`). A publish stamps one of four
+visibility levels (`ShareVisibility`, `src/lib/share/publish.ts`): `public`
+(default, gallery + OG card), `unlisted` (= `--private`; capability URL, `noindex`,
+gallery-hidden), `me` (owner-only, Phoenix-gated), and `org` (anyone at the
+**sharer's** email domain, Phoenix-gated). `org` is refused on a public-inbox
+domain (`PUBLIC_INBOX_DOMAINS` in `src/lib/share/worker-template.ts`), so it needs a
+workspace-domain Google account, never a personal `gmail.com`. The full model is
+[`docs/share.md`](docs/share.md); the publication boundary is
+[`docs/observability.md`](docs/observability.md).
+
 `agents artifacts share list` mirrors the public gallery by default. Use
-`--scope unlisted|me|org` or `--all` to list the authenticated owner's hidden
-pages; the CLI forwards the owner's bearer and a `scope=mine` hint to the
-Worker's JSON listing route, which includes hidden pages only after verifying
-that the bearer owns the requested namespace. See `docs/observability.md` for
-the publication boundary.
+`--scope unlisted|me|org` or `--all` (alias for `--scope all`) to list the
+authenticated owner's hidden pages; the CLI forwards the owner's bearer and a
+`scope=mine` hint to the Worker's JSON listing route, which includes hidden pages
+only after verifying that the bearer owns the requested namespace. The filter is
+`--scope` (not `--visibility`) because the parent `share <file>` command owns
+`--visibility`. `agents artifacts share visibility <target> <level>` re-scopes an
+already-published page in place through the same `PATCH` metadata-edit route as
+`share edit`: the slug/URL and body are preserved, so no revision is created; the
+result flag is `--visibility-json` (the same ancestor-collision rename as
+`--scope`/`--for-user`).
 
 `agents feed watch --json` is the canonical thin-client operator stream: it
 composes the existing session watcher with feed attention and activity, while
