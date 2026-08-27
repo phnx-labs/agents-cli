@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { Command } from 'commander';
 import { setHelpSections } from '../lib/help.js';
-import { syncTraces } from '../lib/traces/sync.js';
+import { syncTraces, type SyncFailure } from '../lib/traces/sync.js';
 import { readSyncLedger } from '../lib/traces/sync.js';
 import { managedTracesBaseUrl, resolveTracesBackend } from '../lib/traces/backend.js';
 import { showUrl } from '../lib/open-url.js';
@@ -105,7 +105,20 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
     parts.push(chalk.dim(`${result.skipped} skipped`));
   }
   if (result.errors > 0) {
-    parts.push(chalk.yellow(`${result.errors} errors`));
+    // Distinguish expected history (transcripts cleaned off disk) from genuine
+    // failures that will be retried, so the operator knows which need attention.
+    const detail: string[] = [];
+    if (result.transcriptUnavailable > 0) {
+      detail.push(`${result.transcriptUnavailable} transcripts no longer on disk`);
+    }
+    const retryable = result.parseFailed + result.uploadFailed;
+    if (retryable > 0) {
+      detail.push(`${retryable} parse/upload failures — will retry`);
+    }
+    parts.push(
+      chalk.yellow(`${result.errors} errors`) +
+        (detail.length ? chalk.dim(` (${detail.join(' · ')})`) : ''),
+    );
   }
   if (parts.length === 0) {
     parts.push(chalk.dim('nothing new'));
@@ -124,7 +137,27 @@ async function handleStatus(): Promise<void> {
 
   const when = new Date(ledger.lastSyncMtime).toLocaleString();
   console.log(`Last sync: ${chalk.bold(when)}`);
-  console.log(chalk.dim('Run `agents traces sync` to push new sessions.'));
+
+  const failures = ledger.failures ?? [];
+  if (failures.length > 0) {
+    const byKind = new Map<string, SyncFailure[]>();
+    for (const f of failures) {
+      const list = byKind.get(f.kind) ?? [];
+      list.push(f);
+      byKind.set(f.kind, list);
+    }
+    console.log(chalk.yellow(`\n${failures.length} unresolved failure${failures.length === 1 ? '' : 's'}:`));
+    for (const [kind, list] of byKind) {
+      const retry = kind === 'transcript-unavailable' ? chalk.dim(' (not retried)') : chalk.dim(' (retried each sync)');
+      console.log(`  ${chalk.bold(list.length)} ${kind}${retry}`);
+      const example = list[0];
+      if (example?.detail) {
+        console.log(chalk.dim(`    e.g. ${example.id.slice(0, 8)} · ${example.detail}`));
+      }
+    }
+  }
+
+  console.log(chalk.dim('\nRun `agents traces sync` to push new sessions.'));
 }
 
 async function handleOpen(): Promise<void> {

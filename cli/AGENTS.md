@@ -46,6 +46,17 @@ it is not part of the hot session scan or `SCHEMA_VERSION`. `agents traces sync
 writes them to a directory (no Phoenix auth, no worker, no upload) — a local
 export for verifying the real signal before the hosted path is wired.
 
+The sync gate is a per-device mtime **watermark** plus a **failure ledger**, both in
+`traces-sync.json` (PHNX-3267). The watermark alone cannot retry a failure — a
+later-mtime success advances it past an earlier failed row, which the next run then
+skips forever — so the ledger also records each failed session's identity + typed,
+redacted evidence and the row query unions those retry-worthy ids back in regardless
+of the watermark. Failures are typed `transcript-unavailable` (the file is gone;
+expected history, not re-read, aged out after 14 days), `parse-failed`, or
+`upload-failed` (both retried until they resolve); `SyncResult` carries the per-kind
+counts, `agents traces sync` prints the breakdown, and `agents traces status` lists
+the outstanding retry set. A `--dry-run` never touches the ledger.
+
 ## Core design choices (read this first)
 
 Break these and downstream code drifts silently.

@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDB, readSessionTopics } from '../session/db.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { ClassifiedTopic } from './classify.js';
-import { buildIndexShard, buildSessionDetail, syncTraces, type SyncRow } from './sync.js';
+import { buildIndexShard, buildSessionDetail, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
 
 const id = 'trace-rich-fixture';
 const transcript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
@@ -298,6 +298,137 @@ describe('traces sync --dry-run local export', () => {
     } finally {
       delete process.env.AGENTS_SYNC_MACHINE_ID;
       fs.rmSync(outDir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('traces sync failure retry ledger (PHNX-3267)', () => {
+  const realTranscript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
+  const ids = ['retry-a', 'retry-b', 'retry-c-gone', 'retry-d-ok'];
+  const ledgerPath = path.join(getRuntimeStateDir(), 'traces-sync.json');
+
+  function insertSession(sessionId: string, mtimeMs: number, filePath: string): void {
+    const db = getDB();
+    db.prepare(`
+      INSERT INTO sessions
+        (id, short_id, agent, timestamp, project, cwd, git_branch, label, duration_ms,
+         model, file_path, file_mtime_ms, file_size, machine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      sessionId, sessionId.slice(0, 8), 'codex', '2026-08-25T00:00:00.000Z', 'agents-cli',
+      '/home/x/agents-cli', 'main', 'Retry test', 9000, 'gpt-test',
+      filePath, mtimeMs, 100, 'retry-device',
+    );
+  }
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const table of ['tool_calls', 'session_topics', 'session_insights']) {
+      for (const sessionId of ids) db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+    }
+    for (const sessionId of ids) db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+    fs.rmSync(ledgerPath, { force: true });
+  });
+
+  afterEach(() => {
+    delete process.env.AGENTS_TRACES_BASE_URL;
+    delete process.env.AGENTS_TRACES_WRITE_TOKEN;
+    delete process.env.AGENTS_SYNC_MACHINE_ID;
+  });
+
+  it('retries an upload-failed session stranded below the watermark, then a stable sync uploads zero', async () => {
+    // A (older) and B (newer). B's later success advances the watermark past A —
+    // the exact case the plain watermark loses. A must still come back via the ledger.
+    insertSession('retry-a', 1000, realTranscript);
+    insertSession('retry-b', 2000, realTranscript);
+
+    let failA = true;
+    const puts: string[] = [];
+    const server = http.createServer((req, res) => {
+      if (req.method === 'PUT') puts.push(req.url ?? '');
+      req.resume();
+      if (req.method === 'PUT' && failA && req.url?.includes('/sessions/retry-a.json')) {
+        res.writeHead(500).end('boom');
+      } else {
+        res.writeHead(200).end('ok');
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no TCP address');
+    process.env.AGENTS_TRACES_BASE_URL = `http://127.0.0.1:${address.port}`;
+    process.env.AGENTS_TRACES_WRITE_TOKEN = 'test-token';
+    process.env.AGENTS_SYNC_MACHINE_ID = 'retry-device';
+    try {
+      // First sync: B uploads, A's PUT 500s → recorded as an upload-failed retry.
+      const first = await syncTraces({ skipIndex: true });
+      expect(first.uploaded).toBe(1);
+      expect(first.uploadFailed).toBe(1);
+      expect(first.errors).toBe(1);
+      const afterFirst = readSyncLedger();
+      expect(afterFirst.lastSyncMtime).toBe(2000); // watermark advanced PAST A (1000)
+      const stranded = (afterFirst.failures ?? []).find((f) => f.id === 'retry-a');
+      expect(stranded?.kind).toBe('upload-failed');
+      expect(stranded?.detail).toContain('500'); // actionable evidence, not an opaque count
+
+      // A is now below the watermark. Only the union-with-retry-ids re-selects it.
+      failA = false;
+      puts.length = 0;
+      const second = await syncTraces({ skipIndex: true });
+      expect(puts.some((u) => u.includes('/sessions/retry-a.json'))).toBe(true); // re-attempted
+      expect(second.uploaded).toBe(1); // A recovered
+      expect(second.uploadFailed).toBe(0);
+      expect((readSyncLedger().failures ?? [])).toHaveLength(0); // cleared on success
+
+      // Third sync of unchanged data uploads nothing (idempotent).
+      puts.length = 0;
+      const third = await syncTraces({ skipIndex: true });
+      expect(third.uploaded).toBe(0);
+      expect(third.errors).toBe(0);
+      expect(puts).toHaveLength(0);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
+    }
+  });
+
+  it('classifies a missing transcript as unavailable and does not re-query it once past the watermark', async () => {
+    // C points at a file that does not exist; D is a real, uploadable session with a
+    // higher mtime so the watermark advances past C.
+    insertSession('retry-c-gone', 1000, '/nonexistent/path/gone.jsonl');
+    insertSession('retry-d-ok', 2000, realTranscript);
+
+    const puts: string[] = [];
+    const server = http.createServer((req, res) => {
+      if (req.method === 'PUT') puts.push(req.url ?? '');
+      req.resume();
+      res.writeHead(200).end('ok');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('no TCP address');
+    process.env.AGENTS_TRACES_BASE_URL = `http://127.0.0.1:${address.port}`;
+    process.env.AGENTS_TRACES_WRITE_TOKEN = 'test-token';
+    process.env.AGENTS_SYNC_MACHINE_ID = 'retry-device';
+    try {
+      const first = await syncTraces({ skipIndex: true });
+      expect(first.transcriptUnavailable).toBe(1);
+      expect(first.uploadFailed).toBe(0);
+      expect(first.parseFailed).toBe(0);
+      expect(first.uploaded).toBe(1); // D
+      const recorded = (readSyncLedger().failures ?? []).find((f) => f.id === 'retry-c-gone');
+      expect(recorded?.kind).toBe('transcript-unavailable');
+
+      // Second sync: C is below the advanced watermark and unavailable, so it is
+      // neither re-selected by the watermark nor by the retry union — no wasted work.
+      puts.length = 0;
+      const second = await syncTraces({ skipIndex: true });
+      expect(second.uploaded).toBe(0);
+      expect(second.transcriptUnavailable).toBe(0); // not re-queried, not re-counted
+      expect(puts).toHaveLength(0);
+      // The evidence is retained in the ledger for the operator even though it is not retried.
+      expect((readSyncLedger().failures ?? []).some((f) => f.id === 'retry-c-gone')).toBe(true);
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
     }
   });
 });

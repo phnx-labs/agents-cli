@@ -9,6 +9,15 @@
  * Sync gate: `sessions.db` `file_mtime_ms` is the source of truth.  A ledger
  * at `getRuntimeStateDir()/traces-sync.json` records the last sync timestamp
  * per device so re-runs skip unchanged sessions.
+ *
+ * Retry ledger: the mtime watermark alone cannot retry failures — a later-mtime
+ * success advances it past an earlier failed row, which the next run's
+ * `file_mtime_ms > watermark` filter then skips forever. So the same ledger also
+ * records the identity + typed evidence of each failed session (`failures`), and
+ * the row query unions those retry-worthy ids back in regardless of the watermark
+ * (PHNX-3267). Failures are typed so a gone transcript (`transcript-unavailable`,
+ * expected history, aged out after a TTL and never re-read) is distinguished from a
+ * real parse/upload failure (retried until it resolves).
  */
 
 import fs from 'node:fs';
@@ -62,7 +71,14 @@ export interface SyncOpts {
 export interface SyncResult {
   uploaded: number;
   skipped: number;
+  /** Total failures = transcriptUnavailable + parseFailed + uploadFailed. Kept for callers. */
   errors: number;
+  /** The transcript file the row points at is gone/unreadable — expected history, not retried each run. */
+  transcriptUnavailable: number;
+  /** The transcript exists but could not be parsed into a trajectory — retried until it parses. */
+  parseFailed: number;
+  /** Parsed fine but the upload PUT failed (network/5xx) — retried on the next sync. */
+  uploadFailed: number;
 }
 
 /** Push derived, redacted trajectories for this device to the traces store. */
@@ -84,21 +100,74 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
   // NULL machine rows are legacy local sessions (pre-machine-field). A dry-run
   // ignores the incremental watermark so the export covers every session.
   const sinceMtime = dryRun ? 0 : (ledger.lastSyncMtime ?? 0);
-  const rows = db
+  const watermarkRows = db
     .prepare(
       'SELECT * FROM sessions WHERE (machine = ? OR machine IS NULL) AND file_mtime_ms > ? ORDER BY file_mtime_ms ASC',
     )
     .all(device, sinceMtime) as SyncRow[];
+
+  // The watermark alone loses failures: a later-mtime success advances it past an
+  // earlier failed row, which the `file_mtime_ms > sinceMtime` filter then skips
+  // forever. So union in the sessions we explicitly recorded as retry-worthy
+  // failures (parse/upload — a `transcript-unavailable` file is gone, re-reading it
+  // wastes work) regardless of where the watermark sits. A dry-run ignores the
+  // ledger entirely and already selects every row.
+  const retryIds = dryRun
+    ? []
+    : (ledger.failures ?? [])
+        .filter((f) => f.kind !== 'transcript-unavailable')
+        .map((f) => f.id);
+  let rows = watermarkRows;
+  if (retryIds.length) {
+    const seen = new Set(watermarkRows.map((r) => r.id));
+    const retryRows: SyncRow[] = [];
+    for (let i = 0; i < retryIds.length; i += 400) {
+      const chunk = retryIds.slice(i, i + 400);
+      retryRows.push(
+        ...(db
+          .prepare(
+            `SELECT * FROM sessions WHERE (machine = ? OR machine IS NULL) AND id IN (${chunk.map(() => '?').join(',')})`,
+          )
+          .all(device, ...chunk) as SyncRow[]),
+      );
+    }
+    const stranded = retryRows.filter((r) => !seen.has(r.id));
+    rows = [...watermarkRows, ...stranded].sort(
+      (a, b) => (a.file_mtime_ms ?? 0) - (b.file_mtime_ms ?? 0),
+    );
+  }
 
   const limited = opts.limit !== undefined ? rows.slice(0, opts.limit) : rows;
   const knownSecrets = knownSecretValuesFromEnv();
 
   let uploaded = 0;
   let skipped = 0;
-  let errors = 0;
-  // Advance the watermark only to the max mtime of successfully uploaded sessions
-  // so failures are retried on the next run.
+  let transcriptUnavailable = 0;
+  let parseFailed = 0;
+  let uploadFailed = 0;
+  // Advance the watermark only to the max mtime of successfully uploaded sessions.
+  // On its own this does NOT retry failures (a later success strands earlier ones);
+  // the failure ledger below is what actually re-selects them next run.
   let maxSuccessMtime = ledger.lastSyncMtime ?? 0;
+
+  // Carry prior failures forward by id so a stranded row's identity + evidence
+  // survives across syncs. A success removes the id; a repeat failure updates it.
+  const now = Date.now();
+  const failures = new Map<string, SyncFailure>(
+    (ledger.failures ?? []).map((f) => [f.id, f]),
+  );
+  const recordFailure = (row: SyncRow, kind: SyncFailureKind, err: unknown): void => {
+    const raw = err instanceof Error ? err.message : String(err);
+    const prev = failures.get(row.id);
+    failures.set(row.id, {
+      id: row.id,
+      mtimeMs: row.file_mtime_ms ?? 0,
+      kind,
+      detail: redactSecrets(raw.split('\n')[0] ?? '', knownSecrets).slice(0, 200),
+      firstSeen: prev?.firstSeen ?? now,
+      attempts: (prev?.attempts ?? 0) + 1,
+    });
+  };
 
   if (dryRun && outDir) {
     fs.mkdirSync(path.join(outDir, 'sessions'), { recursive: true });
@@ -115,8 +184,16 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       const session = rowToMeta(row);
       const events = parseSession(row.file_path, row.agent as SessionAgentId);
       traj = buildTrajectory(events, session, { redact: true, knownSecrets });
-    } catch {
-      errors++;
+    } catch (err) {
+      // A gone/unreadable transcript is expected history, not a retry-worthy error;
+      // a file that IS present but failed to parse is a real problem to retry.
+      if (!fs.existsSync(row.file_path)) {
+        transcriptUnavailable++;
+        recordFailure(row, 'transcript-unavailable', err);
+      } else {
+        parseFailed++;
+        recordFailure(row, 'parse-failed', err);
+      }
       continue;
     }
     try {
@@ -130,8 +207,10 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       }
       uploaded++;
       maxSuccessMtime = Math.max(maxSuccessMtime, row.file_mtime_ms ?? 0);
-    } catch {
-      errors++;
+      failures.delete(row.id); // recovered — drop it from the retry set
+    } catch (err) {
+      uploadFailed++;
+      recordFailure(row, 'upload-failed', err);
     }
   }
 
@@ -163,7 +242,16 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
 
   // A dry-run never advances the incremental watermark: it is a read-only export.
   if (!dryRun) {
-    writeSyncLedger({ lastSyncMtime: maxSuccessMtime });
+    // Age out long-unavailable transcripts so a corpus of deleted files cannot grow
+    // the retry set without bound; parse/upload failures persist until they resolve.
+    const persistedFailures = [...failures.values()].filter(
+      (f) =>
+        !(
+          f.kind === 'transcript-unavailable' &&
+          now - f.firstSeen > TRANSCRIPT_UNAVAILABLE_TTL_MS
+        ),
+    );
+    writeSyncLedger({ lastSyncMtime: maxSuccessMtime, failures: persistedFailures });
     // Register the Phoenix session with Prix so the console can fetch live data
     // (PHNX-3257). Fire-and-forget — a link failure must not block sync.
     // Managed backend only: the BYO path's token is a static write token that
@@ -177,7 +265,14 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       }).catch(() => {});
     }
   }
-  return { uploaded, skipped, errors };
+  return {
+    uploaded,
+    skipped,
+    errors: transcriptUnavailable + parseFailed + uploadFailed,
+    transcriptUnavailable,
+    parseFailed,
+    uploadFailed,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -569,8 +664,32 @@ async function putIndexShard(
 // Sync ledger — per-device timestamp gate
 // ---------------------------------------------------------------------------
 
+/** How a session failed to sync. Only parse/upload failures are re-queried every run. */
+export type SyncFailureKind = 'transcript-unavailable' | 'parse-failed' | 'upload-failed';
+
+export interface SyncFailure {
+  id: string;
+  mtimeMs: number;
+  kind: SyncFailureKind;
+  /** Bounded, redacted first line of the underlying error — actionable evidence. */
+  detail: string;
+  /** Epoch ms first recorded, so a permanently-unavailable transcript can be aged out. */
+  firstSeen: number;
+  attempts: number;
+}
+
+/**
+ * A `transcript-unavailable` failure is kept (so its count stays reportable) but
+ * not retried, because re-reading a file that is gone wastes work. Age it out of
+ * the ledger after this window so a corpus of long-deleted transcripts cannot grow
+ * the failure set without bound.
+ */
+const TRANSCRIPT_UNAVAILABLE_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+
 interface SyncLedger {
   lastSyncMtime?: number;
+  /** Failed session identities, keyed by id, that survive across syncs. */
+  failures?: SyncFailure[];
 }
 
 function ledgerPath(): string {
