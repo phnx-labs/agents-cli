@@ -436,7 +436,7 @@
               "negate": false
             }
           ],
-          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
+          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --code AUTHCODE --json\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
           "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },
@@ -1615,7 +1615,7 @@
               "negate": false
             }
           ],
-          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
+          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --code AUTHCODE --json\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
           "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },

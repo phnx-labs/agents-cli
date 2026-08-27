@@ -49,6 +49,7 @@ agents run codex#work</code></pre><h4>Notes</h4><p class="notes">The label binds
 agents accounts mint claude --account ada@example.com
 agents accounts mint claude --account work --email ada@example.com
 agents accounts mint claude --token-stdin &lt; token.txt
+agents accounts mint claude --code authcode --json
 agents accounts mint claude --fleet
 agents auth mint claude --account ada@example.com --json claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). the command drives that flow in a pty, opens the authorize url, captures a well-formed sk-ant-oat01- token (refusing the #1767 tty-banner capture), and seeds:
   1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`
@@ -58,6 +59,7 @@ already have a token? `--token-stdin` skips the browser dance. `agents auth mint
 agents accounts mint claude --account ada@example.com
 agents accounts mint claude --account work --email ada@example.com
 agents accounts mint claude --token-stdin &lt; token.txt
+agents accounts mint claude --code AUTHCODE --json
 agents accounts mint claude --fleet
 agents auth mint claude --account ada@example.com --json</code></pre><h4>Notes</h4><p class="notes">Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:
   1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`
@@ -543,6 +545,7 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
 agents accounts mint claude --account ada@example.com
 agents accounts mint claude --account work --email ada@example.com
 agents accounts mint claude --token-stdin &lt; token.txt
+agents accounts mint claude --code authcode --json
 agents accounts mint claude --fleet
 agents auth mint claude --account ada@example.com --json claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). the command drives that flow in a pty, opens the authorize url, captures a well-formed sk-ant-oat01- token (refusing the #1767 tty-banner capture), and seeds:
   1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`
@@ -552,6 +555,7 @@ already have a token? `--token-stdin` skips the browser dance. `agents auth mint
 agents accounts mint claude --account ada@example.com
 agents accounts mint claude --account work --email ada@example.com
 agents accounts mint claude --token-stdin &lt; token.txt
+agents accounts mint claude --code AUTHCODE --json
 agents accounts mint claude --fleet
 agents auth mint claude --account ada@example.com --json</code></pre><h4>Notes</h4><p class="notes">Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:
   1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`

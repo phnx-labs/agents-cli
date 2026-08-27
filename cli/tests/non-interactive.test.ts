@@ -830,7 +830,7 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
     for (const { version, email } of accounts) {
       writeFakeManagedVersion(home, 'claude', version, 'claude');
       if (email) {
-        const configDir = path.join(
+        const versionHome = path.join(
           home,
           '.agents',
           '.history',
@@ -838,12 +838,19 @@ describe.skipIf(process.platform === 'win32')('non-interactive CLI usage', () =>
           'claude',
           version,
           'home',
-          '.claude',
         );
+        const configDir = path.join(versionHome, '.claude');
         fs.mkdirSync(configDir, { recursive: true });
         fs.writeFileSync(
           path.join(configDir, '.claude.json'),
           JSON.stringify({ oauthAccount: { emailAddress: email } }),
+        );
+        // Off macOS, a missing `.credentials.json` is signed out even when
+        // `.claude.json` still names an email (PHNX-2685). Seed a token so
+        // the human view still has emails to sort by.
+        fs.writeFileSync(
+          path.join(configDir, '.credentials.json'),
+          JSON.stringify({ claudeAiOauth: { accessToken: 'at-test', refreshToken: 'rt-test' } }),
         );
       }
     }

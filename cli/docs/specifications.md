@@ -2074,7 +2074,10 @@ Credential account selection adds three requirements to that funnel:
   / `agents auth mint claude` (`lib/auth-mint.ts`): the command MUST capture only
   a well-formed `sk-ant-oat01-…` token (refusing a TTY-banner blob, #1767) and
   MUST seed both the named provider account and the reserved FILE-BASED `auth`
-  bundle keyed per-account email (`claude-account-token.ts`). Interactive mint
+  bundle keyed per-account email (`claude-account-token.ts`). `--json` (including
+  `--code --json`) MUST emit only the machine-readable result on stdout — no
+  progress / Authorize lines, never the token (`commands/auth-mint.ts`,
+  `lib/auth-mint.ts` `mintAndSeed` / `driveSetupTokenMint`). Interactive mint
   is Claude-only; any other harness MUST fail loud with the command that
   actually provisions it (`agents fleet login` or `agents accounts add`).
 - **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,

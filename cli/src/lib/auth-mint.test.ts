@@ -18,11 +18,15 @@ import {
   mintAndSeed,
   MINT_FLOWS,
   resolveMintIdentity,
+  resolveSyncTargets,
   seedNamedAccount,
   seedReservedAuthToken,
   stripAnsi,
   unmintableMessage,
+  type MintDriveHooks,
 } from './auth-mint.js';
+import { upsertDevice } from './devices/registry.js';
+import { resetSelfHostCache } from './devices/self-host.js';
 import {
   AUTH_BUNDLE,
   claudeAccountTokenKey,
@@ -178,6 +182,29 @@ describe('driveSetupTokenMint', () => {
     expect(driver.stopped).toEqual(['sess-mint']);
   });
 
+  it('driveSetupTokenMint with json writes no Authorize URL on stdout', async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...a) => {
+      logs.push(a.map(String).join(' '));
+    });
+    const driver = fakeDriver([
+      { screen: fixture('claude-setup-token.txt') },
+      { screen: fixture('claude-setup-token-done.txt') },
+    ]);
+    try {
+      await driveSetupTokenMint('claude setup-token', flow, {
+        driver,
+        json: true,
+        openUrl: async () => {},
+        drive: fast,
+        code: 'AUTHCODE#state',
+      });
+      expect(logs).toEqual([]);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('pastes --code into the PTY after the URL appears', async () => {
     const driver = fakeDriver([
       { screen: fixture('claude-setup-token.txt') },
@@ -295,6 +322,184 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
       "HOME='/tmp/home with space' /opt/claude setup-token",
     );
   });
+
+  it('mintAndSeed --code --json writes no progress lines; stdout is only valid JSON', async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...a) => {
+      logs.push(a.map(String).join(' '));
+    });
+    const driver = fakeDriver([
+      { screen: fixture('claude-setup-token.txt') },
+      { screen: fixture('claude-setup-token-done.txt') },
+    ]);
+    try {
+      const result = await mintAndSeed({
+        harness: 'claude',
+        account: EMAIL,
+        code: 'AUTHCODE#state',
+        json: true,
+        open: false,
+        hooks: { driver, drive: { initialDelayMs: 0, pollMs: 1, timeoutMs: 400 } },
+      });
+      expect(result.account).toBe('ada-at-example.com');
+      expect(result.email).toBe(EMAIL);
+      expect(logs).toEqual([]);
+      expect(result).not.toHaveProperty('token');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('mintAndSeed --code without --json prints the authorize URL on stdout', async () => {
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, 'log').mockImplementation((...a) => {
+      logs.push(a.map(String).join(' '));
+    });
+    const driver = fakeDriver([
+      { screen: fixture('claude-setup-token.txt') },
+      { screen: fixture('claude-setup-token-done.txt') },
+    ]);
+    try {
+      await mintAndSeed({
+        harness: 'claude',
+        account: EMAIL,
+        code: 'AUTHCODE#state',
+        open: false,
+        hooks: { driver, drive: { initialDelayMs: 0, pollMs: 1, timeoutMs: 400 } },
+      });
+      const stdout = logs.join('\n');
+      expect(stdout).toMatch(/Authorize: https:\/\/claude\.ai\/oauth\/authorize/);
+      expect(stdout).toMatch(/Authorize URL: https:\/\/claude\.ai\/oauth\/authorize/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('accounts mint --code --json stdout is only parseable JSON', async () => {
+    const { registerMintCommand } = await import('../commands/auth-mint.js');
+    const driver = fakeDriver([
+      { screen: fixture('claude-setup-token.txt') },
+      { screen: fixture('claude-setup-token-done.txt') },
+    ]);
+    const hooks: MintDriveHooks = {
+      driver,
+      drive: { initialDelayMs: 0, pollMs: 1, timeoutMs: 400 },
+    };
+    const program = new Command();
+    program.exitOverride();
+    registerMintCommand(program.command('accounts'), hooks);
+    const out: string[] = [];
+    const err: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((...a) => void out.push(a.map(String).join(' ')));
+    const error = vi.spyOn(console, 'error').mockImplementation((...a) => void err.push(a.map(String).join(' ')));
+    const proc = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => {
+      throw new Error(`__exit__:${code}`);
+    }) as never);
+    try {
+      await program.parseAsync([
+        'node', 'agents', 'accounts', 'mint', 'claude',
+        '--code', 'AUTHCODE#state',
+        '--json',
+        '--no-open',
+        '--account', EMAIL,
+      ]);
+    } catch (e) {
+      if (!(e instanceof Error) || !e.message.startsWith('__exit__')) throw e;
+    } finally {
+      log.mockRestore();
+      error.mockRestore();
+      proc.mockRestore();
+    }
+    const stdout = out.join('\n');
+    expect(stdout).not.toMatch(/Authorize/);
+    const parsed = JSON.parse(stdout) as {
+      harness: string;
+      account: string;
+      email: string;
+      authBundleKey: string;
+      rotated: boolean;
+      fleet: unknown[];
+      token?: string;
+      error?: string;
+    };
+    expect(parsed).toEqual({
+      harness: 'claude',
+      account: 'ada-at-example.com',
+      email: EMAIL,
+      authBundleKey: claudeAccountTokenKey(EMAIL),
+      rotated: false,
+      fleet: [],
+    });
+    expect(parsed).not.toHaveProperty('token');
+    expect(parsed.error).toBeUndefined();
+  });
+
+  describe('--fleet / --device through mintAndSeed', () => {
+    const SELF = 'mint-self';
+    const PEER = 'peer-a';
+    let devicesDir: string;
+    let prevDevicesDir: string | undefined;
+    let prevMachineId: string | undefined;
+
+    beforeEach(async () => {
+      devicesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-mint-seed-devices-'));
+      prevDevicesDir = process.env.AGENTS_DEVICES_DIR;
+      prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
+      process.env.AGENTS_DEVICES_DIR = devicesDir;
+      process.env.AGENTS_SYNC_MACHINE_ID = SELF;
+      resetSelfHostCache();
+      await upsertDevice(SELF, {
+        platform: 'linux',
+        user: 'test',
+        address: { via: 'manual', dnsName: `${SELF}.example.ts.net` },
+      });
+      await upsertDevice(PEER, {
+        platform: 'linux',
+        user: 'test',
+        address: { via: 'manual', dnsName: `${PEER}.example.ts.net` },
+      });
+      resetSelfHostCache();
+    });
+
+    afterEach(() => {
+      if (prevDevicesDir === undefined) delete process.env.AGENTS_DEVICES_DIR;
+      else process.env.AGENTS_DEVICES_DIR = prevDevicesDir;
+      if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+      else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
+      resetSelfHostCache();
+      fs.rmSync(devicesDir, { recursive: true, force: true });
+    });
+
+    it('fails loud on an unknown --device', async () => {
+      await expect(mintAndSeed({
+        harness: 'claude',
+        account: EMAIL,
+        token: TOKEN,
+        devices: ['no-such-box'],
+      })).rejects.toThrow(/Unknown device 'no-such-box'/);
+    });
+
+    it('skips --device self and returns an empty fleet list', async () => {
+      const result = await mintAndSeed({
+        harness: 'claude',
+        account: EMAIL,
+        token: TOKEN,
+        devices: [SELF],
+      });
+      expect(result.fleet).toEqual([]);
+    });
+
+    it('throws a partial-fleet-failure after seeding locally when a peer sync fails', async () => {
+      await expect(mintAndSeed({
+        harness: 'claude',
+        account: EMAIL,
+        token: TOKEN,
+        devices: [PEER],
+      })).rejects.toThrow(/Minted locally but fleet sync failed for: peer-a/);
+      expect(findAccount('ada-at-example.com')?.auth).toBe('setup-token');
+      expect(resolveClaudeSetupToken(home)).toBe(TOKEN);
+    });
+  });
 });
 
 describe('agents auth mint / accounts mint command wiring', () => {
@@ -342,6 +547,7 @@ describe('agents auth mint / accounts mint command wiring', () => {
       .helpInformation();
     expect(authHelp).toContain('agents accounts mint claude');
     expect(authHelp).toContain('--token-stdin');
+    expect(authHelp).toContain('--code AUTHCODE --json');
     expect(accountsHelp).toContain('sk-ant-oat01-');
     expect(program.commands.find((c) => c.name() === 'auth')!.commands.map((c) => c.name())).toContain('mint');
     expect(program.commands.find((c) => c.name() === 'accounts')!.commands.map((c) => c.name())).toContain('mint');
@@ -352,5 +558,78 @@ describe('agents auth mint / accounts mint command wiring', () => {
     const text = `${r.out}${r.err}`;
     expect(text).toMatch(/Cannot mint a setup-token for 'grok'/);
     expect(r.exit).toBe(1);
+  });
+
+  it('mint --json for an unmintable harness emits only parseable JSON on stdout', async () => {
+    const r = await run('accounts', 'mint', 'grok', '--json');
+    expect(r.exit).toBe(1);
+    expect(r.out).not.toMatch(/Authorize/);
+    const parsed = JSON.parse(r.out);
+    expect(parsed.error).toMatch(/Cannot mint a setup-token for 'grok'/);
+  });
+});
+
+describe('resolveSyncTargets — --fleet / --device', () => {
+  const SELF = 'mint-self';
+  const PEER_A = 'peer-a';
+  const PEER_B = 'peer-b';
+  let devicesDir: string;
+  let prevDevicesDir: string | undefined;
+  let prevMachineId: string | undefined;
+
+  beforeEach(async () => {
+    devicesDir = fs.mkdtempSync(path.join(os.tmpdir(), 'auth-mint-devices-'));
+    prevDevicesDir = process.env.AGENTS_DEVICES_DIR;
+    prevMachineId = process.env.AGENTS_SYNC_MACHINE_ID;
+    process.env.AGENTS_DEVICES_DIR = devicesDir;
+    process.env.AGENTS_SYNC_MACHINE_ID = SELF;
+    resetSelfHostCache();
+    fs.mkdirSync(devicesDir, { recursive: true });
+    await upsertDevice(SELF, {
+      platform: 'linux',
+      user: 'test',
+      address: { via: 'manual', dnsName: `${SELF}.example.ts.net` },
+    });
+    await upsertDevice(PEER_A, {
+      platform: 'linux',
+      user: 'test',
+      address: { via: 'manual', dnsName: `${PEER_A}.example.ts.net` },
+    });
+    await upsertDevice(PEER_B, {
+      platform: 'linux',
+      user: 'test',
+      address: { via: 'manual', dnsName: `${PEER_B}.example.ts.net` },
+    });
+    resetSelfHostCache();
+  });
+
+  afterEach(() => {
+    if (prevDevicesDir === undefined) delete process.env.AGENTS_DEVICES_DIR;
+    else process.env.AGENTS_DEVICES_DIR = prevDevicesDir;
+    if (prevMachineId === undefined) delete process.env.AGENTS_SYNC_MACHINE_ID;
+    else process.env.AGENTS_SYNC_MACHINE_ID = prevMachineId;
+    resetSelfHostCache();
+    fs.rmSync(devicesDir, { recursive: true, force: true });
+  });
+
+  it('returns no targets when neither --fleet nor --device is set', async () => {
+    expect(await resolveSyncTargets(false, [])).toEqual([]);
+  });
+
+  it('fails loud for an unknown --device name', async () => {
+    await expect(resolveSyncTargets(false, ['no-such-box'])).rejects.toThrow(
+      /Unknown device 'no-such-box'/,
+    );
+  });
+
+  it('skips a --device that is this host', async () => {
+    expect(await resolveSyncTargets(false, [SELF])).toEqual([]);
+    expect(await resolveSyncTargets(false, ['localhost'])).toEqual([]);
+  });
+
+  it('unions --fleet with named --device and drops self + duplicates', async () => {
+    expect(await resolveSyncTargets(true, [])).toEqual([PEER_A, PEER_B]);
+    expect(await resolveSyncTargets(true, [PEER_A, SELF])).toEqual([PEER_A, PEER_B]);
+    expect(await resolveSyncTargets(false, [PEER_A, PEER_A, SELF])).toEqual([PEER_A]);
   });
 });

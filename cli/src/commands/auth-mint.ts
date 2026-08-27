@@ -13,6 +13,7 @@ import {
   listMintableHarnesses,
   mintAndSeed,
   type MintAndSeedResult,
+  type MintDriveHooks,
 } from '../lib/auth-mint.js';
 
 function collect(value: string, previous: string[]): string[] {
@@ -44,7 +45,7 @@ function printResult(result: MintAndSeedResult, json: boolean): void {
   }
 }
 
-export function registerMintCommand(parent: Command): Command {
+export function registerMintCommand(parent: Command, testHooks?: MintDriveHooks): Command {
   const mint = parent
     .command('mint <harness>')
     .description('Mint a long-lived setup-token and seed it as a named account')
@@ -87,11 +88,17 @@ export function registerMintCommand(parent: Command): Command {
           open: o.open,
           fleet: o.fleet,
           devices: o.device,
-          hooks: o.tokenStdin || o.code || !isInteractiveTerminal() ? undefined : {
-            readCode: async () => {
-              const { input } = await import('@inquirer/prompts');
-              return input({ message: 'Paste the authorization code from the browser' });
-            },
+          json,
+          hooks: {
+            ...testHooks,
+            ...(o.tokenStdin || o.code || !isInteractiveTerminal()
+              ? {}
+              : {
+                  readCode: async () => {
+                    const { input } = await import('@inquirer/prompts');
+                    return input({ message: 'Paste the authorization code from the browser' });
+                  },
+                }),
           },
         });
         printResult(result, json);
@@ -103,6 +110,7 @@ export function registerMintCommand(parent: Command): Command {
 agents accounts mint claude --account ada@example.com
 agents accounts mint claude --account work --email ada@example.com
 agents accounts mint claude --token-stdin < token.txt
+agents accounts mint claude --code AUTHCODE --json
 agents accounts mint claude --fleet
 agents auth mint claude --account ada@example.com --json`,
     notes: `Claude is the only harness with an interactive long-lived setup-token (\`claude setup-token\`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:

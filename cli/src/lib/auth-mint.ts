@@ -291,6 +291,17 @@ export interface DriveMintResult {
   sessionId: string;
 }
 
+export interface DriveSetupTokenMintOpts extends MintDriveHooks {
+  code?: string;
+  /** Suppress stdout progress so `--json` callers get a parseable blob. */
+  json?: boolean;
+}
+
+/** Stdout progress for the mint path. `--json` / quiet: drop it (stderr errors stay). */
+function emitMintProgress(line: string, json?: boolean): void {
+  if (!json) console.log(line);
+}
+
 /**
  * Drive `claude setup-token` in a PTY: scrape the authorize URL, open it,
  * optionally paste `--code`, then capture the token with the #1767 guard.
@@ -299,15 +310,17 @@ export interface DriveMintResult {
 export async function driveSetupTokenMint(
   command: string,
   flow: MintFlow,
-  opts: MintDriveHooks & { code?: string } = {},
+  opts: DriveSetupTokenMintOpts = {},
 ): Promise<DriveMintResult> {
   const driver = opts.driver ?? defaultPtyDriver();
   const initialDelayMs = opts.drive?.initialDelayMs ?? 1500;
   const pollMs = opts.drive?.pollMs ?? 500;
   const timeoutMs = opts.drive?.timeoutMs ?? 180_000;
+  const json = opts.json === true;
   const openUrl = opts.openUrl ?? (async (url: string) => {
     const shown = await showUrl(url);
     if (shown.via === 'none') {
+      // stderr: `--json` stdout stays parseable; the operator still gets the URL.
       console.error(`Could not open a browser — open this yourself:\n  ${url}`);
     }
   });
@@ -324,7 +337,11 @@ export async function driveSetupTokenMint(
       const { screen, exited } = await driver.screen(id);
       const url = extractMintUrl(screen, flow);
       const token = extractClaudeSetupToken(screen);
-      if (token) return { token, url: url ?? opened, sessionId: id };
+      if (token) {
+        const capturedUrl = url ?? opened;
+        if (capturedUrl) emitMintProgress(`Authorize URL: ${capturedUrl}`, json);
+        return { token, url: capturedUrl, sessionId: id };
+      }
       if (url && url !== opened) {
         opened = url;
         await openUrl(url);
@@ -391,6 +408,8 @@ export interface MintAndSeedInput {
   open?: boolean;
   fleet?: boolean;
   devices?: string[];
+  /** Suppress progress prints so `--json` stdout stays machine-parseable. */
+  json?: boolean;
   hooks?: MintDriveHooks;
 }
 
@@ -416,7 +435,14 @@ export interface MintAndSeedResult {
  */
 export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedResult> {
   const flow = getMintFlow(input.harness);
-  const install = input.token ? null : resolveMintInstallation(flow.harness);
+  const json = input.json === true;
+  // An injected PTY driver is a complete substitute for exec'ing the local
+  // binary, so the install lookup is only required on the real drive path.
+  const install = input.token
+    ? null
+    : input.hooks?.driver
+      ? { bin: flow.harness, home: process.env.HOME ?? '/tmp' }
+      : resolveMintInstallation(flow.harness);
   const identity = resolveMintIdentity({
     account: input.account,
     email: input.email,
@@ -430,7 +456,7 @@ export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedR
     const command = buildMintCommand(flow, install!.bin, install!.home);
     const openUrl = input.open === false
       ? async (url: string) => {
-        console.log(`Authorize: ${url}`);
+        emitMintProgress(`Authorize: ${url}`, json);
       }
       : input.hooks?.openUrl;
     const driven = await driveSetupTokenMint(command, flow, {
@@ -439,9 +465,9 @@ export async function mintAndSeed(input: MintAndSeedInput): Promise<MintAndSeedR
       readCode: input.hooks?.readCode,
       drive: input.hooks?.drive,
       code: input.code,
+      json,
     });
     token = driven.token;
-    if (driven.url) console.log(`Authorize URL: ${driven.url}`);
   }
 
   const existing = findAccount(identity.accountName);
