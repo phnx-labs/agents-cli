@@ -1,11 +1,21 @@
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
-import { spawnSync, spawn } from 'child_process';
-import { memoryTargetDir } from './memory.js';
+import { spawnSync } from 'child_process';
+import { memoryTargetDir, syncClaudeProjectMemoryDir, getClaudeProjectMemoryDir } from './memory.js';
 import { claudeProjectDirName } from './project-key.js';
+
+// Pass-through by default (real symlinkSync) — only the raced-EEXIST tests
+// below override one call each via mockImplementationOnce. Needed because
+// vitest can't vi.spyOn an ESM namespace export directly ("module namespace
+// is not configurable"); this is the standard workaround, scoped to exactly
+// the one syscall those tests need to simulate a concurrent winner.
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  return { ...actual, symlinkSync: vi.fn(actual.symlinkSync) };
+});
 
 const tempDirs: string[] = [];
 
@@ -47,24 +57,6 @@ function runMemory(home: string, expression: string): unknown {
   }
   const line = (child.stdout || '').trim().split('\n').filter(Boolean).pop() || 'null';
   return JSON.parse(line);
-}
-
-/** Same as {@link runMemory}, but async and non-blocking — for racing two real processes. */
-function runMemoryAsync(home: string, expression: string): Promise<{ status: number | null; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(
-      tsxBin,
-      ['-e', `
-        import * as memory from ${JSON.stringify(memoryModuleUrl)};
-        ${expression};
-      `],
-      { env: { ...process.env, HOME: home } },
-    );
-    let stderr = '';
-    child.stderr?.on('data', (d) => { stderr += d.toString(); });
-    child.on('error', reject);
-    child.on('close', (status) => resolve({ status, stderr }));
-  });
 }
 
 describe('memory resource (RUSH-1330)', () => {
@@ -239,27 +231,70 @@ describe('claude native per-project memory sync (PHNX-2817)', () => {
     expect(fs.readlinkSync(nativeDirA)).toBe(targetBefore);
   });
 
-  it('two concurrent first-time syncs of the same project race without throwing', async () => {
+  it('treats a raced EEXIST as success when the winner landed the same canonical target', async () => {
+    // True multi-process concurrency turned out impossible to land reliably
+    // here: the vulnerable window (lstat sees nothing -> symlinkSync) is
+    // sub-millisecond, well under real OS process-scheduling granularity —
+    // measured directly, 20+ trials of real concurrent `tsx` processes
+    // (even barrier-synchronized to release simultaneously) produced zero
+    // collisions. A prior version of this test claimed to reproduce the
+    // race via two unsynchronized processes; non-author review of PHNX-2817
+    // caught that it didn't reliably (0/15 on a rerun) — this replaces it
+    // with a deterministic simulation of the exact outcome a real race
+    // produces: `fs.symlinkSync` throwing EEXIST because another process
+    // won the link first.
     const home = makeTempHome();
-    const cwd = path.join(home, 'projects', 'my-repo');
-    const key = claudeProjectDirName(path.resolve(cwd));
-    const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
-    const nativeDirA = path.join(versionHomeA, '.claude', 'projects', key, 'memory');
+    const prevStateDir = process.env.AGENTS_STATE_DIR;
+    process.env.AGENTS_STATE_DIR = path.join(home, '.cache', 'state');
+    try {
+      const cwd = path.join(home, 'projects', 'my-repo');
+      const key = claudeProjectDirName(path.resolve(cwd));
+      const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
+      const nativeDirA = path.join(versionHomeA, '.claude', 'projects', key, 'memory');
+      const canonicalDir = getClaudeProjectMemoryDir(cwd);
 
-    // Two real processes syncing the SAME never-before-synced version home —
-    // both see nothing at nativeDirA and race to create the symlink
-    // (reproduces the EEXIST a second `agents run claude` launch can hit).
-    const expr = `memory.syncClaudeProjectMemoryDir(${JSON.stringify(versionHomeA)}, ${JSON.stringify(cwd)})`;
-    const [a, b] = await Promise.all([
-      runMemoryAsync(home, expr),
-      runMemoryAsync(home, expr),
-    ]);
+      const { symlinkSync: realSymlinkSync } = await vi.importActual<typeof import('fs')>('fs');
+      vi.mocked(fs.symlinkSync).mockImplementationOnce(((...args: Parameters<typeof fs.symlinkSync>) => {
+        // Actually create the link — simulating that a concurrent sync won
+        // it a moment before ours got here — then surface the exact error
+        // a real racing `symlinkSync` call raises against an existing path.
+        realSymlinkSync(...args);
+        const err = new Error('EEXIST: file already exists, symlink') as NodeJS.ErrnoException;
+        err.code = 'EEXIST';
+        throw err;
+      }) as typeof fs.symlinkSync);
 
-    expect(a.status, a.stderr).toBe(0);
-    expect(b.status, b.stderr).toBe(0);
-    expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
+      expect(() => syncClaudeProjectMemoryDir(versionHomeA, cwd)).not.toThrow();
 
-    const canonicalDir = runMemory(home, `memory.getClaudeProjectMemoryDir(${JSON.stringify(cwd)})`) as string;
-    expect(fs.realpathSync(nativeDirA)).toBe(fs.realpathSync(canonicalDir));
+      expect(fs.lstatSync(nativeDirA).isSymbolicLink()).toBe(true);
+      expect(fs.realpathSync(nativeDirA)).toBe(fs.realpathSync(canonicalDir));
+    } finally {
+      if (prevStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
+      else process.env.AGENTS_STATE_DIR = prevStateDir;
+    }
+  });
+
+  it('still throws when EEXIST is hit but the existing link points somewhere else', () => {
+    const home = makeTempHome();
+    const prevStateDir = process.env.AGENTS_STATE_DIR;
+    process.env.AGENTS_STATE_DIR = path.join(home, '.cache', 'state');
+    try {
+      const cwd = path.join(home, 'projects', 'my-repo');
+      const versionHomeA = path.join(home, 'versions', 'claude', 'v-a', 'home');
+
+      vi.mocked(fs.symlinkSync).mockImplementationOnce((() => {
+        const err = new Error('EEXIST: file already exists, symlink') as NodeJS.ErrnoException;
+        err.code = 'EEXIST';
+        throw err;
+      }) as typeof fs.symlinkSync);
+
+      // readlinkSync on the still-absent nativeMemoryDir throws too — the
+      // catch's "racedTarget !== canonicalDir" branch takes the mismatch
+      // path and rethrows rather than swallowing a genuine, unrelated error.
+      expect(() => syncClaudeProjectMemoryDir(versionHomeA, cwd)).toThrow(/EEXIST/);
+    } finally {
+      if (prevStateDir === undefined) delete process.env.AGENTS_STATE_DIR;
+      else process.env.AGENTS_STATE_DIR = prevStateDir;
+    }
   });
 });
