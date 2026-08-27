@@ -26,6 +26,7 @@ function managedCandidates(home: string, platform: Platform): string[] {
   return [
     path.join(home, '.agents', '.cache', 'bin', name),
     path.join(home, '.agents', '.cache', 'ffmpeg', 'bin', name),
+    path.join(home, '.agents', '.cache', 'ffmpeg', 'node_modules', 'ffmpeg-static', name),
   ];
 }
 
@@ -73,6 +74,23 @@ function readOsRelease(): string {
 }
 
 type InstallStep = { command: string; args: string[] };
+
+async function installManagedFfmpeg(
+  home: string,
+  env: NodeJS.ProcessEnv,
+  platform: Platform,
+  platformDirs: string[],
+): Promise<string | undefined> {
+  const npm = commandOnPath('npm', env, platform, platformDirs);
+  if (!npm) return undefined;
+  const prefix = path.join(home, '.agents', '.cache', 'ffmpeg');
+  await fs.promises.mkdir(prefix, { recursive: true });
+  await execFileAsync(npm, [
+    'install', '--prefix', prefix, '--no-save', '--no-audit', '--no-fund',
+    'ffmpeg-static@5.2.0',
+  ], { env, timeout: 10 * 60_000, windowsHide: true });
+  return firstUsable(managedCandidates(home, platform));
+}
 
 function installAttempt(platform: Platform, env: NodeJS.ProcessEnv, osRelease: string, platformDirs: string[]): InstallStep[] | undefined {
   if (platform === 'darwin') {
@@ -151,6 +169,14 @@ export async function resolveFfmpeg(options: {
       } catch (error) {
         failure = `${path.basename(attempt.at(-1)!.command)} failed: ${(error as Error).message}`;
       }
+    }
+
+    try {
+      const managed = await installManagedFfmpeg(home, env, platform, executableDirs);
+      if (managed) return managed;
+      failure += '; managed npm installation was unavailable';
+    } catch (error) {
+      failure += `; managed npm installation failed: ${(error as Error).message}`;
     }
 
     const manual = ffmpegManualCommand(platform, osRelease);
