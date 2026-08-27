@@ -1209,8 +1209,19 @@ the bug.
   `~/.agents/.cache/state/menubar-children`; `reapOrphansFromPreviousLaunch()`
   runs in `main.swift` **before** the first AppKit call, since the crash being
   recovered from happens *inside* that call. Do NOT move it after, and do NOT
-  replace it with an exit handler — SIGSEGV runs none. Pid reuse is guarded by
-  re-checking the executable path (`proc_pidpath`) before killing.
+  replace it with an exit handler — SIGSEGV runs none. The registry is a
+  versioned, `flock`-serialized document: a launch intent and unguessable
+  provenance token are persisted before `posix_spawn`, the token is inherited
+  through the child environment and carried in a group-leading supervisor's
+  argv (the process-table surface current macOS exposes), and PID/PGID/start-
+  time/resolved executable/argv complete the record immediately after spawn.
+  On the next launch, a token-marked PPID-1 process reconstructs an intent whose
+  helper died in that spawn-to-registration window. Reaping acknowledges entries
+  one at a time:
+  unreadable or identity-ambiguous live records remain durable, and a signalled
+  record is removed only after the process group is confirmed absent. A registry
+  read or write error fails loud and never becomes an empty successful read.
+  Legacy two-field records decode conservatively as unverifiable retained state.
 
 Poll intervals must stay well above the call's real cost:
 `StatusItemController.doctorRefreshInterval` is 15 min against a 136s command

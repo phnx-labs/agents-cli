@@ -126,7 +126,9 @@ enum SingleInstanceSelfTest {
         let path = dir + "/menubar.lock"
         let registry = dir + "/menubar-children"
 
-        guard let orphan = spawnOrphanHoldingLock(path) else {
+        guard let launch = try? ChildProcess.Registry.begin(
+                  argv: ["/usr/bin/python3"], commandKind: "single-instance-test", file: registry),
+              let orphan = spawnOrphanHoldingLock(path, provenance: launch.token) else {
             check(false, "could not spawn a lock-holding orphan"); return
         }
         // The holder is a live process but NOT the "AGI Menu" helper, and the lock file
@@ -134,12 +136,7 @@ enum SingleInstanceSelfTest {
         check(!SingleInstance.liveHelperOwnsLock(path: path),
               "leaked orphan is classified as a stale (non-helper) owner")
 
-        // Record it so the recovery's reaper finds it; its executablePath must
-        // match the recorded path (the reaper's pid-reuse guard).
-        ChildProcess.Registry.register(
-            pid: orphan,
-            path: ChildProcess.executablePath(orphan) ?? "/usr/bin/python3",
-            file: registry)
+        try? ChildProcess.Registry.complete(token: launch.token, pid: orphan, file: registry)
 
         // The fix: acquire reaps the orphan (releasing its flock) and WINS instead
         // of surfacing into the deadlock.
@@ -160,11 +157,17 @@ enum SingleInstanceSelfTest {
     /// dead pid into the lock file — exactly a leaked helper child. Returns once
     /// the flock is provably held, so the acquire under test is guaranteed to
     /// contend. Mirrors ChildProcessSelfTest.spawnDetachedGroupLeader.
-    private static func spawnOrphanHoldingLock(_ lockPath: String) -> pid_t? {
+    private static func spawnOrphanHoldingLock(_ lockPath: String, provenance: String) -> pid_t? {
+        let pidPath = lockPath + ".orphan-pid"
+        try? FileManager.default.removeItem(atPath: pidPath)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
         let script = """
         import fcntl, os, time
+        child = os.fork()
+        if child:
+            open('\(pidPath)', 'w').write(str(child))
+            os._exit(0)
         os.setpgrp()
         fd = os.open('\(lockPath)', os.O_RDWR | os.O_CREAT, 0o644)
         fcntl.flock(fd, fcntl.LOCK_EX)
@@ -172,15 +175,19 @@ enum SingleInstanceSelfTest {
         os.write(fd, b'999999\\n')
         time.sleep(300)
         """
-        p.arguments = ["-c", script]
+        p.arguments = ["-c", script, provenance]
+        p.environment = ProcessInfo.processInfo.environment.merging(
+            [ChildProcess.Registry.provenanceVariable: provenance]) { _, new in new }
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return nil }
-        let pid = p.processIdentifier
+        p.waitUntilExit()
         // Wait until the orphan has actually taken the flock (a fresh flock from
         // here must be refused) so acquire() is guaranteed to contend.
         for _ in 0..<50 {
             usleep(100_000)
+            guard let text = try? String(contentsOfFile: pidPath, encoding: .utf8),
+                  let pid = pid_t(text) else { continue }
             let probe = open(lockPath, O_RDWR | O_CREAT, 0o644)
             if probe >= 0 {
                 let refused = flock(probe, LOCK_EX | LOCK_NB) != 0
@@ -188,7 +195,6 @@ enum SingleInstanceSelfTest {
                 if refused { return pid }
             }
         }
-        kill(pid, SIGKILL)
         return nil
     }
 

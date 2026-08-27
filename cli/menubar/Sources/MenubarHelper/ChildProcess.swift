@@ -66,14 +66,27 @@ enum ChildProcess {
     static func run(_ argv: [String], timeout: TimeInterval = defaultTimeout) -> Data? {
         guard !argv.isEmpty else { return nil }
 
+        let commandKind = argv.dropFirst().prefix(2).joined(separator: " ")
+        let launch: Registry.Entry
+        do {
+            launch = try Registry.begin(argv: argv, commandKind: commandKind)
+        } catch {
+            fputs("menubar: cannot persist child launch intent: \(error)\n", stderr)
+            return nil
+        }
+
         var fds: [Int32] = [-1, -1]
-        guard pipe(&fds) == 0 else { return nil }
+        guard pipe(&fds) == 0 else {
+            removeRegistryEntry(token: launch.token)
+            return nil
+        }
         let readFD = fds[0]
         let writeFD = fds[1]
 
-        guard let pid = spawn(argv, stdout: writeFD, closeInChild: readFD) else {
+        guard let pid = spawn(argv, stdout: writeFD, closeInChild: readFD, provenance: launch.token) else {
             close(readFD)
             close(writeFD)
+            removeRegistryEntry(token: launch.token)
             return nil
         }
 
@@ -81,9 +94,21 @@ enum ChildProcess {
         // never sees EOF even after the child exits — the classic pipe hang.
         close(writeFD)
 
-        Registry.register(pid: pid, path: argv[0])
+        do {
+            try Registry.complete(token: launch.token, pid: pid)
+        } catch {
+            // The child is already live. Kill it now rather than allow a process
+            // whose durable ownership could not be completed to escape tracking.
+            _ = terminateGroup(pid)
+            close(readFD)
+            var status: Int32 = 0
+            while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+            removeRegistryEntry(token: launch.token)
+            return nil
+        }
+        var removeOnReturn = true
         defer {
-            Registry.deregister(pid: pid)
+            if removeOnReturn { removeRegistryEntry(token: launch.token) }
         }
 
         // Drain on a background thread so the deadline is enforceable. Draining
@@ -115,7 +140,8 @@ enum ChildProcess {
             // if it somehow does not, abandon the reader (it owns its fd) and
             // reap off-thread rather than hanging the caller's queue forever.
             if drained.wait(timeout: .now() + 5) == .timedOut {
-                reapDetached(pid)
+                removeOnReturn = false
+                reapDetached(pid, token: launch.token)
                 return nil
             }
         }
@@ -134,10 +160,11 @@ enum ChildProcess {
 
     /// Reap a child we have stopped waiting on, without blocking the caller.
     /// Skipping the reap entirely would leave a zombie holding its pid slot.
-    private static func reapDetached(_ pid: pid_t) {
+    private static func reapDetached(_ pid: pid_t, token: String) {
         DispatchQueue.global(qos: .utility).async {
             var status: Int32 = 0
             while waitpid(pid, &status, 0) == -1 && errno == EINTR {}
+            removeRegistryEntry(token: token)
         }
     }
 
@@ -146,7 +173,7 @@ enum ChildProcess {
     /// Foundation's `Process` exposes no way to set the child's process group,
     /// and without that a `kill` reaches only the CLI while its `node -e` probes
     /// survive as orphans — the exact leak this type exists to stop.
-    private static func spawn(_ argv: [String], stdout writeFD: Int32, closeInChild readFD: Int32) -> pid_t? {
+    private static func spawn(_ argv: [String], stdout writeFD: Int32, closeInChild readFD: Int32, provenance: String) -> pid_t? {
         var attr: posix_spawnattr_t?
         posix_spawnattr_init(&attr)
         defer { posix_spawnattr_destroy(&attr) }
@@ -167,12 +194,24 @@ enum ChildProcess {
         posix_spawn_file_actions_addclose(&actions, readFD)
         posix_spawn_file_actions_addclose(&actions, writeFD)
 
-        var cArgs: [UnsafeMutablePointer<CChar>?] = argv.map { strdup($0) }
+        // Keep a tiny group-leading supervisor alive around the real command.
+        // macOS 26 exposes argv but not another process's environment through
+        // KERN_PROCARGS2, so the same unguessable token also rides as the
+        // shell's $0. "$@" forwards the original argv without interpolation;
+        // the status assignment prevents sh from tail-execing the CLI away.
+        let supervisedArgv = ["/bin/sh", "-c", "\"$@\"; status=$?; exit $status", provenance] + argv
+        var cArgs: [UnsafeMutablePointer<CChar>?] = supervisedArgv.map { strdup($0) }
         cArgs.append(nil)
         defer { for a in cArgs where a != nil { free(a) } }
 
+        var environment = ProcessInfo.processInfo.environment
+        environment[Registry.provenanceVariable] = provenance
+        var cEnvironment: [UnsafeMutablePointer<CChar>?] = environment.map { strdup("\($0.key)=\($0.value)") }
+        cEnvironment.append(nil)
+        defer { for item in cEnvironment where item != nil { free(item) } }
+
         var pid: pid_t = 0
-        let rc = posix_spawn(&pid, argv[0], &actions, &attr, &cArgs, environ)
+        let rc = posix_spawn(&pid, "/bin/sh", &actions, &attr, &cArgs, &cEnvironment)
         return rc == 0 ? pid : nil
     }
 
@@ -196,16 +235,28 @@ enum ChildProcess {
 
     /// SIGTERM the group, then SIGKILL anything that ignored it. The negative
     /// pid is the whole process group — `kill(pid)` alone leaves the subtree.
-    private static func terminateGroup(_ pid: pid_t) {
-        kill(-pid, SIGTERM)
+    @discardableResult
+    private static func terminateGroup(_ pgid: pid_t, confirmAbsence: Bool = false) -> Bool {
+        kill(-pgid, SIGTERM)
         // A wedged node process under memory pressure does not always service
         // SIGTERM promptly; escalate rather than wait on it indefinitely.
         let deadline = Date().addingTimeInterval(2)
         while Date() < deadline {
-            if kill(-pid, 0) != 0 { return }
+            if processGroupIsAbsent(pgid) { return true }
             usleep(50_000)
         }
-        kill(-pid, SIGKILL)
+        kill(-pgid, SIGKILL)
+        if !confirmAbsence { return true }
+        let killDeadline = Date().addingTimeInterval(3)
+        while Date() < killDeadline {
+            if processGroupIsAbsent(pgid) { return true }
+            usleep(50_000)
+        }
+        return processGroupIsAbsent(pgid)
+    }
+
+    private static func processGroupIsAbsent(_ pgid: pid_t) -> Bool {
+        kill(-pgid, 0) != 0 && errno == ESRCH
     }
 
     // MARK: - Cross-launch reaping
@@ -217,24 +268,58 @@ enum ChildProcess {
     /// handler of ours, so the *next* process has to do it.
     @discardableResult
     static func reapOrphansFromPreviousLaunch(file: String = Registry.path()) -> Int {
-        let stale = Registry.readAll(file: file)
-        // Kill FIRST, clear after. Clearing first means a helper that dies part
-        // way through this sweep (entirely possible — the crash it is recovering
-        // from happens moments later, in the first AppKit call) has already
-        // erased the only record of the survivors, stranding them forever. In
-        // this order a death mid-sweep just leaves the record for the next launch
-        // to retry, and re-killing is harmless: the pid+path guard below refuses
-        // anything that is not still the process we spawned.
-        var reaped = 0
-        for entry in stale where entry.pid != getpid() {
-            // Guard against pid reuse: the slot may now hold something else
-            // entirely. Only a live process still running the same executable
-            // is treated as ours.
-            guard kill(entry.pid, 0) == 0, executablePath(entry.pid) == entry.path else { continue }
-            terminateGroup(entry.pid)
-            reaped += 1
+        let stale: [Registry.Entry]
+        do {
+            stale = try Registry.readAll(file: file)
+        } catch {
+            fputs("menubar: cannot read child registry; retaining it for retry: \(error)\n", stderr)
+            return 0
         }
-        Registry.clear(file: file)
+        var reaped = 0
+        for original in stale {
+            let candidates: [Registry.Entry]
+            if original.pid == nil {
+                let recovery = recoverProcesses(provenance: original.token, template: original)
+                candidates = recovery.entries
+                if candidates.isEmpty && recovery.complete {
+                    removeRegistryEntry(token: original.token, file: file)
+                }
+            } else {
+                candidates = [original]
+            }
+
+            for entry in candidates {
+                guard let pid = entry.pid, pid != getpid(), let pgid = entry.pgid else { continue }
+                guard kill(pid, 0) == 0 else {
+                    if errno == ESRCH {
+                        if processGroupIsAbsent(pgid) {
+                            removeRegistryEntry(token: entry.token, file: file)
+                        } else if processGroupContainsProvenance(pgid, token: entry.token),
+                                  terminateGroup(pgid, confirmAbsence: true) {
+                            removeRegistryEntry(token: entry.token, file: file)
+                            reaped += 1
+                        }
+                    }
+                    continue
+                }
+                // A different start time conclusively means pid reuse. Any
+                // unreadable or merely mismatched field is ambiguous and stays
+                // durable for a later validation pass.
+                guard let actualStart = processStartTime(pid) else { continue }
+                if let recordedStart = entry.startTime, recordedStart != actualStart {
+                    removeRegistryEntry(token: entry.token, file: file)
+                    continue
+                }
+                guard processHasProvenance(pid, token: entry.token) == true else { continue }
+                guard let resolved = executablePath(pid) else { continue }
+                if let recorded = entry.resolvedExecutable, recorded != resolved { continue }
+
+                if terminateGroup(pgid, confirmAbsence: true) {
+                    removeRegistryEntry(token: entry.token, file: file)
+                    reaped += 1
+                }
+            }
+        }
         return reaped
     }
 
@@ -247,71 +332,239 @@ enum ChildProcess {
         return String(cString: buf)
     }
 
+    static func processStartTime(_ pid: pid_t) -> UInt64? {
+        var info = proc_bsdinfo()
+        let size = MemoryLayout<proc_bsdinfo>.size
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == size else { return nil }
+        return UInt64(info.pbi_start_tvsec) * 1_000_000 + UInt64(info.pbi_start_tvusec)
+    }
+
+    static func parentPID(_ pid: pid_t) -> pid_t? {
+        var info = proc_bsdinfo()
+        let size = MemoryLayout<proc_bsdinfo>.size
+        guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(size)) == size else { return nil }
+        return pid_t(info.pbi_ppid)
+    }
+
+    static func processEnvironment(_ pid: pid_t) -> [String: String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > 0 else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &bytes, &size, nil, 0) == 0 else { return nil }
+        let intSize = MemoryLayout<Int32>.size
+        guard size > intSize else { return nil }
+        var index = intSize
+        while index < size && bytes[index] != 0 { index += 1 }
+        while index < size && bytes[index] == 0 { index += 1 }
+        // Skip argc argv strings; the first Int32 is argc.
+        let argc = bytes.withUnsafeBytes { $0.load(as: Int32.self) }
+        for _ in 0..<argc {
+            while index < size && bytes[index] != 0 { index += 1 }
+            while index < size && bytes[index] == 0 { index += 1 }
+        }
+        var result: [String: String] = [:]
+        while index < size {
+            let start = index
+            while index < size && bytes[index] != 0 { index += 1 }
+            guard index > start, let item = String(bytes: bytes[start..<index], encoding: .utf8),
+                  let equals = item.firstIndex(of: "=") else { index += 1; continue }
+            result[String(item[..<equals])] = String(item[item.index(after: equals)...])
+            index += 1
+        }
+        return result
+    }
+
+    static func processArguments(_ pid: pid_t) -> [String]? {
+        var mib: [Int32] = [CTL_KERN, KERN_PROCARGS2, pid]
+        var size = 0
+        guard sysctl(&mib, 3, nil, &size, nil, 0) == 0, size > MemoryLayout<Int32>.size else { return nil }
+        var bytes = [UInt8](repeating: 0, count: size)
+        guard sysctl(&mib, 3, &bytes, &size, nil, 0) == 0 else { return nil }
+        let argc = Int(bytes.withUnsafeBytes { $0.load(as: Int32.self) })
+        guard argc >= 0 else { return nil }
+        var index = MemoryLayout<Int32>.size
+        while index < size && bytes[index] != 0 { index += 1 }
+        while index < size && bytes[index] == 0 { index += 1 }
+        var arguments: [String] = []
+        for _ in 0..<argc {
+            let start = index
+            while index < size && bytes[index] != 0 { index += 1 }
+            guard index > start, let argument = String(bytes: bytes[start..<index], encoding: .utf8) else { return nil }
+            arguments.append(argument)
+            index += 1
+        }
+        return arguments
+    }
+
+    private static func processHasProvenance(_ pid: pid_t, token: String) -> Bool? {
+        if let arguments = processArguments(pid), arguments.contains(token) { return true }
+        if let environment = processEnvironment(pid) {
+            return environment[Registry.provenanceVariable] == token
+        }
+        return processArguments(pid).map { _ in false }
+    }
+
+    private struct RecoveryResult { let entries: [Registry.Entry]; let complete: Bool }
+
+    private static func processGroupContainsProvenance(_ pgid: pid_t, token: String) -> Bool {
+        var pids = [pid_t](repeating: 0, count: 4096)
+        let bytes = proc_listpids(UInt32(PROC_ALL_PIDS), 0, &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else { return false }
+        return pids.prefix(Int(bytes) / MemoryLayout<pid_t>.size).contains { pid in
+            pid > 1 && getpgid(pid) == pgid && processHasProvenance(pid, token: token) == true
+        }
+    }
+
+    private static func recoverProcesses(provenance: String, template: Registry.Entry) -> RecoveryResult {
+        var pids = [pid_t](repeating: 0, count: 4096)
+        let bytes = proc_listpids(UInt32(PROC_ALL_PIDS), 0, &pids, Int32(pids.count * MemoryLayout<pid_t>.size))
+        guard bytes > 0 else {
+            fputs("menubar: cannot scan child provenance; retaining launch intent for retry\n", stderr)
+            return RecoveryResult(entries: [], complete: false)
+        }
+        var complete = true
+        let entries = pids.prefix(Int(bytes) / MemoryLayout<pid_t>.size).compactMap { pid -> Registry.Entry? in
+            guard pid > 1 else { return nil }
+            var info = proc_bsdinfo()
+            let infoSize = MemoryLayout<proc_bsdinfo>.size
+            guard proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, &info, Int32(infoSize)) == infoSize,
+                  info.pbi_ppid == 1,
+                  info.pbi_uid == getuid() else { return nil }
+            guard let hasProvenance = processHasProvenance(pid, token: provenance) else {
+                complete = false; return nil
+            }
+            guard hasProvenance,
+                  let start = processStartTime(pid), let resolved = executablePath(pid) else { return nil }
+            let pgid = getpgid(pid)
+            guard pgid == pid else { return nil }
+            return Registry.Entry(pid: pid, pgid: pgid, startTime: start,
+                                  resolvedExecutable: resolved, argv: template.argv,
+                                  commandKind: template.commandKind, token: provenance)
+        }
+        if !complete {
+            fputs("menubar: provenance scan was incomplete; retaining unmatched launch intent for retry\n", stderr)
+        }
+        return RecoveryResult(entries: entries, complete: complete)
+    }
+
+    private static func removeRegistryEntry(token: String, file: String = Registry.path()) {
+        do { try Registry.remove(token: token, file: file) }
+        catch { fputs("menubar: cannot update child registry; retaining entry for retry: \(error)\n", stderr) }
+    }
+
     // MARK: - Live-child registry
 
     /// The on-disk record of children this helper currently has in flight.
     ///
     /// Lives beside the single-instance lock in the CLI's runtime state dir
-    /// (`getRuntimeStateDir()`, src/lib/state.ts). Line format: `<pid> <path>`.
+    /// (`getRuntimeStateDir()`, src/lib/state.ts). Version 2 is JSON; the old
+    /// `<pid> <path>` line format remains readable for safe migration.
     enum Registry {
-        struct Entry: Equatable {
-            let pid: pid_t
-            let path: String
+        static let provenanceVariable = "AGENTS_MENUBAR_CHILD_TOKEN"
+
+        struct Entry: Codable, Equatable {
+            var pid: pid_t?
+            var pgid: pid_t?
+            var startTime: UInt64?
+            var resolvedExecutable: String?
+            let argv: [String]
+            let commandKind: String
+            let token: String
         }
+
+        private struct Document: Codable { let version: Int; var children: [Entry] }
+
+        enum RegistryError: Error { case invalidDocument, lockFailed(String) }
 
         static func path(home: String = NSHomeDirectory()) -> String {
             "\(home)/.agents/.cache/state/menubar-children"
         }
 
-        /// Serializes the read-modify-write across the helper's refresher
-        /// threads. Cross-process contention is not a concern: SingleInstance
-        /// guarantees one helper owns this file.
         private static let queue = DispatchQueue(label: "com.phnx-labs.agents-menubar.children")
 
-        static func register(pid: pid_t, path executable: String, file: String = path()) {
-            queue.sync {
-                var entries = parse(read(file))
-                entries.append(Entry(pid: pid, path: executable))
-                write(entries, to: file)
+        static func begin(argv: [String], commandKind: String, file: String = path()) throws -> Entry {
+            guard !argv.isEmpty else { throw RegistryError.invalidDocument }
+            let entry = Entry(pid: nil, pgid: nil, startTime: nil, resolvedExecutable: nil,
+                              argv: argv, commandKind: commandKind,
+                              token: UUID().uuidString)
+            try mutate(file: file) { $0.append(entry) }
+            return entry
+        }
+
+        static func complete(token: String, pid: pid_t, file: String = path()) throws {
+            let pgid = getpgid(pid)
+            guard pgid > 0, let start = processStartTime(pid), let executable = executablePath(pid) else {
+                throw RegistryError.invalidDocument
+            }
+            try mutate(file: file) { entries in
+                guard let index = entries.firstIndex(where: { $0.token == token }) else { throw RegistryError.invalidDocument }
+                entries[index].pid = pid
+                entries[index].pgid = pgid
+                entries[index].startTime = start
+                entries[index].resolvedExecutable = executable
             }
         }
 
-        static func deregister(pid: pid_t, file: String = path()) {
-            queue.sync {
-                let entries = parse(read(file)).filter { $0.pid != pid }
-                write(entries, to: file)
+        static func remove(token: String, file: String = path()) throws {
+            try mutate(file: file) { $0.removeAll { $0.token == token } }
+        }
+
+        static func readAll(file: String = path()) throws -> [Entry] {
+            try queue.sync { try withLock(file: file) { try read(file) } }
+        }
+
+        static func parse(_ text: String) throws -> [Entry] {
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return [] }
+            if text.first == "{" {
+                let document = try JSONDecoder().decode(Document.self, from: Data(text.utf8))
+                guard document.version == 2 else { throw RegistryError.invalidDocument }
+                return document.children
             }
-        }
-
-        static func readAll(file: String = path()) -> [Entry] {
-            queue.sync { parse(read(file)) }
-        }
-
-        static func clear(file: String = path()) {
-            queue.sync { write([], to: file) }
-        }
-
-        /// Pure — the parse half is what the self-test pins.
-        static func parse(_ text: String) -> [Entry] {
-            text.split(separator: "\n").compactMap { line in
+            // Safe migration: old `<pid> <path>` entries remain durable but
+            // intentionally lack enough identity to be signalled.
+            return try text.split(separator: "\n").map { line in
                 let parts = line.split(separator: " ", maxSplits: 1).map(String.init)
-                guard parts.count == 2, let pid = pid_t(parts[0]), pid > 0 else { return nil }
-                return Entry(pid: pid, path: parts[1])
+                guard parts.count == 2, let pid = pid_t(parts[0]), pid > 0 else {
+                    throw RegistryError.invalidDocument
+                }
+                return Entry(pid: pid, pgid: pid, startTime: nil, resolvedExecutable: parts[1],
+                             argv: [parts[1]], commandKind: "legacy", token: "legacy-\(pid)")
             }
         }
 
-        static func serialize(_ entries: [Entry]) -> String {
-            entries.map { "\($0.pid) \($0.path)" }.joined(separator: "\n")
+        static func serialize(_ entries: [Entry]) throws -> String {
+            let data = try JSONEncoder().encode(Document(version: 2, children: entries))
+            return String(decoding: data, as: UTF8.self)
         }
 
-        private static func read(_ file: String) -> String {
-            (try? String(contentsOfFile: file, encoding: .utf8)) ?? ""
+        private static func mutate(file: String, _ body: (inout [Entry]) throws -> Void) throws {
+            try queue.sync {
+                try withLock(file: file) {
+                    var entries = try read(file)
+                    try body(&entries)
+                    try write(entries, to: file)
+                }
+            }
         }
 
-        private static func write(_ entries: [Entry], to file: String) {
+        private static func withLock<T>(file: String, _ body: () throws -> T) throws -> T {
             let dir = (file as NSString).deletingLastPathComponent
-            try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-            try? serialize(entries).write(toFile: file, atomically: true, encoding: .utf8)
+            try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+            let fd = open(file + ".lock", O_RDWR | O_CREAT | O_CLOEXEC, 0o600)
+            guard fd >= 0 else { throw RegistryError.lockFailed(String(cString: strerror(errno))) }
+            defer { flock(fd, LOCK_UN); close(fd) }
+            guard flock(fd, LOCK_EX) == 0 else { throw RegistryError.lockFailed(String(cString: strerror(errno))) }
+            return try body()
+        }
+
+        private static func read(_ file: String) throws -> [Entry] {
+            guard FileManager.default.fileExists(atPath: file) else { return [] }
+            return try parse(String(contentsOfFile: file, encoding: .utf8))
+        }
+
+        private static func write(_ entries: [Entry], to file: String) throws {
+            try serialize(entries).write(toFile: file, atomically: true, encoding: .utf8)
         }
     }
 }

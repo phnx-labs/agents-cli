@@ -22,7 +22,10 @@ enum ChildProcessSelfTest {
         testTimeoutKillsTheWholeProcessGroup()
         testRegistryTracksInFlightChildren()
         testRegistryRoundTrip()
-        testReapSkipsPidWhoseExecutableChanged()
+        testRegistryReadFailureIsNotAnEmptyRegistry()
+        testRegistryWriteFailureIsReported()
+        testReapRetainsEntryAfterFailedValidation()
+        testReapRecoversChildSpawnedBeforeRegistrationCompletes()
         testReapKillsARealOrphanFromAPreviousLaunch()
         testChildDoesNotInheritSingleInstanceFlock()
         if failures == 0 {
@@ -82,12 +85,12 @@ enum ChildProcessSelfTest {
     private static func testRegistryTracksInFlightChildren() {
         let file = "\(NSTemporaryDirectory())menubar-children-test-\(getpid())"
         try? FileManager.default.removeItem(atPath: file)
-        ChildProcess.Registry.register(pid: 4242, path: "/bin/echo", file: file)
-        ChildProcess.Registry.register(pid: 4243, path: "/bin/sleep", file: file)
-        check(ChildProcess.Registry.readAll(file: file).count == 2, "two in-flight children recorded")
-        ChildProcess.Registry.deregister(pid: 4242, file: file)
-        let left = ChildProcess.Registry.readAll(file: file)
-        check(left == [.init(pid: 4243, path: "/bin/sleep")],
+        let first = try? ChildProcess.Registry.begin(argv: ["/bin/echo"], commandKind: "test", file: file)
+        let second = try? ChildProcess.Registry.begin(argv: ["/bin/sleep"], commandKind: "test", file: file)
+        check((try? ChildProcess.Registry.readAll(file: file).count) == 2, "two pre-spawn launch intents recorded")
+        if let first { try? ChildProcess.Registry.remove(token: first.token, file: file) }
+        let left = try? ChildProcess.Registry.readAll(file: file)
+        check(left == (second.map { [$0] } ?? []),
               "a completed child is removed, the other is untouched")
         try? FileManager.default.removeItem(atPath: file)
     }
@@ -95,39 +98,96 @@ enum ChildProcessSelfTest {
     // Paths can contain spaces, so the split must be bounded to the first one.
     private static func testRegistryRoundTrip() {
         let entries = [
-            ChildProcess.Registry.Entry(pid: 11, path: "/opt/homebrew/bin/agents"),
-            ChildProcess.Registry.Entry(pid: 12, path: "/Users/x/Application Support/a b/agents"),
+            ChildProcess.Registry.Entry(pid: 11, pgid: 11, startTime: 123, resolvedExecutable: "/opt/homebrew/bin/node", argv: ["/opt/homebrew/bin/agents", "doctor", "--json"], commandKind: "doctor --json", token: "one"),
+            ChildProcess.Registry.Entry(pid: 12, pgid: 12, startTime: 456, resolvedExecutable: "/usr/bin/env", argv: ["/Users/x/Application Support/a b/agents", "sessions"], commandKind: "sessions --active", token: "two"),
         ]
-        let parsed = ChildProcess.Registry.parse(ChildProcess.Registry.serialize(entries))
+        let parsed = try? ChildProcess.Registry.parse(ChildProcess.Registry.serialize(entries))
         check(parsed == entries, "registry round-trips pids and paths containing spaces")
-        check(ChildProcess.Registry.parse("garbage\n\n0 /bin/x\n-1 /bin/y").isEmpty,
-              "malformed and non-positive pids are skipped, never thrown on")
+        check((try? ChildProcess.Registry.parse("garbage\n0 /bin/x\n-1 /bin/y")) == nil,
+              "a malformed legacy registry fails loud instead of becoming empty")
+        let legacy = try? ChildProcess.Registry.parse("42 /opt/old agents")
+        check(legacy?.first?.pid == 42 && legacy?.first?.startTime == nil,
+              "legacy two-field records migrate conservatively as unverifiable")
+    }
+
+    private static func testRegistryReadFailureIsNotAnEmptyRegistry() {
+        let file = "\(NSTemporaryDirectory())menubar-children-unreadable-\(getpid())"
+        try? "not-json".write(toFile: file, atomically: true, encoding: .utf8)
+        let before = try? Data(contentsOf: URL(fileURLWithPath: file))
+        check(ChildProcess.reapOrphansFromPreviousLaunch(file: file) == 0,
+              "an unreadable registry fails the reap without claiming children")
+        check((try? Data(contentsOf: URL(fileURLWithPath: file))) == before,
+              "a registry read failure leaves the durable file untouched")
+        try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: file + ".lock")
+    }
+
+    private static func testRegistryWriteFailureIsReported() {
+        let dir = "\(NSTemporaryDirectory())menubar-children-readonly-\(getpid())"
+        let file = dir + "/children"
+        try? FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
+        chmod(dir, 0o500)
+        let result = try? ChildProcess.Registry.begin(argv: ["/bin/sleep"], commandKind: "write-failure", file: file)
+        check(result == nil, "a registry write failure is reported to the caller")
+        chmod(dir, 0o700)
+        try? FileManager.default.removeItem(atPath: dir)
     }
 
     // Pid reuse: by the next launch the recorded pid may belong to something else
     // entirely. Reaping on pid alone would kill an innocent process, so the
     // executable path must still match.
-    private static func testReapSkipsPidWhoseExecutableChanged() {
+    private static func testReapRetainsEntryAfterFailedValidation() {
         let file = "\(NSTemporaryDirectory())menubar-children-reuse-\(getpid())"
         try? FileManager.default.removeItem(atPath: file)
-        // This very process is alive, but its executable is the helper, not
-        // /bin/sleep — so the guard must refuse to treat it as a stale child.
-        let me = getpid()
-        ChildProcess.Registry.register(pid: me, path: "/bin/sleep", file: file)
-        let recorded = ChildProcess.Registry.readAll(file: file)
-        let mismatched = recorded.filter { ChildProcess.executablePath($0.pid) != $0.path }
-        check(mismatched.count == 1,
-              "a live pid whose executable no longer matches is not reapable")
+        guard let launch = try? ChildProcess.Registry.begin(argv: ["/bin/sleep", "300"], commandKind: "test", file: file),
+              let child = spawnDetachedGroupLeader(provenance: "different-token") else {
+            check(false, "could not arrange failed-validation child"); return
+        }
+        try? ChildProcess.Registry.complete(token: launch.token, pid: child, file: file)
+        check(ChildProcess.reapOrphansFromPreviousLaunch(file: file) == 0,
+              "a live child with failed provenance validation is not signalled")
+        check((try? ChildProcess.Registry.readAll(file: file).contains { $0.token == launch.token }) == true,
+              "one failed validation retains its registry entry for the next pass")
+        kill(-child, SIGKILL)
+        var status: Int32 = 0
+        while waitpid(child, &status, 0) == -1 && errno == EINTR {}
+        try? ChildProcess.Registry.remove(token: launch.token, file: file)
+
         // Production builds may name the binary "AGI Menu-universal" (lipo of
         // arm64+x86_64). Match the last path component's prefix, not a hard
         // suffix of the executable name alone — that failed every home-base
         // publish of 1.22.2 with got …/MenubarHelper-universal (RUSH-3101 renamed
         // the bundled executable; the same lipo-suffix caveat still applies).
-        let exe = ChildProcess.executablePath(me) ?? ""
+        let exe = ChildProcess.executablePath(getpid()) ?? ""
         let base = (exe as NSString).lastPathComponent
         check(base.hasPrefix(HelperIdentity.executableName),
               "executablePath resolves a live pid (got \(exe.isEmpty ? "nil" : exe))")
         try? FileManager.default.removeItem(atPath: file)
+    }
+
+    // The helper can die after posix_spawn returns but before the pid identity is
+    // written. The durable pre-spawn token must find that now-PPID-1 child and
+    // reap it even though the registry still contains only launch intent.
+    private static func testReapRecoversChildSpawnedBeforeRegistrationCompletes() {
+        let file = "\(NSTemporaryDirectory())menubar-children-mid-crash-\(getpid())"
+        let pidFile = file + ".pid"
+        try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: pidFile)
+        guard let launch = try? ChildProcess.Registry.begin(argv: ["/bin/sleep", "300"], commandKind: "crash-window", file: file),
+              let orphan = spawnOrphanedGroupLeader(provenance: launch.token, pidFile: pidFile) else {
+            check(false, "could not spawn crash-window orphan"); return
+        }
+        check(kill(orphan, 0) == 0, "child spawned in the crash window survives at PPID 1")
+        check(ChildProcess.parentPID(orphan) == 1,
+              "crash-window child is adopted by launchd (ppid \(ChildProcess.parentPID(orphan) ?? -1))")
+        check(ChildProcess.processArguments(orphan)?.contains(launch.token) == true,
+              "crash-window child exposes its inherited provenance marker")
+        let reaped = ChildProcess.reapOrphansFromPreviousLaunch(file: file)
+        check(reaped == 1, "pre-spawn provenance recovers and reaps the unregistered child")
+        check((try? ChildProcess.Registry.readAll(file: file).isEmpty) == true,
+              "recovered launch intent is removed only after group absence")
+        try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: pidFile)
     }
 
     // The whole point of the on-disk registry: a helper killed by SIGSEGV or
@@ -141,11 +201,13 @@ enum ChildProcessSelfTest {
         // Stand in for the abandoned child: a process that is its own
         // process-group leader (as ChildProcess.spawn makes every child), so the
         // reaper's kill(-pgid) has a group to take.
-        guard let orphan = spawnDetachedGroupLeader() else {
+        let pidFile = file + ".pid"
+        guard let launch = try? ChildProcess.Registry.begin(argv: ["/bin/sleep", "300"], commandKind: "orphan-test", file: file),
+              let orphan = spawnOrphanedGroupLeader(provenance: launch.token, pidFile: pidFile) else {
             check(false, "could not spawn a stand-in orphan")
             return
         }
-        ChildProcess.Registry.register(pid: orphan, path: "/bin/sleep", file: file)
+        try? ChildProcess.Registry.complete(token: launch.token, pid: orphan, file: file)
         check(kill(orphan, 0) == 0, "stand-in orphan (pid \(orphan)) is alive before the reap")
 
         let reaped = ChildProcess.reapOrphansFromPreviousLaunch(file: file)
@@ -159,9 +221,10 @@ enum ChildProcessSelfTest {
             alive = kill(orphan, 0) == 0
         }
         check(!alive, "the orphan is dead after the reap")
-        check(ChildProcess.Registry.readAll(file: file).isEmpty,
-              "registry is cleared so the next launch does not re-reap a dead pid")
+        check((try? ChildProcess.Registry.readAll(file: file).isEmpty) == true,
+              "the confirmed-dead entry is removed without clearing unrelated records")
         try? FileManager.default.removeItem(atPath: file)
+        try? FileManager.default.removeItem(atPath: pidFile)
     }
 
     // The flock-inheritance leak that bricked the single-instance guard: a child
@@ -217,10 +280,11 @@ enum ChildProcessSelfTest {
 
     /// `sleep 300` in its own process group, reparented away from this process.
     /// macOS ships no `setsid(1)`, so python does the `setpgrp` + `exec`.
-    private static func spawnDetachedGroupLeader() -> pid_t? {
+    private static func spawnDetachedGroupLeader(provenance: String) -> pid_t? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-        p.arguments = ["-c", "import os; os.setpgrp(); os.execv('/bin/sleep', ['sleep', '300'])"]
+        p.arguments = ["-c", "import os,sys; os.setpgrp(); os.execv('/bin/sleep', [sys.argv[1], '300'])", provenance]
+        p.environment = ProcessInfo.processInfo.environment.merging([ChildProcess.Registry.provenanceVariable: provenance]) { _, new in new }
         p.standardOutput = FileHandle.nullDevice
         p.standardError = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return nil }
@@ -229,6 +293,23 @@ enum ChildProcessSelfTest {
         for _ in 0..<50 {
             usleep(100_000)
             if ChildProcess.executablePath(pid) == "/bin/sleep" { return pid }
+        }
+        return nil
+    }
+
+    private static func spawnOrphanedGroupLeader(provenance: String, pidFile: String) -> pid_t? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
+        p.arguments = ["-c", "import os,sys; p=os.fork(); (open(r'\(pidFile)', 'w').write(str(p)), os._exit(0)) if p else (os.setpgrp(), os.execve('/bin/sleep', [sys.argv[1],'300'], os.environ))", provenance]
+        p.environment = ProcessInfo.processInfo.environment.merging([ChildProcess.Registry.provenanceVariable: provenance]) { _, new in new }
+        p.standardOutput = FileHandle.nullDevice
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        p.waitUntilExit()
+        for _ in 0..<50 {
+            if let text = try? String(contentsOfFile: pidFile, encoding: .utf8), let pid = pid_t(text),
+               ChildProcess.executablePath(pid) == "/bin/sleep" { return pid }
+            usleep(100_000)
         }
         return nil
     }
