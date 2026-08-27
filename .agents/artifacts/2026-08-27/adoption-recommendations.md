@@ -141,4 +141,12 @@ Why these eleven, and how much of each rests on measurement rather than judgemen
 
 ### Already tracked
 
-`PHNX-3320` pointer + tiering · `PHNX-3321` license claim · `PHNX-3322` the name · `PHNX-3323` the half-landed `notify` deprecation. **3320 and 3323 are unblocked and can start now.**
+| Ticket | Move | State |
+|---|---|---|
+| `PHNX-3320` | 1 + 4 — the pointer and the tiering | unblocked |
+| `PHNX-3321` | 2 — the license claim | carries Decision 2 |
+| `PHNX-3322` | 8 — the name cutover | blocked on Decision 1 |
+| `PHNX-3323` | — the half-landed `notify` deprecation | unblocked |
+| `PHNX-3337` | 7 — the cross-harness skill and plugin | unblocked |
+
+**3320, 3323 and 3337 can start today.** 3337 is the largest item on the page and the one most likely to be deprioritised for its size, so it is worth saying plainly: it is the actual answer to "how do we get Codex and Perplexity to surface this", and `llms.txt` is not.
