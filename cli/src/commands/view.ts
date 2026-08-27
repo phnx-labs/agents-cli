@@ -1420,7 +1420,11 @@ export function parseResourceSections(
  * agents-cli extension's "resume current session in best available version"
  * command).
  */
-export async function collectAgentsJson(filterAgentId?: AgentId, resourceSections?: Set<ResourceSection>): Promise<ViewJsonAgent[]> {
+export async function collectAgentsJson(
+  filterAgentId?: AgentId,
+  resourceSections?: Set<ResourceSection>,
+  opts?: { forceRefresh?: boolean },
+): Promise<ViewJsonAgent[]> {
   const agentsToShow = filterAgentId ? [filterAgentId] : ALL_AGENT_IDS;
   const authCache = readAuthHealthCache();
   const host = machineId();
@@ -1445,7 +1449,8 @@ export async function collectAgentsJson(filterAgentId?: AgentId, resourceSection
       home,
       cliVersion: version,
       info,
-    }))
+    })),
+    { forceRefresh: opts?.forceRefresh === true },
   );
 
   const mergeCanonical = (info: AccountInfo): AccountInfo => {
@@ -1490,6 +1495,7 @@ export async function collectAgentsJson(filterAgentId?: AgentId, resourceSection
       plan: info.plan,
       usageStatus: info.usageStatus,
       overageCredits: info.overageCredits,
+      usageError: usageInfo?.error ?? null,
       windows: snapshot
         ? snapshot.windows.map((w) => ({
             key: w.key,
@@ -1845,7 +1851,7 @@ export async function viewAction(
       return;
     }
     if (json) {
-      const data = await collectAgentsJson(undefined, resourceSections);
+      const data = await collectAgentsJson(undefined, resourceSections, { forceRefresh });
       console.log(JSON.stringify(data, null, 2));
       return;
     }
@@ -1910,7 +1916,7 @@ export async function viewAction(
   if (json) {
     // --json ignores the @version suffix, but --resources/--detailed (or a
     // section flag) now attach each version's resource inventory + sync-state.
-    const data = await collectAgentsJson(agentId, resourceSections);
+    const data = await collectAgentsJson(agentId, resourceSections, { forceRefresh });
     console.log(JSON.stringify(data[0] ?? { agent: agentId, versions: [], harnesses: [] }, null, 2));
     return;
   }

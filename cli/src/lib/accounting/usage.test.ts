@@ -27,6 +27,7 @@ import {
   getUsageBenignState,
   usageNoCredentialError,
   usageExpiredCredentialError,
+  usageExpiredKimiCredentialError,
   usageRejectedError,
   usageThrottledError,
   usageUnreachableError,
@@ -603,6 +604,30 @@ describe('explicit refresh publication', () => {
     expect(cached.snapshot?.windows.find((window) => window.key === 'week')?.usedPercent).toBe(37);
     expect(cached.error).toBeNull();
   });
+
+  it('exposes the live refresh result for Kimi even when the cache is empty (RUSH-3198)', async () => {
+    const credDir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(credDir, 'kimi-code.json'),
+      JSON.stringify({ access_token: 'tok-expired', expires_at: Math.floor(Date.now() / 1000) - 60 }),
+    );
+
+    const input = {
+      agentId: 'kimi' as const,
+      home,
+      cliVersion: '0.32.0',
+      info: { usageKey: 'kimi:user=rush-3198-test' } as AccountInfo,
+    };
+
+    const cached = await getUsageInfoForIdentity(input);
+    const refreshed = await getUsageInfoForIdentity(input, { forceRefresh: true });
+
+    expect(cached.snapshot).toBeNull();
+    expect(cached.error).toBe('stale');
+    expect(refreshed.error).toContain('run Kimi once');
+    expect(refreshed.error).toContain('Kimi credential expired');
+  });
 });
 
 describe('a Claude usage read reports WHY it produced no snapshot', () => {
@@ -718,7 +743,9 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
   });
 
   it.each([
-    [usageExpiredCredentialError('Kimi'), 're-auth for usage'],
+    [usageExpiredCredentialError('Claude'), 're-auth for usage'],
+    [usageExpiredCredentialError('Cursor'), 're-auth for usage'],
+    [usageExpiredKimiCredentialError(), 'run Kimi once'],
     [usageNoCredentialError('Cursor'), 'sign in / provision token'],
   ])('renders the specific unavailable state from %s', (error, expected) => {
     const out = formatUsageSummary(null, null, 3, {
@@ -729,6 +756,13 @@ describe('formatUsageSummary marks bars the live read could not confirm', () => 
 
     expect(out).toContain(expected);
     expect(out).not.toContain('usage unavailable');
+  });
+
+  it('classifies the Kimi expired-credential error as expired-credential', () => {
+    const error = usageExpiredKimiCredentialError();
+    expect(classifyUsageErrorKind(error)).toBe('expired-credential');
+    expect(error).toContain('run Kimi once');
+    expect(error).not.toContain('re-auth');
   });
 
   it('renders no recent usage as a benign state without an unavailable flag', () => {
@@ -868,6 +902,7 @@ describe('every networked provider names the same three failures', () => {
     // unreadable until the agent itself runs. The message has to say so, or the
     // obvious next action (re-auth) is not obvious.
     expect(usageExpiredCredentialError('Droid')).toContain('never refreshes');
+    expect(usageExpiredKimiCredentialError()).toContain('never refreshes');
   });
 });
 
@@ -1045,6 +1080,21 @@ describe('the throttle guard is exercised beyond Claude', () => {
 
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toContain('Kimi rate-limited this machine');
+  });
+
+  it('tells the user to run Kimi once when its credential is expired (RUSH-3198)', async () => {
+    const credDir = path.join(home, '.kimi-code', 'credentials');
+    fs.mkdirSync(credDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(credDir, 'kimi-code.json'),
+      JSON.stringify({ access_token: 'tok-expired', expires_at: Math.floor(Date.now() / 1000) - 60 }),
+    );
+
+    const usage = await getUsageInfo('kimi', { home });
+
+    expect(usage.snapshot).toBeNull();
+    expect(usage.error).toContain('run Kimi once');
+    expect(usage.error).not.toContain('re-auth');
   });
 
   it('does not let a throttle mask a missing Kimi credential in the probe', async () => {

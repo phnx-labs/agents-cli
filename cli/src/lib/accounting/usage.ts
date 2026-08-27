@@ -73,6 +73,15 @@ export function usageNoCredentialError(agent: string): string {
 export function usageExpiredCredentialError(agent: string): string {
   return `${agent} credential expired — re-auth this account (a usage read never refreshes it).`;
 }
+
+/**
+ * Kimi-specific expired-credential wording. A normal Kimi launch refreshes its
+ * own OAuth access token, so the recovery action for an expired Kimi credential
+ * is to run Kimi once — not to re-auth through agents-cli (RUSH-3198).
+ */
+export function usageExpiredKimiCredentialError(): string {
+  return `Kimi credential expired — run Kimi once to refresh it (a usage read never refreshes it).`;
+}
 export function usageRejectedError(agent: string, status: number): string {
   return status === 429
     ? `${agent} is rate-limiting the usage endpoint for this machine (HTTP 429).`
@@ -779,6 +788,9 @@ function formatUsageErrorKindLabel(
     case 'no-credential':
       return 'sign in / provision token';
     case 'expired-credential':
+      // Kimi refreshes its own credential on a normal launch; the recovery hint
+      // is embedded in the error string so the label matches the exact action.
+      if (detail?.includes('run Kimi once')) return 'run Kimi once';
       return 're-auth for usage';
     case 'rate-limited': {
       const retryHint = detail?.match(/not retrying for (.+)\.$/)?.[1] ?? null;
@@ -1283,7 +1295,7 @@ async function getKimiUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
 
     const expiresAt = typeof cred?.expires_at === 'number' ? cred.expires_at : null;
     if (expiresAt !== null && Date.now() / 1000 >= expiresAt) {
-      return { snapshot: null, error: usageExpiredCredentialError('Kimi') };
+      return { snapshot: null, error: usageExpiredKimiCredentialError() };
     }
 
     // Honour a live Retry-After rather than re-arming the penalty (see

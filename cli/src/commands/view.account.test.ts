@@ -15,6 +15,7 @@ import {
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
   writeClaudeUsageCache,
+  usageExpiredKimiCredentialError,
   USAGE_BENIGN_STATE,
   type UsageInfo,
 } from '../lib/accounting/usage.js';
@@ -111,6 +112,15 @@ describe('viewUsageSummaryOptions — truthful unavailable states', () => {
     const opts = viewUsageSummaryOptions('claude', true, { snapshot: null, error }, 2);
 
     expect(formatUsageSummary(null, null, 3, opts)).toBe('re-auth for usage');
+  });
+
+  it('renders "run Kimi once" for an expired Kimi credential (RUSH-3198)', () => {
+    const error = usageExpiredKimiCredentialError();
+    const opts = viewUsageSummaryOptions('kimi', true, { snapshot: null, error }, 2);
+
+    expect(formatUsageSummary(null, null, 3, opts)).toBe('run Kimi once');
+    expect(error).toContain('run Kimi once');
+    expect(error).not.toContain('re-auth');
   });
 
   it('renders an unavailable state for a globally installed signed-in harness', () => {
