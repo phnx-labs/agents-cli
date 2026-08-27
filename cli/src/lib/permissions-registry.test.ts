@@ -265,6 +265,37 @@ describe('codex reads agents-deny.rules (PHNX-2703)', () => {
     expect(back).not.toBeNull();
     expect(back!.deny ?? []).toContain('Bash(sudo:*)');
   });
+
+  it('a later apply with empty deny deletes agents-deny.rules so the read-back is []', () => {
+    // Same version home, two sequential writes — the real resync path
+    // (`staleness/writers/permissions.ts`) rebuilds PermissionSet from the
+    // currently selected groups, so deselecting a deny group arrives here as
+    // deny: []. Before PHNX-2703 the writer left the stale file; the new
+    // reader then reported the removed forbid as still active.
+    const home = makeTempHome();
+    const cwd = process.cwd();
+    const rulesPath = path.join(home, '.codex', 'rules', CODEX_RULES_FILENAME);
+
+    expect(applyPermissionsToVersion(
+      'codex',
+      { name: 'a', allow: [], deny: ['Bash(rm:*)'] },
+      home,
+      true,
+      cwd,
+    ).success).toBe(true);
+    expect(fs.existsSync(rulesPath)).toBe(true);
+    expect(readCanonicalPermissions('codex', 'user', undefined, home)?.deny ?? []).toEqual(['Bash(rm:*)']);
+
+    expect(applyPermissionsToVersion(
+      'codex',
+      { name: 'b', allow: ['Bash(git status:*)'], deny: [] },
+      home,
+      true,
+      cwd,
+    ).success).toBe(true);
+    expect(fs.existsSync(rulesPath), 'empty deny must delete the stale rules file').toBe(false);
+    expect(readCanonicalPermissions('codex', 'user', undefined, home)?.deny ?? []).toEqual([]);
+  });
 });
 
 describe('harness detection does not depend on the working directory', () => {
