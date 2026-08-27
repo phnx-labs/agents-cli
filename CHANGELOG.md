@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **`agents monitors add` refuses immediately when a reachable peer already has the same watcher (PHNX-3299).** The fleet duplicate guard used to collect every peer before reporting a clash, so a single slow box forced the full 12-second timeout even when another peer had already answered with the same fingerprint. The fan-out now aborts remaining SSH captures the moment a peer reports a matching monitor, while the no-match path still waits for the whole fleet so uniqueness can be proved. Source: `cli/src/commands/monitors.ts`, `cli/src/lib/monitors/remote.ts`.
+
 - **A fleet browser hub lets every box drive one shared logged-in browser with no `--device` (PHNX-2010).**
   New `browser.device` config key (user scope, so a single value in the central
   `agents.yaml` syncs fleet-wide). When set, a bare `agents browser start` forwards to

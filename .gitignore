@@ -48,9 +48,20 @@ coverage/
 
 # Durable agent artifacts (plans, reports, visuals) are committed under
 # .agents/artifacts/<yyyy-mm-dd>/; worktrees and scratch stay local.
+# .agents/artifacts/private/ is the one artifacts subtree that never lands: it
+# holds personal data (contact lists, message-derived context) that the
+# "everything committed here is public" rule in AGENTS.md forbids checking in.
 .agents/worktrees/
 .agents/scratch/
+.agents/artifacts/private/
 .plans/
+
+# Local release-proof store: release-attestation-produce.sh (the interim
+# attestation producer, RUSH-2749) writes the exact-tree attestation JSON +
+# pretested tarball here, and release.sh reads it from the same dir. It is a
+# machine-local build cache, never committed — without this it surfaces in
+# `git status` after every release and gets deleted by hand.
+/.release-attestations/
 
 # Scrub script lists personal data strings — must not be committed to public repo
 scripts/scrub-history.sh

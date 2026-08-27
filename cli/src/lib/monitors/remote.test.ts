@@ -12,8 +12,9 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseRemoteMonitors } from './remote.js';
+import { parseRemoteMonitors, gatherFleetMonitors } from './remote.js';
 import { monitorFingerprint } from './fingerprint.js';
+import type { SshCaptureFn } from '../remote-agents-json.js';
 import type { MonitorConfig } from './config.js';
 
 const watcher = (over: Record<string, unknown> = {}) => ({
@@ -130,5 +131,96 @@ describe('against the real `monitors list --json` projection', () => {
     const remote = parseRemoteMonitors(asListJson(runMonitor({ name: 'foo' })), 'zion');
     const mine = runMonitor({ name: 'zion:foo' }) as unknown as Ident;
     expect(remote.find((r) => monitorFingerprint(r.monitor) === monitorFingerprint(mine))?.machine).toBe('zion');
+  });
+});
+
+describe('gatherFleetMonitors', () => {
+  type Ident = Pick<MonitorConfig, 'name' | 'source' | 'condition' | 'action'>;
+
+  const runMonitor = (over: Record<string, unknown> = {}) => ({
+    name: 'land-2517',
+    source: { type: 'poll', command: 'gh pr view 2517', interval: '2m' },
+    condition: { mode: 'on-change' },
+    action: { type: 'run', agent: 'claude', prompt: 'merge it' },
+    ...over,
+  });
+
+  const asListJson = (m: any) =>
+    JSON.stringify([
+      {
+        name: m.name,
+        enabled: true,
+        source: m.source,
+        condition: m.condition,
+        action: m.action,
+        owner: 'all',
+        runsHere: true,
+        lastSeenAt: null,
+        lastFiredAt: null,
+      },
+    ]);
+
+  const FAST = 'tester@fast.example.com';
+  const SLOW = 'tester@slow.example.com';
+
+  it('aborts remaining peers as soon as a clash fingerprint is reported', async () => {
+    const mine = runMonitor({ name: 'mine' }) as unknown as Ident;
+    const targetFp = monitorFingerprint(mine);
+    const aborted: string[] = [];
+
+    const capture: SshCaptureFn = (target, _cmd, { signal }) =>
+      new Promise((resolve) => {
+        if (target === FAST) {
+          resolve({ code: 0, stdout: asListJson(runMonitor()) });
+          return;
+        }
+        if (signal?.aborted) {
+          aborted.push(target);
+          resolve({ code: null, stdout: '' });
+          return;
+        }
+        signal?.addEventListener(
+          'abort',
+          () => {
+            aborted.push(target);
+            resolve({ code: null, stdout: '' });
+          },
+          { once: true },
+        );
+      });
+
+    const result = await gatherFleetMonitors({
+      againstFingerprint: targetFp,
+      hosts: [FAST, SLOW],
+      deps: { capture },
+    });
+
+    const clash = result.monitors.find((r) => monitorFingerprint(r.monitor) === targetFp);
+    expect(clash?.machine).toBe('fast');
+    expect(result.skipped).toEqual([]);
+    expect(aborted).toEqual([SLOW]);
+  });
+
+  it('waits for every peer when no monitor matches the fingerprint', async () => {
+    const mine = runMonitor({
+      name: 'mine',
+      source: { type: 'poll', command: 'gh pr view 2600', interval: '2m' },
+    }) as unknown as Ident;
+    const targetFp = monitorFingerprint(mine);
+
+    const capture: SshCaptureFn = (target) =>
+      new Promise((resolve) => {
+        if (target === FAST) resolve({ code: 0, stdout: asListJson(runMonitor()) });
+        else setTimeout(() => resolve({ code: 0, stdout: asListJson(runMonitor({ name: 'other' })) }), 25);
+      });
+
+    const result = await gatherFleetMonitors({
+      againstFingerprint: targetFp,
+      hosts: [FAST, SLOW],
+      deps: { capture },
+    });
+
+    expect(result.monitors).toHaveLength(2);
+    expect(result.skipped).toEqual([]);
   });
 });

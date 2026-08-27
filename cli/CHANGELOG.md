@@ -1,5 +1,132 @@
 # Changelog
 
+## 1.22.51
+
+- **`publish-computer-helper-mac.sh` cuts the helper's own tag (PHNX-3228).**
+  It published `ComputerHelper.app.zip` to the CLI's `v<version>` release, but since the
+  client was repointed at per-helper tags the resolver asks for `computer-mac/v<x.y.z>`
+  (`helperTag` in `cli/src/lib/helper-versions.ts`). The asset therefore landed at an
+  address nothing requests, and there was **no way to cut a new computer-mac release at
+  all** — the last publisher still coupled to the CLI's version line. It now cuts
+  `computer-mac/v<x.y.z>`, requires the helper's version explicitly instead of defaulting
+  to `cli/package.json` (that default was the coupling), and refuses an existing tag, since
+  the upload uses `--clobber` and would otherwise replace a binary an installed CLI already
+  pins. Symmetric with `publish-computer-win.sh`. Source:
+  `cli/scripts/publish-computer-helper-mac.sh`.
+  It also cuts the tag itself now. `gh release create --verify-tag` refuses to invent a
+  tag absent from the remote, and nothing else pushed `computer-mac/v<x.y.z>` — `release.sh`
+  delegates helper tagging to "where the helper is released", which is this script. So it
+  ran green through build + notarize and then failed at the release step, meaning no new
+  helper version could be cut. The tag is pushed AFTER a successful build, deliberately:
+  pushing first would leave a published, immutable address with nothing behind it whenever
+  notarization failed.
+  Origin, not the local ref, is what makes a helper release immutable. Adding tag creation
+  introduced a wedge: a run that tagged and then failed to push left a local tag, and the
+  guard read that as "published" and told the operator to cut the next patch — burning a
+  version over a transient network error, and (since the guard precedes the build) making
+  that version uncuttable from the checkout without a manual `git tag -d`. A local-only tag
+  now resumes the interrupted publish instead.
+  Immutability keys on the published RELEASE, not the tag. A tag with no release is an
+  interrupted run — whether the push failed or the release creation did — and both now
+  resume rather than burning the version. The asset is what an installed CLI downloads, so
+  the release is the thing that must never be replaced.
+  The published-release check fails CLOSED. A non-zero `gh` is not evidence of absence —
+  unauthenticated, offline, and rate-limited all exit non-zero — so reading that as "not
+  published" would have carried on into `gh release upload --clobber` over a live binary,
+  the exact outcome the guard exists to prevent. Only an explicit not-found means not-found;
+  anything else stops the release and prints what `gh` actually said.
+
+- **`agents traces sync` retains and reports failed sessions instead of stranding them (PHNX-3267).**
+  The sync watermark advanced to the max mtime of *successful* uploads, so a later
+  success moved it past an earlier failed session and the next run's
+  `file_mtime_ms > watermark` filter skipped that session forever — the "failures are
+  retried" comment was false. A live 1.22.49 sync on a real device reported 11,073
+  uploaded and 6,050 errors with no way to tell a transcript cleaned off disk from a
+  genuine upload failure. Sync now records each failed session's identity and typed,
+  redacted evidence in the ledger and unions those retry-worthy ids back into the row
+  query regardless of the watermark, so a stranded session is re-attempted until it
+  succeeds. Failures are classified `transcript-unavailable` (the file is gone —
+  expected history, not re-read, aged out after 14 days), `parse-failed`, or
+  `upload-failed` (both retried); `agents traces sync` prints the breakdown
+  (`… errors (N transcripts no longer on disk · M parse/upload failures — will retry)`)
+  and `agents traces status` lists the outstanding retry set with example detail.
+  Source: `cli/src/lib/traces/sync.ts`, `cli/src/commands/traces.ts`.
+
+- **Helper binaries no longer download through a repository-rename redirect.**
+  `HELPER_RELEASE_REPO` still named `phnx-labs/agents-cli` after the repository was renamed
+  to `phnx-labs/agi-cli`. Nothing was broken — GitHub redirects a renamed repo, and both
+  slugs returned HTTP 200 — but every signed helper asset (`MenubarHelper.app.zip`,
+  `Agents_CLI.app.zip`, `ComputerHelper.app.zip`, `computer-helper-win.exe`) was resolving
+  through that redirect, which is one re-created repository away from pointing elsewhere.
+  What actually protects the download is the sha256 + `codesign` + designated-requirement +
+  Team ID verification in `helper-download.ts`; this removes the reliance on the redirect.
+  The `agents.yaml` `$schema` URL, the CHANGELOG link, the star nudge, and the
+  `package.json` repository/issues metadata moved with it.
+  **The npm package name is deliberately unchanged** — it is still
+  `@phnx-labs/agents-cli`, and renaming it would orphan every installed CLI. That
+  distinction is now pinned by a test. Source: `cli/src/lib/helper-download.ts`.
+  `publish-computer-helper-mac.sh` carried the old slug too, and that one is a **write**
+  path: `REPO_SLUG` reaches `gh release view` (the immutability guard), `gh release create`,
+  and `gh release upload --clobber`. Publishing signed helper binaries was going through the
+  rename redirect. Found by sweeping `scripts/` and `.github/` after the source tree was
+  already clean — the source sweep alone would have missed it.
+  Three further live paths carried the old slug and were missed by the first sweep:
+  `ssh-tunnel.ts:170` `WIN_HELPER_RELEASE_REPO` (a **separately hardcoded** constant — the
+  download URL for `computer-helper-win.exe`, the fourth signed asset, which the first
+  version of this change claimed to cover and did not); `commands/feedback.ts:14`, which
+  opens real GitHub issues; and `factory/snapshot.ts:30`, which polls this repo's PRs.
+  `installations/migrate.ts` also wrote the old URL into the `agents.yaml` header it
+  generates. Separately, `.github/workflows/tests-windows-host-e2e.yml:54` gated on
+  `github.repository == 'phnx-labs/agents-cli'`, which is permanently false after a rename
+  — that job had silently stopped running on every push to main and on its daily cron.
+  The JSON Schema's own `$id` moved with it — `state.ts` and `migrate.ts` write that URL as
+  the `$schema` hint into every user's `agents.yaml`, so a mismatched `$id` would make
+  editors reject their own config.
+
+- **The menu-bar helper's staleness check compares the HELPER's version, not the CLI's
+  (RUSH-3230).** `installAndStartService` stamped `getCliVersion()` as the installed
+  helper's version, and `menubarSetupStale()` compared against `getCliVersion()` too. Once
+  helpers gained their own version line that was wrong in both directions: every CLI
+  release made an unchanged helper look stale and reinstalled it — recopying the bundle
+  under the running helper, which `KeepAlive` then restarts (the #2109 storm: a new pid
+  every 5-15s, 578 launches in one log) — while a genuinely newer helper at the same CLI
+  version never looked stale at all, so it could never install.
+  The stamp is now JSON recording what the helper actually IS: `release` with its helper
+  version, or `local` with the source path + mtime for a dev build (menubar's build.sh
+  hardcodes `CFBundleShortVersionString`, so a local build has no version to compare).
+  Staleness compares like with like, treats a kind change (local <-> release) as stale, and
+  never downgrades when the installed helper is ahead of the floor. A pre-JSON stamp is
+  stale exactly once and is re-stamped in the new format, so the migration cannot loop.
+  `agents menubar status` / `doctor` now print three labelled lines — helper installed,
+  helper available, CLI version — instead of conflating two axes into one, and the
+  permanent false "(mismatch — `agents menubar setup` updates it)" hint is gone.
+  Source: `cli/src/lib/menubar/install-menubar.ts`.
+
+- **The Windows helper's "asset missing" error names a tag that exists (RUSH-3230).**
+  `downloadWinHelperExe` built its error message from `` `v${version}` `` — the CLI's tag
+  shape — while the URL it had just tried came from `helperTag('computer-win', version)`.
+  So a genuine 404 sent the reader looking for `v1.0.0`, which does not exist, instead of
+  `computer-win/v1.0.0`, which does. The mac path was corrected when helpers moved to their
+  own tags; the Windows path was left behind. Also drops a `getCliVersion` import that had
+  no call site — the last trace of the old CLI-version coupling in that file.
+  Source: `cli/src/lib/computer/ssh-tunnel.ts`.
+
+- **Claude status-line delegate no longer fork-bombs the machine.** The delegate
+  self-reference guard compared the saved command against the exact literal
+  `agents __claude-statusline`, so a delegate seeded with the same private
+  subcommand under a *different* binary name (e.g. `agents-dev __claude-statusline`
+  from a dev install, or an absolute path) was not recognized as us. Every
+  status-line render then `spawnSync`ed that command, which read the same delegate
+  and spawned another — unbounded recursion. Observed on a real box: ~4,900 live
+  `node __claude-statusline` processes accumulated over a 2-day uptime, exhausting
+  96 GB of swap and driving load past 300, so keystrokes lagged. The guard now
+  matches the `__claude-statusline` subcommand under any binary name or path
+  (`isStatusLineSelfReference`), `installClaudeStatusLine` refuses to persist such
+  a command as a delegate (and deletes an already-poisoned delegate on re-install),
+  a `AGENTS_CLAUDE_STATUSLINE_DELEGATED` env marker hard-caps delegation at one hop,
+  and the delegate `spawnSync` now carries a 5 s timeout. Source:
+  `cli/src/lib/claude-statusline.ts`.
+
 ## 1.22.50
 
 ### Fixed
