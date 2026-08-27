@@ -714,10 +714,15 @@ SSH access (§7); rendering sessions that no harness produced.
   default-capped at 50) and is a minority of indexed transcripts, so
   intersecting FTS hits with it dropped grep-visible sessions the index already
   matched (PHNX-2767). Hits the pool missed MUST be hydrated from the index and
-  unioned into the result. An id-shaped query MUST still resolve by id only
-  (SES-9a) and MUST NOT fall through to this content path.
+  unioned into the result. Explicit `--project` / `--agent` / `--routine`
+  flags MUST still exclude a hydrated hit that fails them — those are filters,
+  not a page of the index, and the union MUST NOT undo them (otherwise
+  `sessions --project foo "phrase" --markdown` reports a multi-match ambiguity
+  against a session the user already scoped out). An id-shaped query MUST still
+  resolve by id only (SES-9a) and MUST NOT fall through to this content path.
   (`lib/session/discover.ts` `searchContentIndex`; `commands/sessions.ts`
-  `filterSessionsByQuery`; test `discover.search-content.test.ts`).
+  `filterSessionsByQuery`/`scopedContentIndex`; tests
+  `discover.search-content.test.ts`, `commands/sessions.render.test.ts`).
 - **SES-31 (MUST).** Tool-call evidence MUST be redacted before persistence and
   bounded to 16 KiB input, 1 KiB successful output, or 4 KiB error output.
   Raw evidence and shell source MUST be bounded to 64 KiB before redaction or
@@ -1325,6 +1330,14 @@ pool that does not include that session (empty, or filled with an unrelated
 recent row); When `searchContentIndex` / `filterSessionsByQuery` run that
 phrase; Then the indexed session is in the result, with `_matchedTerms`
 covering the query tokens (`lib/session/discover.search-content.test.ts`).
+
+**GWT-19 — Content-search union does not undo `--project` / `--agent`.**
+Given two indexed transcripts whose bodies both match `scoped search`, one in
+project `agents-cli` and one in another project; When
+`filterSessionsByQuery` / `sessions --project agents-cli "scoped search"`
+runs; Then only the `agents-cli` session is in the result. The same holds for
+`--agent` (`lib/session/discover.search-content.test.ts`;
+`commands/sessions.render.test.ts`).
 
 ---
 

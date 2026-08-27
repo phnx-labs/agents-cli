@@ -14,7 +14,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-search-content-'));
+const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'ag-search-content-'));
 process.env.HOME = TEST_HOME;
 process.env.USERPROFILE = TEST_HOME;
 
@@ -31,6 +31,8 @@ afterAll(() => {
 const IN_POOL_ID = 'aaaa2767-0000-4000-8000-000000000001';
 const OUT_OF_POOL_ID = 'bbbb2767-0000-4000-8000-000000000002';
 const OTHER_PROJECT_ID = 'cccc2767-0000-4000-8000-000000000003';
+const OTHER_PROJECT_HIT_ID = 'dddd2767-0000-4000-8000-000000000004';
+const OTHER_AGENT_HIT_ID = 'eeee2767-0000-4000-8000-000000000005';
 const CONTENT = 'Pane is dead — tmux pane died while the agent was running';
 const QUERY = 'tmux pane';
 
@@ -61,10 +63,21 @@ const otherProject = meta(OTHER_PROJECT_ID, {
   project: 'other-repo',
   cwd: path.join(TEST_HOME, 'src', 'other-repo'),
 });
+const otherProjectHit = meta(OTHER_PROJECT_HIT_ID, {
+  topic: 'tmux pane in another repo',
+  project: 'other-repo',
+  cwd: path.join(TEST_HOME, 'src', 'other-repo'),
+});
+const otherAgentHit = meta(OTHER_AGENT_HIT_ID, {
+  topic: 'tmux pane on a different harness',
+  agent: 'codex',
+});
 
 upsertSession(inPool, 'no matching body text here');
 upsertSession(outOfPool, CONTENT);
 upsertSession(otherProject, 'unrelated transcript body');
+upsertSession(otherProjectHit, CONTENT);
+upsertSession(otherAgentHit, CONTENT);
 
 describe('searchContentIndex unions FTS hits missing from the listing pool (PHNX-2767)', () => {
   it('indexes the grep-visible transcript so FTS itself matches', () => {
@@ -74,6 +87,7 @@ describe('searchContentIndex unions FTS hits missing from the listing pool (PHNX
   it('returns the FTS hit even when the caller passes an empty pool', () => {
     const hits = searchContentIndex([], QUERY);
     expect(hits.has(OUT_OF_POOL_ID)).toBe(true);
+    expect(hits.has(OTHER_PROJECT_HIT_ID)).toBe(true);
     expect(hits.has(OTHER_PROJECT_ID)).toBe(false);
     const row = hits.get(OUT_OF_POOL_ID)!;
     expect(row.id).toBe(OUT_OF_POOL_ID);
@@ -101,5 +115,20 @@ describe('filterSessionsByQuery surfaces out-of-pool content hits (PHNX-2767)', 
     const rows = filterSessionsByQuery([inPool], QUERY);
     expect(rows.map(s => s.id)).toContain(OUT_OF_POOL_ID);
     expect(rows.map(s => s.id)).not.toContain(IN_POOL_ID);
+    // Unscoped content search is global — a matching transcript in another
+    // project is a real FTS hit, not a pool-cap miss to ignore.
+    expect(rows.map(s => s.id)).toContain(OTHER_PROJECT_HIT_ID);
+  });
+
+  it('does not reintroduce an FTS hit that fails --project', () => {
+    const rows = filterSessionsByQuery([inPool], QUERY, { project: 'agents-cli' });
+    expect(rows.map(s => s.id)).toContain(OUT_OF_POOL_ID);
+    expect(rows.map(s => s.id)).not.toContain(OTHER_PROJECT_HIT_ID);
+  });
+
+  it('does not reintroduce an FTS hit that fails --agent', () => {
+    const rows = filterSessionsByQuery([inPool], QUERY, { agent: 'claude' });
+    expect(rows.map(s => s.id)).toContain(OUT_OF_POOL_ID);
+    expect(rows.map(s => s.id)).not.toContain(OTHER_AGENT_HIT_ID);
   });
 });

@@ -80,7 +80,9 @@ its provenance, then records the new origin; it does not create two independent 
 
 - Search and ranking operate over normalized messages and metadata. A keyword
   content query unions FTS5 hits with the listing page so an indexed transcript
-  is returned even when it missed the default cwd/limit window.
+  is returned even when it missed the default cwd/limit window. `--project`,
+  `--agent`, and `--routine` still filter that union — a content hit in another
+  project does not leak back in.
 - Rendering and sharing redact credential-shaped values and local identity by default.
 - Export/import preserves provenance and stable IDs while treating indexes as rebuildable.
 - Insights and resource-usage analysis are projections; they never mutate transcripts.
