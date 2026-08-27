@@ -61,6 +61,7 @@ import {
   projectGroupOrder,
   normalizeProjects,
   buildRoutineListJson,
+  buildRoutineStatusRows,
   fireConditionLabel,
   nextRunForDisplay,
   nextRunLabel,
@@ -972,6 +973,9 @@ export function registerRoutinesCommands(program: Command): void {
 
       # Check whether the scheduler is running
       agents routines status
+
+      # Machine-readable scheduler + per-routine status: owner device, last fire, last error, in-flight run
+      agents routines status --json
     `,
     notes: `
       A routine is a YAML file that schedules an agent invocation. It specifies:
@@ -2324,9 +2328,36 @@ export function registerRoutinesCommands(program: Command): void {
   routinesCmd
     .command('status')
     .description('Show scheduler status, enabled routines, and when each one fires next.')
-    .action(() => {
+    .option('--json', 'Emit machine-readable scheduler + per-routine status (owner device, last fire, last error, in-flight run)')
+    .action((options: { json?: boolean }) => {
       try { monitorRunningJobs(); } catch { /* best-effort orphan reap */ }
       const status = getDaemonStatus();
+
+      // The daemon-owned status surface (PHNX-3215): scheduler truth plus, per
+      // routine, its single owner device, last fire outcome + error, and any
+      // in-flight spawn — the fields `list --json` (definition-shaped) does not
+      // carry. Emitted from THIS device, so per-device fields read as this box's.
+      if (options.json) {
+        const rows = buildRoutineStatusRows();
+        writeJson({
+          device: machineId(),
+          scheduler: {
+            state: status.state,
+            pid: status.pid,
+            binaryPath: status.binaryPath,
+            heartbeat: status.heartbeat
+              ? {
+                  lastTick: status.heartbeat.lastTick,
+                  ageSec: Math.round((Date.now() - Date.parse(status.heartbeat.lastTick)) / 1000),
+                }
+              : null,
+            enabled: rows.filter((r) => r.enabled).length,
+            total: rows.length,
+          },
+          routines: rows,
+        });
+        return;
+      }
 
       console.log(chalk.bold('Scheduler\n'));
       const stateLabel = status.state === 'running'

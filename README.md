@@ -1164,6 +1164,7 @@ agents routines add daily-digest \
   --prompt "Review yesterday's PRs and summarize key changes"
 
 agents routines list                   # All jobs + next run times
+agents routines status                 # Scheduler health + next fires (add --json for owner device, last fire, last error, in-flight run per routine)
 agents routines run daily-digest       # Test it now, ignore the schedule
 agents routines logs daily-digest      # Last execution — status + report (add --full for raw stdout)
 agents routines runs daily-digest      # Every attempt, including blocked/skipped pre-session runs

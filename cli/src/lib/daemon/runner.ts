@@ -2547,6 +2547,27 @@ export function listLiveRoutineChildren(): number[] {
   return pids;
 }
 
+/**
+ * Whether a run record marked `running` is genuinely in flight right now. A
+ * `running` status alone is not enough: `writeActiveClaim` stamps a provisional
+ * claim as `running` with `pid: null` BEFORE the child spawns, and
+ * `monitorRunningJobs()` does not reap a null-pid record (it has no process to
+ * probe, and ages it out only past the configured timeout — up to a week). So a
+ * daemon crash in that spawn window leaves a `running` record for a run that is
+ * not running (RUSH-2640). A caller answering "is one running now?" MUST gate on
+ * this, mirroring `listLiveRoutineChildren`'s local-liveness test:
+ * - a local child is in flight only while its pid is still ours (alive, same
+ *   birth time — a dead-and-reused pid does not count);
+ * - a `host:`-placed run has no local pid by design and is in flight until its
+ *   remote `.exit` is reconciled (`finalizeHostRun`).
+ */
+export function isRunGenuinelyInFlight(meta: RunMeta): boolean {
+  if (meta.status !== 'running') return false;
+  if (meta.hostTaskId) return true;
+  if (!meta.pid) return false;
+  return isPidOurs(meta.pid, meta.spawnedAt);
+}
+
 /** Scan all runs marked "running" and finalize any whose process has exited. */
 export function monitorRunningJobs(): void {
   const runsDir = getRunsDir();
