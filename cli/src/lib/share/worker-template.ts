@@ -328,6 +328,7 @@ export default {
       if (!edit || typeof edit !== 'object') return json({ error: 'PATCH body must be an object' }, 400);
       const metadata = { ...(existing.customMetadata || {}) };
       const previousVisibility = metadata.visibility || 'public';
+      let visibilityChanged = false;
       if (Object.prototype.hasOwnProperty.call(edit, 'label')) {
         if (edit.label !== null && typeof edit.label !== 'string') return json({ error: 'label must be a string or null' }, 400);
         if (typeof edit.label === 'string' && (edit.label.trim() !== edit.label || !edit.label || edit.label.length > 200)) return json({ error: 'label must be 1-200 trimmed characters' }, 400);
@@ -354,6 +355,7 @@ export default {
           }
         }
         metadata.visibility = visibility;
+        visibilityChanged = visibility !== previousVisibility;
         // org_domain is meaningful only for org — set it there, drop the stale
         // value on any move away from org so it can never gate a later read.
         if (visibility === 'org') metadata.org_domain = emailDomain(auth.email);
@@ -392,6 +394,16 @@ export default {
       if (existing.etag) putOpts.onlyIf = { etagMatches: existing.etag };
       const putResult = await env.BUCKET.put(path, existing.body, putOpts);
       if (putResult === null) return json({ error: 'conflict', key: path }, 409);
+      // A generated cover copies the canonical visibility gate into its own R2
+      // metadata. Invalidate it after a successful visibility rewrite so the
+      // next cover GET re-gates and renders from the canonical page. Explicitly
+      // uploaded BYO siblings carry no marker and remain independent assets.
+      if (visibilityChanged) {
+        const cover = await env.BUCKET.get(path + '.png');
+        if (cover && cover.customMetadata && cover.customMetadata['og-generated'] === 'true') {
+          await env.BUCKET.delete(path + '.png');
+        }
+      }
       return json({ ok: true, url: url.origin + '/' + path, label: metadata.label || null, meta: extraMetaOf(metadata), visibility: metadata.visibility || 'public', previousVisibility: previousVisibility }, 200);
     }
 
@@ -476,7 +488,7 @@ export default {
           });
           await env.BUCKET.put(path, png, {
             httpMetadata: { contentType: 'image/png' },
-            customMetadata: { ...meta },
+            customMetadata: { ...meta, 'og-generated': 'true' },
           });
           const headers = new Headers({ 'content-type': 'image/png' });
           if (isIdentityGated(pageVisibility)) {
@@ -801,7 +813,7 @@ async function renderRevisions(bucket, origin, key, method, identityGated) {
 // before it ever reaches this Worker; see RESERVED_META_KEYS in publish.ts).
 // One list, reused both to strip a same-named --meta collision on write and
 // to split arbitrary --meta entries back out on read.
-var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source', 'og-title', 'og-description'];
+var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner', 'org_domain', 'agent', 'session', 'host', 'repo', 'date', 'avatar', 'label', 'label-source', 'og-title', 'og-description', 'og-generated'];
 var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
 var SHARE_COOKIE = '__Host-phoenix_share';
 var SHARE_COOKIE_MAX_AGE = 604800;
