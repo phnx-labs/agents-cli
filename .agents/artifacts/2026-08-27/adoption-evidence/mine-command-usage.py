@@ -1,9 +1,31 @@
 #!/usr/bin/env python3
 """How often is each `agents` command ACTUALLY EXECUTED inside a shell tool call?
 
-Counts by invocations AND by distinct transcripts. Distinct-transcript reach is
-the honest popularity signal: raw invocation counts are dominated by hook
-boilerplate that is re-injected into every transcript.
+Counts by invocations AND by distinct SESSIONS. Session reach is the honest
+popularity signal: raw invocation counts are dominated by hook boilerplate that is
+re-injected into every transcript.
+
+Sessions are DEDUPLICATED by session id (the transcript filename), because
+~/.agents/.history keeps repeat copies of the same transcript under backups/ and
+under runs/<job>/<timestamp>/ -- one security-sweep session appears under six
+different run timestamps. Keying reach on the file path counted it six times and
+inflated every reach number by roughly a third.
+
+Duplicate resolution is DETERMINISTIC: for each session id, the canonical copy is
+chosen by (under versions/ first, then largest file, then lexically smallest path).
+`rg -l` returns paths in nondeterministic parallel-walk order, and a backups/ copy
+can be an older, truncated snapshot of a session that is complete under versions/.
+Taking whichever copy happened to be seen first made the totals swing by 15% run
+to run. Sorting and preferring the canonical copy fixes that.
+
+Known limit of that identity: Claude, Codex and Grok name transcripts by session
+UUID, so the key is exact. Antigravity and Gemini both name theirs
+transcript.jsonl / transcript_full.jsonl, and a few stores use session.jsonl or
+events.jsonl, so those OVER-collapse. Measured blast radius: 22 files folding into
+4 ids, all from harnesses that contributed zero matched executions, so the tier
+counts are unaffected. A further 258 files sharing generic names are
+package.json / hooks.json / settings.json configs that match the tool-name regex
+but hold no tool calls, so they contribute nothing either way.
 
 Transcript formats differ per harness, so this reads BOTH line-delimited JSONL
 (Claude, Grok, some Antigravity) and whole-file JSON (Codex, OpenCode, Cursor,
@@ -101,35 +123,41 @@ def records(fp):
 
 
 ROOT = os.path.expanduser("~/.agents/.history")
-rg = subprocess.Popen(
+rg = subprocess.run(
     ["rg", "--hidden", "--no-ignore", "--no-messages", "-l",
      "-g", "*.jsonl", "-g", "*.json",
      r'"(Bash|shell|run_terminal_cmd|execute_command|local_shell_call|bash|run_command)"', ROOT],
-    stdout=subprocess.PIPE, text=True)
+    capture_output=True, text=True)
+
+all_files = sorted(l.strip() for l in rg.stdout.splitlines() if l.strip())
+
+
+def canonical_rank(path):
+    """Lower sorts better. Prefer versions/, then the largest copy, then a stable path."""
+    try:
+        size = os.path.getsize(path)
+    except OSError:
+        size = 0
+    return (0 if "/versions/" in path else 1, -size, path)
+
+
+# One canonical file per session id, chosen deterministically.
+by_id = collections.defaultdict(list)
+for fp in all_files:
+    by_id[os.path.basename(fp)].append(fp)
+chosen = {sid: min(paths_, key=canonical_rank) for sid, paths_ in by_id.items()}
 
 inv = collections.Counter()
 sess = collections.defaultdict(set)
 per_harness = collections.defaultdict(set)
 scanned_per_harness = collections.defaultdict(set)
-nfiles = 0
-seen_ids = set()
-
-
-def session_id(path):
-    """The transcript filename is the session identity across duplicate copies."""
-    return os.path.basename(path)
-for fp in rg.stdout:
-    fp = fp.strip()
-    if not fp:
-        continue
-    nfiles += 1
-    sid = session_id(fp)
+nfiles = len(all_files)
+seen_ids = set(chosen)
+for sid in sorted(chosen):
+    fp = chosen[sid]
     parts = fp.split("/versions/")
-    harness = parts[1].split("/")[0] if len(parts) > 1 else "(duplicate store: backups/ or runs/)"
+    harness = parts[1].split("/")[0] if len(parts) > 1 else "(only in backups/ or runs/)"
     scanned_per_harness[harness].add(sid)
-    if sid in seen_ids:          # same session, another copy — skip entirely
-        continue
-    seen_ids.add(sid)
     matched_here = False
     for obj in records(fp):
         for cmd in extract(obj, []):
@@ -144,7 +172,7 @@ for fp in rg.stdout:
 
 reach = {k: len(v) for k, v in sess.items()}
 total_exec = sum(inv.values())
-ranked = sorted(inv.items(), key=lambda x: -x[1])
+ranked = sorted(inv.items(), key=lambda x: (-x[1], x[0]))
 never = sorted(paths - set(inv))
 
 json.dump({"files_seen": nfiles, "distinct_sessions": len(seen_ids),
@@ -187,12 +215,12 @@ print(f"  dead or near-dead ({t1}+{len(never)})    {t1+len(never)} "
 print("\n=== COVERAGE BY HARNESS — read this before trusting the tiers ===", file=o)
 print(f"{'harness':<40}{'sessions':>10}{'with hits':>11}", file=o)
 for k in sorted(set(scanned_per_harness) | set(per_harness),
-                key=lambda x: -len(scanned_per_harness[x])):
+                key=lambda x: (-len(scanned_per_harness[x]), x)):
     print(f"{k:<40}{len(scanned_per_harness[k]):>10,}{len(per_harness[k]):>11,}", file=o)
 print("\nSQLite-backed transcript stores are not read by this script.", file=o)
 
 print("\n=== TOP 45 BY TRANSCRIPT REACH ===", file=o)
-for k, v in sorted(reach.items(), key=lambda x: -x[1])[:45]:
+for k, v in sorted(reach.items(), key=lambda x: (-x[1], x[0]))[:45]:
     print(f"{v:>6} sessions  {inv[k]:>8,} runs   {k}", file=o)
 
 print("\n=== EXECUTED IN <=2 TRANSCRIPTS ===", file=o)
@@ -206,5 +234,5 @@ g = collections.defaultdict(set)
 for k, v in sess.items():
     g[k.split()[0]] |= v
 print("\n=== GROUPS BY SESSION REACH ===", file=o)
-for k, v in sorted(g.items(), key=lambda x: -len(x[1])):
+for k, v in sorted(g.items(), key=lambda x: (-len(x[1]), x[0])):
     print(f"{len(v):>6}  {k}", file=o)
