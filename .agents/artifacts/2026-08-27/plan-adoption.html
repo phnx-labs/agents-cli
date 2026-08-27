@@ -1,0 +1,917 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Adoption plan for agents-cli: fix the entity, cut the front door, own the two pains that get a million views</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">AGI</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Adoption plan for agents-cli: fix the entity, cut the front door, own the two pains that get a million views</h1>
+<p class="summary">17 stars against peers at 8k-55k, four names for one product, and 46% of 564 commands dead on the author's own machine. The leaks are all upstream of the product: collapse the identity, cut the front door, and lead with the two pains that get a million views.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=share.agents-cli.sh&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://share.agents-cli.sh/muqsitnawaz/agents-cli-command-reference-rush-2396" target="_blank" rel="noopener">agents-cli-command-reference-rush-2396</a></span></li><li class="chip"><span class="chip-value"><img class="chip-favicon" src="https://www.google.com/s2/favicons?domain=is-agentic.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><a href="https://is-agentic.com/scan/agi-cli.sh" target="_blank" rel="noopener">agi-cli.sh</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">claude-2026-08-27-0445-807e9649</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude opus-5</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">zion</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-27</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#evidence-1-your-own-sessions-say-the-surface-is-46-dead" data-toc-for="evidence-1-your-own-sessions-say-the-surface-is-46-dead"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence 1: your own sessions say the surface is 46% dead</a><a class="toc-item toc-sub" href="#surface-area-against-comparable-clis" data-toc-for="surface-area-against-comparable-clis">Surface area against comparable CLIs</a><a class="toc-item" href="#evidence-2-the-entity-is-fragmented-across-four-names" data-toc-for="evidence-2-the-entity-is-fragmented-across-four-names"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Evidence 2: the entity is fragmented across four names</a><a class="toc-item toc-sub" href="#the-license-contradiction" data-toc-for="the-license-contradiction">The license contradiction</a><a class="toc-item" href="#evidence-3-the-market-says-two-pains-and-we-lead-with-neither" data-toc-for="evidence-3-the-market-says-two-pains-and-we-lead-with-neither"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Evidence 3: the market says two pains, and we lead with neither</a><a class="toc-item toc-sub" href="#why-developers-build-their-own-instead" data-toc-for="why-developers-build-their-own-instead">Why developers build their own instead</a><a class="toc-item toc-sub" href="#the-peer-set-with-numbers" data-toc-for="the-peer-set-with-numbers">The peer set, with numbers</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#the-command-surface-drawn" data-toc-for="the-command-surface-drawn"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>The command surface, drawn</a><a class="toc-item" href="#the-front-door-current-versus-proposed" data-toc-for="the-front-door-current-versus-proposed"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>The front door: current versus proposed</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item toc-sub" href="#1-collapse-the-entity-to-one-name" data-toc-for="1-collapse-the-entity-to-one-name">1. Collapse the entity to one name</a><a class="toc-item toc-sub" href="#2-stop-the-false-license-claim" data-toc-for="2-stop-the-false-license-claim">2. Stop the false license claim</a><a class="toc-item toc-sub" href="#3-tier-the-help-output" data-toc-for="3-tier-the-help-output">3. Tier the help output</a><a class="toc-item toc-sub" href="#4-publish-the-cross-harness-skill" data-toc-for="4-publish-the-cross-harness-skill">4. Publish the cross-harness skill</a><a class="toc-item toc-sub" href="#5-fix-the-four-cheap-is-agentic-essentials" data-toc-for="5-fix-the-four-cheap-is-agentic-essentials">5. Fix the four cheap is-agentic essentials</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">13&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">14&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">15&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><p>Five decisions. Two of them are yours and nobody else's.</p>
+<ol>
+<li><strong>DECISION 1 — the name.</strong> The product answers to <code>agents-cli</code>, <code>agi-cli</code>, <code>AGI CLI</code>, and the binary <code>agents</code>. Recommendation: <strong>Agents CLI wins</strong>, everything else redirects.</li>
+<li><strong>DECISION 2 — the license claim.</strong> <code>llms.txt</code> and <code>DESIGN.md</code> both say "open source (Apache-2.0)". <code>LICENSE</code> is FSL-1.1-Apache-2.0. One of the two has to change. Recommendation: <strong>fix the claim</strong>, consider relicensing separately.</li>
+<li><strong>The wedge.</strong> Lead with <em>rotate accounts and resume through the limit</em>, not with teams, worktrees, or browser. Worktrees are table stakes in 2026 and Conductor and Orca own the pictures.</li>
+<li><strong>The cut.</strong> Reduce the <em>first-run</em> surface from 69 groups to 10 without deleting a single command. Help tiering, not deprecation.</li>
+<li><strong>What we do NOT do.</strong> No <code>agents.txt</code>, no experimental MCP server cards, no Wikipedia page, no Product Hunt as the spark. Evidence for each below.</li>
+</ol>
+<h2 id="purpose">Purpose</h2><p>You asked: why is adoption low when the tool is strong, why do developers keep building their own instead, how do we get Codex, Claude, and Perplexity to surface it, and does the 551-command surface hurt. You asked for it grounded in real research and in your own session data rather than opinion.</p>
+<p>Four evidence streams ran in parallel: a reducer over <strong>11,304 local transcripts</strong>, a Grok pass over live X data, a Codex pass over agent-discoverability standards, and a direct <code>is-agentic</code> audit of the live site.</p>
+<p>The finding is that <strong>the product is not the bottleneck.</strong> Three cheaper things are.</p>
+<div class="artifact-callout">
+<strong>The one-line diagnosis.</strong> A developer who would love this tool cannot find it, cannot name it, and if they land on it, is handed 69 top-level command groups and the sentence "A framework for running a distributed agent factory." Every one of those is fixable in days, not quarters.
+</div><h2 id="evidence-1-your-own-sessions-say-the-surface-is-46-dead">Evidence 1: your own sessions say the surface is 46% dead</h2><p>A reducer parsed every <code>agents</code> invocation inside a shell tool call across <code>~/.agents/.history</code> (11,304 transcripts, 86,717 executions) and matched each against the canonical <code>cli/docs/command-index.json</code>.</p>
+<pre><code># .agents/scratch/adoption-2026-08-27/exec_mine.py
+transcripts scanned: 11,304
+distinct commands actually executed: 404 / 564
+NEVER executed: 160 (28%)
+top 20 commands = 70.8% of all executions
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>Tier</th>
+<th>Commands</th>
+<th>Share of surface</th>
+<th>What it means</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Daily driver (50+ sessions)</td>
+<td>62</td>
+<td>11%</td>
+<td>The real product</td>
+</tr>
+<tr>
+<td>Occasional (10-49 sessions)</td>
+<td>114</td>
+<td>20%</td>
+<td>Earns its keep</td>
+</tr>
+<tr>
+<td>Rare (3-9 sessions)</td>
+<td>128</td>
+<td>23%</td>
+<td>Depth, keep hidden</td>
+</tr>
+<tr>
+<td>Near-dead (1-2 sessions)</td>
+<td>100</td>
+<td>18%</td>
+<td>Hide or fold</td>
+</tr>
+<tr>
+<td>Never executed</td>
+<td>160</td>
+<td>28%</td>
+<td>Hide or fold</td>
+</tr>
+</tbody></table>
+<p>This is the author's own machine. If <strong>46% of commands are dead or near-dead for the person who wrote them</strong>, a first-time user will not discover the 11% that matter by reading <code>--help</code>.</p>
+<p>The counts also expose which groups are actually the product:</p>
+<table>
+<thead>
+<tr>
+<th>Group</th>
+<th>Sessions reached</th>
+<th>Group</th>
+<th>Sessions reached</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>sessions</code></td>
+<td>934</td>
+<td><code>repos</code></td>
+<td>239</td>
+</tr>
+<tr>
+<td><code>secrets</code></td>
+<td>823</td>
+<td><code>view</code></td>
+<td>197</td>
+</tr>
+<tr>
+<td><code>browser</code></td>
+<td>759</td>
+<td><code>routines</code></td>
+<td>186</td>
+</tr>
+<tr>
+<td><code>run</code></td>
+<td>436</td>
+<td><code>feed</code></td>
+<td>182</td>
+</tr>
+<tr>
+<td><code>ssh</code></td>
+<td>340</td>
+<td><code>computer</code></td>
+<td>126</td>
+</tr>
+<tr>
+<td><code>teams</code></td>
+<td>271</td>
+<td><code>daemon</code></td>
+<td>109</td>
+</tr>
+<tr>
+<td><code>devices</code></td>
+<td>244</td>
+<td><code>doctor</code></td>
+<td>97</td>
+</tr>
+</tbody></table>
+<p>Ten groups carry the tool. Fifty-nine others share the same visual weight in <code>agents --help</code>.</p>
+<h3 id="surface-area-against-comparable-clis">Surface area against comparable CLIs</h3><p>Measured on this machine by counting top-level commands in each tool's own <code>--help</code>:</p>
+<table>
+<thead>
+<tr>
+<th>CLI</th>
+<th>Top-level commands</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>git</code></td>
+<td>23</td>
+</tr>
+<tr>
+<td><code>bun</code></td>
+<td>20</td>
+</tr>
+<tr>
+<td><code>deno</code></td>
+<td>28</td>
+</tr>
+<tr>
+<td><code>supabase</code></td>
+<td>34</td>
+</tr>
+<tr>
+<td><code>gh</code></td>
+<td>40</td>
+</tr>
+<tr>
+<td><code>kubectl</code></td>
+<td>43</td>
+</tr>
+<tr>
+<td><code>docker</code></td>
+<td>57</td>
+</tr>
+<tr>
+<td><code>vercel</code></td>
+<td>60</td>
+</tr>
+<tr>
+<td><strong><code>agents</code></strong></td>
+<td><strong>69</strong></td>
+</tr>
+</tbody></table>
+<p><code>agents</code> has a larger top-level surface than Docker or Kubernetes. Those tools solve it with progressive disclosure: <code>git</code> hides roughly 130 plumbing commands behind <code>git help -a</code>, and <code>gh</code> pushes breadth into <code>gh extension</code>. Neither deleted capability.</p>
+<h2 id="evidence-2-the-entity-is-fragmented-across-four-names">Evidence 2: the entity is fragmented across four names</h2><p><code>is-agentic</code> (Vercel's agent-readiness scanner, 118 checks) scored the live site and returned a specific, damning check:</p>
+<pre><code>score 63 / 100 — "Important blockers remain"
+FAILED  recommended  Brand name discoverability
+  "agi-cli" search returned 10 results but domain did not appear
+PARTIAL recommended  Developer resource discoverability
+  Name search surfaced no pages on agi-cli.sh
+</code></pre>
+<p>Probing the identity directly:</p>
+<pre><code>$ curl -sI https://agents-cli.sh/ | grep location
+location: https://agi-cli.sh/            # the marketed domain redirects away
+
+$ curl -s https://registry.npmjs.org/@phnx-labs/agents-cli | jq -r .repository.url
+git+https://github.com/phnx-labs/agi-cli.git
+
+$ head -5 README.md | grep '^#'
+# agi-cli                                 # README title disagrees with npm name
+
+$ curl -s https://api.github.com/repos/phnx-labs/agi-cli | jq .stargazers_count
+17
+</code></pre>
+<p>Codex's research explains why this is fatal for the "get Codex, Claude, and Perplexity to recommend us" goal. LLM recommenders exhibit documented <strong>popularity and exposure bias</strong>: they surface what appears repeatedly and consistently in their corpus (<a class="link-pill" href="https://assets.amazon.science/a7/b5/145fc4734ee6abc2af4ce3b05943/large-language-models-as-recommender-systems-a-study-of-popularity-bias.pdf" title="https://assets.amazon.science/a7/b5/145fc4734ee6abc2af4ce3b05943/large-language-models-as-recommender-systems-a-study-of-popularity-bias.pdf" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=assets.amazon.science&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Amazon Science</span></a>, <a class="link-pill" href="https://link.springer.com/article/10.1007/s11257-024-09406-0" title="https://link.springer.com/article/10.1007/s11257-024-09406-0" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=link.springer.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">popularity-bias survey</span></a>). Four names split the corpus four ways. There is no single string for a model to associate with "run multiple coding agents in parallel".</p>
+<h3 id="the-license-contradiction">The license contradiction</h3><p>Three sources disagree with the actual <code>LICENSE</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Source</th>
+<th>Claim</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>LICENSE</code> line 1</td>
+<td>Functional Source License, Version 1.1, Apache 2.0 Future License</td>
+</tr>
+<tr>
+<td><code>package.json</code></td>
+<td><code>"license": "FSL-1.1-Apache-2.0"</code></td>
+</tr>
+<tr>
+<td><code>llms.txt</code></td>
+<td>"Free and open source (<strong>Apache-2.0</strong>)"</td>
+</tr>
+<tr>
+<td><code>DESIGN.md</code></td>
+<td>"A Phoenix Labs OSS product (<strong>Apache-2.0</strong>)"</td>
+</tr>
+<tr>
+<td>GitHub API</td>
+<td><code>"license": NOASSERTION</code></td>
+</tr>
+</tbody></table>
+<p>FSL is source-available, not OSI open source. A skeptical developer, the exact person we are trying to convert, checks the LICENSE file. Finding a false OSS claim is worse than finding FSL honestly labeled.</p>
+<h2 id="evidence-3-the-market-says-two-pains-and-we-lead-with-neither">Evidence 3: the market says two pains, and we lead with neither</h2><p>Grok searched live X and pulled engagement numbers. The pains ranked by actual posting volume and reach:</p>
+<table>
+<thead>
+<tr>
+<th>Rank</th>
+<th>Pain</th>
+<th>Peak evidence</th>
+<th>Solved by agents-cli?</th>
+<th>Do we lead with it?</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><strong>Usage limits killing a run</strong></td>
+<td><a class="link-pill" href="https://x.com/ClaudeDevs/status/2088014831605702937" title="https://x.com/ClaudeDevs/status/2088014831605702937" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@ClaudeDevs auto-continue</span></a> 15,904 likes, 1.4M views; <a class="link-pill" href="https://x.com/flavioAd/status/2077118895635206291" title="https://x.com/flavioAd/status/2077118895635206291" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@flavioAd</span></a> 3,608 likes</td>
+<td>Yes, account rotation plus usage bars</td>
+<td><strong>No</strong></td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Agent stalled on needs-input while you are away</strong></td>
+<td><a class="link-pill" href="https://x.com/housecor/status/2079584079599501666" title="https://x.com/housecor/status/2079584079599501666" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@housecor</span></a> 152 likes; Happy at 23.5k stars is built entirely on this</td>
+<td>Yes, watchdog plus <code>needs-you</code> plus feed</td>
+<td><strong>No</strong></td>
+</tr>
+<tr>
+<td>3</td>
+<td>Steer from another machine or phone</td>
+<td><a class="link-pill" href="https://x.com/meetingattendee/status/2080444427655614596" title="https://x.com/meetingattendee/status/2080444427655614596" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@meetingattendee</span></a> 1,250 likes</td>
+<td>Yes, SSH fleet and <code>--device</code></td>
+<td>No</td>
+</tr>
+<tr>
+<td>4</td>
+<td>Multi-account juggling</td>
+<td><a class="link-pill" href="https://x.com/Taoufiq_Lotfi/status/2092361556419887582" title="https://x.com/Taoufiq_Lotfi/status/2092361556419887582" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">"is there something like a loadbalancer for multiple accounts?"</span></a></td>
+<td>Yes</td>
+<td>No</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Parallel agents colliding in one checkout</td>
+<td><a class="link-pill" href="https://x.com/paul_pbng/status/2091865866359161316" title="https://x.com/paul_pbng/status/2091865866359161316" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@paul_pbng</span></a></td>
+<td>Yes, worktrees</td>
+<td>Yes, but it is table stakes</td>
+</tr>
+<tr>
+<td>8</td>
+<td>CLI version pinning breaking</td>
+<td>No high-engagement corpus found</td>
+<td>Yes</td>
+<td>Yes</td>
+</tr>
+</tbody></table>
+<p>We lead with #5 and #8. The million-view posts are #1 and #2.</p>
+<h3 id="why-developers-build-their-own-instead">Why developers build their own instead</h3><p>Ranked by frequency in 2026 X threads, from Grok's pass:</p>
+<ol>
+<li><strong>"It was missing my one feature and I patched it in 15 minutes"</strong> — <a class="link-pill" href="https://x.com/michlbrmly/status/2092877983925047695" title="https://x.com/michlbrmly/status/2092877983925047695" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@michlbrmly</span></a> left Conductor for Paseo for exactly this.</li>
+<li><strong>"tmux is enough; I do not want another harness"</strong> — <a class="link-pill" href="https://x.com/joshmanders/status/2085799417701937300" title="https://x.com/joshmanders/status/2085799417701937300" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@joshmanders</span></a>: <em>"I don't need another harness."</em> Critically, the converts who <em>did</em> adopt something wanted a <strong>status panel</strong>, not a new runtime.</li>
+<li><strong>Control, and "do not upload half the company"</strong> — <a class="link-pill" href="https://x.com/iret77/status/2054966813696442761" title="https://x.com/iret77/status/2054966813696442761" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">@iret77</span></a>, 305 likes, 1.3M views.</li>
+<li><strong>The vendor locked the feature</strong> — Anthropic's April 2026 policy shift blocked Pro and Max subscriptions on most third-party frameworks. Survivors (Conductor, Happy, Claude Squad) wrap the <em>already-authenticated local CLI</em>. agents-cli already does this, so say so loudly.</li>
+</ol>
+<p>Reasons 1 and 2 are both arguments <strong>for</strong> a CLI and <strong>against</strong> a GUI. That is the opening.</p>
+<h3 id="the-peer-set-with-numbers">The peer set, with numbers</h3><table>
+<thead>
+<tr>
+<th>Tool</th>
+<th>Stars</th>
+<th>Distribution hook</th>
+<th>Fate</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><a class="link-pill" href="https://github.com/stablyai/orca" title="https://github.com/stablyai/orca" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Orca</span></a></td>
+<td>54.8k</td>
+<td>"fleet of parallel agents, bring your own subscription", MIT, cross-platform</td>
+<td>50k stars in under six months</td>
+</tr>
+<tr>
+<td><a class="link-pill" href="https://github.com/BloopAI/vibe-kanban" title="https://github.com/BloopAI/vibe-kanban" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Vibe Kanban</span></a></td>
+<td>27.9k</td>
+<td><code>npx vibe-kanban</code></td>
+<td>Company shut down Apr 2026; stars kept climbing</td>
+</tr>
+<tr>
+<td><a class="link-pill" href="https://github.com/slopus/happy" title="https://github.com/slopus/happy" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Happy</span></a></td>
+<td>23.5k</td>
+<td>"Leave your desk. Keep your agents moving."</td>
+<td>Thriving</td>
+</tr>
+<tr>
+<td><a class="link-pill" href="https://github.com/getpaseo/paseo" title="https://github.com/getpaseo/paseo" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Paseo</span></a></td>
+<td>15.2k</td>
+<td>open and hackable plugins</td>
+<td>Thriving</td>
+</tr>
+<tr>
+<td><a class="link-pill" href="https://github.com/smtg-ai/claude-squad" title="https://github.com/smtg-ai/claude-squad" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Claude Squad</span></a></td>
+<td>8.4k</td>
+<td>tmux plus worktrees TUI, AGPL</td>
+<td>Plateaued</td>
+</tr>
+<tr>
+<td><a class="link-pill" href="https://github.com/dagger/container-use" title="https://github.com/dagger/container-use" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">container-use</span></a></td>
+<td>4.0k</td>
+<td><code>claude mcp add container-use</code></td>
+<td>Niche: isolation, not control plane</td>
+</tr>
+<tr>
+<td><a class="link-pill" href="https://github.com/omnara-ai/omnara" title="https://github.com/omnara-ai/omnara" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="link-pill-text">Omnara</span></a></td>
+<td>2.8k</td>
+<td>YC, "managed agent = managed database"</td>
+<td>Modest</td>
+</tr>
+<tr>
+<td><strong>agents-cli</strong></td>
+<td><strong>17</strong></td>
+<td>none yet</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<p>Note the graveyard: Terragon shut down Jan 2026, Crystal deprecated Feb 2026, Vibe Kanban's company Apr 2026. <strong>Every dead one was a desktop GUI.</strong> The survivors are a CLI-shaped install or a phone client.</p>
+<h2 id="current-architecture">Current architecture</h2><p>The adoption funnel as it exists today, and where each stage leaks. This is the system under change, not the CLI internals.</p>
+<figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 920 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Adoption funnel showing five stages, each with a measured leak">
+  <defs>
+    <marker id="ah" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#666"></path>
+    </marker>
+    <marker id="ahl" markerWidth="9" markerHeight="9" refX="8" refY="3" orient="auto">
+      <path d="M0,0 L0,6 L9,3 z" fill="#f87171"></path>
+    </marker>
+  </defs>
+
+  <text x="16" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13">DEVELOPER WITH THE PAIN</text>
+  <text x="904" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13" text-anchor="end">WHERE IT LEAKS</text>
+
+  <rect x="16" y="44" width="470" height="58" rx="4" fill="#141414" stroke="#333"></rect>
+  <text x="32" y="68" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="14">1 · Asks Codex / Claude / Perplexity</text>
+  <text x="32" y="88" fill="#666" font-family="ui-monospace,monospace" font-size="12">"how do I run multiple coding agents in parallel?"</text>
+  <line x1="486" y1="73" x2="556" y2="73" stroke="#f87171" stroke-width="1.5" marker-end="url(#ahl)"></line>
+  <rect x="560" y="48" width="344" height="50" rx="4" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.5"></rect>
+  <text x="576" y="68" fill="#f87171" font-family="ui-monospace,monospace" font-size="12">Four names split the corpus.</text>
+  <text x="576" y="86" fill="#888" font-family="ui-monospace,monospace" font-size="11">is-agentic: brand discoverability FAILED</text>
+
+  <rect x="16" y="122" width="470" height="58" rx="4" fill="#141414" stroke="#333"></rect>
+  <text x="32" y="146" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="14">2 · Lands on the repo or npm page</text>
+  <text x="32" y="166" fill="#666" font-family="ui-monospace,monospace" font-size="12">17 stars · 64 KB README · "distributed agent factory"</text>
+  <line x1="486" y1="151" x2="556" y2="151" stroke="#f87171" stroke-width="1.5" marker-end="url(#ahl)"></line>
+  <rect x="560" y="126" width="344" height="50" rx="4" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.5"></rect>
+  <text x="576" y="146" fill="#f87171" font-family="ui-monospace,monospace" font-size="12">No social proof, no legible promise.</text>
+  <text x="576" y="164" fill="#888" font-family="ui-monospace,monospace" font-size="11">Peers sit at 2.8k - 54.8k stars</text>
+
+  <rect x="16" y="200" width="470" height="58" rx="4" fill="#141414" stroke="#333"></rect>
+  <text x="32" y="224" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="14">3 · Checks the license</text>
+  <text x="32" y="244" fill="#666" font-family="ui-monospace,monospace" font-size="12">site says Apache-2.0 · LICENSE says FSL-1.1</text>
+  <line x1="486" y1="229" x2="556" y2="229" stroke="#f87171" stroke-width="1.5" marker-end="url(#ahl)"></line>
+  <rect x="560" y="204" width="344" height="50" rx="4" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.5"></rect>
+  <text x="576" y="224" fill="#f87171" font-family="ui-monospace,monospace" font-size="12">Contradiction reads as bait-and-switch.</text>
+  <text x="576" y="242" fill="#888" font-family="ui-monospace,monospace" font-size="11">Trust is the #3 reason devs build their own</text>
+
+  <rect x="16" y="278" width="470" height="58" rx="4" fill="#141414" stroke="#333"></rect>
+  <text x="32" y="302" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="14">4 · Installs, runs `agents --help`</text>
+  <text x="32" y="322" fill="#666" font-family="ui-monospace,monospace" font-size="12">69 top-level groups · 564 commands</text>
+  <line x1="486" y1="307" x2="556" y2="307" stroke="#f87171" stroke-width="1.5" marker-end="url(#ahl)"></line>
+  <rect x="560" y="282" width="344" height="50" rx="4" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.5"></rect>
+  <text x="576" y="302" fill="#f87171" font-family="ui-monospace,monospace" font-size="12">Cannot find the 11% that matter.</text>
+  <text x="576" y="320" fill="#888" font-family="ui-monospace,monospace" font-size="11">git=23, docker=57, vercel=60 top-level</text>
+
+  <rect x="16" y="356" width="470" height="58" rx="4" fill="#0f1a0f" stroke="#a3e635" stroke-opacity="0.55"></rect>
+  <text x="32" y="380" fill="#a3e635" font-family="ui-monospace,monospace" font-size="14">5 · Uses it and stays</text>
+  <text x="32" y="400" fill="#888" font-family="ui-monospace,monospace" font-size="12">rotation, sessions, fleet, browser — all real, all working</text>
+  <line x1="486" y1="385" x2="556" y2="385" stroke="#666" stroke-width="1.5" marker-end="url(#ah)"></line>
+  <rect x="560" y="360" width="344" height="50" rx="4" fill="#0f1a0f" stroke="#a3e635" stroke-opacity="0.35"></rect>
+  <text x="576" y="380" fill="#a3e635" font-family="ui-monospace,monospace" font-size="12">No leak here. The product works.</text>
+  <text x="576" y="398" fill="#888" font-family="ui-monospace,monospace" font-size="11">86,717 executions across 11,304 sessions</text>
+
+  <text x="16" y="450" fill="#666" font-family="ui-monospace,monospace" font-size="11">All four leaks sit upstream of the product. None of them require shipping a feature.</text>
+</svg>
+<figcaption>Every measured leak sits before first use. Sources: the <code>is-agentic</code> scan of agi-cli.sh, the GitHub API, and the transcript reducer in <code>.agents/scratch/adoption-2026-08-27/</code>.</figcaption>
+</figure><h2 id="the-command-surface-drawn">The command surface, drawn</h2><figure class="artifact-figure artifact-figure-diagram artifact-figure-wide">
+<svg viewBox="0 0 920 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="564 commands split into usage tiers; 260 are dead or near-dead">
+  <text x="16" y="26" fill="#888" font-family="ui-monospace,monospace" font-size="13">564 COMMANDS, BY SESSIONS REACHED ACROSS 11,304 TRANSCRIPTS</text>
+
+  <rect x="16" y="46" width="96" height="44" fill="#a3e635"></rect>
+  <rect x="112" y="46" width="176" height="44" fill="#5f8f1f"></rect>
+  <rect x="288" y="46" width="198" height="44" fill="#3a3a3a"></rect>
+  <rect x="486" y="46" width="155" height="44" fill="#241414" stroke="#f87171" stroke-opacity="0.4"></rect>
+  <rect x="641" y="46" width="247" height="44" fill="#1a0f0f" stroke="#f87171" stroke-opacity="0.6"></rect>
+
+  <text x="24" y="74" fill="#0a0a0a" font-family="ui-monospace,monospace" font-size="13" font-weight="700">62</text>
+  <text x="120" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">114</text>
+  <text x="296" y="74" fill="#e8e8e8" font-family="ui-monospace,monospace" font-size="13" font-weight="700">128</text>
+  <text x="494" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">100</text>
+  <text x="649" y="74" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700">160</text>
+
+  <line x1="64" y1="96" x2="64" y2="118" stroke="#444"></line>
+  <line x1="200" y1="96" x2="200" y2="140" stroke="#444"></line>
+  <line x1="387" y1="96" x2="387" y2="162" stroke="#444"></line>
+  <line x1="563" y1="96" x2="563" y2="184" stroke="#444"></line>
+  <line x1="764" y1="96" x2="764" y2="206" stroke="#444"></line>
+
+  <text x="72" y="122" fill="#a3e635" font-family="ui-monospace,monospace" font-size="12">50+ sessions — the daily driver</text>
+  <text x="208" y="144" fill="#8fbf4f" font-family="ui-monospace,monospace" font-size="12">10-49 sessions — earns its keep</text>
+  <text x="395" y="166" fill="#888" font-family="ui-monospace,monospace" font-size="12">3-9 sessions — real depth, keep it hidden</text>
+  <text x="904" y="188" fill="#f87171" font-family="ui-monospace,monospace" font-size="12" text-anchor="end">1-2 sessions — near-dead</text>
+  <text x="904" y="210" fill="#f87171" font-family="ui-monospace,monospace" font-size="12" text-anchor="end">never executed, not once</text>
+
+  <line x1="486" y1="230" x2="904" y2="230" stroke="#f87171" stroke-width="2"></line>
+  <text x="904" y="250" fill="#f87171" font-family="ui-monospace,monospace" font-size="13" font-weight="700" text-anchor="end">260 commands (46%) dead or near-dead</text>
+  <text x="904" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11" text-anchor="end">measured on the author's own machine</text>
+
+  <line x1="16" y1="230" x2="112" y2="230" stroke="#a3e635" stroke-width="2"></line>
+  <text x="16" y="250" fill="#a3e635" font-family="ui-monospace,monospace" font-size="13" font-weight="700">Top 20 commands = 70.8% of all 86,717 executions</text>
+  <text x="16" y="270" fill="#888" font-family="ui-monospace,monospace" font-size="11">the other 544 share the remaining 29.2%</text>
+</svg>
+<figcaption>Tiering is measured, not guessed. The proposal hides tiers 4 and 5 from <code>--help</code>; it does not delete them.</figcaption>
+</figure><h2 id="the-front-door-current-versus-proposed">The front door: current versus proposed</h2><figure class="artifact-figure artifact-behavior">
+<section data-state="current" data-evidence="capture">
+<h4>Today — <code>agents --help</code>, captured 2026-08-27</h4>
+<pre><code>Usage: agents [command] [options]
+
+Install, configure, run, and dispatch AI
+coding agents from one place.
+
+Quick start:
+  agents setup       First-time setup
+  agents view        See what's installed
+  agents run &lt;agent&gt; Run an agent
+  agents sessions    Browse past sessions
+
+Agent versions:
+  add / import / update / prune / remove
+  use / prune cleanup / trash / view
+  inspect
+
+Agent configuration:
+  rules / commands / skills / mcp
+  permissions / hooks / subagents / plugins
+
+Packages:      search / install
+Run:           run / config / teams
+               routines / daemon / webhook
+               funnel / sessions / logs
+               browser / pty / artifacts
+Observe:       feed / events / events audit
+               sync status / devices snapshot
+Credentials:   harness / secrets / accounts
+Diagnostics:   doctor / usage / insights
+               perf
+Config sync:   repo pull / sync / repo init
+               repo add
+
+  … 69 groups, 564 commands total</code></pre>
+<p><strong>What a new user takes away:</strong> nothing. No pain is named, no first command produces a result, and there is no ordering signal. <code>webhook</code> and <code>funnel</code> sit at the same visual weight as <code>run</code>.</p>
+</section>
+<section data-state="proposed" data-evidence="mockup">
+<h4>Proposed — tiered <code>--help</code>, all 564 commands still installed</h4>
+<pre><code>Usage: agents [command] [options]
+
+Run Claude, Codex, Cursor, Grok and friends
+— pin the version, rotate the account,
+resume the session.
+
+Start here:
+  agents setup      Sign in, install an agent
+  agents run claude Run it (no prompt = TUI)
+  agents sessions   Every past run, resumable
+  agents view       Installed, signed in, and
+                    how much quota is left
+
+Every day:
+  agents teams      N agents, one worktree each
+  agents browser    Drive a logged-in browser
+  agents secrets    Keychain env bundles
+  agents devices    Your other machines (-D)
+
+  agents &lt;group&gt; --help  for any of the above
+  agents commands        all 564 commands
+
+Hit a limit?
+  agents accounts add    Add a 2nd Max account
+  agents run --strategy balanced
+                         Rotate to headroom</code></pre>
+<p><strong>What a new user takes away:</strong> the promise in one sentence, four commands that produce output, and a named exit to the full surface. Tiers 3 through 5 stay installed and documented; they just leave the front page.</p>
+</section>
+<figcaption>No command is removed. <code>agents commands</code> becomes the documented door to the full 564, the way <code>git help -a</code> is for git's roughly 130 plumbing commands.</figcaption>
+</figure><h2 id="proposed-changes">Proposed Changes</h2><h3 id="1-collapse-the-entity-to-one-name">1. Collapse the entity to one name</h3><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/package.json</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/package.json</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  "name": "@phnx-labs/agents-cli",</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  "description": "One CLI for all your AI coding agents - versions, config, cloud dispatch, sessions, and teams (now with first-class Grok Build CLI support)",</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  "description": "Run Claude Code, Codex, Cursor, Gemini and Grok from one CLI. Pin versions, rotate accounts past usage limits, resume any session on any machine.",</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  "repository": {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    "url": "git+https://github.com/phnx-labs/agi-cli.git"</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    "url": "git+https://github.com/phnx-labs/agents-cli.git"</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  },</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  "homepage": "https://agents-cli.sh"</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/README.md</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/README.md</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">&lt;h1 align="center"&gt;agi-cli&lt;/h1&gt;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">&lt;h1 align="center"&gt;agents-cli&lt;/h1&gt;</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code"> </span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">**A framework for running a distributed agent factory.** Dispatch Claude, Codex,</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">Antigravity, Grok, and more across your own machines, in parallel, on your existing</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight.</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">fleet from a menu bar — all from one CLI.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">**Pin the version, rotate the account, resume the session.**</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">One `agents` binary for every coding agent you already pay for: Claude Code,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">Codex, Cursor, Gemini, Grok, Kimi, Droid, OpenCode. It drives *your* logged-in</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">CLIs on *your* subscriptions and never proxies your tokens.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">```bash</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">npm i -g @phnx-labs/agents-cli &amp;&amp; agents setup</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">```</span></span></pre></div><p>Infrastructure side: <code>agi-cli.sh</code> starts 301-ing to <code>agents-cli.sh</code> (currently the reverse), and the GitHub repo renames to <code>phnx-labs/agents-cli</code> so its existing 301 becomes the canonical target.</p>
+<h3 id="2-stop-the-false-license-claim">2. Stop the false license claim</h3><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/website/public/llms.txt</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/website/public/llms.txt</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">Free and open source (Apache-2.0), local-first, runs on your existing</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">subscriptions (no per-token API cost, no account).</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">Source-available under FSL-1.1-Apache-2.0 — free for you and your team to use,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">converting to Apache-2.0 two years after each release. Local-first; runs on your</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">existing subscriptions (no per-token API cost, no account).</span></span></pre></div><p>The same edit applies to <code>DESIGN.md</code>. If Decision 2 goes the other way and we relicense, these strings become true instead, and <code>cli/package.json</code> plus <code>LICENSE</code> change with them.</p>
+<h3 id="3-tier-the-help-output">3. Tier the help output</h3><p><code>cli/src/lib/help.ts</code> already owns <code>setHelpSections</code>. Add a tier map derived from the measured reach, and let the root help render tiers 1 and 2 only.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/help.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/help.ts</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">/** Front-door tier. Derived from measured session reach, not opinion.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> *  1 = start here, 2 = every day, 3+ = reachable via `agents commands`. */</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export type CommandTier = 1 | 2 | 3;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code"> </span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">export const FRONT_DOOR: Record&lt;string, CommandTier&gt; = {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  setup: 1, run: 1, sessions: 1, view: 1,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  teams: 2, browser: 2, secrets: 2, devices: 2, accounts: 2, add: 2,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">};</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/cli/command-registry.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/cli/command-registry.ts</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  program.addHelpText('after', renderAllGroups(COMMAND_LOADERS));</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  program.addHelpText('after', renderFrontDoor(COMMAND_LOADERS, FRONT_DOOR));</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  // The full surface stays one command away and fully documented.</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  program.addHelpText('after', '\n  agents commands   all 69 groups, 564 commands\n');</span></span></pre></div><h3 id="4-publish-the-cross-harness-skill">4. Publish the cross-harness skill</h3><p>Codex's research is unambiguous about the highest-leverage discovery move, and it is not <code>llms.txt</code>. Installed <strong>skills and plugins are injected directly into an agent's context</strong>, which is a deterministic surface rather than a hope that a crawler noticed a text file.</p>
+<pre><code>skills/agents-cli/SKILL.md      # trigger phrases + verified recipes
+.claude-plugin/marketplace.json # claude plugin marketplace add phnx-labs/agents-cli
+</code></pre>
+<p>The <code>SKILL.md</code> description carries the exact intents developers type: <em>run multiple coding agents in parallel</em>, <em>manage multiple Claude Code accounts</em>, <em>hit my usage limit</em>, <em>resume a session on another machine</em>, <em>pin the agent CLI version</em>. Submit to <a class="link-pill" href="https://code.claude.com/docs/en/discover-plugins" title="https://code.claude.com/docs/en/discover-plugins" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=code.claude.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Claude's marketplace</span></a>, <a class="link-pill" href="https://cursor.com/marketplace" title="https://cursor.com/marketplace" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=cursor.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">Cursor's</span></a>, and <a class="link-pill" href="https://skills.sh/" title="https://skills.sh/" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=skills.sh&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">skills.sh</span></a>.</p>
+<h3 id="5-fix-the-four-cheap-is-agentic-essentials">5. Fix the four cheap <code>is-agentic</code> essentials</h3><p>The scan named them precisely. All four are site-side and none touch the CLI:</p>
+<table>
+<thead>
+<tr>
+<th>Check</th>
+<th>Status</th>
+<th>Fix</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Markdown content negotiation</td>
+<td>FAILED</td>
+<td>Serve <code>text/markdown</code> on <code>Accept: text/markdown</code> with <code>Vary: Accept</code></td>
+</tr>
+<tr>
+<td>Agent-friendly 404s</td>
+<td>PARTIAL</td>
+<td>Give the 404 a markdown body linking <code>llms.txt</code> and the docs index</td>
+</tr>
+<tr>
+<td>Agent instruction / when-to-use</td>
+<td>FAILED</td>
+<td>Serve <code>/AGENTS.md</code> (currently 404) with install and when-to-use</td>
+</tr>
+<tr>
+<td>Trust anchor pages</td>
+<td>FAILED</td>
+<td>Real <code>/about</code>, <code>/contact</code>, <code>/privacy</code>, 500+ characters each</td>
+</tr>
+</tbody></table>
+<p>Skip <code>openapi.json</code>, <code>json-error-responses</code>, and <code>function-calling</code>. Those checks assume a web API; agents-cli is a local CLI, and forging an API surface to game a score is exactly the cargo cult to avoid.</p>
+<h2 id="public-interface">Public Interface</h2><table>
+<thead>
+<tr>
+<th>Surface</th>
+<th>Before</th>
+<th>After</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents --help</code></td>
+<td>69 groups, unordered by importance</td>
+<td>4 "start here" plus 6 "every day" plus a pointer</td>
+</tr>
+<tr>
+<td><code>agents commands</code></td>
+<td>Lists installed slash commands</td>
+<td>Also the documented door to the full 564-command index</td>
+</tr>
+<tr>
+<td>npm description</td>
+<td>"One CLI for all your AI coding agents…"</td>
+<td>Pain-first, names the harnesses</td>
+</tr>
+<tr>
+<td><code>agents-cli.sh</code></td>
+<td>301 to <code>agi-cli.sh</code></td>
+<td>Canonical; <code>agi-cli.sh</code> 301s here</td>
+</tr>
+<tr>
+<td><code>github.com/phnx-labs/agi-cli</code></td>
+<td>Canonical, 17 stars</td>
+<td>301 to <code>phnx-labs/agents-cli</code></td>
+</tr>
+<tr>
+<td><code>/AGENTS.md</code> on the site</td>
+<td>404</td>
+<td>Served</td>
+</tr>
+<tr>
+<td>License string on the site</td>
+<td>"open source (Apache-2.0)"</td>
+<td>"source-available (FSL-1.1, becomes Apache-2.0)"</td>
+</tr>
+</tbody></table>
+<p>No command is removed, renamed, or deprecated. Every existing invocation keeps working.</p>
+<h2 id="plan">Plan</h2><p>Sequenced so nothing waits on the naming decision except the naming work itself.</p>
+<p><strong>Week 1 — stop the leaks, ship no features</strong></p>
+<ol>
+<li>Ratify Decision 1 and Decision 2.</li>
+<li>Fix the license claim in <code>llms.txt</code> and <code>DESIGN.md</code>. One commit, no ambiguity.</li>
+<li>Rewrite the README first screen and the npm description to the pain-first line.</li>
+<li>Land the <code>--help</code> tiering behind <code>FRONT_DOOR</code>.</li>
+<li>Serve <code>/AGENTS.md</code>, the markdown 404 body, content negotiation, and the three trust pages. Re-run <code>npx is-agentic agents-cli.sh</code> and expect 63 to rise past 85.</li>
+</ol>
+<p><strong>Week 2 — the wedge artifact</strong></p>
+<ol>
+<li>Record the 12-second demo: limit hit, <code>--strategy balanced</code> rotates, same session continues. This is the only pain with million-view posts and no competitor owns it on camera.</li>
+<li>Ship the <code>SKILL.md</code> and plugin marketplace entry; submit to Claude, Cursor, and skills.sh.</li>
+<li>Do the name cutover: domain 301 flip, repo rename, README title.</li>
+</ol>
+<p><strong>Week 3 — distribution</strong></p>
+<ol>
+<li>Show HN with the demo GIF. Grok's case studies put Show HN as the spark (Conductor 228 points, container-use 82 points) and Product Hunt as the echo.</li>
+<li>Write the setup-dump thread, not a product thread. Jamon Holmgren's setup listicle got 10,332 bookmarks with nothing to download.</li>
+<li>Submit to <code>awesome-claude-code</code> (53.1k stars) and the maintained agent lists.</li>
+</ol>
+<p><strong>Deliberately not doing:</strong> <code>agents.txt</code> and <code>agent.json</code> and experimental MCP server cards (no answer-engine adoption evidence; several are unaccepted proposals); a Wikipedia page (fails notability without independent coverage, and creating one early is counterproductive); Product Hunt as the launch spark; a 564-tool MCP server mirroring the CLI.</p>
+<h2 id="validation">Validation</h2><pre><code># 1. Surface: the front door is small, the full index still reachable
+agents --help | grep -cE '^\s{2,6}[a-z]'          # expect &lt;= 12, was 69
+agents commands --index --json | jq '.commands'    # expect 564, unchanged
+bash cli/scripts/verify-command-index.sh           # index still matches registry
+
+# 2. Identity: one canonical entity
+curl -sI https://agi-cli.sh/ | grep -i location    # expect agents-cli.sh
+curl -s https://api.github.com/repos/phnx-labs/agents-cli | jq -r .full_name
+curl -s https://registry.npmjs.org/@phnx-labs/agents-cli | jq -r .repository.url
+
+# 3. Agent readiness: measured, not asserted
+npx is-agentic agents-cli.sh --json | jq '.score'  # expect &gt;= 85, was 63
+curl -sL -H 'Accept: text/markdown' https://agents-cli.sh/docs/agents/run -i | head -3
+curl -sL -o /dev/null -w '%{http_code}\n' https://agents-cli.sh/AGENTS.md  # expect 200
+
+# 4. License truth
+grep -ri 'apache-2.0' website/public/llms.txt DESIGN.md   # expect the FSL wording
+
+# 5. The wedge actually works before it is filmed
+agents accounts add                                 # second Max account
+agents run claude "long task" --strategy balanced   # observe rotation at the limit
+agents sessions --active                            # stalled work ranks first
+</code></pre>
+<p>End-to-end proof for the demo is the recording itself: a real run hitting a real limit and continuing on the second account, uncut.</p>
+<h2 id="risks">Risks</h2><ul>
+<li><strong>The name cutover breaks live installs.</strong> <code>cli/scripts/release.sh</code> and <code>cli/scripts/postinstall.js</code> embed the repo URL for update checks; renaming the GitHub repo before the 301 is verified would break <code>agents upgrade</code> for every installed client. Mitigation: rename first (GitHub keeps the 301 permanently), verify with <code>curl -sI</code>, then flip the domain, then publish a release.</li>
+<li><strong>Tiered help hides a command someone scripted against.</strong> Nothing is removed, but a user who learned a group from <code>--help</code> may believe it was deleted. Mitigation: the <code>agents commands</code> pointer sits in the help body, and <code>agents &lt;anything&gt; --help</code> still resolves for all 564.</li>
+<li><strong>Publicly advertising multi-account rotation is a ToS gray zone.</strong> Anthropic's April 2026 policy shift blocked Pro and Max subscriptions on most third-party frameworks, and one developer reported seven Max accounts banned. Mitigation: frame the feature as <em>pin a named account per repo or session</em> (work versus personal), which is the same code path and a defensible story. Never proxy or resell tokens, and say so in sentence two of the README.</li>
+<li><strong><code>agents-cli</code> is a generic string.</strong> This is Decision 1's own weakness: it may not rank against the literal words "agents cli". That is the honest argument for choosing a distinctive third name instead, at the cost of one hard cutover.</li>
+<li><strong>20,412 npm downloads per month overstates external adoption.</strong> 68 versions were published in August alone; fleet auto-update and CI install smokes account for an unknown share. Do not treat the download curve as the adoption metric. Measure stars, Show HN, and first-run telemetry instead.</li>
+</ul>
+<h2 id="tracking">Tracking</h2><ul>
+<li>Plan source: <code>.agents/artifacts/2026-08-27/plan-adoption.md</code></li>
+<li>Evidence and reducers: <code>.agents/scratch/adoption-2026-08-27/</code> — <code>exec_mine.py</code>, <code>exec-report.txt</code>, <code>exec-usage.json</code>, <code>is-agentic-*.json</code>, <code>out-codex.md</code>, <code>report-adoption-2026-08-27.md</code></li>
+<li>Existing command reference: <a class="link-pill" href="https://share.agents-cli.sh/muqsitnawaz/agents-cli-command-reference-rush-2396" title="https://share.agents-cli.sh/muqsitnawaz/agents-cli-command-reference-rush-2396" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=share.agents-cli.sh&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">share.agents-cli.sh — command reference</span></a></li>
+<li>Live audit: <a class="link-pill" href="https://is-agentic.com/scan/agi-cli.sh" title="https://is-agentic.com/scan/agi-cli.sh" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=is-agentic.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="link-pill-text">agi-cli.sh</span></a></li>
+</ul>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://assets.amazon.science/a7/b5/145fc4734ee6abc2af4ce3b05943/large-language-models-as-recommender-systems-a-study-of-popularity-bias.pdf" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=assets.amazon.science&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">Amazon Science</span><span class="reference-host">assets.amazon.science</span></a></li><li class="reference-item"><a class="reference-link" href="https://link.springer.com/article/10.1007/s11257-024-09406-0" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=link.springer.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">popularity-bias survey</span><span class="reference-host">link.springer.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/ClaudeDevs/status/2088014831605702937" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@ClaudeDevs auto-continue</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/flavioAd/status/2077118895635206291" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@flavioAd</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/housecor/status/2079584079599501666" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@housecor</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/meetingattendee/status/2080444427655614596" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@meetingattendee</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/Taoufiq_Lotfi/status/2092361556419887582" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">"is there something like a loadbalancer for multiple accounts?"</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/paul_pbng/status/2091865866359161316" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@paul_pbng</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/michlbrmly/status/2092877983925047695" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@michlbrmly</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/joshmanders/status/2085799417701937300" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@joshmanders</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://x.com/iret77/status/2054966813696442761" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=x.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">@iret77</span><span class="reference-host">x.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/stablyai/orca" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">Orca</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/BloopAI/vibe-kanban" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">Vibe Kanban</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/slopus/happy" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">Happy</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/getpaseo/paseo" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">Paseo</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/smtg-ai/claude-squad" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">Claude Squad</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/dagger/container-use" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">container-use</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://github.com/omnara-ai/omnara" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><span class="reference-text">Omnara</span><span class="reference-host">github.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://code.claude.com/docs/en/discover-plugins" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=code.claude.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">Claude's marketplace</span><span class="reference-host">code.claude.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://cursor.com/marketplace" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=cursor.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">Cursor's</span><span class="reference-host">cursor.com</span></a></li><li class="reference-item"><a class="reference-link" href="https://skills.sh/" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=skills.sh&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">skills.sh</span></a></li><li class="reference-item"><a class="reference-link" href="https://share.agents-cli.sh/muqsitnawaz/agents-cli-command-reference-rush-2396" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=share.agents-cli.sh&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">share.agents-cli.sh — command reference</span><span class="reference-host">share.agents-cli.sh</span></a></li><li class="reference-item"><a class="reference-link" href="https://is-agentic.com/scan/agi-cli.sh" target="_blank" rel="noopener noreferrer"><img class="link-pill-favicon" src="https://www.google.com/s2/favicons?domain=is-agentic.com&amp;sz=32" alt="" width="12" height="12" loading="lazy" decoding="async" onerror="this.remove()" /><span class="reference-text">agi-cli.sh</span><span class="reference-host">is-agentic.com</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogY2xpCnRpdGxlOiAiQWRvcHRpb24gcGxhbiBmb3IgYWdlbnRzLWNsaTogZml4IHRoZSBlbnRpdHksIGN1dCB0aGUgZnJvbnQgZG9vciwgb3duIHRoZSB0d28gcGFpbnMgdGhhdCBnZXQgYSBtaWxsaW9uIHZpZXdzIgpzdW1tYXJ5OiAiMTcgc3RhcnMgYWdhaW5zdCBwZWVycyBhdCA4ay01NWssIGZvdXIgbmFtZXMgZm9yIG9uZSBwcm9kdWN0LCBhbmQgNDYlIG9mIDU2NCBjb21tYW5kcyBkZWFkIG9uIHRoZSBhdXRob3IncyBvd24gbWFjaGluZS4gVGhlIGxlYWtzIGFyZSBhbGwgdXBzdHJlYW0gb2YgdGhlIHByb2R1Y3Q6IGNvbGxhcHNlIHRoZSBpZGVudGl0eSwgY3V0IHRoZSBmcm9udCBkb29yLCBhbmQgbGVhZCB3aXRoIHRoZSB0d28gcGFpbnMgdGhhdCBnZXQgYSBtaWxsaW9uIHZpZXdzLiIKc3RhdHVzOiBkcmFmdApwcm9qZWN0OiBBR0kKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnZW50cy1jbGkKaGFybmVzczogY2xhdWRlCmFnZW50OiBjbGF1ZGUtb3B1cy01Cmhvc3Q6IHppb24KZGF0ZTogMjAyNi0wOC0yNwpsaW5rczoKICAtIGh0dHBzOi8vc2hhcmUuYWdlbnRzLWNsaS5zaC9tdXFzaXRuYXdhei9hZ2VudHMtY2xpLWNvbW1hbmQtcmVmZXJlbmNlLXJ1c2gtMjM5NgogIC0gaHR0cHM6Ly9pcy1hZ2VudGljLmNvbS9zY2FuL2FnaS1jbGkuc2gKLS0tCgojIyBGb2N1cyBmb3IgcmV2aWV3CgpGaXZlIGRlY2lzaW9ucy4gVHdvIG9mIHRoZW0gYXJlIHlvdXJzIGFuZCBub2JvZHkgZWxzZSdzLgoKMS4gKipERUNJU0lPTiAxIOKAlCB0aGUgbmFtZS4qKiBUaGUgcHJvZHVjdCBhbnN3ZXJzIHRvIGBhZ2VudHMtY2xpYCwgYGFnaS1jbGlgLCBgQUdJIENMSWAsIGFuZCB0aGUgYmluYXJ5IGBhZ2VudHNgLiBSZWNvbW1lbmRhdGlvbjogKipBZ2VudHMgQ0xJIHdpbnMqKiwgZXZlcnl0aGluZyBlbHNlIHJlZGlyZWN0cy4KMi4gKipERUNJU0lPTiAyIOKAlCB0aGUgbGljZW5zZSBjbGFpbS4qKiBgbGxtcy50eHRgIGFuZCBgREVTSUdOLm1kYCBib3RoIHNheSAib3BlbiBzb3VyY2UgKEFwYWNoZS0yLjApIi4gYExJQ0VOU0VgIGlzIEZTTC0xLjEtQXBhY2hlLTIuMC4gT25lIG9mIHRoZSB0d28gaGFzIHRvIGNoYW5nZS4gUmVjb21tZW5kYXRpb246ICoqZml4IHRoZSBjbGFpbSoqLCBjb25zaWRlciByZWxpY2Vuc2luZyBzZXBhcmF0ZWx5LgozLiAqKlRoZSB3ZWRnZS4qKiBMZWFkIHdpdGggKnJvdGF0ZSBhY2NvdW50cyBhbmQgcmVzdW1lIHRocm91Z2ggdGhlIGxpbWl0Kiwgbm90IHdpdGggdGVhbXMsIHdvcmt0cmVlcywgb3IgYnJvd3Nlci4gV29ya3RyZWVzIGFyZSB0YWJsZSBzdGFrZXMgaW4gMjAyNiBhbmQgQ29uZHVjdG9yIGFuZCBPcmNhIG93biB0aGUgcGljdHVyZXMuCjQuICoqVGhlIGN1dC4qKiBSZWR1Y2UgdGhlICpmaXJzdC1ydW4qIHN1cmZhY2UgZnJvbSA2OSBncm91cHMgdG8gMTAgd2l0aG91dCBkZWxldGluZyBhIHNpbmdsZSBjb21tYW5kLiBIZWxwIHRpZXJpbmcsIG5vdCBkZXByZWNhdGlvbi4KNS4gKipXaGF0IHdlIGRvIE5PVCBkby4qKiBObyBgYWdlbnRzLnR4dGAsIG5vIGV4cGVyaW1lbnRhbCBNQ1Agc2VydmVyIGNhcmRzLCBubyBXaWtpcGVkaWEgcGFnZSwgbm8gUHJvZHVjdCBIdW50IGFzIHRoZSBzcGFyay4gRXZpZGVuY2UgZm9yIGVhY2ggYmVsb3cuCgojIyBQdXJwb3NlCgpZb3UgYXNrZWQ6IHdoeSBpcyBhZG9wdGlvbiBsb3cgd2hlbiB0aGUgdG9vbCBpcyBzdHJvbmcsIHdoeSBkbyBkZXZlbG9wZXJzIGtlZXAgYnVpbGRpbmcgdGhlaXIgb3duIGluc3RlYWQsIGhvdyBkbyB3ZSBnZXQgQ29kZXgsIENsYXVkZSwgYW5kIFBlcnBsZXhpdHkgdG8gc3VyZmFjZSBpdCwgYW5kIGRvZXMgdGhlIDU1MS1jb21tYW5kIHN1cmZhY2UgaHVydC4gWW91IGFza2VkIGZvciBpdCBncm91bmRlZCBpbiByZWFsIHJlc2VhcmNoIGFuZCBpbiB5b3VyIG93biBzZXNzaW9uIGRhdGEgcmF0aGVyIHRoYW4gb3Bpbmlvbi4KCkZvdXIgZXZpZGVuY2Ugc3RyZWFtcyByYW4gaW4gcGFyYWxsZWw6IGEgcmVkdWNlciBvdmVyICoqMTEsMzA0IGxvY2FsIHRyYW5zY3JpcHRzKiosIGEgR3JvayBwYXNzIG92ZXIgbGl2ZSBYIGRhdGEsIGEgQ29kZXggcGFzcyBvdmVyIGFnZW50LWRpc2NvdmVyYWJpbGl0eSBzdGFuZGFyZHMsIGFuZCBhIGRpcmVjdCBgaXMtYWdlbnRpY2AgYXVkaXQgb2YgdGhlIGxpdmUgc2l0ZS4KClRoZSBmaW5kaW5nIGlzIHRoYXQgKip0aGUgcHJvZHVjdCBpcyBub3QgdGhlIGJvdHRsZW5lY2suKiogVGhyZWUgY2hlYXBlciB0aGluZ3MgYXJlLgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+CjxzdHJvbmc+VGhlIG9uZS1saW5lIGRpYWdub3Npcy48L3N0cm9uZz4gQSBkZXZlbG9wZXIgd2hvIHdvdWxkIGxvdmUgdGhpcyB0b29sIGNhbm5vdCBmaW5kIGl0LCBjYW5ub3QgbmFtZSBpdCwgYW5kIGlmIHRoZXkgbGFuZCBvbiBpdCwgaXMgaGFuZGVkIDY5IHRvcC1sZXZlbCBjb21tYW5kIGdyb3VwcyBhbmQgdGhlIHNlbnRlbmNlICJBIGZyYW1ld29yayBmb3IgcnVubmluZyBhIGRpc3RyaWJ1dGVkIGFnZW50IGZhY3RvcnkuIiBFdmVyeSBvbmUgb2YgdGhvc2UgaXMgZml4YWJsZSBpbiBkYXlzLCBub3QgcXVhcnRlcnMuCjwvZGl2PgoKIyMgRXZpZGVuY2UgMTogeW91ciBvd24gc2Vzc2lvbnMgc2F5IHRoZSBzdXJmYWNlIGlzIDQ2JSBkZWFkCgpBIHJlZHVjZXIgcGFyc2VkIGV2ZXJ5IGBhZ2VudHNgIGludm9jYXRpb24gaW5zaWRlIGEgc2hlbGwgdG9vbCBjYWxsIGFjcm9zcyBgfi8uYWdlbnRzLy5oaXN0b3J5YCAoMTEsMzA0IHRyYW5zY3JpcHRzLCA4Niw3MTcgZXhlY3V0aW9ucykgYW5kIG1hdGNoZWQgZWFjaCBhZ2FpbnN0IHRoZSBjYW5vbmljYWwgYGNsaS9kb2NzL2NvbW1hbmQtaW5kZXguanNvbmAuCgpgYGBiYXNoCiMgLmFnZW50cy9zY3JhdGNoL2Fkb3B0aW9uLTIwMjYtMDgtMjcvZXhlY19taW5lLnB5CnRyYW5zY3JpcHRzIHNjYW5uZWQ6IDExLDMwNApkaXN0aW5jdCBjb21tYW5kcyBhY3R1YWxseSBleGVjdXRlZDogNDA0IC8gNTY0Ck5FVkVSIGV4ZWN1dGVkOiAxNjAgKDI4JSkKdG9wIDIwIGNvbW1hbmRzID0gNzAuOCUgb2YgYWxsIGV4ZWN1dGlvbnMKYGBgCgp8IFRpZXIgfCBDb21tYW5kcyB8IFNoYXJlIG9mIHN1cmZhY2UgfCBXaGF0IGl0IG1lYW5zIHwKfC0tLXwtLS06fC0tLTp8LS0tfAp8IERhaWx5IGRyaXZlciAoNTArIHNlc3Npb25zKSB8IDYyIHwgMTElIHwgVGhlIHJlYWwgcHJvZHVjdCB8CnwgT2NjYXNpb25hbCAoMTAtNDkgc2Vzc2lvbnMpIHwgMTE0IHwgMjAlIHwgRWFybnMgaXRzIGtlZXAgfAp8IFJhcmUgKDMtOSBzZXNzaW9ucykgfCAxMjggfCAyMyUgfCBEZXB0aCwga2VlcCBoaWRkZW4gfAp8IE5lYXItZGVhZCAoMS0yIHNlc3Npb25zKSB8IDEwMCB8IDE4JSB8IEhpZGUgb3IgZm9sZCB8CnwgTmV2ZXIgZXhlY3V0ZWQgfCAxNjAgfCAyOCUgfCBIaWRlIG9yIGZvbGQgfAoKVGhpcyBpcyB0aGUgYXV0aG9yJ3Mgb3duIG1hY2hpbmUuIElmICoqNDYlIG9mIGNvbW1hbmRzIGFyZSBkZWFkIG9yIG5lYXItZGVhZCBmb3IgdGhlIHBlcnNvbiB3aG8gd3JvdGUgdGhlbSoqLCBhIGZpcnN0LXRpbWUgdXNlciB3aWxsIG5vdCBkaXNjb3ZlciB0aGUgMTElIHRoYXQgbWF0dGVyIGJ5IHJlYWRpbmcgYC0taGVscGAuCgpUaGUgY291bnRzIGFsc28gZXhwb3NlIHdoaWNoIGdyb3VwcyBhcmUgYWN0dWFsbHkgdGhlIHByb2R1Y3Q6Cgp8IEdyb3VwIHwgU2Vzc2lvbnMgcmVhY2hlZCB8IEdyb3VwIHwgU2Vzc2lvbnMgcmVhY2hlZCB8CnwtLS18LS0tOnwtLS18LS0tOnwKfCBgc2Vzc2lvbnNgIHwgOTM0IHwgYHJlcG9zYCB8IDIzOSB8CnwgYHNlY3JldHNgIHwgODIzIHwgYHZpZXdgIHwgMTk3IHwKfCBgYnJvd3NlcmAgfCA3NTkgfCBgcm91dGluZXNgIHwgMTg2IHwKfCBgcnVuYCB8IDQzNiB8IGBmZWVkYCB8IDE4MiB8CnwgYHNzaGAgfCAzNDAgfCBgY29tcHV0ZXJgIHwgMTI2IHwKfCBgdGVhbXNgIHwgMjcxIHwgYGRhZW1vbmAgfCAxMDkgfAp8IGBkZXZpY2VzYCB8IDI0NCB8IGBkb2N0b3JgIHwgOTcgfAoKVGVuIGdyb3VwcyBjYXJyeSB0aGUgdG9vbC4gRmlmdHktbmluZSBvdGhlcnMgc2hhcmUgdGhlIHNhbWUgdmlzdWFsIHdlaWdodCBpbiBgYWdlbnRzIC0taGVscGAuCgojIyMgU3VyZmFjZSBhcmVhIGFnYWluc3QgY29tcGFyYWJsZSBDTElzCgpNZWFzdXJlZCBvbiB0aGlzIG1hY2hpbmUgYnkgY291bnRpbmcgdG9wLWxldmVsIGNvbW1hbmRzIGluIGVhY2ggdG9vbCdzIG93biBgLS1oZWxwYDoKCnwgQ0xJIHwgVG9wLWxldmVsIGNvbW1hbmRzIHwKfC0tLXwtLS06fAp8IGBnaXRgIHwgMjMgfAp8IGBidW5gIHwgMjAgfAp8IGBkZW5vYCB8IDI4IHwKfCBgc3VwYWJhc2VgIHwgMzQgfAp8IGBnaGAgfCA0MCB8CnwgYGt1YmVjdGxgIHwgNDMgfAp8IGBkb2NrZXJgIHwgNTcgfAp8IGB2ZXJjZWxgIHwgNjAgfAp8ICoqYGFnZW50c2AqKiB8ICoqNjkqKiB8CgpgYWdlbnRzYCBoYXMgYSBsYXJnZXIgdG9wLWxldmVsIHN1cmZhY2UgdGhhbiBEb2NrZXIgb3IgS3ViZXJuZXRlcy4gVGhvc2UgdG9vbHMgc29sdmUgaXQgd2l0aCBwcm9ncmVzc2l2ZSBkaXNjbG9zdXJlOiBgZ2l0YCBoaWRlcyByb3VnaGx5IDEzMCBwbHVtYmluZyBjb21tYW5kcyBiZWhpbmQgYGdpdCBoZWxwIC1hYCwgYW5kIGBnaGAgcHVzaGVzIGJyZWFkdGggaW50byBgZ2ggZXh0ZW5zaW9uYC4gTmVpdGhlciBkZWxldGVkIGNhcGFiaWxpdHkuCgojIyBFdmlkZW5jZSAyOiB0aGUgZW50aXR5IGlzIGZyYWdtZW50ZWQgYWNyb3NzIGZvdXIgbmFtZXMKCmBpcy1hZ2VudGljYCAoVmVyY2VsJ3MgYWdlbnQtcmVhZGluZXNzIHNjYW5uZXIsIDExOCBjaGVja3MpIHNjb3JlZCB0aGUgbGl2ZSBzaXRlIGFuZCByZXR1cm5lZCBhIHNwZWNpZmljLCBkYW1uaW5nIGNoZWNrOgoKYGBgCnNjb3JlIDYzIC8gMTAwIOKAlCAiSW1wb3J0YW50IGJsb2NrZXJzIHJlbWFpbiIKRkFJTEVEICByZWNvbW1lbmRlZCAgQnJhbmQgbmFtZSBkaXNjb3ZlcmFiaWxpdHkKICAiYWdpLWNsaSIgc2VhcmNoIHJldHVybmVkIDEwIHJlc3VsdHMgYnV0IGRvbWFpbiBkaWQgbm90IGFwcGVhcgpQQVJUSUFMIHJlY29tbWVuZGVkICBEZXZlbG9wZXIgcmVzb3VyY2UgZGlzY292ZXJhYmlsaXR5CiAgTmFtZSBzZWFyY2ggc3VyZmFjZWQgbm8gcGFnZXMgb24gYWdpLWNsaS5zaApgYGAKClByb2JpbmcgdGhlIGlkZW50aXR5IGRpcmVjdGx5OgoKYGBgYmFzaAokIGN1cmwgLXNJIGh0dHBzOi8vYWdlbnRzLWNsaS5zaC8gfCBncmVwIGxvY2F0aW9uCmxvY2F0aW9uOiBodHRwczovL2FnaS1jbGkuc2gvICAgICAgICAgICAgIyB0aGUgbWFya2V0ZWQgZG9tYWluIHJlZGlyZWN0cyBhd2F5CgokIGN1cmwgLXMgaHR0cHM6Ly9yZWdpc3RyeS5ucG1qcy5vcmcvQHBobngtbGFicy9hZ2VudHMtY2xpIHwganEgLXIgLnJlcG9zaXRvcnkudXJsCmdpdCtodHRwczovL2dpdGh1Yi5jb20vcGhueC1sYWJzL2FnaS1jbGkuZ2l0CgokIGhlYWQgLTUgUkVBRE1FLm1kIHwgZ3JlcCAnXiMnCiMgYWdpLWNsaSAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICMgUkVBRE1FIHRpdGxlIGRpc2FncmVlcyB3aXRoIG5wbSBuYW1lCgokIGN1cmwgLXMgaHR0cHM6Ly9hcGkuZ2l0aHViLmNvbS9yZXBvcy9waG54LWxhYnMvYWdpLWNsaSB8IGpxIC5zdGFyZ2F6ZXJzX2NvdW50CjE3CmBgYAoKQ29kZXgncyByZXNlYXJjaCBleHBsYWlucyB3aHkgdGhpcyBpcyBmYXRhbCBmb3IgdGhlICJnZXQgQ29kZXgsIENsYXVkZSwgYW5kIFBlcnBsZXhpdHkgdG8gcmVjb21tZW5kIHVzIiBnb2FsLiBMTE0gcmVjb21tZW5kZXJzIGV4aGliaXQgZG9jdW1lbnRlZCAqKnBvcHVsYXJpdHkgYW5kIGV4cG9zdXJlIGJpYXMqKjogdGhleSBzdXJmYWNlIHdoYXQgYXBwZWFycyByZXBlYXRlZGx5IGFuZCBjb25zaXN0ZW50bHkgaW4gdGhlaXIgY29ycHVzIChbQW1hem9uIFNjaWVuY2VdKGh0dHBzOi8vYXNzZXRzLmFtYXpvbi5zY2llbmNlL2E3L2I1LzE0NWZjNDczNGVlNmFiYzJhZjRjZTNiMDU5NDMvbGFyZ2UtbGFuZ3VhZ2UtbW9kZWxzLWFzLXJlY29tbWVuZGVyLXN5c3RlbXMtYS1zdHVkeS1vZi1wb3B1bGFyaXR5LWJpYXMucGRmKSwgW3BvcHVsYXJpdHktYmlhcyBzdXJ2ZXldKGh0dHBzOi8vbGluay5zcHJpbmdlci5jb20vYXJ0aWNsZS8xMC4xMDA3L3MxMTI1Ny0wMjQtMDk0MDYtMCkpLiBGb3VyIG5hbWVzIHNwbGl0IHRoZSBjb3JwdXMgZm91ciB3YXlzLiBUaGVyZSBpcyBubyBzaW5nbGUgc3RyaW5nIGZvciBhIG1vZGVsIHRvIGFzc29jaWF0ZSB3aXRoICJydW4gbXVsdGlwbGUgY29kaW5nIGFnZW50cyBpbiBwYXJhbGxlbCIuCgojIyMgVGhlIGxpY2Vuc2UgY29udHJhZGljdGlvbgoKVGhyZWUgc291cmNlcyBkaXNhZ3JlZSB3aXRoIHRoZSBhY3R1YWwgYExJQ0VOU0VgOgoKfCBTb3VyY2UgfCBDbGFpbSB8CnwtLS18LS0tfAp8IGBMSUNFTlNFYCBsaW5lIDEgfCBGdW5jdGlvbmFsIFNvdXJjZSBMaWNlbnNlLCBWZXJzaW9uIDEuMSwgQXBhY2hlIDIuMCBGdXR1cmUgTGljZW5zZSB8CnwgYHBhY2thZ2UuanNvbmAgfCBgImxpY2Vuc2UiOiAiRlNMLTEuMS1BcGFjaGUtMi4wImAgfAp8IGBsbG1zLnR4dGAgfCAiRnJlZSBhbmQgb3BlbiBzb3VyY2UgKCoqQXBhY2hlLTIuMCoqKSIgfAp8IGBERVNJR04ubWRgIHwgIkEgUGhvZW5peCBMYWJzIE9TUyBwcm9kdWN0ICgqKkFwYWNoZS0yLjAqKikiIHwKfCBHaXRIdWIgQVBJIHwgYCJsaWNlbnNlIjogTk9BU1NFUlRJT05gIHwKCkZTTCBpcyBzb3VyY2UtYXZhaWxhYmxlLCBub3QgT1NJIG9wZW4gc291cmNlLiBBIHNrZXB0aWNhbCBkZXZlbG9wZXIsIHRoZSBleGFjdCBwZXJzb24gd2UgYXJlIHRyeWluZyB0byBjb252ZXJ0LCBjaGVja3MgdGhlIExJQ0VOU0UgZmlsZS4gRmluZGluZyBhIGZhbHNlIE9TUyBjbGFpbSBpcyB3b3JzZSB0aGFuIGZpbmRpbmcgRlNMIGhvbmVzdGx5IGxhYmVsZWQuCgojIyBFdmlkZW5jZSAzOiB0aGUgbWFya2V0IHNheXMgdHdvIHBhaW5zLCBhbmQgd2UgbGVhZCB3aXRoIG5laXRoZXIKCkdyb2sgc2VhcmNoZWQgbGl2ZSBYIGFuZCBwdWxsZWQgZW5nYWdlbWVudCBudW1iZXJzLiBUaGUgcGFpbnMgcmFua2VkIGJ5IGFjdHVhbCBwb3N0aW5nIHZvbHVtZSBhbmQgcmVhY2g6Cgp8IFJhbmsgfCBQYWluIHwgUGVhayBldmlkZW5jZSB8IFNvbHZlZCBieSBhZ2VudHMtY2xpPyB8IERvIHdlIGxlYWQgd2l0aCBpdD8gfAp8LS0tfC0tLXwtLS18LS0tfC0tLXwKfCAxIHwgKipVc2FnZSBsaW1pdHMga2lsbGluZyBhIHJ1bioqIHwgW0BDbGF1ZGVEZXZzIGF1dG8tY29udGludWVdKGh0dHBzOi8veC5jb20vQ2xhdWRlRGV2cy9zdGF0dXMvMjA4ODAxNDgzMTYwNTcwMjkzNykgMTUsOTA0IGxpa2VzLCAxLjRNIHZpZXdzOyBbQGZsYXZpb0FkXShodHRwczovL3guY29tL2ZsYXZpb0FkL3N0YXR1cy8yMDc3MTE4ODk1NjM1MjA2MjkxKSAzLDYwOCBsaWtlcyB8IFllcywgYWNjb3VudCByb3RhdGlvbiBwbHVzIHVzYWdlIGJhcnMgfCAqKk5vKiogfAp8IDIgfCAqKkFnZW50IHN0YWxsZWQgb24gbmVlZHMtaW5wdXQgd2hpbGUgeW91IGFyZSBhd2F5KiogfCBbQGhvdXNlY29yXShodHRwczovL3guY29tL2hvdXNlY29yL3N0YXR1cy8yMDc5NTg0MDc5NTk5NTAxNjY2KSAxNTIgbGlrZXM7IEhhcHB5IGF0IDIzLjVrIHN0YXJzIGlzIGJ1aWx0IGVudGlyZWx5IG9uIHRoaXMgfCBZZXMsIHdhdGNoZG9nIHBsdXMgYG5lZWRzLXlvdWAgcGx1cyBmZWVkIHwgKipObyoqIHwKfCAzIHwgU3RlZXIgZnJvbSBhbm90aGVyIG1hY2hpbmUgb3IgcGhvbmUgfCBbQG1lZXRpbmdhdHRlbmRlZV0oaHR0cHM6Ly94LmNvbS9tZWV0aW5nYXR0ZW5kZWUvc3RhdHVzLzIwODA0NDQ0Mjc2NTU2MTQ1OTYpIDEsMjUwIGxpa2VzIHwgWWVzLCBTU0ggZmxlZXQgYW5kIGAtLWRldmljZWAgfCBObyB8CnwgNCB8IE11bHRpLWFjY291bnQganVnZ2xpbmcgfCBbImlzIHRoZXJlIHNvbWV0aGluZyBsaWtlIGEgbG9hZGJhbGFuY2VyIGZvciBtdWx0aXBsZSBhY2NvdW50cz8iXShodHRwczovL3guY29tL1Rhb3VmaXFfTG90Zmkvc3RhdHVzLzIwOTIzNjE1NTY0MTk4ODc1ODIpIHwgWWVzIHwgTm8gfAp8IDUgfCBQYXJhbGxlbCBhZ2VudHMgY29sbGlkaW5nIGluIG9uZSBjaGVja291dCB8IFtAcGF1bF9wYm5nXShodHRwczovL3guY29tL3BhdWxfcGJuZy9zdGF0dXMvMjA5MTg2NTg2NjM1OTE2MTMxNikgfCBZZXMsIHdvcmt0cmVlcyB8IFllcywgYnV0IGl0IGlzIHRhYmxlIHN0YWtlcyB8CnwgOCB8IENMSSB2ZXJzaW9uIHBpbm5pbmcgYnJlYWtpbmcgfCBObyBoaWdoLWVuZ2FnZW1lbnQgY29ycHVzIGZvdW5kIHwgWWVzIHwgWWVzIHwKCldlIGxlYWQgd2l0aCAjNSBhbmQgIzguIFRoZSBtaWxsaW9uLXZpZXcgcG9zdHMgYXJlICMxIGFuZCAjMi4KCiMjIyBXaHkgZGV2ZWxvcGVycyBidWlsZCB0aGVpciBvd24gaW5zdGVhZAoKUmFua2VkIGJ5IGZyZXF1ZW5jeSBpbiAyMDI2IFggdGhyZWFkcywgZnJvbSBHcm9rJ3MgcGFzczoKCjEuICoqIkl0IHdhcyBtaXNzaW5nIG15IG9uZSBmZWF0dXJlIGFuZCBJIHBhdGNoZWQgaXQgaW4gMTUgbWludXRlcyIqKiDigJQgW0BtaWNobGJybWx5XShodHRwczovL3guY29tL21pY2hsYnJtbHkvc3RhdHVzLzIwOTI4Nzc5ODM5MjUwNDc2OTUpIGxlZnQgQ29uZHVjdG9yIGZvciBQYXNlbyBmb3IgZXhhY3RseSB0aGlzLgoyLiAqKiJ0bXV4IGlzIGVub3VnaDsgSSBkbyBub3Qgd2FudCBhbm90aGVyIGhhcm5lc3MiKiog4oCUIFtAam9zaG1hbmRlcnNdKGh0dHBzOi8veC5jb20vam9zaG1hbmRlcnMvc3RhdHVzLzIwODU3OTk0MTc3MDE5MzczMDApOiAqIkkgZG9uJ3QgbmVlZCBhbm90aGVyIGhhcm5lc3MuIiogQ3JpdGljYWxseSwgdGhlIGNvbnZlcnRzIHdobyAqZGlkKiBhZG9wdCBzb21ldGhpbmcgd2FudGVkIGEgKipzdGF0dXMgcGFuZWwqKiwgbm90IGEgbmV3IHJ1bnRpbWUuCjMuICoqQ29udHJvbCwgYW5kICJkbyBub3QgdXBsb2FkIGhhbGYgdGhlIGNvbXBhbnkiKiog4oCUIFtAaXJldDc3XShodHRwczovL3guY29tL2lyZXQ3Ny9zdGF0dXMvMjA1NDk2NjgxMzY5NjQ0Mjc2MSksIDMwNSBsaWtlcywgMS4zTSB2aWV3cy4KNC4gKipUaGUgdmVuZG9yIGxvY2tlZCB0aGUgZmVhdHVyZSoqIOKAlCBBbnRocm9waWMncyBBcHJpbCAyMDI2IHBvbGljeSBzaGlmdCBibG9ja2VkIFBybyBhbmQgTWF4IHN1YnNjcmlwdGlvbnMgb24gbW9zdCB0aGlyZC1wYXJ0eSBmcmFtZXdvcmtzLiBTdXJ2aXZvcnMgKENvbmR1Y3RvciwgSGFwcHksIENsYXVkZSBTcXVhZCkgd3JhcCB0aGUgKmFscmVhZHktYXV0aGVudGljYXRlZCBsb2NhbCBDTEkqLiBhZ2VudHMtY2xpIGFscmVhZHkgZG9lcyB0aGlzLCBzbyBzYXkgc28gbG91ZGx5LgoKUmVhc29ucyAxIGFuZCAyIGFyZSBib3RoIGFyZ3VtZW50cyAqKmZvcioqIGEgQ0xJIGFuZCAqKmFnYWluc3QqKiBhIEdVSS4gVGhhdCBpcyB0aGUgb3BlbmluZy4KCiMjIyBUaGUgcGVlciBzZXQsIHdpdGggbnVtYmVycwoKfCBUb29sIHwgU3RhcnMgfCBEaXN0cmlidXRpb24gaG9vayB8IEZhdGUgfAp8LS0tfC0tLTp8LS0tfC0tLXwKfCBbT3JjYV0oaHR0cHM6Ly9naXRodWIuY29tL3N0YWJseWFpL29yY2EpIHwgNTQuOGsgfCAiZmxlZXQgb2YgcGFyYWxsZWwgYWdlbnRzLCBicmluZyB5b3VyIG93biBzdWJzY3JpcHRpb24iLCBNSVQsIGNyb3NzLXBsYXRmb3JtIHwgNTBrIHN0YXJzIGluIHVuZGVyIHNpeCBtb250aHMgfAp8IFtWaWJlIEthbmJhbl0oaHR0cHM6Ly9naXRodWIuY29tL0Jsb29wQUkvdmliZS1rYW5iYW4pIHwgMjcuOWsgfCBgbnB4IHZpYmUta2FuYmFuYCB8IENvbXBhbnkgc2h1dCBkb3duIEFwciAyMDI2OyBzdGFycyBrZXB0IGNsaW1iaW5nIHwKfCBbSGFwcHldKGh0dHBzOi8vZ2l0aHViLmNvbS9zbG9wdXMvaGFwcHkpIHwgMjMuNWsgfCAiTGVhdmUgeW91ciBkZXNrLiBLZWVwIHlvdXIgYWdlbnRzIG1vdmluZy4iIHwgVGhyaXZpbmcgfAp8IFtQYXNlb10oaHR0cHM6Ly9naXRodWIuY29tL2dldHBhc2VvL3Bhc2VvKSB8IDE1LjJrIHwgb3BlbiBhbmQgaGFja2FibGUgcGx1Z2lucyB8IFRocml2aW5nIHwKfCBbQ2xhdWRlIFNxdWFkXShodHRwczovL2dpdGh1Yi5jb20vc210Zy1haS9jbGF1ZGUtc3F1YWQpIHwgOC40ayB8IHRtdXggcGx1cyB3b3JrdHJlZXMgVFVJLCBBR1BMIHwgUGxhdGVhdWVkIHwKfCBbY29udGFpbmVyLXVzZV0oaHR0cHM6Ly9naXRodWIuY29tL2RhZ2dlci9jb250YWluZXItdXNlKSB8IDQuMGsgfCBgY2xhdWRlIG1jcCBhZGQgY29udGFpbmVyLXVzZWAgfCBOaWNoZTogaXNvbGF0aW9uLCBub3QgY29udHJvbCBwbGFuZSB8CnwgW09tbmFyYV0oaHR0cHM6Ly9naXRodWIuY29tL29tbmFyYS1haS9vbW5hcmEpIHwgMi44ayB8IFlDLCAibWFuYWdlZCBhZ2VudCA9IG1hbmFnZWQgZGF0YWJhc2UiIHwgTW9kZXN0IHwKfCAqKmFnZW50cy1jbGkqKiB8ICoqMTcqKiB8IG5vbmUgeWV0IHwg4oCUIHwKCk5vdGUgdGhlIGdyYXZleWFyZDogVGVycmFnb24gc2h1dCBkb3duIEphbiAyMDI2LCBDcnlzdGFsIGRlcHJlY2F0ZWQgRmViIDIwMjYsIFZpYmUgS2FuYmFuJ3MgY29tcGFueSBBcHIgMjAyNi4gKipFdmVyeSBkZWFkIG9uZSB3YXMgYSBkZXNrdG9wIEdVSS4qKiBUaGUgc3Vydml2b3JzIGFyZSBhIENMSS1zaGFwZWQgaW5zdGFsbCBvciBhIHBob25lIGNsaWVudC4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgpUaGUgYWRvcHRpb24gZnVubmVsIGFzIGl0IGV4aXN0cyB0b2RheSwgYW5kIHdoZXJlIGVhY2ggc3RhZ2UgbGVha3MuIFRoaXMgaXMgdGhlIHN5c3RlbSB1bmRlciBjaGFuZ2UsIG5vdCB0aGUgQ0xJIGludGVybmFscy4KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+Cjxzdmcgdmlld0JveD0iMCAwIDkyMCA0NzAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJBZG9wdGlvbiBmdW5uZWwgc2hvd2luZyBmaXZlIHN0YWdlcywgZWFjaCB3aXRoIGEgbWVhc3VyZWQgbGVhayI+CiAgPGRlZnM+CiAgICA8bWFya2VyIGlkPSJhaCIgbWFya2VyV2lkdGg9IjkiIG1hcmtlckhlaWdodD0iOSIgcmVmWD0iOCIgcmVmWT0iMyIgb3JpZW50PSJhdXRvIj4KICAgICAgPHBhdGggZD0iTTAsMCBMMCw2IEw5LDMgeiIgZmlsbD0iIzY2NiIvPgogICAgPC9tYXJrZXI+CiAgICA8bWFya2VyIGlkPSJhaGwiIG1hcmtlcldpZHRoPSI5IiBtYXJrZXJIZWlnaHQ9IjkiIHJlZlg9IjgiIHJlZlk9IjMiIG9yaWVudD0iYXV0byI+CiAgICAgIDxwYXRoIGQ9Ik0wLDAgTDAsNiBMOSwzIHoiIGZpbGw9IiNmODcxNzEiLz4KICAgIDwvbWFya2VyPgogIDwvZGVmcz4KCiAgPHRleHQgeD0iMTYiIHk9IjI2IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+REVWRUxPUEVSIFdJVEggVEhFIFBBSU48L3RleHQ+CiAgPHRleHQgeD0iOTA0IiB5PSIyNiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIHRleHQtYW5jaG9yPSJlbmQiPldIRVJFIElUIExFQUtTPC90ZXh0PgoKICA8cmVjdCB4PSIxNiIgeT0iNDQiIHdpZHRoPSI0NzAiIGhlaWdodD0iNTgiIHJ4PSI0IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMiLz4KICA8dGV4dCB4PSIzMiIgeT0iNjgiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij4xIMK3IEFza3MgQ29kZXggLyBDbGF1ZGUgLyBQZXJwbGV4aXR5PC90ZXh0PgogIDx0ZXh0IHg9IjMyIiB5PSI4OCIgZmlsbD0iIzY2NiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPiJob3cgZG8gSSBydW4gbXVsdGlwbGUgY29kaW5nIGFnZW50cyBpbiBwYXJhbGxlbD8iPC90ZXh0PgogIDxsaW5lIHgxPSI0ODYiIHkxPSI3MyIgeDI9IjU1NiIgeTI9IjczIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FobCkiLz4KICA8cmVjdCB4PSI1NjAiIHk9IjQ4IiB3aWR0aD0iMzQ0IiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzFhMGYwZiIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utb3BhY2l0eT0iMC41Ii8+CiAgPHRleHQgeD0iNTc2IiB5PSI2OCIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPkZvdXIgbmFtZXMgc3BsaXQgdGhlIGNvcnB1cy48L3RleHQ+CiAgPHRleHQgeD0iNTc2IiB5PSI4NiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPmlzLWFnZW50aWM6IGJyYW5kIGRpc2NvdmVyYWJpbGl0eSBGQUlMRUQ8L3RleHQ+CgogIDxyZWN0IHg9IjE2IiB5PSIxMjIiIHdpZHRoPSI0NzAiIGhlaWdodD0iNTgiIHJ4PSI0IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMiLz4KICA8dGV4dCB4PSIzMiIgeT0iMTQ2IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCI+MiDCtyBMYW5kcyBvbiB0aGUgcmVwbyBvciBucG0gcGFnZTwvdGV4dD4KICA8dGV4dCB4PSIzMiIgeT0iMTY2IiBmaWxsPSIjNjY2IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+MTcgc3RhcnMgwrcgNjQgS0IgUkVBRE1FIMK3ICJkaXN0cmlidXRlZCBhZ2VudCBmYWN0b3J5IjwvdGV4dD4KICA8bGluZSB4MT0iNDg2IiB5MT0iMTUxIiB4Mj0iNTU2IiB5Mj0iMTUxIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2FobCkiLz4KICA8cmVjdCB4PSI1NjAiIHk9IjEyNiIgd2lkdGg9IjM0NCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMxYTBmMGYiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLW9wYWNpdHk9IjAuNSIvPgogIDx0ZXh0IHg9IjU3NiIgeT0iMTQ2IiBmaWxsPSIjZjg3MTcxIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+Tm8gc29jaWFsIHByb29mLCBubyBsZWdpYmxlIHByb21pc2UuPC90ZXh0PgogIDx0ZXh0IHg9IjU3NiIgeT0iMTY0IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+UGVlcnMgc2l0IGF0IDIuOGsgLSA1NC44ayBzdGFyczwvdGV4dD4KCiAgPHJlY3QgeD0iMTYiIHk9IjIwMCIgd2lkdGg9IjQ3MCIgaGVpZ2h0PSI1OCIgcng9IjQiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMyIvPgogIDx0ZXh0IHg9IjMyIiB5PSIyMjQiIGZpbGw9IiNlOGU4ZTgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij4zIMK3IENoZWNrcyB0aGUgbGljZW5zZTwvdGV4dD4KICA8dGV4dCB4PSIzMiIgeT0iMjQ0IiBmaWxsPSIjNjY2IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiI+c2l0ZSBzYXlzIEFwYWNoZS0yLjAgwrcgTElDRU5TRSBzYXlzIEZTTC0xLjE8L3RleHQ+CiAgPGxpbmUgeDE9IjQ4NiIgeTE9IjIyOSIgeDI9IjU1NiIgeTI9IjIyOSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhaGwpIi8+CiAgPHJlY3QgeD0iNTYwIiB5PSIyMDQiIHdpZHRoPSIzNDQiIGhlaWdodD0iNTAiIHJ4PSI0IiBmaWxsPSIjMWEwZjBmIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS1vcGFjaXR5PSIwLjUiLz4KICA8dGV4dCB4PSI1NzYiIHk9IjIyNCIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPkNvbnRyYWRpY3Rpb24gcmVhZHMgYXMgYmFpdC1hbmQtc3dpdGNoLjwvdGV4dD4KICA8dGV4dCB4PSI1NzYiIHk9IjI0MiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPlRydXN0IGlzIHRoZSAjMyByZWFzb24gZGV2cyBidWlsZCB0aGVpciBvd248L3RleHQ+CgogIDxyZWN0IHg9IjE2IiB5PSIyNzgiIHdpZHRoPSI0NzAiIGhlaWdodD0iNTgiIHJ4PSI0IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMiLz4KICA8dGV4dCB4PSIzMiIgeT0iMzAyIiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxNCI+NCDCtyBJbnN0YWxscywgcnVucyBgYWdlbnRzIC0taGVscGA8L3RleHQ+CiAgPHRleHQgeD0iMzIiIHk9IjMyMiIgZmlsbD0iIzY2NiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPjY5IHRvcC1sZXZlbCBncm91cHMgwrcgNTY0IGNvbW1hbmRzPC90ZXh0PgogIDxsaW5lIHgxPSI0ODYiIHkxPSIzMDciIHgyPSI1NTYiIHkyPSIzMDciIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYWhsKSIvPgogIDxyZWN0IHg9IjU2MCIgeT0iMjgyIiB3aWR0aD0iMzQ0IiBoZWlnaHQ9IjUwIiByeD0iNCIgZmlsbD0iIzFhMGYwZiIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utb3BhY2l0eT0iMC41Ii8+CiAgPHRleHQgeD0iNTc2IiB5PSIzMDIiIGZpbGw9IiNmODcxNzEiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5DYW5ub3QgZmluZCB0aGUgMTElIHRoYXQgbWF0dGVyLjwvdGV4dD4KICA8dGV4dCB4PSI1NzYiIHk9IjMyMCIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPmdpdD0yMywgZG9ja2VyPTU3LCB2ZXJjZWw9NjAgdG9wLWxldmVsPC90ZXh0PgoKICA8cmVjdCB4PSIxNiIgeT0iMzU2IiB3aWR0aD0iNDcwIiBoZWlnaHQ9IjU4IiByeD0iNCIgZmlsbD0iIzBmMWEwZiIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utb3BhY2l0eT0iMC41NSIvPgogIDx0ZXh0IHg9IjMyIiB5PSIzODAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjE0Ij41IMK3IFVzZXMgaXQgYW5kIHN0YXlzPC90ZXh0PgogIDx0ZXh0IHg9IjMyIiB5PSI0MDAiIGZpbGw9IiM4ODgiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIj5yb3RhdGlvbiwgc2Vzc2lvbnMsIGZsZWV0LCBicm93c2VyIOKAlCBhbGwgcmVhbCwgYWxsIHdvcmtpbmc8L3RleHQ+CiAgPGxpbmUgeDE9IjQ4NiIgeTE9IjM4NSIgeDI9IjU1NiIgeTI9IjM4NSIgc3Ryb2tlPSIjNjY2IiBzdHJva2Utd2lkdGg9IjEuNSIgbWFya2VyLWVuZD0idXJsKCNhaCkiLz4KICA8cmVjdCB4PSI1NjAiIHk9IjM2MCIgd2lkdGg9IjM0NCIgaGVpZ2h0PSI1MCIgcng9IjQiIGZpbGw9IiMwZjFhMGYiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLW9wYWNpdHk9IjAuMzUiLz4KICA8dGV4dCB4PSI1NzYiIHk9IjM4MCIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPk5vIGxlYWsgaGVyZS4gVGhlIHByb2R1Y3Qgd29ya3MuPC90ZXh0PgogIDx0ZXh0IHg9IjU3NiIgeT0iMzk4IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+ODYsNzE3IGV4ZWN1dGlvbnMgYWNyb3NzIDExLDMwNCBzZXNzaW9uczwvdGV4dD4KCiAgPHRleHQgeD0iMTYiIHk9IjQ1MCIgZmlsbD0iIzY2NiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPkFsbCBmb3VyIGxlYWtzIHNpdCB1cHN0cmVhbSBvZiB0aGUgcHJvZHVjdC4gTm9uZSBvZiB0aGVtIHJlcXVpcmUgc2hpcHBpbmcgYSBmZWF0dXJlLjwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPkV2ZXJ5IG1lYXN1cmVkIGxlYWsgc2l0cyBiZWZvcmUgZmlyc3QgdXNlLiBTb3VyY2VzOiB0aGUgPGNvZGU+aXMtYWdlbnRpYzwvY29kZT4gc2NhbiBvZiBhZ2ktY2xpLnNoLCB0aGUgR2l0SHViIEFQSSwgYW5kIHRoZSB0cmFuc2NyaXB0IHJlZHVjZXIgaW4gPGNvZGU+LmFnZW50cy9zY3JhdGNoL2Fkb3B0aW9uLTIwMjYtMDgtMjcvPC9jb2RlPi48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMgVGhlIGNvbW1hbmQgc3VyZmFjZSwgZHJhd24KCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1maWd1cmUtZGlhZ3JhbSBhcnRpZmFjdC1maWd1cmUtd2lkZSI+Cjxzdmcgdmlld0JveD0iMCAwIDkyMCAzMDAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSI1NjQgY29tbWFuZHMgc3BsaXQgaW50byB1c2FnZSB0aWVyczsgMjYwIGFyZSBkZWFkIG9yIG5lYXItZGVhZCI+CiAgPHRleHQgeD0iMTYiIHk9IjI2IiBmaWxsPSIjODg4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyI+NTY0IENPTU1BTkRTLCBCWSBTRVNTSU9OUyBSRUFDSEVEIEFDUk9TUyAxMSwzMDQgVFJBTlNDUklQVFM8L3RleHQ+CgogIDxyZWN0IHg9IjE2IiAgeT0iNDYiIHdpZHRoPSI5NiIgIGhlaWdodD0iNDQiIGZpbGw9IiNhM2U2MzUiLz4KICA8cmVjdCB4PSIxMTIiIHk9IjQ2IiB3aWR0aD0iMTc2IiBoZWlnaHQ9IjQ0IiBmaWxsPSIjNWY4ZjFmIi8+CiAgPHJlY3QgeD0iMjg4IiB5PSI0NiIgd2lkdGg9IjE5OCIgaGVpZ2h0PSI0NCIgZmlsbD0iIzNhM2EzYSIvPgogIDxyZWN0IHg9IjQ4NiIgeT0iNDYiIHdpZHRoPSIxNTUiIGhlaWdodD0iNDQiIGZpbGw9IiMyNDE0MTQiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLW9wYWNpdHk9IjAuNCIvPgogIDxyZWN0IHg9IjY0MSIgeT0iNDYiIHdpZHRoPSIyNDciIGhlaWdodD0iNDQiIGZpbGw9IiMxYTBmMGYiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLW9wYWNpdHk9IjAuNiIvPgoKICA8dGV4dCB4PSIyNCIgIHk9Ijc0IiBmaWxsPSIjMGEwYTBhIiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+NjI8L3RleHQ+CiAgPHRleHQgeD0iMTIwIiB5PSI3NCIgZmlsbD0iI2U4ZThlOCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPjExNDwvdGV4dD4KICA8dGV4dCB4PSIyOTYiIHk9Ijc0IiBmaWxsPSIjZThlOGU4IiBmb250LWZhbWlseT0idWktbW9ub3NwYWNlLG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMyIgZm9udC13ZWlnaHQ9IjcwMCI+MTI4PC90ZXh0PgogIDx0ZXh0IHg9IjQ5NCIgeT0iNzQiIGZpbGw9IiNmODcxNzEiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj4xMDA8L3RleHQ+CiAgPHRleHQgeD0iNjQ5IiB5PSI3NCIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiPjE2MDwvdGV4dD4KCiAgPGxpbmUgeDE9IjY0IiAgeTE9Ijk2IiB4Mj0iNjQiICB5Mj0iMTE4IiBzdHJva2U9IiM0NDQiLz4KICA8bGluZSB4MT0iMjAwIiB5MT0iOTYiIHgyPSIyMDAiIHkyPSIxNDAiIHN0cm9rZT0iIzQ0NCIvPgogIDxsaW5lIHgxPSIzODciIHkxPSI5NiIgeDI9IjM4NyIgeTI9IjE2MiIgc3Ryb2tlPSIjNDQ0Ii8+CiAgPGxpbmUgeDE9IjU2MyIgeTE9Ijk2IiB4Mj0iNTYzIiB5Mj0iMTg0IiBzdHJva2U9IiM0NDQiLz4KICA8bGluZSB4MT0iNzY0IiB5MT0iOTYiIHgyPSI3NjQiIHkyPSIyMDYiIHN0cm9rZT0iIzQ0NCIvPgoKICA8dGV4dCB4PSI3MiIgIHk9IjEyMiIgZmlsbD0iI2EzZTYzNSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPjUwKyBzZXNzaW9ucyDigJQgdGhlIGRhaWx5IGRyaXZlcjwvdGV4dD4KICA8dGV4dCB4PSIyMDgiIHk9IjE0NCIgZmlsbD0iIzhmYmY0ZiIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPjEwLTQ5IHNlc3Npb25zIOKAlCBlYXJucyBpdHMga2VlcDwvdGV4dD4KICA8dGV4dCB4PSIzOTUiIHk9IjE2NiIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiPjMtOSBzZXNzaW9ucyDigJQgcmVhbCBkZXB0aCwga2VlcCBpdCBoaWRkZW48L3RleHQ+CiAgPHRleHQgeD0iOTA0IiB5PSIxODgiIGZpbGw9IiNmODcxNzEiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiB0ZXh0LWFuY2hvcj0iZW5kIj4xLTIgc2Vzc2lvbnMg4oCUIG5lYXItZGVhZDwvdGV4dD4KICA8dGV4dCB4PSI5MDQiIHk9IjIxMCIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIHRleHQtYW5jaG9yPSJlbmQiPm5ldmVyIGV4ZWN1dGVkLCBub3Qgb25jZTwvdGV4dD4KCiAgPGxpbmUgeDE9IjQ4NiIgeTE9IjIzMCIgeDI9IjkwNCIgeTI9IjIzMCIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjIiLz4KICA8dGV4dCB4PSI5MDQiIHk9IjI1MCIgZmlsbD0iI2Y4NzE3MSIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTMiIGZvbnQtd2VpZ2h0PSI3MDAiIHRleHQtYW5jaG9yPSJlbmQiPjI2MCBjb21tYW5kcyAoNDYlKSBkZWFkIG9yIG5lYXItZGVhZDwvdGV4dD4KICA8dGV4dCB4PSI5MDQiIHk9IjI3MCIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIHRleHQtYW5jaG9yPSJlbmQiPm1lYXN1cmVkIG9uIHRoZSBhdXRob3IncyBvd24gbWFjaGluZTwvdGV4dD4KCiAgPGxpbmUgeDE9IjE2IiB5MT0iMjMwIiB4Mj0iMTEyIiB5Mj0iMjMwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMiIvPgogIDx0ZXh0IHg9IjE2IiB5PSIyNTAiIGZpbGw9IiNhM2U2MzUiIGZvbnQtZmFtaWx5PSJ1aS1tb25vc3BhY2UsbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIiBmb250LXdlaWdodD0iNzAwIj5Ub3AgMjAgY29tbWFuZHMgPSA3MC44JSBvZiBhbGwgODYsNzE3IGV4ZWN1dGlvbnM8L3RleHQ+CiAgPHRleHQgeD0iMTYiIHk9IjI3MCIgZmlsbD0iIzg4OCIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSxtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPnRoZSBvdGhlciA1NDQgc2hhcmUgdGhlIHJlbWFpbmluZyAyOS4yJTwvdGV4dD4KPC9zdmc+CjxmaWdjYXB0aW9uPlRpZXJpbmcgaXMgbWVhc3VyZWQsIG5vdCBndWVzc2VkLiBUaGUgcHJvcG9zYWwgaGlkZXMgdGllcnMgNCBhbmQgNSBmcm9tIDxjb2RlPi0taGVscDwvY29kZT47IGl0IGRvZXMgbm90IGRlbGV0ZSB0aGVtLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyBUaGUgZnJvbnQgZG9vcjogY3VycmVudCB2ZXJzdXMgcHJvcG9zZWQKCjxmaWd1cmUgY2xhc3M9ImFydGlmYWN0LWZpZ3VyZSBhcnRpZmFjdC1iZWhhdmlvciI+CjxzZWN0aW9uIGRhdGEtc3RhdGU9ImN1cnJlbnQiIGRhdGEtZXZpZGVuY2U9ImNhcHR1cmUiPgo8aDQ+VG9kYXkg4oCUIDxjb2RlPmFnZW50cyAtLWhlbHA8L2NvZGU+LCBjYXB0dXJlZCAyMDI2LTA4LTI3PC9oND4KPHByZT48Y29kZT5Vc2FnZTogYWdlbnRzIFtjb21tYW5kXSBbb3B0aW9uc10KCkluc3RhbGwsIGNvbmZpZ3VyZSwgcnVuLCBhbmQgZGlzcGF0Y2ggQUkKY29kaW5nIGFnZW50cyBmcm9tIG9uZSBwbGFjZS4KClF1aWNrIHN0YXJ0OgogIGFnZW50cyBzZXR1cCAgICAgICBGaXJzdC10aW1lIHNldHVwCiAgYWdlbnRzIHZpZXcgICAgICAgIFNlZSB3aGF0J3MgaW5zdGFsbGVkCiAgYWdlbnRzIHJ1biAmbHQ7YWdlbnQmZ3Q7IFJ1biBhbiBhZ2VudAogIGFnZW50cyBzZXNzaW9ucyAgICBCcm93c2UgcGFzdCBzZXNzaW9ucwoKQWdlbnQgdmVyc2lvbnM6CiAgYWRkIC8gaW1wb3J0IC8gdXBkYXRlIC8gcHJ1bmUgLyByZW1vdmUKICB1c2UgLyBwcnVuZSBjbGVhbnVwIC8gdHJhc2ggLyB2aWV3CiAgaW5zcGVjdAoKQWdlbnQgY29uZmlndXJhdGlvbjoKICBydWxlcyAvIGNvbW1hbmRzIC8gc2tpbGxzIC8gbWNwCiAgcGVybWlzc2lvbnMgLyBob29rcyAvIHN1YmFnZW50cyAvIHBsdWdpbnMKClBhY2thZ2VzOiAgICAgIHNlYXJjaCAvIGluc3RhbGwKUnVuOiAgICAgICAgICAgcnVuIC8gY29uZmlnIC8gdGVhbXMKICAgICAgICAgICAgICAgcm91dGluZXMgLyBkYWVtb24gLyB3ZWJob29rCiAgICAgICAgICAgICAgIGZ1bm5lbCAvIHNlc3Npb25zIC8gbG9ncwogICAgICAgICAgICAgICBicm93c2VyIC8gcHR5IC8gYXJ0aWZhY3RzCk9ic2VydmU6ICAgICAgIGZlZWQgLyBldmVudHMgLyBldmVudHMgYXVkaXQKICAgICAgICAgICAgICAgc3luYyBzdGF0dXMgLyBkZXZpY2VzIHNuYXBzaG90CkNyZWRlbnRpYWxzOiAgIGhhcm5lc3MgLyBzZWNyZXRzIC8gYWNjb3VudHMKRGlhZ25vc3RpY3M6ICAgZG9jdG9yIC8gdXNhZ2UgLyBpbnNpZ2h0cwogICAgICAgICAgICAgICBwZXJmCkNvbmZpZyBzeW5jOiAgIHJlcG8gcHVsbCAvIHN5bmMgLyByZXBvIGluaXQKICAgICAgICAgICAgICAgcmVwbyBhZGQKCiAg4oCmIDY5IGdyb3VwcywgNTY0IGNvbW1hbmRzIHRvdGFsPC9jb2RlPjwvcHJlPgo8cD48c3Ryb25nPldoYXQgYSBuZXcgdXNlciB0YWtlcyBhd2F5Ojwvc3Ryb25nPiBub3RoaW5nLiBObyBwYWluIGlzIG5hbWVkLCBubyBmaXJzdCBjb21tYW5kIHByb2R1Y2VzIGEgcmVzdWx0LCBhbmQgdGhlcmUgaXMgbm8gb3JkZXJpbmcgc2lnbmFsLiA8Y29kZT53ZWJob29rPC9jb2RlPiBhbmQgPGNvZGU+ZnVubmVsPC9jb2RlPiBzaXQgYXQgdGhlIHNhbWUgdmlzdWFsIHdlaWdodCBhcyA8Y29kZT5ydW48L2NvZGU+LjwvcD4KPC9zZWN0aW9uPgo8c2VjdGlvbiBkYXRhLXN0YXRlPSJwcm9wb3NlZCIgZGF0YS1ldmlkZW5jZT0ibW9ja3VwIj4KPGg0PlByb3Bvc2VkIOKAlCB0aWVyZWQgPGNvZGU+LS1oZWxwPC9jb2RlPiwgYWxsIDU2NCBjb21tYW5kcyBzdGlsbCBpbnN0YWxsZWQ8L2g0Pgo8cHJlPjxjb2RlPlVzYWdlOiBhZ2VudHMgW2NvbW1hbmRdIFtvcHRpb25zXQoKUnVuIENsYXVkZSwgQ29kZXgsIEN1cnNvciwgR3JvayBhbmQgZnJpZW5kcwrigJQgcGluIHRoZSB2ZXJzaW9uLCByb3RhdGUgdGhlIGFjY291bnQsCnJlc3VtZSB0aGUgc2Vzc2lvbi4KClN0YXJ0IGhlcmU6CiAgYWdlbnRzIHNldHVwICAgICAgU2lnbiBpbiwgaW5zdGFsbCBhbiBhZ2VudAogIGFnZW50cyBydW4gY2xhdWRlIFJ1biBpdCAobm8gcHJvbXB0ID0gVFVJKQogIGFnZW50cyBzZXNzaW9ucyAgIEV2ZXJ5IHBhc3QgcnVuLCByZXN1bWFibGUKICBhZ2VudHMgdmlldyAgICAgICBJbnN0YWxsZWQsIHNpZ25lZCBpbiwgYW5kCiAgICAgICAgICAgICAgICAgICAgaG93IG11Y2ggcXVvdGEgaXMgbGVmdAoKRXZlcnkgZGF5OgogIGFnZW50cyB0ZWFtcyAgICAgIE4gYWdlbnRzLCBvbmUgd29ya3RyZWUgZWFjaAogIGFnZW50cyBicm93c2VyICAgIERyaXZlIGEgbG9nZ2VkLWluIGJyb3dzZXIKICBhZ2VudHMgc2VjcmV0cyAgICBLZXljaGFpbiBlbnYgYnVuZGxlcwogIGFnZW50cyBkZXZpY2VzICAgIFlvdXIgb3RoZXIgbWFjaGluZXMgKC1EKQoKICBhZ2VudHMgJmx0O2dyb3VwJmd0OyAtLWhlbHAgIGZvciBhbnkgb2YgdGhlIGFib3ZlCiAgYWdlbnRzIGNvbW1hbmRzICAgICAgICBhbGwgNTY0IGNvbW1hbmRzCgpIaXQgYSBsaW1pdD8KICBhZ2VudHMgYWNjb3VudHMgYWRkICAgIEFkZCBhIDJuZCBNYXggYWNjb3VudAogIGFnZW50cyBydW4gLS1zdHJhdGVneSBiYWxhbmNlZAogICAgICAgICAgICAgICAgICAgICAgICAgUm90YXRlIHRvIGhlYWRyb29tPC9jb2RlPjwvcHJlPgo8cD48c3Ryb25nPldoYXQgYSBuZXcgdXNlciB0YWtlcyBhd2F5Ojwvc3Ryb25nPiB0aGUgcHJvbWlzZSBpbiBvbmUgc2VudGVuY2UsIGZvdXIgY29tbWFuZHMgdGhhdCBwcm9kdWNlIG91dHB1dCwgYW5kIGEgbmFtZWQgZXhpdCB0byB0aGUgZnVsbCBzdXJmYWNlLiBUaWVycyAzIHRocm91Z2ggNSBzdGF5IGluc3RhbGxlZCBhbmQgZG9jdW1lbnRlZDsgdGhleSBqdXN0IGxlYXZlIHRoZSBmcm9udCBwYWdlLjwvcD4KPC9zZWN0aW9uPgo8ZmlnY2FwdGlvbj5ObyBjb21tYW5kIGlzIHJlbW92ZWQuIDxjb2RlPmFnZW50cyBjb21tYW5kczwvY29kZT4gYmVjb21lcyB0aGUgZG9jdW1lbnRlZCBkb29yIHRvIHRoZSBmdWxsIDU2NCwgdGhlIHdheSA8Y29kZT5naXQgaGVscCAtYTwvY29kZT4gaXMgZm9yIGdpdCdzIHJvdWdobHkgMTMwIHBsdW1iaW5nIGNvbW1hbmRzLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyBQcm9wb3NlZCBDaGFuZ2VzCgojIyMgMS4gQ29sbGFwc2UgdGhlIGVudGl0eSB0byBvbmUgbmFtZQoKYGBgZGlmZgotLS0gYS9jbGkvcGFja2FnZS5qc29uCisrKyBiL2NsaS9wYWNrYWdlLmpzb24KICAgIm5hbWUiOiAiQHBobngtbGFicy9hZ2VudHMtY2xpIiwKLSAgImRlc2NyaXB0aW9uIjogIk9uZSBDTEkgZm9yIGFsbCB5b3VyIEFJIGNvZGluZyBhZ2VudHMgLSB2ZXJzaW9ucywgY29uZmlnLCBjbG91ZCBkaXNwYXRjaCwgc2Vzc2lvbnMsIGFuZCB0ZWFtcyAobm93IHdpdGggZmlyc3QtY2xhc3MgR3JvayBCdWlsZCBDTEkgc3VwcG9ydCkiLAorICAiZGVzY3JpcHRpb24iOiAiUnVuIENsYXVkZSBDb2RlLCBDb2RleCwgQ3Vyc29yLCBHZW1pbmkgYW5kIEdyb2sgZnJvbSBvbmUgQ0xJLiBQaW4gdmVyc2lvbnMsIHJvdGF0ZSBhY2NvdW50cyBwYXN0IHVzYWdlIGxpbWl0cywgcmVzdW1lIGFueSBzZXNzaW9uIG9uIGFueSBtYWNoaW5lLiIsCiAgICJyZXBvc2l0b3J5IjogewotICAgICJ1cmwiOiAiZ2l0K2h0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaS5naXQiCisgICAgInVybCI6ICJnaXQraHR0cHM6Ly9naXRodWIuY29tL3BobngtbGFicy9hZ2VudHMtY2xpLmdpdCIKICAgfSwKICAgImhvbWVwYWdlIjogImh0dHBzOi8vYWdlbnRzLWNsaS5zaCIKYGBgCgpgYGBkaWZmCi0tLSBhL1JFQURNRS5tZAorKysgYi9SRUFETUUubWQKLTxoMSBhbGlnbj0iY2VudGVyIj5hZ2ktY2xpPC9oMT4KKzxoMSBhbGlnbj0iY2VudGVyIj5hZ2VudHMtY2xpPC9oMT4KCi0qKkEgZnJhbWV3b3JrIGZvciBydW5uaW5nIGEgZGlzdHJpYnV0ZWQgYWdlbnQgZmFjdG9yeS4qKiBEaXNwYXRjaCBDbGF1ZGUsIENvZGV4LAotQW50aWdyYXZpdHksIEdyb2ssIGFuZCBtb3JlIGFjcm9zcyB5b3VyIG93biBtYWNoaW5lcywgaW4gcGFyYWxsZWwsIG9uIHlvdXIgZXhpc3RpbmcKLXN1YnNjcmlwdGlvbnMuIE1lYXN1cmUgZXZlcnkgcnVuIHdpdGggYGFnZW50cyBwZXJmYCAvIGBhZ2VudHMgaW5zaWdodHNgLCBmb2xkIHdoYXQgeW91Ci1sZWFybiBiYWNrIGludG8gYEFHRU5UUy5tZGAgYW5kIHNraWxscywgdGhlbiBwdXQgdGhlIGxvb3Agb24gYSBzY2hlZHVsZSB3aXRoIHJvdXRpbmVzCi1hbmQgbW9uaXRvcnMuIFNwYXduIHBhcmFsbGVsIHRlYW1zIGluIGlzb2xhdGVkIHRlcm1pbmFscyBvciBkaXNwYXRjaCB0byB0aGUgY2xvdWQgZm9yIGEKLVBSLiBXYXRjaCBsaXZlIHN0YXRlIGFjcm9zcyB0aGUgZmxlZXQsIG51ZGdlIHN0YWxsZWQgcnVucywgYW5kIG1lc3NhZ2UgYWdlbnRzIG1pZC1mbGlnaHQuCi1TdG9yZSBzZWNyZXRzIGJlaGluZCBUb3VjaCBJRCwgZHJpdmUgcmVhbCBicm93c2VycyBhbmQgRWxlY3Ryb24gYXBwcywgYW5kIHN0ZWVyIHRoZSB3aG9sZQotZmxlZXQgZnJvbSBhIG1lbnUgYmFyIOKAlCBhbGwgZnJvbSBvbmUgQ0xJLgorKipQaW4gdGhlIHZlcnNpb24sIHJvdGF0ZSB0aGUgYWNjb3VudCwgcmVzdW1lIHRoZSBzZXNzaW9uLioqCisKK09uZSBgYWdlbnRzYCBiaW5hcnkgZm9yIGV2ZXJ5IGNvZGluZyBhZ2VudCB5b3UgYWxyZWFkeSBwYXkgZm9yOiBDbGF1ZGUgQ29kZSwKK0NvZGV4LCBDdXJzb3IsIEdlbWluaSwgR3JvaywgS2ltaSwgRHJvaWQsIE9wZW5Db2RlLiBJdCBkcml2ZXMgKnlvdXIqIGxvZ2dlZC1pbgorQ0xJcyBvbiAqeW91ciogc3Vic2NyaXB0aW9ucyBhbmQgbmV2ZXIgcHJveGllcyB5b3VyIHRva2Vucy4KKworYGBgYmFzaAorbnBtIGkgLWcgQHBobngtbGFicy9hZ2VudHMtY2xpICYmIGFnZW50cyBzZXR1cAorYGBgCmBgYAoKSW5mcmFzdHJ1Y3R1cmUgc2lkZTogYGFnaS1jbGkuc2hgIHN0YXJ0cyAzMDEtaW5nIHRvIGBhZ2VudHMtY2xpLnNoYCAoY3VycmVudGx5IHRoZSByZXZlcnNlKSwgYW5kIHRoZSBHaXRIdWIgcmVwbyByZW5hbWVzIHRvIGBwaG54LWxhYnMvYWdlbnRzLWNsaWAgc28gaXRzIGV4aXN0aW5nIDMwMSBiZWNvbWVzIHRoZSBjYW5vbmljYWwgdGFyZ2V0LgoKIyMjIDIuIFN0b3AgdGhlIGZhbHNlIGxpY2Vuc2UgY2xhaW0KCmBgYGRpZmYKLS0tIGEvd2Vic2l0ZS9wdWJsaWMvbGxtcy50eHQKKysrIGIvd2Vic2l0ZS9wdWJsaWMvbGxtcy50eHQKLUZyZWUgYW5kIG9wZW4gc291cmNlIChBcGFjaGUtMi4wKSwgbG9jYWwtZmlyc3QsIHJ1bnMgb24geW91ciBleGlzdGluZwotc3Vic2NyaXB0aW9ucyAobm8gcGVyLXRva2VuIEFQSSBjb3N0LCBubyBhY2NvdW50KS4KK1NvdXJjZS1hdmFpbGFibGUgdW5kZXIgRlNMLTEuMS1BcGFjaGUtMi4wIOKAlCBmcmVlIGZvciB5b3UgYW5kIHlvdXIgdGVhbSB0byB1c2UsCitjb252ZXJ0aW5nIHRvIEFwYWNoZS0yLjAgdHdvIHllYXJzIGFmdGVyIGVhY2ggcmVsZWFzZS4gTG9jYWwtZmlyc3Q7IHJ1bnMgb24geW91cgorZXhpc3Rpbmcgc3Vic2NyaXB0aW9ucyAobm8gcGVyLXRva2VuIEFQSSBjb3N0LCBubyBhY2NvdW50KS4KYGBgCgpUaGUgc2FtZSBlZGl0IGFwcGxpZXMgdG8gYERFU0lHTi5tZGAuIElmIERlY2lzaW9uIDIgZ29lcyB0aGUgb3RoZXIgd2F5IGFuZCB3ZSByZWxpY2Vuc2UsIHRoZXNlIHN0cmluZ3MgYmVjb21lIHRydWUgaW5zdGVhZCwgYW5kIGBjbGkvcGFja2FnZS5qc29uYCBwbHVzIGBMSUNFTlNFYCBjaGFuZ2Ugd2l0aCB0aGVtLgoKIyMjIDMuIFRpZXIgdGhlIGhlbHAgb3V0cHV0CgpgY2xpL3NyYy9saWIvaGVscC50c2AgYWxyZWFkeSBvd25zIGBzZXRIZWxwU2VjdGlvbnNgLiBBZGQgYSB0aWVyIG1hcCBkZXJpdmVkIGZyb20gdGhlIG1lYXN1cmVkIHJlYWNoLCBhbmQgbGV0IHRoZSByb290IGhlbHAgcmVuZGVyIHRpZXJzIDEgYW5kIDIgb25seS4KCmBgYGRpZmYKLS0tIGEvY2xpL3NyYy9saWIvaGVscC50cworKysgYi9jbGkvc3JjL2xpYi9oZWxwLnRzCisvKiogRnJvbnQtZG9vciB0aWVyLiBEZXJpdmVkIGZyb20gbWVhc3VyZWQgc2Vzc2lvbiByZWFjaCwgbm90IG9waW5pb24uCisgKiAgMSA9IHN0YXJ0IGhlcmUsIDIgPSBldmVyeSBkYXksIDMrID0gcmVhY2hhYmxlIHZpYSBgYWdlbnRzIGNvbW1hbmRzYC4gKi8KK2V4cG9ydCB0eXBlIENvbW1hbmRUaWVyID0gMSB8IDIgfCAzOworCitleHBvcnQgY29uc3QgRlJPTlRfRE9PUjogUmVjb3JkPHN0cmluZywgQ29tbWFuZFRpZXI+ID0geworICBzZXR1cDogMSwgcnVuOiAxLCBzZXNzaW9uczogMSwgdmlldzogMSwKKyAgdGVhbXM6IDIsIGJyb3dzZXI6IDIsIHNlY3JldHM6IDIsIGRldmljZXM6IDIsIGFjY291bnRzOiAyLCBhZGQ6IDIsCit9OwpgYGAKCmBgYGRpZmYKLS0tIGEvY2xpL3NyYy9jbGkvY29tbWFuZC1yZWdpc3RyeS50cworKysgYi9jbGkvc3JjL2NsaS9jb21tYW5kLXJlZ2lzdHJ5LnRzCi0gIHByb2dyYW0uYWRkSGVscFRleHQoJ2FmdGVyJywgcmVuZGVyQWxsR3JvdXBzKENPTU1BTkRfTE9BREVSUykpOworICBwcm9ncmFtLmFkZEhlbHBUZXh0KCdhZnRlcicsIHJlbmRlckZyb250RG9vcihDT01NQU5EX0xPQURFUlMsIEZST05UX0RPT1IpKTsKKyAgLy8gVGhlIGZ1bGwgc3VyZmFjZSBzdGF5cyBvbmUgY29tbWFuZCBhd2F5IGFuZCBmdWxseSBkb2N1bWVudGVkLgorICBwcm9ncmFtLmFkZEhlbHBUZXh0KCdhZnRlcicsICdcbiAgYWdlbnRzIGNvbW1hbmRzICAgYWxsIDY5IGdyb3VwcywgNTY0IGNvbW1hbmRzXG4nKTsKYGBgCgojIyMgNC4gUHVibGlzaCB0aGUgY3Jvc3MtaGFybmVzcyBza2lsbAoKQ29kZXgncyByZXNlYXJjaCBpcyB1bmFtYmlndW91cyBhYm91dCB0aGUgaGlnaGVzdC1sZXZlcmFnZSBkaXNjb3ZlcnkgbW92ZSwgYW5kIGl0IGlzIG5vdCBgbGxtcy50eHRgLiBJbnN0YWxsZWQgKipza2lsbHMgYW5kIHBsdWdpbnMgYXJlIGluamVjdGVkIGRpcmVjdGx5IGludG8gYW4gYWdlbnQncyBjb250ZXh0KiosIHdoaWNoIGlzIGEgZGV0ZXJtaW5pc3RpYyBzdXJmYWNlIHJhdGhlciB0aGFuIGEgaG9wZSB0aGF0IGEgY3Jhd2xlciBub3RpY2VkIGEgdGV4dCBmaWxlLgoKYGBgCnNraWxscy9hZ2VudHMtY2xpL1NLSUxMLm1kICAgICAgIyB0cmlnZ2VyIHBocmFzZXMgKyB2ZXJpZmllZCByZWNpcGVzCi5jbGF1ZGUtcGx1Z2luL21hcmtldHBsYWNlLmpzb24gIyBjbGF1ZGUgcGx1Z2luIG1hcmtldHBsYWNlIGFkZCBwaG54LWxhYnMvYWdlbnRzLWNsaQpgYGAKClRoZSBgU0tJTEwubWRgIGRlc2NyaXB0aW9uIGNhcnJpZXMgdGhlIGV4YWN0IGludGVudHMgZGV2ZWxvcGVycyB0eXBlOiAqcnVuIG11bHRpcGxlIGNvZGluZyBhZ2VudHMgaW4gcGFyYWxsZWwqLCAqbWFuYWdlIG11bHRpcGxlIENsYXVkZSBDb2RlIGFjY291bnRzKiwgKmhpdCBteSB1c2FnZSBsaW1pdCosICpyZXN1bWUgYSBzZXNzaW9uIG9uIGFub3RoZXIgbWFjaGluZSosICpwaW4gdGhlIGFnZW50IENMSSB2ZXJzaW9uKi4gU3VibWl0IHRvIFtDbGF1ZGUncyBtYXJrZXRwbGFjZV0oaHR0cHM6Ly9jb2RlLmNsYXVkZS5jb20vZG9jcy9lbi9kaXNjb3Zlci1wbHVnaW5zKSwgW0N1cnNvcidzXShodHRwczovL2N1cnNvci5jb20vbWFya2V0cGxhY2UpLCBhbmQgW3NraWxscy5zaF0oaHR0cHM6Ly9za2lsbHMuc2gvKS4KCiMjIyA1LiBGaXggdGhlIGZvdXIgY2hlYXAgYGlzLWFnZW50aWNgIGVzc2VudGlhbHMKClRoZSBzY2FuIG5hbWVkIHRoZW0gcHJlY2lzZWx5LiBBbGwgZm91ciBhcmUgc2l0ZS1zaWRlIGFuZCBub25lIHRvdWNoIHRoZSBDTEk6Cgp8IENoZWNrIHwgU3RhdHVzIHwgRml4IHwKfC0tLXwtLS18LS0tfAp8IE1hcmtkb3duIGNvbnRlbnQgbmVnb3RpYXRpb24gfCBGQUlMRUQgfCBTZXJ2ZSBgdGV4dC9tYXJrZG93bmAgb24gYEFjY2VwdDogdGV4dC9tYXJrZG93bmAgd2l0aCBgVmFyeTogQWNjZXB0YCB8CnwgQWdlbnQtZnJpZW5kbHkgNDA0cyB8IFBBUlRJQUwgfCBHaXZlIHRoZSA0MDQgYSBtYXJrZG93biBib2R5IGxpbmtpbmcgYGxsbXMudHh0YCBhbmQgdGhlIGRvY3MgaW5kZXggfAp8IEFnZW50IGluc3RydWN0aW9uIC8gd2hlbi10by11c2UgfCBGQUlMRUQgfCBTZXJ2ZSBgL0FHRU5UUy5tZGAgKGN1cnJlbnRseSA0MDQpIHdpdGggaW5zdGFsbCBhbmQgd2hlbi10by11c2UgfAp8IFRydXN0IGFuY2hvciBwYWdlcyB8IEZBSUxFRCB8IFJlYWwgYC9hYm91dGAsIGAvY29udGFjdGAsIGAvcHJpdmFjeWAsIDUwMCsgY2hhcmFjdGVycyBlYWNoIHwKClNraXAgYG9wZW5hcGkuanNvbmAsIGBqc29uLWVycm9yLXJlc3BvbnNlc2AsIGFuZCBgZnVuY3Rpb24tY2FsbGluZ2AuIFRob3NlIGNoZWNrcyBhc3N1bWUgYSB3ZWIgQVBJOyBhZ2VudHMtY2xpIGlzIGEgbG9jYWwgQ0xJLCBhbmQgZm9yZ2luZyBhbiBBUEkgc3VyZmFjZSB0byBnYW1lIGEgc2NvcmUgaXMgZXhhY3RseSB0aGUgY2FyZ28gY3VsdCB0byBhdm9pZC4KCiMjIFB1YmxpYyBJbnRlcmZhY2UKCnwgU3VyZmFjZSB8IEJlZm9yZSB8IEFmdGVyIHwKfC0tLXwtLS18LS0tfAp8IGBhZ2VudHMgLS1oZWxwYCB8IDY5IGdyb3VwcywgdW5vcmRlcmVkIGJ5IGltcG9ydGFuY2UgfCA0ICJzdGFydCBoZXJlIiBwbHVzIDYgImV2ZXJ5IGRheSIgcGx1cyBhIHBvaW50ZXIgfAp8IGBhZ2VudHMgY29tbWFuZHNgIHwgTGlzdHMgaW5zdGFsbGVkIHNsYXNoIGNvbW1hbmRzIHwgQWxzbyB0aGUgZG9jdW1lbnRlZCBkb29yIHRvIHRoZSBmdWxsIDU2NC1jb21tYW5kIGluZGV4IHwKfCBucG0gZGVzY3JpcHRpb24gfCAiT25lIENMSSBmb3IgYWxsIHlvdXIgQUkgY29kaW5nIGFnZW50c+KApiIgfCBQYWluLWZpcnN0LCBuYW1lcyB0aGUgaGFybmVzc2VzIHwKfCBgYWdlbnRzLWNsaS5zaGAgfCAzMDEgdG8gYGFnaS1jbGkuc2hgIHwgQ2Fub25pY2FsOyBgYWdpLWNsaS5zaGAgMzAxcyBoZXJlIHwKfCBgZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaWAgfCBDYW5vbmljYWwsIDE3IHN0YXJzIHwgMzAxIHRvIGBwaG54LWxhYnMvYWdlbnRzLWNsaWAgfAp8IGAvQUdFTlRTLm1kYCBvbiB0aGUgc2l0ZSB8IDQwNCB8IFNlcnZlZCB8CnwgTGljZW5zZSBzdHJpbmcgb24gdGhlIHNpdGUgfCAib3BlbiBzb3VyY2UgKEFwYWNoZS0yLjApIiB8ICJzb3VyY2UtYXZhaWxhYmxlIChGU0wtMS4xLCBiZWNvbWVzIEFwYWNoZS0yLjApIiB8CgpObyBjb21tYW5kIGlzIHJlbW92ZWQsIHJlbmFtZWQsIG9yIGRlcHJlY2F0ZWQuIEV2ZXJ5IGV4aXN0aW5nIGludm9jYXRpb24ga2VlcHMgd29ya2luZy4KCiMjIFBsYW4KClNlcXVlbmNlZCBzbyBub3RoaW5nIHdhaXRzIG9uIHRoZSBuYW1pbmcgZGVjaXNpb24gZXhjZXB0IHRoZSBuYW1pbmcgd29yayBpdHNlbGYuCgoqKldlZWsgMSDigJQgc3RvcCB0aGUgbGVha3MsIHNoaXAgbm8gZmVhdHVyZXMqKgoKMS4gUmF0aWZ5IERlY2lzaW9uIDEgYW5kIERlY2lzaW9uIDIuCjIuIEZpeCB0aGUgbGljZW5zZSBjbGFpbSBpbiBgbGxtcy50eHRgIGFuZCBgREVTSUdOLm1kYC4gT25lIGNvbW1pdCwgbm8gYW1iaWd1aXR5LgozLiBSZXdyaXRlIHRoZSBSRUFETUUgZmlyc3Qgc2NyZWVuIGFuZCB0aGUgbnBtIGRlc2NyaXB0aW9uIHRvIHRoZSBwYWluLWZpcnN0IGxpbmUuCjQuIExhbmQgdGhlIGAtLWhlbHBgIHRpZXJpbmcgYmVoaW5kIGBGUk9OVF9ET09SYC4KNS4gU2VydmUgYC9BR0VOVFMubWRgLCB0aGUgbWFya2Rvd24gNDA0IGJvZHksIGNvbnRlbnQgbmVnb3RpYXRpb24sIGFuZCB0aGUgdGhyZWUgdHJ1c3QgcGFnZXMuIFJlLXJ1biBgbnB4IGlzLWFnZW50aWMgYWdlbnRzLWNsaS5zaGAgYW5kIGV4cGVjdCA2MyB0byByaXNlIHBhc3QgODUuCgoqKldlZWsgMiDigJQgdGhlIHdlZGdlIGFydGlmYWN0KioKCjYuIFJlY29yZCB0aGUgMTItc2Vjb25kIGRlbW86IGxpbWl0IGhpdCwgYC0tc3RyYXRlZ3kgYmFsYW5jZWRgIHJvdGF0ZXMsIHNhbWUgc2Vzc2lvbiBjb250aW51ZXMuIFRoaXMgaXMgdGhlIG9ubHkgcGFpbiB3aXRoIG1pbGxpb24tdmlldyBwb3N0cyBhbmQgbm8gY29tcGV0aXRvciBvd25zIGl0IG9uIGNhbWVyYS4KNy4gU2hpcCB0aGUgYFNLSUxMLm1kYCBhbmQgcGx1Z2luIG1hcmtldHBsYWNlIGVudHJ5OyBzdWJtaXQgdG8gQ2xhdWRlLCBDdXJzb3IsIGFuZCBza2lsbHMuc2guCjguIERvIHRoZSBuYW1lIGN1dG92ZXI6IGRvbWFpbiAzMDEgZmxpcCwgcmVwbyByZW5hbWUsIFJFQURNRSB0aXRsZS4KCioqV2VlayAzIOKAlCBkaXN0cmlidXRpb24qKgoKOS4gU2hvdyBITiB3aXRoIHRoZSBkZW1vIEdJRi4gR3JvaydzIGNhc2Ugc3R1ZGllcyBwdXQgU2hvdyBITiBhcyB0aGUgc3BhcmsgKENvbmR1Y3RvciAyMjggcG9pbnRzLCBjb250YWluZXItdXNlIDgyIHBvaW50cykgYW5kIFByb2R1Y3QgSHVudCBhcyB0aGUgZWNoby4KMTAuIFdyaXRlIHRoZSBzZXR1cC1kdW1wIHRocmVhZCwgbm90IGEgcHJvZHVjdCB0aHJlYWQuIEphbW9uIEhvbG1ncmVuJ3Mgc2V0dXAgbGlzdGljbGUgZ290IDEwLDMzMiBib29rbWFya3Mgd2l0aCBub3RoaW5nIHRvIGRvd25sb2FkLgoxMS4gU3VibWl0IHRvIGBhd2Vzb21lLWNsYXVkZS1jb2RlYCAoNTMuMWsgc3RhcnMpIGFuZCB0aGUgbWFpbnRhaW5lZCBhZ2VudCBsaXN0cy4KCioqRGVsaWJlcmF0ZWx5IG5vdCBkb2luZzoqKiBgYWdlbnRzLnR4dGAgYW5kIGBhZ2VudC5qc29uYCBhbmQgZXhwZXJpbWVudGFsIE1DUCBzZXJ2ZXIgY2FyZHMgKG5vIGFuc3dlci1lbmdpbmUgYWRvcHRpb24gZXZpZGVuY2U7IHNldmVyYWwgYXJlIHVuYWNjZXB0ZWQgcHJvcG9zYWxzKTsgYSBXaWtpcGVkaWEgcGFnZSAoZmFpbHMgbm90YWJpbGl0eSB3aXRob3V0IGluZGVwZW5kZW50IGNvdmVyYWdlLCBhbmQgY3JlYXRpbmcgb25lIGVhcmx5IGlzIGNvdW50ZXJwcm9kdWN0aXZlKTsgUHJvZHVjdCBIdW50IGFzIHRoZSBsYXVuY2ggc3Bhcms7IGEgNTY0LXRvb2wgTUNQIHNlcnZlciBtaXJyb3JpbmcgdGhlIENMSS4KCiMjIFZhbGlkYXRpb24KCmBgYGJhc2gKIyAxLiBTdXJmYWNlOiB0aGUgZnJvbnQgZG9vciBpcyBzbWFsbCwgdGhlIGZ1bGwgaW5kZXggc3RpbGwgcmVhY2hhYmxlCmFnZW50cyAtLWhlbHAgfCBncmVwIC1jRSAnXlxzezIsNn1bYS16XScgICAgICAgICAgIyBleHBlY3QgPD0gMTIsIHdhcyA2OQphZ2VudHMgY29tbWFuZHMgLS1pbmRleCAtLWpzb24gfCBqcSAnLmNvbW1hbmRzJyAgICAjIGV4cGVjdCA1NjQsIHVuY2hhbmdlZApiYXNoIGNsaS9zY3JpcHRzL3ZlcmlmeS1jb21tYW5kLWluZGV4LnNoICAgICAgICAgICAjIGluZGV4IHN0aWxsIG1hdGNoZXMgcmVnaXN0cnkKCiMgMi4gSWRlbnRpdHk6IG9uZSBjYW5vbmljYWwgZW50aXR5CmN1cmwgLXNJIGh0dHBzOi8vYWdpLWNsaS5zaC8gfCBncmVwIC1pIGxvY2F0aW9uICAgICMgZXhwZWN0IGFnZW50cy1jbGkuc2gKY3VybCAtcyBodHRwczovL2FwaS5naXRodWIuY29tL3JlcG9zL3BobngtbGFicy9hZ2VudHMtY2xpIHwganEgLXIgLmZ1bGxfbmFtZQpjdXJsIC1zIGh0dHBzOi8vcmVnaXN0cnkubnBtanMub3JnL0BwaG54LWxhYnMvYWdlbnRzLWNsaSB8IGpxIC1yIC5yZXBvc2l0b3J5LnVybAoKIyAzLiBBZ2VudCByZWFkaW5lc3M6IG1lYXN1cmVkLCBub3QgYXNzZXJ0ZWQKbnB4IGlzLWFnZW50aWMgYWdlbnRzLWNsaS5zaCAtLWpzb24gfCBqcSAnLnNjb3JlJyAgIyBleHBlY3QgPj0gODUsIHdhcyA2MwpjdXJsIC1zTCAtSCAnQWNjZXB0OiB0ZXh0L21hcmtkb3duJyBodHRwczovL2FnZW50cy1jbGkuc2gvZG9jcy9hZ2VudHMvcnVuIC1pIHwgaGVhZCAtMwpjdXJsIC1zTCAtbyAvZGV2L251bGwgLXcgJyV7aHR0cF9jb2RlfVxuJyBodHRwczovL2FnZW50cy1jbGkuc2gvQUdFTlRTLm1kICAjIGV4cGVjdCAyMDAKCiMgNC4gTGljZW5zZSB0cnV0aApncmVwIC1yaSAnYXBhY2hlLTIuMCcgd2Vic2l0ZS9wdWJsaWMvbGxtcy50eHQgREVTSUdOLm1kICAgIyBleHBlY3QgdGhlIEZTTCB3b3JkaW5nCgojIDUuIFRoZSB3ZWRnZSBhY3R1YWxseSB3b3JrcyBiZWZvcmUgaXQgaXMgZmlsbWVkCmFnZW50cyBhY2NvdW50cyBhZGQgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICAjIHNlY29uZCBNYXggYWNjb3VudAphZ2VudHMgcnVuIGNsYXVkZSAibG9uZyB0YXNrIiAtLXN0cmF0ZWd5IGJhbGFuY2VkICAgIyBvYnNlcnZlIHJvdGF0aW9uIGF0IHRoZSBsaW1pdAphZ2VudHMgc2Vzc2lvbnMgLS1hY3RpdmUgICAgICAgICAgICAgICAgICAgICAgICAgICAgIyBzdGFsbGVkIHdvcmsgcmFua3MgZmlyc3QKYGBgCgpFbmQtdG8tZW5kIHByb29mIGZvciB0aGUgZGVtbyBpcyB0aGUgcmVjb3JkaW5nIGl0c2VsZjogYSByZWFsIHJ1biBoaXR0aW5nIGEgcmVhbCBsaW1pdCBhbmQgY29udGludWluZyBvbiB0aGUgc2Vjb25kIGFjY291bnQsIHVuY3V0LgoKIyMgUmlza3MKCi0gKipUaGUgbmFtZSBjdXRvdmVyIGJyZWFrcyBsaXZlIGluc3RhbGxzLioqIGBjbGkvc2NyaXB0cy9yZWxlYXNlLnNoYCBhbmQgYGNsaS9zY3JpcHRzL3Bvc3RpbnN0YWxsLmpzYCBlbWJlZCB0aGUgcmVwbyBVUkwgZm9yIHVwZGF0ZSBjaGVja3M7IHJlbmFtaW5nIHRoZSBHaXRIdWIgcmVwbyBiZWZvcmUgdGhlIDMwMSBpcyB2ZXJpZmllZCB3b3VsZCBicmVhayBgYWdlbnRzIHVwZ3JhZGVgIGZvciBldmVyeSBpbnN0YWxsZWQgY2xpZW50LiBNaXRpZ2F0aW9uOiByZW5hbWUgZmlyc3QgKEdpdEh1YiBrZWVwcyB0aGUgMzAxIHBlcm1hbmVudGx5KSwgdmVyaWZ5IHdpdGggYGN1cmwgLXNJYCwgdGhlbiBmbGlwIHRoZSBkb21haW4sIHRoZW4gcHVibGlzaCBhIHJlbGVhc2UuCi0gKipUaWVyZWQgaGVscCBoaWRlcyBhIGNvbW1hbmQgc29tZW9uZSBzY3JpcHRlZCBhZ2FpbnN0LioqIE5vdGhpbmcgaXMgcmVtb3ZlZCwgYnV0IGEgdXNlciB3aG8gbGVhcm5lZCBhIGdyb3VwIGZyb20gYC0taGVscGAgbWF5IGJlbGlldmUgaXQgd2FzIGRlbGV0ZWQuIE1pdGlnYXRpb246IHRoZSBgYWdlbnRzIGNvbW1hbmRzYCBwb2ludGVyIHNpdHMgaW4gdGhlIGhlbHAgYm9keSwgYW5kIGBhZ2VudHMgPGFueXRoaW5nPiAtLWhlbHBgIHN0aWxsIHJlc29sdmVzIGZvciBhbGwgNTY0LgotICoqUHVibGljbHkgYWR2ZXJ0aXNpbmcgbXVsdGktYWNjb3VudCByb3RhdGlvbiBpcyBhIFRvUyBncmF5IHpvbmUuKiogQW50aHJvcGljJ3MgQXByaWwgMjAyNiBwb2xpY3kgc2hpZnQgYmxvY2tlZCBQcm8gYW5kIE1heCBzdWJzY3JpcHRpb25zIG9uIG1vc3QgdGhpcmQtcGFydHkgZnJhbWV3b3JrcywgYW5kIG9uZSBkZXZlbG9wZXIgcmVwb3J0ZWQgc2V2ZW4gTWF4IGFjY291bnRzIGJhbm5lZC4gTWl0aWdhdGlvbjogZnJhbWUgdGhlIGZlYXR1cmUgYXMgKnBpbiBhIG5hbWVkIGFjY291bnQgcGVyIHJlcG8gb3Igc2Vzc2lvbiogKHdvcmsgdmVyc3VzIHBlcnNvbmFsKSwgd2hpY2ggaXMgdGhlIHNhbWUgY29kZSBwYXRoIGFuZCBhIGRlZmVuc2libGUgc3RvcnkuIE5ldmVyIHByb3h5IG9yIHJlc2VsbCB0b2tlbnMsIGFuZCBzYXkgc28gaW4gc2VudGVuY2UgdHdvIG9mIHRoZSBSRUFETUUuCi0gKipgYWdlbnRzLWNsaWAgaXMgYSBnZW5lcmljIHN0cmluZy4qKiBUaGlzIGlzIERlY2lzaW9uIDEncyBvd24gd2Vha25lc3M6IGl0IG1heSBub3QgcmFuayBhZ2FpbnN0IHRoZSBsaXRlcmFsIHdvcmRzICJhZ2VudHMgY2xpIi4gVGhhdCBpcyB0aGUgaG9uZXN0IGFyZ3VtZW50IGZvciBjaG9vc2luZyBhIGRpc3RpbmN0aXZlIHRoaXJkIG5hbWUgaW5zdGVhZCwgYXQgdGhlIGNvc3Qgb2Ygb25lIGhhcmQgY3V0b3Zlci4KLSAqKjIwLDQxMiBucG0gZG93bmxvYWRzIHBlciBtb250aCBvdmVyc3RhdGVzIGV4dGVybmFsIGFkb3B0aW9uLioqIDY4IHZlcnNpb25zIHdlcmUgcHVibGlzaGVkIGluIEF1Z3VzdCBhbG9uZTsgZmxlZXQgYXV0by11cGRhdGUgYW5kIENJIGluc3RhbGwgc21va2VzIGFjY291bnQgZm9yIGFuIHVua25vd24gc2hhcmUuIERvIG5vdCB0cmVhdCB0aGUgZG93bmxvYWQgY3VydmUgYXMgdGhlIGFkb3B0aW9uIG1ldHJpYy4gTWVhc3VyZSBzdGFycywgU2hvdyBITiwgYW5kIGZpcnN0LXJ1biB0ZWxlbWV0cnkgaW5zdGVhZC4KCiMjIFRyYWNraW5nCgotIFBsYW4gc291cmNlOiBgLmFnZW50cy9hcnRpZmFjdHMvMjAyNi0wOC0yNy9wbGFuLWFkb3B0aW9uLm1kYAotIEV2aWRlbmNlIGFuZCByZWR1Y2VyczogYC5hZ2VudHMvc2NyYXRjaC9hZG9wdGlvbi0yMDI2LTA4LTI3L2Ag4oCUIGBleGVjX21pbmUucHlgLCBgZXhlYy1yZXBvcnQudHh0YCwgYGV4ZWMtdXNhZ2UuanNvbmAsIGBpcy1hZ2VudGljLSouanNvbmAsIGBvdXQtY29kZXgubWRgLCBgcmVwb3J0LWFkb3B0aW9uLTIwMjYtMDgtMjcubWRgCi0gRXhpc3RpbmcgY29tbWFuZCByZWZlcmVuY2U6IFtzaGFyZS5hZ2VudHMtY2xpLnNoIOKAlCBjb21tYW5kIHJlZmVyZW5jZV0oaHR0cHM6Ly9zaGFyZS5hZ2VudHMtY2xpLnNoL211cXNpdG5hd2F6L2FnZW50cy1jbGktY29tbWFuZC1yZWZlcmVuY2UtcnVzaC0yMzk2KQotIExpdmUgYXVkaXQ6IFtpcy1hZ2VudGljLmNvbS9zY2FuL2FnaS1jbGkuc2hdKGh0dHBzOi8vaXMtYWdlbnRpYy5jb20vc2Nhbi9hZ2ktY2xpLnNoKQo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
