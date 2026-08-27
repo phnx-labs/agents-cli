@@ -918,6 +918,18 @@ suite; the GH Actions CI matrix on the release PR still gates the cross-platform
 (macOS/Windows) legs (`wait_for_ci_green` blocks on them, fail-closed). `--skip-tests`
 skips only that suite run.
 
+**The attestation producer shards by default.** `release-attestation-produce.sh`
+(the suite run that mints the attestation) now fans the ~13k-test suite across the
+fleet via `test.sh --shard N` instead of pinning one box — the suite is
+throughput-bound, so this is ~1/N the wall time (~269s on one box → ~31s on nine).
+N is resolved from the eligible workers `agents devices pick` reports, capped, and
+falls back to a single auto-picked box when fewer than two are eligible (`test.sh
+--shard` has no silent fallback, so the count is resolved before the call rather
+than demanded of a possibly-thin fleet). Each shard still runs vitest at
+`--maxWorkers=2 --retry=2`, so the RUSH-3015 per-box flake mitigation is unchanged —
+sharding adds machines, not per-box concurrency. Override with `--test-shard <n>` /
+`--test-devices a,b,c`, or pin one box with `--test-device <box>` / `--test-here`.
+
 **Idempotent re-runs.** The script's git-scope reads use `<ref>:cli/package.json`
 (not root) since the package moved under `cli`. If a publish fails after the PR
 merges, rerun the same command: registry-truth short-circuits skip an

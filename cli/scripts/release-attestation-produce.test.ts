@@ -252,6 +252,73 @@ describe('release-attestation-produce.sh', () => {
     expect(out).not.toMatch(/tests passed/);
   });
 
+  // The default (no --test-* flag) shards the suite across the fleet so a
+  // release stops pinning one box at --maxWorkers=2 for ~880s. These two tests
+  // pin the DECISION the producer makes about how to call test.sh -- so they
+  // commit a recording stub test.sh (the producer runs test.sh from a fresh
+  // worktree checkout, hence a commit, not a working-tree edit) and stub
+  // `agents devices pick --json` on PATH to control the eligible-worker count.
+  function withRecordingTestSh(fx: ReturnType<typeof buildFixture>, root: string, candidates: number) {
+    const cand = Array.from({ length: candidates }, (_, i) => `{"device":"w${i}"}`).join(',');
+    fs.writeFileSync(
+      path.join(fx.fakebin, 'agents'),
+      [
+        '#!/usr/bin/env bash',
+        'if [[ "$1" == "devices" && "$2" == "pick" ]]; then',
+        `  echo '{"candidates":[${cand}]}'`,
+        '  exit 0',
+        'fi',
+        'exit 0',
+      ].join('\n'),
+    );
+    fs.chmodSync(path.join(fx.fakebin, 'agents'), 0o755);
+    const argsLog = path.join(root, 'testsh-argv.txt');
+    fs.writeFileSync(
+      path.join(fx.caller, 'cli/scripts/test.sh'),
+      ['#!/usr/bin/env bash', `printf '%s\\n' "$*" > ${JSON.stringify(argsLog)}`, 'echo "tests passed"', 'exit 0'].join('\n'),
+    );
+    fs.chmodSync(path.join(fx.caller, 'cli/scripts/test.sh'), 0o755);
+    git(fx.caller, 'add', '-A');
+    git(fx.caller, 'commit', '-q', '-m', 'recording test.sh stub');
+    git(fx.caller, 'push', '-q', 'origin', 'main');
+    const head = git(fx.caller, 'rev-parse', 'HEAD');
+    const r = spawnSync(
+      'bash',
+      [path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'), head, '--repo-root', fx.caller, '--dir', fx.store],
+      { encoding: 'utf-8', env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}` } },
+    );
+    return { r, argsLog };
+  }
+
+  it('shards the suite across the fleet by default, keeping --maxWorkers=2 per shard (fast release)', () => {
+    // The whole point: a release must not run ~13k tests on one box at
+    // maxWorkers=2 (~880s). With >=2 eligible workers the producer fans out via
+    // test.sh --shard N, and each shard STILL passes --maxWorkers=2 --retry=2 so
+    // the RUSH-3015 per-box flake mitigation is unchanged (sharding adds boxes,
+    // not per-box concurrency).
+    const root = tmp('attest-produce-shard-');
+    const fx = buildFixture(root);
+    const { r, argsLog } = withRecordingTestSh(fx, root, 3);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(r.status, out).toBe(0);
+    const argv = fs.readFileSync(argsLog, 'utf-8');
+    expect(argv).toContain('--shard 3');
+    expect(argv).toContain('--maxWorkers=2');
+  });
+
+  it('falls back to a single auto-picked box when fewer than 2 workers are eligible (no thin-fleet release break)', () => {
+    // test.sh --shard has no silent fallback and refuses <2 workers, so a blind
+    // default of --shard N would fail a release on a small fleet. The producer
+    // resolves the count itself and only shards when >=2 are eligible.
+    const root = tmp('attest-produce-thin-');
+    const fx = buildFixture(root);
+    const { r, argsLog } = withRecordingTestSh(fx, root, 1);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(r.status, out).toBe(0);
+    const argv = fs.readFileSync(argsLog, 'utf-8');
+    expect(argv).not.toContain('--shard');
+  });
+
   it('does not seed when the caller checkout has no apps (nothing to reuse; gates decide)', () => {
     const root = tmp('attest-produce-noseed-');
     const fx = buildFixture(root);

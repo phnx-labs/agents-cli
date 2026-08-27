@@ -35,13 +35,20 @@
 #   scripts/release-attestation-produce.sh <commit-ish> [--dir DIR]
 #                                           [--repo-root DIR] [--keep]
 #                                           [--with-helpers]
-#                                           [--test-device <box> | --test-here
+#                                           [--test-shard <n> | --test-devices a,b,c
+#                                            | --test-device <box> | --test-here
 #                                            | --test-crabbox]
 #
-# Where the suite runs. Default auto-picks a fleet worker via `agents devices
-# pick`; --test-device <box> names one; --test-here pins THIS machine (loud);
-# --test-crabbox uses a disposable crabbox. All three forward to scripts/test.sh,
-# which owns the routing.
+# Where the suite runs. DEFAULT SHARDS across the fleet -- the suite is
+# throughput-bound, so dividing it across N workers runs it in ~1/N the time
+# (~269s on one box -> ~31s on 9). The count is resolved from the eligible
+# workers `agents devices pick` reports, capped, and falls back to a single
+# auto-picked box when fewer than 2 are eligible. --test-shard <n> forces a
+# count; --test-devices a,b,c names the shard workers; --test-device <box> pins
+# ONE box (no sharding); --test-here pins THIS machine (loud); --test-crabbox
+# uses a disposable crabbox. All forward to scripts/test.sh, which owns the
+# routing. Every shard still runs vitest at --maxWorkers=2 --retry=2, so the
+# per-box flake mitigation is unchanged.
 #
 # --with-helpers (default OFF) additionally verifies the helper input-digest
 # manifest. Off by default for the same reason release.sh's flag is: the check
@@ -67,7 +74,9 @@ COMMIT_ISH=""
 REPO_ROOT="$DEFAULT_REPO_ROOT"
 STORE=""
 KEEP=false
-# Where the suite runs. Empty = scripts/test.sh's default (auto-pick a fleet worker).
+# Where the suite runs. Empty here means "no explicit target given" -- resolved
+# below to a default SHARD across the fleet (resolve_default_shards), falling
+# back to test.sh's single auto-picked worker only when <2 workers are eligible.
 TEST_TARGET=()
 # Default OFF, matching release.sh's flag of the same name. The helper manifest
 # re-derives every helper's INPUT DIGEST and fails when one moved without a
@@ -88,6 +97,13 @@ while [[ $# -gt 0 ]]; do
     # two of the three lanes, and a release on a box with no fleet worker in
     # reach had no way to ask for the disposable crabbox it can still use.
     --test-crabbox) TEST_TARGET=(--crabbox); shift ;;
+    # Explicit sharding overrides (mirror test.sh). Absent these AND any other
+    # --test-* flag, the producer shards by default (see resolve_default_shards
+    # below) instead of pinning one box, so the ~13k-test suite finishes in ~1/N
+    # the time. --test-shard <n> fans across n auto-picked workers; --test-devices
+    # a,b,c names them.
+    --test-shard) [[ -n "${2:-}" ]] || die "--test-shard needs a worker count, e.g. --test-shard 6"; TEST_TARGET=(--shard "$2"); shift 2 ;;
+    --test-devices) [[ -n "${2:-}" ]] || die "--test-devices needs a comma-separated list, e.g. --test-devices m1,m2,m3"; TEST_TARGET=(--devices "$2"); shift 2 ;;
     --with-helpers) WITH_HELPERS=true; shift ;;
     -h|--help)
       # Print the WHOLE docblock, not a hardcoded line range. `sed -n '3,32p'`
@@ -107,6 +123,39 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$COMMIT_ISH" ]] || die "usage: scripts/release-attestation-produce.sh <commit-ish> [--dir DIR] [--repo-root DIR] [--keep]"
+
+# Default to sharding the suite across the fleet. The suite is throughput-bound
+# (measured ~3079s CPU at ~11.5x parallelism -> ~269s on one box), so the win is
+# dividing the CPU across machines: test.sh --shard N runs ~1/N per box. Each
+# shard still passes --maxWorkers=2 --retry=2 to vitest (below), so the RUSH-3015
+# flake mitigation (integration tests contend on shared version-home state at
+# high parallelism) is preserved PER BOX -- sharding adds machines, it does not
+# raise per-box concurrency. Count eligible workers from the same picker test.sh
+# uses; shard across them (capped). Echo nothing when <2 are eligible, so the
+# caller falls back to test.sh's single auto-picked box (its --shard has no silent
+# fallback, so we must resolve the count here rather than demand N boxes and fail
+# a release on a thin fleet). jq/agents missing -> 0 -> single box, never an error.
+SHARD_CAP=8
+resolve_default_shards() {
+  local n
+  n="$(agents devices pick --json 2>/dev/null | jq -r '.candidates | length' 2>/dev/null || echo 0)"
+  [[ "$n" =~ ^[0-9]+$ ]] || n=0
+  if (( n >= 2 )); then
+    (( n > SHARD_CAP )) && n=$SHARD_CAP
+    printf '%s\n' "$n"
+  fi
+}
+# ${#arr[@]} is safe under `set -u` on bash 3.2 (the macOS trap is "${arr[@]}"
+# expansion of an EMPTY array, not the length operator).
+if [[ ${#TEST_TARGET[@]} -eq 0 ]]; then
+  default_shards="$(resolve_default_shards)"
+  if [[ -n "$default_shards" ]]; then
+    TEST_TARGET=(--shard "$default_shards")
+    gray "Sharding the suite across $default_shards fleet workers (each at --maxWorkers=2)."
+  else
+    gray "Fewer than 2 eligible workers; running the suite on one auto-picked box."
+  fi
+fi
 
 git -C "$REPO_ROOT" fetch --quiet origin
 SHA="$(git -C "$REPO_ROOT" rev-parse --verify "$COMMIT_ISH^{commit}" 2>/dev/null)" \
