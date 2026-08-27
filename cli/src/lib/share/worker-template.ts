@@ -256,33 +256,32 @@ export default {
       }
       if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
       const ctype = headers.get('content-type') || '';
-      // ?raw ALWAYS returns the stored bytes untouched — the escape hatch for
-      // <img src>, OG crawlers, iframes, and anyone embedding the asset. The
-      // media element inside the viewer below points back at ?raw for exactly this.
+      // HTML pages ALWAYS get the attribution bar injected at serve time (who
+      // shared it, what made it, when, and — the point — a visual VISIBILITY cue),
+      // all from stamped metadata. This is unconditional: ?raw does NOT strip the
+      // bar from a shared page (the always-on cue from #3122/#3140 is not
+      // defeatable with a query param). The body changes, so the R2 etag no
+      // longer matches — drop it rather than serve a lying validator.
+      if (ctype.indexOf('text/html') !== -1) {
+        const rawHtml = await obj.text();
+        const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg);
+        headers.delete('etag');
+        return new Response(withBar, { status: 200, headers });
+      }
+      // Non-HTML asset. ?raw returns the stored bytes untouched — the escape hatch
+      // for <img src>, OG crawlers, iframes, and anyone embedding the asset (the
+      // viewer's own media element points back at ?raw). Otherwise a BROWSER
+      // navigating directly to a viewable asset (image/video/audio/pdf) gets a
+      // lightweight viewer page carrying the same bar; a non-browser fetch (Accept
+      // without text/html) falls through to raw bytes so embedding is never broken.
       const wantsRaw = url.searchParams.get('raw') != null;
-      if (!wantsRaw) {
-        // HTML pages get the attribution bar injected at serve time (who shared
-        // it, what made it, when, and — the point — a visual VISIBILITY cue), all
-        // from stamped metadata. The body changes, so the R2 etag no longer
-        // matches — drop it rather than serve a lying validator.
-        if (ctype.indexOf('text/html') !== -1) {
-          const rawHtml = await obj.text();
-          const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg);
-          headers.delete('etag');
-          return new Response(withBar, { status: 200, headers });
-        }
-        // A BROWSER navigating directly to a non-HTML asset (image / video /
-        // audio / pdf) gets a lightweight viewer page carrying the same bar. A
-        // non-browser fetch (Accept without text/html — <img>, OG crawler, curl)
-        // falls through to the raw bytes, so embedding is never broken.
-        const kind = viewableAssetKind(ctype);
-        if (kind && acceptsHtml(request)) {
-          const viewer = renderAssetViewer(url.pathname, kind, obj.customMetadata || {}, firstSeg);
-          const vheaders = new Headers(headers);
-          vheaders.set('content-type', 'text/html; charset=utf-8');
-          vheaders.delete('etag');
-          return new Response(viewer, { status: 200, headers: vheaders });
-        }
+      const kind = viewableAssetKind(ctype);
+      if (!wantsRaw && kind && acceptsHtml(request)) {
+        const viewer = renderAssetViewer(url.pathname, kind, obj.customMetadata || {}, firstSeg);
+        const vheaders = new Headers(headers);
+        vheaders.set('content-type', 'text/html; charset=utf-8');
+        vheaders.delete('etag');
+        return new Response(viewer, { status: 200, headers: vheaders });
       }
       return new Response(obj.body, { status: 200, headers });
     }

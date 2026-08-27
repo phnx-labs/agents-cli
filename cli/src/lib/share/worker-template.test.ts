@@ -1352,6 +1352,29 @@ describe('viewer wrapper for non-HTML assets', () => {
     expect(body).not.toContain('agents-share-bar');
   });
 
+  it('?raw does NOT strip the bar from an HTML page — the bar is always-on (regression)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/page', '<html><body><h1>hi</h1></body></html>');
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/page?raw=1'), env);
+    const html = await res.text();
+    expect(html).toContain('agents-share-bar'); // ?raw only affects non-HTML assets
+  });
+
+  it('escapes a crafted asset filename in the viewer (no attribute break-out)', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    // a double-quote in the name would break out of alt="…"/src="…" if unescaped
+    await put(worker, env, 'octocat/e"vil.png', 'PNG', { 'content-type': 'image/png' });
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/e%22vil.png', { headers: { accept: 'text/html' } }),
+      env,
+    );
+    const html = await res.text();
+    expect(html).toContain('e&quot;vil.png'); // escaped
+    expect(html).not.toContain('e"vil.png'); // never the raw, attribute-breaking form
+  });
+
   it('uses <video> for video and <iframe> for pdf', async () => {
     const worker = await loadWorker();
     const { env } = makeEnv();
