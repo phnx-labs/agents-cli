@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 564,
+  "commands": 567,
   "root": {
     "name": "agents",
     "path": "",
@@ -79,8 +79,8 @@
           "negate": false
         }
       ],
-      "examples": "agents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
-      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
+      "examples": "agents accounts mint claude\nagents accounts mint claude --account work --email ada@example.com --fleet\nagents accounts add work --provider anthropic --auth setup-token\nagents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY\nagents accounts set-key work\nagents accounts name claude@2.1.220 work\nagents accounts label codex@0.146.0 personal\nagents accounts attach work claude@2.1.225\nagents accounts view work --json\nagents accounts switch claude\nagents accounts switch claude work\nagents accounts set-default claude work\nagents accounts sync openrouter-work yosemite-s0\nagents run claude --account work\nagents accounts logout claude",
+      "notes": "Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.",
       "subcommands": [
         {
           "name": "add",
@@ -336,6 +336,108 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "mint",
+          "path": "accounts mint",
+          "aliases": [],
+          "description": "Mint a long-lived setup-token and seed it as a named account",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--account <name-or-email>",
+              "description": "Named account to create/rotate, or the account email",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--email <email>",
+              "description": "Email that keys the reserved auth bundle when --account is a name",
+              "long": "--email",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token-stdin",
+              "description": "Seed an already-minted token from stdin (skip the PTY drive)",
+              "long": "--token-stdin",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--code <code>",
+              "description": "Authorization code to paste into the setup-token prompt",
+              "long": "--code",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-open",
+              "description": "Print the authorize URL instead of opening a browser",
+              "long": "--no-open",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--fleet",
+              "description": "Sync the minted account and reserved auth bundle to every other registered device",
+              "long": "--fleet",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Sync to this device (repeatable)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable result (never includes the token)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
+          "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },
         {
@@ -1372,8 +1474,8 @@
           "negate": false
         }
       ],
-      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
-      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).",
+      "examples": "agents auth login                         # device-code sign-in via your browser\nagents auth whoami                        # who this machine is signed in as\nagents auth mint claude                   # mint a Claude setup-token into a named account\nagents auth space create \"Design Team\"    # start a space\nagents auth space invite ada@example.com  # add a teammate\nagents auth logout                        # clear this machine only",
+      "notes": "Signing in is optional — every local feature works with no account; team spaces are what it unlocks.\nSign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.\nThe session lives in this machine's agents state dir, so logging out here signs out nothing else.\nPoint at a different backend with PHOENIX_ID_BASE (defaults to the production service).\n`agents auth mint` is the harness setup-token mint (same command as `agents accounts mint`); it does not sign you into Phoenix ID.",
       "subcommands": [
         {
           "name": "login",
@@ -1413,6 +1515,108 @@
               "negate": false
             }
           ],
+          "subcommands": []
+        },
+        {
+          "name": "mint",
+          "path": "auth mint",
+          "aliases": [],
+          "description": "Mint a long-lived setup-token and seed it as a named account",
+          "args": [
+            {
+              "name": "harness",
+              "required": true,
+              "variadic": false,
+              "description": ""
+            }
+          ],
+          "options": [
+            {
+              "flags": "--account <name-or-email>",
+              "description": "Named account to create/rotate, or the account email",
+              "long": "--account",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--email <email>",
+              "description": "Email that keys the reserved auth bundle when --account is a name",
+              "long": "--email",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--token-stdin",
+              "description": "Seed an already-minted token from stdin (skip the PTY drive)",
+              "long": "--token-stdin",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--code <code>",
+              "description": "Authorization code to paste into the setup-token prompt",
+              "long": "--code",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-open",
+              "description": "Print the authorize URL instead of opening a browser",
+              "long": "--no-open",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
+              "flags": "--fleet",
+              "description": "Sync the minted account and reserved auth bundle to every other registered device",
+              "long": "--fleet",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <name>",
+              "description": "Sync to this device (repeatable)",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": []
+            },
+            {
+              "flags": "--json",
+              "description": "Machine-readable result (never includes the token)",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "examples": "agents accounts mint claude\nagents accounts mint claude --account ada@example.com\nagents accounts mint claude --account work --email ada@example.com\nagents accounts mint claude --token-stdin < token.txt\nagents accounts mint claude --fleet\nagents auth mint claude --account ada@example.com --json",
+          "notes": "Claude is the only harness with an interactive long-lived setup-token (`claude setup-token`, ~1 year, shareable across machines). The command drives that flow in a PTY, opens the authorize URL, captures a well-formed sk-ant-oat01- token (refusing the #1767 TTY-banner capture), and seeds:\n  1. a named provider account (policy never) for `agents run --account` / `agents accounts sync`\n  2. the reserved FILE-BASED auth bundle keyed per email, which usage/probe reads\nNative rotating OAuth is never copied. Other harnesses fail loud: device-code login is `agents fleet login`; API keys are `agents accounts add`.\nAlready have a token? `--token-stdin` skips the browser dance. `agents auth mint` is the same command as `agents accounts mint`.",
           "subcommands": []
         },
         {
@@ -25456,9 +25660,29 @@
           "negate": false
         }
       ],
-      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup fleet\n      agents setup watchdog\n      agents setup alias add teams\n      agents setup beta enable factory",
-      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n        agents setup alias add teams  # PATH shorthand: teams runs agents teams\n        agents setup beta enable factory  # opt into preview features\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
+      "examples": "# First-time setup (clones the system repo into ~/.agents/.system/)\n      agents setup\n\n      # Re-run after corruption or to repair ~/.agents/.system/\n      agents setup --force\n\n      # Set up a specific capability on its own\n      agents setup browser\n      agents setup computer\n      agents setup secrets\n      agents setup accounts\n      agents setup fleet\n      agents setup watchdog\n      agents setup alias add teams\n      agents setup beta enable factory",
+      "notes": "What it does:\n        1. Clones the system repo into ~/.agents/.system/\n        2. Imports any unmanaged agent installations it finds\n        3. Opens a re-runnable capability menu with live ready/missing status\n        4. Delegates each selection to its existing setup wizard\n\n      Capability setup can also be run any time on its own:\n        agents setup browser    # detect a browser + create the default profile\n        agents setup computer    # install the signed macOS helper + grant permissions\n        agents artifacts setup   # provision or join a Cloudflare share endpoint\n        agents setup secrets     # choose secrets backend/policy defaults + import\n        agents setup accounts    # mint a Claude setup-token for unattended usage/probe\n        agents setup fleet       # discover Tailscale devices + configure SSH access\n        agents setup watchdog    # choose which devices run the daemon watchdog pass\n        agents setup alias add teams  # PATH shorthand: teams runs agents teams\n        agents setup beta enable factory  # opt into preview features\n\n      To install CLIs from agents.yaml and sync resources into version homes:\n        agents sync --local -y",
       "subcommands": [
+        {
+          "name": "accounts",
+          "path": "setup accounts",
+          "aliases": [],
+          "description": "Mint a Claude setup-token into a named account (unattended usage/probe).",
+          "args": [],
+          "options": [
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": []
+        },
         {
           "name": "alias",
           "path": "setup alias",
@@ -26081,7 +26305,7 @@
           "name": "status",
           "path": "setup status",
           "aliases": [],
-          "description": "Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.",
+          "description": "Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.",
           "args": [],
           "options": [
             {

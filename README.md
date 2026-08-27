@@ -523,7 +523,7 @@ agents add claude@2.0.65     # Install a specific version
 agents add codex@latest       # Install latest
 agents add codex@oldest       # Install the oldest published version
 agents view                   # See everything installed
-agents accounts add work --provider anthropic --auth setup-token
+agents accounts mint claude --account work   # mint a setup-token into a named account
 agents run claude --account work
 ```
 
@@ -1070,6 +1070,8 @@ Distinct from **Accounts** below: this is *your human identity*; those are the *
 Give a provider credential a durable name once, reuse it everywhere -- across harnesses, across machines.
 
 ```bash
+agents accounts mint claude                  # drive `claude setup-token`, seed a named account + reserved auth bundle
+agents accounts mint claude --token-stdin    # already have a token
 agents accounts add work --provider anthropic --auth setup-token
 agents accounts add gateway --provider openrouter --auth api-key \
   --from-secrets openrouter.ai:OPENROUTER_API_KEY  # import from an existing secrets bundle
@@ -1082,6 +1084,8 @@ agents accounts sync work --device yosemite-s0   # explicitly copy the bundle to
 agents run claude --account work
 agents harness add deepinfra --account deepinfra
 ```
+
+`agents accounts mint claude` (also `agents auth mint claude`) is the first-class replacement for the mint-auth recipe: it drives `claude setup-token` in a PTY, captures a well-formed `sk-ant-oat01-` token, and seeds both the named account and the reserved file-based `auth` bundle that usage/probe reads. Native rotating OAuth is never copied.
 
 One provider account **is** one `agents secrets` bundle -- `agents accounts add` creates it with secrets policy `never`, so a background agent launch on that account never raises Touch ID. `agents accounts` (no subcommand) lists provider bundles next to harness-native signed-in identities so you see both kinds of credential together; `accounts list` / `inspect <name>` / `set-key <name>` (rotate) / `rename` / `remove` manage a bundle by its stable id, independent of its current label. `accounts switch <harness>` is the fast picker over that default -- it writes the same binding as `set-default`, and balanced rotation already honors it.
 

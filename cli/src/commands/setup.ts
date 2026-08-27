@@ -27,7 +27,9 @@ import { runShareWizard } from './artifacts-setup.js';
 import { registerSetupMineCommand } from './setup-mine.js';
 import { registerSetupSecretsCommand } from './setup-secrets.js';
 import { registerSetupFleetCommand } from './setup-fleet.js';
+import { registerSetupAccountsCommand, runAccountsSetupWizard } from './setup-accounts.js';
 import { registerSetupWatchdogCommand, runWatchdogSetupWizard } from './setup-watchdog.js';
+import { hasMintedSetupToken } from '../lib/auth-mint.js';
 import { registerAliasCommand } from './alias.js';
 import { registerBetaCommands } from './beta.js';
 import { runPreferencesStep } from './setup-preferences.js';
@@ -312,7 +314,7 @@ export async function ensureInitialized(program: Command): Promise<void> {
  * wizard. Never throws — a cancel or an optional wizard's error just skips the
  * rest and lets core setup complete.
  */
-export type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets' | 'fleet' | 'watchdog' | 'preferences';
+export type SetupPhase = 'browser' | 'computer' | 'share' | 'secrets' | 'accounts' | 'fleet' | 'watchdog' | 'preferences';
 export type SetupStatusState = 'ready' | 'missing' | 'n/a';
 export interface SetupStatusRow {
   phase: 'core' | SetupPhase;
@@ -331,6 +333,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
   const devices = await loadDevices();
   const coreReady = isGitRepo(getAgentsDir());
   const secretsReady = fs.existsSync(setupSecretsPrefsPath());
+  const minted = hasMintedSetupToken();
   const shareConfig = readShareConfig();
   const watchdogEnabled = getConfigValue('watchdog.enabled').value === true;
   const interactiveHost = getConfigValue('interactive.host').value;
@@ -340,6 +343,7 @@ export async function getSetupStatus(): Promise<SetupStatusRow[]> {
     { phase: 'browser', state: browserReady ? 'ready' : 'missing', detail: browserReady ? `profile ${browserProfile.name}` : browserProfile ? `profile ${browserProfile.name} cannot launch here` : installedBrowsers.length ? 'no default profile' : 'no supported browser found' },
     { phase: 'computer', state: computerState, detail: computerState === 'ready' ? 'helper trusted' : computerState === 'n/a' ? 'macOS local setup only' : 'helper not running or not trusted' },
     { phase: 'secrets', state: secretsReady ? 'ready' : 'missing', detail: secretsReady ? 'defaults chosen' : 'defaults not chosen' },
+    { phase: 'accounts', state: minted.ready ? 'ready' : 'missing', detail: minted.detail },
     { phase: 'fleet', state: Object.keys(devices).length ? 'ready' : 'missing', detail: Object.keys(devices).length ? `${Object.keys(devices).length} device${Object.keys(devices).length === 1 ? '' : 's'} registered` : 'no devices registered' },
     { phase: 'share', state: shareConfig ? 'ready' : 'missing', detail: shareConfig?.baseUrl ?? 'endpoint not configured' },
     { phase: 'watchdog', state: watchdogEnabled ? 'ready' : 'missing', detail: watchdogEnabled ? 'enabled on this device' : 'disabled on this device' },
@@ -361,6 +365,7 @@ async function runSetupPhase(phase: SetupPhase): Promise<void> {
   else if (phase === 'computer') await runComputerWizard();
   else if (phase === 'share') await runShareWizard();
   else if (phase === 'secrets') await import('./setup-secrets.js').then((m) => m.runSecretsSetupWizard());
+  else if (phase === 'accounts') await runAccountsSetupWizard();
   else if (phase === 'fleet') await import('./setup-fleet.js').then((m) => m.runFleetSetupWizard());
   else if (phase === 'watchdog') await runWatchdogSetupWizard();
   else await runPreferencesStep();
@@ -416,19 +421,20 @@ export function registerSetupCommand(program: Command): void {
     .option('-f, --force', 'Re-run setup even if ~/.agents/.system/ already exists (use with caution)')
     .option('--no-system-repo', 'Skip cloning the system repo (you must populate ~/.agents/.system/ yourself)');
 
-  // Capability subcommands: `agents setup browser|computer|mine|secrets|fleet|alias|beta`.
+  // Capability subcommands: `agents setup browser|computer|mine|secrets|accounts|fleet|alias|beta`.
   // Share/artifact publishing is set up by `agents artifacts setup` (RUSH-2580);
   // the hub below still offers it as a phase via runShareWizard.
   registerSetupBrowserCommand(setupCmd);
   registerSetupComputerCommand(setupCmd);
   registerSetupMineCommand(setupCmd);
   registerSetupSecretsCommand(setupCmd);
+  registerSetupAccountsCommand(setupCmd);
   registerSetupFleetCommand(setupCmd);
   registerSetupWatchdogCommand(setupCmd);
   registerAliasCommand(setupCmd);
   registerBetaCommands(setupCmd);
   setupCmd.command('status')
-    .description('Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.')
+    .description('Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.')
     .option('--json', 'print machine-readable JSON')
     .action(async (options: { json?: boolean }) => {
       const rows = await getSetupStatus();
@@ -449,6 +455,7 @@ export function registerSetupCommand(program: Command): void {
       agents setup browser
       agents setup computer
       agents setup secrets
+      agents setup accounts
       agents setup fleet
       agents setup watchdog
       agents setup alias add teams
@@ -466,6 +473,7 @@ export function registerSetupCommand(program: Command): void {
         agents setup computer    # install the signed macOS helper + grant permissions
         agents artifacts setup   # provision or join a Cloudflare share endpoint
         agents setup secrets     # choose secrets backend/policy defaults + import
+        agents setup accounts    # mint a Claude setup-token for unattended usage/probe
         agents setup fleet       # discover Tailscale devices + configure SSH access
         agents setup watchdog    # choose which devices run the daemon watchdog pass
         agents setup alias add teams  # PATH shorthand: teams runs agents teams

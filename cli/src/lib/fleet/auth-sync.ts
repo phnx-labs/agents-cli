@@ -196,9 +196,11 @@ export const FLEET_LOGIN_FLOWS: Record<string, LoginFlow> = {
     successFile: successFileFor('opencode'),
   },
   // claude: interactive `/login` inside the TUI is a loopback browser flow, and
-  // the token is keychain-bound on macOS. A headless `claude setup-token` device
-  // variant exists (TODO: wire as a device-code flow with a captured pattern);
-  // until then claude is flagged non-remotable.
+  // the token is keychain-bound on macOS. That native login stays per-box and
+  // is never copied. The shareable `claude setup-token` mint is a different
+  // credential class — wired as `agents accounts mint claude` / `agents auth mint`
+  // (`lib/auth-mint.ts`), not as a fleet-login device-code flow (a setup-token
+  // is account-scoped, not per-machine).
   claude: {
     loginCommand: 'claude',
     flowType: 'loopback',

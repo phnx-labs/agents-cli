@@ -13,7 +13,7 @@ const { getSetupStatus, registerSetupCommand, runSetup, runSetupHub } = await im
 const { listInstalledBrowsers } = await import('../lib/browser/chrome.js');
 
 describe('agents setup command group', () => {
-  it('registers the browser/computer/fleet/mine/secrets/alias/beta capability subcommands', () => {
+  it('registers the browser/computer/fleet/mine/secrets/accounts/alias/beta capability subcommands', () => {
     const program = new Command();
     registerSetupCommand(program);
     const setup = program.commands.find((c) => c.name() === 'setup');
@@ -21,7 +21,7 @@ describe('agents setup command group', () => {
     const subs = setup!.commands.map((c) => c.name()).sort();
     // `share` is deliberately absent: artifact-share provisioning moved to
     // `agents artifacts setup` (RUSH-2580). The `share` PHASE stays in the hub.
-    expect(subs).toEqual(['alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'watchdog']);
+    expect(subs).toEqual(['accounts', 'alias', 'beta', 'browser', 'computer', 'fleet', 'mine', 'secrets', 'status', 'watchdog']);
   });
 
   it('keeps the bare `setup` command with its force / no-system-repo flags', () => {
@@ -43,7 +43,7 @@ describe('agents setup command group', () => {
     expect(rows.find((row) => row.phase === 'browser')?.state).toBe('missing');
     expect(rows.find((row) => row.phase === 'computer')).toBeDefined();
     expect(rows.map((row) => row.phase)).toEqual([
-      'core', 'browser', 'computer', 'secrets', 'fleet', 'share', 'watchdog', 'preferences',
+      'core', 'browser', 'computer', 'secrets', 'accounts', 'fleet', 'share', 'watchdog', 'preferences',
     ]);
   });
 

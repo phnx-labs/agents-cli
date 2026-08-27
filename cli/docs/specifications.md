@@ -2070,6 +2070,13 @@ Credential account selection adds three requirements to that funnel:
   setup tokens, or bearer tokens. A harness version's native OAuth login MUST
   NOT be converted into a provider account or copied between devices; it remains
   a distinct, device-local native identity (`commands/accounts.ts`).
+  Claude's shareable setup-token is minted by `agents accounts mint claude`
+  / `agents auth mint claude` (`lib/auth-mint.ts`): the command MUST capture only
+  a well-formed `sk-ant-oat01-…` token (refusing a TTY-banner blob, #1767) and
+  MUST seed both the named provider account and the reserved FILE-BASED `auth`
+  bundle keyed per-account email (`claude-account-token.ts`). Interactive mint
+  is Claude-only; any other harness MUST fail loud with the command that
+  actually provisions it (`agents fleet login` or `agents accounts add`).
 - **EXEC-ACCOUNT-3 (MUST).** `agents run --account <name>`, profile `account:`,
   and a routine `account:` that names a provider bundle MUST use the same provider
   adapter and fail before spawn when the provider cannot authenticate the host or

@@ -1,0 +1,7 @@
+Welcome to Claude Code v2.1.219
+
+Your OAuth token:
+
+sk-ant-oat01-abcdefghijklmnopqrstuvwxyz012345
+
+Store this token in CLAUDE_CODE_OAUTH_TOKEN and set it as an environment variable.

@@ -21,6 +21,7 @@ import {
 } from '../lib/identity/index.js';
 import { setHelpSections } from '../lib/help.js';
 import { runOrDie } from '../lib/format.js';
+import { registerMintCommand } from './auth-mint.js';
 
 /**
  * `agents auth` — sign in to Phoenix ID, the account layer behind team spaces.
@@ -122,13 +123,15 @@ export function registerAuthCommand(program: Command): void {
   setHelpSections(auth, {
     examples: `agents auth login                         # device-code sign-in via your browser
 agents auth whoami                        # who this machine is signed in as
+agents auth mint claude                   # mint a Claude setup-token into a named account
 agents auth space create "Design Team"    # start a space
 agents auth space invite ada@example.com  # add a teammate
 agents auth logout                        # clear this machine only`,
     notes: `Signing in is optional — every local feature works with no account; team spaces are what it unlocks.
 Sign-in is Google-only and opens a Phoenix-branded page; the CLI never sees a password.
 The session lives in this machine's agents state dir, so logging out here signs out nothing else.
-Point at a different backend with PHOENIX_ID_BASE (defaults to the production service).`,
+Point at a different backend with PHOENIX_ID_BASE (defaults to the production service).
+\`agents auth mint\` is the harness setup-token mint (same command as \`agents accounts mint\`); it does not sign you into Phoenix ID.`,
   });
 
   auth
@@ -144,6 +147,8 @@ Point at a different backend with PHOENIX_ID_BASE (defaults to the production se
       const json = !!o.json || !!command.optsWithGlobals().json;
       return runOrDie(() => whoami(json), { json });
     });
+
+  registerMintCommand(auth);
 
   auth
     .command('logout')

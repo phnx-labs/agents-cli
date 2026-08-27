@@ -83,7 +83,7 @@ describe('RUSH-2989 nested leftover aliases', () => {
 
     const authCmd = program.commands.find((c) => c.name() === 'auth');
     expect(authCmd?.commands.map((c) => c.name())).toEqual(
-      expect.arrayContaining(['login', 'whoami', 'logout', 'space']),
+      expect.arrayContaining(['login', 'whoami', 'logout', 'space', 'mint']),
     );
   });
 

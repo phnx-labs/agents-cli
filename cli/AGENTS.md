@@ -16,7 +16,7 @@ module map, build, and release mechanics the README does not.
 > lives in the root [AGENTS.md](../AGENTS.md).
 
 `agents setup` is the re-runnable onboarding hub. It reports live readiness for
-core, browser, computer, secrets, fleet, share, watchdog, and preferences, then
+core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences, then
 delegates each selected phase to its existing `agents setup <capability>` wizard.
 `agents setup status --json` is the non-interactive view of the same probes.
 

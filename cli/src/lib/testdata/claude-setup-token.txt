@@ -1,0 +1,7 @@
+Welcome to Claude Code v2.1.219
+
+Browser didn't open? Use the url below to sign in:
+
+https://claude.ai/oauth/authorize?code=true&client_id=9d1c905e-14a1-4b1e-8b1e-example&response_type=code&redirect_uri=https%3A%2F%2Fconsole.anthropic.com%2Foauth%2Fcode%2Fcallback&state=abc123&scope=user%3Ainference
+
+Paste the authorization code here:

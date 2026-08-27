@@ -296,7 +296,7 @@ Observe (read the fleet — no store merge):
 Credentials (harness keys):
   harness                         Custom (host CLI + model + auth) harnesses; replaces former profiles command
   secrets                         Keychain-backed env bundles; synced vault: secrets vault unlock|lock
-  accounts                        Provider credentials + native OAuth logout
+  accounts                        Provider credentials, setup-token mint, native OAuth logout
 
 Diagnostics:
   doctor [agent[@version]]        Diagnose CLI availability, sync status, and resource divergence; --check for the CI drift gate

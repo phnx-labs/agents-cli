@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 564 commands._
+_69 command groups · 567 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -27,6 +27,7 @@ agents accounts detach <account> <target>   Remove one account attachment
 agents accounts label <source> [label]      Label a native login by harness or <harness>@<version>; the label binds to the account identity, not the version
 agents accounts list                        List credential accounts
 agents accounts logout <target>             Sign out a harness-native OAuth login. API-key / setup-token / bearer accounts use `accounts remove` instead.
+agents accounts mint <harness>              Mint a long-lived setup-token and seed it as a named account
 agents accounts name <source> <name>        Name a signed-in native installation without copying its OAuth credentials
 agents accounts remove <name>               Remove an account and its device-local credential
 agents accounts rename <old> <new>          Rename an account without changing its stable id
@@ -65,6 +66,7 @@ agents artifacts unshare <targets...>       Alias of `agents artifacts share del
 agents auth                            Sign in to Phoenix ID — the account layer behind team spaces
 agents auth login                      Sign in with the device-code flow
 agents auth logout                     Clear this machine's session (no other device is affected)
+agents auth mint <harness>             Mint a long-lived setup-token and seed it as a named account
 agents auth space                      Spaces — share work with teammates
 agents auth space create <name>        Create a space
 agents auth space invite <email>       Invite someone to a space
@@ -754,6 +756,7 @@ agents sessions watch                       Stream canonical live and recoverabl
 
 ```
 agents setup                                  Set up agents-cli, or re-open the capability onboarding hub.
+agents setup accounts                         Mint a Claude setup-token into a named account (unattended usage/probe).
 agents setup alias                            Create shorthand binaries that expand to `agents <subcommand>`
 agents setup alias add <name> [expansion...]  Create an alias shim. If expansion is omitted, defaults to <name>.
 agents setup alias list                       Show installed aliases
@@ -771,7 +774,7 @@ agents setup mine list                        Show your brands and what each has
 agents setup mine remove <name>               Remove a brand (its shim + config)
 agents setup mine toggle <name>               Enable/disable features for a brand
 agents setup secrets                          Configure `agents secrets` defaults and optionally import existing secrets.
-agents setup status                           Show setup readiness for core, browser, computer, secrets, fleet, share, watchdog, and preferences.
+agents setup status                           Show setup readiness for core, browser, computer, secrets, accounts, fleet, share, watchdog, and preferences.
 agents setup watchdog                         Choose the devices where the daemon watchdog pass runs.
 ```
 

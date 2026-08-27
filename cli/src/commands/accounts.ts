@@ -22,6 +22,7 @@ import { discoverNativeAccounts } from '../lib/account-catalog.js';
 import { readAndResolveBundleEnv } from '../lib/secrets/bundles.js';
 import { getAccountProvider, listAccountProviders, providerAuthenticatesHarness, type AccountAuthKind } from '../lib/account-provider-registry.js';
 import { accountBindings, addAccount, addNativeAccount, bindAccount, findAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, listNativeAccounts, readAccountRegistry, removeAccount, renameAccount, setAccountSecret, unbindAccount, type UnifiedAccount } from '../lib/account-registry.js';
+import { registerMintCommand } from './auth-mint.js';
 
 function cleanCommandError(command: Command, err: unknown): never {
   command.error(err instanceof Error ? err.message : String(err), { exitCode: 1, code: 'accounts.error' });
@@ -441,6 +442,8 @@ export function registerAccountsCommand(program: Command): void {
     await runAccountsAction(command, () => printAccounts(!!(o.json || command.optsWithGlobals().json)));
   });
 
+  registerMintCommand(accounts);
+
   accounts.command('add <name>')
     .description('Add a durable API key, setup token, or bearer token')
     .requiredOption('--provider <provider>', `Credential provider (${listAccountProviders().join(', ')})`)
@@ -701,7 +704,9 @@ agents run claude`,
   });
 
   setHelpSections(accounts, {
-    examples: `agents accounts add work --provider anthropic --auth setup-token
+    examples: `agents accounts mint claude
+agents accounts mint claude --account work --email ada@example.com --fleet
+agents accounts add work --provider anthropic --auth setup-token
 agents accounts add openrouter-work --provider openrouter --auth api-key --from-secrets openrouter.ai:OPENROUTER_API_KEY
 agents accounts set-key work
 agents accounts name claude@2.1.220 work
@@ -714,6 +719,6 @@ agents accounts set-default claude work
 agents accounts sync openrouter-work yosemite-s0
 agents run claude --account work
 agents accounts logout claude`,
-    notes: 'Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
+    notes: 'Native account records contain metadata only; harness-owned OAuth credentials are never copied. Provider accounts are explicit portable bundles with policy never. `accounts mint claude` drives `claude setup-token` and seeds both the named account and the reserved file-based auth bundle (same command as `agents auth mint`). `accounts switch` is the fast picker over the same default `set-default` writes. Harness-native OAuth sign-out is `agents accounts logout <harness>` (API-key accounts use `accounts remove`). Synced vault unlock is `agents secrets vault unlock`.',
   });
 }

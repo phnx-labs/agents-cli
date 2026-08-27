@@ -20,7 +20,8 @@ import { secretsKeychainItem } from './secrets/index.js';
  * bare key, so one account's token can't be misapplied to another in a
  * multi-account fleet.
  */
-const AUTH_BUNDLE = AUTH_BUNDLE_NAME;
+/** Alias of the secrets-layer reserved name so mint/seed shares one source of truth. */
+export const AUTH_BUNDLE = AUTH_BUNDLE_NAME;
 
 /**
  * A well-formed Claude OAuth setup-token: the `sk-ant-oat01-` prefix followed by
