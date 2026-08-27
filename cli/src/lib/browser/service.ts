@@ -1419,6 +1419,7 @@ export class BrowserService {
     durationMs: number;
     ffmpeg: import('child_process').ChildProcess;
     ffmpegStderr: () => string;
+    encoderError: () => Error | undefined;
     frameCount: number;
     sessionId: string;
     conn: ProfileConnection;
@@ -1506,6 +1507,17 @@ export class BrowserService {
 
     let frameCount = 0;
     let latestFrame: Buffer | undefined;
+    let stdinBlocked = false;
+    let stdinError: Error | undefined;
+    ffmpeg.stdin?.on('drain', () => { stdinBlocked = false; });
+    ffmpeg.stdin?.on('error', (error) => { stdinError = error; });
+    const writeFrame = (frame: Buffer): boolean => {
+      const stdin = ffmpeg.stdin;
+      if (!stdin || stdin.destroyed || stdinError || stdinBlocked) return false;
+      stdinBlocked = !stdin.write(frame);
+      frameCount += 1;
+      return true;
+    };
     const frameIntervalMs = 1000 / fps;
     let resolveFirstFrame!: () => void;
     const firstFrame = new Promise<void>((resolve) => { resolveFirstFrame = resolve; });
@@ -1515,9 +1527,7 @@ export class BrowserService {
       try {
         latestFrame = Buffer.from(p.data, 'base64');
         if (frameCount === 0) {
-          ffmpeg.stdin?.write(latestFrame);
-          frameCount += 1;
-          resolveFirstFrame();
+          if (writeFrame(latestFrame)) resolveFirstFrame();
         }
       } catch {
         // ffmpeg exited; ignore writes
@@ -1532,8 +1542,7 @@ export class BrowserService {
     const framePump = setInterval(() => {
       if (!latestFrame) return;
       try {
-        ffmpeg.stdin?.write(latestFrame);
-        frameCount += 1;
+        writeFrame(latestFrame);
       } catch {
         // ffmpeg exited; recordStop reports its exit code and stderr.
       }
@@ -1604,6 +1613,7 @@ export class BrowserService {
       maxBytes,
       ffmpeg,
       ffmpegStderr,
+      encoderError: () => stdinError,
       get frameCount() { return frameCount; },
       sessionId,
       conn,
@@ -1697,6 +1707,13 @@ export class BrowserService {
         `ffmpeg exited abnormally (code ${finalize.code}) while finalizing the recording at ` +
           `${rec.outputPath}; the file is likely corrupt or empty.` +
           (err ? ` ffmpeg: ${err.slice(-800)}` : '')
+      );
+    }
+
+    const encoderError = rec.encoderError?.();
+    if (encoderError) {
+      throw new Error(
+        `ffmpeg stopped accepting recording frames at ${rec.outputPath}: ${encoderError.message}`
       );
     }
 
