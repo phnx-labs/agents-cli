@@ -254,7 +254,20 @@ export default {
         headers.set('cache-control', 'public, max-age=60');
         if (visibility === 'unlisted') headers.set('X-Robots-Tag', 'noindex');
       }
-      return new Response(request.method === 'HEAD' ? null : obj.body, { status: 200, headers });
+      if (request.method === 'HEAD') return new Response(null, { status: 200, headers });
+      // HTML pages get an attribution bar injected at serve time (who shared it,
+      // what made it, when, and — the point — a visual VISIBILITY cue). All read
+      // from the object's stamped metadata; non-HTML assets (images, JSON, the OG
+      // cover) are served byte-for-byte. The body changes, so the R2 etag no
+      // longer matches — drop it rather than serve a lying validator.
+      const isHtmlPage = (headers.get('content-type') || '').indexOf('text/html') !== -1;
+      if (isHtmlPage) {
+        const rawHtml = await obj.text();
+        const withBar = injectAttributionBar(rawHtml, obj.customMetadata || {}, firstSeg);
+        headers.delete('etag');
+        return new Response(withBar, { status: 200, headers });
+      }
+      return new Response(obj.body, { status: 200, headers });
     }
 
     if (request.method === 'DELETE') {
@@ -472,6 +485,63 @@ function escapeHtml(s) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
+}
+
+// The attribution bar: a slim strip prepended to every served HTML page that
+// makes the object's stamped metadata visible — who shared it, what made it,
+// when, and (the whole point) a color-coded VISIBILITY cue Google-Drive style.
+// All values come from customMetadata; nothing new is stamped at publish time,
+// so this is a pure Worker change deployable with 'agents artifacts share update'.
+var VIS_ICON = {
+  me: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="11" width="16" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>',
+  org: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 21h18M6 21V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v17M14 9h4a1 1 0 0 1 1 1v11"/></svg>',
+  unlisted: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg>',
+  public: '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 0 1 0 18M12 3a15 15 0 0 0 0 18"/></svg>',
+};
+
+function visibilityChip(visibility, orgDomain) {
+  if (visibility === 'me') return { icon: VIS_ICON.me, label: 'Only you', color: '#f59e0b' };
+  if (visibility === 'org') return { icon: VIS_ICON.org, label: 'Anyone at ' + escapeHtml(orgDomain || 'your organization'), color: '#5b9dff' };
+  if (visibility === 'unlisted') return { icon: VIS_ICON.unlisted, label: 'Unlisted', color: '#9aa0a6' };
+  return { icon: VIS_ICON.public, label: 'Public', color: '#30a46c' };
+}
+
+function renderAttributionBar(meta, handle) {
+  var cm = meta || {};
+  var chip = visibilityChip(cm.visibility || 'public', cm.org_domain);
+  var left = '';
+  // The handle is already the public URL namespace, so surfacing it leaks nothing new.
+  if (handle) left += 'Shared by <strong>' + escapeHtml(handle) + '</strong>';
+  if (cm.agent) left += (left ? '<span class="ash-dot">·</span>' : '') + 'Made with ' + escapeHtml(cm.agent);
+  var right = '<span class="ash-chip" style="color:' + chip.color + ';border-color:' + chip.color + '66">' + chip.icon + '<span>' + chip.label + '</span></span>';
+  if (cm.date) right += '<span class="ash-date">' + escapeHtml(cm.date) + '</span>';
+  return '<div class="agents-share-bar" role="contentinfo" aria-label="Sharing details">' +
+    '<style>' +
+    '.agents-share-bar{all:initial;position:sticky;top:0;left:0;right:0;z-index:2147483647;box-sizing:border-box;display:flex;align-items:center;gap:12px;flex-wrap:wrap;' +
+    'padding:8px 16px;background:#0b0b0c;color:#e8e8e8;border-bottom:1px solid #24242b;' +
+    'font:13px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,system-ui,sans-serif}' +
+    '.agents-share-bar *{box-sizing:border-box}' +
+    '.agents-share-bar .ash-left{display:flex;align-items:center;gap:8px;min-width:0;color:#c8ccd2}' +
+    '.agents-share-bar strong{color:#fff;font-weight:600}' +
+    '.agents-share-bar .ash-dot{opacity:.4;margin:0 3px}' +
+    '.agents-share-bar .ash-right{margin-left:auto;display:flex;align-items:center;gap:12px}' +
+    '.agents-share-bar .ash-date{color:#8b9098}' +
+    '.agents-share-bar .ash-chip{display:inline-flex;align-items:center;gap:6px;padding:3px 10px;border-radius:999px;border:1px solid;font-weight:600;font-size:12px;white-space:nowrap}' +
+    '.agents-share-bar .ash-chip svg{flex:none}' +
+    '</style>' +
+    '<span class="ash-left">' + left + '</span>' +
+    '<span class="ash-right">' + right + '</span>' +
+    '</div>';
+}
+
+function injectAttributionBar(html, meta, handle) {
+  var bar = renderAttributionBar(meta, handle);
+  var m = /<body[^>]*>/i.exec(html);
+  if (m) {
+    var at = m.index + m[0].length;
+    return html.slice(0, at) + bar + html.slice(at);
+  }
+  return bar + html;
 }
 
 function json(body, status) {

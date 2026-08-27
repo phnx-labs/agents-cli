@@ -46,6 +46,10 @@ function makeEnv() {
           body: item.body,
           customMetadata: item.customMetadata,
           httpEtag: '"etag"',
+          // R2 objects expose text()/arrayBuffer(); the Worker reads text() to
+          // inject the attribution bar, so the fake must too.
+          text: async () => Buffer.from(item.body).toString('utf8'),
+          arrayBuffer: async () => Buffer.from(item.body).buffer,
           writeHttpMetadata(headers: Headers) {
             if (item.httpMetadata.contentType) headers.set('content-type', item.httpMetadata.contentType);
           },
@@ -1193,5 +1197,97 @@ describe('me/org GET identity gate (PHNX-3260)', () => {
     );
     expect(res.status).toBe(400);
     expect(await res.json()).toMatchObject({ error: 'visibility me/org requires Phoenix identity' });
+  });
+});
+
+describe('attribution bar injected on served HTML pages', () => {
+  it('injects a Public visibility chip + author + agent into a served public page', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/report', '<!doctype html><html><body><h1>the page</h1></body></html>', {
+      'x-share-agent': 'Claude',
+      'x-share-date': '2026-08-27',
+    });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/report'), env);
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('agents-share-bar');
+    expect(html).toContain('Public');
+    expect(html).toContain('Shared by <strong>octocat</strong>');
+    expect(html).toContain('Made with Claude');
+    expect(html).toContain('2026-08-27');
+    // the bar is prepended INSIDE <body>, before the page's own content
+    expect(html.indexOf('agents-share-bar')).toBeGreaterThan(-1);
+    expect(html.indexOf('agents-share-bar')).toBeLessThan(html.indexOf('the page'));
+    // and the etag is dropped since the body was rewritten
+    expect(res.headers.get('etag')).toBeNull();
+  });
+
+  it('shows the "Only you" chip on an owner-viewed me page', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@a.com' });
+    const put1 = await worker.default.fetch(
+      new Request('https://share.test/octocat/secret', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer p', 'content-type': 'text/html', 'x-share-visibility': 'me' },
+        body: '<html><body>mine</body></html>',
+      }),
+      env,
+    );
+    expect(put1.status).toBe(200);
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/secret', { headers: { authorization: 'Bearer p' } }),
+      env,
+    );
+    expect(res.status).toBe(200);
+    const html = await res.text();
+    expect(html).toContain('Only you');
+    expect(html).toContain('agents-share-bar');
+  });
+
+  it('shows "Anyone at <domain>" on an org page for a same-domain viewer', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    (env as { PHOENIX_ID_BASE?: string }).PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async () => ({ userId: 'u1', email: 'octocat@acme.com' });
+    const put1 = await worker.default.fetch(
+      new Request('https://share.test/octocat/plan', {
+        method: 'PUT',
+        headers: { authorization: 'Bearer p', 'content-type': 'text/html', 'x-share-visibility': 'org' },
+        body: '<html><body>team</body></html>',
+      }),
+      env,
+    );
+    expect(put1.status).toBe(200);
+    const res = await worker.default.fetch(
+      new Request('https://share.test/octocat/plan', { headers: { authorization: 'Bearer p' } }),
+      env,
+    );
+    const html = await res.text();
+    expect(html).toContain('Anyone at acme.com');
+  });
+
+  it('does NOT inject the bar into a non-HTML asset', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/data', '{"a":1}', { 'content-type': 'application/json' });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/data'), env);
+    const body = await res.text();
+    expect(body).toBe('{"a":1}');
+    expect(body).not.toContain('agents-share-bar');
+  });
+
+  it('escapes metadata in the bar — no HTML injection via a stamped value', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/x', '<html><body>y</body></html>', {
+      'x-share-agent': '<script>evil()</script>',
+    });
+    const res = await worker.default.fetch(new Request('https://share.test/octocat/x'), env);
+    const html = await res.text();
+    expect(html).toContain('&lt;script&gt;evil()&lt;/script&gt;');
+    expect(html).not.toContain('<script>evil()</script>');
   });
 });
