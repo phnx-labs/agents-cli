@@ -1191,7 +1191,14 @@ if ! $MAIN_AT_TARGET; then
   # cross-version gap the review of #2966 flagged. Command substitution (not a
   # process substitution) so a die inside the helper aborts the release --
   # stuck-release.test.ts documents why the `<(...)` form would fail open.
-  OPEN_PR_LINES="$(gh pr list --state open --limit 200 --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"' 2>/dev/null || true)"
+  # Fail CLOSED on a gh failure: a `|| true` here would fold a rate-limit / network
+  # blip / expiring-token into an empty list, and the helper would then read "no
+  # other bump PRs" — reopening the exact silent misattribution this guard closes,
+  # at the one moment it is needed. `if ! VAR=$(...)` catches the non-zero exit
+  # under `set -e`; a genuine no-PRs result still exits 0 with empty output.
+  if ! OPEN_PR_LINES="$(gh pr list --state open --limit 200 --json number,headRefName --jq '.[] | "\(.number) \(.headRefName)"' 2>/dev/null)"; then
+    die "could not list open PRs (gh pr list failed) to check for a stuck earlier release bump — refusing to fold, or an earlier version's notes could be silently re-attributed under $TARGET. Retry when gh is reachable."
+  fi
   OTHER_BUMP_PRS="$(printf '%s\n' "$OPEN_PR_LINES" | scripts/release-other-bump-prs.sh "$RELEASE_BRANCH")"
   if [[ -n "$OTHER_BUMP_PRS" ]]; then
     red "Refusing to fold .changelog/next/* for $TARGET — an earlier release bump PR is still open:" >&2

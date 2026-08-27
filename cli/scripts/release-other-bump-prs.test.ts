@@ -92,6 +92,15 @@ describe('release-other-bump-prs: release.sh wires it in before the fold', () =>
     expect(RELEASE_SH).not.toMatch(/done < <\(scripts\/release-other-bump-prs\.sh/);
   });
 
+  it('fails CLOSED on a gh failure — no `|| true` swallowing the lookup into empty', () => {
+    // A `|| true` on the `gh pr list` lookup would fold a rate-limit/network blip
+    // into an empty list, and the helper would read "no other bump PRs" — the guard
+    // failing open at the one moment it is needed. It must die loudly instead.
+    expect(RELEASE_SH).toMatch(/if ! OPEN_PR_LINES="\$\(gh pr list --state open --limit 200/);
+    expect(RELEASE_SH).toMatch(/could not list open PRs \(gh pr list failed\)/);
+    expect(RELEASE_SH).not.toMatch(/gh pr list --state open --limit 200[^\n]*\|\| true/);
+  });
+
   it('appears before the changelog fold it is guarding', () => {
     const guardIdx = RELEASE_SH.indexOf('release-other-bump-prs.sh');
     const foldIdx = RELEASE_SH.indexOf('bun scripts/release-changelog.ts');
