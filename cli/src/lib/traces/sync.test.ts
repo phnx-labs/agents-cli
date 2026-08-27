@@ -3,7 +3,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { getDB, readSessionTopics } from '../session/db.js';
+import { getDB, readSessionTopics, INSIGHTS_EXTRACTOR_VERSION } from '../session/db.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { ClassifiedTopic } from './classify.js';
 import { buildIndexShard, buildSessionDetail, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
@@ -67,11 +67,14 @@ describe('rich traces index shard', () => {
     db.prepare(`
       INSERT INTO session_insights
         (session_id, file_mtime_ms, file_size, extractor_version, computed_at, facets)
-      VALUES (?, ?, ?, 6, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?)
     `).run(
       id,
       first.file_mtime_ms,
       first.file_size,
+      // Seed at the current extractor version so this cache row is read, not treated
+      // as stale — otherwise a version bump silently drops these facets from the shard.
+      INSIGHTS_EXTRACTOR_VERSION,
       Date.now(),
       JSON.stringify({ frictionSignals: { 'failed tool loop: exec_command': 1 }, correctionSignals: {} }),
     );
