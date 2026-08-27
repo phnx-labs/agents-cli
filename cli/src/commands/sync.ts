@@ -36,9 +36,9 @@ import { Command, Option } from 'commander';
 import chalk from 'chalk';
 import { resolveSyncPassphraseFromEnv } from '../lib/secrets/sync-passphrase.js';
 import { agentLabel, resolveAgentName, MANAGED_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../lib/agents.js';
-import type { AgentId, BrowserProfileConfig } from '../lib/types.js';
+import type { AgentId } from '../lib/types.js';
 import { autoEvictCentralBrowserProfiles } from '../lib/browser/registry.js';
-import { isProfileLaunchableHere } from '../lib/browser/profiles.js';
+import { shouldAutoClaimCentralProfile } from '../lib/browser/profiles.js';
 import {
   isVersionInstalled,
   syncResourcesToVersion,
@@ -500,14 +500,12 @@ function evictCentralBrowserProfilesForSync(
   errLog: (msg: string) => void,
 ): void {
   try {
-    const result = autoEvictCentralBrowserProfiles((config: BrowserProfileConfig) =>
-      isProfileLaunchableHere({
-        name: '_',
-        browser: config.browser,
-        binary: config.binary,
-        endpoints: config.endpoints,
-      }),
-    );
+    // Auto-claim ONLY remote (ssh://) tombstones — they are fungible by design,
+    // so a concurrent cross-machine double-claim is harmless. Local/cdp profiles
+    // have no per-machine ownership signal and are left central for an explicit
+    // `agents browser profiles claim` (PHNX-3315 review). See
+    // shouldAutoClaimCentralProfile.
+    const result = autoEvictCentralBrowserProfiles(shouldAutoClaimCentralProfile);
     if (!quiet && !json && result.claimed.length > 0) {
       outLog(
         chalk.gray(

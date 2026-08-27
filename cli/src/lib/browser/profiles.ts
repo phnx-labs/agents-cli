@@ -426,7 +426,7 @@ function validateRemoteBrowserBinary(binary: string | undefined): void {
   }
 }
 
-function hasSshEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
+export function hasSshEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
   const targets = Array.isArray(endpoints)
     ? endpoints
     : Object.values(endpoints).map((preset) => preset.target);
@@ -436,6 +436,31 @@ function hasSshEndpoint(endpoints: BrowserProfileConfig['endpoints']): boolean {
     } catch {
       return false;
     }
+  });
+}
+
+/**
+ * Whether the automatic central-tombstone drain (PHNX-3315) may claim `config`
+ * into THIS device's doc during `agents sync`.
+ *
+ * Only REMOTE (`ssh://`) profiles qualify. An `ssh://` endpoint names a specific
+ * host, so the profile is fungible by design — any box resolves it to the same
+ * browser, and a concurrent double-claim across machines is harmless. A
+ * local/`cdp://` profile has NO per-machine ownership signal: "that browser is
+ * installed here" is not "I hold this profile's credentialed session", so two
+ * boxes with the same common browser installed would each auto-claim the same
+ * tombstone on their first post-merge sync and flip it identity->fungible
+ * fleet-wide (the exact logged-out-browser failure this module exists to prevent
+ * — PHNX-3315 review). Local/cdp tombstones stay central for the explicit
+ * `agents browser profiles claim`.
+ */
+export function shouldAutoClaimCentralProfile(config: BrowserProfileConfig): boolean {
+  if (!hasSshEndpoint(config.endpoints)) return false;
+  return isProfileLaunchableHere({
+    name: '_',
+    browser: config.browser,
+    binary: config.binary,
+    endpoints: config.endpoints,
   });
 }
 

@@ -72,6 +72,8 @@ import {
   renameProfile,
   assertRegistrableProfileName,
   assertLocalPortFree,
+  shouldAutoClaimCentralProfile,
+  hasSshEndpoint,
 } from './profiles.js';
 import { findBrowserPath, findFirstInstalledBrowser, isPortInUse } from './chrome.js';
 import type { BrowserProfile } from './types.js';
@@ -1408,5 +1410,35 @@ describe('assertRegistrableProfileName', () => {
     for (const bad of ['Agents', '1agent', 'my profile', 'agent_x', '-lead', '']) {
       expect(() => assertRegistrableProfileName(bad), bad).toThrow(/Invalid profile name/);
     }
+  });
+});
+
+describe('shouldAutoClaimCentralProfile (PHNX-3315 auto-drain safety)', () => {
+  // The safety-critical property: a local/cdp tombstone is NEVER auto-claimed,
+  // regardless of what browsers are installed here. "browser installed here" is
+  // not "I hold this profile's session", so auto-claiming a cdp profile would let
+  // two boxes flip a credentialed profile identity->fungible fleet-wide. This
+  // assertion is machine-independent (it short-circuits before any binary probe).
+  it('never auto-claims a local/cdp profile', () => {
+    expect(
+      shouldAutoClaimCentralProfile({
+        browser: 'comet',
+        endpoints: ['cdp://localhost:9333'],
+      } as BrowserProfileConfig),
+    ).toBe(false);
+    expect(
+      shouldAutoClaimCentralProfile({
+        browser: 'chrome',
+        endpoints: ['cdp://127.0.0.1:9222'],
+      } as BrowserProfileConfig),
+    ).toBe(false);
+  });
+
+  it('gates on ssh:// ownership — a remote endpoint passes the gate, a cdp one does not', () => {
+    // ssh:// is fungible by design: the endpoint names the host, so a concurrent
+    // cross-machine double-claim is harmless. The final claim still requires
+    // launchability here, but the ownership gate itself must accept ssh://.
+    expect(hasSshEndpoint(['ssh://user@mac-mini?port=9333'])).toBe(true);
+    expect(hasSshEndpoint(['cdp://localhost:9333'])).toBe(false);
   });
 });
