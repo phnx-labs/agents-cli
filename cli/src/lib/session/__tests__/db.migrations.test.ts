@@ -9,7 +9,7 @@ import * as path from 'path';
 const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-db-migrations-'));
 process.env.HOME = TEST_HOME;
 
-const { getDB, closeDB, upsertSession, getSessionById } = await import('../db.js');
+const { getDB, closeDB, upsertSession, getSessionById, SCHEMA_VERSION } = await import('../db.js');
 type SessionMeta = import('../types.js').SessionMeta;
 
 function openDBInChild(): Promise<void> {
@@ -73,6 +73,34 @@ describe('harness column migration (v41)', () => {
     const reopened = getDB();
     const cols = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
     expect(cols).toContain('harness');
+  });
+
+  it('adds the harness column when schema_version is missing (migrateSchema skipped)', () => {
+    // currentVersion === undefined stamps SCHEMA_VERSION and never calls
+    // migrateSchema. The v41 ALTER lives only inside migrateSchema, so a
+    // sessions table that already exists without `harness` would stay that
+    // way — and the next upsertSession INSERT naming the column would throw
+    // — unless the unconditional post-migration repair adds it (PHNX-2935).
+    const db = getDB();
+    db.exec(`ALTER TABLE sessions DROP COLUMN harness`);
+    db.prepare(`DELETE FROM meta WHERE key = 'schema_version'`).run();
+    closeDB();
+
+    const reopened = getDB();
+    const cols = (reopened.prepare(`PRAGMA table_info(sessions)`).all() as Array<{ name: string }>).map(c => c.name);
+    expect(cols).toContain('harness');
+    const stamped = reopened.prepare(`SELECT value FROM meta WHERE key = 'schema_version'`).get() as { value: string };
+    expect(Number(stamped.value)).toBe(SCHEMA_VERSION);
+
+    expect(() => upsertSession({
+      id: 'harness-repair-undefined',
+      shortId: 'hrepair',
+      agent: 'claude',
+      harness: 'deepseek',
+      timestamp: '2026-08-27T00:00:00.000Z',
+      filePath: '/tmp/harness-repair/session.jsonl',
+    } as SessionMeta, 'custom harness stamp')).not.toThrow();
+    expect(getSessionById('harness-repair-undefined')?.harness).toBe('deepseek');
   });
 });
 
