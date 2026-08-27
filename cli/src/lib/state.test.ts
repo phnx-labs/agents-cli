@@ -104,6 +104,48 @@ describe('pins route to the untracked pins file; the tracked doc is operator-onl
     expect(JSON.parse(fs.readFileSync(pinsPath(), 'utf-8'))).toEqual({});
   });
 
+  it('routes a newly-declared device-scoped key to the device doc by default, never central (PHNX-3315 P3)', async () => {
+    const { updateMeta, readMeta } = await freshState();
+
+    // `probeDeviceKey` is NOT in CENTRAL_META_KEYS, so device-scope is its DEFAULT
+    // — the whole point of P3: a key nobody explicitly marked fleet-shared lands
+    // per-box, never in the synced agents.yaml. Cast because it is not a modeled
+    // Meta field; the generic router keys off the scope classifier, not the type.
+    updateMeta((m) => ({
+      ...m,
+      probeDeviceKey: { hello: 'world' },
+      run: { claude: { strategy: 'balanced' } },
+    } as any));
+
+    // Landed in THIS box's device doc under its own name…
+    const doc = fs.readFileSync(devicePath(), 'utf-8');
+    expect(doc).toContain('probeDeviceKey:');
+    expect(doc).toContain('hello: world');
+
+    // …and never touched the synced central file (a genuine central key still does).
+    const central = fs.readFileSync(centralPath(), 'utf-8');
+    expect(central).not.toContain('probeDeviceKey');
+    expect(central).toContain('strategy: balanced');
+
+    // Round-trips back through the overlay.
+    expect((readMeta() as any).probeDeviceKey).toEqual({ hello: 'world' });
+  });
+
+  it('leaves a foreign central key (unknown, already on disk) in central — never relocates it (PHNX-3315 P3)', async () => {
+    // A newer CLI wrote `futureCentralKey` to the synced file as fleet-shared
+    // config. This older CLI reads it, carries it through a spread write, and must
+    // NOT relocate it to the per-box doc — that would un-sync a fleet-shared key.
+    writeCentral('futureCentralKey: keep-me-central\n');
+    const { updateMeta } = await freshState();
+
+    updateMeta((m) => ({ ...m, run: { claude: { strategy: 'balanced' } } }));
+
+    const central = fs.readFileSync(centralPath(), 'utf-8');
+    expect(central).toContain('futureCentralKey: keep-me-central'); // preserved, still synced
+    const doc = fs.existsSync(devicePath()) ? fs.readFileSync(devicePath(), 'utf-8') : '';
+    expect(doc).not.toContain('futureCentralKey'); // never pushed into the device doc
+  });
+
 });
 
 describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
@@ -135,10 +177,13 @@ describe('reading state never writes a tracked agents.yaml (RUSH-1925)', () => {
     writeCentral('registries:\n  mcp: {}\n  skill: {}\n');
 
     const { updateMeta } = await freshState();
-    updateMeta((m) => ({ ...m, defaultAgent: 'claude' }));
+    // Use a real central key (`source`): P3 makes device-scope the DEFAULT, so an
+    // UNMODELED key would now route to the device doc rather than central. The test's
+    // intent — a central write must not resurrect the seed — is unchanged.
+    updateMeta((m) => ({ ...m, source: 'set-by-write' }));
 
     const after = fs.readFileSync(centralPath(), 'utf-8');
-    expect(after).toContain('defaultAgent: claude');
+    expect(after).toContain('source: set-by-write');
     expect(after).not.toContain('hermes-agent.nousresearch.com');
   });
 });

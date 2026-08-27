@@ -954,52 +954,114 @@ function writeIfChanged(filePath: string, content: string): void {
  * `agents:` / `versions:` are not written (no empty committed files).
  */
 /**
- * Every `Meta` key, classified as `central` (synced via agents.yaml) or `device`
- * (routed to the per-machine device file by {@link writeMetaUnlocked}). The
- * `Record<keyof Meta, …>` type makes this EXHAUSTIVE: adding a field to `Meta`
- * without classifying it here is a compile error. That guarantee is what lets
- * `serializeCentral` delete only keys THIS version models — a key a newer CLI
- * version added (absent from this map) is preserved verbatim instead of being
- * dropped and synced fleet-wide as data loss. This is the fix for the recurring
- * agents.yaml key-loss (beta flags, `notify.owner`, and `feed:` all vanished
- * this way when an older-versioned CLI on the fleet rewrote the file).
+ * Fleet-shared (`central`) Meta keys — the OPT-IN allowlist. A key listed here is
+ * written to the synced `~/.agents/agents.yaml`. Device-scope is the DEFAULT:
+ * {@link metaKeyScope} returns `'device'` for every Meta key NOT listed here, so a
+ * newly-added key can never SILENTLY churn the shared file the way a
+ * central-by-default would — the very trap behind the recurring agents.yaml churn.
+ * Making a key fleet-shared is now a deliberate edit HERE, not the path of least
+ * resistance (PHNX-3315).
  */
-const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
-  // Device-local — writeMetaUnlocked destructures these out; never in central.
-  agents: 'device',
-  isolatedAgents: 'device',
-  versions: 'device',
-  deviceRoutines: 'device',
-  deviceConfig: 'device',
-  deviceBrowser: 'device',
-  deviceFleet: 'device',
-  deviceHosts: 'device',
-  deviceAccounts: 'device',
-  // Central — synced via agents.yaml.
-  accounts: 'central',
-  run: 'central',
-  model: 'central',
-  watchdog: 'central',
-  lease: 'central',
-  secrets: 'central',
-  budget: 'central',
-  feed: 'central',
-  beta: 'central',
-  registries: 'central',
-  profiles: 'central',
-  source: 'central',
-  projectRoot: 'device',
-  extraRepos: 'central',
-  brands: 'central',
-  actors: 'central',
-  seededPresets: 'central',
-  hooks: 'central',
-  config: 'central',
-  hosts: 'central',
-  fleet: 'central',
-  share: 'central',
-  notify: 'central',
-};
+const CENTRAL_META_KEYS = [
+  'accounts',
+  'run',
+  'model',
+  'watchdog',
+  'lease',
+  'secrets',
+  'budget',
+  'feed',
+  'beta',
+  'registries',
+  'profiles',
+  'source',
+  'extraRepos',
+  'brands',
+  'actors',
+  'seededPresets',
+  'hooks',
+  'config',
+  'hosts',
+  'fleet',
+  'share',
+  'notify',
+] as const satisfies readonly (keyof Meta)[];
+
+/**
+ * Device-scoped Meta keys with BESPOKE routing — each lands in a special file
+ * (pins JSON / version-resources JSON) or a REMAPPED device-doc sub-block
+ * (`deviceHosts`->`hosts:`, `deviceFleet`->`fleet:`, ...), so their handling is
+ * hand-written in {@link writeMetaUnlocked} / {@link overlayMachineLocal} and kept
+ * behavior-identical. A device-scoped key NOT listed here is a GENERIC device key:
+ * it round-trips through `devices/<host>/agents.yaml` under its OWN name with no
+ * bespoke wiring (see the generic loops in those two functions). The `browser`
+ * tombstone is bespoke too — drained by lib/browser/registry.ts.
+ */
+const BESPOKE_DEVICE_KEYS = [
+  'agents',
+  'isolatedAgents',
+  'versions',
+  'deviceRoutines',
+  'deviceConfig',
+  'deviceBrowser',
+  'deviceFleet',
+  'deviceHosts',
+  'deviceAccounts',
+  'projectRoot',
+] as const satisfies readonly (keyof Meta)[];
+
+const CENTRAL_KEY_SET: ReadonlySet<string> = new Set(CENTRAL_META_KEYS);
+
+/**
+ * Compile-time exhaustiveness: every Meta key must be filed as central or
+ * bespoke-device above. Add a Meta field without filing it and this line stops
+ * compiling — a nudge, NOT a safety gate: {@link metaKeyScope} still defaults an
+ * unfiled key to `'device'` at runtime, so even a slipped-through key lands
+ * per-box and never leaks to the synced file. File it into {@link CENTRAL_META_KEYS}
+ * (fleet-shared) or {@link BESPOKE_DEVICE_KEYS} (per-box).
+ */
+type ClassifiedMetaKey = (typeof CENTRAL_META_KEYS)[number] | (typeof BESPOKE_DEVICE_KEYS)[number];
+const _metaKeysAreExhaustive: keyof Meta extends ClassifiedMetaKey ? true : never = true;
+void _metaKeysAreExhaustive;
+
+/**
+ * Sync-domain of a Meta key. `'central'` ONLY for the opt-in allowlist; `'device'`
+ * by DEFAULT for everything else — so the classification is authoritative (it
+ * DRIVES the generic device-doc router below) rather than a decorative string map,
+ * and forgetting to classify a new key routes it to the SAFE per-box file.
+ */
+function metaKeyScope(key: string): 'central' | 'device' {
+  return CENTRAL_KEY_SET.has(key) ? 'central' : 'device';
+}
+
+/** Bespoke device keys as a runtime Set (the generic router skips these). */
+const BESPOKE_DEVICE_KEY_SET: ReadonlySet<string> = new Set<string>([
+  ...BESPOKE_DEVICE_KEYS,
+  // The `browser` tombstone is device-scoped but bespoke: lib/browser/registry.ts
+  // drains it (collision-checked) into deviceBrowser, so the generic router must
+  // never blindly relocate it.
+  'browser',
+]);
+
+/**
+ * Device-doc sub-block names the read/write paths handle BESPOKE-ly (each maps to
+ * a different `device*` Meta key, or lives in a separate file). The generic
+ * device-doc overlay skips these so it only surfaces genuine generic keys.
+ */
+const BESPOKE_DEVICE_DOC_KEYS: ReadonlySet<string> = new Set<string>([
+  'agents',
+  'isolatedAgents',
+  'routines',
+  'config',
+  'browser',
+  'fleet',
+  'hosts',
+  'accounts',
+  'projectRoot',
+  // Legacy top-level doc key the config migration folds into `config:`; never
+  // surfaced onto Meta before, so keep the generic overlay from doing so.
+  'defaultBrowserProfile',
+]);
 
 /**
  * Every key this version models (central + device). serializeCentral deletes an
@@ -1009,8 +1071,9 @@ const META_KEY_SCOPE: Record<keyof Meta, 'central' | 'device'> = {
  * in central is stale and must be migrated out). A key NOT listed here — e.g. one
  * a newer CLI version added — is preserved verbatim, never dropped + synced away.
  */
-const KNOWN_META_KEYS: ReadonlySet<string> = new Set([
-  ...Object.keys(META_KEY_SCOPE),
+const KNOWN_META_KEYS: ReadonlySet<string> = new Set<string>([
+  ...CENTRAL_META_KEYS,
+  ...BESPOKE_DEVICE_KEYS,
   // Removed browser-profile store. Kept only as a serializer tombstone so the
   // first registry read can migrate it into this device's file and delete it.
   'browser',
@@ -1045,6 +1108,54 @@ function healMetaHeader(serialized: string): string {
   // it (that would rewrite a hand-authored, headerless central file on the first
   // real central change). A current header round-trips to the identical bytes.
   return stripped === serialized ? serialized : META_HEADER + stripped;
+}
+
+/**
+ * True when the top-level `~/.agents/agents.yaml` carries a metadata header that
+ * is NOT the canonical {@link META_HEADER} — the P1 frozen-header case a box only
+ * heals on its next central write (serializeCentral). An absent or headerless
+ * file is NOT stale (a headerless central file is deliberately left alone).
+ * Surfaced as config drift by `agents sync status` (PHNX-3315).
+ */
+export function hasStaleMetaHeader(): boolean {
+  let content: string;
+  try { content = fs.readFileSync(META_FILE, 'utf-8'); } catch { return false; }
+  return healMetaHeader(content) !== content;
+}
+
+/**
+ * Parse the top-level user `agents.yaml` (this box's synced central file) WITHOUT
+ * the system-repo merge, machine-local overlay, or cache — the raw on-disk central
+ * map, or null when the file is absent/unparseable. Used by config-drift detection
+ * to see the central blocks that should have folded into the device doc, without
+ * mis-attributing a system-repo default as this box's own leak (PHNX-3315).
+ */
+export function readTopLevelUserMeta(): Record<string, unknown> | null {
+  let content: string;
+  try { content = fs.readFileSync(META_FILE, 'utf-8'); } catch { return null; }
+  try {
+    const parsed = yaml.parse(content);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch { /* malformed — nothing to report */ }
+  return null;
+}
+
+/**
+ * Top-level keys currently on disk in the central `agents.yaml` ({} when the file
+ * is absent or unparseable). The generic device-doc router uses this to leave a
+ * FOREIGN key — one this version does not model, already written to central by a
+ * newer CLI — in place instead of relocating it to this box's device doc.
+ */
+function readCentralKeys(): ReadonlySet<string> {
+  try {
+    const parsed = yaml.parse(fs.readFileSync(META_FILE, 'utf-8'));
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return new Set(Object.keys(parsed as Record<string, unknown>));
+    }
+  } catch { /* absent or malformed — no foreign keys to protect */ }
+  return new Set();
 }
 
 /**
@@ -1217,6 +1328,26 @@ export function writeMetaUnlocked(meta: Meta): void {
   const hasProjectRoot = typeof projectRoot === 'string' && projectRoot.length > 0;
   if (hasProjectRoot) doc.projectRoot = projectRoot;
   else delete doc.projectRoot;
+
+  // Generic device-scoped keys (PHNX-3315): any key left in `central` that this
+  // version classifies as device but does NOT bespoke-route round-trips through
+  // this box's device doc under its OWN name — so a NEWLY DECLARED device-scoped
+  // key lands per-box BY DEFAULT, with no bespoke wiring, and never reaches the
+  // synced central file. Today the bespoke set covers every device key, so this
+  // loop moves nothing (behavior-identical). A key that is UNKNOWN to this version
+  // AND already present in the on-disk central file is a FOREIGN key a newer CLI
+  // wrote as central — left in `central` and preserved verbatim by serializeCentral
+  // (the fleet-wide config-loss guard), never relocated to this box's doc.
+  const centralRecord = central as Record<string, unknown>;
+  const onDiskCentralKeys = readCentralKeys();
+  for (const k of Object.keys(centralRecord)) {
+    if (metaKeyScope(k) !== 'device') continue;            // fleet-shared: stays central
+    if (BESPOKE_DEVICE_KEY_SET.has(k)) continue;           // bespoke (incl. browser tombstone)
+    if (!KNOWN_META_KEYS.has(k) && onDiskCentralKeys.has(k)) continue; // foreign — preserve
+    doc[k] = centralRecord[k];
+    delete centralRecord[k];
+  }
+
   if (Object.keys(doc).length > 0) {
     fs.mkdirSync(path.dirname(devicePath), { recursive: true });
     writeIfChanged(devicePath, META_HEADER + yaml.stringify(doc));
@@ -1331,6 +1462,14 @@ function overlayMachineLocal(meta: Meta): Meta {
           throw new Error(`Device config corrupted at ${devicePath}: routines must be a string list.`);
         }
         meta.deviceRoutines = dm.routines;
+      }
+      // Generic device-scoped keys (PHNX-3315): device-doc keys this overlay does
+      // NOT bespoke-handle map straight back onto Meta under their own name —
+      // symmetry with the generic write in writeMetaUnlocked. The bespoke sub-blocks
+      // are handled above and skipped, so a stock device doc surfaces nothing extra.
+      for (const [k, v] of Object.entries(dm as Record<string, unknown>)) {
+        if (BESPOKE_DEVICE_DOC_KEYS.has(k)) continue;
+        (meta as Record<string, unknown>)[k] = v;
       }
     }
   }
