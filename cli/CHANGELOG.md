@@ -94,6 +94,20 @@
 
 ## 1.22.51
 
+- **Cursor auto-titles go through the same skill-scaffolding cleaner as Claude (PHNX-3123).**
+  `readCursorMeta` took `chatMeta.title` verbatim, so a Cursor session whose
+  server-generated title echoed the injected `Base directory for this skill: …`
+  line kept that path as `SessionMeta.label` — the field that wins on every
+  surface for the session's whole life. Claude's `ai-title` was already collapsed
+  to `/<skill>` at label composition (PR #2995); that collapse now lives in one
+  shared helper (`cleanGeneratedSessionLabel`) and Cursor's title takes the same
+  path. An ordinary Cursor title, and one that merely names a `skills/…` path,
+  is unchanged. A Claude `/rename` (`custom-title`) is still never rewritten.
+  Codex / OpenCode / Kimi / Droid put auto-titles on `topic`, not `label`, so
+  they are out of this change. **Not retroactive:** already-indexed labels stay
+  until the transcript next changes (RUSH-3122). Source:
+  `cli/src/lib/session/prompt.ts`, `cli/src/lib/session/discover.ts`.
+
 - **`publish-computer-helper-mac.sh` cuts the helper's own tag (PHNX-3228).**
   It published `ComputerHelper.app.zip` to the CLI's `v<version>` release, but since the
   client was repointed at per-helper tags the resolver asks for `computer-mac/v<x.y.z>`

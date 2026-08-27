@@ -344,6 +344,19 @@ SSH access (§7); rendering sessions that no harness produced.
   title / `/rename` > `agents run --name` handle > unset (listing then falls back
   to `topic`); an empty incoming label MUST NOT clobber a stored non-empty one
   (`lib/session/db.ts:800-803,1098-1100`; test `db.names.test.ts:50-128`).
+- **SES-14a (MUST).** A harness-generated session title MUST pass through
+  `cleanGeneratedSessionLabel` (`lib/session/prompt.ts`) at the point the
+  scanner composes `SessionMeta.label`, so injected skill scaffolding
+  (`Base directory for this skill: …`) collapses to `/<skill>`. Today that is
+  Claude `ai-title` (`finalizeClaudeScan` in `lib/session/discover.ts`) and
+  Cursor `chatMeta.title` (`readCursorMeta`). A user `/rename` (`custom-title`)
+  MUST NOT be rewritten. Codex / OpenCode / Kimi / Droid auto-titles land on
+  `topic`, not `label`, and are out of this requirement.
+
+  Given a Cursor `meta.json` whose `title` is the skill-basedir line, When
+  `readCursorMeta` runs, Then `meta.label` is `/<skill>`.
+  Tests: `lib/session/prompt.test.ts`, `lib/session/__tests__/parse-cursor.test.ts`,
+  `lib/session/__tests__/discover.test.ts`.
 - **SES-15 (MUST).** A timestamp-less source MUST fall back to file mtime and
   MUST NOT bind NULL into the `NOT NULL` timestamp column
   (`lib/session/discover.ts:4198-4202,1238-1243`).
