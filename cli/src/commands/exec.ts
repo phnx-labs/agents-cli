@@ -1889,15 +1889,19 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                 });
               }
             }
-            // A network drop kills the local ssh client (exit 255) but the remote
-            // agent survives in its detached tmux session. With a known session id
-            // (Claude's forced id, a resumed run, or a non-Claude id we just
-            // resolved from the remote hook record) and a tmux-hosted run,
-            // re-attach the live pane automatically instead of exiting — the user
-            // never has to notice the drop and `agents sessions focus` by hand.
-            // `raw` runs aren't tmux wrapped, so there is nothing to reconnect to.
-            // For `run auto` prefer the join-resolved id (the harness the remote
-            // ACTUALLY picked) over the explicit --session-id only claude adopts.
+            // A network drop kills the local ssh client (exit 255). What the
+            // remote agent does next depends on the peer's tmux.enabled
+            // (PHNX-3316): wrapped, it survives in its detached pane and the
+            // reconnect rejoins it; bare (the default), the drop SIGHUPs it and
+            // the reconnect resumes the session in place from disk. Either way,
+            // with a known session id (Claude's forced id, a resumed run, or a
+            // non-Claude id we just resolved from the remote hook record) we
+            // reconnect automatically instead of exiting — the user never has
+            // to notice the drop and `agents sessions focus` by hand.
+            // `raw` runs opted out of all of this, so there is nothing to
+            // reconnect to. For `run auto` prefer the join-resolved id (the
+            // harness the remote ACTUALLY picked) over the explicit
+            // --session-id only claude adopts.
             const { pickReconnectTarget, reconnectInteractiveSession, afterInteractiveRemoteExit, SSH_CONN_FAILURE } = await import('../lib/hosts/reconnect.js');
             const reconnectTarget = pickReconnectTarget({
               agent: runAgent,

@@ -641,10 +641,11 @@ export async function runInteractiveOnHost(host: Host, opts: InteractiveDispatch
   // REMOTE_INTERACTIVE_ENV rides the same prelude and tells the remote CLI its
   // stdio is this ssh link: it marks the run as reconnect-managed (a drop is
   // answered by reconnect.ts, which rejoins the live pane or resumes the
-  // session in place) and, for --no-follow, requires the detached pane that is
-  // the run's only stdout. Since PHNX-3316 it no longer forces the tmux wrap
-  // on a followed run — the peer's tmux.enabled decides that. Set here, on the
-  // interactive path only: `launchDetached` already setsids the headless one.
+  // session in place) and, when the launcher has no TTY (CI, scripts), requires
+  // the detached pane that is the run's only interface. Since PHNX-3316 it no
+  // longer forces the tmux wrap on a TTY-followed run — the peer's
+  // tmux.enabled decides that. Set here, on the interactive path only:
+  // `launchDetached` already setsids the headless one.
   const prelude = remoteRunShellPrelude(opts.agent, { [REMOTE_INTERACTIVE_ENV]: '1' });
   let remoteCmd = `${prelude}${cwd}${invocation}`;
   if (opts.copyCreds) {

@@ -633,8 +633,9 @@ describePosix('resolveTmuxWrap (interactive spawn-wrap gate)', () => {
     expect(resolveTmuxWrap({ ...base, hasTty: false }).kind).toBe('bare');
   });
 
-  it('still wraps a REMOTE-dispatched run with no TTY, even with tmux.enabled=false (--no-follow wants a detached pane)', () => {
-    // The pane is the run's only stdout — infrastructure, not ergonomics — so
+  it('still wraps a followed REMOTE run whose launcher has no TTY, even with tmux.enabled=false (the pane is its only interface)', () => {
+    // A launcher without a TTY (CI, scripts, another agent) gives the peer
+    // nothing to attach to, so the pane is infrastructure, not ergonomics —
     // the config toggle does not reach this case.
     expect(resolveTmuxWrap({ ...base, hasTty: false, remoteDispatch: true }).kind).toBe('wrap');
     expect(resolveTmuxWrap({ ...base, hasTty: false, remoteDispatch: true, configEnabled: false }).kind).toBe('wrap');

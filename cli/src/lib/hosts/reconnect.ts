@@ -389,10 +389,13 @@ export function startConnectionTarget(opts: {
 /**
  * Decide what happens after an interactive `--device` stream returns.
  *
- * Auto-reconnect only when the link dropped (255) AND the run is tmux-hosted
- * (`willReconnect`). `--raw` is not wrapped, so it never reconnects — but it
- * still prints the session id: the user is at a shell, and EXEC-55 does not
- * exempt raw (RUSH-3227). Bundling the notice behind `!isRaw` was the miss.
+ * Auto-reconnect fires whenever the link dropped (255) and the run did not opt
+ * out with `--raw` (`willReconnect`) — wrap or no wrap. A wrapped run's pane
+ * survived, so the reattach rejoins it; a bare run's agent died with the link,
+ * so the same verb resumes the session in place from disk (PHNX-3316). `--raw`
+ * never reconnects — but it still prints the session id: the user is at a
+ * shell, and EXEC-55 does not exempt raw (RUSH-3227). Bundling the notice
+ * behind `!isRaw` was the miss.
  */
 export function afterInteractiveRemoteExit(opts: {
   target?: ReconnectTarget;
