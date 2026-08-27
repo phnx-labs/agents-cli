@@ -490,7 +490,7 @@ export function registerAccountsCommand(program: Command): void {
 agents accounts label codex@0.146.0 personal
 agents accounts label codex work --account you@example.com
 agents run codex#work`,
-    notes: 'The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.',
+    notes: 'The label binds to the signed-in account identity, not the version — codex#work keeps selecting that account after it moves to a newer install. Labels sync across the fleet via `agents repo push/pull`, keyed by (agent, identityKey); the device-local registry is the read cache. One signed-in login needs no selector; with several, an interactive terminal opens a picker, while scripts pass --account or <harness>@<version>.',
   });
 
   accounts.command('attach <account> <target>')

@@ -499,6 +499,13 @@ tracked `fleet.ignored` block that `agents devices ignore` writes and
 are hidden so a dismissed box is never silently absent; `agents devices unignore
 <name>` puts one back (RUSH-3062).
 
+Native-account labels (`agents accounts label`) are the same kind of fleet-wide
+fact: they bind to a stable `(agent, identityKey)` (email / org key), not a
+device or a version. They live in tracked `~/.agents/accounts/native.yaml` and
+sync with `agents repo push/pull`, so `codex#personal` selects the same login
+on every box. `meta.accounts.native` is the device-local read cache (UUID ids
+for bindings); `readMeta` overlays the tracked file onto it.
+
 `interactive.host` is a **user-level** preference: it lives in central
 `~/.agents/agents.yaml` under `config.interactiveHost`, syncs fleet-wide via
 `agents repo push/pull`, and answers "which device shows me artifacts?" It is

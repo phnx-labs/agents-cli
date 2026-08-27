@@ -1216,6 +1216,8 @@ export function registerRepoCommands(program: Command): void {
         }
       }
       if (userPulled) {
+        const { reconcileNativeAccountLabels } = await import('../lib/account-registry.js');
+        reconcileNativeAccountLabels();
         const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
         const result = await reconcileDeviceDiscoveryPolicies();
         const parts = [
@@ -1336,6 +1338,8 @@ Examples:
           if (t.alias === 'user') {
             const u = resolveUserRepoRemoteUrl(t.dir);
             if (u) recordUserRepoRemote(t.dir, u);
+            const { reconcileNativeAccountLabels } = await import('../lib/account-registry.js');
+            reconcileNativeAccountLabels();
             const { reconcileDeviceDiscoveryPolicies } = await import('../lib/devices/discovery-policy.js');
             await reconcileDeviceDiscoveryPolicies();
           }

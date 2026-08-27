@@ -12,7 +12,9 @@
  * `{ version: 2, accounts }` view so existing consumers (harness, profiles,
  * exec) keep working — it is now a projection over the account bundles, not a
  * file read. Native OAuth logins are NOT accounts here; they stay native and
- * surface through unified discovery in [[account-catalog]].
+ * surface through unified discovery in [[account-catalog]]. Fleet-wide native
+ * labels sync via tracked `accounts/native.yaml` ([[account-labels]]);
+ * `meta.accounts.native` is the device-local read cache.
  */
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -21,6 +23,13 @@ import * as yaml from 'yaml';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
 import type { AgentId, Meta } from './types.js';
+import {
+  nativeLabelsPath,
+  removeNativeLabel,
+  seedNativeLabels,
+  upsertNativeLabel,
+  type NativeLabelRecord,
+} from './account-labels.js';
 import { deleteKeychainToken, getKeychainToken, hasKeychainToken } from './secrets/index.js';
 import { bundleExists, deleteBundle, listBundles, readBundle, renameBundle, writeBundleWithItems } from './secrets/bundles.js';
 import { getAccountProvider, type AccountAuthKind } from './account-provider-registry.js';
@@ -189,6 +198,24 @@ function assertUniqueUnifiedName(name: string, meta: Pick<Meta, 'accounts'>, doc
   if (findUnifiedAccount(name, meta, doc)) throw new Error(`Account '${name}' already exists.`);
 }
 
+function toLabelRecord(account: Pick<NativeAccount, 'agent' | 'identityKey' | 'name' | 'identityLabel' | 'scope'>): NativeLabelRecord {
+  return {
+    agent: account.agent,
+    identityKey: account.identityKey,
+    name: account.name,
+    identityLabel: account.identityLabel,
+    scope: account.scope,
+  };
+}
+
+function persistNativeLabel(
+  account: Pick<NativeAccount, 'agent' | 'identityKey' | 'name' | 'identityLabel' | 'scope'>,
+  meta: Pick<Meta, 'accounts'>,
+  base = getUserAgentsDir(),
+): void {
+  upsertNativeLabel(toLabelRecord(account), base, listNativeAccounts(meta).map(toLabelRecord));
+}
+
 export function addNativeAccount(
   name: string,
   agent: AgentId,
@@ -202,6 +229,7 @@ export function addNativeAccount(
   const duplicate = listNativeAccounts(meta).find(account => account.agent === agent && account.identityKey === identityKey);
   if (duplicate) throw new Error(`This ${agent} login is already named '${duplicate.name}'.`);
   const account: NativeAccount = { id: crypto.randomUUID(), name, kind: 'native', agent, identityKey, identityLabel, scope };
+  // Cache first so overlay-on-read keeps this id instead of synthesizing another.
   updateMeta(current => ({
     ...current,
     accounts: {
@@ -209,6 +237,7 @@ export function addNativeAccount(
       native: { ...current.accounts?.native, [account.id]: { id: account.id, name, agent, identityKey, identityLabel, scope } },
     },
   }));
+  persistNativeLabel(account, readMeta());
   return account;
 }
 
@@ -232,10 +261,29 @@ export function labelNativeAccount(
     ...current,
     accounts: {
       ...current.accounts,
-      native: { ...current.accounts?.native, [existing.id]: { ...current.accounts?.native?.[existing.id]!, name: resolvedLabel, identityLabel } },
+      native: {
+        ...current.accounts?.native,
+        [existing.id]: { id: existing.id, name: resolvedLabel, agent, identityKey, identityLabel, scope },
+      },
     },
   }));
+  persistNativeLabel({ ...existing, name: resolvedLabel, identityLabel }, readMeta());
   return { ...existing, name: resolvedLabel, identityLabel };
+}
+
+/**
+ * After `agents repo pull user`, seed the tracked labels file from this
+ * machine's cache when the file is still missing — so labels that only lived
+ * in agents.yaml start syncing on the next push. Overlay-on-read already makes
+ * a pulled file visible; this does not rewrite agents.yaml (that would dirty
+ * the user repo and block the next pull).
+ */
+export function reconcileNativeAccountLabels(base = getUserAgentsDir()): { seeded: number } {
+  if (fs.existsSync(nativeLabelsPath(base))) return { seeded: 0 };
+  const cached = listNativeAccounts(readMeta()).map(toLabelRecord);
+  if (cached.length === 0) return { seeded: 0 };
+  seedNativeLabels(cached, base);
+  return { seeded: cached.length };
 }
 
 export function bindAccount(nameOrId: string, target: string): UnifiedAccount {
@@ -340,6 +388,7 @@ export function renameAccount(oldName: string, newName: string, base = getUserAg
         native: { ...current.accounts?.native, [native.id]: { ...current.accounts?.native?.[native.id]!, name: newName } },
       },
     }));
+    persistNativeLabel({ ...native, name: newName }, readMeta());
     return;
   }
   const account = findAccount(oldName, doc);
@@ -360,6 +409,7 @@ export function removeAccount(name: string, base = getUserAgentsDir()): void {
       delete accounts[native.id];
       return { ...current, accounts: { ...current.accounts, native: accounts } };
     });
+    removeNativeLabel(native.agent, native.identityKey, getUserAgentsDir());
     return;
   }
   const account = findAccount(name, readAccountRegistry(base));

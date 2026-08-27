@@ -5,8 +5,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { secretsKeychainItem, setKeychainBackendForTest, setKeychainToken, type KeychainBackend } from './secrets/index.js';
 import { writeBundleWithItems } from './secrets/bundles.js';
 import { _resetFileStoreForTest } from './secrets/filestore.js';
-import { readMeta, updateMeta } from './state.js';
-import { addAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, readAccountRegistry, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
+import { addAccount, findUnifiedAccount, inspectAccount, labelNativeAccount, readAccountRegistry, reconcileNativeAccountLabels, removeAccount, renameAccount, resolveAccountSelection, resolveCredentialAccount, resolveSpawnAccount, setAccountSecret, type AccountRegistryDocument } from './account-registry.js';
+import { nativeLabelsPath, readNativeLabels } from './account-labels.js';
 
 describe('findUnifiedAccount does not touch the provider store for a native lookup', () => {
   // A registry whose every access throws — stands in for a device whose provider
@@ -29,8 +30,22 @@ describe('findUnifiedAccount does not touch the provider store for a native look
 });
 
 describe('native account labels', () => {
-  beforeEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
-  afterEach(() => updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } })));
+  function clearNativeCache() {
+    updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, native: {} } }));
+  }
+  function clearTrackedLabels() {
+    const file = nativeLabelsPath(getUserAgentsDir());
+    fs.rmSync(file, { force: true });
+    try { fs.rmdirSync(path.dirname(file)); } catch { /* not empty */ }
+  }
+  beforeEach(() => {
+    clearTrackedLabels();
+    clearNativeCache();
+  });
+  afterEach(() => {
+    clearTrackedLabels();
+    clearNativeCache();
+  });
 
   it('writes and resolves a manual label and the implicit email label', () => {
     const original = labelNativeAccount('codex', 'codex:user=1', 'user@example.com', 'work', 'version');
@@ -42,6 +57,47 @@ describe('native account labels', () => {
 
   it('requires a manual label when the harness exposes no email', () => {
     expect(() => labelNativeAccount('kimi', 'kimi:opaque=1', undefined, undefined, 'version')).toThrow('pass a manual label');
+  });
+
+  it('syncs the label through the tracked user-repo file keyed by agent and identityKey', () => {
+    labelNativeAccount('codex', 'codex:account=abc:user=def:org=ghi', 'you@example.com', 'personal', 'version');
+    const file = nativeLabelsPath(getUserAgentsDir());
+    expect(fs.existsSync(file)).toBe(true);
+    expect(readNativeLabels(getUserAgentsDir())).toEqual([
+      {
+        agent: 'codex',
+        identityKey: 'codex:account=abc:user=def:org=ghi',
+        name: 'personal',
+        identityLabel: 'you@example.com',
+        scope: 'version',
+      },
+    ]);
+
+    // Other box after `agents repo pull`: empty device-local cache, tracked file present.
+    clearNativeCache();
+    expect(findUnifiedAccount('personal', readMeta())).toMatchObject({
+      kind: 'native',
+      name: 'personal',
+      agent: 'codex',
+      identityKey: 'codex:account=abc:user=def:org=ghi',
+    });
+  });
+
+  it('seeds the tracked file from the device-local cache when the file is missing', () => {
+    labelNativeAccount('codex', 'codex:user=1', 'you@example.com', 'personal', 'version');
+    clearTrackedLabels();
+    expect(reconcileNativeAccountLabels()).toEqual({ seeded: 1 });
+    expect(readNativeLabels(getUserAgentsDir())).toMatchObject([
+      { agent: 'codex', identityKey: 'codex:user=1', name: 'personal' },
+    ]);
+    expect(reconcileNativeAccountLabels()).toEqual({ seeded: 0 });
+  });
+
+  it('fails loud when the tracked labels file is not a map', () => {
+    const file = nativeLabelsPath(getUserAgentsDir());
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '- not a map\n');
+    expect(() => readNativeLabels(getUserAgentsDir())).toThrow(/Native-account labels corrupted/);
   });
 });
 

@@ -885,7 +885,11 @@ export interface Meta {
   /** Preferred provider account per harness. Explicit --account wins. */
   accounts?: {
     defaults?: Partial<Record<AgentId, string>>;
-    /** Named harness-owned identities. Metadata only; OAuth credentials stay in the harness home. */
+    /**
+     * Named harness-owned identities (device-local read cache). Metadata only;
+     * OAuth credentials stay in the harness home. Fleet-wide labels sync via
+     * tracked `accounts/native.yaml`, keyed by (agent, identityKey).
+     */
     native?: Record<string, {
       id: string;
       name: string;
