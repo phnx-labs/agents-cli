@@ -872,3 +872,110 @@ describe('release-attestation-produce.sh -- helper manifest (RUSH-2766)', () => 
     expect(out).not.toContain('helper computer-mac input changed');
   });
 });
+
+describe('release-attestation-produce.sh --inherit-suite-from (PHNX-3237)', () => {
+  // Inherit mode forbids any --test-* flag, so it cannot reuse runProduce (which
+  // always passes --test-here). Run the producer directly with the fake toolchain.
+  function runInherit(
+    fx: ReturnType<typeof buildFixture>,
+    commit: string,
+    base: string,
+    extra: string[] = [],
+  ) {
+    return spawnSync(
+      'bash',
+      [
+        path.join(fx.caller, 'cli/scripts/release-attestation-produce.sh'),
+        commit,
+        '--repo-root',
+        fx.caller,
+        '--dir',
+        fx.store,
+        '--inherit-suite-from',
+        base,
+        ...extra,
+      ],
+      { encoding: 'utf-8', env: { ...process.env, PATH: `${fx.fakebin}:${process.env.PATH}` } },
+    );
+  }
+
+  it('mints the release-tree record from a green base without re-running the suite', () => {
+    const root = tmp('attest-inherit-');
+    const fx = buildFixture(root);
+    // 1. Produce the BASE (default-branch tree) attestation the normal way.
+    const baseRun = runProduce(fx);
+    const baseOut = (baseRun.stdout + baseRun.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(baseRun.status, baseOut).toBe(0);
+    const baseJson = baseOut.match(/Wrote (\S+\.json)/)?.[1];
+    expect(baseJson).toBeTruthy();
+
+    // 2. Metadata-only release commit: version bump + a changelog fragment.
+    fs.writeFileSync(
+      path.join(fx.caller, 'cli/package.json'),
+      '{"name":"@phnx-labs/agents-cli","version":"9.9.10"}\n',
+    );
+    fs.mkdirSync(path.join(fx.caller, 'cli/.changelog'), { recursive: true });
+    fs.writeFileSync(path.join(fx.caller, 'cli/.changelog/9.9.10.md'), '- note\n');
+    git(fx.caller, 'add', '-A');
+    git(fx.caller, 'commit', '-q', '-m', 'chore(release): 9.9.10');
+    const relCommit = git(fx.caller, 'rev-parse', 'HEAD');
+
+    // 3. Derive the release-tree attestation from the base — no suite run.
+    const r = runInherit(fx, relCommit, baseJson!);
+    const out = (r.stdout + r.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(r.status, out).toBe(0);
+    expect(out).toContain('Inheriting the suite result');
+    // The fake `bun run test` prints these; inherit must NOT have invoked it.
+    expect(out).not.toContain('RUSH-3007-ENV');
+    expect(out).not.toContain('tests passed');
+
+    const relJson = out.match(/Wrote (\S+\.json)/)?.[1];
+    expect(relJson, out).toBeTruthy();
+    const rec = JSON.parse(fs.readFileSync(relJson!, 'utf-8'));
+    expect(rec.candidateTree).toBe(git(fx.caller, 'rev-parse', `${relCommit}^{tree}`));
+    expect(rec.conclusion).toBe('pass');
+    const baseRec = JSON.parse(fs.readFileSync(baseJson!, 'utf-8'));
+    expect(rec.derivedFrom.baseTree).toBe(baseRec.candidateTree);
+    // lock/policy inherited from base == the release tree's own (allowlist proof)
+    expect(rec.lockfileDigest).toBe(baseRec.lockfileDigest);
+    expect(rec.policyVersion).toBe(baseRec.policyVersion);
+  });
+
+  it('fails closed when the release tree carries code beyond version/changelog', () => {
+    const root = tmp('attest-inherit-code-');
+    const fx = buildFixture(root);
+    const baseRun = runProduce(fx);
+    const baseJson = (baseRun.stdout + baseRun.stderr).replace(/\[[0-9;]*m/g, '').match(/Wrote (\S+\.json)/)?.[1];
+    expect(baseJson).toBeTruthy();
+    // A source change, not a metadata change.
+    fs.mkdirSync(path.join(fx.caller, 'cli/src'), { recursive: true });
+    fs.writeFileSync(path.join(fx.caller, 'cli/src/foo.ts'), 'export const x = 1;\n');
+    git(fx.caller, 'add', '-A');
+    git(fx.caller, 'commit', '-q', '-m', 'feat: code');
+    const relCommit = git(fx.caller, 'rev-parse', 'HEAD');
+    const r = runInherit(fx, relCommit, baseJson!);
+    const out = (r.stdout + r.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(r.status).not.toBe(0);
+    expect(out).toMatch(/cli\/src\/foo\.ts|beyond version\/changelog|not a metadata-only descendant/);
+  });
+
+  it('refuses --inherit-suite-from alongside a --test-* flag', () => {
+    const root = tmp('attest-inherit-conflict-');
+    const fx = buildFixture(root);
+    const baseJson = path.join(root, 'base.json');
+    fs.writeFileSync(baseJson, '{}');
+    const r = runInherit(fx, fx.headCommit, baseJson, ['--test-here']);
+    const out = (r.stdout + r.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(r.status).not.toBe(0);
+    expect(out).toContain('do not also pass a --test-*');
+  });
+
+  it('fails when the base attestation is missing', () => {
+    const root = tmp('attest-inherit-missing-');
+    const fx = buildFixture(root);
+    const r = runInherit(fx, fx.headCommit, path.join(root, 'nope.json'));
+    const out = (r.stdout + r.stderr).replace(/\[[0-9;]*m/g, '');
+    expect(r.status).not.toBe(0);
+    expect(out).toContain('base attestation not found');
+  });
+});

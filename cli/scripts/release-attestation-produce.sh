@@ -35,9 +35,18 @@
 #   scripts/release-attestation-produce.sh <commit-ish> [--dir DIR]
 #                                           [--repo-root DIR] [--keep]
 #                                           [--with-helpers]
+#                                           [--inherit-suite-from BASE.json]
 #                                           [--test-shard <n> | --test-devices a,b,c
 #                                            | --test-device <box> | --test-here
 #                                            | --test-crabbox]
+#
+# --inherit-suite-from BASE.json mints the attestation from an already-green BASE
+# (the default-branch tree) WITHOUT re-running the suite -- the redundant second
+# full-suite run per release (PHNX-3237). Sound only for a release commit, whose
+# tree differs from BASE by version + changelog + generated command-index and
+# nothing else; `release-attestation.sh derive` fails closed on any other changed
+# path. build + pack still run, so the recorded tarball is the real release tree's.
+# Incompatible with any --test-* flag (there is no suite to route).
 #
 # Where the suite runs. DEFAULT SHARDS across the fleet -- the suite is
 # throughput-bound, so dividing it across N workers runs it in ~1/N the time
@@ -86,6 +95,7 @@ TEST_TARGET=()
 # changed the digest and blocked an otherwise-perfect 1.22.49 attestation, for a
 # helper the tarball no longer ships and the CLI resolves from its own tag.
 WITH_HELPERS=false
+INHERIT_BASE=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --dir) STORE="$2"; shift 2 ;;
@@ -104,6 +114,13 @@ while [[ $# -gt 0 ]]; do
     # a,b,c names them.
     --test-shard) [[ -n "${2:-}" ]] || die "--test-shard needs a worker count, e.g. --test-shard 6"; TEST_TARGET=(--shard "$2"); shift 2 ;;
     --test-devices) [[ -n "${2:-}" ]] || die "--test-devices needs a comma-separated list, e.g. --test-devices m1,m2,m3"; TEST_TARGET=(--devices "$2"); shift 2 ;;
+    # Inherit the suite result from an already-green BASE attestation instead of
+    # re-running the ~13k-test suite (PHNX-3237). Sound ONLY for a release commit,
+    # whose tree differs from BASE by version + changelog + generated command-index
+    # and nothing else -- release-attestation.sh derive fails closed on any other
+    # changed path, so a code change can never inherit a stale pass. build + pack
+    # still run, so the recorded tarball is the real release tree's.
+    --inherit-suite-from) [[ -n "${2:-}" ]] || die "--inherit-suite-from needs a base attestation JSON path"; INHERIT_BASE="$2"; shift 2 ;;
     --with-helpers) WITH_HELPERS=true; shift ;;
     -h|--help)
       # Print the WHOLE docblock, not a hardcoded line range. `sed -n '3,32p'`
@@ -123,6 +140,14 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 [[ -n "$COMMIT_ISH" ]] || die "usage: scripts/release-attestation-produce.sh <commit-ish> [--dir DIR] [--repo-root DIR] [--keep]"
+
+# Inherit mode skips the suite entirely, so it is incompatible with any --test-*
+# target and needs a readable base attestation. Fail loud rather than silently
+# ignore a flag the caller thought would take effect.
+if [[ -n "$INHERIT_BASE" ]]; then
+  [[ -f "$INHERIT_BASE" ]] || die "--inherit-suite-from: base attestation not found: $INHERIT_BASE"
+  [[ ${#TEST_TARGET[@]} -eq 0 ]] || die "--inherit-suite-from skips the suite; do not also pass a --test-* target"
+fi
 
 # Default to sharding the suite across the fleet. The suite is throughput-bound
 # (measured ~3079s CPU at ~11.5x parallelism -> ~269s on one box), so the win is
@@ -151,7 +176,7 @@ resolve_default_shards() {
 }
 # ${#arr[@]} is safe under `set -u` on bash 3.2 (the macOS trap is "${arr[@]}"
 # expansion of an EMPTY array, not the length operator).
-if [[ ${#TEST_TARGET[@]} -eq 0 ]]; then
+if [[ -z "$INHERIT_BASE" && ${#TEST_TARGET[@]} -eq 0 ]]; then
   default_shards="$(resolve_default_shards)"
   if [[ -n "$default_shards" ]]; then
     TEST_TARGET=(--shard "$default_shards")
@@ -201,7 +226,7 @@ cd "$WT/$CLI_DIR"
 
 bun install --frozen-lockfile || die "bun install failed for ${SHA:0:12}"
 
-bold "Running the full suite..."
+[[ -n "$INHERIT_BASE" ]] || bold "Running the full suite..."
 # RUSH-3007: cutting 1.22.44, the operator exported CI=true by hand to get
 # vitest.config.ts's extended hookTimeout profile (RUSH-2970 trap 5a), which
 # also armed tests/setup.ts's leak tripwires against this box's REAL
@@ -252,15 +277,22 @@ SUITE_LOG="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest-suite.XXXXXX")"
 # bash 3.2 (what macOS ships, and the producer MUST run on a Mac when a helper
 # input changed) treats "${arr[@]}" on an EMPTY array as an unbound variable
 # under `set -u`. The ${arr[@]+"${arr[@]}"} guard is the portable form.
-if scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} -- --retry=2 --maxWorkers=2 2>&1 | tee "$SUITE_LOG"; then
+if [[ -n "$INHERIT_BASE" ]]; then
+  # Inherit mode: the base attestation already proved this tree passes (the diff
+  # is version/changelog/command-index only, verified by derive below), so the
+  # suite is not re-run. build + pack still run, so the recorded tarball is real.
+  green "Inheriting the suite result from $(basename "$INHERIT_BASE") (skipping the full suite)."
+  rm -f "$SUITE_LOG"
+elif scripts/test.sh ${TEST_TARGET[@]+"${TEST_TARGET[@]}"} -- --retry=2 --maxWorkers=2 2>&1 | tee "$SUITE_LOG"; then
   green "Suite passed."
+  rm -f "$SUITE_LOG"
 elif suite_green_despite_worker_crash "$SUITE_LOG"; then
   gray "vitest worker exited after zero test failures; treating as pass (RUSH-2215)."
   green "Suite passed (teardown worker-exit tolerated on a green summary)."
+  rm -f "$SUITE_LOG"
 else
   die "suite failed for ${SHA:0:12} -- refusing to attest a red tree (log: $SUITE_LOG)"
 fi
-rm -f "$SUITE_LOG"
 
 # Sign + notarize headlessly, matching what release.sh's privileged phase did
 # before RUSH-2666 moved build/sign to attestation time. Skipped off a macOS
@@ -325,10 +357,29 @@ green "Packed $TGZ_NAME (sha256:$TGZ_DIGEST)"
 # policy or not. Running the full suite here satisfies "selected" -- it is a
 # superset -- but the record must still speak the consumer's vocabulary.
 ATTEST_TMP="$(mktemp "${TMPDIR:-/tmp}/agents-cli-attest.XXXXXX.json")"
-scripts/release-attestation.sh identity --repo-root "$WT" --commit "$SHA" \
-  | jq --arg name "$TGZ_NAME" --arg digest "sha256:$TGZ_DIGEST" \
-      '. + {schemaVersion: 1, suite: "selected", conclusion: "pass", tarball: {filename: $name, digest: $digest}}' \
-  > "$ATTEST_TMP"
+if [[ -n "$INHERIT_BASE" ]]; then
+  # Derive the record from the green base: it verifies the release tree differs
+  # from the base tree by version/changelog/command-index only (fail-closed on
+  # any other path) and inherits the base's suite/lock/policy/toolchain, recording
+  # THIS tree's freshly packed tarball. The base's suite tag rides through, so the
+  # record still speaks release.sh's "selected" vocabulary.
+  scripts/release-attestation.sh derive \
+      --base "$INHERIT_BASE" --tarball "$TGZ_NAME" \
+      --repo-root "$WT" --commit "$SHA" \
+      > "$ATTEST_TMP" \
+      || die "derive failed for ${SHA:0:12} -- the release tree is not a metadata-only descendant of the base; run the full suite instead"
+else
+  # suite is "selected", not "full" or a producer-invented name: release.sh
+  # never passes --suite to `release-attestation.sh require`
+  # (bind_tree_lock_policy defaults an unset --suite to "selected"), so a record
+  # tagged anything else is invisible to it, key-for-key correct on tree/lock/
+  # policy or not. Running the full suite here satisfies "selected" -- it is a
+  # superset -- but the record must still speak the consumer's vocabulary.
+  scripts/release-attestation.sh identity --repo-root "$WT" --commit "$SHA" \
+    | jq --arg name "$TGZ_NAME" --arg digest "sha256:$TGZ_DIGEST" \
+        '. + {schemaVersion: 1, suite: "selected", conclusion: "pass", tarball: {filename: $name, digest: $digest}}' \
+    > "$ATTEST_TMP"
+fi
 
 DEST_JSON="$(scripts/release-attestation.sh write --dir "$STORE" --file "$ATTEST_TMP")" \
   || die "failed to write attestation record"

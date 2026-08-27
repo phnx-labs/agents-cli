@@ -17,7 +17,17 @@
 #   release-attestation.sh require --dir DIR --tree TREE [--repo-root DIR] ...
 #   release-attestation.sh tarball --file ATTEST.json [--require-file]
 #   release-attestation.sh promote --file ATTEST.json --tarball TGZ
+#   release-attestation.sh derive --base BASE.json --tarball TGZ [--repo-root DIR]
+#                                  [--commit REF]
 #
+# `derive` mints a release-commit-tree attestation from an already-green BASE
+# attestation (the default-branch tree) WITHOUT re-running the suite. It is sound
+# ONLY because a release commit differs from its base by version + changelog +
+# generated command-index and nothing else -- none of which can change a test
+# outcome. It fails closed if the tree diff touches any other path, so a code
+# change can never ride a stale suite result. The freshly built TGZ (packed from
+# the release tree, carrying the new version) is what gets recorded and published;
+# only the expensive suite run is inherited.
 set -euo pipefail
 
 die() { echo "error: $*" >&2; exit 1; }
@@ -61,6 +71,7 @@ NODE_VER=""
 PLATFORM=""
 SUITE=""
 TGZ=""
+BASE=""
 REQUIRE_FILE=false
 
 while [[ $# -gt 0 ]]; do
@@ -69,6 +80,7 @@ while [[ $# -gt 0 ]]; do
     --commit) COMMIT="$2"; shift 2 ;;
     --dir) DIR="$2"; shift 2 ;;
     --file) FILE="$2"; shift 2 ;;
+    --base) BASE="$2"; shift 2 ;;
     --tree) TREE="$2"; shift 2 ;;
     --lock|--lockfile-digest) LOCK_DIGEST="$2"; shift 2 ;;
     --policy|--policy-version) POLICY="$2"; shift 2 ;;
@@ -315,6 +327,85 @@ promote_tarball() {
   printf '%s\n' "$TGZ"
 }
 
+# A release commit may change ONLY these paths, relative to the CLI dir (`cli/`
+# pre/post flatten `apps/cli/`). This mirrors exactly what release.sh stages:
+# `git add -A package.json CHANGELOG.md .changelog docs/command-index.{md,json}`
+# run from the CLI dir. Any other changed path means the release tree carries
+# code (or config the suite depends on) the base attestation never tested, so
+# derive MUST refuse and the caller MUST run the real suite.
+release_diff_is_metadata_only() {
+  local root="$1" base_tree="$2" rel_tree="$3" line rel
+  local changed
+  changed="$(git -C "$root" diff --name-only "$base_tree" "$rel_tree")" \
+    || die "cannot diff base tree ${base_tree:0:12} against release tree ${rel_tree:0:12}"
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    # Strip an optional cli/ or apps/cli/ prefix so the allowlist is layout-agnostic.
+    rel="$line"
+    rel="${rel#apps/cli/}"
+    rel="${rel#cli/}"
+    case "$rel" in
+      package.json|CHANGELOG.md|docs/command-index.md|docs/command-index.json) ;;
+      .changelog/*) ;;
+      *) die "derive refused: release tree changes '$line' beyond version/changelog/command-index -- run the full suite for this tree" ;;
+    esac
+  done <<< "$changed"
+}
+
+# Mint a release-tree attestation that INHERITS the suite pass from a green base
+# attestation, recording a freshly built release-tree tarball. See the header.
+derive_release_tree() {
+  [[ -n "$BASE" ]] || die "derive needs --base BASE.json"
+  [[ -n "$TGZ" ]] || die "derive needs --tarball TGZ (the release-tree pack)"
+  [[ -f "$TGZ" ]] || die "release tarball not found: $TGZ"
+  # The base MUST itself be a valid passing tarball attestation.
+  TREE="" LOCK_DIGEST="" POLICY="" BUN_VER="" NODE_VER="" PLATFORM="" SUITE="" \
+    verify_file "$BASE"
+
+  local root base_tree rel_commit rel_tree
+  root="$(resolve_repo_root)"
+  base_tree="$(jq -r '.candidateTree' "$BASE")"
+  rel_commit="$(git -C "$root" rev-parse "$COMMIT")"
+  rel_tree="$(git -C "$root" rev-parse "$COMMIT^{tree}")"
+
+  release_diff_is_metadata_only "$root" "$base_tree" "$rel_tree"
+
+  local name digest
+  name="$(basename "$TGZ")"
+  digest="sha256:$(file_sha256 "$TGZ")"
+
+  # Inherit lock/policy/toolchain/suite from the base. The allowlist above proves
+  # bun.lock and the policy inputs are byte-identical between the two trees, so an
+  # inherited value equals what release.sh's require() recomputes from the release
+  # tree -- the record still keys exactly to the tree it is for.
+  jq -nc \
+    --arg commit "$rel_commit" \
+    --arg tree "$rel_tree" \
+    --arg lock "$(jq -r '.lockfileDigest' "$BASE")" \
+    --arg policy "$(jq -r '.policyVersion' "$BASE")" \
+    --argjson toolchain "$(jq -c '.toolchain' "$BASE")" \
+    --arg platform "$(jq -r '.platform' "$BASE")" \
+    --arg suite "$(jq -r '.suite' "$BASE")" \
+    --arg name "$name" \
+    --arg digest "$digest" \
+    --arg baseTree "$base_tree" \
+    --arg baseDigest "$(jq -r '.attestationDigest // empty' "$BASE")" \
+    '{
+      schemaVersion: 1,
+      candidateCommit: $commit,
+      candidateTree: $tree,
+      lockfileDigest: $lock,
+      policyVersion: $policy,
+      toolchain: $toolchain,
+      platform: $platform,
+      suite: $suite,
+      conclusion: "pass",
+      tarball: { filename: $name, digest: $digest },
+      derivedFrom: ( { baseTree: $baseTree }
+        + (if $baseDigest == "" then {} else { baseAttestationDigest: $baseDigest } end) )
+    }'
+}
+
 write_record() {
   [[ -n "$DIR" ]] || die "write needs --dir"
   [[ -n "$FILE" ]] || die "write needs --file"
@@ -342,5 +433,6 @@ case "$CMD" in
   require) require_from_dir ;;
   tarball) tarball_from_file ;;
   promote) promote_tarball ;;
-  *) die "unknown command: $CMD (try identity|key|write|verify|require|tarball|promote)" ;;
+  derive) derive_release_tree ;;
+  *) die "unknown command: $CMD (try identity|key|write|verify|require|tarball|promote|derive)" ;;
 esac

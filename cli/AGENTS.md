@@ -1000,6 +1000,26 @@ than demanded of a possibly-thin fleet). Each shard still runs vitest at
 sharding adds machines, not per-box concurrency. Override with `--test-shard <n>` /
 `--test-devices a,b,c`, or pin one box with `--test-device <box>` / `--test-here`.
 
+**A release-tree attestation can inherit the suite instead of re-running it
+(PHNX-3237).** A release runs the full suite twice — once for the default-branch
+tree, once for the `chore(release)` commit tree — even though the second differs
+from the first only by the version bump, the folded changelog, and the
+regenerated command-index. `release-attestation-produce.sh --inherit-suite-from
+<base-attestation.json>` mints the release-tree record from an already-green base
+**without re-running the suite**: it still `bun run build` + `npm pack`s (so the
+recorded tarball is the real release tree's, carrying the new version), but the
+expensive suite run is inherited. The soundness gate is
+`release-attestation.sh derive` — it fails **closed** unless the tree diff between
+base and release touches only `package.json`, `.changelog/**`, `CHANGELOG.md`, and
+`docs/command-index.{md,json}` (the exact set `release.sh` stages), so a code
+change can never ride a stale pass. The derived record inherits the base's
+lockfile/policy/toolchain/suite identity, which the allowlist proves are byte-
+identical to the release tree's, so `release.sh`'s `require()` still keys to it
+exactly. Inherit mode is incompatible with any `--test-*` flag (there is no suite
+to route). release.sh does not yet call this automatically — the release-tree
+attestation is still produced out of band — so use `--inherit-suite-from` when
+producing it to avoid the second full-suite run.
+
 **Idempotent re-runs.** The script's git-scope reads use `<ref>:cli/package.json`
 (not root) since the package moved under `cli`. If a publish fails after the PR
 merges, rerun the same command: registry-truth short-circuits skip an

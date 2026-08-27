@@ -333,4 +333,135 @@ describeUnix('release-attestation.sh', () => {
     const p99 = samples[samples.length - 1];
     expect(p99).toBeLessThan(10_000);
   });
+
+  // derive mints a release-tree attestation from a green base WITHOUT re-running
+  // the suite -- the redundant second full-suite run per release (PHNX-3237). It
+  // is sound only because a release commit changes version/changelog/command-index
+  // and nothing else; derive fails closed on any other changed path.
+  describe('derive', () => {
+    function releaseCommit(root: string, changes: () => void): { tree: string; commit: string } {
+      changes();
+      git(root, 'add', '-A');
+      git(root, 'commit', '-q', '-m', 'chore(release): x');
+      return { tree: git(root, 'rev-parse', 'HEAD^{tree}'), commit: git(root, 'rev-parse', 'HEAD') };
+    }
+
+    // A base attestation whose lock/policy are the REAL values for the base tree,
+    // so require() (which recomputes them) round-trips against a derived record.
+    function baseAttestation(root: string, tree: string, store: string): string {
+      const id = JSON.parse(sh(['identity', '--repo-root', root], root).out);
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.0.tgz', 'base-pretested');
+      const p = path.join(store, 'base.json');
+      fs.writeFileSync(
+        p,
+        record({
+          tree,
+          lock: id.lockfileDigest,
+          policy: id.policyVersion,
+          bun: id.toolchain.bun,
+          node: id.toolchain.node,
+          platform: id.platform,
+          filename: 'phnx-labs-agents-cli-1.0.0.tgz',
+          digest: tgz.digest,
+        }),
+      );
+      return p;
+    }
+
+    it('mints a release-tree record inheriting the base pass, with the release tarball', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+        fs.mkdirSync(path.join(root, 'cli/.changelog'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'cli/.changelog/1.0.1.md'), '- note\n');
+        fs.mkdirSync(path.join(root, 'cli/docs'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'cli/docs/command-index.md'), '# index\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status, d.out).toBe(0);
+      const rec = JSON.parse(d.out);
+      expect(rec.candidateTree).toBe(rel.tree);
+      expect(rec.candidateCommit).toBe(rel.commit);
+      expect(rec.conclusion).toBe('pass');
+      expect(rec.tarball.filename).toBe('phnx-labs-agents-cli-1.0.1.tgz');
+      expect(rec.tarball.digest).toBe(tgz.digest);
+      expect(rec.derivedFrom.baseTree).toBe(baseTree);
+      // lock/policy are inherited from base (== the release tree's own values)
+      const baseRec = JSON.parse(fs.readFileSync(base, 'utf-8'));
+      expect(rec.lockfileDigest).toBe(baseRec.lockfileDigest);
+      expect(rec.policyVersion).toBe(baseRec.policyVersion);
+    });
+
+    it('a derived record satisfies require() for the release tree (round-trip)', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-rt-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'release-pretested');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status, d.out).toBe(0);
+      const src = path.join(store, 'derived.json');
+      fs.writeFileSync(src, d.out);
+      const written = sh(['write', '--dir', store, '--file', src], root);
+      expect(written.status, written.out).toBe(0);
+      const req = sh(['require', '--dir', store, '--tree', rel.tree, '--repo-root', root], root);
+      expect(req.status, req.out).toBe(0);
+    });
+
+    it('refuses when the release tree changes code beyond version/changelog/command-index', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-neg-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.mkdirSync(path.join(root, 'cli/src'), { recursive: true });
+        fs.writeFileSync(path.join(root, 'cli/src/foo.ts'), 'export const x = 1;\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'x');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status).not.toBe(0);
+      expect(d.out).toMatch(/cli\/src\/foo\.ts|beyond version\/changelog\/command-index/);
+    });
+
+    it('refuses a lockfile change (would silently ride a stale suite result)', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-lock-');
+      const base = baseAttestation(root, baseTree, store);
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'cli/bun.lock'), 'lock-v2\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'x');
+      const d = sh(['derive', '--base', base, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status).not.toBe(0);
+      expect(d.out).toMatch(/bun\.lock|beyond/);
+    });
+
+    it('refuses a base that is not a passing tarball proof', () => {
+      const { root, tree: baseTree } = initRepo();
+      const store = tmp('rel-attest-derive-badbase-');
+      const id = JSON.parse(sh(['identity', '--repo-root', root], root).out);
+      const badBase = path.join(store, 'bad.json');
+      fs.writeFileSync(
+        badBase,
+        record({
+          tree: baseTree,
+          lock: id.lockfileDigest,
+          policy: id.policyVersion,
+          filename: 'phnx-labs-agents-cli-1.0.0.tgz',
+          digest: `sha256:${'a'.repeat(64)}`,
+          conclusion: 'fail',
+        }),
+      );
+      const rel = releaseCommit(root, () => {
+        fs.writeFileSync(path.join(root, 'cli/package.json'), '{"version":"1.0.1"}\n');
+      });
+      const tgz = packTgz(store, 'phnx-labs-agents-cli-1.0.1.tgz', 'x');
+      const d = sh(['derive', '--base', badBase, '--tarball', tgz.path, '--repo-root', root, '--commit', rel.commit], root);
+      expect(d.status).not.toBe(0);
+    });
+  });
 });
