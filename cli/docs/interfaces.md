@@ -12,6 +12,14 @@ is off by default and enforced in the daemon for attach as well as launch.
 The reaper closes only tabs owned by abandoned tasks. It never closes user-created tabs
 or the shared browser window. Captures stay on disk; session linkage stores metadata.
 
+`agents browser start --device <host>` resolves the browser binary and profile on the
+TARGET, not the caller: a bare start forwards to the device rather than requiring a local
+browser, so a browserless box no longer fails with `No supported browser found`. Client
+readiness re-probes across an IPC-server restart (bounded, fail-loud) instead of throwing
+on a fixed ceiling, and `agents browser stop --daemon` stops the daemon and clears a stale
+`browser.sock` so the next `start` binds clean — the recovery path for a wedged
+`Timeout waiting for browser daemon socket` (PHNX-3289).
+
 ## Computer
 
 The CLI talks to a signed native helper. The helper enforces platform permissions, an

@@ -123,7 +123,7 @@ agents browser set viewport <width> <height>  Set viewport size
 agents browser show <url>                     Open a URL for a human to read: goes to browser.viewer (default: browser.profile), and binds no task
 agents browser start                          Start a browser task. Pass --profile <name>; omit to use your configured default (set it with `agents browser use <name>` or `agents setup`). Page verbs (navigate/screenshot/…) create a task implicitly when none exists — start is for --profile/--url/--record/--title.
 agents browser status                         Show running browser tasks
-agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)
+agents browser stop                           Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection); with --daemon, stop the browser daemon and clear a wedged socket
 agents browser stream                         Keep one process and daemon IPC socket open; read NDJSON requests from stdin and write NDJSON responses
 agents browser tab                            Manage tabs
 agents browser tab add                        Open URL in new tab (becomes current)

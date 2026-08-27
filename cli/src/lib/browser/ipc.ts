@@ -77,6 +77,31 @@ const SOCKET_NAME = 'browser.sock';
  */
 const IPC_CLOSE_TIMEOUT_MS = 1_500;
 
+/**
+ * How long {@link waitForSocket} waits for the browser daemon to come up before
+ * failing loud (PHNX-3289).
+ *
+ * The old flat 6s ceiling was the wedge: the shared daemon's browser IPC server
+ * restarts (version reconcile, supervisor restart, a hard-crashed predecessor's
+ * successor claiming the socket), and a client that started its wait *during*
+ * one of those restart windows could burn the whole 6s and throw
+ * `Timeout waiting for browser daemon socket` on an otherwise-healthy daemon. A
+ * browser start/navigate then failed intermittently and self-healed on the next
+ * try. 15s comfortably spans a restart; the stable-probe requirement below is
+ * what keeps a socket that "appears and is immediately destroyed" (#556) from
+ * being mistaken for a ready daemon.
+ */
+const SOCKET_WAIT_TIMEOUT_MS = 15_000;
+
+/**
+ * Consecutive successful probes required before {@link waitForSocket} declares
+ * the daemon ready. A single accept can land in the sliver between a restarting
+ * server binding and tearing back down; requiring two accepts ~100ms apart means
+ * we only return once the daemon is *staying* up, so the caller's real request
+ * doesn't race a restart it happened to probe mid-flight.
+ */
+const SOCKET_WAIT_STABLE_PROBES = 2;
+
 export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
 }
@@ -139,14 +164,114 @@ export async function isDaemonReachable(): Promise<boolean> {
   return probeDaemon(getIpcEndpoint());
 }
 
-async function waitForSocket(_socketPath: string, timeoutMs: number): Promise<void> {
+/**
+ * Wait until the browser daemon is genuinely reachable, or throw.
+ *
+ * Re-probes across the whole window rather than latching on the first accept, so
+ * it survives an IPC-server restart that happens mid-wait (PHNX-3289): a restart
+ * just resets the consecutive-accept counter, and the loop keeps going until the
+ * daemon is *stably* up or the deadline passes. Bounded and fail-loud — a daemon
+ * that never comes up throws a message naming the endpoint and the budget, never
+ * a silent hang.
+ */
+export async function waitForSocket(
+  _socketPath: string,
+  timeoutMs: number = SOCKET_WAIT_TIMEOUT_MS,
+): Promise<void> {
   const endpoint = getIpcEndpoint();
   const deadline = Date.now() + timeoutMs;
+  let consecutive = 0;
   while (Date.now() < deadline) {
-    if (await probeDaemon(endpoint)) return;
+    if (await probeDaemon(endpoint)) {
+      consecutive += 1;
+      if (consecutive >= SOCKET_WAIT_STABLE_PROBES) return;
+    } else {
+      // A dropped probe means a restart (or the daemon isn't up yet) — start the
+      // stability count over rather than counting accepts from before the gap.
+      consecutive = 0;
+    }
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  throw new Error('Timeout waiting for browser daemon socket');
+  throw new Error(
+    `Timeout waiting for browser daemon socket after ${Math.round(timeoutMs / 1000)}s (${endpoint}).`,
+  );
+}
+
+/** Outcome of {@link resetBrowserDaemon} — what the wedge-recovery actually did. */
+export interface BrowserDaemonResetResult {
+  /** The daemon was reachable before the reset and a stop was issued. */
+  wasRunning: boolean;
+  /** A leftover `browser.sock` file was unlinked (POSIX only). */
+  socketCleared: boolean;
+}
+
+/** How long {@link resetBrowserDaemon} waits for the endpoint to go quiet after
+ * signalling a stop before it clears the socket and re-checks. Bounded so the
+ * command fails loud instead of hanging on a daemon that will not die. */
+const DAEMON_RESET_QUIESCE_MS = 5_000;
+
+/**
+ * Clear a wedged browser daemon so a subsequent `start` comes up clean
+ * (PHNX-3289). Stops the shared daemon (the same `stopDaemon` path
+ * `reconcileDaemonVersion` uses for a stale-version restart), waits for the IPC
+ * endpoint to stop accepting, then unlinks any stale `browser.sock` a
+ * hard-crashed daemon left behind — the file a fresh `start` would otherwise
+ * `unlink` blindly, racing whatever still holds it.
+ *
+ * Fails loud: if the endpoint is *still* reachable after the quiesce window, a
+ * live server is holding it and clearing the socket under it would orphan two
+ * servers on one path, so we throw rather than pretend the reset worked. The
+ * daemon auto-restarts on the next browser command.
+ */
+export async function resetBrowserDaemon(): Promise<BrowserDaemonResetResult> {
+  const endpoint = getIpcEndpoint();
+  const wasRunning = await probeDaemon(endpoint);
+
+  stopDaemon();
+
+  // Wait for the listener to actually release the endpoint. We must decide
+  // reachability BEFORE touching the socket file: unlinking a path out from
+  // under a live server makes new connects ENOENT (so it would *look* cleared)
+  // while the server keeps running — the two-servers orphan the eviction
+  // protocol exists to prevent. So a still-reachable endpoint fails loud here,
+  // and only a genuinely dead one gets its stale file removed below.
+  const deadline = Date.now() + DAEMON_RESET_QUIESCE_MS;
+  let reachable = wasRunning;
+  while (reachable && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    reachable = await probeDaemon(endpoint);
+  }
+
+  if (reachable) {
+    throw new Error(
+      actionable(
+        'Browser daemon is still reachable after stop — a live server is holding the socket.',
+        `Endpoint: ${endpoint}`,
+        'Next: agents daemon status   (find and stop the process holding it)',
+      ),
+    );
+  }
+
+  // Nothing is listening now — clear the leftover socket file a hard-crashed
+  // daemon left behind, so the next `start` binds clean instead of unlinking it
+  // blindly. (Named pipes vanish with their owning process, so Windows has no
+  // stale file to clear.)
+  let socketCleared = false;
+  if (!IS_WINDOWS) {
+    const socketPath = getSocketPath();
+    if (fs.existsSync(socketPath)) {
+      try {
+        fs.unlinkSync(socketPath);
+        socketCleared = true;
+      } catch {
+        // Raced with a fresh start that already claimed it — the goal (no stale
+        // socket) still holds, so treat it as cleared rather than failing.
+        socketCleared = !fs.existsSync(socketPath);
+      }
+    }
+  }
+
+  return { wasRunning, socketCleared };
 }
 
 /**
@@ -982,7 +1107,7 @@ async function reconcileDaemonVersion(socketPath: string): Promise<void> {
   stopDaemon();
   startDaemon();
   if (!(await isDaemonReachable())) {
-    await waitForSocket(socketPath, 6000);
+    await waitForSocket(socketPath);
   }
   await new Promise((r) => setTimeout(r, 300));
 }
@@ -1115,7 +1240,7 @@ async function prepareIPC(
     }
     startDaemon();
     if (!(await isDaemonReachable())) {
-      await waitForSocket(socketPath, 6000);
+      await waitForSocket(socketPath);
     }
     if (!(await isDaemonReachable())) {
       throw new Error(

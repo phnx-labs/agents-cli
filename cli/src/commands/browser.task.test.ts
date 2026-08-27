@@ -176,4 +176,26 @@ describe('start --device validates the declaration (T3)', () => {
       /a task lives on one device/,
     );
   });
+
+  // PHNX-3289 fix 4: a bare `start --device <remote>` must route to the target
+  // BEFORE any local browser/profile resolution — the browser lives on the
+  // target. It used to resolve the profile here first, so a browserless box
+  // failed with a misleading "No supported browser found" (or, on a box that
+  // does have a browser, resolved and mis-attributed the profile) before the
+  // start ever reached the device. We assert it reaches the remote-dispatch
+  // path (an unregistered device fails loud with "Unknown device") and never
+  // touches local browser auto-pick — deterministic regardless of whether the
+  // host running the test has a Chromium browser installed.
+  it('routes a bare start to --device before resolving a local browser', async () => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mockExit();
+    await expect(
+      run(['start', '--device', 'ghost', '--task', 'post']),
+    ).rejects.toThrow(/process.exit 1/);
+    const err = error.mock.calls.map((c) => String(c[0])).join('\n');
+    // Reached the remote dispatch (past local resolution).
+    expect(err).toMatch(/Unknown device "ghost"/);
+    // Did NOT try to auto-pick / require a browser on THIS machine.
+    expect(err).not.toMatch(/No supported browser found/);
+  });
 });

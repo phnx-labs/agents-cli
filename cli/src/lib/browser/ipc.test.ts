@@ -7,8 +7,10 @@ import {
   formatBrowserDaemonNotRunningError,
   getSocketPath,
   isDaemonReachable,
+  resetBrowserDaemon,
   sendIPCRequest,
   shouldRestartStaleDaemon,
+  waitForSocket,
 } from './ipc.js';
 import { getHelpersDir } from '../state.js';
 import { ipcEndpoint } from '../platform/index.js';
@@ -423,4 +425,85 @@ describe('stampCallerIdentity — consent marker', () => {
     const { stampCallerIdentity } = await import('./ipc.js');
     expect(stampCallerIdentity({ action: 'navigate' } as never, {}).fleetRemote).toBeFalsy();
   });
+});
+
+// PHNX-3289 fix 3: waitForSocket must survive an IPC-server restart mid-wait —
+// it keeps re-probing until the daemon is *stably* up, rather than throwing on a
+// flat 6s ceiling that a restart window could exhaust. Driven against a real
+// net listener (startDaemon is mocked here, so nothing else brings one up).
+describe('waitForSocket (re-probes across a restart, fails loud on timeout)', () => {
+  it('resolves once a daemon comes up during the wait (the restart-window case)', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+
+    // Start the wait while NOTHING is listening — the exact moment a client hits
+    // during a restart. Bring a real listener up ~300ms later and assert the
+    // wait notices it instead of having latched a failure.
+    const waited = waitForSocket(socketPath, 5_000);
+
+    let server: net.Server | undefined;
+    setTimeout(() => {
+      server = net.createServer();
+      server.listen(ipcEndpoint(socketPath));
+    }, 300);
+
+    try {
+      await expect(waited).resolves.toBeUndefined();
+    } finally {
+      if (server) await new Promise<void>((resolve) => server!.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('throws a bounded, endpoint-named error when no daemon ever appears', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    await expect(waitForSocket(socketPath, 400)).rejects.toThrow(
+      /Timeout waiting for browser daemon socket/,
+    );
+  }, 20_000);
+});
+
+// PHNX-3289 fix 2: `agents browser stop --daemon` clears a wedged daemon so the
+// next start comes up clean. stopDaemon is mocked (no-op) here, so these drive
+// the socket-file + reachability logic directly.
+describe('resetBrowserDaemon (wedge recovery)', () => {
+  it('unlinks a stale socket file left by a crashed daemon', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    // A socket file on disk with NOTHING listening — the wedge.
+    writeFileSync(socketPath, '');
+    expect(await isDaemonReachable()).toBe(false);
+
+    const result = await resetBrowserDaemon();
+
+    expect(result.wasRunning).toBe(false);
+    expect(result.socketCleared).toBe(true);
+    // The stale file is gone, so a fresh start binds clean.
+    const { existsSync } = await import('fs');
+    expect(existsSync(socketPath)).toBe(false);
+    expect(await isDaemonReachable()).toBe(false);
+  }, 20_000);
+
+  it('is a no-op clear when there is no socket at all', async () => {
+    const result = await resetBrowserDaemon();
+    expect(result.wasRunning).toBe(false);
+    expect(result.socketCleared).toBe(false);
+  }, 20_000);
+
+  it('fails loud rather than unlinking a socket a LIVE server still holds', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    const server = net.createServer();
+    await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
+    try {
+      // stopDaemon is mocked to a no-op, so the live server keeps accepting —
+      // reset must refuse rather than unlink the path out from under it.
+      await expect(resetBrowserDaemon()).rejects.toThrow(/still reachable after stop/);
+      // The socket the live server owns was NOT removed.
+      const { existsSync } = await import('fs');
+      expect(existsSync(socketPath)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
 });

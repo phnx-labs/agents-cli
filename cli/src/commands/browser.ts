@@ -55,6 +55,7 @@ import {
   BrowserDaemonNotRunningError,
   formatBrowserDaemonNotRunningError,
   sendIPCRequest as sendRawIPCRequest,
+  resetBrowserDaemon,
 } from '../lib/browser/ipc.js';
 import type { IPCRequest, IPCResponse } from '../lib/browser/types.js';
 import {
@@ -408,6 +409,11 @@ export function registerBrowserCommand(program: Command): void {
 
       # Close tabs the daemon's own reaper would have caught on its next 5-min tick
       agents browser prune --dry-run
+
+      # Recover a wedged daemon ("Timeout waiting for browser daemon socket"):
+      # stop it and clear a stale socket, then start clean
+      agents browser stop --daemon
+      agents browser start
     `,
     notes: `
       Most agent workflows should use the 'browser' skill instead of raw subcommands.
@@ -1613,6 +1619,73 @@ function registerTaskCommands(browser: Command): void {
         }
       }
 
+      // Resolve an EXPLICIT --device BEFORE any local profile/browser
+      // resolution (PHNX-3289). The task lives on the TARGET device, so its
+      // browser binary and profile must resolve THERE. Resolving locally first
+      // made a browserless box fail with a misleading "No supported browser
+      // found" (bare start) or "Profile <x> not found" (a profile that lives
+      // only on the target) before the start ever routed to --device. This
+      // mirrors the hub path above: the target is the authority on its own
+      // profiles, so forward the whole start and let it validate. `local`/`self`
+      // force a local run; a fleet-remote re-exec is already ON the target and
+      // falls through to the local launch below.
+      const deviceName: string | undefined =
+        opts.device === 'local' || opts.device === 'self' ? undefined : opts.device;
+      if (deviceName) {
+        const lowered = deviceName.toLowerCase();
+        if (lowered === 'all' || lowered === 'auto') {
+          console.error(
+            `--device ${deviceName} is not valid on \`agents browser start\`: a task lives on one device.\n` +
+              `Next: agents browser start --task <name> --device <device>`,
+          );
+          process.exit(1);
+        }
+        if (!isSelfHost(deviceName) && !isFleetRemoteInvocation()) {
+          // Resolve the profile NAME (never a local browser auto-pick) so a
+          // named profile can still be validated against the target's
+          // declarations before we round-trip. A bare start carries no name to
+          // validate — the target picks its own default — so it forwards
+          // straight through, which is exactly what unblocks a browserless box.
+          const forwardProfile = await resolveProfileRef(opts.profile);
+          if (forwardProfile) {
+            try {
+              assertDeviceDeclaresProfile(deviceName, forwardProfile);
+            } catch (err) {
+              console.error(err instanceof Error ? err.message : String(err));
+              process.exit(1);
+            }
+          }
+          try {
+            const result = await dispatchBrowserToDevice(deviceName, browserForwardedArgv(), 'capture');
+            process.stdout.write(result.stdout);
+            process.stderr.write(result.stderr);
+            if (result.code !== 0) process.exit(result.code);
+            const taskName = opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
+            if (!taskName) {
+              console.error(`Remote start on ${deviceName} produced no task name.`);
+              process.exit(1);
+            }
+            bindTask(taskName, {
+              device: deviceName,
+              // Only the caller-named profile; the target's own default (bare
+              // start) is opaque here, exactly as in the hub path.
+              profile: forwardProfile ?? opts.profile,
+              url: opts.url,
+              sessionId: callerSessionId(),
+              launchId: callerLaunchId(),
+              createdAt: Date.now(),
+            });
+            if (!result.stderr.includes(`started on ${deviceName}`)) {
+              console.error(`Task "${taskName}" started on ${deviceName}.`);
+            }
+          } catch (err) {
+            console.error(err instanceof Error ? err.message : String(err));
+            process.exit(1);
+          }
+          return;
+        }
+      }
+
       // One resolution order for every command (RUSH-2709): `--profile default`
       // means the same profile here as it does in stop / status / navigate.
       // `start` is the one command that LAUNCHES, so its implicit path goes
@@ -1656,53 +1729,17 @@ function registerTaskCommands(browser: Command): void {
         }
       }
 
-      // The `browser.device` hub default is applied above (bare/--profile, no
-      // --device). Here only an EXPLICIT --device remains — with `local`/`self` as
-      // the escape that forces a local run when a hub is configured.
-      const deviceName: string | undefined =
-        opts.device === 'local' || opts.device === 'self' ? undefined : opts.device;
+      // Only the LOCAL launch reaches here — an explicit remote --device already
+      // forwarded and returned above. A residual `deviceName` means an explicit
+      // self target (or a fleet-remote re-exec on the target); its profile
+      // resolved locally, so verify this box actually declares it (the
+      // `profiles claim` hint lives in `assertDeviceDeclaresProfile`).
       if (deviceName) {
-        const lowered = deviceName.toLowerCase();
-        if (lowered === 'all' || lowered === 'auto') {
-          console.error(
-            `--device ${deviceName} is not valid on \`agents browser start\`: a task lives on one device.\n` +
-              `Next: agents browser start --task <name> --device <device>`,
-          );
-          process.exit(1);
-        }
         try {
           assertDeviceDeclaresProfile(deviceName, profileName);
         } catch (err) {
           console.error(err instanceof Error ? err.message : String(err));
           process.exit(1);
-        }
-        if (!isSelfHost(deviceName) && !isFleetRemoteInvocation()) {
-          try {
-            const result = await dispatchBrowserToDevice(deviceName, browserForwardedArgv(), 'capture');
-            process.stdout.write(result.stdout);
-            process.stderr.write(result.stderr);
-            if (result.code !== 0) process.exit(result.code);
-            const taskName = opts.task || result.stdout.trim().split('\n').find((line) => line.length > 0);
-            if (!taskName) {
-              console.error(`Remote start on ${deviceName} produced no task name.`);
-              process.exit(1);
-            }
-            bindTask(taskName, {
-              device: deviceName,
-              profile: profileName,
-              url: opts.url,
-              sessionId: callerSessionId(),
-              launchId: callerLaunchId(),
-              createdAt: Date.now(),
-            });
-            if (!result.stderr.includes(`started on ${deviceName}`)) {
-              console.error(`Task "${taskName}" started on ${deviceName} (profile: ${profileName}).`);
-            }
-          } catch (err) {
-            console.error(err instanceof Error ? err.message : String(err));
-            process.exit(1);
-          }
-          return;
         }
       }
 
@@ -1828,11 +1865,30 @@ function registerTaskCommands(browser: Command): void {
 
   browser
     .command('stop')
-    .description('Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection)')
+    .description('Stop a browser task and close its tabs; with --profile, detach the whole profile (close browser + drop cached connection); with --daemon, stop the browser daemon and clear a wedged socket')
     .option(TASK_OPTION_FLAG, TASK_OPTION_DESC)
     .option(DEVICE_ON_PAGE_VERB_FLAG, DEVICE_ON_PAGE_VERB_DESC)
     .option('-p, --profile <name>', 'Detach the whole profile (incl. composite "name@endpoint") instead of stopping a single task')
+    .option('--daemon', 'Stop the browser daemon entirely and clear a stale/wedged socket so the next start comes up clean (recovery for "Timeout waiting for browser daemon socket")')
     .action(async (opts) => {
+      if (opts.daemon) {
+        if (opts.profile || opts.task) {
+          console.error('--daemon stops the whole browser daemon; do not combine it with --profile or --task.');
+          process.exit(1);
+        }
+        try {
+          const result = await resetBrowserDaemon();
+          const parts: string[] = [];
+          parts.push(result.wasRunning ? 'Stopped browser daemon' : 'Browser daemon was not running');
+          if (result.socketCleared) parts.push('cleared stale socket');
+          console.log(`${parts.join('; ')}. It restarts on the next browser command.`);
+        } catch (err) {
+          console.error(err instanceof Error ? err.message : String(err));
+          process.exit(1);
+        }
+        return;
+      }
+
       if (opts.profile) {
         const profile = (await resolveProfileRef(opts.profile)) ?? opts.profile;
         const response = await sendIPCRequest({

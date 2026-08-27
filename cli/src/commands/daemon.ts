@@ -66,6 +66,7 @@ import {
   type HostedReceiverConfig,
 } from '../lib/daemon-webhooks.js';
 import { parseFunnelPort } from '../lib/funnel.js';
+import { parseEtimeToSeconds } from '../lib/secrets/reaper.js';
 
 // ─── Process scanning — which install owns the pid, and every duplicate ──────
 
@@ -304,12 +305,15 @@ function registryScopedDuplicates(processes: DaemonProcess[], ownerPid: number |
 }
 
 /** Elapsed wall-clock seconds since `pid` started, or null if unavailable (best-effort, POSIX only). */
-function uptimeSeconds(pid: number): number | null {
+export function uptimeSeconds(pid: number): number | null {
   if (process.platform === 'win32') return null;
   try {
-    const out = execFileSync('ps', ['-o', 'etimes=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
-    const n = parseInt(out, 10);
-    return isNaN(n) ? null : n;
+    // `-o etimes=` is a GNU/procps keyword macOS/BSD `ps` rejects with a
+    // non-zero exit (`ps: etimes: keyword not found`), so `agents daemon status`
+    // errored out entirely on macOS. `etime` (`[[dd-]hh:]mm:ss`) is the portable
+    // POSIX field; `parseEtimeToSeconds` (shared with the keychain reaper) parses it.
+    const out = execFileSync('ps', ['-o', 'etime=', '-p', String(pid)], { encoding: 'utf-8' }).trim();
+    return parseEtimeToSeconds(out);
   } catch {
     return null;
   }
