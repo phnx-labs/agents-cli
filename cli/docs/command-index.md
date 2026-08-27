@@ -837,9 +837,9 @@ agents tmux capture <target>          Print the contents of a pane. Target is "n
 agents tmux check                     Check whether tmux is installed and report its version.
 agents tmux has <name>                Exit 0 if a session with this name exists, 1 otherwise. Useful in shell scripts.
 agents tmux info <name>               Show provenance for a session (cmd, cwd, created_at, source, labels).
-agents tmux kill <name>               Kill one tmux session. Idempotent — exits 0 even if the session was already gone.
+agents tmux kill [name]               Kill one tmux session, or pick from a list that shows each pane's last screen. Idempotent.
 agents tmux kill-all                  Kill every session on the shared server and remove the socket. Requires --yes.
-agents tmux list                      List live tmux sessions on the shared server. Prunes stale meta files as a side effect.
+agents tmux list                      List live tmux sessions on the shared server (name, age, last screen line). Prunes stale meta files as a side effect.
 agents tmux new <name>                Start a detached tmux session running a command. The session persists until killed.
 agents tmux send <target> <keys>      Send keystrokes to a session. Target is "name" or "name:pane" (e.g. team:%2 or team:1).
 agents tmux split <name> <direction>  Split the active pane of a session. Direction: h (left/right) or v (top/bottom).
