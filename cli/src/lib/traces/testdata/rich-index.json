@@ -37,5 +37,29 @@
       { "key": "engineering", "date": "2026-08-25", "count": 1, "errorRate": 0.6666666666666666, "stallRate": 0 }
     ]
   ],
-  "driftSignals": []
+  "driftSignals": [],
+  "failurePatterns": [
+    {
+      "id": "58bca113",
+      "label": "exec_command: git guard denial",
+      "signature": { "tool": "exec_command", "cause": "guard", "key": "git-guard blocked" },
+      "sessions": 1,
+      "occurrences": 1,
+      "wastedMs": 0,
+      "exampleSessionIds": ["trace-rich-fixture"],
+      "drift": "up"
+    },
+    {
+      "id": "c7a7fd10",
+      "label": "exec_command: command failed",
+      "signature": { "tool": "exec_command", "cause": "real", "key": "command failed" },
+      "sessions": 1,
+      "occurrences": 1,
+      "wastedMs": 0,
+      "exampleSessionIds": ["trace-rich-fixture"],
+      "drift": "up"
+    }
+  ],
+  "wastedMsTotal": 0,
+  "latency": { "firstToolMs": { "p50": 0, "p90": 0, "p99": 0, "max": 0 } }
 }

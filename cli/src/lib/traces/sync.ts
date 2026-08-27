@@ -47,6 +47,8 @@ import {
   type TraceFailureCause,
   type TraceTopicGroup,
 } from './classify.js';
+import { computeInsights, type FailurePattern } from './insights.js';
+import type { LatencyInsight } from './segments.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -301,6 +303,12 @@ export interface TracesIndexShard {
   bucketHistory: BucketStats[][];
   /** Movement signals for buckets with ≥3 days of history. */
   driftSignals: DriftSignal[];
+  /** Cross-session failure clusters ranked by wasted time, from computeInsights(). Top-K, bounded. */
+  failurePatterns: FailurePattern[];
+  /** Sum of wastedMs across every cluster (not just the top-K rows above) — the headline number. */
+  wastedMsTotal: number;
+  /** Time-to-first-tool percentiles across this device's sessions. */
+  latency: LatencyInsight;
 }
 
 export interface IndexedSession {
@@ -314,8 +322,11 @@ export interface IndexedSession {
   flags: string[];
 }
 
-interface ToolCallRow {
+/** A row from `tool_calls`. `ordinal`/`timestamp` order calls within a session for computeInsights(). */
+export interface ToolCallRow {
   session_id: string;
+  ordinal: number;
+  timestamp: string;
   tool: string;
   outcome: string;
   exit_code: number | null;
@@ -331,7 +342,8 @@ function percentile(values: number[], ratio: number): number {
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
 }
 
-function failureDescription(call: ToolCallRow, cause: TraceFailureCause): string {
+/** Human description of a failed call, keyed by (tool, desc, cause) for grouping. Exported for computeInsights(). */
+export function failureDescription(call: ToolCallRow, cause: TraceFailureCause): string {
   if (cause === 'guard') return /main-branch-guard/i.test(`${call.error_code ?? ''} ${call.error ?? ''}`)
     ? 'main branch guard' : 'git guard';
   if (cause === 'hook') return 'auto-mode hook denial';
@@ -372,7 +384,7 @@ export function buildIndexShard(
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400);
     calls.push(...db.prepare(`
-      SELECT session_id, tool, outcome, exit_code, status_code, error_code, error, parse_error
+      SELECT session_id, ordinal, timestamp, tool, outcome, exit_code, status_code, error_code, error, parse_error
       FROM tool_calls
       WHERE session_id IN (${chunk.map(() => '?').join(',')})
     `).all(...chunk) as ToolCallRow[]);
@@ -490,6 +502,7 @@ export function buildIndexShard(
   const prevHistory = prevShard?.bucketHistory ?? [];
   const bucketHistory = [...prevHistory, todayStats].slice(-14);
   const driftSignals = computeDriftSignal(prevHistory, todayStats);
+  const patternInsights = computeInsights(rows, calls, prevShard);
 
   return {
     schema: 1,
@@ -511,6 +524,9 @@ export function buildIndexShard(
     },
     bucketHistory,
     driftSignals,
+    failurePatterns: patternInsights.failurePatterns,
+    wastedMsTotal: patternInsights.wastedMsTotal,
+    latency: patternInsights.latency,
   };
 }
 
@@ -539,6 +555,12 @@ export interface SessionDetail {
   /** Steps dropped from `steps` when a run was too long — surfaced so truncation is never silent. */
   truncatedSteps: number;
   whereItWentWrong: string | null;
+  /**
+   * Failed tool steps, surfaced even when `meta.outcome === 'completed'` — a run
+   * can finish without throwing while a tool call inside it failed (the
+   * LangSmith trap: a green run-level status hiding a real failure).
+   */
+  surfacedToolFailures: Array<{ tool?: string; label: string; detail?: string }>;
 }
 
 /** Plain-language summary of the friction in a run, or null when it ran clean. */
@@ -600,6 +622,9 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
     gaps: traj.gaps,
     truncatedSteps: traj.truncatedSteps,
     whereItWentWrong: buildWhereItWentWrong(traj),
+    surfacedToolFailures: traj.steps
+      .filter((step) => step.outcome === 'error')
+      .map((step) => ({ tool: step.tool, label: step.label, detail: step.detail })),
   };
 }
 

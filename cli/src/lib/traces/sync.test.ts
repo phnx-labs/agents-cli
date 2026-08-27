@@ -232,6 +232,14 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     expect(clean.whereItWentWrong).toBeNull();
     expect(clean.meta.outcome).toBe('completed');
   });
+
+  it('surfaces every failed step so a run-level view never hides a tool failure', () => {
+    const d = buildSessionDetail(baseTraj);
+    expect(d.surfacedToolFailures).toEqual([{ tool: 'Bash', label: 'git rebase', detail: undefined }]);
+
+    const clean = buildSessionDetail({ ...baseTraj, steps: [baseTraj.steps[1]], gaps: [], errorCount: 0 });
+    expect(clean.surfacedToolFailures).toEqual([]);
+  });
 });
 
 describe('traces sync --dry-run local export', () => {

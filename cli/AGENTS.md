@@ -39,10 +39,39 @@ Group-by dimensions for the console insight bar are pure functions in
 (time-to-first-tool percentiles from `steps[0].startMs`). The sync integrator
 wires them into the shard.
 
+**Cross-session failure clustering + wasted-time attribution** (PHNX-3141) is
+[`src/lib/traces/insights.ts`](src/lib/traces/insights.ts)'s `computeInsights()` —
+the piece that turns flat per-tool error counts into ranked, time-weighted
+**failure patterns**: failed `tool_calls` rows are grouped by `(tool, cause,
+normalized-error)` — volatile tokens (ids, counts, countdowns) stripped so 47
+near-identical "rate limit exceeded for user N" errors fold into one pattern —
+and each pattern accumulates `wastedMs` from the inter-call gap in `tool_calls`
+(`ordinal`/`timestamp`, already indexed) whenever the next call repeats the same
+signature (a retry loop) or the gap itself is a stall (≥60s). Patterns are
+**bounded top-K, ranked by wastedMs (impact) — never by raw occurrence count** —
+so a single rare multi-hour loop still outranks a frequent but cheap one.
+Cost stays proportional to this sync's row count (no transcript re-parsing), so
+it stays incremental at 10k+ session scale. **Known scope gap:** patterns do not
+yet carry a `phenotype` (false-termination / out-of-order / …,
+[`phenotype.ts`](src/lib/traces/phenotype.ts)) — that classification needs the
+full derived trajectory, which is only ever materialized per-session during
+upload, not cached the way per-session insight facets are; folding it in is a
+real follow-up, not a silent omission.
+
 | Field | Type | Description |
 |---|---|---|
 | `bucketHistory` | `BucketStats[][]` | 14-day rolling window. Each inner array is one day's per-bucket stats (errorRate = tool errors / total calls; stallRate = sessions with ≥1 stall / total sessions). |
 | `driftSignals` | `DriftSignal[]` | Buckets whose error or stall rate crossed ±0.20 vs the 7-day average. `severity`: `degrading | stable | improving`. Sorted by errorDelta desc. Buckets with <3 historical days are skipped. |
+| `failurePatterns` | `FailurePattern[]` | Top-25 cross-session failure clusters from `computeInsights()`, ranked by `wastedMs` desc. Each carries `signature` (tool/cause/normalized key), `sessions`, `occurrences`, `wastedMs` (estimate — labeled, never presented as exact), `exampleSessionIds` (≤5), and `drift` vs the same pattern id in the previous shard. |
+| `wastedMsTotal` | `number` | Sum of `wastedMs` across every cluster found this sync — not just the top-25 rows in `failurePatterns` above. |
+| `latency` | `LatencyInsight` | `{ firstToolMs: { p50, p90, p99, max } }` — time-to-first-tool percentiles, reusing `segments.ts`'s `computeLatency()` over each session's earliest `tool_calls` row. |
+
+Per-session `SessionDetail` also carries `surfacedToolFailures` — every failed
+step, listed unconditionally regardless of the run's overall outcome, so a
+session that ultimately succeeded (merged / tests-green) still shows the tool
+failures it hit along the way instead of hiding them behind a green run-level
+status (the failure this fixes: a coding-agent analogue of a monitoring tool
+reporting 0% error rate while a run burned hours in a failed-tool retry loop).
 
 On live sync, the prior shard is fetched from R2 before the PUT to seed history; failures (404, parse error) fall back to empty history. `--dry-run --out <dir>` seeds from the previous `index.json` in the output directory. Topic classification is lazily
 cached in the self-healing `session_topics` table by transcript mtime + size;
