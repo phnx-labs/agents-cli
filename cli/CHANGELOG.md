@@ -1,10 +1,5 @@
 # Changelog
 
-## Unreleased
-
-- **`agents insights output --json` and `agents insights cost --json` now honor every flag (PHNX bug — parent-option name collision).**
-  `--json`, `--since`, and `--by` share their long names with the `insights` parent command, so commander bound them to the parent at parse time and the `output`/`cost` leaves — which read their own `opts()` — never saw them: `--json` printed the human table (invalid for machine callers), `--by` fell back to the default agent grouping, and `--since` was ignored (defaulting to 7d). Both actions now read `command.optsWithGlobals()`, matching the sibling `insights mix` recipes. This unblocks the `yc:workweave` shipped-output engine, which shells `agents insights output --by project --json`. Source: `cli/src/commands/output.ts`, `cli/src/commands/cost.ts`.
-
 ## 1.22.53
 
 - **Custom-harness runs launched via a profile now show their real harness name in agents sessions instead of 'claude' (PHNX-2935).**
