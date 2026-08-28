@@ -49,6 +49,8 @@ import { machineId, normalizeHost } from '../lib/machine-id.js';
 import { loadDevices } from '../lib/devices/registry.js';
 import { assertDaemonEnabled } from '../lib/device-config.js';
 import { setHelpSections } from '../lib/help.js';
+import { isPidAlive } from '../lib/session/active.js';
+import { PID_WATCH_EXITED_TOKEN, pidLivenessCommand } from '../lib/monitors/pid-watch.js';
 import { isInteractiveTerminal, requireInteractiveSelection } from './utils.js';
 
 function stdoutJson(payload: unknown): void {
@@ -262,6 +264,22 @@ async function validateDevice(name: string): Promise<string> {
 function buildSource(options: Record<string, any>): MonitorSource {
   const chosen: Array<{ type: MonitorSourceType; source: MonitorSource }> = [];
   if (options.watch) chosen.push({ type: 'command', source: { type: 'command', command: options.watch } });
+  if (options.watchPid) {
+    const pid = Number(options.watchPid);
+    if (!Number.isInteger(pid) || pid < 1) {
+      stderrLine(chalk.red(`--watch-pid must be a positive integer pid, got '${options.watchPid}'`));
+      process.exit(1);
+    }
+    // Fail loud rather than silently arming a watcher on a corpse (PHNX-3023):
+    // a pid that is already gone at arm time can never transition to "exited",
+    // so the monitor would sit enabled and never fire.
+    if (!isPidAlive(pid) && !options.force) {
+      stderrLine(chalk.red(`Process ${pid} is not running — there is nothing to watch.`));
+      stderrLine(chalk.gray('Pass --force to arm it anyway (e.g. the pid is about to be spawned by a concurrent step).'));
+      process.exit(1);
+    }
+    chosen.push({ type: 'command', source: { type: 'command', command: pidLivenessCommand(pid) } });
+  }
   if (options.poll) {
     chosen.push({ type: 'poll', source: { type: 'poll', command: options.poll[0], interval: options.poll[1] } });
   }
@@ -295,7 +313,7 @@ function buildSource(options: Record<string, any>): MonitorSource {
   }
 
   if (chosen.length === 0) {
-    stderrLine(chalk.red('A source is required: --watch, --poll, --poll-http, --ws, --watch-file, --watch-device, or --on'));
+    stderrLine(chalk.red('A source is required: --watch, --watch-pid, --poll, --poll-http, --ws, --watch-file, --watch-device, or --on'));
     process.exit(1);
   }
   if (chosen.length > 1) {
@@ -305,7 +323,12 @@ function buildSource(options: Record<string, any>): MonitorSource {
   return chosen[0].source;
 }
 
-/** Parse the condition flags into a MonitorCondition (default on-change). */
+/**
+ * Parse the condition flags into a MonitorCondition (default on-change).
+ * `--watch-pid` with no explicit mode defaults to firing on exit rather than
+ * on-change, since "running"/"exited" is a two-value observation where
+ * on-change would fire the instant the daemon takes its first poll.
+ */
 function buildCondition(options: Record<string, any>): MonitorCondition {
   const modes: Array<MonitorCondition['mode']> = [];
   if (options.onChange) modes.push('on-change');
@@ -314,6 +337,9 @@ function buildCondition(options: Record<string, any>): MonitorCondition {
   if (modes.length > 1) {
     stderrLine(chalk.red('--on-change, --match, and --every are mutually exclusive'));
     process.exit(1);
+  }
+  if (options.watchPid && modes.length === 0) {
+    return { mode: 'match', match: PID_WATCH_EXITED_TOKEN };
   }
   const mode: MonitorCondition['mode'] = modes[0] ?? (options.match ? 'match' : 'on-change');
   const condition: MonitorCondition = { mode };
@@ -472,11 +498,17 @@ export function registerMonitorsCommands(program: Command): void {
       # A fleet box going loaded → spin up an agent
       agents monitors add box-loaded --watch-device yosemite-s0 --match loaded \\
         --run claude --prompt 'yosemite-s0 is loaded: {event}. Investigate.'
+
+      # A backgrounded shell that will never exit on its own (a watch loop, gh pr
+      # checks --watch, a long sleep) — arm a REAL watcher instead of trusting the
+      # harness's own exit hook (which only fires when the process dies):
+      agents monitors add pr-checks-1234 --watch-pid 48213 \\
+        --run claude --prompt 'PID 48213 exited: {event}. Resume and check the result.'
     `,
     notes: `
       A monitor is a routine whose trigger is a watched SOURCE instead of a clock.
       It has three parts:
-        - SOURCE    (--watch, --poll, --poll-http, --ws, --watch-file, --watch-device, --on)
+        - SOURCE    (--watch, --watch-pid, --poll, --poll-http, --ws, --watch-file, --watch-device, --on)
         - CONDITION (--on-change [default], --match <re>, --every; --dedupe-key)
         - ACTION    (--run <agent> --prompt, --routine, --notify, --webhook-out)
                     --postcondition <cmd> on --run/--routine asserts the effect
@@ -491,6 +523,11 @@ export function registerMonitorsCommands(program: Command): void {
       v1 evaluates poll sources (command, poll, poll-http, file, device). Push
       sources (ws, webhook) are accepted but delivered through a receiver wired in
       a follow-up.
+
+      --watch-pid <pid> refuses to arm (fails loud) when the pid is already dead —
+      a "will re-invoke me" watcher pointed at a corpse never fires. It defaults
+      the condition to fire on exit, unlike a raw --watch which defaults to
+      on-change.
     `,
   });
 
@@ -500,6 +537,7 @@ export function registerMonitorsCommands(program: Command): void {
     .description('Create a monitor from inline flags or a YAML file. Auto-starts the daemon unless daemon.enabled is false.')
     // SOURCE
     .option('--watch <cmd>', 'Run a shell command; its stdout is the observation')
+    .option('--watch-pid <pid>', 'Watch a backgrounded process for exit — a reliable, daemon-polled alternative to a harness exit hook. Fails loud if the pid is already gone. Defaults to firing on exit')
     .option('--poll <cmd...>', 'Re-run a command every interval: --poll "<cmd>" <interval> (e.g. 30s)')
     .option('--poll-http <url...>', 'GET a URL every interval: --poll-http <url> <interval> (e.g. 15m)')
     .option('--on <source:event>', 'Webhook trigger source: github:pull_request or linear:Issue')
@@ -538,7 +576,7 @@ export function registerMonitorsCommands(program: Command): void {
     .action(async (nameOrPath: string | undefined, options: Record<string, any>) => {
       // File mode: a single arg pointing at an existing .yml with no source flags.
       const hasSourceFlag = Boolean(
-        options.watch || options.poll || options.pollHttp || options.on || options.ws || options.watchFile || options.watchDevice,
+        options.watch || options.watchPid || options.poll || options.pollHttp || options.on || options.ws || options.watchFile || options.watchDevice,
       );
       if (!hasSourceFlag && nameOrPath && /\.ya?ml$/.test(nameOrPath) && fs.existsSync(path.resolve(nameOrPath))) {
         const resolved = path.resolve(nameOrPath);
