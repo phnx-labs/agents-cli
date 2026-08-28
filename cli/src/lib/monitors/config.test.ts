@@ -6,6 +6,8 @@ import {
   validateMonitor,
   parseInterval,
   monitorRunsOnThisDevice,
+  requiresSingleOwner,
+  resolveSharedInputOwner,
   writeMonitor,
   readMonitor,
   deleteMonitor,
@@ -116,6 +118,13 @@ describe('validateMonitor — source/action requirements', () => {
     expect(errors.some((e) => /mutually exclusive/.test(e))).toBe(true);
   });
 
+  it('accepts a boolean sharedInput and rejects a non-boolean', () => {
+    expect(validateMonitor(base({ sharedInput: true }))).toEqual([]);
+    expect(validateMonitor(base({ sharedInput: false }))).toEqual([]);
+    const errors = validateMonitor(base({ sharedInput: 'yes' as never }));
+    expect(errors.some((e) => /sharedInput must be a boolean/.test(e))).toBe(true);
+  });
+
   it('rejects a malformed rateLimit', () => {
     const errors = validateMonitor(base({ rateLimit: { max: 0, per: 'nope' } }));
     expect(errors.some((e) => /rateLimit\.max/.test(e))).toBe(true);
@@ -177,6 +186,82 @@ describe('monitorRunsOnThisDevice — owner semantics', () => {
   it('honors an allowlist', () => {
     expect(monitorRunsOnThisDevice({ devices: [machineId(), 'other'] })).toBe(true);
     expect(monitorRunsOnThisDevice({ devices: ['other-a', 'other-b'] })).toBe(false);
+  });
+
+  // ─── SING-9: an unpinned shared-input built-in must NOT fire on every box ──────
+  // The exact double-fire bug class the repo AGENTS.md names as blocking (the
+  // 2026-08-03 incident): a system built-in that polls a fleet-shared queue (a PR
+  // list, a tracker) ships enabled with no device pin, so without this guard every
+  // daemon fires it and races on the shared queue. `ownerHost` is passed
+  // explicitly so the placement rule is asserted without a live tailnet.
+  const OTHER_BOX = 'some-other-box-xyz';
+
+  it('an unpinned SYSTEM built-in does NOT fire on a non-owner box', () => {
+    // pr-merge-on-green shape: system scope, no device pin, mode `every`.
+    const builtin = { scope: 'system' as const };
+    // Owner is another box → this daemon must stay inert (no double-fire).
+    expect(monitorRunsOnThisDevice(builtin, OTHER_BOX)).toBe(false);
+    // Explicitly-declared shared-input, same result.
+    expect(monitorRunsOnThisDevice({ scope: 'system', sharedInput: true }, OTHER_BOX)).toBe(false);
+  });
+
+  it('an unpinned SYSTEM built-in fires only on the resolved owner box', () => {
+    expect(monitorRunsOnThisDevice({ scope: 'system' }, machineId())).toBe(true);
+  });
+
+  it('an unpinned SYSTEM built-in fires NOWHERE when no owner resolves (fail safe)', () => {
+    // Multi-box fleet, no interactive host pinned → no safe single owner. Firing
+    // nowhere (a silent no-op) beats a fleet-wide double-fire.
+    expect(monitorRunsOnThisDevice({ scope: 'system' }, '')).toBe(false);
+  });
+
+  it('a device-local built-in (sharedInput: false) still fires fleet-wide', () => {
+    // Input is the firing box's own state — every daemon may fire it, so the
+    // owner override never applies (ownerHost is irrelevant here).
+    expect(monitorRunsOnThisDevice({ scope: 'system', sharedInput: false }, OTHER_BOX)).toBe(true);
+  });
+
+  it('a built-in with an explicit device pin ignores the shared-input owner rule', () => {
+    expect(monitorRunsOnThisDevice({ scope: 'system', device: machineId() }, OTHER_BOX)).toBe(true);
+    expect(monitorRunsOnThisDevice({ scope: 'system', device: OTHER_BOX }, machineId())).toBe(false);
+  });
+
+  it('a USER monitor keeps its fleet-wide default; opts IN to owner-only with sharedInput', () => {
+    // Unpinned user monitor unchanged — fires everywhere (the operator owns
+    // single-executor discipline per SING-9).
+    expect(monitorRunsOnThisDevice({ scope: 'user' }, OTHER_BOX)).toBe(true);
+    expect(monitorRunsOnThisDevice({}, OTHER_BOX)).toBe(true);
+    // Explicit opt-in makes a user monitor owner-restricted too.
+    expect(monitorRunsOnThisDevice({ scope: 'user', sharedInput: true }, OTHER_BOX)).toBe(false);
+  });
+
+  it('requiresSingleOwner: default-safe for system, opt-in for user, pin wins', () => {
+    expect(requiresSingleOwner({ scope: 'system' })).toBe(true);
+    expect(requiresSingleOwner({ scope: 'system', sharedInput: false })).toBe(false);
+    expect(requiresSingleOwner({ scope: 'user' })).toBe(false);
+    expect(requiresSingleOwner({ scope: 'user', sharedInput: true })).toBe(true);
+    // A pin is an explicit executor choice — never owner-overridden.
+    expect(requiresSingleOwner({ scope: 'system', device: 'box' })).toBe(false);
+    expect(requiresSingleOwner({ scope: 'system', devices: ['box'] })).toBe(false);
+  });
+});
+
+describe('resolveSharedInputOwner — the single owner of an unpinned shared-input monitor', () => {
+  it('prefers the configured interactive host', () => {
+    expect(resolveSharedInputOwner('Yosemite-S0', ['zion', 'yosemite-s0'], 'zion')).toBe('yosemite-s0');
+  });
+
+  it('normalizes the interactive host (tailnet fqdn / case)', () => {
+    expect(resolveSharedInputOwner('Yosemite-S0.tailnet.ts.net', [], 'zion')).toBe('yosemite-s0');
+  });
+
+  it('falls back to self on a single-box fleet (no peer, no race)', () => {
+    expect(resolveSharedInputOwner(undefined, [], 'zion')).toBe('zion');
+    expect(resolveSharedInputOwner(undefined, ['zion'], 'zion')).toBe('zion');
+  });
+
+  it('returns undefined on a multi-box fleet with no interactive host (fail safe)', () => {
+    expect(resolveSharedInputOwner(undefined, ['zion', 'mark-1'], 'zion')).toBeUndefined();
   });
 });
 
