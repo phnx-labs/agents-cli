@@ -471,13 +471,39 @@ export interface RepoInfo {
   lastSync: string;
 }
 
-/** Canonical system repo cloned into ~/.agents/.system/. */
-export const DEFAULT_SYSTEM_REPO = 'gh:phnx-labs/.agents-system';
+/**
+ * Canonical system repo cloned into ~/.agents/.system/. Renamed from
+ * `.agents-system` — the `-system` suffix was redundant once the layering
+ * itself is the role (PHNX-3394). GitHub keeps a redirect across the rename and
+ * every existing fleet checkout still points at the old remote, so the old name
+ * stays recognized as the system origin (see {@link SYSTEM_REPO_SLUGS} and
+ * `isSystemRepoRemote` in git.ts) — this is an additive rename, not a cutover.
+ */
+export const DEFAULT_SYSTEM_REPO = 'gh:phnx-labs/.agents';
+
+/**
+ * Former name of the system repo, still recognized for back-compat. Fresh
+ * installs clone {@link DEFAULT_SYSTEM_REPO}; a box that already cloned this one
+ * keeps pulling from it (GitHub's rename redirect).
+ */
+export const LEGACY_SYSTEM_REPO = 'gh:phnx-labs/.agents-system';
 
 /** Strip the `gh:` prefix and `.git` suffix to get a GitHub `owner/repo` slug. */
 export function systemRepoSlug(repo: string = DEFAULT_SYSTEM_REPO): string {
   return repo.replace(/^gh:/, '').replace(/\.git$/, '');
 }
+
+/**
+ * Every `owner/repo` slug recognized as the system DotAgents repo — the new
+ * canonical name plus the legacy one. A checkout whose origin is ANY of these is
+ * the system layer, never a project layer. Lowercased for case-insensitive
+ * comparison. Recognition (both names) is mandatory back-compat; the clone
+ * target ({@link DEFAULT_SYSTEM_REPO}) is the new name only.
+ */
+export const SYSTEM_REPO_SLUGS: readonly string[] = [
+  systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase(),
+  systemRepoSlug(LEGACY_SYSTEM_REPO).toLowerCase(),
+];
 
 /** Kind of package that can be searched and installed from a registry. */
 export type RegistryType = 'mcp' | 'skill';

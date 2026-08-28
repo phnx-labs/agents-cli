@@ -150,10 +150,20 @@ else unions.
 |---|---|---|
 | `<repo>/.agents/` | **Project repo** — project-pinned commands / skills / hooks / rules. | Project maintainers |
 | `~/.agents/` | **User repo** — user resources + ALL operational state (versions, shims, sessions, `agents.yaml`, browser). | You / CLI |
-| `~/.agents/.system/` | **System repo** — npm-shipped defaults ONLY. | Maintainers (`gh:phnx-labs/.agents-system`) |
+| `~/.agents/.system/` | **System repo** — npm-shipped defaults ONLY. | Maintainers (`gh:phnx-labs/.agents`, formerly `.agents-system`) |
+
+The system repo was renamed `phnx-labs/.agents-system` → `phnx-labs/.agents`
+(PHNX-3394): the `-system` suffix was redundant once the layering itself is the
+role. The old name is still recognized as the system origin (GitHub keeps a
+rename redirect and every existing fleet checkout points at it), so this is an
+additive back-compat change, not a cutover — see `SYSTEM_REPO_SLUGS` in
+[`src/lib/types.ts`](src/lib/types.ts) and `isSystemRepoRemote` in
+[`src/lib/git.ts`](src/lib/git.ts).
 
 Extra repos register via `agents repo add <source>` → clone into `~/.agents-<alias>/`
-and participate after the user repo.
+and participate after the user repo. The companion extras repo
+`phnx-labs/.agents-extras` keeps its name but is now **private and opt-in**: it is
+not cloned by default and is added explicitly with `agents repo add`.
 
 ### 2. `AGENTS.md` is the canonical memory file
 

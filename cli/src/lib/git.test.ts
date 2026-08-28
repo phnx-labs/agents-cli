@@ -21,6 +21,8 @@ import {
   commitAndPush,
   commitsBehindUpstream,
   displayHomePath,
+  isSystemRepoOrigin,
+  isSystemRepoRemote,
   parseSource,
   pullRepo,
   pushOrigin,
@@ -725,6 +727,65 @@ describe('sameGitRemote (adopt-existing repo matching)', () => {
   it('canonicalizes to host/owner/repo', () => {
     expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-extras.git')).toBe('github.com/phnx-labs/.agents-extras');
     expect(canonicalGitRemote('https://github.com/phnx-labs/.agents-extras')).toBe('github.com/phnx-labs/.agents-extras');
+  });
+
+  it('folds the renamed system repo (.agents-system → .agents) so both names compare equal (PHNX-3394)', () => {
+    // The system repo was renamed; GitHub keeps a redirect and every existing
+    // fleet checkout still points at the old name, so the two must be equal.
+    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-system.git')).toBe('github.com/phnx-labs/.agents');
+    expect(canonicalGitRemote('https://github.com/phnx-labs/.agents-system')).toBe('github.com/phnx-labs/.agents');
+    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents.git')).toBe('github.com/phnx-labs/.agents');
+    expect(sameGitRemote('git@github.com:phnx-labs/.agents-system.git', 'https://github.com/phnx-labs/.agents')).toBe(true);
+    // The extras repo keeps its name — it must NOT be folded onto anything.
+    expect(sameGitRemote('git@github.com:phnx-labs/.agents-extras.git', 'https://github.com/phnx-labs/.agents')).toBe(false);
+  });
+});
+
+describe('isSystemRepoRemote / isSystemRepoOrigin (PHNX-3394 additive rename)', () => {
+  it('recognizes BOTH the new canonical name and the legacy name across transports', () => {
+    // New canonical name.
+    expect(isSystemRepoRemote('git@github.com:phnx-labs/.agents.git')).toBe(true);
+    expect(isSystemRepoRemote('https://github.com/phnx-labs/.agents.git')).toBe(true);
+    expect(isSystemRepoRemote('https://github.com/phnx-labs/.agents')).toBe(true);
+    expect(isSystemRepoRemote('ssh://git@github.com/phnx-labs/.agents')).toBe(true);
+    // Legacy name — every existing fleet box has this remote and must keep working.
+    expect(isSystemRepoRemote('git@github.com:phnx-labs/.agents-system.git')).toBe(true);
+    expect(isSystemRepoRemote('https://github.com/phnx-labs/.agents-system.git')).toBe(true);
+    expect(isSystemRepoRemote('https://github.com/phnx-labs/.agents-system')).toBe(true);
+    expect(isSystemRepoRemote('ssh://git@github.com/phnx-labs/.agents-system')).toBe(true);
+  });
+
+  it('rejects unrelated repos and empty input', () => {
+    expect(isSystemRepoRemote('git@github.com:phnx-labs/.agents-extras.git')).toBe(false);
+    expect(isSystemRepoRemote('https://github.com/acme/.agents')).toBe(false);
+    expect(isSystemRepoRemote(null)).toBe(false);
+    expect(isSystemRepoRemote(undefined)).toBe(false);
+    expect(isSystemRepoRemote('')).toBe(false);
+  });
+
+  it('reads a real checkout origin (no mocks) for both names', async () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'sysrepo-origin-'));
+    try {
+      for (const url of [
+        'https://github.com/phnx-labs/.agents.git',
+        'git@github.com:phnx-labs/.agents-system.git',
+      ]) {
+        const dir = fs.mkdtempSync(path.join(base, 'repo-'));
+        const git = simpleGit(dir);
+        await git.init();
+        await git.addRemote('origin', url);
+        expect(await isSystemRepoOrigin(dir)).toBe(true);
+      }
+
+      // An unrelated origin is not the system repo.
+      const other = fs.mkdtempSync(path.join(base, 'repo-'));
+      const otherGit = simpleGit(other);
+      await otherGit.init();
+      await otherGit.addRemote('origin', 'https://github.com/phnx-labs/.agents-extras.git');
+      expect(await isSystemRepoOrigin(other)).toBe(false);
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });
 

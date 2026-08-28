@@ -394,7 +394,8 @@ the exception.
 - **Core command groups stay in sync with fleet guidance.** A change to a core
   group such as `sessions`, `devices`, `teams`, `run`, `secrets`, or `browser`
   MUST audit the hooks, skills, commands, and rules in the companion
-  `phnx-labs/.agents-system` repo that invoke or teach that group. Land the
+  `phnx-labs/.agents` repo (formerly `.agents-system`) that invoke or teach that
+  group. Land the
   relevant companion edits in the same delivery and link both PRs; when the
   audit finds no consumer, state that explicitly in the agents-cli PR. A CLI
   surface is incomplete while the fleet guidance still teaches its old shape.

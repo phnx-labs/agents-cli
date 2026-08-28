@@ -327,7 +327,7 @@ Examples:
   agents mcp add gh:user/repo --agents claude@all
 
   # Install specific servers by name
-  agents mcp add gh:phnx-labs/.agents-system --names notion,figma --agents claude
+  agents mcp add gh:phnx-labs/.agents --names notion,figma --agents claude
 `)
     .action(async (name: string, commandOrUrl: string[], options) => {
       // Repo-source form: `agents mcp add gh:user/repo [--names a,b] [--agents …]`
