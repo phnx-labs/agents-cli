@@ -577,7 +577,7 @@ export function getIsolatedDefault(agent: AgentId): string | null {
  *
  * It lives at the version-dir root (a sibling of `home/`), so it is carried
  * along when `softDeleteVersionDir` moves the whole directory to trash and is
- * restored intact by `agents trash restore`. Its mere presence is the marker;
+ * restored intact by `agents restore`. Its mere presence is the marker;
  * the contents are an informational timestamp only.
  */
 function getIsolatedMarkerPath(agent: AgentId, version: string): string {
