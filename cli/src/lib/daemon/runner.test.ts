@@ -10,6 +10,8 @@ import type { JobConfig, RunMeta } from '../scheduling/routines.js';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
 import { hardDeprecationError } from '../agents.js';
+import { writeAuthHealthEntries, authCacheKey } from '../auth-health.js';
+import { machineId } from '../machine-id.js';
 import type { RotateCandidate, RotateResult } from '../accounting/rotate.js';
 import { saveTask, hostsCacheDir } from '../hosts/tasks.js';
 import { _resetPerfDbForTest, aggregateSamples } from '../perf/db.js';
@@ -241,6 +243,66 @@ describeSpawn('runner hard-deprecation enforcement (RUSH-2202)', () => {
     // No cloud dispatch happened — no cloudTaskId/cloudProvider was ever set.
     expect(meta.cloudTaskId).toBeUndefined();
     expect(meta.cloudProvider).toBeUndefined();
+  });
+});
+
+
+describeSpawn('runner fire-time auth preflight (PHNX-3415)', () => {
+  // Proves the runner.ts WIRING, not just the extracted pure function
+  // (routine-readiness.auth.test.ts covers fireTimeAuthReadiness in isolation): a
+  // routine whose resolved account is provably signed out records a terminal
+  // `blocked`/`agent_auth_failed` run — with the re-login repair, exitCode/pid
+  // null, and nothing spawned — through the real executeJob/executeJobDetached
+  // call sites, instead of a `failed` run that spawned and 401'd.
+  //
+  // A PINNED version resolves through `resolveRoutineLaunch` without a live
+  // credential (the pin returns its own chain — runner.ts:1069), so the fire-time
+  // cache preflight downstream is what's exercised; `sandbox: false` keeps the run
+  // out of a version-home overlay it need not build. This is the real signed-out
+  // pinned-routine scenario, not a synthetic one.
+  afterEach(() => {
+    cleanupJobRuns('auth-preflight-fg');
+    cleanupJobRuns('auth-preflight-detached');
+  });
+
+  /** Seed the daemon-warmed auth-health cache (isolated HOME) for claude@version. */
+  function seedAuth(version: string, verdict: 'revoked' | 'unconfigured', account?: string): void {
+    writeAuthHealthEntries({
+      [authCacheKey(machineId(), 'claude', version)]: { verdict, checkedAt: Date.now(), ...(account ? { account } : {}) },
+    });
+  }
+
+  it('executeJob blocks a signed-out (revoked) pinned account with a visible run record — no spawn', async () => {
+    const version = '9.3.101';
+    seedAuth(version, 'revoked', 'bot@example.com');
+    const config = baseConfig({ name: 'auth-preflight-fg', agent: 'claude', version, sandbox: false });
+    const { meta, reportPath } = await executeJob(config);
+
+    expect(meta.status).toBe('blocked');
+    expect(meta.exitCode).toBeNull();
+    expect(meta.pid).toBeNull();
+    expect(meta.readiness?.code).toBe('agent_auth_failed');
+    expect(meta.readiness?.repair).toBe(`agents run claude@${version} -- login`);
+    expect(meta.errorMessage).toContain('agent_auth_failed');
+    expect(reportPath).toBeNull();
+
+    // Persisted, not just returned — `agents routines runs` sees the same block.
+    const persisted = readRunMeta(config.name, meta.runId);
+    expect(persisted?.status).toBe('blocked');
+    expect(persisted?.readiness?.code).toBe('agent_auth_failed');
+  });
+
+  it('executeJobDetached blocks a signed-out (unconfigured) pinned account without spawning', async () => {
+    const version = '9.3.102';
+    seedAuth(version, 'unconfigured');
+    const config = baseConfig({ name: 'auth-preflight-detached', agent: 'claude', version, sandbox: false });
+    const meta = await executeJobDetached(config);
+
+    expect(meta.status).toBe('blocked');
+    expect(meta.exitCode).toBeNull();
+    expect(meta.pid).toBeNull();
+    expect(meta.readiness?.code).toBe('agent_auth_failed');
+    expect(meta.readiness?.repair).toBe(`agents run claude@${version} -- login`);
   });
 });
 
