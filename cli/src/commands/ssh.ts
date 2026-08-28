@@ -2487,6 +2487,13 @@ box; \`agents doctor\` names it.
 
 A box whose probe cannot answer (no POSIX shell, e.g. Windows) is reported
 \`unverified\` rather than counted as a success.
+
+The upgrade OWNS its global bin links: after installing, it verifies that
+\`<prefix>/bin/{agents,ag,browser,computer}\` resolve to the freshly-installed
+copy and RESTORES any the package manager dropped — the state that once left a
+box upgraded in place but with every \`agents\` invocation "command not found"
+(PHNX-2768). A link it cannot make resolve fails the upgrade loud, so that box
+is reported \`failed\` (exit non-zero), never a stranded \`ok\`.
 `)
     .action(async (version: string | undefined) => {
       let cmd: string[];

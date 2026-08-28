@@ -532,6 +532,114 @@ export function refreshAliasShims(packageRoot: string): void {
   });
 }
 
+/** One global bin link the upgrade reconciled: what it is and what happened. */
+export interface BinLinkRepair {
+  /** The `package.json#bin` key (`agents`, `ag`, `browser`, `computer`). */
+  name: string;
+  /** `<prefix>/bin/<name>` — the PATH entry the box's shell resolves. */
+  linkPath: string;
+  /** Absolute path the link must resolve to (`<packageRoot>/<bin target>`). */
+  target: string;
+  /**
+   * `ok` — already resolved to the freshly-installed target.
+   * `repaired` — was missing / dangling / pointing elsewhere, now relinked.
+   * `failed` — could not be made to resolve (see `error`).
+   */
+  action: 'ok' | 'repaired' | 'failed';
+  /** Set only for `failed`: why the relink did not take. */
+  error?: string;
+}
+
+/** Resolve `p` through symlinks, or null when it does not resolve (missing/dangling). */
+function realpathOrNull(p: string): string | null {
+  try {
+    return fs.realpathSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reconcile one `<binDir>/<name>` link to `target`. A link that already resolves
+ * to `target` is left untouched (`ok`); anything else — absent, dangling, or
+ * pointing at a stale/foreign path — is replaced with a fresh **relative**
+ * symlink (`../lib/node_modules/@phnx-labs/agents-cli/dist/index.js`), the exact
+ * shape npm and the by-hand zion repair both produced, then re-verified. A
+ * repair that still does not resolve (target missing, unwritable bin dir) is
+ * reported `failed` with the reason rather than silently swallowed.
+ */
+function reconcileBinLink(name: string, linkPath: string, target: string): BinLinkRepair {
+  const wanted = realpathOrNull(target);
+  if (wanted !== null && realpathOrNull(linkPath) === wanted) {
+    return { name, linkPath, target, action: 'ok' };
+  }
+  try {
+    fs.mkdirSync(path.dirname(linkPath), { recursive: true });
+    // Replace whatever is there (a dangling link, a stale link, or nothing).
+    fs.rmSync(linkPath, { force: true });
+    fs.symlinkSync(path.relative(path.dirname(linkPath), target), linkPath);
+    const resolved = realpathOrNull(linkPath);
+    if (resolved !== null && resolved === realpathOrNull(target)) {
+      return { name, linkPath, target, action: 'repaired' };
+    }
+    return {
+      name,
+      linkPath,
+      target,
+      action: 'failed',
+      error:
+        resolved === null
+          ? `link created but still does not resolve (is ${target} present?)`
+          : `link resolves to ${resolved}, not ${target}`,
+    };
+  } catch (err) {
+    return { name, linkPath, target, action: 'failed', error: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/**
+ * The global bin links the upgrade OWNS: `<prefix>/bin/<name>` for every
+ * `package.json#bin` entry (`agents`, `ag`, `browser`, `computer`).
+ *
+ * npm creates these on a normal `install -g`, but a box with several installs
+ * (or a reify interrupted after the old links were retired) can end an upgrade
+ * with the package at the new version and these links **missing** — the state
+ * that stranded zion (PHNX-2768): `/opt/homebrew/lib/node_modules/...` at
+ * 1.22.40 but `/opt/homebrew/bin/{agents,ag,browser,computer}` gone, so every
+ * `agents` invocation was "command not found" until the links were relinked by
+ * hand. The rollout probe reported it `unverified`; the box was left broken.
+ *
+ * So the upgrade verifies these links right after installing and **restores any
+ * that are wrong** — covering the sibling entrypoints, not just `agents`, since
+ * `ag`/`browser`/`computer` share the same failure. Each link is reconciled
+ * independently; a link that cannot be made to resolve is reported `failed` so
+ * the caller can fail loud (the rollout then marks the box failed, not merely
+ * unverified) instead of returning a box the package upgraded but cannot run.
+ *
+ * POSIX only — Windows npm bins are `.cmd`/`.ps1` shims, not symlinks, so this
+ * relink shape does not apply and the caller skips it there. `prefix` is the
+ * npm global prefix from {@link deriveGlobalPrefix}; the bun path uses its own
+ * bin layout and is out of scope.
+ */
+export function ensureGlobalBinLinks(packageRoot: string, prefix: string): BinLinkRepair[] {
+  let bin: Record<string, string>;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(packageRoot, 'package.json'), 'utf-8'));
+    bin = pkg && typeof pkg.bin === 'object' && pkg.bin !== null ? (pkg.bin as Record<string, string>) : {};
+  } catch (err) {
+    throw new Error(
+      `could not read bin entries from ${path.join(packageRoot, 'package.json')}: ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+  const binDir = path.join(prefix, 'bin');
+  const repairs: BinLinkRepair[] = [];
+  for (const [name, rel] of Object.entries(bin)) {
+    if (typeof rel !== 'string' || !rel) continue;
+    repairs.push(reconcileBinLink(name, path.join(binDir, name), path.resolve(packageRoot, rel)));
+  }
+  return repairs;
+}
+
 /**
  * The package root a resolved `agents` entrypoint belongs to, or null when the
  * path is not an agents-cli entry at all. Two shipped shapes:
