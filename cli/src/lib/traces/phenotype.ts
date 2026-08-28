@@ -233,15 +233,32 @@ function reasonOutOfOrder(session: SessionDetail): string {
 }
 
 /**
+ * The **work signature** of a step — what work it represents, so a later success
+ * can be matched back to the specific failure it resolves. For a shell step this
+ * is the effective program (`bun`, `git`, `gh`, …, from `TrajectoryStep.program`),
+ * so a failed `bun test` is resolved by a later `bun test` but NOT by an incidental
+ * `ls`. For any other tool it is the tool identity, so a failed `Edit` is resolved
+ * by a later successful `Edit`, not by an unrelated `Read`. A shell step whose
+ * command did not parse (no `program`) degrades to the bare tool name, matching
+ * the pre-`program` behavior only for that unparseable minority.
+ */
+function workSignature(step: SessionDetail['steps'][number]): string {
+  const tool = step.tool ?? step.lane;
+  if (SHELL_TOOLS.has(tool) && step.program) return `${tool}:${step.program}`;
+  return tool;
+}
+
+/**
  * Did a run that hit tool errors nonetheless *recover and finish*?
  *
  * The causal recovery test: a **substantive** tool step (not a human-facing
  * `AskUserQuestion` / `SendMessage` / `wait`) SUCCEEDED strictly AFTER the last
- * error's ordinal. A trailing incidental success unrelated to the failure (an
- * `ls`), or a punt to a human, is NOT recovery — the first is caught because a
- * lone unrelated ok that is itself the last substantive step still requires a
- * *later* ordinal than the last error; the second because human-facing tools are
- * excluded from the substantive set entirely.
+ * error's ordinal, AND that success resolves the failed work — its
+ * {@link workSignature} matches an errored step's. A later success of *unrelated*
+ * work does NOT count: a `bun test` failure followed by an incidental `ls` leaves
+ * the failed test unresolved, so the run stays errored, even though the `ls`
+ * succeeded after it. A punt to a human is excluded twice over — human-facing
+ * tools are outside the substantive set, and they never match a failed signature.
  *
  * This is the single source of truth for "did this finish", shared by the
  * false-termination phenotype below and `sync.ts`'s `deriveRunOutcome` — so a
@@ -257,8 +274,16 @@ export function recoveredAfterErrors(session: Pick<SessionDetail, 'steps'>): boo
   if (last.outcome === 'error') return false;
   const lastErrorOrdinal = lastStepOrdinalOf(session, (s) => s.outcome === 'error');
   if (lastErrorOrdinal === undefined) return true;
+  const failedSignatures = new Set<string>();
+  for (const s of session.steps) {
+    if (s.outcome === 'error') failedSignatures.add(workSignature(s));
+  }
   return substantive.some(
-    (s) => s.ordinal > lastErrorOrdinal && s.outcome === 'ok' && !HUMAN_FACING_TOOLS.has(s.tool ?? s.lane),
+    (s) =>
+      s.ordinal > lastErrorOrdinal &&
+      s.outcome === 'ok' &&
+      !HUMAN_FACING_TOOLS.has(s.tool ?? s.lane) &&
+      failedSignatures.has(workSignature(s)),
   );
 }
 

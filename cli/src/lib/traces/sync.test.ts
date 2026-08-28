@@ -369,8 +369,9 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
 // `completed` while still surfacing the failure it recovered from; a run that
 // punted to a human or ended unresolved stays `errored` (no regression).
 describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
-  const step = (ordinal: number, tool: string, outcome: 'ok' | 'error', label: string) => ({
+  const step = (ordinal: number, tool: string, outcome: 'ok' | 'error', label: string, program?: string) => ({
     ordinal, kind: 'tool' as const, lane: tool, tool, startMs: ordinal * 10, durationMs: 5, outcome, label,
+    ...(program ? { program } : {}),
   });
   const traj = (steps: ReturnType<typeof step>[]) => ({
     session: { id: 's', agent: 'claude', model: 'opus-4-8', cwd: '/home/x/repo', costUsd: 0 },
@@ -412,6 +413,31 @@ describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
       step(2, 'Bash', 'error', 'bun test'), // the task fails and the run ends
     ]));
     expect(d.meta.outcome).toBe('errored'); // no regression vs errorCount-based derivation
+  });
+
+  it('an incidental later success of unrelated work does not rescue the failure → errored', () => {
+    // The regression the review reproduced: a failed `bun test` followed by an
+    // incidental `ls` that succeeds AFTER it. The `ls` occurs later, but it does
+    // not resolve the failed test — its work signature (`Bash:ls`) differs from the
+    // failure's (`Bash:bun`) — so the run must stay `errored`, not flip to
+    // `completed`. (The shell `program` is what distinguishes the two Bash calls.)
+    const d = buildSessionDetail(traj([
+      step(1, 'Bash', 'error', 'bun test', 'bun'), // the task fails
+      step(2, 'Bash', 'ok', 'ls', 'ls'), // incidental, unrelated — runs AFTER the failure
+    ]));
+    expect(d.meta.errorCount).toBe(1);
+    expect(d.meta.outcome).toBe('errored');
+  });
+
+  it('a genuine retry of the failed work after the error → completed', () => {
+    // Contrast to the incidental case: the SAME program that failed is re-run and
+    // succeeds after an intervening fix, so the failure is resolved → completed.
+    const d = buildSessionDetail(traj([
+      step(1, 'Bash', 'error', 'bun test', 'bun'), // the task fails
+      step(2, 'Edit', 'ok', 'fix the bug'),
+      step(3, 'Bash', 'ok', 'bun test', 'bun'), // …and passes on retry (same program)
+    ]));
+    expect(d.meta.outcome).toBe('completed');
   });
 
   it('a clean run with zero errors is completed', () => {
