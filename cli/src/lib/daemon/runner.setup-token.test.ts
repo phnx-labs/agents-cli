@@ -144,4 +144,23 @@ describe('buildRoutineSpawnEnv — CLAUDE_CODE_OAUTH_TOKEN handling', () => {
       expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
     });
   });
+
+  // A DESKTOP device is in the same headed bucket as personal (isHeadedDeviceRole):
+  // a headed always-on box holds a real per-version login, so a routine there must
+  // ALSO defer to it, never the worker setup-token (PHNX-3392).
+  describe('on a desktop device', () => {
+    it('does NOT inject a provisioned setup-token — defers to the per-version login', () => {
+      const device = `phnx-3392-desktop-defer-${process.pid}`;
+      process.env.AGENTS_SYNC_MACHINE_ID = device;
+      setConfiguredDeviceRole(device, 'desktop');
+      const version = `phnx-3392-desktop-defer-v-${process.pid}`;
+      const email = 'alpha@example.com';
+      makeVersionHome(version, email);
+      writeAuthBundle({ [claudeAccountTokenKey(email)]: 'sk-ant-oat01-alpha' });
+
+      const env = buildRoutineSpawnEnv({ ...process.env } as Record<string, string>, 'claude', version);
+
+      expect(env.CLAUDE_CODE_OAUTH_TOKEN).toBeUndefined();
+    });
+  });
 });

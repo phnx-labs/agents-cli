@@ -425,8 +425,8 @@ interface UsageOptions {
    * When true, a read that finds no file-based setup-token MAY fall through to
    * Claude Code's interactive OAuth login (the only credential carrying
    * `user:profile`, which `/api/oauth/usage` requires). OFF by default and set
-   * ONLY by a foreground human `agents view` on a `personal` device (see
-   * USAGE-READ-2). Every background caller — daemon usage warm, auth-health
+   * ONLY by a foreground human `agents view` on a headed device (personal or
+   * desktop; see USAGE-READ-2). Every background caller — daemon usage warm, auth-health
    * probe, watchdog — leaves it unset, preserving the RUSH-1822 guarantee that
    * an unattended loop never transmits the interactive login to Anthropic.
    */
@@ -2062,7 +2062,7 @@ export async function loadClaudeOauth(
     // setup-token via the mint-auth path to restore usage/probe for the account.
     //
     // The single sanctioned exception (USAGE-READ-1/2): a foreground human
-    // `agents view` on a `personal` device sets allowInteractiveLogin, and only
+    // `agents view` on a headed device (personal or desktop) sets allowInteractiveLogin, and only
     // then do we fall through to the interactive-login read below — the one
     // credential carrying `user:profile`, which the usage endpoint requires. This
     // is a human running one command, not an unattended loop, so it is not the
