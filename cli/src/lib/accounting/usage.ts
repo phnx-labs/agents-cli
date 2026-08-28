@@ -336,6 +336,12 @@ const USAGE_BAR_LEN = 10;
 const FULL = '\u2588';
 const EMPTY = '\u2591';
 const PARTIAL_BLOCKS = ['', '\u258F', '\u258E', '\u258D', '\u258C', '\u258B', '\u258A', '\u2589'];
+// A window we EXPECTED but have no reading for \u2014 e.g. Claude's 5h "session"
+// window when the account has no usage in the current rolling window, so the
+// usage API returns five_hour.utilization = null and no session bar is written.
+// It must read as neither 0% (EMPTY '\u2591') nor 100% (FULL '\u2588') \u2014 a full block was
+// alarming and looked maxed-out \u2014 so use a dashed row that says "no data".
+const NO_DATA = '\u2504';
 
 /** Discriminator for usage window types. */
 export type UsageWindowKey = 'session' | 'week' | 'sonnet_week' | 'month';
@@ -943,7 +949,7 @@ export function formatUsageSummary(
       : selected.map((window) => ({ window, shortLabel: window.shortLabel }));
     const windowParts = windowsToRender.map(({ window, shortLabel }, index) => {
       if (!window) {
-        const missing = chalk.red(`${shortLabel}: ${FULL.repeat(COMPACT_BAR_LEN)} unavailable`);
+        const missing = chalk.dim(`${shortLabel}: ${NO_DATA.repeat(COMPACT_BAR_LEN)} unavailable`);
         return index < windowsToRender.length - 1 ? padToWidth(missing, 20) : missing;
       }
       const bar = renderCompactUsageBar(window.usedPercent);
