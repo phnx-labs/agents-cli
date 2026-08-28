@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as crypto from 'node:crypto';
 import * as yaml from 'yaml';
+import chalk from 'chalk';
 import { atomicWriteFileSync } from './fs-atomic.js';
 import { getUserAgentsDir, readMeta, updateMeta } from './state.js';
 import type { AgentId, Meta } from './types.js';
@@ -464,7 +465,7 @@ export function removeAccount(name: string, base = getUserAgentsDir()): void {
   const account = findAccount(name, readAccountRegistry(base));
   if (!account) throw new Error(`Unknown account '${name}'.`);
   const bindings = accountBindings(account.id, meta);
-  const defaults = Object.entries(meta.accounts?.defaults ?? {}).filter(([, id]) => id === account.id).map(([agent]) => agent);
+  const defaults = Object.entries(meta.accounts?.defaults ?? {}).filter(([, value]) => value === account.id || value === account.name).map(([agent]) => agent);
   if (bindings.length || defaults.length) {
     const refs = [...bindings.map(target => `binding ${target}`), ...defaults.map(agent => `default ${agent}`)];
     throw new Error(`Account '${account.name}' is still referenced by: ${refs.join(', ')}. Detach or clear those references before removing it.`);
@@ -551,10 +552,22 @@ export function resolveSpawnAccount(
   // (a run of `deepseek` must find a binding on `deepseek`, not `claude@x`); a
   // native/global run keys on the exact `agent@version` installation.
   const target = opts.target ?? (version ? `${agent}@${version}` : agent);
+  const configuredDefault = opts.useDefault === false ? undefined : meta.accounts?.defaults?.[agent];
   const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
   if (!selection) return null;
   const unified = findUnifiedAccount(selection, meta);
-  if (!unified) throw new Error(`Unknown account '${selection}'.`);
+  if (!unified) {
+    // A stale per-harness default is a preference, not a hard requirement: the
+    // machine stays runnable by falling back to balanced rotation. Bindings and
+    // explicit --account are intentional, so they still fail loud.
+    if (selection === configuredDefault) {
+      process.stderr.write(chalk.yellow(
+        `[agents] default account '${selection}' for ${agent} no longer exists on this machine; falling back to balanced selection. Clear the stale default with: agents accounts clear-default ${agent}\n`,
+      ));
+      return null;
+    }
+    throw new Error(`Unknown account '${selection}'.`);
+  }
   if (unified.kind === 'native') {
     if (unified.agent !== agent) {
       throw new Error(`Account '${unified.name}' is a ${unified.agent} login and cannot authenticate the ${agent} harness.`);

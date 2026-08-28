@@ -366,14 +366,18 @@ export function setDefaultAccount(agentRaw: string, name: string): { agent: Agen
     }
     assertNativeAccountNameable(account.agent);
   }
-  updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.id } } }));
+  // Reference by NAME, not id: defaults sync fleet-wide with `agents repo push/pull`
+  // while account ids are minted per-device, so an id ref breaks on every other
+  // machine ("Unknown account '<uuid>'"). Names are the portable handle — the
+  // registry resolves both, and existing uuid entries still resolve.
+  updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, [agent]: account.name } } }));
   return { agent, account };
 }
 
 async function switchAccountRows(agent: AgentId): Promise<SwitchAccountRow[]> {
   const accounts = await listSwitchableAccounts(agent);
   const candidates = await collectRunCandidates(agent);
-  const defaultId = readMeta().accounts?.defaults?.[agent];
+  const defaultValue = readMeta().accounts?.defaults?.[agent];
   return accounts.map(account => {
     const candidate = account.kind === 'native'
       ? candidates.find(row => row.accountKey === account.identityKey) ?? null
@@ -382,7 +386,7 @@ async function switchAccountRows(agent: AgentId): Promise<SwitchAccountRow[]> {
       accountName: account.name,
       kind: account.kind,
       detail: account.kind === 'provider' ? account.provider : (account.identityLabel ?? account.identityKey),
-      current: account.id === defaultId,
+      current: account.id === defaultValue || account.name === defaultValue,
       candidate,
     };
   });
