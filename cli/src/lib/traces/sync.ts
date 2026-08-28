@@ -335,6 +335,15 @@ export interface TracesIndexShard {
     needAttention: number;
     toolErrorRate: number;
   };
+  /**
+   * Sessions excluded from the eval corpus as internal utility plumbing (PHNX-3474):
+   * single-shot machine calls (no tool call AND ≤2 messages) or a known
+   * internal-prompt signature (title generation, watchdog, commit-message, factory
+   * worker). Every `stats` figure above, `topics` counts, and `needsAttention` are
+   * computed over the AGENT set ONLY — `sessionsImported` is the real agent count,
+   * not the raw row count. This is the number that was dropped.
+   */
+  utilityCount: number;
   needsAttention: IndexedSession[];
   topics: TopicItem[];
   failures: {
@@ -358,16 +367,72 @@ export interface IndexedSession {
   title: string;
   repo: string;
   device: string;
+  /** The harness that produced the session (claude/codex/rush/grok/…). Same as `harness`. */
   agent: string;
   model: string;
+  /** Corpus classification (PHNX-3474). Always `'agent'` here — utility rows are excluded. */
+  kind: SessionKind;
   severity: number;
   flags: string[];
 }
 
-/** One example session under a topic tile — the shape the console drill-down consumes. */
+/**
+ * One example session under a topic tile — the shape the console drill-down consumes.
+ * Carries `kind` + `harness` (PHNX-3474) so the console can filter a tile's session
+ * list by corpus class and by harness. Refs on a topic tile are always `'agent'`
+ * (utility rows never reach a bucket), but the field is explicit for the consumer.
+ */
 export interface TopicSessionRef {
   id: string;
   title: string;
+  kind: SessionKind;
+  harness: string;
+}
+
+/**
+ * Corpus class of a session (PHNX-3474). `utility` is internal machine plumbing —
+ * a single-shot call with no tool use and ≤2 messages, or one whose topic/label
+ * matches a known internal-prompt signature (title generation, watchdog,
+ * commit-message writer, factory worker). Everything else is `agent`: real agent
+ * work the Evals console counts and scores. Utility rows are tagged, never deleted,
+ * and excluded from every index statistic.
+ */
+export type SessionKind = 'utility' | 'agent';
+
+/**
+ * Topic/label substrings that identify an internal-prompt session regardless of its
+ * message/tool shape. These are the harness-spawned utility prompts the Rush app
+ * fires (they run under the `claude` harness): title generation writes the 3–4 word
+ * session title, the watchdog polls for stalled agents, the commit-message writer
+ * drafts a conventional commit, and factory workers are dispatched sub-agents. The
+ * title-generation prompt lives in the `topic` column, the rest can land in either
+ * `topic` or `label`, so both are matched.
+ */
+const UTILITY_PROMPT_SIGNATURES: RegExp[] = [
+  /generate a 3-4 word title/i, // title generation
+  /you are a watchdog|watchdog monitoring/i, // watchdog tick
+  /conventional[- ]commit/i, // commit-message writer
+  /factory worker/i, // dispatched factory worker
+];
+
+/**
+ * Classify a session as internal `utility` plumbing vs real `agent` work (PHNX-3474).
+ * `toolCallCount` is the AUTHORITATIVE per-session tool-call count from the loaded
+ * `tool_calls` rows (the row's own `tool_call_count` column is a fallback for a row
+ * whose calls weren't loaded). A session is `utility` when a known internal-prompt
+ * signature matches its topic/label, OR it made no tool call AND has ≤2 messages —
+ * the single-shot machine-call shape. Otherwise it is `agent`.
+ */
+export function classifySessionKind(
+  row: Pick<SyncRow, 'topic' | 'label' | 'message_count' | 'tool_call_count'>,
+  toolCallCount: number,
+): SessionKind {
+  const haystack = `${row.topic ?? ''}\n${row.label ?? ''}`;
+  if (UTILITY_PROMPT_SIGNATURES.some((re) => re.test(haystack))) return 'utility';
+  const hasToolCalls = toolCallCount > 0 || (row.tool_call_count ?? 0) > 0;
+  const messages = row.message_count ?? 0;
+  if (!hasToolCalls && messages <= 2) return 'utility';
+  return 'agent';
 }
 
 /**
@@ -563,8 +628,24 @@ export function buildIndexShard(
     if (list) list.push(call); else callsBySession.set(call.session_id, [call]);
   }
 
-  const topics = readSessionTopics<ClassifiedTopic>(ids);
-  const missingTopics = rows.filter((row) => !topics.has(row.id)).map((row) => {
+  // Classify every row as real `agent` work or internal `utility` plumbing, then run
+  // the ENTIRE rest of the shard build over the agent set ONLY (PHNX-3474). Utility
+  // rows — title-gen / watchdog / commit-message / factory-worker calls, ~68% of the
+  // corpus — are tagged and excluded here, never deleted from sessions.db, so the
+  // console counts and scores real agent work: `sessionsImported`, the medians,
+  // needs-attention, tool-error-rate, and the topic buckets all measure `agentRows`.
+  const kindOf = new Map<string, SessionKind>(
+    rows.map((row) => [row.id, classifySessionKind(row, callsBySession.get(row.id)?.length ?? 0)]),
+  );
+  const agentRows = rows.filter((row) => kindOf.get(row.id) === 'agent');
+  const agentIds = agentRows.map((row) => row.id);
+  const utilityCount = rows.length - agentRows.length;
+  // Tool calls belonging to utility rows never contribute to the failure/latency
+  // stats or the tool-error rate — filter them out at the source alongside the rows.
+  const agentCalls = calls.filter((call) => kindOf.get(call.session_id) === 'agent');
+
+  const topics = readSessionTopics<ClassifiedTopic>(agentIds);
+  const missingTopics = agentRows.filter((row) => !topics.has(row.id)).map((row) => {
     const topic = classifyTopic({
       cwd: row.cwd,
       gitBranch: row.git_branch,
@@ -586,8 +667,8 @@ export function buildIndexShard(
   // from an identically-signatured session synced this run purely by *when* each
   // was first seen (PHNX-3327). A cache-miss row is parsed at most once here even
   // when both derivations are missing.
-  const insights = readSessionInsights<InsightFacets>(ids);
-  const phenotypes = readSessionPhenotypes<FailurePhenotype | null>(ids);
+  const insights = readSessionInsights<InsightFacets>(agentIds);
+  const phenotypes = readSessionPhenotypes<FailurePhenotype | null>(agentIds);
   const missingInsights: Array<{
     id: string;
     fileMtimeMs: number | null;
@@ -600,7 +681,7 @@ export function buildIndexShard(
     fileSize: number | null;
     phenotype: FailurePhenotype | null;
   }> = [];
-  for (const row of rows) {
+  for (const row of agentRows) {
     const needInsights = !insights.has(row.id);
     const needPhenotype = !phenotypes.has(row.id);
     if (!needInsights && !needPhenotype) continue;
@@ -629,7 +710,7 @@ export function buildIndexShard(
   persistDerivedCache('session-insights', () => writeSessionInsights(missingInsights));
   persistDerivedCache('session-phenotypes', () => writeSessionPhenotypes(missingPhenotypes));
 
-  const needsAttention = rows.flatMap((row): IndexedSession[] => {
+  const needsAttention = agentRows.flatMap((row): IndexedSession[] => {
     const facets = insights.get(row.id);
     const errorCount = errorCounts.get(row.id) ?? 0;
     const flags = attentionFlags(errorCount, facets);
@@ -646,6 +727,7 @@ export function buildIndexShard(
       device,
       agent: row.agent,
       model: row.model ?? 'unknown',
+      kind: 'agent',
       severity: errorCount * 2 + friction * 3 + corrections * 2,
       flags,
     }];
@@ -663,10 +745,10 @@ export function buildIndexShard(
     label: string;
     count: number;
     group: TraceTopicGroup;
-    refs: Array<{ id: string; title: string; recencyMs: number }>;
+    refs: Array<{ id: string; title: string; harness: string; recencyMs: number }>;
   };
   const topicCounts = new Map<string, TopicBucket>();
-  for (const row of rows) {
+  for (const row of agentRows) {
     const topic = topics.get(row.id);
     if (!topic) continue;
     const bucket = topicCounts.get(topic.key)
@@ -675,12 +757,13 @@ export function buildIndexShard(
     bucket.refs.push({
       id: row.id,
       title: redactSecrets(row.label ?? row.topic ?? topic.label ?? 'Untitled session', knownSecrets),
+      harness: row.agent,
       recencyMs: Date.parse(row.last_activity ?? row.timestamp) || 0,
     });
     topicCounts.set(topic.key, bucket);
   }
 
-  const failedCalls = calls.filter((call) => call.outcome === 'error');
+  const failedCalls = agentCalls.filter((call) => call.outcome === 'error');
   const byCause: Record<TraceFailureCause, number> = { real: 0, guard: 0, hook: 0 };
   const failureCounts = new Map<string, { tool: string; desc: string; cause: TraceFailureCause; count: number }>();
   for (const call of failedCalls) {
@@ -697,7 +780,7 @@ export function buildIndexShard(
   // session resumed after hours, or left idle mid-turn, otherwise inflates the
   // median/p90 with wall-clock the agent did no work in (real corpus max span:
   // 345h). The raw span stays available per session on `SessionDetail.meta.spanMs`.
-  const activeDurations = rows.flatMap((row) =>
+  const activeDurations = agentRows.flatMap((row) =>
     row.duration_ms == null
       ? []
       : [sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [], Date.parse(row.timestamp))],
@@ -711,14 +794,14 @@ export function buildIndexShard(
   const agentActive: number[] = [];
   const interactiveActive: number[] = [];
   let measured = 0;
-  for (const row of rows) {
+  for (const row of agentRows) {
     if (row.duration_ms == null) continue;
     measured++;
     const active = sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [], Date.parse(row.timestamp));
     const isAgent = (callsBySession.get(row.id)?.length ?? 0) > 0 || (row.message_count ?? 0) > 8;
     (isAgent ? agentActive : interactiveActive).push(active);
   }
-  const measuredFraction = rows.length === 0 ? 0 : measured / rows.length;
+  const measuredFraction = agentRows.length === 0 ? 0 : measured / agentRows.length;
 
   // Build today's per-bucket stats for the rolling drift window.
   const todayDate = new Date().toISOString().slice(0, 10);
@@ -726,7 +809,7 @@ export function buildIndexShard(
     const sessionsInBucket = [...topics.entries()]
       .filter(([, t]) => t.key === key)
       .map(([id]) => id);
-    const bucketCalls = calls.filter((c) => sessionsInBucket.includes(c.session_id));
+    const bucketCalls = agentCalls.filter((c) => sessionsInBucket.includes(c.session_id));
     const bucketErrors = bucketCalls.filter((c) => c.outcome === 'error').length;
     const errorRate = bucketCalls.length === 0 ? 0 : bucketErrors / bucketCalls.length;
     const stallCount = sessionsInBucket.filter((id) => {
@@ -741,7 +824,7 @@ export function buildIndexShard(
   const prevHistory = prevShard?.bucketHistory ?? [];
   const bucketHistory = [...prevHistory, todayStats].slice(-14);
   const driftSignals = computeDriftSignal(prevHistory, todayStats);
-  const patternInsights = computeInsights(rows, calls, prevShard, phenotypes);
+  const patternInsights = computeInsights(agentRows, agentCalls, prevShard, phenotypes);
 
   return {
     schema: 1,
@@ -749,7 +832,7 @@ export function buildIndexShard(
     syncedAt: Date.now(),
     owner,
     stats: {
-      sessionsImported: rows.length,
+      sessionsImported: agentRows.length,
       medianMs: percentile(activeDurations, 0.5),
       p90Ms: percentile(activeDurations, 0.9),
       agentMedianMs: percentile(agentActive, 0.5),
@@ -757,8 +840,9 @@ export function buildIndexShard(
       interactiveMedianMs: percentile(interactiveActive, 0.5),
       measuredFraction,
       needAttention: needsAttention.length,
-      toolErrorRate: calls.length === 0 ? 0 : failedCalls.length / calls.length,
+      toolErrorRate: agentCalls.length === 0 ? 0 : failedCalls.length / agentCalls.length,
     },
+    utilityCount,
     needsAttention,
     topics: [...topicCounts.values()]
       .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
@@ -776,7 +860,7 @@ export function buildIndexShard(
         sessions: bucket.refs
           .sort((a, b) => b.recencyMs - a.recencyMs)
           .slice(0, TOPIC_SESSION_CAP)
-          .map(({ id, title }) => ({ id, title })),
+          .map(({ id, title, harness }): TopicSessionRef => ({ id, title, kind: 'agent', harness })),
       })),
     failures: {
       byToolError: [...failureCounts.values()].sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool)),
