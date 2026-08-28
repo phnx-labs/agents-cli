@@ -217,6 +217,86 @@ describe('removeSkillFromVersion — soft-delete', () => {
   });
 });
 
+// ─── diffVersionSkills — plugin-provided skills are not orphans (PHNX-3185) ─────
+
+/**
+ * Create a plugin under a base repo (`~/.agents` or `~/.agents/.system`) that
+ * bundles a skill: `plugins/<plugin>/{.claude-plugin/plugin.json, skills/<name>}`.
+ * The manifest carries the name+version pluginSkillDirs requires. Returns the
+ * bundled skill's source dir so the caller can mirror its content into a home.
+ */
+function makePluginSkill(baseRepoDir: string, pluginName: string, skillName: string): string {
+  const pluginRoot = path.join(baseRepoDir, 'plugins', pluginName);
+  fs.mkdirSync(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(
+    path.join(pluginRoot, '.claude-plugin', 'plugin.json'),
+    JSON.stringify({ name: pluginName, version: '1.0.0' }),
+    'utf-8',
+  );
+  const skillsDir = path.join(pluginRoot, 'skills');
+  fs.mkdirSync(skillsDir, { recursive: true });
+  return makeSkillDir(skillsDir, skillName);
+}
+
+describe('diffVersionSkills — plugin-provided skills (PHNX-3185)', () => {
+  it('credits a plugin-bundled skill as matched, never an orphan', () => {
+    const home = makeTempHome();
+    const agent = 'claude';
+    const version = '2.1.226';
+    const systemRepo = path.join(home, '.agents', '.system');
+
+    // Source: a plugin bundles `design`. Home: the materialized copy (identical
+    // content, so it must read as `matched`, not `toUpdate`).
+    makePluginSkill(systemRepo, 'design', 'design');
+    plantSkillInVersionHome(home, agent, version, 'design');
+
+    const diff = runSkills(home, `skills.diffVersionSkills('${agent}', '${version}')`) as {
+      orphans: string[];
+      matched: string[];
+      toUpdate: string[];
+    };
+
+    expect(diff.orphans).not.toContain('design');
+    expect(diff.matched).toContain('design');
+    expect(diff.toUpdate).not.toContain('design');
+  });
+
+  it('still flags a genuinely dead skill (no source anywhere) as an orphan', () => {
+    const home = makeTempHome();
+    const agent = 'claude';
+    const version = '2.1.226';
+
+    // A skill in the version home that no source root — central, extra, or
+    // plugin — provides. This is the real orphan the detector must still catch.
+    plantSkillInVersionHome(home, agent, version, 'ghost-skill');
+
+    const diff = runSkills(home, `skills.diffVersionSkills('${agent}', '${version}')`) as {
+      orphans: string[];
+    };
+
+    expect(diff.orphans).toContain('ghost-skill');
+  });
+
+  it('credits a plugin skill from a user-repo plugin too, alongside a real orphan', () => {
+    const home = makeTempHome();
+    const agent = 'claude';
+    const version = '2.1.226';
+    const userRepo = path.join(home, '.agents');
+
+    makePluginSkill(userRepo, 'write', 'blog');
+    plantSkillInVersionHome(home, agent, version, 'blog');       // plugin-backed → not orphan
+    plantSkillInVersionHome(home, agent, version, 'dead-one');   // no source → orphan
+
+    const diff = runSkills(home, `skills.diffVersionSkills('${agent}', '${version}')`) as {
+      orphans: string[];
+      matched: string[];
+    };
+
+    expect(diff.orphans).toEqual(['dead-one']);
+    expect(diff.matched).toContain('blog');
+  });
+});
+
 // ─── diffVersionSkills ────────────────────────────────────────────────────────
 
 describe('diffVersionSkills — orphan detection', () => {

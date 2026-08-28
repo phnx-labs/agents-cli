@@ -643,3 +643,99 @@ describe('installSessionTrackerHookSync — failure reasons are never empty', ()
     expect((res.error ?? '').trim().length).toBeGreaterThan(0);
   });
 });
+
+// ─── listUnmanagedHooksInVersionHome — orphan = absent from SOURCE (PHNX-2693) ──
+//
+// The bug: orphan detection diffed installed hook names against the REGISTERED
+// hook manifest, not the source file set. Sync copies helper / test / benchmark
+// scripts into every version home alongside registered hooks but never registers
+// them, so each read as an orphan — `agents prune cleanup` offered to trash ~1000
+// in-use files. The fix diffs against the resolved source set (user + system +
+// extras), so a source-present file is never an orphan and a genuinely dead one
+// still is.
+
+/** Write a hook script into a source root's hooks dir (user or system). */
+function seedSourceHook(root: string, relative: string): void {
+  const scriptPath = path.join(root, 'hooks', relative);
+  fs.mkdirSync(path.dirname(scriptPath), { recursive: true });
+  fs.writeFileSync(scriptPath, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+}
+
+/** Write a file into a claude version home's hooks dir. */
+function seedHomeHookFile(version: string, relative: string): void {
+  const hooksDir = path.join(userDir, '.history', 'versions', 'claude', version, 'home', '.claude', 'hooks');
+  const p = path.join(hooksDir, relative);
+  fs.mkdirSync(path.dirname(p), { recursive: true });
+  fs.writeFileSync(p, '#!/bin/sh\nexit 0\n', { mode: 0o755 });
+}
+
+function runUnmanagedHooks(agent: string, version: string): string[] {
+  const modulePath = path.resolve(process.cwd(), 'src/lib/hooks/install.ts');
+  const script = `
+    const mod = await import(${JSON.stringify(modulePath)});
+    console.log(JSON.stringify(mod.listUnmanagedHooksInVersionHome(${JSON.stringify(agent)}, ${JSON.stringify(version)})));
+  `;
+  const out = execFileSync('bun', ['-e', script], {
+    cwd: process.cwd(),
+    env: { ...process.env, HOME: testHome },
+    stdio: ['ignore', 'pipe', 'inherit'],
+  }).toString('utf-8');
+  return JSON.parse(out);
+}
+
+describe('listUnmanagedHooksInVersionHome — source-based orphan detection', () => {
+  it('does NOT flag source-present helper/test/benchmark scripts, but DOES flag a genuine orphan', () => {
+    // Source set: one registered hook plus the helper/test/benchmark scripts sync
+    // copies alongside it. Only `git-guard` is in the manifest; the rest are not.
+    fs.writeFileSync(
+      path.join(systemDir, 'agents.yaml'),
+      'hooks:\n  git-guard:\n    script: git-guard.sh\n    events: [PreToolUse]\n',
+    );
+    for (const f of [
+      'git-guard.sh',            // registered + source
+      'permission-handler.sh',   // source-present helper, unregistered
+      'verify-work-state.py',    // source-present helper, unregistered
+      'run_tests.sh',            // source-present test, unregistered
+      'benchmark_x.py',          // source-present benchmark, unregistered
+    ]) {
+      seedSourceHook(systemDir, f);
+    }
+
+    // Version home carries every source file (sync copies them) plus one file
+    // that exists in NO source root — the only genuine orphan.
+    for (const f of [
+      'git-guard.sh',
+      'permission-handler.sh',
+      'verify-work-state.py',
+      'run_tests.sh',
+      'benchmark_x.py',
+      'dead-hook.sh',            // absent from every source → orphan
+    ]) {
+      seedHomeHookFile('2.0.0', f);
+    }
+
+    const orphans = runUnmanagedHooks('claude', '2.0.0');
+    // Pre-fix (manifest-based) this returned permission-handler, verify-work-state,
+    // run_tests, benchmark_x AND dead-hook. Now only the true orphan remains.
+    expect(orphans).toEqual(['dead-hook']);
+  });
+
+  it('flags a home file once its source is removed (no over-suppression)', () => {
+    // Same helper present in source and home → not an orphan.
+    seedSourceHook(userDir, 'permission-handler.sh');
+    seedHomeHookFile('2.0.0', 'permission-handler.sh');
+    expect(runUnmanagedHooks('claude', '2.0.0')).toEqual([]);
+
+    // Remove it from source only: the home copy is now genuinely orphaned.
+    fs.rmSync(path.join(userDir, 'hooks', 'permission-handler.sh'));
+    expect(runUnmanagedHooks('claude', '2.0.0')).toEqual(['permission-handler']);
+  });
+
+  it('resolves a source hook nested in an event-group subdir', () => {
+    // Sync materializes event-group hooks (hooks/<event>/<script>) flat into the
+    // home; the source resolver descends one level, so they are not orphans.
+    seedSourceHook(systemDir, 'stop/00-agent-verify-work-complete.sh');
+    seedHomeHookFile('2.0.0', '00-agent-verify-work-complete.sh');
+    expect(runUnmanagedHooks('claude', '2.0.0')).toEqual([]);
+  });
+});

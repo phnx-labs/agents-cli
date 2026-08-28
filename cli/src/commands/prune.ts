@@ -115,9 +115,11 @@ function collectOrphans(types: ResourceType[], all: boolean): OrphanGroup[] {
 
   if (types.includes('hooks')) {
     for (const { agent, version } of scopePairs(iterHooksCapableVersions(), all)) {
-      // Orphan hooks = scripts present in the version home that no
-      // agents.yaml/hooks.yaml entry registers, so they never fire. Same
-      // definition the doctor overview reports.
+      // Orphan hooks = scripts present in the version home but absent from
+      // every configured source (user + system + extras) — genuinely dead
+      // files, not merely unregistered ones (sync copies helper/test scripts
+      // that no manifest entry declares). Same definition the doctor overview
+      // reports (PHNX-2693).
       const orphans = listUnmanagedHooksInVersionHome(agent, version);
       if (orphans.length > 0) {
         groups.push({ type: 'hooks', agent, version, orphans });
