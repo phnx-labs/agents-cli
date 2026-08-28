@@ -348,23 +348,26 @@ export function accountBindings(accountId: string, meta: Pick<Meta, 'accounts' |
   return Object.entries(merged).filter(([, id]) => id === accountId).map(([target]) => target).sort();
 }
 
+export interface AccountSelection { id: string; source: 'explicit' | 'binding' | 'default' }
+
 /** Explicit selection wins over a configured per-harness default. */
 export function resolveAccountSelection(
   explicit: string | undefined,
   agent: AgentId,
   meta: Pick<Meta, 'accounts' | 'deviceAccounts'>,
   opts: { useDefault?: boolean; target?: string } = {},
-): string | undefined {
-  if (explicit) return explicit;
+): AccountSelection | undefined {
+  if (explicit) return { id: explicit, source: 'explicit' };
   // This box's device-doc bindings win over the fleet-shared central bindings
   // (PHNX-3315), so a per-box account attachment resolves without touching the
   // shared file. Defaults are genuinely fleet-shared and stay central.
   const bindings = { ...meta.accounts?.bindings, ...meta.deviceAccounts?.bindings };
   const bound = opts.target ? bindings[opts.target] : undefined;
-  if (bound) return bound;
+  if (bound) return { id: bound, source: 'binding' };
   const deviceScoped = bindings[agent];
-  if (deviceScoped) return deviceScoped;
-  return opts.useDefault === false ? undefined : meta.accounts?.defaults?.[agent];
+  if (deviceScoped) return { id: deviceScoped, source: 'binding' };
+  const defaulted = opts.useDefault === false ? undefined : meta.accounts?.defaults?.[agent];
+  return defaulted ? { id: defaulted, source: 'default' } : undefined;
 }
 
 function profileConsumers(name: string, base: string): string[] {
@@ -420,23 +423,40 @@ export function renameAccount(oldName: string, newName: string, base = getUserAg
   const rows = nativeRowsForNameOrId(meta, oldName);
   if (rows.length) {
     assertUniqueUnifiedName(newName, meta, doc, new Set(rows.map(account => account.id)));
-    // Sweep every row for the identity (PHNX-3206) in its owning store (PHNX-3315).
+    // Sweep every row for the identity (PHNX-3206) in its owning store (PHNX-3315)
+    // and any per-harness default that points to the old name or row ids.
     const rowScope = rows[0]!.scope;
+    const idsToRename = new Set([oldName, ...rows.map(row => row.id)]);
     updateMeta(current => {
+      const defaults = { ...(current.accounts?.defaults as Record<string, string> | undefined) };
+      for (const [agent, value] of Object.entries(defaults)) {
+        if (idsToRename.has(value)) defaults[agent] = newName;
+      }
+      const next: Meta = { ...current, accounts: { ...current.accounts, defaults } };
       if (rowScope === 'device') {
         const native = { ...current.deviceAccounts?.native };
         for (const row of rows) native[row.id] = { ...native[row.id]!, name: newName };
-        return { ...current, deviceAccounts: { ...current.deviceAccounts, native } };
+        next.deviceAccounts = { ...current.deviceAccounts, native };
+      } else {
+        const native = { ...current.accounts?.native };
+        for (const row of rows) native[row.id] = { ...native[row.id]!, name: newName };
+        next.accounts = { ...next.accounts, native };
       }
-      const native = { ...current.accounts?.native };
-      for (const row of rows) native[row.id] = { ...native[row.id]!, name: newName };
-      return { ...current, accounts: { ...current.accounts, native } };
+      return next;
     });
     return;
   }
   const account = findAccount(oldName, doc);
   if (!account) throw new Error(`Unknown account '${oldName}'.`);
   assertUniqueUnifiedName(newName, meta, doc);
+  const idsToRename = new Set([account.name, account.id]);
+  updateMeta(current => {
+    const defaults = { ...(current.accounts?.defaults as Record<string, string> | undefined) };
+    for (const [agent, value] of Object.entries(defaults)) {
+      if (idsToRename.has(value)) defaults[agent] = newName;
+    }
+    return { ...current, accounts: { ...current.accounts, defaults } };
+  });
   renameBundle(account.name, newName); // moves metadata + secret, preserves ACCOUNT_ID
   renameProfileConsumers(account.name, newName, base);
 }
@@ -552,21 +572,23 @@ export function resolveSpawnAccount(
   // (a run of `deepseek` must find a binding on `deepseek`, not `claude@x`); a
   // native/global run keys on the exact `agent@version` installation.
   const target = opts.target ?? (version ? `${agent}@${version}` : agent);
-  const configuredDefault = opts.useDefault === false ? undefined : meta.accounts?.defaults?.[agent];
   const selection = resolveAccountSelection(explicit, agent, meta, { useDefault: opts.useDefault, target });
   if (!selection) return null;
-  const unified = findUnifiedAccount(selection, meta);
+  const unified = findUnifiedAccount(selection.id, meta);
   if (!unified) {
     // A stale per-harness default is a preference, not a hard requirement: the
     // machine stays runnable by falling back to balanced rotation. Bindings and
     // explicit --account are intentional, so they still fail loud.
-    if (selection === configuredDefault) {
+    if (selection.source === 'default') {
       process.stderr.write(chalk.yellow(
-        `[agents] default account '${selection}' for ${agent} no longer exists on this machine; falling back to balanced selection. Clear the stale default with: agents accounts clear-default ${agent}\n`,
+        `[agents] default account '${selection.id}' for ${agent} no longer exists on this machine; falling back to balanced selection. Clear the stale default with: agents accounts clear-default ${agent}\n`,
       ));
       return null;
     }
-    throw new Error(`Unknown account '${selection}'.`);
+    const remedy = selection.source === 'binding'
+      ? `Detach the stale binding with: agents accounts detach ${selection.id} ${target}`
+      : `Add an account named '${selection.id}' or remove the --account override.`;
+    throw new Error(`Unknown account '${selection.id}' for ${agent} harness. ${remedy}`);
   }
   if (unified.kind === 'native') {
     if (unified.agent !== agent) {

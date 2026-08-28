@@ -220,11 +220,11 @@ describe('credential account registry (bundle-canonical)', () => {
 
   it('prefers explicit selection, then a per-harness default', () => {
     const meta = { accounts: { defaults: { claude: 'default-work' } } };
-    expect(resolveAccountSelection('one-run', 'claude', meta)).toBe('one-run');
-    expect(resolveAccountSelection(undefined, 'claude', meta)).toBe('default-work');
+    expect(resolveAccountSelection('one-run', 'claude', meta)).toEqual({ id: 'one-run', source: 'explicit' });
+    expect(resolveAccountSelection(undefined, 'claude', meta)).toEqual({ id: 'default-work', source: 'default' });
     expect(resolveAccountSelection(undefined, 'codex', meta)).toBeUndefined();
     expect(resolveAccountSelection(undefined, 'claude', meta, { useDefault: false })).toBeUndefined();
-    expect(resolveAccountSelection('profile-override', 'claude', meta, { useDefault: false })).toBe('profile-override');
+    expect(resolveAccountSelection('profile-override', 'claude', meta, { useDefault: false })).toEqual({ id: 'profile-override', source: 'explicit' });
   });
 
   it('resolves exact installation and device-scoped bindings before a harness default', () => {
@@ -234,10 +234,10 @@ describe('credential account registry (bundle-canonical)', () => {
         bindings: { 'claude@2.1.220': 'native-work', cursor: 'cursor-device' },
       },
     };
-    expect(resolveAccountSelection(undefined, 'claude', meta, { target: 'claude@2.1.220' })).toBe('native-work');
-    expect(resolveAccountSelection(undefined, 'claude', meta, { target: 'claude@2.1.225' })).toBe('default-work');
-    expect(resolveAccountSelection(undefined, 'cursor', meta, { target: 'cursor@latest' })).toBe('cursor-device');
-    expect(resolveAccountSelection('one-run', 'claude', meta, { target: 'claude@2.1.220' })).toBe('one-run');
+    expect(resolveAccountSelection(undefined, 'claude', meta, { target: 'claude@2.1.220' })).toEqual({ id: 'native-work', source: 'binding' });
+    expect(resolveAccountSelection(undefined, 'claude', meta, { target: 'claude@2.1.225' })).toEqual({ id: 'default-work', source: 'default' });
+    expect(resolveAccountSelection(undefined, 'cursor', meta, { target: 'cursor@latest' })).toEqual({ id: 'cursor-device', source: 'binding' });
+    expect(resolveAccountSelection('one-run', 'claude', meta, { target: 'claude@2.1.220' })).toEqual({ id: 'one-run', source: 'explicit' });
   });
 
   it('resolveSpawnAccount classifies provider (with env) vs native (no keychain read), following bindings', () => {
@@ -316,6 +316,18 @@ describe('credential account registry (bundle-canonical)', () => {
     }
   });
 
+  it('resolveSpawnAccount fails loud when a stale binding shares an id with a stale default', () => {
+    const danglingId = 'd4a2d110-17fe-4341-a1c5-b1222ed91557';
+    const meta = {
+      accounts: {
+        defaults: { claude: danglingId },
+        bindings: { 'claude@2.1.220': danglingId },
+      },
+    };
+    expect(() => resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root }))
+      .toThrow(`Unknown account '${danglingId}' for claude harness. Detach the stale binding with: agents accounts detach ${danglingId} claude@2.1.220`);
+  });
+
   it('resolveSpawnAccount resolves a name-based default and still accepts legacy uuid defaults', () => {
     const account = addAccount('by-name', 'openrouter', 'api-key', 'sk-or', root);
     const byName = resolveSpawnAccount(undefined, 'claude', '2.1.220', { accounts: { defaults: { claude: 'by-name' } } }, { base: root });
@@ -344,6 +356,21 @@ describe('credential account registry (bundle-canonical)', () => {
     expect(renamed.id).toBe(before.id); // ACCOUNT_ID survives the rename
     expect(resolveCredentialAccount('company', 'claude', undefined, root).env.ANTHROPIC_AUTH_TOKEN).toBe('secret');
     expect(() => removeAccount('company', root)).toThrow('used by harness: deepseek');
+  });
+
+  it('renameAccount sweeps per-harness defaults that point to the old name or id', () => {
+    const before = addAccount('work', 'openrouter', 'api-key', 'secret', root);
+    updateMeta(meta => ({
+      ...meta,
+      accounts: {
+        ...meta.accounts,
+        defaults: { claude: 'work', codex: before.id },
+      },
+    }));
+    renameAccount('work', 'company', root);
+    const meta = readMeta();
+    expect(meta.accounts?.defaults).toEqual({ claude: 'company', codex: 'company' });
+    expect(resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root })).toMatchObject({ kind: 'provider', name: 'company', agent: 'claude' });
   });
 
   it('removes the account and its device-local credential', () => {
