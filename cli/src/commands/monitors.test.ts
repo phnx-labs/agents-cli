@@ -123,6 +123,35 @@ describe('monitors inspection JSON and stderr', () => {
     expect(payload.recentFires[0].summary).toBe('build failed');
   });
 
+  it('list --json reconciles a detached action that failed after the fire was recorded', () => {
+    const home = makeHome();
+    const name = 'failed-action';
+    const runId = '2026-07-21T12-01-00-000Z';
+    writeMonitor(home, {
+      name,
+      enabled: true,
+      source: { type: 'poll', command: 'echo fail', interval: '30s' },
+      condition: { mode: 'match', match: 'fail' },
+      action: { type: 'run', agent: 'claude', prompt: 'investigate' },
+    });
+    writeState(home, name);
+    const fireDir = path.join(home, '.agents', '.history', 'monitors', name, 'fires', runId);
+    fs.mkdirSync(fireDir, { recursive: true });
+    fs.writeFileSync(path.join(fireDir, 'event.json'), JSON.stringify({
+      monitorName: name, firedAt: '2026-07-21T12:01:00.000Z', summary: 'fail', action: 'run', ok: true, runId,
+    }));
+    const runDir = path.join(home, '.agents', '.history', 'runs', name, runId);
+    fs.mkdirSync(runDir, { recursive: true });
+    fs.writeFileSync(path.join(runDir, 'meta.json'), JSON.stringify({
+      jobName: name, runId, agent: 'claude', status: 'failed', exitCode: 1,
+      startedAt: '2026-07-21T12:01:00.000Z', completedAt: '2026-07-21T12:01:01.000Z', pid: null,
+    }));
+
+    const payload = JSON.parse(run(home, ['list', '--json']).stdout);
+    expect(payload[0].lastActionStatus).toBe('failed');
+    expect(payload[0].lastActionFailed).toBe(true);
+  });
+
   it('test --json evaluates once, prints the dry-run decision as JSON, and writes no state', () => {
     const home = makeHome();
     // The monitor command runs through the host shell, so it has to be
