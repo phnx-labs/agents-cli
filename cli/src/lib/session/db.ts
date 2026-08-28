@@ -2475,6 +2475,17 @@ export function upsertSessionsBatch(
         ? { ...entry, meta: { ...entry.meta, ...fanOutCounts(entry.events, entry.meta.agent) } }
         : entry;
     }
+    if (!entry.events) {
+      // Scanner produced no events (e.g. Kimi reads only summary.json, Grok
+      // reads only summary.json, OpenCode reads only metadata). Calling
+      // parseSession here would read + redact the full transcript on every warm
+      // tick for every changed session — wedging the daemon event loop on large
+      // active files (PHNX-3411). Defer tool-call indexing to runDeferredToolIndex
+      // which uses ensureToolIndex with tool_scan_ledger stamps and byte/file
+      // budget caps so it never blocks the warm tick.
+      return entry;
+    }
+    // Scanner already normalized the transcript — enrich without re-opening it.
     try {
       const toolSourcePath = toolEvidenceSourcePath(entry.meta.filePath, entry.meta.agent);
       const toolScan = toolSourcePath === entry.meta.filePath
@@ -2483,10 +2494,7 @@ export function upsertSessionsBatch(
             const stat = fs.statSync(toolSourcePath);
             return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
           })();
-      // Some non-resumable scanners already normalized the transcript while
-      // deriving metadata. Reuse those events; scanners that only read summary
-      // metadata fall back to exactly one normalized parse here.
-      const events = entry.events ?? parseSession(entry.meta.filePath, entry.meta.agent);
+      const events = entry.events;
       writeResourceUsage(entry.meta.id, events, entry.meta.cwd);
       // Resume the tool index from the last scan of this append-only stream when
       // it is safe to (PHNX-3411). A live session's transcript grows every tick,
@@ -3255,6 +3263,27 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
   const live = rows.filter(r => !phantomIds.has(r.id));
   const trimmed = options.limit ? live.slice(0, options.limit) : live;
   return trimmed.map(rowToMeta);
+}
+
+/**
+ * Cheap query for the daemon's deferred tool-index pass (PHNX-3411).
+ *
+ * Returns the most-recently-active non-claude/codex sessions that have a
+ * transcript file path. The caller feeds these into ensureToolIndex, which
+ * consults tool_scan_ledger to skip already-current rows and applies byte/file
+ * budget caps — so only genuinely stale sessions pay the parse cost, and the
+ * daemon tick is never wedged by the size of an active large transcript.
+ */
+export function querySessionsForDeferredToolIndex(limit: number): SessionMeta[] {
+  const db = getDB();
+  const rows = db.prepare(`
+    SELECT * FROM sessions
+    WHERE file_path IS NOT NULL
+      AND agent NOT IN ('claude', 'codex')
+    ORDER BY last_activity DESC, timestamp DESC
+    LIMIT ?
+  `).all(limit) as SessionRow[];
+  return rows.map(rowToMeta);
 }
 
 /** Count sessions matching the given filter options. */
