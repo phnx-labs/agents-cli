@@ -115,7 +115,7 @@ function humanSize(bytes: number): string {
 
 /**
  * Restore a soft-deleted version back into ~/.agents/.history/versions/.
- * Shared by `agents trash restore` and the top-level `agents restore` alias.
+ * Backs the top-level `agents restore` command.
  * Exits the process with a non-zero code on any failure.
  */
 export function restoreVersion(target: string): void {
@@ -157,7 +157,7 @@ export function restoreVersion(target: string): void {
 
 /**
  * Register the top-level `agents restore` command — a shorthand for
- * `agents trash restore` so users can undo a `remove`/`prune` directly.
+ * `agents restore` so users can undo a `remove`/`prune` directly.
  */
 export function registerRestoreCommand(program: Command): void {
   program

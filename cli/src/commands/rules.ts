@@ -629,7 +629,7 @@ Examples:
         }
         const version = resolveVersionAlias(agentId, rawVersion);
         if (!version) {
-          console.log(chalk.red(`Pass a version: ${agentId}@<version>. Try 'default' or 'agents list ${agentId}'.`));
+          console.log(chalk.red(`Pass a version: ${agentId}@<version>. Try 'default' or 'agents view ${agentId}'.`));
           process.exit(1);
         }
         const installed = listInstalledVersions(agentId);

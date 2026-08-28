@@ -602,7 +602,7 @@ async function handleTerminalHandoff(
     const probeCwd = options.cwd ?? process.cwd();
     if (!hasProfile && !resolveWorkflowRef(rawTarget, probeCwd)) {
       console.error(chalk.red(
-        `Unknown agent, profile, or workflow: ${rawTarget}. See \`agents list\` for the installed harnesses.`,
+        `Unknown agent, profile, or workflow: ${rawTarget}. See \`agents view\` for the installed harnesses.`,
       ));
       process.exit(1);
     }

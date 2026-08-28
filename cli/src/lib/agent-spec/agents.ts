@@ -3424,7 +3424,7 @@ export function parseAgentVersionSpec(
   const [rawAgent, rawVersion] = parts;
   const agent = resolveAgentName(rawAgent);
   if (!agent) {
-    return { error: `Unknown agent, profile, or workflow: ${rawAgent}. See \`agents list\` for the installed harnesses.` };
+    return { error: `Unknown agent, profile, or workflow: ${rawAgent}. See \`agents view\` for the installed harnesses.` };
   }
   if (rawVersion !== undefined && (rawVersion === '' || !VERSION_RE.test(rawVersion))) {
     return { error: `Invalid version '${rawVersion}' in '${raw}'` };
