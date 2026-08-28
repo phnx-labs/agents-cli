@@ -6,6 +6,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   installSubagentToAgent,
   listSubagentsForAgent,
+  parseSubagentFrontmatter,
+  getSubagentBody,
+  transformSubagentForClaude,
   transformSubagentForAntigravity,
   transformSubagentForCopilot,
   transformSubagentForCursor,
@@ -265,6 +268,56 @@ describe('installSubagentToAgent for Antigravity', () => {
     const installed = listSubagentsForAgent('antigravity', agentHome);
     expect(installed.map(s => s.name)).toEqual(['verifier']);
     expect(installed[0].frontmatter.description).toBe('Verifies work');
+  });
+});
+
+// PHNX-3187: git checks text files out with CRLF on Windows (core.autocrlf), so
+// an AGENT.md whose fences read `---\r\n` must still parse. Before the fix,
+// `content.split('\n')` left a trailing '\r' and `'---\r' !== '---'` dropped the
+// subagent from discovery — so `agents doctor --fix` on win-mini could never
+// install or reconcile it (reported an unactionable "hold").
+describe('subagent AGENT.md parsing is CRLF-robust (PHNX-3187)', () => {
+  function writeAgentMdRaw(parent: string, name: string, contents: string): string {
+    const dir = path.join(parent, name);
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'AGENT.md'), contents, 'utf-8');
+    return path.join(dir, 'AGENT.md');
+  }
+
+  const frontmatter = '---\nname: code-reviewer\ndescription: Reviews the diff\nmodel: opus\n---\n\nYou review code.\n';
+
+  it('parses frontmatter from a CRLF-checked-out AGENT.md', () => {
+    const home = makeTempHome();
+    const crlf = frontmatter.replace(/\n/g, '\r\n');
+    const file = writeAgentMdRaw(home, 'code-reviewer', crlf);
+
+    const parsed = parseSubagentFrontmatter(file);
+    expect(parsed).not.toBeNull();
+    expect(parsed!.name).toBe('code-reviewer');
+    expect(parsed!.description).toBe('Reviews the diff');
+    expect(parsed!.model).toBe('opus');
+  });
+
+  it('extracts the body from a CRLF-checked-out AGENT.md', () => {
+    const home = makeTempHome();
+    const file = writeAgentMdRaw(home, 'code-reviewer', frontmatter.replace(/\n/g, '\r\n'));
+    expect(getSubagentBody(file)).toBe('You review code.');
+  });
+
+  it('transformSubagentForClaude succeeds on a CRLF subagent dir (does not throw "Invalid AGENT.md")', () => {
+    const home = makeTempHome();
+    writeAgentMdRaw(home, 'code-reviewer', frontmatter.replace(/\n/g, '\r\n'));
+    const out = transformSubagentForClaude(path.join(home, 'code-reviewer'));
+    expect(out).toContain('name: code-reviewer');
+    expect(out).toContain('You review code.');
+  });
+
+  it('still parses ordinary LF AGENT.md (no regression)', () => {
+    const home = makeTempHome();
+    const file = writeAgentMdRaw(home, 'code-reviewer', frontmatter);
+    const parsed = parseSubagentFrontmatter(file);
+    expect(parsed!.name).toBe('code-reviewer');
+    expect(getSubagentBody(file)).toBe('You review code.');
   });
 });
 

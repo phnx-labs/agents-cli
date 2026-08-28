@@ -385,8 +385,13 @@ export function buildPermissionsFromGroups(groupNames: string[]): PermissionSet 
 
       // Extract rules using line-by-line regex (more robust than YAML parsing)
       // Matches lines like: - "Bash(git *)" or   - "WebFetch(domain:example.com)"
-      // Handles nested quotes that break YAML parsers
-      const lines = content.split('\n');
+      // Handles nested quotes that break YAML parsers.
+      // Split on CRLF or LF: git checks group yaml out with CRLF on Windows
+      // (core.autocrlf), and a plain split('\n') leaves a trailing '\r' so the
+      // closing-quote anchor `"$` never matches — extracting ZERO rules, which
+      // wrote an empty permission set and left `agents doctor --fix` unable to
+      // reconcile permissions on Windows forever (PHNX-3187).
+      const lines = content.split(/\r?\n/);
       let section: 'allow' | 'deny' | null = null;
       for (const line of lines) {
         const sectionMatch = line.match(/^\s*(allow|deny)\s*:\s*(?:#.*)?$/);

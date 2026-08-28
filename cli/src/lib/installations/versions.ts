@@ -2469,6 +2469,44 @@ export function mergeRepoScopedSelections(repos: string[], cwd: string = process
  *
  * For Gemini: commands are converted from markdown to TOML.
  */
+/**
+ * Resolve a caller's hook selection against the available hook set, matching a
+ * selection entry by exact name OR by its extensionless basename, and returning
+ * the AVAILABLE (extensioned) name in every case.
+ *
+ * `available.hooks` carries the source filename WITH its extension
+ * (`git-guard.sh`) — the shape the hooks writer's source resolver requires — but
+ * the doctor/heal resource diff identifies a hook by its extensionless basename
+ * (`git-guard`). A heal pass feeds those diff names straight back as the
+ * selection, so a plain exact-set filter matched NOTHING and `agents doctor
+ * --fix` could never reconcile a flagged hook (PHNX-3187). Basename tolerance
+ * closes that gap without changing the extensioned names the writer needs.
+ *
+ * Order-stable and de-duplicated; a selection entry that matches nothing is
+ * dropped (mirrors resolveSelection).
+ */
+export function resolveHookSelection(sel: string[] | 'all' | undefined, available: string[]): string[] {
+  if (sel === 'all') return available;
+  if (!Array.isArray(sel)) return [];
+  const stripExt = (n: string): string => n.replace(/\.[^./\\]+$/, '');
+  const exact = new Set(available);
+  const byBase = new Map<string, string>();
+  for (const a of available) {
+    const base = stripExt(a);
+    if (!byBase.has(base)) byBase.set(base, a); // first available wins the basename
+  }
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const name of sel) {
+    const resolved = exact.has(name) ? name : byBase.get(stripExt(name));
+    if (resolved && !seen.has(resolved)) {
+      seen.add(resolved);
+      out.push(resolved);
+    }
+  }
+  return out;
+}
+
 export function syncResourcesToVersion(agent: AgentId, version: string, selection?: ResourceSelection, options: { projectDir?: string; cwd?: string; force?: boolean; available?: AvailableResources; prune?: boolean; allowExecSurfaces?: boolean } = {}): SyncResult {
   if (isAgentHardDeprecated(agent)) {
     return { commands: false, skills: false, hooks: false, memory: [], permissions: false, mcp: [], subagents: [], plugins: [], workflows: [], projectSkipped: [], pruned: { commands: [], skills: [] }, declined: [] };
@@ -2774,8 +2812,14 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     if (!hooksGate.ok) {
       console.warn(explainSkip(agent, 'hooks', hooksGate, version) + ' -- skipped');
     } else {
+      // Resolve requested hooks against the available set BY BASENAME as well as
+      // exact name. `available.hooks` carries the source filename WITH its
+      // extension (`git-guard.sh`), but the doctor/heal diff identifies a hook
+      // by its extensionless basename (`git-guard`) — so a heal pass that feeds
+      // the diff's names straight back through the plain resolveSelection
+      // matched NOTHING and could never reconcile a flagged hook (PHNX-3187).
       const hooksToSync = selection
-        ? resolveSelection(selection.hooks, available.hooks)
+        ? resolveHookSelection(selection.hooks, available.hooks)
         : available.hooks;
 
       let hookManifest: ReturnType<typeof parseHookManifest> = {};
@@ -2930,6 +2974,7 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
     const r = subagentsWriter.write({ version, versionHome, selection: subagentsToSync, cwd });
     if (r.paths) writtenTargets.push(...r.paths);
     result.subagents.push(...r.synced);
+    if (r.errors?.length) result.declined.push(...r.errors.map((e) => `subagents: ${e}`));
 
     // Orphan-sweep for Claude only — see comment on commands/skills sweep
     // for the no-selection guard. OpenClaw stores subagents as siblings of
