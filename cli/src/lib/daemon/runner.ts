@@ -83,7 +83,6 @@ import { machineId } from '../machine-id.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { isCustomHarnessName, readProfile } from '../profiles.js';
-import { loadClaudeOauth } from '../accounting/usage.js';
 
 /** Result of a completed job execution, including metadata and optional report. */
 export interface RunResult {
@@ -984,7 +983,7 @@ export function claudeVersionIsAuthenticated(version: string): boolean {
     const raw = execFileSync(binary, ['auth', 'status', '--json'], {
       encoding: 'utf8',
       timeout: 5_000,
-      env: { ...process.env, HOME: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude') },
+      env: { ...process.env, HOME: process.env.AGENTS_REAL_HOME || os.homedir(), CLAUDE_CONFIG_DIR: path.join(home, '.claude') },
       stdio: ['ignore', 'pipe', 'ignore'],
     });
     return JSON.parse(raw).loggedIn === true;
@@ -1144,7 +1143,7 @@ export async function resolveRoutineLaunch(
       throw new Error(`Routine '${config.name}' found no authenticated Claude account; run \`claude /login\` for an installed version or pin a provider profile.`);
     }
     version = authenticated.version;
-    rotation.picked = authenticated;
+    if (rotation) rotation.picked = authenticated;
   }
 
   if (!version) {
@@ -1335,32 +1334,16 @@ export function buildRoutineSpawnEnv(
     // to the overlay so an ambient value cannot bypass the routine sandbox.
     out.XDG_CONFIG_HOME = path.join(overlayHome, '.config');
   }
-  // Keep the generated sandbox settings authoritative. A version home's
-  // settings contain `~/...` hooks; under a routine HOME those paths point at
-  // missing files and every lifecycle event exits 127 (PHNX-3406).
+  // Claude's native login and its portable `~/...` hooks both resolve only
+  // with the operator HOME, while CLAUDE_CONFIG_DIR selects the balanced
+  // version/account. Splitting HOME into the routine overlay caused both the
+  // authentication_failed exit and every hook 127 in PHNX-3406.
   if (overlayHome && agent === 'claude') {
-    // Claude keys its native macOS login to the managed version HOME, not only
-    // CLAUDE_CONFIG_DIR. Keep HOME on that narrow account home so Keychain auth
-    // works, while settings/transcripts remain in the hook-free overlay config.
-    if (version) out.HOME = getVersionHomePath('claude', version);
-    // Keep CLAUDE_CONFIG_DIR on the selected version too: Claude keys the
-    // Keychain service to this path. prepareJobHome mirrors only hook roots
-    // beneath the version HOME so portable `~/...` commands resolve there.
+    out.HOME = process.env.AGENTS_REAL_HOME || os.homedir();
   }
   if (overlayHome && agent === 'codex') out.CODEX_HOME = path.join(overlayHome, '.codex');
   if (timezone) out.TZ = timezone;
   return out;
-}
-
-/** Inject the selected native login into a sandboxed unattended launch. */
-async function injectRoutineNativeAuth(env: Record<string, string>, agent: AgentId, version?: string): Promise<void> {
-  if (agent !== 'claude' || !version || env.CLAUDE_CODE_OAUTH_TOKEN) return;
-  // Claude's Keychain item is keyed to the managed version home. The sandbox
-  // must use a different config dir to exclude operator hooks, so the binary
-  // cannot discover that item itself. Reading it here is the same native login
-  // used by an ordinary `agents run`; the value lives only in the child env.
-  const oauth = await loadClaudeOauth(getVersionHomePath('claude', version));
-  if (oauth?.accessToken) env.CLAUDE_CODE_OAUTH_TOKEN = oauth.accessToken;
 }
 
 /** One spawn attempt result for the single-shot executeJob path. */
@@ -1722,7 +1705,6 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
           return e;
         })()
       : buildRoutineSpawnEnv(baseEnv, attemptAgent, attemptVersion, config.timezone, overlayHome);
-    await injectRoutineNativeAuth(spawnEnv, attemptAgent, attemptVersion);
 
     // Remaining timeout budget shared across failover attempts.
     const elapsed = Date.now() - Date.parse(meta.startedAt);
@@ -2197,7 +2179,6 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
       })()
     // Non-command path only: config.agent is always set here (command/workflow branch earlier).
     : buildRoutineSpawnEnv(baseEnv, config.agent! as AgentId, version, config.timezone, overlayHome);
-  await injectRoutineNativeAuth(spawnEnv, config.agent! as AgentId, version);
 
   // RUSH-2860: if this host holds gh auth, the sandbox child MUST see it —
   // otherwise monitors runs records ok while every gh call inside fails.

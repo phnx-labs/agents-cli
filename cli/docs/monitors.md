@@ -204,7 +204,7 @@ agents monitors remove <name>
 
 - `--run <agent> --prompt '…'` — spawn a **new headless agent conversation**;
   it does not resume or re-invoke the session that created the monitor. It shares `--mode`/`--effort`/
-  `--action-timeout` with routines), dispatched through `executeJobDetached`.
+  `--action-timeout` with routines and is dispatched through `executeJobDetached`.
   Takes a native harness id or a custom harness name (`agents harness list`);
   a custom harness is delegated to `agents run <name>` and pins its own host
   version and auth. The sandboxed child inherits this host's GitHub CLI auth
@@ -214,9 +214,9 @@ agents monitors remove <name>
   Isolation](routines.md#sandbox-isolation)).
   Native Claude/Codex actions use balanced rotation by default. Claude verifies
   the selected version with its own `auth status` before spawn and skips stale
-  identity-only accounts. Its narrow managed version HOME mirrors only the hook
-  roots needed by portable `~/...` commands, so hooks resolve without exposing
-  the operator's full `~/.agents` tree.
+  identity-only accounts. Claude launches with the same operator HOME plus the
+  balanced version's `CLAUDE_CONFIG_DIR` as an ordinary `agents run`, so the
+  native login and portable `~/...` hooks resolve through the same paths.
 - `--routine <name>` — fire an existing routine (attach a monitor to a routine).
 - `--notify [channel]` — notify the owner through the one channel seam
   (`lookupTransport` → provider). The recipient and normal channel come from
