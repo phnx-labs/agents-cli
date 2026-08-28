@@ -97,6 +97,12 @@ if (process.argv[2] === '__usage-ingest') {
   process.exit(await runUsageIngest());
 }
 
+if (process.argv[2] === '__usage-export') {
+  const { exportClaudeUsageCacheRows } = await import('./lib/accounting/usage.js');
+  process.stdout.write(JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows() }));
+  process.exit(0);
+}
+
 if (process.argv[2] === '__daemon-run') {
   const { runDaemon, log: daemonLog } = await import('./lib/daemon/daemon.js');
 

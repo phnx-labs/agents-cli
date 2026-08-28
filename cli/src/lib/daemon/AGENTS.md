@@ -17,17 +17,18 @@ sessions (`cli/src/lib/session/remote/watch.ts:245`). This means every
 cross-device feature in this repo is built on top of one primitive (ssh +
 CLI verb), not a shared daemon protocol.
 
-**Two runtime models coexist today (RUSH-3193 plus PHNX-3265 migrated 16 of 17
+**Two runtime models coexist today (RUSH-3193 plus PHNX-3265 migrated 17 of 18
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
-defines `DaemonServiceId` (17 ids:
+defines `DaemonServiceId` (18 ids:
 `secrets-broker`, `scheduler`, `monitors`, `browser-ipc`,
 `webhook-receiver`, `self-heal`, `keychain-reap`, `account-state`,
 `watchdog`, `device-probe`, `state-dir-check`, `session-index`, `auth-sync`,
-`daemon-heartbeat`, `tmux-reap`, `browser-task-reap`, `session-state`) — the
+`daemon-heartbeat`, `tmux-reap`, `browser-task-reap`, `session-state`,
+`usage-sync`) — the
 catalog every id in `runDaemon()` is expected to register under, whichever
 model it uses.
 
-- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 16 services:**
+- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 17 services:**
   `secrets-broker` (`secrets-broker-service.ts`), `browser-ipc`
   (`browser-ipc-service.ts`), `account-state`
   (`account-state-daemon-service.ts`), `session-index`
@@ -40,7 +41,7 @@ model it uses.
   (`webhook-receiver-service.ts`), `daemon-heartbeat`
   (`heartbeat-service.ts`), `tmux-reap` (`tmux-reap-service.ts`), and
   `browser-task-reap` (`browser-task-reap-service.ts`), and `auth-sync`
-  (`auth-sync-service.ts`). Each implements the
+  (`auth-sync-service.ts`), and `usage-sync` (`usage-sync-service.ts`). Each implements the
   `DaemonService` contract (`service.ts`) — `id`,
   `start`/`stop`/`restart`/`health()`, plus `intervalMs`/`deadlineMs`/`tick()`
   for the periodic ones — and is `supervisor.register()`ed in `runDaemon()`
@@ -195,7 +196,7 @@ supervised total to 10. PHNX-3265 moved live-session publishing and webhook
 ingress plus every fixed-cadence maintenance loop onto the same supervisor,
 and fixed manual periodic restarts so they
 replace, rather than duplicate, the timer. `agents daemon services` now reports
-measured health for 16 of 17 declared services and infers only `scheduler`.
+measured health for 17 of 18 declared services and infers only `scheduler`.
 This doc's Current architecture section
 above is the source of truth for all of it.
 
