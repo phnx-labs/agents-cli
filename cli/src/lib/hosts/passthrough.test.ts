@@ -515,9 +515,10 @@ describe('runFleetPassthrough — direct unit tests', () => {
     // The remote (mac-mini) target is driven WITH the fleet-remote marker so its
     // consent gate can fire; the self (zion) target runs locally and stays ungated.
     expect(remoteCmds).toHaveLength(1);
-    // Marker leads; actor provenance tokens may ride between it and the command.
+    // Marker leads; actor provenance tokens may ride between it and the command,
+    // which is preserved intact at the tail.
     expect(remoteCmds[0].slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
-    expect(remoteCmds[0]).toContain('agents');
+    expect(remoteCmds[0].slice(-4)).toEqual(['agents', 'browser', 'start', '--json']);
     expect(selfCmds).toHaveLength(1);
     expect(selfCmds[0][0]).toBe('agents');
     expect(selfCmds[0]).not.toContain('AGENTS_FLEET_REMOTE=1');
