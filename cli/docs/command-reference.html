@@ -2063,38 +2063,40 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
 <article id="monitors-runs" data-search="runs monitors runs  see a monitor’s fire history: when it fired, the action, and the outcome. name  -h, --help show help  "><div class="command-head"><h3><code>agents monitors runs [name]</code></h3></div><p>See a monitor’s fire history: when it fired, the action, and the outcome.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[name]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="monitors-test" data-search="test monitors test  dry-run: evaluate the source once and print the emitted event + whether it would fire. no action is taken. name  --json emit machine-readable json -h, --help show help  "><div class="command-head"><h3><code>agents monitors test [name]</code></h3></div><p>DRY-RUN: evaluate the source once and print the emitted event + whether it would fire. No action is taken.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[name]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit machine-readable JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
 <article id="monitors-view" data-search="view monitors view  show a monitor’s full yaml config plus its current watched-state and recent fires. name  --json emit machine-readable json -h, --help show help  "><div class="command-head"><h3><code>agents monitors view [name]</code></h3></div><p>Show a monitor’s full YAML config plus its current watched-state and recent fires.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[name]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--json</code></td><td>Emit machine-readable JSON</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table></article>
-<article id="notify" data-search="notify notify  deliver to the owner (alias of send --to owner). channel + target default from notify.owner in agents.yaml. text  --text &lt;text&gt; message body (preferred over positional text) --channel &lt;name&gt; override owner channel --to &lt;target&gt; override owner target (or pass a non-owner dest with --channel) --thread &lt;id&gt; channel thread id / timestamp --attach &lt;path...&gt; local file attachment path (repeatable) --attachment &lt;path...&gt; alias of --attach --url &lt;url...&gt; link or remote media url to include in the body (repeatable) --from &lt;who&gt; sender label (mailbox) --json output json --dry-run resolve + build but do not send -h, --help show help # same as: agents send --to owner --text &quot;…&quot;
+<article id="notify" data-search="notify notify  [deprecated] deliver to the owner (alias of send --to owner). use &quot;agents feed post&quot; for new code. text  --text &lt;text&gt; message body (preferred over positional text) --channel &lt;name&gt; override owner channel --to &lt;target&gt; override owner target (or pass a non-owner dest with --channel) --thread &lt;id&gt; channel thread id / timestamp --attach &lt;path...&gt; local file attachment path (repeatable) --attachment &lt;path...&gt; alias of --attach --url &lt;url...&gt; link or remote media url to include in the body (repeatable) --from &lt;who&gt; sender label (mailbox) --json output json --dry-run resolve + build but do not send -h, --help show help # deprecated: prefer &quot;agents feed post --title &quot;…&quot; &quot;…&quot; --level important&quot;
       agents notify --text &quot;build finished — pr #1346 is green&quot;
       agents notify &quot;legacy positional still works&quot;
 
       # override channel for this one ping
       agents notify --text &quot;fallback&quot; --channel desktop --to local
 
-      agents notify --text &quot;probe&quot; --dry-run --json notify ≡ send --to owner. one delivery stack (lib/channels). set
-      notify.owner.{channel,to} in agents.yaml once per machine/fleet.
+      agents notify --text &quot;probe&quot; --dry-run --json deprecated. notify ≡ send --to owner and still works, but new callers
+      should use &quot;agents feed post&quot; (record + optional broadcast) instead.
+      set notify.owner.{channel,to} in agents.yaml once per machine/fleet.
 
       
   planes (do not mix them up):
-    send / notify     - deliver a message to a recipient (this command)
+    send              - deliver a message to a recipient (this command)
     feed post         - record progress / milestones (optional broadcast may call send)
     activity          - read the activity stream (not a send path)
     message / inject  - control a running agent (mailbox answer or terminal keystroke)
 
   --to owner is an address alias for notify.owner in agents.yaml, not a
   special control path. agent resume / pty inject stay on message and
-  sessions inject."><div class="command-head"><h3><code>agents notify [text]</code></h3></div><p>Deliver to the owner (alias of send --to owner). Channel + target default from notify.owner in agents.yaml.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[text]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--text &lt;text&gt;</code></td><td>message body (preferred over positional text)</td><td></td><td></td></tr><tr><td><code>--channel &lt;name&gt;</code></td><td>override owner channel</td><td></td><td></td></tr><tr><td><code>--to &lt;target&gt;</code></td><td>override owner target (or pass a non-owner dest with --channel)</td><td></td><td></td></tr><tr><td><code>--thread &lt;id&gt;</code></td><td>channel thread id / timestamp</td><td></td><td></td></tr><tr><td><code>--attach &lt;path...&gt;</code></td><td>local file attachment path (repeatable)</td><td></td><td></td></tr><tr><td><code>--attachment &lt;path...&gt;</code></td><td>alias of --attach</td><td></td><td></td></tr><tr><td><code>--url &lt;url...&gt;</code></td><td>link or remote media URL to include in the body (repeatable)</td><td></td><td></td></tr><tr><td><code>--from &lt;who&gt;</code></td><td>sender label (mailbox)</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>output JSON</td><td></td><td></td></tr><tr><td><code>--dry-run</code></td><td>resolve + build but do not send</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Same as: agents send --to owner --text &quot;…&quot;
+  sessions inject."><div class="command-head"><h3><code>agents notify [text]</code></h3></div><p>[DEPRECATED] Deliver to the owner (alias of send --to owner). Use &quot;agents feed post&quot; for new code.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>[text]</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--text &lt;text&gt;</code></td><td>message body (preferred over positional text)</td><td></td><td></td></tr><tr><td><code>--channel &lt;name&gt;</code></td><td>override owner channel</td><td></td><td></td></tr><tr><td><code>--to &lt;target&gt;</code></td><td>override owner target (or pass a non-owner dest with --channel)</td><td></td><td></td></tr><tr><td><code>--thread &lt;id&gt;</code></td><td>channel thread id / timestamp</td><td></td><td></td></tr><tr><td><code>--attach &lt;path...&gt;</code></td><td>local file attachment path (repeatable)</td><td></td><td></td></tr><tr><td><code>--attachment &lt;path...&gt;</code></td><td>alias of --attach</td><td></td><td></td></tr><tr><td><code>--url &lt;url...&gt;</code></td><td>link or remote media URL to include in the body (repeatable)</td><td></td><td></td></tr><tr><td><code>--from &lt;who&gt;</code></td><td>sender label (mailbox)</td><td></td><td></td></tr><tr><td><code>--json</code></td><td>output JSON</td><td></td><td></td></tr><tr><td><code>--dry-run</code></td><td>resolve + build but do not send</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Deprecated: prefer &quot;agents feed post --title &quot;…&quot; &quot;…&quot; --level important&quot;
       agents notify --text &quot;Build finished — PR #1346 is green&quot;
       agents notify &quot;legacy positional still works&quot;
 
       # Override channel for this one ping
       agents notify --text &quot;fallback&quot; --channel desktop --to local
 
-      agents notify --text &quot;probe&quot; --dry-run --json</code></pre><h4>Notes</h4><p class="notes">notify ≡ send --to owner. One delivery stack (lib/channels). Set
-      notify.owner.{channel,to} in agents.yaml once per machine/fleet.
+      agents notify --text &quot;probe&quot; --dry-run --json</code></pre><h4>Notes</h4><p class="notes">DEPRECATED. notify ≡ send --to owner and still works, but new callers
+      should use &quot;agents feed post&quot; (record + optional broadcast) instead.
+      Set notify.owner.{channel,to} in agents.yaml once per machine/fleet.
 
       
   Planes (do not mix them up):
-    send / notify     - DELIVER a message to a recipient (this command)
+    send              - DELIVER a message to a recipient (this command)
     feed post         - RECORD progress / milestones (optional broadcast may call send)
     activity          - READ the activity stream (not a send path)
     message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)
@@ -3201,7 +3203,7 @@ Harness OAuth sign-out is `agents accounts logout` (OAuth native logins only).</
 
       # dry-run (resolve provider, no delivery)
       agents send --to owner --text &quot;probe&quot; --dry-run --json planes (do not mix them up):
-    send / notify     - deliver a message to a recipient (this command)
+    send              - deliver a message to a recipient (this command)
     feed post         - record progress / milestones (optional broadcast may call send)
     activity          - read the activity stream (not a send path)
     message / inject  - control a running agent (mailbox answer or terminal keystroke)
@@ -3225,7 +3227,7 @@ Harness OAuth sign-out is `agents accounts logout` (OAuth native logins only).</
 
       # Dry-run (resolve provider, no delivery)
       agents send --to owner --text &quot;probe&quot; --dry-run --json</code></pre><h4>Notes</h4><p class="notes">Planes (do not mix them up):
-    send / notify     - DELIVER a message to a recipient (this command)
+    send              - DELIVER a message to a recipient (this command)
     feed post         - RECORD progress / milestones (optional broadcast may call send)
     activity          - READ the activity stream (not a send path)
     message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)

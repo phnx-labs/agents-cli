@@ -11,7 +11,8 @@
  * Compat: positional text still works (`agents send "hi" --channel … --to …`).
  *
  * `agents notify` is the same delivery path with owner defaults
- * (`send --to owner`). Not a second stack. Not agent control — use
+ * (`send --to owner`) and is deprecated — new callers should use
+ * `agents feed post`. Not a second stack. Not agent control — use
  * `agents message` / `agents sessions inject` for running agents.
  *
  * Feed / activity are a different plane (record + read); feed.broadcast may
@@ -96,7 +97,7 @@ async function runSend(
 
 const SHARED_NOTES = `
   Planes (do not mix them up):
-    send / notify     - DELIVER a message to a recipient (this command)
+    send              - DELIVER a message to a recipient (this command)
     feed post         - RECORD progress / milestones (optional broadcast may call send)
     activity          - READ the activity stream (not a send path)
     message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)
@@ -153,7 +154,7 @@ export function registerSendCommand(program: Command): void {
   const notifyCmd = program
     .command('notify [text]')
     .description(
-      'Deliver to the owner (alias of send --to owner). Channel + target default from notify.owner in agents.yaml.',
+      '[DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.',
     )
     .option('--text <text>', 'message body (preferred over positional text)')
     .option('--channel <name>', 'override owner channel')
@@ -168,7 +169,7 @@ export function registerSendCommand(program: Command): void {
 
   setHelpSections(notifyCmd, {
     examples: `
-      # Same as: agents send --to owner --text "…"
+      # Deprecated: prefer "agents feed post --title \"…\" \"…\" --level important"
       agents notify --text "Build finished — PR #1346 is green"
       agents notify "legacy positional still works"
 
@@ -178,14 +179,20 @@ export function registerSendCommand(program: Command): void {
       agents notify --text "probe" --dry-run --json
     `,
     notes: `
-      notify ≡ send --to owner. One delivery stack (lib/channels). Set
-      notify.owner.{channel,to} in agents.yaml once per machine/fleet.
+      DEPRECATED. notify ≡ send --to owner and still works, but new callers
+      should use "agents feed post" (record + optional broadcast) instead.
+      Set notify.owner.{channel,to} in agents.yaml once per machine/fleet.
 
       ${SHARED_NOTES}
     `,
   });
 
   notifyCmd.action(async (text: string | undefined, opts: SendCliOpts) => {
+    console.error(
+      chalk.yellow(
+        'Warning: "agents notify" is deprecated. Use "agents feed post" for progress posts that can also reach the owner.',
+      ),
+    );
     await runSend(text, opts, true);
   });
 }
