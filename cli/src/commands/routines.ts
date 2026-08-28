@@ -791,6 +791,12 @@ export function runFailureReason(run: RunMeta): string | null {
   }
   if (run.skipReason) return SKIP_REASON_LABEL[run.skipReason];
   if (run.status === 'missed') return 'scheduler was not running when it came due';
+  // The most common failure shape: a command/agent body that exited nonzero with
+  // no structured errorMessage (the cause is in stdout). Naming the exit code is
+  // still more than the bare status word, and tells the reader it ran and threw.
+  if ((run.status === 'failed' || run.status === 'timeout') && run.exitCode !== null && run.exitCode !== undefined) {
+    return `exit ${run.exitCode}`;
+  }
   return null;
 }
 
@@ -1734,7 +1740,9 @@ export function registerRoutinesCommands(program: Command): void {
           : run.status === 'failed'
             ? chalk.red(run.status)
             : chalk.yellow(run.status);
-        console.log(`  ${run.runId}  ${status}  ${run.startedAt}`);
+        const reason = runFailureReason(run);
+        const why = reason ? chalk.gray(` — ${reason}`) : '';
+        console.log(`  ${run.runId}  ${status}  ${run.startedAt}${why}`);
       }
     });
 
