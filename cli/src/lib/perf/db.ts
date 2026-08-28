@@ -1,7 +1,7 @@
 /**
  * Disposable performance warehouse — SQLite under ~/.agents/.cache/perf/.
  *
- * Opened only by `agents perf` / `hooks profile` (read path). Writers use
+ * Opened only by `agents insights perf` / `hooks profile` (read path). Writers use
  * {@link recordSample} in `./spool.ts` (NDJSON, no SQLite).
  */
 

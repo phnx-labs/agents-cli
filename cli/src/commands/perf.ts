@@ -274,7 +274,7 @@ function summaryAction(opts: PerfGlobalOpts): void {
     return;
   }
 
-  console.log(chalk.bold(`agents perf — last ${days} day${days === 1 ? '' : 's'}${project ? ` — project ${project}` : ''}`));
+  console.log(chalk.bold(`agents insights perf — last ${days} day${days === 1 ? '' : 's'}${project ? ` — project ${project}` : ''}`));
   console.log(chalk.gray(`warehouse: ${perfDbPath()}  (disposable; soft-join sessions via session_id/agent/machine)`));
   console.log('');
 
@@ -310,8 +310,16 @@ function leafOpts(cmd: Command): PerfGlobalOpts {
   return { ...parent, ...(cmd.opts() as PerfGlobalOpts) };
 }
 
-export function registerPerfCommand(program: Command): void {
-  const perf = program
+/**
+ * Attach the `perf` latency-rollup command under a parent (the top-level
+ * `insights` group). Performance is an insight, not a top-level noun — `agents
+ * perf` was retired in favour of `agents insights perf` (PHNX-3391). It is a
+ * sibling of `agents insights cost` / `output`, registered in
+ * `registerInsightsCommand` beside them (top-level insights only, not
+ * `sessions insights`).
+ */
+export function registerPerfSubcommand(parent: Command): void {
+  const perf = parent
     .command('perf')
     .description('Latency rollups from the disposable perf warehouse (hooks, commands, runs)')
     .addHelpText('after', `
@@ -320,13 +328,13 @@ Identity columns reuse sessions/events string shapes (session_id, agent, machine
 for soft cross-reference; there are no foreign keys.
 
 Examples:
-  agents perf                        # summary: commands + hooks + runs
-  agents perf hooks                  # per-hook p50/p95/p99 + cache hit rate
-  agents perf commands --days 30     # slowest CLI entrypoints
-  agents perf run --json             # agent.run timings as JSON
-  agents perf hooks --warn-ms 500
-  agents perf hooks --project agents-cli  # scope to one repo's samples
-  agents perf friction               # sessions stuck retrying the same guard block
+  agents insights perf                        # summary: commands + hooks + runs
+  agents insights perf hooks                  # per-hook p50/p95/p99 + cache hit rate
+  agents insights perf commands --days 30     # slowest CLI entrypoints
+  agents insights perf run --json             # agent.run timings as JSON
+  agents insights perf hooks --warn-ms 500
+  agents insights perf hooks --project agents-cli  # scope to one repo's samples
+  agents insights perf friction               # sessions stuck retrying the same guard block
 `);
 
   // Options live on the parent so `agents perf --json` and

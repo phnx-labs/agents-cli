@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 550 commands._
+_68 command groups · 550 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -346,11 +346,16 @@ agents import <agent>  Import an existing unmanaged agent install into agents-cl
 ## insights — How work looks — behavioural report (default) or counter mix (`mix`, recipes)
 
 ```
-agents insights               How work looks — behavioural report (default) or counter mix (`mix`, recipes)
-agents insights cost          Roll up $ cost and duration across local agent sessions
-agents insights mix [recipe]  Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.
-agents insights output        Productivity rollup — token burn vs shipped output (PRs, commits) across agents
-agents insights query         Raw usage-event query (usage.db)
+agents insights                How work looks — behavioural report (default) or counter mix (`mix`, recipes)
+agents insights cost           Roll up $ cost and duration across local agent sessions
+agents insights mix [recipe]   Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.
+agents insights output         Productivity rollup — token burn vs shipped output (PRs, commits) across agents
+agents insights perf           Latency rollups from the disposable perf warehouse (hooks, commands, runs)
+agents insights perf commands  Slowest CLI command paths (command.end samples)
+agents insights perf friction  Sessions stuck repeatedly hitting the same guard block
+agents insights perf hooks     Per-hook timing + cache stats
+agents insights perf run       agent.run / perf.timing label rollups
+agents insights query          Raw usage-event query (usage.db)
 ```
 
 ## inspect — Inspect one installed agent harness at one version (not a model), or a DotAgents repo — paths, capabilities, resources, and hook capable/on-disk/wired state.
@@ -474,16 +479,6 @@ agents open [url]       Resume a session from an agents:// deep link, or registe
 agents open register    Register the agents:// URL scheme with the OS so artifact links resume sessions (idempotent).
 agents open status      Report whether the agents:// URL scheme handler is registered.
 agents open unregister  Remove the agents:// URL scheme handler.
-```
-
-## perf — Latency rollups from the disposable perf warehouse (hooks, commands, runs)
-
-```
-agents perf           Latency rollups from the disposable perf warehouse (hooks, commands, runs)
-agents perf commands  Slowest CLI command paths (command.end samples)
-agents perf friction  Sessions stuck repeatedly hitting the same guard block
-agents perf hooks     Per-hook timing + cache stats
-agents perf run       agent.run / perf.timing label rollups
 ```
 
 ## permissions — Control what agents can access with allow/deny rules for bash, tools, and filesystem
