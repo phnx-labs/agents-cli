@@ -157,8 +157,6 @@ export function prepareJobHome(config: JobConfig, version?: string): string {
   // ever reaches prepareJobHome, so there is deliberately no branch here.
   if (config.agent === 'claude') {
     generateClaudeConfig(overlayHome, config);
-    linkVersionAuth(overlayHome, 'claude', version);
-    linkVersionHookRoots('claude', version);
   } else if (config.agent === 'codex') {
     generateCodexConfig(overlayHome, config);
     linkVersionAuth(overlayHome, 'codex', version);
@@ -185,29 +183,6 @@ export function prepareJobHome(config: JobConfig, version?: string): string {
   }
 
   return overlayHome;
-}
-
-/**
- * Mirror only executable hook roots under the managed version HOME.
- * Hook settings intentionally use portable `~/...` paths; a routine must set
- * HOME to that version for native Keychain auth, so give those paths their
- * real targets without exposing the operator's whole ~/.agents tree.
- */
-export function linkVersionHookRoots(agent: AgentId, version?: string): void {
-  if (!version) return;
-  const versionHome = getVersionHomePath(agent, version);
-  const userAgents = getUserAgentsDir();
-  const pairs = [
-    [path.join(versionHome, agent === 'claude' ? '.claude' : `.${agent}`, 'hooks'), path.join(versionHome, '.agents', '.history', 'versions', agent, version, 'home', agent === 'claude' ? '.claude' : `.${agent}`, 'hooks')],
-    [path.join(userAgents, '.cache', 'shims', 'hooks'), path.join(versionHome, '.agents', '.cache', 'shims', 'hooks')],
-    [path.join(userAgents, '.system', 'hooks'), path.join(versionHome, '.agents', '.system', 'hooks')],
-    [path.join(userAgents, 'hooks'), path.join(versionHome, '.agents', 'hooks')],
-  ];
-  for (const [source, target] of pairs) {
-    if (!fs.existsSync(source) || fs.existsSync(target)) continue;
-    fs.mkdirSync(path.dirname(target), { recursive: true });
-    try { createLink(source, target); } catch { /* hook execution fails loudly if linking is unavailable */ }
-  }
 }
 
 /** Link only the selected harness login into the disposable routine HOME. */

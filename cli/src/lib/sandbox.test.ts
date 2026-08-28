@@ -175,25 +175,19 @@ describe('getJobHomePath — routine-name path containment (C4)', () => {
   });
 });
 
-describe('prepareJobHome — monitor/routine agent auth (PHNX-3406)', () => {
-  it('links the balanced Claude account identity but keeps hook-bearing settings out of the routine HOME', () => {
+describe('prepareJobHome — monitor/routine agent auth', () => {
+  it('links the selected Codex auth without importing hook-bearing settings', () => {
     const version = `99.0.0-phnx3406-${process.pid}`;
     const name = `phnx3406-${process.pid}`;
-    const versionHome = getVersionHomePath('claude', version);
-    const configDir = path.join(versionHome, '.claude');
+    const versionHome = getVersionHomePath('codex', version);
+    const configDir = path.join(versionHome, '.codex');
     fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(path.join(configDir, '.claude.json'), '{"oauthAccount":{"emailAddress":"routine@example.com"}}');
-    fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({
-      hooks: { SessionStart: [{ hooks: [{ command: '~/.agents/missing-hook.sh' }] }] },
-    }));
+    fs.writeFileSync(path.join(configDir, 'auth.json'), '{"auth_mode":"chatgpt"}');
 
     try {
-      const overlay = prepareJobHome({ name, agent: 'claude', mode: 'auto', enabled: true }, version);
-      expect(fs.realpathSync(path.join(overlay, '.claude', '.claude.json')))
-        .toBe(fs.realpathSync(path.join(configDir, '.claude.json')));
-      const settings = JSON.parse(fs.readFileSync(path.join(overlay, '.claude', 'settings.json'), 'utf8'));
-      expect(settings.hooks).toBeUndefined();
-      expect(settings.permissions).toBeDefined();
+      const overlay = prepareJobHome({ name, agent: 'codex', mode: 'auto', enabled: true }, version);
+      expect(fs.realpathSync(path.join(overlay, '.codex', 'auth.json')))
+        .toBe(fs.realpathSync(path.join(configDir, 'auth.json')));
     } finally {
       fs.rmSync(versionHome, { recursive: true, force: true });
       fs.rmSync(path.dirname(getJobHomePath(name)), { recursive: true, force: true });

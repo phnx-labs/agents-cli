@@ -25,7 +25,7 @@ describe('buildRoutineSpawnEnv (PHNX-3406)', () => {
     const overlay = path.join(os.tmpdir(), 'phnx3406-overlay');
     const version = '99.0.0-phnx3406';
     const env = buildRoutineSpawnEnv({ HOME: overlay, AGENTS_USER_DIR: state.getUserAgentsDir() }, 'claude', version, undefined, overlay);
-    expect(env.HOME).toBe(getVersionHomePath('claude', version));
+    expect(env.HOME).toBe(process.env.AGENTS_REAL_HOME || os.homedir());
     expect(env.CLAUDE_CONFIG_DIR).toBe(path.join(getVersionHomePath('claude', version), '.claude'));
   });
 });
