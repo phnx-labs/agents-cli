@@ -71,13 +71,21 @@ claims the first reply and routes it over the recorded session reply rail.
 
 `agents traces sync` publishes two redacted derived surfaces: a per-session
 `SessionDetail` at `sessions/<id>.json` (a `meta` summary —
-spanMs/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
+spanMs/**activeMs**/turns/tools/errorCount/tokens/cost/outcome/repo — plus a plain-language
 `whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
-rich per-device `index.json`. The index contains duration/error statistics,
+rich per-device `index.json`. `activeMs` is `spanMs` minus every idle gap > 120s
+(PHNX-3457) so a session resumed after hours, or left idle mid-turn, reads as
+effort rather than calendar span. The index contains duration/error statistics —
+`medianMs`/`p90Ms` are the ACTIVE-time percentiles (the meaningful figure), with the
+raw wall-clock span kept alongside as `spanMedianMs`/`spanP90Ms`; every harness now
+carries a non-null span (`resolveDurationMs` in `session/db.ts` derives it at upsert
+for rush/grok/kimi/cursor/muse/antigravity, which previously left `duration_ms` NULL) —
 ranked attention flags, metadata/tool-mix topic buckets — the human task taxonomy the
 console treemap renders (Feature work · Bug fixes · Refactor · Debugging · Code review ·
 Release · Blog & docs · Fleet / ops), an ordered rules table in `classify.ts`'s
-`classifyTopic`, keyed within the five stable `TraceTopicGroup` groups — and structured tool
+`classifyTopic`, keyed within the five stable `TraceTopicGroup` groups, **each bucket
+carrying up to 30 example `sessions` refs (`{id,title}`) so a treemap tile is
+drillable into its session list (PHNX-3408)** — and structured tool
 failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**.
 Group-by dimensions for the console insight bar are pure functions in
 [`src/lib/traces/segments.ts`](src/lib/traces/segments.ts): `deriveAgent`

@@ -306,13 +306,19 @@ export interface TracesIndexShard {
   owner: string;
   stats: {
     sessionsImported: number;
+    /** Median ACTIVE duration (span − idle gaps > 120s), ms — the meaningful figure (PHNX-3457). */
     medianMs: number;
+    /** p90 ACTIVE duration, ms. */
     p90Ms: number;
+    /** Median raw wall-clock span, ms — idle time included; kept alongside the active figure. */
+    spanMedianMs: number;
+    /** p90 raw wall-clock span, ms. */
+    spanP90Ms: number;
     needAttention: number;
     toolErrorRate: number;
   };
   needsAttention: IndexedSession[];
-  topics: Array<{ key: string; label: string; count: number; group: TraceTopicGroup }>;
+  topics: TopicItem[];
   failures: {
     byToolError: Array<{ tool: string; desc: string; cause: TraceFailureCause; count: number }>;
     byCause: Record<TraceFailureCause, number>;
@@ -340,6 +346,25 @@ export interface IndexedSession {
   flags: string[];
 }
 
+/** One example session under a topic tile — the shape the console drill-down consumes. */
+export interface TopicSessionRef {
+  id: string;
+  title: string;
+}
+
+/**
+ * One topic bucket in the treemap. `sessions` carries up to {@link TOPIC_SESSION_CAP}
+ * example refs so the console can drill from the tile into its session list — a tile
+ * with no refs renders display-only (PHNX-3408). `count` stays the true total.
+ */
+export interface TopicItem {
+  key: string;
+  label: string;
+  count: number;
+  group: TraceTopicGroup;
+  sessions: TopicSessionRef[];
+}
+
 /** A row from `tool_calls`. `ordinal`/`timestamp` order calls within a session for computeInsights(). */
 export interface ToolCallRow {
   session_id: string;
@@ -365,6 +390,48 @@ function percentile(values: number[], ratio: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((a, b) => a - b);
   return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
+}
+
+/**
+ * A delta between consecutive events longer than this reads as an idle stall, not
+ * work — the same threshold the trajectory uses for its gap detection
+ * (`DEFAULT_IDLE_THRESHOLD_MS`, trajectory.ts). Kept in lockstep so active time
+ * here and the gaps drawn in a session's detail view agree on what "idle" means.
+ */
+const IDLE_GAP_THRESHOLD_MS = 120_000;
+
+/** Max example session refs carried per topic tile so a tile is drillable (PHNX-3408). */
+const TOPIC_SESSION_CAP = 30;
+
+/**
+ * Active time for a session in the index shard: its recorded span minus every idle
+ * gap between consecutive tool calls (PHNX-3457). The index build already holds the
+ * ordered `tool_calls` rows for the whole corpus, so idle gaps are derived from
+ * them here — no transcript re-parse — measuring each gap from a call's END (its
+ * own `end_timestamp` when known, else its start) to the next call's start, so a
+ * call's own duration is never mistaken for idle. Bounded to `[0, spanMs]`: calls
+ * whose timestamps fall outside the recorded span can't drive active negative or
+ * above the span.
+ */
+export function sessionActiveMs(spanMs: number, sessionCalls: ToolCallRow[]): number {
+  if (spanMs <= 0) return Math.max(0, spanMs);
+  const ordered = [...sessionCalls].sort((a, b) => a.ordinal - b.ordinal);
+  let idleMs = 0;
+  for (let i = 1; i < ordered.length; i++) {
+    const prev = ordered[i - 1];
+    const prevEndMs = Date.parse(prev.end_timestamp ?? prev.timestamp);
+    const nextStartMs = Date.parse(ordered[i].timestamp);
+    if (!Number.isFinite(prevEndMs) || !Number.isFinite(nextStartMs)) continue;
+    const gap = nextStartMs - prevEndMs;
+    if (gap > IDLE_GAP_THRESHOLD_MS) idleMs += gap;
+  }
+  return Math.max(0, spanMs - Math.min(idleMs, spanMs));
+}
+
+/** Active time from an already-built trajectory: span minus its idle gaps (all > threshold). */
+function activeMsFromTrajectory(traj: SessionTrajectory): number {
+  const idleMs = traj.gaps.reduce((sum, gap) => sum + gap.durationMs, 0);
+  return Math.max(0, traj.spanMs - Math.min(idleMs, traj.spanMs));
 }
 
 /** Human description of a failed call, keyed by (tool, desc, cause) for grouping. Exported for computeInsights(). */
@@ -442,6 +509,7 @@ export function buildIndexShard(
   }
   const toolMix = new Map<string, Record<string, number>>();
   const errorCounts = new Map<string, number>();
+  const callsBySession = new Map<string, ToolCallRow[]>();
   for (const call of calls) {
     const mix = toolMix.get(call.session_id) ?? {};
     mix[call.tool] = (mix[call.tool] ?? 0) + 1;
@@ -449,6 +517,8 @@ export function buildIndexShard(
     if (call.outcome === 'error') {
       errorCounts.set(call.session_id, (errorCounts.get(call.session_id) ?? 0) + 1);
     }
+    const list = callsBySession.get(call.session_id);
+    if (list) list.push(call); else callsBySession.set(call.session_id, [call]);
   }
 
   const topics = readSessionTopics<ClassifiedTopic>(ids);
@@ -539,11 +609,33 @@ export function buildIndexShard(
     }];
   }).sort((a, b) => b.severity - a.severity || a.id.localeCompare(b.id));
 
-  const topicCounts = new Map<string, { key: string; label: string; count: number; group: TraceTopicGroup }>();
-  for (const topic of topics.values()) {
-    const current = topicCounts.get(topic.key) ?? { ...topic, count: 0 };
-    current.count++;
-    topicCounts.set(topic.key, current);
+  // Aggregate the human task taxonomy the console treemap renders, AND collect a
+  // capped set of example session refs per topic so each tile is drillable
+  // (PHNX-3457/PHNX-3408): the console gates a tile's click on `topic.sessions`
+  // being non-empty, so without refs every tile renders display-only. Iterating
+  // `rows` (not `topics.values()`) gives the same per-session count while carrying
+  // the row's title + recency for the ref list; every row has a topic (missing
+  // ones were classified into `topics` above).
+  type TopicBucket = {
+    key: string;
+    label: string;
+    count: number;
+    group: TraceTopicGroup;
+    refs: Array<{ id: string; title: string; recencyMs: number }>;
+  };
+  const topicCounts = new Map<string, TopicBucket>();
+  for (const row of rows) {
+    const topic = topics.get(row.id);
+    if (!topic) continue;
+    const bucket = topicCounts.get(topic.key)
+      ?? { key: topic.key, label: topic.label, group: topic.group, count: 0, refs: [] };
+    bucket.count++;
+    bucket.refs.push({
+      id: row.id,
+      title: redactSecrets(row.label ?? row.topic ?? topic.label ?? 'Untitled session', knownSecrets),
+      recencyMs: Date.parse(row.last_activity ?? row.timestamp) || 0,
+    });
+    topicCounts.set(topic.key, bucket);
   }
 
   const failedCalls = calls.filter((call) => call.outcome === 'error');
@@ -558,7 +650,15 @@ export function buildIndexShard(
     current.count++;
     failureCounts.set(key, current);
   }
-  const durations = rows.flatMap((row) => row.duration_ms == null ? [] : [row.duration_ms]);
+  // Duration stats run over ACTIVE time, not raw span (PHNX-3457): span minus idle
+  // gaps > 120s, derived per session from the tool_calls already loaded above. A
+  // session resumed after hours, or left idle mid-turn, otherwise inflates the
+  // median/p90 with wall-clock the agent did no work in (real corpus max span:
+  // 345h). Raw span is kept alongside as spanMedianMs/spanP90Ms.
+  const spans = rows.flatMap((row) => row.duration_ms == null ? [] : [row.duration_ms]);
+  const activeDurations = rows.flatMap((row) =>
+    row.duration_ms == null ? [] : [sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [])],
+  );
 
   // Build today's per-bucket stats for the rolling drift window.
   const todayDate = new Date().toISOString().slice(0, 10);
@@ -590,13 +690,29 @@ export function buildIndexShard(
     owner,
     stats: {
       sessionsImported: rows.length,
-      medianMs: percentile(durations, 0.5),
-      p90Ms: percentile(durations, 0.9),
+      medianMs: percentile(activeDurations, 0.5),
+      p90Ms: percentile(activeDurations, 0.9),
+      spanMedianMs: percentile(spans, 0.5),
+      spanP90Ms: percentile(spans, 0.9),
       needAttention: needsAttention.length,
       toolErrorRate: calls.length === 0 ? 0 : failedCalls.length / calls.length,
     },
     needsAttention,
-    topics: [...topicCounts.values()].sort((a, b) => b.count - a.count || a.key.localeCompare(b.key)),
+    topics: [...topicCounts.values()]
+      .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key))
+      .map((bucket) => ({
+        key: bucket.key,
+        label: bucket.label,
+        count: bucket.count,
+        group: bucket.group,
+        // Up to TOPIC_SESSION_CAP most-recent example sessions, so the console can
+        // drill from a tile into its session list. Capped to keep the shard small;
+        // the tile's `count` remains the true total.
+        sessions: bucket.refs
+          .sort((a, b) => b.recencyMs - a.recencyMs)
+          .slice(0, TOPIC_SESSION_CAP)
+          .map(({ id, title }) => ({ id, title })),
+      })),
     failures: {
       byToolError: [...failureCounts.values()].sort((a, b) => b.count - a.count || a.tool.localeCompare(b.tool)),
       byCause,
@@ -618,7 +734,16 @@ export interface SessionDetail {
   schema: 1;
   id: string;
   meta: {
+    /** Raw wall-clock span (last event − first event), idle time included. */
     spanMs: number;
+    /**
+     * Active time: `spanMs` minus every idle gap > 120s (PHNX-3457). A session
+     * resumed hours later, or left idle mid-turn, inflates `spanMs` with wall-clock
+     * the agent did no work in — active time strips those gaps so a duration reads
+     * as effort, not calendar span. This is what the console's duration median/p90
+     * should trust; `spanMs` stays available as the raw figure.
+     */
+    activeMs: number;
     turns: number;
     tools: number;
     errorCount: number;
@@ -712,6 +837,7 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
     id: s.id,
     meta: {
       spanMs: traj.spanMs,
+      activeMs: activeMsFromTrajectory(traj),
       turns: (stats.userTurns ?? 0) + (stats.assistantTurns ?? 0),
       tools: stats.toolCount ?? 0,
       errorCount: traj.errorCount,
