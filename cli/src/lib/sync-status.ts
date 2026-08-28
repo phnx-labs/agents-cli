@@ -109,6 +109,50 @@ export interface UnifiedSyncStatus {
   };
 }
 
+/**
+ * Residual drift for a single (agent, version) after a reconcile — the drifted
+ * and missing rows that a sync claimed to fix but did not. `orphan` rows are
+ * deliberately excluded: sync never removes them (that is `agents prune`'s job),
+ * so they are not "unfinished sync". Empty `drifted`+`missing` ⇒ converged.
+ */
+export interface ResidualDrift {
+  agent: AgentId;
+  version: string;
+  rows: ResourceStatusRow[];
+}
+
+/**
+ * Re-check that a version's home now matches its resolved sources after a
+ * reconcile. This is the post-write verification the `agents sync` success line
+ * depends on (PHNX-3186): the exit line must not read "reconciled" while drift
+ * it was asked to fix stays put. Resolves against non-project layers only
+ * (`excludeProject: true`), mirroring what the sync writer targets. Returns null
+ * when the version converged (no drifted/missing), else the residual rows.
+ */
+export function verifyVersionConverged(
+  agent: AgentId,
+  version: string,
+  cwd: string = process.cwd(),
+): ResidualDrift | null {
+  const report = diffVersionResources(agent, version, { cwd, excludeProject: true });
+  const rows = rowsFromReport(agent, version, report)
+    .filter((r) => r.status === 'drifted' || r.status === 'missing');
+  if (rows.length === 0) return null;
+  return { agent, version, rows };
+}
+
+/** One-line-per-resource description of residual drift, for the sync exit line. */
+export function formatResidualDrift(residual: ResidualDrift[]): string[] {
+  const lines: string[] = [];
+  for (const r of residual) {
+    for (const row of r.rows) {
+      const detail = row.detail ? ` (${row.detail})` : '';
+      lines.push(`${r.agent}@${r.version}: ${row.status} ${row.kind} '${row.name}'${detail}`);
+    }
+  }
+  return lines;
+}
+
 const STATUS_MAP: Record<DiffStatus, ResourceSyncStatus> = {
   ok: 'synced',
   diff: 'drifted',

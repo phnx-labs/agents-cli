@@ -236,6 +236,39 @@ partial outcome, not a failed command — the sync did everything it could — a
 treat a refusal as failure should read `ok` (or `declined`) from `--json` rather
 than `$?`.
 
+### Post-reconcile verification — the success line is checked, not assumed
+
+`agents sync` used to print `✓ sync: reconciled` (umbrella) or `Synced to
+<agent>@<version>` (per-agent) the moment the writer returned — without
+re-reading the home. When the drift detector and the writer disagreed about what
+a version should hold, the writer silently wrote nothing while
+`agents sync status` kept reporting drift, so re-running sync forever printed
+success while the drift stayed put (PHNX-3186).
+
+Every full reconcile now **verifies convergence**: after writing, it re-reads
+each version it touched (`verifyVersionConverged`, the same
+`diffVersionResources` engine behind `agents sync status`, resolved against the
+non-project layers) and confirms the home now matches source.
+
+- **Residual drift is named, not hidden.** Any `drifted`/`missing` resource that
+  survives the reconcile is printed under a `⚠ sync did not fully reconcile —`
+  block naming each `<agent>@<version>: <status> <kind> '<name>'`, and the
+  umbrella one-liner reads `⚠ sync: reconcile INCOMPLETE` instead of a bare `✓`.
+- **`--json`** carries a `residualDrift` array and sets `ok: false` (per-agent,
+  `agent-all`, and `umbrella` modes).
+- **Exit code stays 0**, exactly like a declined write — the loud reporting is
+  the `ok: false` + `residualDrift` payload and the printed ⚠ block, not `$?`.
+  This is deliberate: the fleet fan-out (`agents sync --device all`) treats a
+  non-zero peer exit as unreachable and discards that box's JSON, so a non-zero
+  exit would hide the very residual it emitted. Scripts that must treat an
+  incomplete sync as failure read `ok` / `residualDrift` from `--json`. A gap
+  that persists across a re-run is a real unreconcilable drift worth filing.
+- **Scope.** Only a full reconcile is verified. An interactive subset-selection
+  and a repo-/kind-scoped sync deliberately touch only part of the home, so the
+  rest legitimately still differs and is not that run's responsibility.
+- **`orphan` never counts.** Sync does not remove orphans (`agents prune`'s job),
+  so an installed-with-no-source resource is not "unfinished sync".
+
 Pruning is **manifest-bounded**, so it never over-deletes:
 
 - **Only agents-installed resources are candidates.** The prune set is

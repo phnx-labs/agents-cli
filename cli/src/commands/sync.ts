@@ -71,6 +71,7 @@ import { runLaunchSync } from '../lib/project-launch.js';
 import { formatKeptProjectResources } from '../lib/project-resources.js';
 import { isInteractiveTerminal, isPromptCancelled } from './utils.js';
 import { runUmbrellaSync, type UmbrellaFlags } from '../lib/sync-umbrella.js';
+import { verifyVersionConverged, formatResidualDrift, type ResidualDrift } from '../lib/sync-status.js';
 import { addHostOption } from '../lib/hosts/option.js';
 import { syncRepoGit, adoptUserRepoIfNeeded, recordUserRepoRemote, resolveUserRepoRemoteUrl } from '../lib/git.js';
 import { getSystemAgentsDir, getUserAgentsDir, getEnabledExtraRepos } from '../lib/state.js';
@@ -129,6 +130,47 @@ interface SyncOpts {
 /** Emit one JSON object to stdout for `--json` callers / fleet fan-out. */
 function emitJson(payload: unknown): void {
   console.log(JSON.stringify(payload));
+}
+
+/**
+ * Post-reconcile verification (PHNX-3186): after a sync writes into a set of
+ * version homes, re-read each home and confirm it now matches its resolved
+ * sources. The `agents sync` success line MUST NOT read "reconciled" while the
+ * drift it was asked to fix stays put. Any residual drifted/missing resource
+ * sets a non-zero exit code and — outside `--json` — names the exact unfixed
+ * drift so the operator sees what did not converge instead of a false ✓. Orphans
+ * are excluded (sync never removes them). Returns the residual for `--json`.
+ */
+function verifyReconciled(
+  pairs: Array<{ agent: AgentId; version: string }>,
+  cwd: string,
+): ResidualDrift[] {
+  const residual: ResidualDrift[] = [];
+  const seen = new Set<string>();
+  for (const { agent, version } of pairs) {
+    const key = `${agent}@${version}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const r = verifyVersionConverged(agent, version, cwd);
+    if (r) residual.push(r);
+  }
+  // Residual drift is reported loudly via `ok:false` + the printed ⚠ block, but
+  // does NOT change the exit code — matching the declined-write precedent
+  // (RUSH-2700). The fleet fan-out (`agents sync --device all`) THROWS on a
+  // non-zero peer exit (`hosts/passthrough.ts`), discarding that box's JSON, so a
+  // non-zero exit here would hide the very `residualDrift` payload it emitted.
+  // Callers that must treat an incomplete sync as failure read `ok`/`residualDrift`
+  // from `--json`, exactly as they already do for declines.
+  return residual;
+}
+
+/** Print the residual-drift block naming exactly what did not converge. */
+function printResidual(residual: ResidualDrift[], errLog: (msg: string) => void): void {
+  if (residual.length === 0) return;
+  const lines = formatResidualDrift(residual);
+  errLog(chalk.yellow(`⚠ sync did not fully reconcile — ${lines.length} resource(s) still drift after writing:`));
+  for (const line of lines) errLog(chalk.yellow(`  ${line}`));
+  errLog(chalk.gray('  Re-run the sync; a gap that survives a re-run is a real unreconcilable drift — report it.'));
 }
 
 /**
@@ -544,6 +586,7 @@ async function runUmbrella(
     return;
   }
 
+  const cwd = opts.cwd || process.cwd();
   const flags: UmbrellaFlags = {
     repos: opts.repos,
     secrets: opts.secrets,
@@ -575,10 +618,22 @@ async function runUmbrella(
     // --cloud (fetch-only, no local reconcile).
     if (!opts.cloud) evictCentralBrowserProfilesForSync(quiet, json, outLog, errLog);
 
+    // Post-reconcile verification (PHNX-3186): re-read every version the reconcile
+    // wrote into and confirm it now matches source. Without this the umbrella
+    // printed `✓ sync: reconciled` unconditionally, the exact false-success the
+    // ticket reports. Residual drift downgrades the line and sets a non-zero exit.
+    const residual = result.reconciled
+      ? verifyReconciled(
+          result.reconciledVersions.map((r) => ({ agent: r.agent as AgentId, version: r.version })),
+          cwd,
+        )
+      : [];
+
     if (json) {
       emitJson({
-        // A refused resource is not a clean sync (RUSH-2700).
-        ok: result.declined.length === 0,
+        // A refused resource OR residual drift is not a clean sync (RUSH-2700 +
+        // PHNX-3186).
+        ok: result.declined.length === 0 && residual.length === 0,
         mode: 'umbrella',
         plan: result.plan,
         repos: result.repos,
@@ -586,6 +641,7 @@ async function runUmbrella(
         devices: result.devices,
         reconciled: result.reconciled,
         declined: result.declined,
+        residualDrift: residual,
       });
       return;
     }
@@ -599,11 +655,17 @@ async function runUmbrella(
       if (result.secrets) {
         parts.push(result.secrets.skipped ? 'secrets skipped' : `secrets ${result.secrets.pulled} pulled`);
       }
-      if (result.reconciled) parts.push('reconciled');
-      outLog(chalk.green(`✓ sync: ${parts.join(' · ') || 'nothing to do'}`));
+      // Only claim "reconciled" when the reconcile actually converged. Residual
+      // drift is already printed loudly by verifyReconciled above; reflect it in
+      // the one-line summary rather than a bare ✓.
+      if (result.reconciled) parts.push(residual.length === 0 ? 'reconciled' : 'reconcile INCOMPLETE');
+      const symbol = residual.length === 0 ? chalk.green('✓') : chalk.yellow('⚠');
+      const line = `${symbol} sync: ${parts.join(' · ') || 'nothing to do'}`;
+      outLog(residual.length === 0 ? chalk.green(line) : chalk.yellow(line));
 
       const errs = [...(result.repos?.errors ?? []), ...(result.secrets?.errors ?? [])];
       for (const e of errs) errLog(chalk.yellow(`  ! ${e}`));
+      printResidual(residual, errLog);
     }
   } catch (err) {
     if (json) {
@@ -813,13 +875,22 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
       versions.push({ version: v, result });
       if (!quiet && !json) printSyncDetail(result, agentId, v, cwd);
     }
+    // Verify each version actually converged; a repo-scoped sync only touched
+    // that repo's kinds, so skip verification there (the other layers legitimately
+    // still differ and are not this run's responsibility).
+    const residual = repoScope
+      ? []
+      : verifyReconciled(versions.map(({ version: v }) => ({ agent: agentId, version: v })), cwd);
+    if (!quiet && !json) printResidual(residual, errLog);
     if (json) {
       emitJson({
-        // Any version that refused a write makes the whole run not-ok (RUSH-2700).
-        ok: versions.every(({ result }) => result.declined.length === 0),
+        // Any version that refused a write, or any residual drift after the
+        // reconcile, makes the whole run not-ok (RUSH-2700 + PHNX-3186).
+        ok: versions.every(({ result }) => result.declined.length === 0) && residual.length === 0,
         mode: 'agent-all',
         agent: agentId,
         repo: repoScope,
+        residualDrift: residual,
         ...healedPointers,
         versions: versions.map(({ version: v, result }) => ({
           version: v,
@@ -1015,6 +1086,12 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
   const result = syncResourcesToVersion(agentId, version, selection, { projectDir, cwd, force, allowExecSurfaces: !!opts.allowExecSurfaces });
 
+  // Post-reconcile verification (PHNX-3186). Only for a FULL reconcile
+  // (`!selection`): an interactive subset-selection deliberately touched only the
+  // picked kinds, so the rest legitimately still differs and is not this run's
+  // failure. This is the exact path `agents sync <agent>[@version]` takes.
+  const residual = selection ? [] : verifyReconciled([{ agent: agentId, version }], cwd);
+
   // Compile project-scope rules into the workspace itself so each agent's
   // native loader picks up cwd/<INSTRUCTIONS_FILE>. projectDir is the
   // .agents/ directory; the workspace root is its parent.
@@ -1025,8 +1102,11 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
   }
 
   if (json) {
+    const base = agentSyncJson(agentId, version, result);
     emitJson({
-      ...agentSyncJson(agentId, version, result),
+      ...base,
+      ok: base.ok === true && residual.length === 0,
+      residualDrift: residual,
       ...healedPointers,
       projectCompile: projectCompile
         ? {
@@ -1044,6 +1124,7 @@ async function runSync(agentSpec: string | undefined, repoArg: string | undefine
 
   // ---------- 6. Detailed output ----------
   printSyncDetail(result, agentId, version, cwd);
+  printResidual(residual, errLog);
 
   if (projectCompile?.compiled) {
     const linkInfo = projectCompile.symlinks.length > 0
