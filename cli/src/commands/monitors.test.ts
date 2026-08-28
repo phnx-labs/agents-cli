@@ -346,7 +346,13 @@ describe('monitors inspection JSON and stderr', () => {
       // A user copy now exists, prefilled from the built-in's own config.
       const userFile = path.join(home, '.agents', 'monitors', 'ci-built-in.yml');
       expect(fs.existsSync(userFile)).toBe(true);
-      expect(yaml.parse(fs.readFileSync(userFile, 'utf-8')).source.command).toBe('echo hi');
+      const userBody = fs.readFileSync(userFile, 'utf-8');
+      expect(yaml.parse(userBody).source.command).toBe('echo hi');
+      // The derived `scope` must NOT leak into the materialized YAML, and a
+      // built-in's implicit `enabled: true` is stripped like every other write —
+      // materialization routes through writeMonitor, not a raw yaml.stringify.
+      expect(userBody).not.toContain('scope:');
+      expect(userBody).not.toContain('enabled: true');
 
       // The system mirror is byte-for-byte untouched.
       expect(fs.readFileSync(sysFile, 'utf-8')).toBe(sysBefore);
