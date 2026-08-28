@@ -2064,12 +2064,22 @@ export function slotRunId(scheduledFor: Date | string): string {
 }
 
 /**
- * Lookback windows for {@link alignedSlotForFire}, narrowest first. A fixed
- * one-week window silently blinds the walk to any cron whose gap exceeds it
- * (`0 9 1,13,25 * *` has 12-day gaps), so a wider window is tried only when the
- * narrower one found nothing — a dense schedule never walks more than a week.
+ * Lookback windows for {@link alignedSlotForFire}, narrowest first. A wider
+ * window is tried ONLY when the narrower one found no fire, so:
+ *  - a dense schedule (every-minute) resolves in the 1-hour window — ~60 steps,
+ *    not ~10080 — which matters because the forward-timer path now runs this on
+ *    every fire (a live fire is milliseconds past its boundary, so the narrowest
+ *    window always contains it);
+ *  - a sparse schedule (`0 9 1,13,25 * *` has 12-day gaps; monthly/quarterly/
+ *    annual) still resolves, because a fixed short window silently blinded
+ *    overdue detection to any cron whose gap exceeded it.
+ * A narrower window can only ever find the true most-recent fire ≤ `at` or
+ * nothing (never a wrong boundary), so prepending the cheap windows is
+ * behavior-preserving for the sparse-schedule overdue path.
  */
-const SLOT_LOOKBACK_WINDOWS_MS = [7, 32, 93, 400].map((d) => d * 24 * 60 * 60 * 1000);
+const HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * HOUR_MS;
+const SLOT_LOOKBACK_WINDOWS_MS = [HOUR_MS, DAY_MS, 7 * DAY_MS, 32 * DAY_MS, 93 * DAY_MS, 400 * DAY_MS];
 
 /**
  * The aligned schedule boundary a fire belongs to: the most recent occurrence of
