@@ -518,11 +518,21 @@ Behavior rules, per `src/lib/plugins.ts:379` and `src/lib/plugin-marketplace.ts`
    converted to skills prefixed with `<plugin>-<command>`
    (`plugins.ts:444-453`) so they remain reachable as `$<plugin>-<command>`.
 
-7. **Source delete ≠ destination clean — but skills get swept.**
-   `cleanOrphanedPluginSkills()` (`plugins.ts:866`) runs every sync and
-   removes plugin-owned skill dirs whose parent plugin no longer exists in
-   `~/.agents/plugins/`. The marketplace copy itself isn't pruned until
-   `agents plugins remove <name>` runs explicitly.
+7. **Source delete ≠ destination clean — but stale marketplace copies get
+   swept.** `cleanOrphanedPluginSkills()` (`plugins.ts`) runs every sync and
+   trashes a version-home marketplace-plugin install once no active source
+   plugin matches its **`(marketplace, name)` pair**. Keying on the pair — not
+   the plugin name alone — is what removes a *shadow*: a plugin that moved
+   marketplaces (e.g. `code` shipping from the user `agents-cli` marketplace and
+   later from the system `agents-system` marketplace) leaves a stale
+   `agents-cli` copy that a name-only sweep kept alive because the name was still
+   active via `agents-system` (PHNX-2618). A copy is trashed when its
+   marketplace's **source repo is present** but no longer ships that plugin;
+   when the source repo is **absent** (a project we're not in, a removed extra
+   repo) the sweep falls back to the name-only test so an unrelated sync never
+   trashes a plugin whose source simply is not reachable in this context. Trashed
+   copies soft-delete to `~/.agents/.trash/plugins/`; `diffVersionPlugins()`
+   surfaces the same orphans for `agents prune`.
 
 ## Key Functions
 

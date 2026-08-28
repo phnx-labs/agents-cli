@@ -2129,3 +2129,179 @@ describePlugins('updatePlugin exec-surface consent gate', () => {
     expect(fs.readFileSync(path.join(pluginRoot, 'hooks', 'existing.json'), 'utf-8')).toContain('"v":2');
   });
 });
+
+// ─── cleanOrphanedPluginSkills: cross-marketplace shadow (PHNX-2618) ───────────
+//
+// A `code` plugin used to live in the user repo (→ the "agents-cli" marketplace)
+// and later moved to the system repo (→ "agents-system"). The stale agents-cli
+// install was never reconciled, so every fleet box served BOTH — the shadow
+// copy answering `/code:quality` / `/code:ship` from skills the repo deleted.
+// Orphan detection keyed on plugin NAME kept the shadow alive because `code`
+// was still active (via agents-system). These tests reproduce the shadow end to
+// end through the real sync + cleanup path (no mocks) and prove the healthy
+// multi-marketplace case is untouched.
+
+describePlugins('cleanOrphanedPluginSkills across marketplaces (PHNX-2618 shadow)', () => {
+  let tmpDir: string;
+  let userDir: string;
+  let systemDir: string;
+  let extraRepo: string;
+  let versionHome: string;
+  let trashDir: string;
+
+  // A plugin that ships one skill, so a stale copy is visibly serving a skill.
+  function writePlugin(pluginsDir: string, name: string, skill = `${name}-skill`): string {
+    const root = path.join(pluginsDir, name);
+    fs.mkdirSync(path.join(root, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, '.claude-plugin', 'plugin.json'),
+      JSON.stringify({ name, version: '1.0.0', description: `${name} plugin` })
+    );
+    const skillDir = path.join(root, 'skills', skill);
+    fs.mkdirSync(skillDir, { recursive: true });
+    fs.writeFileSync(path.join(skillDir, 'SKILL.md'), `# ${name}:${skill}`);
+    return root;
+  }
+
+  function installedPluginDir(marketplace: string, name: string): string {
+    return path.join(versionHome, '.claude', 'plugins', 'marketplaces', marketplace, 'plugins', name);
+  }
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-shadow-'));
+    userDir = path.join(tmpDir, 'user', 'plugins');
+    systemDir = path.join(tmpDir, 'system', 'plugins');
+    extraRepo = path.join(tmpDir, 'agents-extras'); // ~/.agents-extras/ for alias "extras"
+    versionHome = path.join(tmpDir, 'version-home');
+    trashDir = path.join(tmpDir, 'trash', 'plugins');
+    fs.mkdirSync(userDir, { recursive: true });
+    fs.mkdirSync(systemDir, { recursive: true });
+    fs.mkdirSync(path.join(extraRepo, 'plugins'), { recursive: true });
+    fs.mkdirSync(versionHome, { recursive: true });
+  });
+
+  afterEach(() => {
+    vi.doUnmock('../state.js');
+    vi.resetModules();
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  async function withState(
+    overrides: Partial<typeof import('../state.js')>,
+    fn: (mod: typeof import('./plugins.js')) => Promise<void> | void
+  ) {
+    vi.resetModules();
+    vi.doMock('../state.js', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('../state.js')>();
+      return {
+        ...actual,
+        getPluginsDir: () => userDir,
+        getSystemPluginsDir: () => systemDir,
+        getEnabledExtraRepos: () => [],
+        getProjectPluginsDir: () => null,
+        getExtraPluginsDir: (alias: string) =>
+          alias === 'extras' ? path.join(extraRepo, 'plugins') : path.join(tmpDir, `agents-${alias}`, 'plugins'),
+        getTrashPluginsDir: () => trashDir,
+        ...overrides,
+      };
+    });
+    try {
+      const mod = await import('./plugins.js');
+      await fn(mod);
+    } finally {
+      vi.doUnmock('../state.js');
+      vi.resetModules();
+    }
+  }
+
+  it('trashes the stale agents-cli `code` after it moved to agents-system, keeping the current copy', async () => {
+    // Lineage: `code` was in the user repo AND the system repo. Install both.
+    writePlugin(userDir, 'code');
+    writePlugin(systemDir, 'code');
+
+    await withState({}, ({ discoverPlugins, syncPluginToVersion, cleanOrphanedPluginSkills }) => {
+      for (const p of discoverPlugins()) {
+        expect(syncPluginToVersion(p, 'claude', versionHome, { version: '1.0.0' }).success).toBe(true);
+      }
+      // Both marketplaces installed the plugin.
+      expect(fs.existsSync(installedPluginDir('agents-cli', 'code'))).toBe(true);
+      expect(fs.existsSync(installedPluginDir('agents-system', 'code'))).toBe(true);
+
+      // `code` moves out of the user repo entirely — now only agents-system ships it.
+      fs.rmSync(path.join(userDir, 'code'), { recursive: true, force: true });
+      const active = discoverPlugins();
+      expect(active.filter((p) => p.name === 'code').map((p) => p.marketplace)).toEqual(['agents-system']);
+
+      const removed = cleanOrphanedPluginSkills('claude', versionHome, active, '1.0.0');
+
+      // The shadow is gone; the current copy survives.
+      expect(removed).toContain('code');
+      expect(fs.existsSync(installedPluginDir('agents-cli', 'code'))).toBe(false);
+      expect(fs.existsSync(installedPluginDir('agents-system', 'code'))).toBe(true);
+    });
+  });
+
+  it('keeps BOTH copies while the same name is a live source in each marketplace (healthy path)', async () => {
+    writePlugin(userDir, 'code');
+    writePlugin(systemDir, 'code');
+
+    await withState({}, ({ discoverPlugins, syncPluginToVersion, cleanOrphanedPluginSkills }) => {
+      for (const p of discoverPlugins()) {
+        expect(syncPluginToVersion(p, 'claude', versionHome, { version: '1.0.0' }).success).toBe(true);
+      }
+      // Both sources still present — nothing is stale.
+      const removed = cleanOrphanedPluginSkills('claude', versionHome, discoverPlugins(), '1.0.0');
+
+      expect(removed).toEqual([]);
+      expect(fs.existsSync(installedPluginDir('agents-cli', 'code'))).toBe(true);
+      expect(fs.existsSync(installedPluginDir('agents-system', 'code'))).toBe(true);
+    });
+  });
+
+  it('keeps a still-present user plugin while trashing the moved one in the same pass', async () => {
+    writePlugin(userDir, 'code');
+    writePlugin(systemDir, 'code');
+    writePlugin(userDir, 'keeper');
+
+    await withState({}, ({ discoverPlugins, syncPluginToVersion, cleanOrphanedPluginSkills }) => {
+      for (const p of discoverPlugins()) {
+        expect(syncPluginToVersion(p, 'claude', versionHome, { version: '1.0.0' }).success).toBe(true);
+      }
+      fs.rmSync(path.join(userDir, 'code'), { recursive: true, force: true });
+
+      const removed = cleanOrphanedPluginSkills('claude', versionHome, discoverPlugins(), '1.0.0');
+
+      expect(removed).toEqual(['code']);
+      expect(fs.existsSync(installedPluginDir('agents-cli', 'code'))).toBe(false);
+      expect(fs.existsSync(installedPluginDir('agents-cli', 'keeper'))).toBe(true);
+    });
+  });
+
+  it('lenient fallback: does not trash an install whose source marketplace is unreachable', async () => {
+    // `code` lives in the user repo and an extra repo; install both. Then the
+    // extra repo is DISABLED (its source vanishes from discovery). Because that
+    // marketplace's source repo is no longer on disk, the extra install must be
+    // kept — an unrelated sync must not trash a plugin whose source simply is
+    // not reachable right now (only a present, authoritative source cleans).
+    writePlugin(userDir, 'code');
+    writePlugin(path.join(extraRepo, 'plugins'), 'code');
+
+    await withState(
+      { getEnabledExtraRepos: () => [{ alias: 'extras', dir: extraRepo, url: '' }] },
+      ({ discoverPlugins, syncPluginToVersion }) => {
+        for (const p of discoverPlugins()) {
+          expect(syncPluginToVersion(p, 'claude', versionHome, { version: '1.0.0' }).success).toBe(true);
+        }
+        expect(fs.existsSync(installedPluginDir('agents-extras', 'code'))).toBe(true);
+      }
+    );
+
+    // Re-run with the extra repo disabled AND its source directory removed.
+    fs.rmSync(extraRepo, { recursive: true, force: true });
+    await withState({}, ({ discoverPlugins, cleanOrphanedPluginSkills }) => {
+      const removed = cleanOrphanedPluginSkills('claude', versionHome, discoverPlugins(), '1.0.0');
+      expect(removed).not.toContain('code');
+      expect(fs.existsSync(installedPluginDir('agents-extras', 'code'))).toBe(true);
+    });
+  });
+});
