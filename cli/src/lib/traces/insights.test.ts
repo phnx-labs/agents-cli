@@ -21,10 +21,11 @@ function makeCall(
   timestamp: string,
   tool: string,
   outcome: 'ok' | 'error',
-  opts: Partial<Pick<ToolCallRow, 'exit_code' | 'status_code' | 'error_code' | 'error' | 'parse_error'>> = {},
+  opts: Partial<Pick<ToolCallRow, 'exit_code' | 'status_code' | 'error_code' | 'error' | 'parse_error' | 'end_timestamp'>> = {},
 ): ToolCallRow {
   return {
     session_id: sessionId, ordinal, timestamp, tool, outcome,
+    end_timestamp: opts.end_timestamp ?? null,
     exit_code: opts.exit_code ?? null, status_code: opts.status_code ?? null,
     error_code: opts.error_code ?? null, error: opts.error ?? null, parse_error: opts.parse_error ?? null,
   };
@@ -162,6 +163,82 @@ describe('computeInsights', () => {
     const result = computeInsights(rows, calls, null);
     expect(result.failurePatterns).toHaveLength(0);
     expect(result.wastedMsTotal).toBe(0);
+  });
+
+  it('attributes a failed call\'s own blocking duration (end - start), even with no next call', () => {
+    // A user_location tool that hung ~5.5 minutes on stdin and then failed
+    // (PHNX-3407). It is the last call in the session, so the gap heuristic alone
+    // would book ~0 — the call's own end timestamp is what makes it measurable.
+    const rows = [makeRow('sess-hang', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-hang', 1, iso(0), 'user_location', 'error', {
+        end_timestamp: iso(330_000), error: 'stdin read timed out',
+      }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    expect(result.failurePatterns).toHaveLength(1);
+    expect(result.failurePatterns[0].wastedMs).toBe(330_000);
+    expect(result.wastedMsTotal).toBe(330_000);
+  });
+
+  it('a fail-fast call (end - start < 1s) contributes ~0 wasted time', () => {
+    // The PHNX-3407 fix: the same tool now fails in under a second instead of
+    // hanging. The failure is still clustered, but its wasted time drops to ~0.
+    const rows = [makeRow('sess-fast', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-fast', 1, iso(0), 'user_location', 'error', {
+        end_timestamp: iso(800), error: 'stdin read timed out',
+      }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    expect(result.failurePatterns).toHaveLength(1);
+    expect(result.failurePatterns[0].wastedMs).toBe(800);
+    expect(result.failurePatterns[0].wastedMs).toBeLessThan(1_000);
+  });
+
+  it('a NULL end_timestamp degrades to the bounded-gap heuristic — no crash, no NaN', () => {
+    // Old rows (pre-migration extractor) carry no end timestamp. A lone failed
+    // call with no following call and no end must contribute exactly 0, not NaN.
+    const rows = [makeRow('sess-old', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-old', 1, iso(0), 'Bash', 'error', { error: 'boom' }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    expect(result.failurePatterns[0].wastedMs).toBe(0);
+    expect(Number.isNaN(result.wastedMsTotal)).toBe(false);
+    expect(result.wastedMsTotal).toBe(0);
+  });
+
+  it('sums own blocking duration and the post-call retry gap without double-counting', () => {
+    // Call 1 blocks 30s then fails; the same failure recurs 90s after it ended
+    // (a retry loop). Own duration (30s) + gap-from-END to the retry (90s) = 120s
+    // — the gap is measured from the call's end, so the 30s blocking counted once.
+    const rows = [makeRow('sess-retry', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-retry', 1, iso(0), 'Bash', 'error', {
+        end_timestamp: iso(30_000), error: 'network timeout',
+      }),
+      makeCall('sess-retry', 2, iso(120_000), 'Bash', 'error', {
+        end_timestamp: iso(150_000), error: 'network timeout',
+      }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    // call 1: own 30s + retry gap (120s-30s = 90s) = 120s. call 2: own 30s, no
+    // next call = 30s. Total 150s.
+    expect(result.failurePatterns[0].wastedMs).toBe(150_000);
+  });
+
+  it('bounds the own blocking duration by MAX_GAP_ATTRIBUTION_MS (30m)', () => {
+    // A corrupt/backwards end timestamp — 8 hours after the start — must not book
+    // 8 hours of waste; it is capped at the 30-minute recovery window.
+    const rows = [makeRow('sess-corrupt', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-corrupt', 1, iso(0), 'Bash', 'error', {
+        end_timestamp: iso(8 * 3_600_000), error: 'network timeout',
+      }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    expect(result.failurePatterns[0].wastedMs).toBe(30 * 60_000);
   });
 
   it('computes time-to-first-tool latency from the first call offset per session', () => {

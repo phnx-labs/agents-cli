@@ -81,9 +81,10 @@ const STALL_MS = 60_000;
  * multi-hour gap — the very artifact this fix targets. A genuine active loop has
  * MANY short gaps that each stay under this cap and still sum to a large total,
  * so bounding a single gap doesn't hide it. Real single-tool stalls (a hung
- * typecheck, a slow build) are minutes and stay fully counted. (Fuller fix:
- * persist per-call end timestamps and attribute a call's own blocking duration —
- * PHNX-3423 follow-up.)
+ * typecheck, a slow build) are minutes and stay fully counted.
+ *
+ * The same cap bounds the call's OWN blocking duration (PHNX-3437) so a corrupt
+ * or backwards end timestamp can't book a single call as hours of waste either.
  */
 const MAX_GAP_ATTRIBUTION_MS = 30 * 60_000;
 
@@ -145,17 +146,31 @@ function labelFor(tool: string, cause: TraceFailureCause, key: string): string {
  * Cluster failed tool calls into ranked patterns and estimate the wasted time
  * behind each, plus device-wide time-to-first-tool latency.
  *
- * wastedMs attribution: the gap between a failed call and the NEXT call in the
- * same session counts as wasted when either (a) the next call repeats the same
- * signature (a retry loop) or (b) the gap is a stall (≥60s) before an unrelated
- * next call — and in BOTH cases a single gap contributes at most
- * MAX_GAP_ATTRIBUTION_MS. That bound stops one failure from absorbing hours of
- * human-away idle in an async channel session (a Slack thread the user replies to
- * hours later), whether that shows up as a lone stall or as a same-signature
- * re-ask hours later; a genuine active retry loop is many short gaps that each
- * clear the cap and still sum large. An idle gap unrelated to a nearby failure is
- * never counted. This is an estimate, not ground truth; it is not inflated by
- * folding in ordinary processing time between unrelated calls.
+ * wastedMs attribution has two parts that sum:
+ *
+ * (1) The failed call's OWN blocking duration — `end_timestamp - timestamp`
+ * (PHNX-3437). A call that hung for minutes and then failed wasted that whole
+ * time even if it was the last call in its session or was followed quickly by an
+ * unrelated call — the case the gap heuristic alone booked as ~0. This is what
+ * makes a fail-fast fix measurable: a channel that stops hanging 5.5min on stdin
+ * and instead fails in <1s (PHNX-3407) drops from ~5.5min of attributed waste to
+ * ~0. Bounded by MAX_GAP_ATTRIBUTION_MS so a corrupt end timestamp can't dominate.
+ *
+ * (2) The idle gap AFTER the call, before the NEXT call in the same session,
+ * counted when either (a) the next call repeats the same signature (a retry
+ * loop) or (b) the gap is a stall (≥60s) before an unrelated next call — each
+ * bounded by MAX_GAP_ATTRIBUTION_MS so one failure can't absorb hours of
+ * human-away idle in an async channel session, whether as a lone stall or a
+ * same-signature re-ask hours later; a genuine active retry loop is many short
+ * gaps that each clear the cap and still sum large. When the end timestamp is
+ * known, this gap is measured from the call's END, so the blocking time counted
+ * in (1) is never double-counted; for a NULL end (rows an older extractor stored,
+ * or a call still pending at scan end) it falls back to the original
+ * gap-from-START heuristic unchanged — no crash, no NaN, no regression.
+ *
+ * An idle gap unrelated to a nearby failure is never counted. This is an
+ * estimate, not ground truth; it is not inflated by folding in ordinary
+ * processing time between unrelated calls.
  */
 export function computeInsights(
   rows: readonly SyncRow[],
@@ -200,9 +215,24 @@ export function computeInsights(
         group.examples.push(sessionId);
       }
 
+      // (1) The call's OWN blocking duration (end minus start) is the primary
+      // signal — see the computeInsights docblock. Attributed whenever the end
+      // timestamp is present, independent of whether a next call follows.
+      const startMs = Date.parse(call.timestamp);
+      const endMs = call.end_timestamp ? Date.parse(call.end_timestamp) : NaN;
+      const hasEnd = Number.isFinite(endMs) && Number.isFinite(startMs);
+      if (hasEnd) {
+        const ownMs = endMs - startMs;
+        if (ownMs > 0) group.wastedMs += Math.min(ownMs, MAX_GAP_ATTRIBUTION_MS);
+      }
+
+      // (2) The idle gap after the call, before the next one. Measured from the
+      // call's END when known (so the blocking time in (1) isn't double-counted),
+      // else from its START — the original heuristic, unchanged for NULL ends.
       const next = ordered[i + 1];
       if (!next) continue;
-      const gapMs = Date.parse(next.timestamp) - Date.parse(call.timestamp);
+      const gapFromMs = hasEnd ? endMs : startMs;
+      const gapMs = Date.parse(next.timestamp) - gapFromMs;
       if (!Number.isFinite(gapMs) || gapMs <= 0) continue;
       const nextIsSameFailure =
         next.outcome === 'error' &&

@@ -38,7 +38,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 42;
+export const SCHEMA_VERSION = 43;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -221,6 +221,11 @@ CREATE TABLE IF NOT EXISTS tool_calls (
   ordinal INTEGER NOT NULL,
   source_call_id TEXT,
   timestamp TEXT NOT NULL,
+  -- When the call's RESULT record arrived (its own end time). end_timestamp
+  -- minus timestamp is the call's own blocking duration, which the traces
+  -- insight engine attributes as a failed call's wasted time (PHNX-3437). NULL
+  -- for a call that never produced a result and for rows an older extractor stored.
+  end_timestamp TEXT,
   tool TEXT NOT NULL,
   input TEXT NOT NULL,
   outcome TEXT NOT NULL,
@@ -1307,6 +1312,31 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     // re-extracts on its next scan while parser_state/content_text (the
     // Claude/Codex resumable continuation) stay intact for rows that don't
     // need a full reparse for any OTHER reason.
+  }
+
+  if (fromVersion < 43) {
+    // v42 -> v43: persist a per-tool-call END timestamp (PHNX-3437). The traces
+    // insight engine could only book a failed call's wasted time from the
+    // bounded gap to the NEXT call — so a call that BLOCKED for minutes and was
+    // the last in its session (or was followed quickly by an unrelated call)
+    // registered as ~0 waste. The call's result record already carried its own
+    // timestamp at ingestion; this column persists it so `end_timestamp -
+    // timestamp` (the call's own blocking duration) becomes the primary
+    // attribution, with the gap heuristic kept as the fallback for NULL rows.
+    //
+    // Additive, nullable column — no ledger flush (the v33->v34 contract that
+    // adding a column keeps warm session ledgers warm). Pre-upgrade rows stay
+    // NULL until re-indexed, and `insights.ts` degrades a NULL end back to the
+    // bounded-gap behavior, so nothing crashes or yields NaN. The paired
+    // TOOL_INDEX_VERSION bump (7 -> 8) is what re-derives it on a re-index; the
+    // tool index is deliberately independent of SCHEMA_VERSION and is never
+    // force-rescanned by a migration (only by the explicit tool backfill or a
+    // normal incremental append), so a bare ALTER here would otherwise leave
+    // existing rows dark forever.
+    const cols = new Set(
+      (db.prepare(`PRAGMA table_info(tool_calls)`).all() as Array<{ name: string }>).map((c) => c.name),
+    );
+    if (!cols.has('end_timestamp')) db.exec(`ALTER TABLE tool_calls ADD COLUMN end_timestamp TEXT`);
   }
 
 }

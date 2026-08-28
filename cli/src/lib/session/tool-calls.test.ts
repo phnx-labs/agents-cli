@@ -47,6 +47,32 @@ describe('ToolCallCollector', () => {
     expect(Buffer.byteLength(calls[0].output || '')).toBeLessThanOrEqual(1024);
   });
 
+  it('records the result record timestamp as the call end time (PHNX-3437)', () => {
+    const calls = toolCallsFromEvents([
+      {
+        type: 'tool_use', agent: 'claude', timestamp: '2026-08-03T00:00:00.000Z', tool: 'Bash',
+        command: 'sleep 330', callId: 'call-a',
+      },
+      {
+        type: 'tool_result', agent: 'claude', timestamp: '2026-08-03T00:05:30.000Z', tool: 'Bash',
+        success: false, output: 'timed out', callId: 'call-a',
+      },
+    ]);
+    // start is the tool_use timestamp; end is the tool_result timestamp.
+    expect(calls[0].timestamp).toBe('2026-08-03T00:00:00.000Z');
+    expect(calls[0].endTimestamp).toBe('2026-08-03T00:05:30.000Z');
+    expect(calls[0].outcome).toBe('error');
+  });
+
+  it('leaves endTimestamp undefined for a call that never produced a result', () => {
+    const calls = toolCallsFromEvents([{
+      type: 'tool_use', agent: 'claude', timestamp: '2026-08-03T00:00:00.000Z', tool: 'Bash',
+      command: 'echo hi', callId: 'pending-1',
+    }]);
+    expect(calls[0].endTimestamp).toBeUndefined();
+    expect(calls[0].outcome).toBe('unknown');
+  });
+
   it("recognizes Codex's exec tool as a shell command", () => {
     const calls = toolCallsFromEvents([{
       type: 'tool_use', agent: 'codex', timestamp: '2026-08-03T00:00:00Z', tool: 'exec',
