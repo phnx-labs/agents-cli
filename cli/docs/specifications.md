@@ -3193,22 +3193,31 @@ nothing but its own view cache.
   the catch-up path: `claimMissedFire` (`lib/catchup.ts`) creates the run directory
   with a non-recursive `mkdir` — an atomic test-and-set — so the losing caller reports
   `already claimed by the scheduler` and never spawns a second agent
-  (see [`automation.md`](automation.md)). Status: **Current** for the
-  catch-up/overlap path (the `missed`-record claim), **[Intended]** for the primary
-  scheduled dispatch path (see SING-GAP-3): today the forward-timer dispatch has no
-  durable per-slot claim of its own, so two live schedulers evaluating one occurrence
-  is prevented by the pid-file singleton (SING-5), not by an occurrence claim.
+  (see [`automation.md`](automation.md)). Status: **Current** (PHNX-3215). The
+  forward-timer path now claims the same way: the scheduler floors croner's jittered
+  `currentRun()` to the aligned occurrence boundary (`fireSlot` → `alignedSlotForFire`,
+  `lib/scheduler.ts`, `lib/scheduling/routines.ts`) and `allocateRoutineAttempt`
+  (`lib/daemon/runner.ts:334`) atomically claims the run dir via `claimRunSlot` keyed on
+  that `(routine, scheduledFor)`. Forward dispatch and catch-up share one derivation
+  (`alignedSlotForFire`, which `previousExpectedFire` also delegates to), so a live fire
+  and its missed twin for one UTC slot collide by construction. Before the fix the
+  forward key was the jittered fire instant, so two deliveries of one occurrence minted
+  distinct ids and both launched.
 - **SING-16 (MUST).** The slot claim (SING-15 — "may this occurrence dispatch?") and
   the active-run claim (SING-13 — "is an instance of this routine already running?")
   MUST be distinct guards: a routine that overlaps itself (a long run still executing
   when the next slot arrives) is a different condition from one occurrence firing
   twice, and collapsing them into one lock makes each failure mode mask the other.
-  Status: **[Intended]** (see SING-GAP-3).
+  Status: **Current** (PHNX-3215). `allocateRoutineAttempt` (`lib/daemon/runner.ts`)
+  evaluates the slot claim (`claimRunSlot`, `:334`) and the active-run claim
+  (`activeRoutineRun`, `:123`/`:354`) as two sequential, distinct guards.
 - **SING-13 (MUST).** A routine MUST NOT overlap itself: while one run of a routine is
   in a non-terminal state (`running`), a newly-arriving occurrence MUST record a
   terminal `skipped` run linked to the active run (its `activeRunId`) rather than
   spawning a concurrent second instance, across every placement (`local`, `host`,
-  `fleet`, `cloud`). Status: **[Intended]** (see SING-GAP-3).
+  `fleet`, `cloud`). Status: **Current** (PHNX-3215). `allocateRoutineAttempt`
+  (`lib/daemon/runner.ts:354`) records a `skipped` run with `skipReason: 'active_run'`
+  and `activeRunId` when `activeRoutineRun` finds a live prior run, spawning nothing.
 
 #### 3.1 Multi-device — parallel daemons are fine, shared queues are not
 
@@ -3459,16 +3468,17 @@ a machine-wide process sweep.)
   it is a second coordination fabric where the daemon's presence tracking
   (`lib/session/presence.ts`) would be the singular home. Informative; a future
   consolidation SHOULD retire it in the daemon's favor.
-- **SING-GAP-3 (RUSH-2290).** The primary scheduled-dispatch path has no durable
-  per-occurrence claim of its own (SING-15 [Intended]), the slot claim and the
-  active-run claim are not yet separated (SING-16 [Intended]), and self-overlap does
-  not yet record a `skipped` run (SING-13 [Intended]). The catch-up path's atomic
-  `mkdir` claim (`lib/catchup.ts`) already makes a *missed* fire at-most-once, and the
-  daemon pid singleton (SING-5) prevents two schedulers, but a single scheduler that
-  evaluates one occurrence through two timer callbacks — or dispatches a new slot while
-  the prior run is still live — is guarded only in memory. The reliability plan
-  (RUSH-2290) moves the claim into a unified transaction on `(routine, scheduledFor)`
-  and adds the `skipped`-run overlap record; the run-status contract for that record is
+- **SING-GAP-3 (resolved, PHNX-3215).** The primary scheduled-dispatch path now carries
+  a durable per-occurrence claim of its own (SING-15 Current), the slot claim and the
+  active-run claim are separated (SING-16 Current), and self-overlap records a `skipped`
+  run (SING-13 Current). The forward-timer path floors croner's jittered `currentRun()`
+  to the aligned boundary (`fireSlot` → `alignedSlotForFire`, `lib/scheduler.ts`) and
+  claims the run dir atomically (`claimRunSlot`, `lib/daemon/runner.ts:334`) keyed on
+  `(routine, scheduledFor)` — the same derivation catch-up's `missedRunId` uses (both via
+  `alignedSlotForFire`), so a live fire and its missed twin for one UTC slot collide by
+  construction. Before the fix, two timer callbacks for one occurrence — or a live fire
+  and its catch-up twin — were keyed on the jittered instant and did not collide; the
+  guard was in-memory only. The run-status contract for the `skipped` overlap record is
   RT-6/RT-7 below.
 - **SING-GAP-4 (resolved, RUSH-2419).** SING-11b's leak-freedom guarantee once held for
   every recovery layer except the keychain `watch-lock` watcher (`lib/secrets/agent.ts:833`,
@@ -3623,15 +3633,16 @@ readiness/context fields RT-1..RT-8 describe.
   for run-first history (`missed`/`failed` runs exist with no session,
   see [`automation.md`](automation.md)); **[Intended]** for the pre-session
   readiness-failure runs (RT-5) and the menu History surface that renders them.
-- **RT-7 (MUST, [Intended]).** `RunMeta.status` MUST distinguish, at minimum:
+- **RT-7 (MUST).** `RunMeta.status` MUST distinguish, at minimum:
   `running`, `completed`, `failed` (the body ran and errored), `timeout`, `missed`
   (a scheduled fire the daemon never got to — SING-15), `blocked` (readiness failed,
   no body ran — RT-5), and `skipped` (the routine was already running, self-overlap —
   SING-13). `blocked` and `failed` MUST NOT be collapsed: a routine that never ran
   because its account was dead is a different operational state from one whose body
-  ran and threw. Status: **Current** for `running`/`completed`/`failed`/`timeout`/
-  `missed` (`lib/routines.ts:440`); **[Intended]** for `blocked` and `skipped` (see
-  RT-GAP-1).
+  ran and threw. Status: **Current** (PHNX-3215). The full union — including `blocked`
+  and `skipped` (with `skipReason` ∈ `duplicate_slot`/`active_run`/`wrong_owner` and
+  `activeRunId`) — is on `RunMeta` (`lib/scheduling/routines.ts:694`) and written by
+  `allocateRoutineAttempt`/`writeTerminalRecord` (`lib/daemon/runner.ts`).
 - **RT-8 (MUST).** `repo` on a routine is an **external identity** — the GitHub
   `owner/repo` a webhook trigger filters on (`JobConfig.repo`, `lib/routines.ts:174`)
   and the origin remote recorded as provenance when a routine is materialised from a
@@ -3680,15 +3691,16 @@ readiness/context fields RT-1..RT-8 describe.
 
 - **RT-GAP-1 (RUSH-2290).** The execution-context resolver (RT-2, RT-3), the readiness
   model and pause-on-blocker (RT-4, RT-5), resume recheck (RT-9), atomic raw edit
-  (RT-10), and the `blocked`/`skipped` run statuses with their pre-session runs and
-  menu History (RT-6 [Intended] half, RT-7 [Intended] half) are the routine reliability
-  plan's target contract and are **not yet implemented** on `main`. Today: `remoteCwd`
-  covers only `host`/`fleet` body placement (`lib/routines.ts:238`); `RunMeta.status`
-  stops at `missed` (`lib/routines.ts:440`); there is no singular `project` anchor,
-  `--project-anchor`, `routines doctor`, readiness code, or `cwd` field. The landed
-  guarantees this section already pins are RT-1, RT-6 (run-first history), RT-8, and
-  RT-11. A change that lands any [Intended] requirement MUST flip its `Status:` to
-  **Current** in the same PR and MUST NOT widen this gap.
+  (RT-10), and the menu History surface that renders pre-session runs (RT-6 [Intended]
+  half) are the routine reliability plan's target contract and are **not yet
+  implemented** on `main`. Today: `remoteCwd` covers only `host`/`fleet` body placement
+  (`lib/routines.ts:238`); there is no singular `project` anchor, `--project-anchor`,
+  `routines doctor`, readiness code, or `cwd` field. The `RunMeta.status` union is
+  complete (PHNX-3215 landed the `blocked`/`skipped` statuses and their pre-session run
+  records, RT-7 Current, `lib/scheduling/routines.ts:694`). The landed guarantees this
+  section already pins are RT-1, RT-6 (run-first history), RT-7, RT-8, and RT-11. A
+  change that lands any [Intended] requirement MUST flip its `Status:` to **Current** in
+  the same PR and MUST NOT widen this gap.
 - **RT-GAP-2 (RUSH-2719).** Launch-target readiness is validated on the LOCAL box
   only: a pinned `version:` absent locally saves the routine paused with
   `agent_unavailable` (`lib/routine-readiness.ts` probes `isVersionInstalled`),
