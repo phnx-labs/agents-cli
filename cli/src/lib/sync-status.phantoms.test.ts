@@ -183,6 +183,55 @@ describe('computeSyncStatus — presence-only kinds are capability-gated (PHNX-3
   });
 });
 
+describe('describePluginDrift — a stale marketplace copy is reportable drift (PHNX-2955)', () => {
+  // A skill/command that exists in both central and the per-version marketplace
+  // mirror but whose BYTES went stale (a skill edit pulled into central, the
+  // mirror never refreshed) must be reported as drift — presence alone missed it,
+  // so `plugins list`/`doctor`/`sync status` called it `everywhere`/`ok` while
+  // agents ran the OLD skill text.
+  function makePlugin(dir: string, skillBody: string, cmdBody: string) {
+    fs.mkdirSync(path.join(dir, '.claude-plugin'), { recursive: true });
+    fs.writeFileSync(path.join(dir, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'code', version: '0.2.0' }));
+    fs.mkdirSync(path.join(dir, 'skills', 'review'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'skills', 'review', 'SKILL.md'), skillBody);
+    fs.mkdirSync(path.join(dir, 'commands'), { recursive: true });
+    fs.writeFileSync(path.join(dir, 'commands', 'ship.md'), cmdBody);
+  }
+
+  function describe1(centralBody: string, mirrorBody: string, centralCmd: string, mirrorCmd: string): string | null {
+    const modulePath = path.resolve(process.cwd(), 'src/lib/doctor-diff.ts');
+    const central = path.join(testHome, 'central');
+    const mirror = path.join(testHome, 'mirror');
+    fs.rmSync(central, { recursive: true, force: true });
+    fs.rmSync(mirror, { recursive: true, force: true });
+    makePlugin(central, centralBody, centralCmd);
+    makePlugin(mirror, mirrorBody, mirrorCmd);
+    const script = `
+      import { describePluginDrift } from ${JSON.stringify(modulePath)};
+      const central = { name: 'code', root: ${JSON.stringify(central)}, marketplace: 'agents-system', manifest: { name: 'code', version: '0.2.0' } };
+      console.log(JSON.stringify(describePluginDrift(central, ${JSON.stringify(mirror)})));
+    `;
+    const out = execFileSync('bun', ['-e', script], { cwd: process.cwd(), env: { ...process.env, HOME: testHome }, stdio: ['ignore', 'pipe', 'inherit'] }).toString('utf-8');
+    return JSON.parse(out);
+  }
+
+  it('returns null when the mirror content matches central', () => {
+    expect(describe1('SKILL v1\n', 'SKILL v1\n', 'CMD v1\n', 'CMD v1\n')).toBeNull();
+  });
+
+  it('reports a stale skill when the mirror SKILL.md bytes differ (the PHNX-2955 repro)', () => {
+    const d = describe1('SKILL v2 (edited)\n', 'SKILL v1 (old)\n', 'CMD v1\n', 'CMD v1\n');
+    expect(d).not.toBeNull();
+    expect(d).toContain('stale skill: review');
+  });
+
+  it('reports a stale command when the mirror command bytes differ', () => {
+    const d = describe1('SKILL v1\n', 'SKILL v1\n', 'CMD v2\n', 'CMD v1\n');
+    expect(d).not.toBeNull();
+    expect(d).toContain('stale command: ship');
+  });
+});
+
 describe('verifyVersionConverged — post-reconcile truth (PHNX-3186)', () => {
   it('returns null when the version home matches its sources', () => {
     const { configDir } = makeInstalledVersion('claude', '2.0.0', 'claude', '.claude');
