@@ -275,8 +275,12 @@ deploy_share_worker() {
     # Change detection is a pure local render+hash and needs no CF creds; skip the
     # deploy when the shipped template already matches what the endpoint deployed.
     local check needed
-    check="$("${cli[@]}" artifacts share update --bundle "$WORKER_CF_BUNDLE" --check --update-json 2>/dev/null)" \
-      || die "share Worker change-detection failed on $RELEASE_HOME_BASE -- fix it or re-run with --deploy-worker=off, then deploy manually: agents artifacts share update --bundle $WORKER_CF_BUNDLE --force"
+    # Keep stderr visible: if npx can't yet resolve the just-published version
+    # (registry/CDN propagation lag right after publish), its 404 must show rather
+    # than read as a --check code bug. The Verify phase confirms visibility, so a
+    # re-run of the release finishes the deploy from the already-published path.
+    check="$("${cli[@]}" artifacts share update --bundle "$WORKER_CF_BUNDLE" --check --update-json)" \
+      || die "share Worker change-detection failed on $RELEASE_HOME_BASE (if npx 404'd, the just-published $TARGET may not have propagated yet -- re-run this release to finish the deploy). Or re-run with --deploy-worker=off and deploy manually: agents artifacts share update --bundle $WORKER_CF_BUNDLE --force"
     needed="$(jq -r '.deployNeeded' <<<"$check" 2>/dev/null || echo "true")"
     if [[ "$needed" != "true" ]]; then
       green "share Worker already matches the shipped template -- no deploy needed"
@@ -387,7 +391,6 @@ run_home_base_phase() {
   green "Published $PHNX_PKG@$TARGET from attested $tgz"
 
   deploy_share_worker
-
 
 
   # The ComputerHelper.app.zip gate that used to live here is GONE, deliberately.
