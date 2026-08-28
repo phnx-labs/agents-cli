@@ -19,6 +19,7 @@ import { hookManifestCheck } from './checks/hook-manifest.js';
 import { shimsCheck } from './checks/shims.js';
 import { shadowingCheck } from './checks/shadowing.js';
 import { pathCheck } from './checks/path.js';
+import { installStagingCheck } from './checks/install-staging.js';
 
 // Order matters: cheap structural fixes (shims, shadow adoption, PATH, generated
 // hook wrappers) before the heavier resource reconciliation, so a freshly-
@@ -32,6 +33,7 @@ export const HEAL_CHECKS: HealCheck[] = [
   // manifest entry that should have produced it resolves nowhere.
   hookManifestCheck,
   resourcesCheck,
+  installStagingCheck,
 ];
 
 export interface SelfHealOptions {

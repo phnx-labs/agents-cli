@@ -30,6 +30,7 @@ import {
   resolveRunningPackageRoot,
   saveUpdateCheck,
   shouldPromptUpgrade,
+  sweepStaleInstallStaging,
   TOUCH_ID_STORM_FIXED_SINCE,
   verifyInstalledVersion,
   verifyTarballIntegrity,
@@ -979,5 +980,87 @@ describe('classifyRemovableAgentsCliInstalls / purge (RUSH-2415)', () => {
     expect(unresolved.manualRemoveCommand).toBe(
       `npm uninstall -g --prefix '${fs.realpathSync(nvmPrefix)}' @phnx-labs/agents-cli`,
     );
+  });
+});
+
+describe('sweepStaleInstallStaging', () => {
+  /**
+   * npm's own retire-path naming (@npmcli/arborist `lib/retire-path.js`):
+   * `.<basename>-<8-char sha1(base64, alnum-only) of the full path>`,
+   * sibling to the directory it retires. Reproduced here (not imported) so the
+   * test proves the sweep matches npm's real scheme, not just its own guess.
+   */
+  function npmRetirePath(from: string): string {
+    const dir = path.dirname(from);
+    const base = path.basename(from);
+    const hash = createHash('sha1').update(from).digest('base64')
+      .replace(/[^a-zA-Z0-9]+/g, '')
+      .slice(0, 8);
+    return path.join(dir, `.${base}-${hash}`);
+  }
+
+  it('a rename onto an orphaned staging dir fails ENOTEMPTY, and the sweep clears it', () => {
+    const scopeDir = makeTempDir('sweep-scope');
+    const packageRoot = path.join(scopeDir, 'agents-cli');
+    fs.mkdirSync(packageRoot);
+    fs.writeFileSync(path.join(packageRoot, 'package.json'), '{"name":"@phnx-labs/agents-cli"}');
+
+    // Simulate a crash mid-reify: the retire-rename completed (the live
+    // package moved to its staging path) but the final rename never ran, so
+    // the staging dir is left behind non-empty — the exact orphan this bug
+    // report describes.
+    const stagingPath = npmRetirePath(packageRoot);
+    fs.mkdirSync(stagingPath);
+    fs.writeFileSync(path.join(stagingPath, 'package.json'), '{"name":"@phnx-labs/agents-cli","version":"old"}');
+
+    // Prove the failure is real, not asserted from prose: a second reify's
+    // retire-rename (renaming the CURRENT live package out of the way again,
+    // onto the same deterministic path) hits ENOTEMPTY on this actual
+    // filesystem, exactly as it does for npm.
+    let threw: NodeJS.ErrnoException | undefined;
+    try {
+      fs.renameSync(packageRoot, stagingPath);
+    } catch (err) {
+      threw = err as NodeJS.ErrnoException;
+    }
+    expect(threw?.code).toBe('ENOTEMPTY');
+    // The failed rename must not have moved anything.
+    expect(fs.existsSync(packageRoot)).toBe(true);
+
+    const swept = sweepStaleInstallStaging(packageRoot);
+
+    expect(swept).toEqual([stagingPath]);
+    expect(fs.existsSync(stagingPath)).toBe(false);
+    // The sweep clears the collision, not the live package it protects.
+    expect(fs.existsSync(packageRoot)).toBe(true);
+
+    // With the orphan gone, the exact rename that failed above now succeeds —
+    // proving the sweep is what unblocks a real reify, not just a directory
+    // deletion in isolation.
+    expect(() => fs.renameSync(packageRoot, stagingPath)).not.toThrow();
+    expect(fs.existsSync(stagingPath)).toBe(true);
+    expect(fs.existsSync(packageRoot)).toBe(false);
+  });
+
+  it('leaves an unrelated dotfile and a differently-named sibling alone', () => {
+    const scopeDir = makeTempDir('sweep-scope-safe');
+    const packageRoot = path.join(scopeDir, 'agents-cli');
+    fs.mkdirSync(packageRoot);
+
+    const unrelatedDotfile = path.join(scopeDir, '.DS_Store');
+    fs.writeFileSync(unrelatedDotfile, '');
+    const otherPackageStaging = path.join(scopeDir, '.some-other-pkg-abcd1234');
+    fs.mkdirSync(otherPackageStaging);
+
+    const swept = sweepStaleInstallStaging(packageRoot);
+
+    expect(swept).toEqual([]);
+    expect(fs.existsSync(unrelatedDotfile)).toBe(true);
+    expect(fs.existsSync(otherPackageStaging)).toBe(true);
+  });
+
+  it('returns an empty list when the scope dir does not exist', () => {
+    const missing = path.join(os.tmpdir(), `agents-self-update-missing-${Date.now()}`, 'agents-cli');
+    expect(sweepStaleInstallStaging(missing)).toEqual([]);
   });
 });

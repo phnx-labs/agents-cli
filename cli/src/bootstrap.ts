@@ -42,6 +42,7 @@ import {
   verifyInstalledVersion,
   refreshAliasShims,
   downloadVerifiedTarball,
+  sweepStaleInstallStaging,
 } from './lib/self-update.js';
 import { registerUpgradeCommand, type UpgradeOptions } from './commands/upgrade.js';
 
@@ -382,6 +383,13 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   // trusted .tgz. A mismatch throws and nothing below runs — fail closed.
   const tarball = await downloadVerifiedTarball(metadata.tarball, metadata.integrity);
   try {
+    // Clear any orphaned npm reify staging dir from a prior crashed upgrade
+    // BEFORE the package manager stages the new one (PHNX-3393) — otherwise
+    // npm's rename onto that exact, deterministic path fails ENOTEMPTY and
+    // every subsequent upgrade dead-ends there forever. bun does not use
+    // npm's retire-path staging scheme, so this only needs to run once, ahead
+    // of both package-manager branches below.
+    sweepStaleInstallStaging(packageRoot);
     // Upgrade with the package manager that owns this install. A bun global
     // install lives at <bunGlobalDir>/node_modules/... (no `lib` segment), so an
     // `npm install --prefix` would write to <bunGlobalDir>/lib/node_modules and
