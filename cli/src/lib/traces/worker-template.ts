@@ -8,8 +8,18 @@
 // Routes (all require Phoenix bearer + userId owner match):
 //   PUT  /<userId>/<device>/index.json            — per-device stats shard
 //   PUT  /<userId>/<device>/sessions/<id>.json    — per-session SessionDetail
-//   GET  /<userId>/...                            — returns the stored object
+//   GET  /<userId>/<device>/...                   — returns the stored object
+//   GET  /<userId>/all/index.json                 — cross-device merge (read-side)
+//   GET  /<userId>/all/sessions/<id>.json         — first device that holds <id>
 //   GET  /                                        — 200 description (no data)
+//
+// The CLI writes per-device (`localDevice()` == hostname); the console asks for
+// the "all agents" view (`/all/`). `all` is not a real device — the worker
+// synthesizes it on read by listing this owner's device prefixes and merging.
+// A single device is an exact passthrough; cross-device stats that need the raw
+// sample (median, latency percentiles) are session-weighted approximations,
+// documented at the merge site. This keeps the CLI unchanged and uploads nothing
+// extra — the per-device shards already in R2 are the source (PHNX-3397).
 //
 // Emitted as a string so it compiles into dist/** and ships with no
 // package.json#files change. `provisionTraces.ts` uploads this verbatim as an
@@ -80,12 +90,138 @@ async function handleGet(request, env, path) {
   const auth = await authorizeRead(request, env, path);
   if (auth.error) return auth.error;
 
+  const segments = path.split('/').filter(Boolean);
+  // The "all agents" view is synthesized, not stored: merge this owner's device
+  // shards on read. segments[0] === owner is already enforced by authorizeRead.
+  if (segments[1] === 'all') {
+    return handleAggregate(request, env, segments[0], segments.slice(2).join('/'));
+  }
+
   const object = await env.BUCKET.get(path);
   if (!object) return json({ error: 'not found' }, 404);
 
   const headers = new Headers(object.httpMetadata ?? {});
   headers.set('cache-control', 'private, no-store');
   return new Response(object.body, { headers });
+}
+
+// Enumerate this owner's real device names (never 'all') using a delimited list
+// so we read one page of prefixes, not every session object.
+async function listDevices(env, owner) {
+  const listed = await env.BUCKET.list({ prefix: owner + '/', delimiter: '/' });
+  const prefixes = (listed && listed.delimitedPrefixes) || [];
+  const base = owner + '/';
+  return prefixes
+    .map((p) => (p.startsWith(base) ? p.slice(base.length) : p).replace(/\\/+$/, ''))
+    .filter((d) => d && d !== 'all');
+}
+
+async function handleAggregate(request, env, owner, rest) {
+  const devices = await listDevices(env, owner);
+  if (devices.length === 0) return json({ error: 'not found' }, 404);
+
+  // A single session drill-down: the shard lives under whichever device owns it.
+  if (rest.startsWith('sessions/')) {
+    for (const device of devices) {
+      const object = await env.BUCKET.get(owner + '/' + device + '/' + rest);
+      if (object) {
+        const headers = new Headers(object.httpMetadata ?? {});
+        headers.set('cache-control', 'private, no-store');
+        return new Response(object.body, { headers });
+      }
+    }
+    return json({ error: 'not found' }, 404);
+  }
+
+  if (rest === 'index.json') {
+    const shards = [];
+    for (const device of devices) {
+      const object = await env.BUCKET.get(owner + '/' + device + '/index.json');
+      if (!object) continue;
+      try {
+        shards.push(JSON.parse(await object.text()));
+      } catch {
+        // A corrupt per-device shard must not sink the whole aggregate.
+      }
+    }
+    if (shards.length === 0) return json({ error: 'not found' }, 404);
+    return json(mergeIndexShards(shards, owner), 200);
+  }
+
+  return json({ error: 'not found' }, 404);
+}
+
+// Merge per-device index shards into one "all agents" shard. One device is an
+// exact passthrough (relabelled). For many, counts sum and lists concat+resort;
+// median/latency percentiles cannot be recomputed without the raw per-session
+// sample, so they are session-count-weighted approximations — good enough for an
+// at-a-glance fleet view, and exact the moment you filter to a single device.
+function mergeIndexShards(shards, owner) {
+  if (shards.length === 1) {
+    return Object.assign({}, shards[0], { device: 'all', owner });
+  }
+  const sorted = shards.slice().sort((a, b) => (b.syncedAt || 0) - (a.syncedAt || 0));
+  const totalSessions = sorted.reduce((n, s) => n + ((s.stats && s.stats.sessionsImported) || 0), 0) || 1;
+  const wsum = (pick) => sorted.reduce((n, s) => n + (pick(s) || 0) * ((s.stats && s.stats.sessionsImported) || 0), 0) / totalSessions;
+
+  const topicCounts = new Map();
+  for (const s of sorted) for (const t of s.topics || []) {
+    const cur = topicCounts.get(t.key) || Object.assign({}, t, { count: 0 });
+    cur.count += t.count || 0;
+    topicCounts.set(t.key, cur);
+  }
+  const byToolError = new Map();
+  let real = 0, guard = 0, hook = 0;
+  for (const s of sorted) {
+    const f = s.failures || {};
+    for (const e of f.byToolError || []) {
+      const key = e.tool + '\\u0000' + e.desc + '\\u0000' + e.cause;
+      const cur = byToolError.get(key) || Object.assign({}, e, { count: 0 });
+      cur.count += e.count || 0;
+      byToolError.set(key, cur);
+    }
+    real += (f.byCause && f.byCause.real) || 0;
+    guard += (f.byCause && f.byCause.guard) || 0;
+    hook += (f.byCause && f.byCause.hook) || 0;
+  }
+  const latencies = sorted.map((s) => s.latency).filter(Boolean);
+
+  return {
+    schema: 1,
+    device: 'all',
+    owner,
+    syncedAt: sorted[0].syncedAt || 0,
+    stats: {
+      sessionsImported: sorted.reduce((n, s) => n + ((s.stats && s.stats.sessionsImported) || 0), 0),
+      medianMs: Math.round(wsum((s) => s.stats && s.stats.medianMs)),
+      p90Ms: Math.max.apply(null, sorted.map((s) => (s.stats && s.stats.p90Ms) || 0)),
+      needAttention: sorted.reduce((n, s) => n + ((s.stats && s.stats.needAttention) || 0), 0),
+      toolErrorRate: wsum((s) => s.stats && s.stats.toolErrorRate),
+    },
+    needsAttention: sorted.flatMap((s) => s.needsAttention || [])
+      .sort((a, b) => (b.severity || 0) - (a.severity || 0) || String(a.id).localeCompare(String(b.id)))
+      .slice(0, 100),
+    topics: Array.from(topicCounts.values()).sort((a, b) => b.count - a.count),
+    failures: {
+      byToolError: Array.from(byToolError.values()).sort((a, b) => b.count - a.count).slice(0, 50),
+      byCause: { real, guard, hook },
+    },
+    failurePatterns: sorted.flatMap((s) => s.failurePatterns || [])
+      .sort((a, b) => (b.wastedMs || 0) - (a.wastedMs || 0)).slice(0, 25),
+    wastedMsTotal: sorted.reduce((n, s) => n + (s.wastedMsTotal || 0), 0),
+    latency: latencies.length ? {
+      firstToolMs: {
+        p50: Math.round(wsum((s) => s.latency && s.latency.firstToolMs && s.latency.firstToolMs.p50)),
+        p90: Math.max.apply(null, latencies.map((l) => (l.firstToolMs && l.firstToolMs.p90) || 0)),
+        p99: Math.max.apply(null, latencies.map((l) => (l.firstToolMs && l.firstToolMs.p99) || 0)),
+        max: Math.max.apply(null, latencies.map((l) => (l.firstToolMs && l.firstToolMs.max) || 0)),
+      },
+    } : undefined,
+    // Rolling history / drift are per-device time series; the freshest device's
+    // are the most representative for the merged view without double-counting.
+    bucketHistory: sorted[0].bucketHistory || [],
+    driftSignals: sorted[0].driftSignals || [],
+  };
 }
 
 // Require a Phoenix bearer that owns the path prefix.
