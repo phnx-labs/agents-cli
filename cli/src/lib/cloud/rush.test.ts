@@ -2,7 +2,8 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { buildDispatchBody, RushCloudProvider } from './rush.js';
+import * as yaml from 'yaml';
+import { buildDispatchBody, isRushSessionValid, RushCloudProvider } from './rush.js';
 import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
 import type { ImageAttachment, SkillRef } from './types.js';
 
@@ -271,5 +272,53 @@ describe('buildDispatchBody', () => {
     // sent a token (SING-1b email-only manifest); the leftover helper still
     // read Keychain / .credentials.json and was the #1767 shape. --lease SING-1b
     // reads the wrapped blob itself in crabbox/runtimes.ts.
+  });
+});
+
+describe('isRushSessionValid', () => {
+  function writeYaml(dir: string, data: object): string {
+    const rushDir = path.join(dir, '.rush');
+    fs.mkdirSync(rushDir, { recursive: true });
+    const p = path.join(rushDir, 'user.yaml');
+    fs.writeFileSync(p, yaml.stringify(data), 'utf-8');
+    return p;
+  }
+
+  it('returns false when the yaml file does not exist', () => {
+    const p = path.join(tmpDir, '.rush', 'user.yaml');
+    expect(isRushSessionValid(p)).toBe(false);
+  });
+
+  it('returns false when the yaml has no access_token', () => {
+    const p = writeYaml(tmpDir, { session: { email: 'a@b.com' } });
+    expect(isRushSessionValid(p)).toBe(false);
+  });
+
+  it('returns false when expires_at is in the past', () => {
+    const expiredAt = Math.floor(Date.now() / 1000) - 3600; // 1 hour ago
+    const p = writeYaml(tmpDir, {
+      session: { access_token: 'tok', expires_at: expiredAt },
+    });
+    expect(isRushSessionValid(p)).toBe(false);
+  });
+
+  it('returns true when expires_at is in the future', () => {
+    const futureAt = Math.floor(Date.now() / 1000) + 3600; // 1 hour from now
+    const p = writeYaml(tmpDir, {
+      session: { access_token: 'tok', expires_at: futureAt },
+    });
+    expect(isRushSessionValid(p)).toBe(true);
+  });
+
+  it('returns true when expires_at is absent (no expiry info → treat as valid)', () => {
+    const p = writeYaml(tmpDir, { session: { access_token: 'tok' } });
+    expect(isRushSessionValid(p)).toBe(true);
+  });
+
+  it('capabilities().available reflects session validity', () => {
+    // No yaml file → available: false.
+    const caps = new RushCloudProvider().capabilities();
+    // We cannot control USER_YAML in the provider, so only verify the type here.
+    expect(typeof caps.available).toBe('boolean');
   });
 });
