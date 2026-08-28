@@ -2663,9 +2663,16 @@ async function sessionsAction(
     return;
   }
   // --device / --devices values are merged into options.host for internal routing. A bare `all` / `fleet` sentinel means
-  // "search every peer" — which is already the default — so it resolves to no
-  // explicit host set rather than erroring on a device literally named "all".
-  const deviceTargets = [...(options.device ?? []), ...(options.devices ?? [])]
+  // "search every peer" — which is already the default for `--active` and the
+  // interactive listing — so it resolves to no explicit host set rather than
+  // erroring on a device literally named "all".
+  const rawDeviceTargets = [...(options.device ?? []), ...(options.devices ?? [])];
+  // But the HISTORICAL `--json` listing does NOT fan out by default (it stays a
+  // deterministic local slice for scripts), so the sentinel would otherwise be
+  // silently dropped and the fleet never reached (PHNX-2673). Remember it so that
+  // path can sweep every peer, exactly as the interactive listing already does.
+  const fleetWide = rawDeviceTargets.some(t => t.toLowerCase() === 'all' || t.toLowerCase() === 'fleet');
+  const deviceTargets = rawDeviceTargets
     .filter(t => t.toLowerCase() !== 'all' && t.toLowerCase() !== 'fleet');
   if (deviceTargets.length > 0) {
     options.host = [...(options.host ?? []), ...deviceTargets];
@@ -3180,16 +3187,40 @@ async function sessionsAction(
       // each peer) would fall to FTS content search and return every transcript
       // that merely MENTIONS the id, defeating exact remote resolution. A genuine
       // search phrase keeps the ranked metadata+content path.
-      const filtered = searchQuery
+      let filtered = searchQuery
         ? resolveSessionQuery(sessions, searchQuery, {
             scope: { agent: options.agent, project: options.project, routine: options.routine },
           }).matches
         : sessions;
+      // `--device all`/`--fleet` on a historical `--json` query fans out to every
+      // peer and merges their rows in — the SAME SSH sweep the interactive listing
+      // below uses, and the whole-fleet twin of the explicit `--device <host>
+      // --json` path (`runRemoteSessionsJson`). Without this the documented
+      // "search the whole fleet" flag returned local rows only (PHNX-2673). Guarded
+      // to the sentinel so a bare `--json` stays a deterministic local slice for
+      // scripts, and skipped under `--local`/the peer recursion guard. Dead peers
+      // are skipped by the fan-out, never fatal — enrichment, not a dependency.
+      const forceLocalJson = options.local === true || process.env[NO_FANOUT_ENV] === '1';
+      if (fleetWide && !forceLocalJson) {
+        const forwarded = ensureWholeIndex(buildForwardedArgs(process.argv, new Set(options.host ?? [])));
+        if (!forwarded.includes('--json')) forwarded.push('--json');
+        const fanSpinner = isInteractiveTerminal() ? ora('Reaching other machines...').start() : null;
+        try {
+          const { sessions: remoteSessions } = await gatherRemoteList(forwarded, undefined);
+          if (remoteSessions.length > 0) {
+            filtered = mergeLocalFirst([...filtered, ...remoteSessions], machineId());
+          }
+        } catch {
+          // fan-out is an enrichment, never a hard dependency
+        } finally {
+          fanSpinner?.stop();
+        }
+      }
       // JSON is the canonical picker contract: enrich the durable rows once
       // from the shared live cache so every consumer gets lifecycle/recovery
       // metadata without performing its own join or transcript scan.
       const live = await gatherActiveSessions({
-        local: options.local === true || process.env[NO_FANOUT_ENV] === '1',
+        local: forceLocalJson,
         hosts: options.host,
       });
       process.stdout.write(serializeSessionsJson(serializeSessionPickerRows(filtered, live.sessions)));
