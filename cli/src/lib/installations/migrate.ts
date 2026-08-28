@@ -1,9 +1,4 @@
-/**
- * One-shot idempotent migrations for the FOUNDATION refactor.
- *
- * Called from postinstall and as a command-time fallback from agents view/use/pull.
- * Each migration is guarded by an existence check so re-running is safe.
- */
+/** One-shot idempotent migrations. Each is guarded by an existence check so re-running is safe. */
 
 import * as fs from 'fs';
 import * as path from 'path';
@@ -36,7 +31,6 @@ const SYSTEM_DIR = path.join(USER_DIR, '.system');
 const HISTORY_DIR = path.join(USER_DIR, '.history');
 const CACHE_DIR = path.join(USER_DIR, '.cache');
 
-/** True when `relPath` is a file tracked by a git repo rooted at `repoDir`. */
 function isTrackedInGitRepo(repoDir: string, relPath: string): boolean {
   try {
     execSync(`git ls-files --error-unmatch -- ${relPath}`, { cwd: repoDir, stdio: 'ignore' });
@@ -47,31 +41,13 @@ function isTrackedInGitRepo(repoDir: string, relPath: string): boolean {
   }
 }
 
-/**
- * Migrate a legacy single-repo agents.yaml into ~/.agents/agents.yaml.
- *
- * The post-fold system dir (~/.agents/.system) is a pull-only mirror of the
- * npm-shipped defaults. Its agents.yaml is a TRACKED file that readMeta() reads
- * in place as the defaults base (see SYSTEM_META_FILE in state.ts). Deleting or
- * moving a tracked file out of the mirror dirties its working tree, which
- * permanently wedges `agents setup`, `agents sync`, and background auto-pull
- * ("Working tree has uncommitted changes.") because the mirror sync refuses a
- * dirty tree. So when agents.yaml is tracked there, treat the mirror as strictly
- * read-only and leave the file alone.
- *
- * Only an UNTRACKED agents.yaml is residue from the pre-split single-repo layout
- * (or a legacy ~/.agents-system fold) and is safe to move/drop.
- *
- * Params default to the real on-disk locations; they are injectable so tests can
- * drive a fixture tree without touching the user's ~/.agents.
- */
+/** Migrate a legacy single-repo agents.yaml into ~/.agents/agents.yaml. Leaves the tracked system-mirror copy alone to avoid dirtying the npm-shipped defaults. */
 export function migrateAgentsYaml(systemDir: string = SYSTEM_DIR, userDir: string = USER_DIR): void {
   const src = path.join(systemDir, 'agents.yaml');
   const dest = path.join(userDir, 'agents.yaml');
   if (!fs.existsSync(src)) return;
 
-  // Tracked in the system mirror → npm-shipped defaults; never mutate. readMeta()
-  // already surfaces it in place, so no user-dir copy is needed either.
+  // Never move the tracked system-mirror copy; doing so would dirty the npm-shipped defaults.
   if (isTrackedInGitRepo(systemDir, 'agents.yaml')) return;
 
   if (fs.existsSync(dest)) {
@@ -86,9 +62,6 @@ export function migrateAgentsYaml(systemDir: string = SYSTEM_DIR, userDir: strin
   } catch { /* best-effort */ }
 }
 
-/**
- * Delete ~/.agents-system/prompts.json (dead file — zero refs in src/).
- */
 function deleteSystemPromptsJson(): void {
   const f = path.join(SYSTEM_DIR, 'prompts.json');
   if (!fs.existsSync(f)) return;
@@ -97,14 +70,7 @@ function deleteSystemPromptsJson(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move ~/.agents-system/config.json -> ~/.agents/teams/config.json.
- * The teams persistence layer already reads the legacy path as a fallback;
- * moving it here keeps the canonical location consistent.
- */
-// Delete the legacy ~/.agents-system/config.json. This was the teams agent
-// registry, which no longer exists — `agents teams` discovers agents through
-// `listInstalledVersions` and invokes them through `agents run`.
+/** Delete the legacy ~/.agents-system/config.json (dead teams agent registry). */
 function migrateSystemConfigJson(): void {
   const src = path.join(SYSTEM_DIR, 'config.json');
   if (!fs.existsSync(src)) return;
@@ -113,12 +79,7 @@ function migrateSystemConfigJson(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move promptcuts.yaml from each repo root into hooks/ subdir.
- *   ~/.agents-system/promptcuts.yaml -> ~/.agents-system/hooks/promptcuts.yaml
- *   ~/.agents/promptcuts.yaml        -> ~/.agents/hooks/promptcuts.yaml
- * Idempotent: skips if dest already exists or src absent.
- */
+/** Move promptcuts.yaml from each repo root into hooks/. */
 function migratePromptcutsIntoHooks(): void {
   for (const root of [SYSTEM_DIR, USER_DIR]) {
     const src = path.join(root, 'promptcuts.yaml');
@@ -131,23 +92,7 @@ function migratePromptcutsIntoHooks(): void {
   }
 }
 
-/**
- * Move installed agent versions from the legacy system-root layout
- * (~/.agents-system/versions/<agent>/<ver>/) into the user root
- * (~/.agents/versions/<agent>/<ver>/).
- *
- * Earlier installs (and an inverted prior version of this migrator) put
- * binaries and home dirs under ~/.agents-system/. The current architecture
- * keeps all operational state (versions, sessions, shims, trash) under
- * ~/.agents/, and getVersionsDir() in state.ts resolves there. Without this
- * migration the legacy versions become invisible to listInstalledVersions
- * and every command that depends on it (view, prune, run, sync) writes a
- * second copy to ~/.agents/versions/ while the agent CLIs keep reading the
- * stale ~/.agents-system/versions/ copy via the existing ~/.<agent> symlink.
- *
- * Idempotent and non-destructive: if a same-named dest already exists we
- * leave the legacy copy in place so the user can reconcile manually.
- */
+/** Move installed versions from the legacy ~/.agents-system/versions/ tree into ~/.agents/versions/. Leaves collisions in place for manual reconciliation. */
 function migrateSystemVersionsToUser(): void {
   const sysVersions = path.join(SYSTEM_DIR, 'versions');
   const userVersions = path.join(USER_DIR, 'versions');
@@ -208,10 +153,7 @@ function migrateSystemVersionsToUser(): void {
   }
 }
 
-/**
- * Move ~/. agents/runs/ -> ~/.agents/routines/runs/.
- * Runs now live inside routines directory for cleaner organization.
- */
+/** Move ~/.agents/runs/ into ~/.agents/routines/runs/. */
 function migrateRunsIntoRoutines(): void {
   const src = path.join(USER_DIR, 'runs');
   const dest = path.join(USER_DIR, 'routines', 'runs');
@@ -222,10 +164,7 @@ function migrateRunsIntoRoutines(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move ~/.agents/trash/ -> ~/.agents/.trash/.
- * Hide the trash directory.
- */
+/** Move ~/.agents/trash/ to ~/.agents/.trash/. */
 function migrateTrashToHidden(): void {
   const src = path.join(USER_DIR, 'trash');
   const dest = path.join(USER_DIR, '.trash');
@@ -235,10 +174,7 @@ function migrateTrashToHidden(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move ~/.agents/backups/ -> ~/.agents/.backups/.
- * Hide the backups directory.
- */
+/** Move ~/.agents/backups/ to ~/.agents/.backups/. */
 function migrateBackupsToHidden(): void {
   const src = path.join(USER_DIR, 'backups');
   const dest = path.join(USER_DIR, '.backups');
@@ -248,17 +184,7 @@ function migrateBackupsToHidden(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Fold ~/.agents/hooks.yaml into ~/.agents/agents.yaml under a `hooks:` key,
- * then delete the standalone hooks.yaml. Single user file to sync.
- *
- * On collision (a hook name already exists in agents.yaml hooks:), the
- * existing agents.yaml entry wins and the standalone copy is dropped — this
- * matches the behavior a user would get if they had already migrated
- * manually and edited agents.yaml.
- *
- * Idempotent: skips if hooks.yaml is absent or unparseable.
- */
+/** Fold ~/.agents/hooks.yaml into ~/.agents/agents.yaml under `hooks:`, dropping the standalone file. agents.yaml wins on collision. */
 function foldUserHooksYamlIntoAgentsYaml(): void {
   const hooksFile = path.join(USER_DIR, 'hooks.yaml');
   if (!fs.existsSync(hooksFile)) return;
@@ -297,17 +223,7 @@ function foldUserHooksYamlIntoAgentsYaml(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Fold the legacy GLOBAL browser captures root
- * (`~/.agents/.cache/browser/sessions/<task>/`) into the new PER-PROFILE layout
- * (`~/.agents/.cache/browser/<profile>/sessions/<task>/`), so each profile is one
- * self-contained tree and the new `browser sessions` listing finds old captures.
- *
- * Attribution: a legacy `sessions/<task>` dir is owned by whichever profile's
- * `tasks.json` still lists that task name. Tasks no profile claims (the profile
- * was deleted, or tasks.json was cleared) move under a `_legacy` pseudo-profile so
- * nothing is lost. Idempotent — once the global `sessions/` root is gone it no-ops.
- */
+/** Fold the legacy global browser/sessions/<task>/ tree into the per-profile browser/<profile>/sessions/<task>/ layout. Unclaimed tasks move under `_legacy`. */
 export function foldBrowserSessionsIntoProfiles(browserDir: string = path.join(CACHE_DIR, 'browser')): void {
   const legacySessionsDir = path.join(browserDir, 'sessions');
 
@@ -318,7 +234,6 @@ export function foldBrowserSessionsIntoProfiles(browserDir: string = path.join(C
     return; // no legacy global sessions/ root — already folded or never existed
   }
 
-  // Map task name -> owning profile from every profile's tasks.json (first wins).
   const taskOwner = new Map<string, string>();
   let profileDirs: fs.Dirent[] = [];
   try {
@@ -349,15 +264,7 @@ export function foldBrowserSessionsIntoProfiles(browserDir: string = path.join(C
   rmEmptyDirTree(legacySessionsDir);
 }
 
-/**
- * Fold ~/.agents/browser/profiles/*.yaml into ~/.agents/agents.yaml under a
- * `browser:` key, then delete the profiles directory. Single user file to sync.
- *
- * On collision (a profile name already exists in agents.yaml browser:), the
- * existing agents.yaml entry wins and the standalone copy is dropped.
- *
- * Idempotent: skips if profiles dir is absent or empty.
- */
+/** Fold ~/.agents/browser/profiles/*.yaml into ~/.agents/agents.yaml under `browser:`. agents.yaml wins on collision. */
 function foldBrowserProfilesIntoAgentsYaml(): void {
   const profilesDir = path.join(USER_DIR, 'browser', 'profiles');
   if (!fs.existsSync(profilesDir)) return;
@@ -418,10 +325,7 @@ function foldBrowserProfilesIntoAgentsYaml(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Delete ~/.agents/linear.json. The linear-cli now manages its own
- * credentials in the OS keychain; this file was a legacy plaintext store.
- */
+/** Delete the legacy ~/.agents/linear.json plaintext credential store. */
 function deleteUserLinearJson(): void {
   const f = path.join(USER_DIR, 'linear.json');
   if (!fs.existsSync(f)) return;
@@ -430,11 +334,7 @@ function deleteUserLinearJson(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Delete ~/.agents/prompts.json. Dead file with zero refs in src/ (the
- * system-repo copy was cleared by deleteSystemPromptsJson; this is the
- * matching cleanup at the user layer).
- */
+/** Delete the dead ~/.agents/prompts.json file. */
 function deleteUserPromptsJson(): void {
   const f = path.join(USER_DIR, 'prompts.json');
   if (!fs.existsSync(f)) return;
@@ -443,12 +343,7 @@ function deleteUserPromptsJson(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Delete ~/.agents/teams/config.json. The teams subsystem no longer carries
- * its own agent registry — agent discovery flows through `listInstalledVersions`
- * (the same source `agents view` uses) and invocation flows through
- * `agents run`. The on-disk file is pure dead state on existing installs.
- */
+/** Delete the dead ~/.agents/teams/config.json file. */
 function deleteTeamsConfigJson(): void {
   const f = path.join(USER_DIR, 'teams', 'config.json');
   if (!fs.existsSync(f)) return;
@@ -457,23 +352,14 @@ function deleteTeamsConfigJson(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move ~/.agents/teams/registry.json → ~/.agents/.history/teams/registry.json.
- * The registry is per-machine runtime state (timestamps + absolute worktree
- * paths) and belongs in the durable-runtime bucket, not at the user-root
- * where `agents repo push` would sync it across machines.
- */
+/** Move ~/.agents/teams/registry.json (per-machine runtime state) into ~/.agents/.history/teams/. */
 function moveTeamsRegistryToHistory(): void {
   const src = path.join(USER_DIR, 'teams', 'registry.json');
   const dest = path.join(HISTORY_DIR, 'teams', 'registry.json');
   moveFileOnce(src, dest);
 }
 
-/**
- * Delete ~/.agents/config.json. This was the legacy teams config location;
- * the teams subsystem no longer carries a config file at all, so the legacy
- * copy is simply removed.
- */
+/** Delete the legacy ~/.agents/config.json teams config file. */
 function cleanupUserConfigJson(): void {
   const legacy = path.join(USER_DIR, 'config.json');
   if (!fs.existsSync(legacy)) return;
@@ -482,11 +368,7 @@ function cleanupUserConfigJson(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Remove an empty ~/.agents/runs/ directory left over after the
- * migrateRunsIntoRoutines() rename. Some older code paths re-created the
- * empty parent; this trims it once it has no contents.
- */
+/** Remove an empty ~/.agents/runs/ directory left over after migrateRunsIntoRoutines(). */
 function cleanupEmptyTopLevelRuns(): void {
   const dir = path.join(USER_DIR, 'runs');
   if (!fs.existsSync(dir)) return;
@@ -495,11 +377,7 @@ function cleanupEmptyTopLevelRuns(): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move ~/.agents-system/aliases.json -> ~/.agents/aliases.json.
- * Aliases are per-user state and were previously written to the system root
- * by mistake. Idempotent: skips if dest already exists or src absent.
- */
+/** Move ~/.agents-system/aliases.json into ~/.agents/aliases.json. */
 function migrateAliasesToUser(): void {
   const src = path.join(SYSTEM_DIR, 'aliases.json');
   const dest = path.join(USER_DIR, 'aliases.json');
@@ -581,11 +459,7 @@ function mergeOverlappingVersionHomes(): void {
   }
 }
 
-/**
- * Rename ~/.agents/permissions/sets/ -> ~/.agents/permissions/presets/.
- * Also handles ~/.agents-system/permissions/sets/ for system repo.
- * Idempotent: skips if dest already exists or src absent.
- */
+/** Rename permissions/sets/ to permissions/presets/ in both user and system repos. */
 function migratePermissionSetsToPresets(): void {
   for (const root of [USER_DIR, SYSTEM_DIR]) {
     const src = path.join(root, 'permissions', 'sets');
@@ -599,16 +473,7 @@ function migratePermissionSetsToPresets(): void {
   }
 }
 
-/**
- * After versions are migrated to ~/.agents/versions/, rewrite the per-agent
- * config symlinks (~/.claude, ~/.codex, …) to point at the user-side
- * version-home so the agent CLIs read fresh resources.
- *
- * Idempotent: if the symlink already points at the right user-path target,
- * leave it. If it points at the legacy system path, re-create it. If a real
- * directory exists there (no symlink yet), leave it alone — version-config
- * switching is owned by `agents use`, not the migrator.
- */
+/** Rewrite per-agent config symlinks to point at the user-side version home after migration. Leaves real directories alone (switching is owned by `agents use`). */
 function repairAgentConfigSymlinks(): void {
   // Version pins live in the machine-local pins JSON (~/.agents/.history/
   // devices/pins-<machine>.json); the tracked device doc and central
@@ -672,36 +537,13 @@ function repairAgentConfigSymlinks(): void {
   }
 }
 
-/**
- * Repair self-referential agent binary symlinks.
- *
- * Some installScript-based agents — notably Factory.ai's `droid`, whose installer
- * drops a standalone native binary at ~/.local/bin/droid — were registered at
- * install time by resolving the post-install binary with `which <cli>`. Because
- * ~/.agents/.cache/shims sits ahead of ~/.local/bin on PATH, `which` could
- * return OUR OWN dispatcher shim, and the install step symlinked
- *   ~/.agents/.history/versions/<agent>/<version>/node_modules/.bin/<cli>
- * back at ~/.agents/.cache/shims/<cli>. Launching that agent then re-execs the
- * dispatcher forever (an infinite exec loop that hangs the terminal).
- *
- * This walks every installed version's node_modules/.bin and, for any entry
- * whose symlink resolves into the shims dir, re-points it at the real binary
- * (found on PATH with the shims dir excluded) — or removes it when no real
- * binary can be found, letting getBinaryPath's per-agent resolver take over.
- * Idempotent: a correctly-pointed link is left untouched on re-run.
- *
- * Params default to the real on-disk locations; they are injectable so tests
- * can drive a fixture tree without touching the user's ~/.agents.
- */
+/** Repair node_modules/.bin/<cli> symlinks that resolve back into our own shims dir (infinite exec-loop fix). */
 export function repairSelfReferentialBinShims(
   versionsRoot: string = path.join(HISTORY_DIR, 'versions'),
   shimsDir: string = path.resolve(CACHE_DIR, 'shims'),
   historyDir: string = path.dirname(versionsRoot),
 ): void {
-  // Normalize the shims dir through realpath so the prefix check below survives
-  // a symlinked ~/.agents (or macOS's /tmp -> /private/tmp): fs.realpathSync on
-  // the link target resolves those symlinks, so the dir we compare against must
-  // too, or every loop would read as "points at a real binary" and be skipped.
+  // realpath the shims dir so the prefix check survives symlinked paths (e.g. macOS /tmp -> /private/tmp).
   shimsDir = path.resolve(shimsDir);
   try {
     shimsDir = fs.realpathSync(shimsDir);
@@ -769,14 +611,7 @@ export function repairSelfReferentialBinShims(
   }
 }
 
-/**
- * Move a directory from `src` to `dest`. No-op when src is absent. When dest
- * already exists, merge by copying everything that isn't already there, then
- * remove the source. Idempotent: re-running converges without duplicating.
- *
- * The merge-on-collision behavior matters because `ensureAgentsDir()` may have
- * pre-created an empty `dest` during startup before the migrator gets to run.
- */
+/** Move `src` to `dest`; when `dest` exists, merge missing entries then remove `src`. Idempotent. */
 function moveDirOnce(src: string, dest: string): void {
   if (!fs.existsSync(src)) return;
 
@@ -796,11 +631,7 @@ function moveDirOnce(src: string, dest: string): void {
   } catch { /* best-effort */ }
 }
 
-/**
- * Move a single file from `src` to `dest`. No-op when src is absent. When
- * dest exists, the source is simply deleted (the in-place version is treated
- * as the canonical state). Idempotent.
- */
+/** Move `src` to `dest`; when `dest` exists, delete `src` (dest is canonical). Idempotent. */
 function moveFileOnce(src: string, dest: string): void {
   if (!fs.existsSync(src)) return;
   if (fs.existsSync(dest)) {
@@ -818,7 +649,6 @@ function moveFileOnce(src: string, dest: string): void {
   }
 }
 
-/** Remove a directory tree if it exists and contains no files (best-effort). */
 function rmEmptyDirTree(dir: string): void {
   if (!fs.existsSync(dir)) return;
   try {
@@ -1582,41 +1412,7 @@ function migrateSplitDeviceLocalMeta(): void {
   }
 }
 
-/**
- * Move the auto-detected `default` browser profile OUT of the committed central
- * agents.yaml and into this machine's per-device file.
- *
- * `browser` is a CENTRAL key because named profiles a user creates are real fleet
- * config, but the ONE `default` entry inside it is machine-local: its `binary` is
- * an OS-specific path and its endpoint is a locally-chosen free port.
- * `createProfile`/`updateProfile` already route that entry to `deviceBrowser`
- * (`isMachineLocalProfile`, browser/profiles.ts) — but nothing ever removed the
- * copy older versions had already written into the shared file, and
- * `serializeCentral` cannot: it deletes whole KEYS that are device-scoped, and
- * `browser` is not one.
- *
- * So the entry sat in the committed file and every box rewrote it with its own
- * browser. Measured 2026-08-13, all three boxes on 1.22.38 (which HAS the writer
- * fix) with an empty `deviceBrowser` and a machine-specific `default` in central:
- *
- *   zion         browser: chrome    binary: /Applications/Google Chrome.app/...
- *   yosemite-s1  browser: brave     binary: /opt/brave.com/brave/brave
- *   mark-1       (same shape)
- *
- * `agents repos pull user` refuses when an incoming change touches a locally
- * modified path, so agents.yaml being permanently dirty wedged the fleet config
- * sync outright — those boxes sat 5, 8 and 79 commits behind. (RUSH-2161)
- *
- * Idempotent: no-op once central carries no `default` entry. The device file is
- * written FIRST so a crash between the two writes can never lose the profile,
- * and an entry already in the device file wins (this machine's live value is
- * newer than the stale central copy by construction).
- *
- * Central is edited through a `yaml.Document` rather than re-stringified, so the
- * hand-written comments in the committed agents.yaml survive — a plain
- * `yaml.stringify` would drop every one of them and rewrite the whole file,
- * which is the same churn this migration exists to stop (see `serializeCentral`).
- */
+/** Move the auto-detected `default` browser profile from committed agents.yaml into the per-device file. The device file is written first so a crash cannot lose the profile; central is edited via yaml.Document to preserve comments. */
 export function migrateMachineLocalBrowserProfileOutOfCentral(
   userDir: string = USER_DIR,
   machine: string = machineId(),
@@ -1684,35 +1480,7 @@ export function migrateMachineLocalBrowserProfileOutOfCentral(
   console.error(`Migrated agents.yaml: browser '${LEGACY_DEFAULT_BROWSER_PROFILE_NAME}' profile -> devices/${machine}/agents.yaml`);
 }
 
-/**
- * Rename the legacy `extras-extras/` plugin-marketplace dir to `agents-extras/`
- * inside every installed agent version-home, and rewrite cross-references in
- * `known_marketplaces.json` and the agent's `settings.json`.
- *
- * A previous dev build of `agents-cli` named the extras-aliased repo's
- * synthesized marketplace dir `extras-extras` (double "extras" because the alias
- * itself was `extras`). The new naming convention is `agents-<alias>`, so the
- * directory should be `agents-extras`. Without this migration the orphan dir
- * stays on disk and Claude Code loads two parallel marketplaces (the legacy
- * `extras-extras` entry from `known_marketplaces.json` plus the freshly
- * synthesized `agents-extras` from the new code path).
- *
- * Strategy per `<historyDir>/versions/<agent>/<ver>/home/.<agent>/plugins/`:
- *   1. `marketplaces/extras-extras/` → `marketplaces/agents-extras/`
- *      (drops `extras-extras/` outright when `agents-extras/` already exists —
- *      previous incomplete migration ran)
- *   2. Inside the renamed dir's `.claude-plugin/marketplace.json`, set
- *      `"name": "agents-extras"`.
- *   3. In `<configDir>/plugins/known_marketplaces.json`, rename the
- *      `extras-extras` key to `agents-extras` and rewrite `source.path` /
- *      `installLocation`.
- *   4. In `<configDir>/settings.json`'s `enabledPlugins`, rename every
- *      `<plugin>@extras-extras` key to `<plugin>@agents-extras` (preserving
- *      its boolean value, skipping if the new key already exists).
- *
- * Idempotent: re-running converges without further writes once everything is on
- * the new name.
- */
+/** Rename the legacy `extras-extras/` plugin marketplace dir to `agents-extras/` in every installed version home, and rewrite cross-references in `known_marketplaces.json` and `settings.json`. */
 export function migrateExtrasExtrasToAgentsExtras(historyDir: string = HISTORY_DIR): void {
   const versionsRoot = path.join(historyDir, 'versions');
   if (!fs.existsSync(versionsRoot)) return;
