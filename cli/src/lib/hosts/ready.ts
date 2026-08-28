@@ -248,6 +248,14 @@ export interface ViewAgentAccountEligibility {
  * --json`. A picker may route to a signed-out version because launching it is
  * the login flow, but it must not route to a device whose every signed-in
  * account is throttled.
+ *
+ * The sign-in gate reads the per-version `launchable` field — the strict
+ * per-version launch truth (`isLaunchableSignedIn`) — so a remote box is judged
+ * by the SAME launchability the local candidate uses (`collectRunCandidates` →
+ * `isLaunchableSignedIn`), not the display `signedIn` that inherits the
+ * active/global HOME login and passes a box that dies at spawn (PHNX-3466). An
+ * older remote CLI omits `launchable`, so it falls back to `signedIn` — the
+ * pre-fix behavior, so a rolling fleet does not regress.
  */
 export function viewAgentAccountEligibility(view: string, agent: string): ViewAgentAccountEligibility {
   try {
@@ -255,6 +263,7 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
       agent?: string;
       versions?: Array<{
         signedIn?: boolean;
+        launchable?: boolean;
         authVerdict?: AuthVerdict | null;
         usageStatus?: 'available' | 'rate_limited' | 'out_of_credits' | null;
       }>;
@@ -263,12 +272,15 @@ export function viewAgentAccountEligibility(view: string, agent: string): ViewAg
     if (!row) return { signedIn: undefined, pickerEligible: undefined };
     const verdicts = (row.versions ?? []).flatMap((version) => {
       if (typeof version.signedIn !== 'boolean') return [];
+      // Prefer the strict per-version launch signal; fall back to the display
+      // `signedIn` for an older remote CLI that does not emit `launchable`.
+      const launchable = typeof version.launchable === 'boolean' ? version.launchable : version.signedIn;
       const throttled = version.usageStatus === 'rate_limited' || version.usageStatus === 'out_of_credits';
       const authBlocked = version.authVerdict !== null
         && version.authVerdict !== undefined
         && isDeadVerdict(version.authVerdict);
-      const ready = version.signedIn && !authBlocked && !throttled;
-      return [{ ready, pickerEligible: ready || !version.signedIn || authBlocked }];
+      const ready = launchable && !authBlocked && !throttled;
+      return [{ ready, pickerEligible: ready || !launchable || authBlocked }];
     });
     if (verdicts.length === 0) return { signedIn: undefined, pickerEligible: undefined };
     return {
