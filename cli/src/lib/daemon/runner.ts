@@ -78,7 +78,6 @@ import {
   type RotateCandidate,
   type RotateResult,
 } from '../accounting/rotate.js';
-import { machineId } from '../machine-id.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
 import { isCustomHarnessName, readProfile } from '../profiles.js';
