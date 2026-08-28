@@ -493,7 +493,7 @@ SSH access (§7); rendering sessions that no harness produced.
   transcript copy, no Claude-only gate). It MUST fail loud — never launch a
   context-less sibling — when the source cannot be resolved (`commands/fork.ts`
   `runFork`). Superseded the transcript-copy contract (fresh-UUID copy, Claude-only)
-  in PHNX-2223; the old `forkSession`/`FORKABLE_AGENTS` mechanism is `(resolved)` —
+  in PHNX-3409; the old `forkSession`/`FORKABLE_AGENTS` mechanism is `(resolved)` —
   removed with its requirement.
 - **SES-21a (MUST).** The tmux helper-process reaper MUST fail closed. A process
   carrying `AGENT_TMUX_SESSION_NAME` MAY be selected only when the corresponding
