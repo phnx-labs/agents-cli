@@ -7,8 +7,6 @@
     "sessionsImported": 1,
     "medianMs": 9000,
     "p90Ms": 9000,
-    "spanMedianMs": 9000,
-    "spanP90Ms": 9000,
     "needAttention": 1,
     "toolErrorRate": 0.6666666666666666
   },
