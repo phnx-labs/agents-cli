@@ -1010,6 +1010,7 @@ export async function resolveRoutineLaunch(
     findCredentialAccount?: (name: string) => boolean;
     readMeta?: typeof readMeta;
     resolveCredentialAccount?: (name: string, host: AgentId) => { env: Record<string, string> };
+    claudeVersionIsAuthenticated?: typeof claudeVersionIsAuthenticated;
   } = {},
 ): Promise<RoutineLaunchPlan> {
   if (config.workflow) {
@@ -1137,13 +1138,23 @@ export async function resolveRoutineLaunch(
   if (!version) {
     version = resolveVersion(agent, cwd) ?? undefined;
   }
-  if (agent === 'claude' && version && !claudeVersionIsAuthenticated(version)) {
-    const authenticated = rotation?.healthy.find((candidate) => claudeVersionIsAuthenticated(candidate.version));
-    if (!authenticated) {
+  if (agent === 'claude' && version) {
+    const checkClaudeAuth = deps.claudeVersionIsAuthenticated ?? claudeVersionIsAuthenticated;
+    const authenticatedHealthy = rotation?.healthy.filter((candidate) => checkClaudeAuth(candidate.version));
+    const authenticated = authenticatedHealthy?.find((candidate) => candidate.version === version) ?? authenticatedHealthy?.[0];
+    if (rotation && (!authenticated || authenticatedHealthy!.length === 0)) {
       throw new Error(`Routine '${config.name}' found no authenticated Claude account; run \`claude /login\` for an installed version or pin a provider profile.`);
     }
-    version = authenticated.version;
-    if (rotation) rotation.picked = authenticated;
+    if (!rotation && !checkClaudeAuth(version)) {
+      throw new Error(`Routine '${config.name}' found no authenticated Claude account at claude@${version}; run \`claude /login\` for that version or remove the pin.`);
+    }
+    if (rotation && authenticated) {
+      const rejected = rotation.healthy.filter((candidate) => !authenticatedHealthy!.includes(candidate));
+      if (rejected.length > 0 || rotation.picked !== authenticated) {
+        rotation = { ...rotation, picked: authenticated, healthy: authenticatedHealthy!, excluded: [...rotation.excluded, ...rejected] };
+      }
+      version = authenticated.version;
+    }
   }
 
   if (!version) {
@@ -1334,13 +1345,7 @@ export function buildRoutineSpawnEnv(
     // to the overlay so an ambient value cannot bypass the routine sandbox.
     out.XDG_CONFIG_HOME = path.join(overlayHome, '.config');
   }
-  // Claude's native login and its portable `~/...` hooks both resolve only
-  // with the operator HOME, while CLAUDE_CONFIG_DIR selects the balanced
-  // version/account. Splitting HOME into the routine overlay caused both the
-  // authentication_failed exit and every hook 127 in PHNX-3406.
-  if (overlayHome && agent === 'claude') {
-    out.HOME = process.env.AGENTS_REAL_HOME || os.homedir();
-  }
+  if (overlayHome && agent === 'claude') out.HOME = process.env.AGENTS_REAL_HOME || os.homedir();
   if (overlayHome && agent === 'codex') out.CODEX_HOME = path.join(overlayHome, '.codex');
   if (timezone) out.TZ = timezone;
   return out;

@@ -21,7 +21,7 @@ import { query, _resetForTest } from '../feed/events.js';
 const describeSpawn = process.platform === 'win32' ? describe.skip : describe;
 
 describe('buildRoutineSpawnEnv (PHNX-3406)', () => {
-  it('keeps Claude on the selected authenticated version HOME/config', () => {
+  it('pairs Claude operator HOME with the selected version config', () => {
     const overlay = path.join(os.tmpdir(), 'phnx3406-overlay');
     const version = '99.0.0-phnx3406';
     const env = buildRoutineSpawnEnv({ HOME: overlay, AGENTS_USER_DIR: state.getUserAgentsDir() }, 'claude', version, undefined, overlay);
@@ -969,6 +969,19 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     });
     expect(plan.chain[0]).toEqual({ agent: 'claude', version: '2.1.219' });
     expect(plan.rotation).toBe(rotation);
+  });
+
+  it('removes unauthenticated Claude accounts from both the primary and failover chain', async () => {
+    const stale = { ...acct('2.1.219'), usageStatus: 'available' as const };
+    const authenticated = { ...acct('2.1.220'), usageStatus: 'available' as const };
+    const rotation: RotateResult = { picked: stale, healthy: [stale, authenticated], excluded: [] };
+    const plan = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: stale.version, rotation }),
+      claudeVersionIsAuthenticated: (version) => version === authenticated.version,
+    });
+    expect(plan.chain).toEqual([{ agent: 'claude', version: authenticated.version }]);
+    expect(plan.rotation?.healthy.map((candidate) => candidate.version)).toEqual([authenticated.version]);
+    expect(plan.rotation?.excluded.map((candidate) => candidate.version)).toContain(stale.version);
   });
 
   it('a non-exhausted null rotation (pinned-shaped) proceeds with the resolved version — unchanged', async () => {
