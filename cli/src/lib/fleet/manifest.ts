@@ -209,8 +209,9 @@ export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): De
  * apply" there reads like the command is dead — the exact confusion that made
  * `apply` look like a broken command during the RUSH-2981 surface review
  * (PHNX-3422). Any OTHER zero-target case (a `devices: all` fleet with no online
- * peers, or an explicit roster whose every name was unresolved/offline) already
- * had its reason surfaced above, so it stays a plain note.
+ * peers, or an explicit roster whose every name was unresolved — off-tailnet,
+ * ignored, or a typo, the only names `resolveDesired` drops) already had its
+ * reason surfaced above, so it stays a plain note.
  */
 export function emptyTargetsMessage(
   manifest: FleetManifest,
