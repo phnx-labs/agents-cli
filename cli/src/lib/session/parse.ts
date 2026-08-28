@@ -137,28 +137,10 @@ export function safeReadSessionFile(filePath: string, maxBytes: number = SESSION
   return fs.readFileSync(filePath, 'utf-8');
 }
 
-/**
- * Auto-detect agent type from file path and parse the session.
- */
 export interface ParseSessionOptions {
   /** Keep normalized tool results compact by default; renderers can request full output. */
   maxToolOutputChars?: number;
-  /**
-   * Emit an `interrupt` event where the transcript records `[Request interrupted`.
-   *
-   * OFF by default, deliberately. That marker is not a user message, and the default
-   * event array is a versioned consumer contract: `agents sessions <id> --json`
-   * serializes it verbatim (see render.ts, issue #743), `computeSummaryStats` folds
-   * every event's timestamp into the session duration, and the live-state reader and
-   * tail renderer inspect fixed-size windows of the last N events. Emitting it
-   * unconditionally changed all four — a measured 12x duration swing on one real
-   * transcript, a new object in a published payload, and an eviction from the
-   * 12-event rate-limit window whose trigger shape (a trailing interrupt) is exactly
-   * a session the user just cancelled.
-   *
-   * `agents insights` opts in: an interruption is a real friction signal, and dropping
-   * it outright is what made it unrecoverable.
-   */
+  /** Opt-in because interrupts are not user messages and would change the published event stream. */
   includeInterrupts?: boolean;
 }
 
@@ -167,14 +149,7 @@ function truncateNormalizedToolOutput(output: string, maxChars: number): string 
   return `${output.slice(0, maxChars)}\n\n[Output truncated: ${output.length - maxChars} characters omitted.]`;
 }
 
-/**
- * Registry-dispatch table: each `SessionAgentId` to its offline transcript
- * parser. Replaces the per-harness `switch` — the harness axis of Move 3. Kept
- * as its own table (not on the HarnessAdapter registry) because its id domain is
- * `SessionAgentId`: `rush` is a session agent with no `AgentId`, and the offline
- * transcript reader is a deliberately separate concern from live team events.
- * The `Record` is total, so a new session harness must add an entry here.
- */
+/** Separate from HarnessAdapter because offline transcripts include session-only agents such as Rush. */
 const TRANSCRIPT_PARSERS: Record<SessionAgentId, (filePath: string, opts: ParseSessionOptions) => SessionEvent[]> = {
   claude: (filePath, opts) => parseClaude(filePath, opts),
   codex: (filePath) => parseCodex(filePath),
@@ -203,13 +178,7 @@ export function parseSession(
 
   const events: SessionEvent[] = TRANSCRIPT_PARSERS[detected](filePath, opts);
 
-  // Chokepoint: every string field that originated in an untrusted session
-  // file gets stripped of terminal escapes here, so renderers downstream can
-  // safely splat values into chalk/console output. Same pass flags
-  // harness-injected `role=user` scaffolding (Claude `<bash-input>`/`<bash-stdout>`
-  // from `!`-prefix runs, `<system-reminder>`, etc.) as `_synthetic` so turn
-  // slicing and `--include user` count only genuine user intent — one place,
-  // every harness, instead of per-consumer regex.
+  // Sanitize untrusted strings and identify synthetic user scaffolding once for every consumer.
   const maxToolOutputChars = opts.maxToolOutputChars ?? 500;
   for (const e of events) {
     if (e.type === 'tool_result' && e.output) {
@@ -1000,26 +969,8 @@ function extractGeminiContent(content: any): string {
   return '';
 }
 
-// ---------------------------------------------------------------------------
-// Antigravity parser
-//
-// Antigravity (Google's Gemini-CLI successor) stores each conversation as a
-// SQLite DB at ~/.gemini/antigravity-cli/conversations/<trajectory-uuid>.db.
-// Table `steps(idx, step_type, ..., step_payload BLOB, ...)`; step_payload is
-// protobuf with no .proto shipped. The wire layout, reverse-engineered and
-// uniform across every tool step, nests a tool-call sub-message with:
-//   f1  (string) = call id       (shared by the request + completion steps)
-//   f2  (string) = tool name     e.g. run_command / view_file / grep_search
-//   f3  (string) = JSON args     e.g. {"CommandLine":"date","Cwd":"…","toolAction":…}
-//   f30 (string) = toolSummary   short human label ("Run date")
-//   f31 (string) = toolAction    ("Running date command")
-// We never decode the step_type enum: extracting the tool name (f2) + JSON args
-// (f3) generically keeps the parser tool-agnostic, so a future tool (web search,
-// etc.) is captured automatically. Each tool surfaces TWICE — a request step
-// (step_type 15) and a completion step share the same f1 call id — so we dedupe
-// by that id. Reads the BLOB payloads via the node/bun SQLite wrapper (portable,
-// no `sqlite3` CLI dependency) and normalizes to SessionEvent[].
-// ---------------------------------------------------------------------------
+// Antigravity's undocumented protobuf stores tool name in f2, JSON args in f3,
+// and repeats request/completion with the same f1 call id, which must be deduplicated.
 
 /** One decoded protobuf field at a single nesting level. */
 type ProtoField = { field: number; wire: number; value: number | Uint8Array };

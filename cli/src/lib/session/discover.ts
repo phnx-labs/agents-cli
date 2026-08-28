@@ -172,12 +172,7 @@ async function applyJsonlAppend(
  */
 const HOT_FILE_WINDOW_MS = 600_000;
 
-/**
- * Kill-switch: set `AGENTS_SESSIONS_NO_DIR_LEDGER=1` to force the old full-walk
- * path (readdir + per-file stat every dir, every run — the pre-A-2 behavior),
- * skipping the dir_ledger short-circuit entirely. One env var reverts a field
- * regression to today's behavior.
- */
+/** Emergency kill-switch for the directory-ledger optimization. */
 function dirLedgerDisabled(): boolean {
   const v = process.env.AGENTS_SESSIONS_NO_DIR_LEDGER;
   return v === '1' || v === 'true';
@@ -229,14 +224,7 @@ export interface DiscoverOptions {
   idExact?: string;
   /** Session id prefix — a targeted indexed lookup with no scan (RUSH-2477). */
   idPrefix?: string;
-  /**
-   * Cold-miss repair: when another live process already holds the scan claim,
-   * wait (bounded) for that in-flight scan to finish before reading the index,
-   * instead of returning the pre-scan snapshot (RUSH-2682). A caller repairing a
-   * "not indexed yet" miss wants the fresh result the concurrent scan is about to
-   * write, not the stale read that just missed. Ignored when THIS process wins
-   * the claim (it scans itself) or no scan is in progress.
-   */
+  /** On a cold miss, briefly await the scan already holding the single-flight claim. */
   waitForScan?: boolean;
 }
 
@@ -404,33 +392,11 @@ export async function discoverSessions(options?: DiscoverOptions): Promise<Sessi
 interface IncrementalScanResult {
   /** True when this process won the single-flight claim and ran the scan. */
   claimed: boolean;
-  /**
-   * Transcripts parsed this scan — i.e. those whose (mtime, size) changed. Zero
-   * is the steady state on an idle box and does NOT mean the scan was skipped;
-   * read `claimed` for that.
-   *
-   * Twelve of the 13 SESSION_AGENTS contribute, including OpenCode, whose
-   * scanner filters to sessions whose own per-session stamp changed and reports
-   * that batch — so a tick whose only changed sessions live there no longer
-   * reports 0 (RUSH-2691). OpenClaw is the exception and contributes nothing:
-   * its scanner has no change detection to report (a TTL gate, a fresh stamp
-   * every run, and an entry list rebuilt as the current inventory), so counting
-   * it would overstate rather than measure. See `scanOpenClawIncremental`.
-   */
+  /** Changed transcripts parsed; zero with `claimed: true` is a successful no-op scan. */
   scanned: number;
 }
 
-/**
- * The write half of {@link discoverSessions}: claim the single-flight scan slot,
- * incrementally index this host's transcript dirs, and report what was parsed.
- *
- * Split out so a caller that only wants the index refreshed — the daemon's warm
- * tick — can run it WITHOUT the listing query `discoverSessions` ends with. That
- * query is not free: it applies a cwd filter, runs the `archived_at`-writing
- * existence check, and can issue a Linear fetch, none of which index anything
- * (RUSH-2691). Keeping one implementation here is also what stops the tick and
- * the foreground path from drifting apart.
- */
+/** Separate write half so daemon warming does not pay for listing or external enrichment. */
 export async function scanSessionsIncremental(options?: {
   agent?: SessionAgentId;
   onProgress?: (p: ScanProgress) => void;
@@ -473,11 +439,7 @@ export async function scanSessionsIncremental(options?: {
   return { claimed: true, scanned };
 }
 
-/**
- * Poll until no live process holds the scan claim, or the bound elapses
- * (RUSH-2682). Bounded so a wedged/slow scan can never hang a foreground preview.
- * Exported for the cold-miss repair test.
- */
+/** Bounded wait so a wedged scan cannot hang a foreground cold-miss repair. */
 export async function waitForScanToSettle(
   timeoutMs: number = WAIT_FOR_SCAN_TIMEOUT_MS,
   pollMs: number = WAIT_FOR_SCAN_POLL_MS,
@@ -519,27 +481,8 @@ export async function queryIndexedSessions(
 }
 
 /**
- * Resolve a full-or-partial session id against the LOCAL SQLite index only.
- *
- * A plain WAL read through `queryIndexedSessions` — same origin-machine
- * attribution and managed scoping every indexed read gets — with NO incremental
- * discovery scan (so none of `tryClaimScan`/`releaseScan`'s `BEGIN IMMEDIATE`
- * writer lock) and NO fleet SSH fan-out. This is the crash-restart storm path
- * (RUSH-2477): dozens of `sessions resume <id>` at once for a known local id must
- * each be a cheap read, never a writer-lock contender or a dial into the
- * not-yet-up tailnet. Exact id first, then prefix (matching `findSessionsById`),
- * so a complete id never also drags in its prefix siblings. Returns `[]` on a
- * genuine local miss, leaving the caller to fall back to the fleet resolver.
- *
- * The existence check is left ON (`skipExistenceCheck: false`), exactly as the old
- * `discoverSessions` path and `findSessionsById` do (RUSH-2436): it KEEPS a
- * file-gone session whose user turns still live in `session_text` (flagged
- * archived) and SUPPRESSES a contentless phantom — so a phantom id misses here and
- * falls through to the fleet resolver, instead of resolving to a row with no real
- * transcript to resume. For a present transcript — the storm's actual case, since
- * the crashed tabs' files are on disk — the check does no writes, so the lock-free
- * guarantee holds; it only writes to (un)archive a genuinely missing or resurrected
- * file, which is not the 20-at-once resume path.
+ * Resolve locally without scanning or fleet I/O, keeping concurrent crash recovery lock-light.
+ * The existence check preserves archived content while rejecting transcriptless phantoms.
  */
 export async function resolveIndexedSessionById(idQuery: string): Promise<SessionMeta[]> {
   const q = idQuery.trim();
