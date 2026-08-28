@@ -37,10 +37,17 @@ import {
   selfConfiguredDeviceRole,
   type ConfiguredDeviceRole,
 } from '../device-config.js';
-import { exportClaudeUsageCacheRows, type CachedUsageSnapshot } from './usage.js';
+import {
+  exportClaudeUsageCacheRows,
+  ingestPeerClaudeUsageRows,
+  readClaudeUsageCache,
+  type CachedUsageSnapshot,
+  type UsageSnapshot,
+} from './usage.js';
 
 /** How long a single peer push may take before it is abandoned for this tick. */
 export const USAGE_PUSH_DEADLINE_MS = 20_000;
+export const USAGE_PULL_DEADLINE_MS = 20_000;
 
 /** The stdin envelope the `__usage-ingest` verb reads. `v` guards the shape. */
 export interface UsageSyncPayload {
@@ -116,6 +123,25 @@ export interface UsageSyncDeps {
   push?: (device: DeviceProfile, payload: string) => { ok: boolean; message?: string };
 }
 
+export interface UsagePullResult {
+  pulledFrom: string | null;
+  merged: number;
+  skipped: string | null;
+  error: string | null;
+}
+
+export interface UsagePullDeps {
+  selfRole?: () => ConfiguredDeviceRole | undefined;
+  listDevices?: () => DeviceProfile[];
+  listRoles?: () => Record<string, ConfiguredDeviceRole>;
+  isPinned?: (name: string) => boolean;
+  exportRows?: () => Record<string, CachedUsageSnapshot>;
+  readRow?: (usageKey: string) => Pick<UsageSnapshot, 'windows'> | null;
+  ingestRows?: (rows: Record<string, CachedUsageSnapshot>) => number;
+  /** Read the versioned payload from the primary. Default: ssh `__usage-export`. */
+  pull?: (device: DeviceProfile) => { ok: boolean; stdout?: string; message?: string };
+}
+
 /** Production push: pipe the payload to the peer's `agents __usage-ingest` over ssh. */
 function defaultUsagePush(device: DeviceProfile, payload: string): { ok: boolean; message?: string } {
   const target = sshTargetFor(device);
@@ -131,6 +157,76 @@ function defaultUsagePush(device: DeviceProfile, payload: string): { ok: boolean
   if (res.timedOut) return { ok: false, message: 'timed out' };
   if (res.code !== 0) return { ok: false, message: res.stderr.trim() || `remote exit ${res.code}` };
   return { ok: true };
+}
+
+/** Production pull: read the primary's cache through its hidden export verb. */
+function defaultUsagePull(device: DeviceProfile): { ok: boolean; stdout?: string; message?: string } {
+  const target = sshTargetFor(device);
+  const os = resolveRemoteOsSync(device.name);
+  const remoteCmd = buildRemoteAgentsInvocation(['__usage-export'], undefined, os);
+  const res = sshExec(target, remoteCmd, { timeoutMs: USAGE_PULL_DEADLINE_MS });
+  if (res.timedOut) return { ok: false, message: 'timed out' };
+  if (res.code !== 0) return { ok: false, message: res.stderr.trim() || `remote exit ${res.code}` };
+  return { ok: true, stdout: res.stdout };
+}
+
+/**
+ * Pull usage from the fleet's primary headed device when this worker's local
+ * cache is empty or contains an expired row. `personal` is the primary role;
+ * a `desktop` is used only when the fleet has no personal device.
+ */
+export function pullUsageFromPrimary(deps: UsagePullDeps = {}): UsagePullResult {
+  const result: UsagePullResult = { pulledFrom: null, merged: 0, skipped: null, error: null };
+  if ((deps.selfRole ?? selfConfiguredDeviceRole)() !== 'worker') {
+    result.skipped = 'this device is not a worker';
+    return result;
+  }
+
+  const localRows = (deps.exportRows ?? exportClaudeUsageCacheRows)();
+  const readRow = deps.readRow ?? readClaudeUsageCache;
+  const localEntries = Object.entries(localRows);
+  if (localEntries.length > 0 && localEntries.every(([key, row]) => {
+    const fresh = readRow(key);
+    return fresh !== null && fresh.windows.length === row.windows.length;
+  })) {
+    result.skipped = 'local usage cache is fresh';
+    return result;
+  }
+
+  const devices = deps.listDevices?.() ?? Object.values(loadDevicesSync());
+  const roles = deps.listRoles?.() ?? (deps.listDevices
+    ? listConfiguredDeviceRoles(devices.map((device) => device.name))
+    : listConfiguredDeviceRoles());
+  const isPinned = deps.isPinned ?? isHostPinned;
+  const primary = devices
+    .filter((device) => roles[device.name] === 'personal')
+    .concat(devices.filter((device) => roles[device.name] === 'desktop'))
+    .find((device) => device.tailscale?.online !== false && isPinned(device.name));
+  if (!primary) {
+    result.error = 'no reachable, pinned personal or desktop device is configured as the usage primary';
+    return result;
+  }
+
+  const outcome = (deps.pull ?? defaultUsagePull)(primary);
+  if (!outcome.ok) {
+    result.error = outcome.message ?? 'pull failed';
+    return result;
+  }
+
+  let payload: UsageSyncPayload;
+  try {
+    payload = JSON.parse(outcome.stdout ?? '') as UsageSyncPayload;
+  } catch {
+    result.error = 'primary returned malformed JSON';
+    return result;
+  }
+  if (!payload || payload.v !== 1 || typeof payload.rows !== 'object' || payload.rows === null || Array.isArray(payload.rows)) {
+    result.error = 'primary returned an unrecognized usage-sync payload shape';
+    return result;
+  }
+  result.pulledFrom = primary.name;
+  result.merged = (deps.ingestRows ?? ingestPeerClaudeUsageRows)(payload.rows);
+  return result;
 }
 
 /**

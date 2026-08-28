@@ -1,13 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, describe, it, expect } from 'vitest';
 
 import {
   planUsagePush,
+  pullUsageFromPrimary,
   syncFleetUsageSnapshots,
   type UsagePushTarget,
   type UsageSyncDeps,
 } from './usage-sync.js';
 import type { DeviceProfile } from '../devices/registry.js';
-import type { CachedUsageSnapshot } from './usage.js';
+import {
+  exportClaudeUsageCacheRows,
+  ingestPeerClaudeUsageRows,
+  readClaudeUsageCache,
+  writeClaudeUsageCache,
+  type CachedUsageSnapshot,
+} from './usage.js';
 
 // The planner is pure (roles/reachability injected) so every skip/push branch is
 // covered with no SSH; the driver test injects a fake push to assert routing.
@@ -20,6 +30,11 @@ const TARGETS: UsagePushTarget[] = [
   { name: 'offline-box', role: 'worker', online: false, pinned: true },
   { name: 'unpinned-box', role: 'worker', online: true, pinned: false },
 ];
+
+const tempDirs: string[] = [];
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
 
 function pushesOf(items: ReturnType<typeof planUsagePush>): string[] {
   return items.filter((i) => i.action === 'push').map((i) => i.device);
@@ -107,5 +122,84 @@ describe('syncFleetUsageSnapshots (driver, injected deps)', () => {
     const result = syncFleetUsageSnapshots(baseDeps({ exportRows: () => ({}) }));
     expect(result.pushed).toEqual([]);
     expect(result.skipped.every((s) => /no local usage snapshot/.test(s.reason))).toBe(true);
+  });
+});
+
+describe('pullUsageFromPrimary', () => {
+  it('pulls a 7d-100% primary row through the real cache export and ingest path', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'agents-usage-pull-'));
+    tempDirs.push(dir);
+    const primaryCache = join(dir, 'primary.json');
+    const workerCache = join(dir, 'worker.json');
+    const capturedAt = new Date();
+    const resetsAt = new Date(capturedAt.getTime() + 7 * 24 * 60 * 60_000);
+    const usageKey = 'claude:org=alpha';
+    writeClaudeUsageCache(usageKey, {
+      source: 'api',
+      sourceLabel: 'Anthropic',
+      capturedAt,
+      windows: [{
+        key: 'week' as any,
+        label: 'Weekly',
+        shortLabel: 'W',
+        usedPercent: 100,
+        resetsAt,
+        windowMinutes: 7 * 24 * 60,
+      }],
+      plan: null,
+      refreshHint: null,
+    }, primaryCache);
+
+    const primary = { name: 'zion', tailscale: { online: true } } as DeviceProfile;
+    const result = pullUsageFromPrimary({
+      selfRole: () => 'worker',
+      listDevices: () => [primary],
+      listRoles: () => ({ zion: 'personal' }),
+      isPinned: () => true,
+      exportRows: () => exportClaudeUsageCacheRows(workerCache),
+      readRow: (key) => readClaudeUsageCache(key, workerCache),
+      pull: () => ({
+        ok: true,
+        stdout: JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows(primaryCache) }),
+      }),
+      ingestRows: (rows) => ingestPeerClaudeUsageRows(rows, workerCache),
+    });
+
+    expect(result).toEqual({ pulledFrom: 'zion', merged: 1, skipped: null, error: null });
+    expect(exportClaudeUsageCacheRows(workerCache)[usageKey]).toMatchObject({
+      capturedAt: capturedAt.toISOString(),
+      windows: [{ key: 'week', usedPercent: 100, windowMinutes: 7 * 24 * 60 }],
+    });
+  });
+
+  it('does not cross the ssh boundary when the worker cache is fresh', () => {
+    const rows: Record<string, CachedUsageSnapshot> = {
+      'claude:org=alpha': {
+        capturedAt: new Date().toISOString(),
+        windows: [{ key: 'week' as any, label: 'Weekly', shortLabel: 'W', usedPercent: 10, resetsAt: null, windowMinutes: 7 * 24 * 60 }],
+      },
+    };
+    let pulled = false;
+    const result = pullUsageFromPrimary({
+      selfRole: () => 'worker',
+      exportRows: () => rows,
+      readRow: () => ({ windows: [{} as any] }),
+      pull: () => { pulled = true; return { ok: true, stdout: '' }; },
+    });
+    expect(result.skipped).toBe('local usage cache is fresh');
+    expect(pulled).toBe(false);
+  });
+
+  it('fails loud when the primary returns a non-protocol response', () => {
+    const primary = { name: 'zion', tailscale: { online: true } } as DeviceProfile;
+    const result = pullUsageFromPrimary({
+      selfRole: () => 'worker',
+      listDevices: () => [primary],
+      listRoles: () => ({ zion: 'personal' }),
+      isPinned: () => true,
+      exportRows: () => ({}),
+      pull: () => ({ ok: true, stdout: 'login banner' }),
+    });
+    expect(result.error).toBe('primary returned malformed JSON');
   });
 });

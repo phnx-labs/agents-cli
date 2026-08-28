@@ -2,9 +2,9 @@
  * Fleet usage-snapshot sync as a `PeriodicService` (PHNX-3392 usage-sync).
  *
  * On a headed box (personal/desktop) each tick pushes the local identity-keyed
- * Claude usage rows to worker peers that cannot read usage themselves. A no-op on
- * a worker/unmarked box or when the local cache is empty — the driver
- * ({@link syncFleetUsageSnapshots}) gates on the self role, so this service is
+ * Claude usage rows to worker peers that cannot read usage themselves. On a
+ * worker whose cache is empty or stale, the same tick pulls those rows from the
+ * primary headed device. Both drivers gate on the self role, so this service is
  * safe to register everywhere. Single-executor per destination: each daemon only
  * writes the DESTINATION's own cache, and the merge is newest-wins + idempotent.
  */
@@ -30,13 +30,18 @@ export class UsageSyncService extends BasePeriodicService {
   }
 
   protected async onTick(ctx: DaemonContext): Promise<void> {
-    const { syncFleetUsageSnapshots } = await import('../accounting/usage-sync.js');
-    const result = syncFleetUsageSnapshots();
-    if (result.pushed.length > 0) {
-      ctx.log('INFO', `usage-sync: pushed usage to ${result.pushed.join(', ')}`);
+    const { pullUsageFromPrimary, syncFleetUsageSnapshots } = await import('../accounting/usage-sync.js');
+    const pushResult = syncFleetUsageSnapshots();
+    if (pushResult.pushed.length > 0) {
+      ctx.log('INFO', `usage-sync: pushed usage to ${pushResult.pushed.join(', ')}`);
     }
-    for (const err of result.errors) {
+    for (const err of pushResult.errors) {
       ctx.log('WARN', `usage-sync: ${err.device}: ${err.message}`);
     }
+    const pullResult = pullUsageFromPrimary();
+    if (pullResult.pulledFrom) {
+      ctx.log('INFO', `usage-sync: pulled usage from ${pullResult.pulledFrom}; merged ${pullResult.merged} row(s)`);
+    }
+    if (pullResult.error) ctx.log('WARN', `usage-sync: pull: ${pullResult.error}`);
   }
 }
