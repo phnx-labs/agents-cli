@@ -247,6 +247,93 @@ describe('release.sh: assert_promote_home_base fails loud under set -e', () => {
   });
 });
 
+/**
+ * assert_promote_home_base MUST forward $DEPLOY_WORKER to the probe as its
+ * positional arg (PHNX-3403). Without this, the cloudflare.com/share gate is
+ * silently skipped for every release regardless of the mode. The stub probe here
+ * ECHOES its $1 so the forwarding is asserted, not assumed.
+ */
+function runAssertForwardsMode(mode: string): { status: number | null; out: string } {
+  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
+  const start = lines.findIndex((l) => l.startsWith('assert_promote_home_base() {'));
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  const fnBody = lines.slice(start, end + 1).join('\n');
+
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'assert-promote-forward-'));
+  fs.mkdirSync(path.join(dir, 'scripts'), { recursive: true });
+  // Echo the mode the probe was invoked with, then FAIL — assert_promote_home_base
+  // captures the probe's output into $out and surfaces it only on the die path, so
+  // a failing probe is how the forwarded positional arg becomes observable.
+  fs.writeFileSync(
+    path.join(dir, 'scripts/promote-home-base-probe.sh'),
+    "#!/usr/bin/env bash\nprintf 'PROBE_MODE:%s\\n' \"${1:-<none>}\" >&2\nexit 1\n",
+    { mode: 0o755 },
+  );
+  const harness = [
+    'set -euo pipefail',
+    'ON_HOME_BASE=true',
+    'RELEASE_HOME_BASE=testbox',
+    `DEPLOY_WORKER=${mode}`,
+    'bold(){ :; }',
+    "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
+    "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
+    fnBody,
+    'assert_promote_home_base',
+  ].join('\n');
+  const harnessPath = path.join(dir, 'harness.sh');
+  fs.writeFileSync(harnessPath, harness);
+  const r = spawnSync('bash', [harnessPath], { cwd: dir, encoding: 'utf-8' });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+describe('release.sh: assert_promote_home_base forwards the deploy-worker mode to the probe', () => {
+  it('passes DEPLOY_WORKER as the probe positional arg (auto)', () => {
+    const { status, out } = runAssertForwardsMode('auto');
+    expect(status).not.toBe(0); // the echo-probe fails, so the die path surfaces $out
+    expect(out).toContain('PROBE_MODE:auto'); // NOT PROBE_MODE:<none> — the forwarding is real
+  });
+
+  it('passes DEPLOY_WORKER as the probe positional arg (off)', () => {
+    const { out } = runAssertForwardsMode('off');
+    expect(out).toContain('PROBE_MODE:off');
+  });
+});
+
+/**
+ * The home-base re-exec must carry --deploy-worker (PHNX-3403). `home_base_wt_snippet`
+ * emits the tagged-tree program that ends by invoking `release.sh … --home-base-phase`;
+ * $DEPLOY_WORKER is expanded into it at emit time. Generate the snippet with the mode
+ * bound and assert the flag rides through — otherwise the whole feature is a local-only
+ * no-op on the home base.
+ */
+function generateHomeBaseSnippet(mode: string): string {
+  const lines = fs.readFileSync(RELEASE, 'utf-8').replace(/\r/g, '').split('\n');
+  const start = lines.findIndex((l) => l.startsWith('home_base_wt_snippet() {'));
+  expect(start, 'home_base_wt_snippet() { not found').toBeGreaterThanOrEqual(0);
+  const end = lines.findIndex((l, i) => i > start && l === '}');
+  const fnBody = lines.slice(start, end + 1).join('\n');
+  // The emitting function only needs $1 (arg), $RELEASE_HOME_BASE and $DEPLOY_WORKER
+  // at cat time; the emitted program's own `set -u` is inside the heredoc.
+  const r = spawnSync('bash', ['-c', `${fnBody}\nhome_base_wt_snippet "1.2.3"`], {
+    encoding: 'utf-8',
+    env: { ...process.env, RELEASE_HOME_BASE: 'testbox', DEPLOY_WORKER: mode },
+  });
+  expect(r.status).toBe(0);
+  return r.stdout;
+}
+
+describe('release.sh: home_base_wt_snippet forwards --deploy-worker to the tagged re-exec', () => {
+  it('embeds --deploy-worker "<mode>" alongside --home-base-phase --device', () => {
+    const snippet = generateHomeBaseSnippet('auto');
+    expect(snippet).toContain('--home-base-phase --device "testbox"');
+    expect(snippet).toContain('--deploy-worker "auto"');
+  });
+
+  it('carries off through unchanged', () => {
+    expect(generateHomeBaseSnippet('off')).toContain('--deploy-worker "off"');
+  });
+});
+
 describe('release.sh: the promote preflight gates the mutating phases (RUSH-3026)', () => {
   it('calls assert_promote_home_base BEFORE the first mutating phase', () => {
     // The RUSH-2535 shape: an unready home base must abort before merge+tag,
