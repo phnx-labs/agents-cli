@@ -3295,6 +3295,29 @@ export class BrowserService {
    * tasks.json entries. Used before identity-based resolution so a daemon
    * restart does not make the caller's tasks invisible.
    */
+  /**
+   * Register a freshly-rehydrated connection, unless a concurrent rehydrate won
+   * the race and already registered one for this key. `attachRunningProfile`
+   * awaits an ssh-tunnel spawn / CDP connect, so two commands landing right
+   * after a daemon restart can each build a connection for the same key; the
+   * loser must tear its own down — an ssh:// connection owns a real tunnel
+   * child + CDP socket, and the `cleanup` docblock says it MUST run whenever the
+   * connection leaves `this.connections`, so silently overwriting it in the map
+   * would leak the tunnel. Returns the winning connection to use.
+   */
+  private registerRehydratedConnection(
+    key: ConnectionKey,
+    conn: ProfileConnection,
+  ): ProfileConnection {
+    const existing = this.connections.get(key);
+    if (existing) {
+      try { conn.cleanup?.(); } catch { /* best effort — the winner stays live */ }
+      return existing;
+    }
+    this.connections.set(key, conn);
+    return conn;
+  }
+
   private async rehydrateAllFromDisk(): Promise<void> {
     const runtimeRoot = getBrowserRuntimeDir();
     let dirNames: string[] = [];
@@ -3321,7 +3344,10 @@ export class BrowserService {
       // Soft attach only — never launch / never clear pid files.
       const conn = await this.attachRunningProfile(key, tasks);
       if (!conn) continue;
-      this.connections.set(key, conn);
+      // A concurrent rehydrate may have registered one for this key while we
+      // awaited the attach; keep the winner and tear our loser's tunnel down.
+      const registered = this.registerRehydratedConnection(key, conn);
+      if (registered !== conn) continue;
       try {
         await this.applyDefaultDownloadBehavior(conn, key);
       } catch {
@@ -3382,12 +3408,15 @@ export class BrowserService {
           // CDP down — cannot rehydrate a live connection; caller will error.
           continue;
         }
-        conn = attached;
-        this.connections.set(key, conn);
-        try {
-          await this.applyDefaultDownloadBehavior(conn, key);
-        } catch {
-          // Non-fatal.
+        // Keep whichever connection a concurrent rehydrate registered first and
+        // tear our loser's tunnel down instead of leaking it (see the helper).
+        conn = this.registerRehydratedConnection(key, attached);
+        if (conn === attached) {
+          try {
+            await this.applyDefaultDownloadBehavior(conn, key);
+          } catch {
+            // Non-fatal.
+          }
         }
       }
 

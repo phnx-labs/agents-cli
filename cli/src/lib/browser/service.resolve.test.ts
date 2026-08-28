@@ -5,6 +5,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import * as crypto from 'crypto';
 import { tmpdir } from 'os';
 import * as yaml from 'yaml';
 import * as state from '../state.js';
@@ -335,4 +336,30 @@ describe('disk task state + identity', () => {
     expect(resolved?.task.name).toBe(taskName);
     expect(resolved?.created).toBe(false);
   });
+
+  it('ssh:// rehydrate returns null (does not throw) when the remote is unreachable (PHNX-2663)', async () => {
+    // The reconnect path re-establishes a real SSH tunnel via connectSSH. When
+    // the remote is gone, connectSSH throws — attachRunningProfile must catch it
+    // and return null so the caller falls through to disk reconcile, exactly
+    // like the local-CDP branch, and never crashes the daemon. `.invalid` is a
+    // reserved TLD (RFC 6761) that never resolves, so ssh fails fast with no
+    // live host and no mock. This exercises the failure branch the fix adds.
+    const name = `tst-sshfail-${crypto.randomBytes(6).toString('hex')}`;
+    writeProfile(name, ['ssh://nohost.invalid?port=9333']);
+    const runtimeKey = `${name}@endpoint-0`;
+    const runtimeDir = path.join(TEST_BROWSER_DIR, runtimeKey);
+    fs.mkdirSync(runtimeDir, { recursive: true });
+    const diskTasks = new Map<string, Record<string, unknown>>([
+      ['t', { id: 't', name: 't', profile: runtimeKey, tabs: {}, pid: 0 }],
+    ]);
+
+    const service = new BrowserService();
+    const attach = (
+      service as unknown as {
+        attachRunningProfile: (k: string, t: Map<string, unknown>) => Promise<unknown>;
+      }
+    ).attachRunningProfile.bind(service);
+
+    await expect(attach(runtimeKey, diskTasks)).resolves.toBeNull();
+  }, 30_000);
 });
