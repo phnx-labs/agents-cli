@@ -188,6 +188,22 @@ groups:
     checks: [typecheck]
     budget_sec: 120
 
+  # 240s, not the default 85s. The secrets suite is the heaviest in the tree: the
+  # vault round-trip tests (secrets/bundles.test.ts, secrets/agent.test.ts) each drive a
+  # real keychain / file-store lifecycle at ~2-8s a case (repo convention forbids
+  # mocking), and a secrets/** edit selects the whole secrets suite plus its
+  # installations/hosts importers. Secrets had NO group of its own, so a secrets change
+  # fell back to whatever else it touched — PR #3218 (a comment-only trim of
+  # secrets+installations+hosts) inherited the installations 120s ceiling and measured
+  # 122-174s of a PASSING vitest run (2195 tests, all green) across 5 runs on loaded AND
+  # idle fleet workers, failing the gate every time. Same pattern as sessions 240 /
+  # daemon 240. Raise this only against a measured run, and lower it when the suite is split.
+  - id: secrets
+    when:
+      - cli/src/lib/secrets/**
+    checks: [typecheck]
+    budget_sec: 240
+
   # 150s, not the default 85s. Moving hooks.ts into hooks/install.ts (PR #2804,
   # run 32397180788) selected companion + importer tests inside a 129s impact
   # run (48 files / 1099 tests, all passed). Under 85s the move cannot merge.
