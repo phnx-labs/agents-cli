@@ -27800,7 +27800,7 @@
             },
             {
               "flags": "--status <status>",
-              "description": "Filter: only teams with this status (working, done, failed, or empty)",
+              "description": "Filter: only teams with this status (working, done, stranded, failed, or empty)",
               "long": "--status",
               "required": true,
               "optional": false,
