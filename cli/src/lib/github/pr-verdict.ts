@@ -2,7 +2,7 @@
  * Non-author PR approval + CI-green checks for merge-on-green.
  *
  * Verdict rules are copied from merge-guard.sh (the PreToolUse hook in
- * phnx-labs/.agents-system `rules/subrules/gh-merge-guard/merge-guard.sh`).
+ * phnx-labs/.agents `rules/subrules/gh-merge-guard/merge-guard.sh`).
  * That hook accepts EITHER a formal GitHub `APPROVED` review OR an APPROVE
  * verdict comment on THIS PR, and rejects a comment that only cites another
  * PR ("carried from #N" / "APPROVE on #N") — the #2736 laundering pattern.

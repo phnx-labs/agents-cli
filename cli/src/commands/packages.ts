@@ -454,7 +454,7 @@ Examples:
   agents install plugin:my-plugin@https://github.com/user/my-plugin.git
   agents install plugin:~/Projects/rush-toolkit
   agents install gh:anthropics/skills --agents codex,claude
-  agents install gh:phnx-labs/.agents-system --types skills,workflows --agents claude@all
+  agents install gh:phnx-labs/.agents --types skills,workflows --agents claude@all
 
 Specialized verbs still work (agents plugins install, agents skills add) and
 delegate to the same underlying installers.

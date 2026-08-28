@@ -1407,7 +1407,7 @@ Two repos with the same shape, different roles:
 
 | Repo | Role | Owner |
 |---|---|---|
-| `~/.agents-system/` | **System repo** — core/built-in skills, commands, hooks, rules, MCP configs, permissions, and profiles that ship with `agi-cli`. The defaults every install gets. | Maintained upstream at [phnx-labs/.agents-system](https://github.com/phnx-labs/.agents-system) |
+| `~/.agents-system/` | **System repo** — core/built-in skills, commands, hooks, rules, MCP configs, permissions, and profiles that ship with `agi-cli`. The defaults every install gets. | Maintained upstream at [phnx-labs/.agents](https://github.com/phnx-labs/.agents) (formerly `.agents-system`) |
 | `~/.agents/` | **User repo** — your personal additions and overrides. This is what `agents repo push`/`pull` syncs. | You |
 
 **Version pinning:** `agents.yaml` at project root pins which agent version to use (like `.nvmrc` for Node).

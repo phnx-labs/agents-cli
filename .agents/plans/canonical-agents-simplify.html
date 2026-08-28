@@ -1,0 +1,443 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>One public `.agents` — rename the system repo, keep the paths, flip extras private</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">visual</span><span class="status-badge status-draft">draft</span></div>
+<h1>One public `.agents` — rename the system repo, keep the paths, flip extras private</h1>
+<p class="summary">Drop the confusing <code>-system</code> suffix and flip <code>.agents-extras</code> to private, changing zero local paths — maximum naming clarity at near-zero operational risk.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/phnx/issue/PHNX-3229" target="_blank" rel="noopener">PHNX-3229</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/phnx/issue/PHNX-3315" target="_blank" rel="noopener">PHNX-3315</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/phnx/issue/PHNX-3306" target="_blank" rel="noopener">PHNX-3306</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-m2</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/c2711235-856a-4711-9a68-34f09d3e6453">c2711235</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-28</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#story" data-toc-for="story"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Story</a><a class="toc-item" href="#data" data-toc-for="data"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Data</a><a class="toc-item" href="#figure" data-toc-for="figure"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Figure</a><a class="toc-item toc-sub" href="#sequencing-a-small-contained-change" data-toc-for="sequencing-a-small-contained-change">Sequencing — a small, contained change</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="story">Story</h2><p>The organizing bet: <strong>bugs track lines of code — code and comments alike — so the win is measured by what this removes, not what it adds.</strong> That is the same bet as serving funded, Series-A startups: they reward a small, legible, secure core over a growing feature count. This revision earns that by shrinking the change itself, not just the model.</p>
+<p>Today the DotAgents model names repos after their jobs. There is <code>phnx-labs/.agents-system</code> (the npm-shipped defaults), <code>phnx-labs/.agents-extras</code> (a second Phoenix repo), and your own <code>muqsitnawaz/.agents</code>. But the layering already <em>is</em> the role: <code>resolveResource</code> resolves <code>project &gt; user &gt; system</code> by position (<code>cli/src/lib/resources.ts:181</code>). A repo does not need <code>-system</code> in its name to be the system layer — its position says so, and the local checkout dir <code>~/.agents/.system/</code> already names the layer, not the repo.</p>
+<p>So the move is narrow and deliberate. <strong>Rename <code>phnx-labs/.agents-system</code> → <code>phnx-labs/.agents</code></strong> — the one public default the CLI ships. <strong>Keep <code>phnx-labs/.agents-extras</code> by name, and flip it private</strong> — an opt-in repo that is also the natural home for the private steering layer (the operating principles that boot the fleet and never ship publicly). GitHub redirects the old remote, so the live fleet keeps pulling through the rename.</p>
+<p>And crucially: <strong>nothing on disk moves.</strong> <code>~/.agents/.system/</code>, <code>~/.agents/</code>, and the <code>~/.agents-&lt;alias&gt;/</code> peer dirs all stay exactly as they are. This is the whole point of the revision — the earlier draft proposed re-plumbing every checkout under <code>~/.agents/.repos/&lt;owner&gt;/</code>, which is real churn that collides with the in-flight device-config refactor (PHNX-3315). Dropping it means the change is one repo rename plus one visibility flip. A serious customer never notices it; every agent stops tripping over <code>-system</code> vs <code>-extras</code>.</p>
+<p>The follow-on rib — keep the boot injection (<code>03-linear-inject-tasks-context.sh</code>, <code>08-inject-repo-inflight.sh</code>) and add a tiny <code>UserPromptSubmit</code> scoping pass that filters the already-fetched tickets, PRs, memories, and sessions to the one prompt in hand — stays a separate, later lane. It is an addition, so under the deletion ethos it waits behind the rename.</p>
+<p>One honest note on sequencing: on your own north star, the highest-leverage item open is not this cleanup — it is <strong>PHNX-3306</strong>, the Urgent compliance defect (consumer Claude OAuth tokens used server-side). This plan is craft; that one is a customer walking. I would land 3306 first and run this right behind it.</p>
+<div class="artifact-callout artifact-callout-warn">
+<strong>The move:</strong> drop one confusing suffix (<code>phnx-labs/.agents-system</code> → <code>phnx-labs/.agents</code>), flip one repo's visibility (<code>.agents-extras</code> → private, same name), and change <strong>zero local paths</strong>. Maximum naming clarity at near-zero operational risk.
+</div><h2 id="data">Data</h2><p>The rename touches a small surface — the repo-name references and the remote-identity checks. It deliberately leaves the large surface alone: the <code>.system</code> local-path references, the peer-scheme, and the legacy migrator all stay, because keeping paths as-is is the decision. Minimal blast radius is the feature, not a compromise.</p>
+<figure class="artifact-figure artifact-figure-wide artifact-figure-diagram">
+<svg viewBox="0 0 900 280" role="img" aria-label="Blast radius: name references changed by the rename versus the path surface left unchanged" xmlns="http://www.w3.org/2000/svg">
+  <text x="16" y="24" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#c8c8c8">Blast radius — what the rename touches vs. what it leaves alone (grep, cli/src + docs, 2026-08-28)</text>
+
+  
+  <text x="16" y="66" font-family="JetBrains Mono, monospace" font-size="11" fill="#a3e635">agents-system / -extras name refs</text>
+  <rect x="320" y="54" width="242" height="18" rx="4" fill="#a3e635" opacity="0.9"></rect>
+  <text x="572" y="67" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">173</text>
+  <text x="820" y="67" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#a3e635" text-anchor="end">CHANGED</text>
+
+  
+  <line x1="16" y1="88" x2="884" y2="88" stroke="#8a8a8a" stroke-width="1" opacity="0.35"></line>
+
+  
+  <text x="16" y="112" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">.system local-path refs</text>
+  <rect x="320" y="100" width="533" height="18" rx="4" fill="#38bdf8" opacity="0.45"></rect>
+  <text x="843" y="113" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">381</text>
+
+  <text x="16" y="150" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">extra-repo peer-scheme refs</text>
+  <rect x="320" y="138" width="113" height="18" rx="4" fill="#38bdf8" opacity="0.45"></rect>
+  <text x="433" y="151" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">81</text>
+
+  <text x="16" y="188" font-family="JetBrains Mono, monospace" font-size="11" fill="#38bdf8">migrate-fold.ts (legacy migrator LOC)</text>
+  <rect x="320" y="176" width="168" height="18" rx="4" fill="#38bdf8" opacity="0.45"></rect>
+  <text x="488" y="189" font-family="JetBrains Mono, monospace" font-size="11" fill="#c8c8c8">120</text>
+
+  <text x="820" y="150" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#38bdf8" text-anchor="end">UNCHANGED — kept on purpose</text>
+
+  <line x1="320" y1="48" x2="320" y2="200" stroke="#8a8a8a" stroke-width="1" opacity="0.4"></line>
+  <text x="320" y="224" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">bar length ∝ count · absolute numbers labeled at right</text>
+</svg>
+<figcaption>The rename sweeps ~173 name references and the remote-identity checks. The 381 <code>.system</code> path refs, 81 peer-scheme refs, and the 120-line migrator stay untouched — no path churn.</figcaption>
+</figure><h2 id="figure">Figure</h2><p>The hero: repos get renamed on top, local checkout stays exactly as it is on the bottom, and the spine names what is now versus what is next.</p>
+<figure class="artifact-figure artifact-figure-wide artifact-figure-diagram">
+<svg viewBox="0 0 960 480" role="img" aria-label="Before and after of the DotAgents repo naming, with local checkout unchanged" xmlns="http://www.w3.org/2000/svg">
+  
+  <text x="40" y="30" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#f59e0b">BEFORE — role-named repos</text>
+  <text x="520" y="30" font-family="Inter, system-ui, sans-serif" font-size="13" fill="#a3e635">AFTER — one public name · extras goes private</text>
+
+  <text x="40" y="52" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">github repos</text>
+  <text x="520" y="52" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">github repos</text>
+
+  
+  <rect x="40" y="60" width="380" height="44" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="56" y="82" font-family="JetBrains Mono, monospace" font-size="12" fill="#f59e0b">phnx-labs/.agents-system</text>
+  <text x="56" y="97" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">npm-shipped defaults · read-only</text>
+
+  <rect x="40" y="112" width="380" height="44" rx="8" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"></rect>
+  <text x="56" y="134" font-family="JetBrains Mono, monospace" font-size="12" fill="#f59e0b">phnx-labs/.agents-extras</text>
+  <text x="56" y="149" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">second Phoenix repo · public today</text>
+
+  <rect x="40" y="164" width="380" height="44" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="56" y="186" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">muqsitnawaz/.agents</text>
+  <text x="56" y="201" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">your user repo</text>
+
+  
+  <rect x="520" y="60" width="400" height="44" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="536" y="82" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">phnx-labs/.agents</text>
+  <text x="536" y="97" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">the default core · public · ships with the CLI</text>
+
+  <rect x="520" y="112" width="400" height="44" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="536" y="134" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">phnx-labs/.agents-extras</text>
+  <text x="536" y="149" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">same name · now PRIVATE · opt-in · steering home</text>
+
+  <rect x="520" y="164" width="400" height="44" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="536" y="186" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">muqsitnawaz/.agents</text>
+  <text x="536" y="201" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">your user repo · unchanged</text>
+
+  
+  <line x1="420" y1="82" x2="520" y2="82" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"></line>
+  <line x1="420" y1="134" x2="520" y2="134" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"></line>
+  <line x1="420" y1="186" x2="520" y2="186" stroke="#38bdf8" stroke-width="1" stroke-dasharray="3 3" opacity="0.7"></line>
+  <text x="470" y="52" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#a3e635" text-anchor="middle">drop -system · extras → private</text>
+
+  
+  <text x="40" y="252" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">local checkout — unchanged (no path churn)</text>
+
+  <rect x="40" y="262" width="280" height="48" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="56" y="284" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">~/.agents/</text>
+  <text x="56" y="299" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">user layer · keep</text>
+
+  <rect x="340" y="262" width="280" height="48" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="356" y="284" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">~/.agents/.system/</text>
+  <text x="356" y="299" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">system layer · KEEP (points at phnx-labs/.agents)</text>
+
+  <rect x="640" y="262" width="280" height="48" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="656" y="284" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">~/.agents-&lt;alias&gt;/</text>
+  <text x="656" y="299" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">extra repos · keep</text>
+
+  
+  <text x="40" y="346" font-family="Inter, system-ui, sans-serif" font-size="11" fill="#c8c8c8">One spine — the rename now, the steering next</text>
+
+  <rect x="40" y="358" width="280" height="72" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="56" y="384" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">Now · public core</text>
+  <text x="56" y="402" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">rename → phnx-labs/.agents</text>
+  <text x="56" y="416" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">the default that ships</text>
+
+  <rect x="340" y="358" width="280" height="72" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="356" y="384" font-family="JetBrains Mono, monospace" font-size="12" fill="#a3e635">Now · extras private</text>
+  <text x="356" y="402" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">.agents-extras → private · opt-in</text>
+  <text x="356" y="416" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">the private steering home</text>
+
+  <rect x="640" y="358" width="280" height="72" rx="8" fill="#0e1418" stroke="#38bdf8" stroke-width="1.5"></rect>
+  <text x="656" y="384" font-family="JetBrains Mono, monospace" font-size="12" fill="#38bdf8">Next · boot + scope</text>
+  <text x="656" y="402" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">steering injected at SessionStart</text>
+  <text x="656" y="416" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">+ prompt-time relevance · later lane</text>
+
+  <text x="40" y="462" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">amber = renamed away · lime = done in this plan · blue = unchanged / later</text>
+</svg>
+<figcaption>The whole change: two repo edits on top (rename, flip private), nothing moved on the bottom, and the steering + scoping work held as an explicit next lane.</figcaption>
+</figure><h3 id="sequencing-a-small-contained-change">Sequencing — a small, contained change</h3><table>
+<thead>
+<tr>
+<th>Phase</th>
+<th>Move</th>
+<th>Changes / removes</th>
+<th>Hold</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td>Rename <code>phnx-labs/.agents-system</code> → <code>phnx-labs/.agents</code></td>
+<td>The <code>-system</code> naming special-cases + the "which repo is which role" confusion</td>
+<td>Remote-identity checks accept both names during cutover (GitHub redirects the URL)</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Flip <code>phnx-labs/.agents-extras</code> to <strong>private</strong> (keep the name)</td>
+<td>Public exposure of internal / steering resources</td>
+<td>Register as an opt-in extra repo (<code>agents repo add</code>), disabled by default</td>
+</tr>
+<tr>
+<td>—</td>
+<td>Local paths (<code>~/.agents/.system</code>, <code>~/.agents-&lt;alias&gt;/</code>)</td>
+<td><strong>Nothing</strong> — kept as-is by decision</td>
+<td>No migrator, no churn, no collision with PHNX-3315</td>
+</tr>
+<tr>
+<td>next</td>
+<td>Private-steering boot hook + prompt-time scoping pass</td>
+<td>Agents booting without the principles / re-deriving context</td>
+<td>Separate later lane; keep the existing boot injection</td>
+</tr>
+</tbody></table>
+<pre><code># Phase 1 — rename (old remote auto-redirects):
+#   GitHub:  phnx-labs/.agents-system  -&gt;  phnx-labs/.agents
+#   Update remote-identity checks to accept BOTH names during cutover:
+#     isSystemRepoOrigin / sameGitRemote / canonicalGitRemote   (cli/src/lib/git.ts)
+# Phase 2 — flip extras private, keep the name:
+#   GitHub:  set phnx-labs/.agents-extras visibility = private
+#   Register opt-in:  agents repo add phnx-labs/.agents-extras   (disabled by default)
+# Local paths (~/.agents/.system, ~/.agents-&lt;alias&gt;/) stay exactly as they are.
+grep -rn "agents-system\|agents-extras" cli/src cli/docs   # ~173 name refs to sweep
+</code></pre>
+<h2 id="tracking">Tracking</h2><ul>
+<li><a class="link-pill" href="https://linear.app/phnx/issue/PHNX-3229" title="https://linear.app/phnx/issue/PHNX-3229" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">PHNX-3229</span></a> — Clean agents-cli repository root and consolidate project skills into system resources</li>
+<li><a class="link-pill" href="https://linear.app/phnx/issue/PHNX-3315" title="https://linear.app/phnx/issue/PHNX-3315" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">PHNX-3315</span></a> — Device-scoped config refactor (the churn this revision deliberately avoids colliding with)</li>
+<li><a class="link-pill" href="https://linear.app/phnx/issue/PHNX-3306" title="https://linear.app/phnx/issue/PHNX-3306" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">PHNX-3306</span></a> — Urgent compliance defect; outranks this cleanup on the north star</li>
+</ul>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://linear.app/phnx/issue/PHNX-3229" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">PHNX-3229</span><span class="reference-host">linear.app</span></a></li><li class="reference-item"><a class="reference-link" href="https://linear.app/phnx/issue/PHNX-3315" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">PHNX-3315</span><span class="reference-host">linear.app</span></a></li><li class="reference-item"><a class="reference-link" href="https://linear.app/phnx/issue/PHNX-3306" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">PHNX-3306</span><span class="reference-host">linear.app</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHZpc3VhbAp0aXRsZTogT25lIHB1YmxpYyBgLmFnZW50c2Ag4oCUIHJlbmFtZSB0aGUgc3lzdGVtIHJlcG8sIGtlZXAgdGhlIHBhdGhzLCBmbGlwIGV4dHJhcyBwcml2YXRlCnN1bW1hcnk6IERyb3AgdGhlIGNvbmZ1c2luZyBgLXN5c3RlbWAgc3VmZml4IGFuZCBmbGlwIGAuYWdlbnRzLWV4dHJhc2AgdG8gcHJpdmF0ZSwgY2hhbmdpbmcgemVybyBsb2NhbCBwYXRocyDigJQgbWF4aW11bSBuYW1pbmcgY2xhcml0eSBhdCBuZWFyLXplcm8gb3BlcmF0aW9uYWwgcmlzay4Kc3RhdHVzOiBkcmFmdApsaW5rczoKICAtIHVybDogaHR0cHM6Ly9saW5lYXIuYXBwL3BobngvaXNzdWUvUEhOWC0zMjI5CiAgICBsYWJlbDogUEhOWC0zMjI5CiAgLSB1cmw6IGh0dHBzOi8vbGluZWFyLmFwcC9waG54L2lzc3VlL1BITlgtMzMxNQogICAgbGFiZWw6IFBITlgtMzMxNQogIC0gdXJsOiBodHRwczovL2xpbmVhci5hcHAvcGhueC9pc3N1ZS9QSE5YLTMzMDYKICAgIGxhYmVsOiBQSE5YLTMzMDYKLS0tCgojIyBTdG9yeQoKVGhlIG9yZ2FuaXppbmcgYmV0OiAqKmJ1Z3MgdHJhY2sgbGluZXMgb2YgY29kZSDigJQgY29kZSBhbmQgY29tbWVudHMgYWxpa2Ug4oCUIHNvIHRoZSB3aW4gaXMgbWVhc3VyZWQgYnkgd2hhdCB0aGlzIHJlbW92ZXMsIG5vdCB3aGF0IGl0IGFkZHMuKiogVGhhdCBpcyB0aGUgc2FtZSBiZXQgYXMgc2VydmluZyBmdW5kZWQsIFNlcmllcy1BIHN0YXJ0dXBzOiB0aGV5IHJld2FyZCBhIHNtYWxsLCBsZWdpYmxlLCBzZWN1cmUgY29yZSBvdmVyIGEgZ3Jvd2luZyBmZWF0dXJlIGNvdW50LiBUaGlzIHJldmlzaW9uIGVhcm5zIHRoYXQgYnkgc2hyaW5raW5nIHRoZSBjaGFuZ2UgaXRzZWxmLCBub3QganVzdCB0aGUgbW9kZWwuCgpUb2RheSB0aGUgRG90QWdlbnRzIG1vZGVsIG5hbWVzIHJlcG9zIGFmdGVyIHRoZWlyIGpvYnMuIFRoZXJlIGlzIGBwaG54LWxhYnMvLmFnZW50cy1zeXN0ZW1gICh0aGUgbnBtLXNoaXBwZWQgZGVmYXVsdHMpLCBgcGhueC1sYWJzLy5hZ2VudHMtZXh0cmFzYCAoYSBzZWNvbmQgUGhvZW5peCByZXBvKSwgYW5kIHlvdXIgb3duIGBtdXFzaXRuYXdhei8uYWdlbnRzYC4gQnV0IHRoZSBsYXllcmluZyBhbHJlYWR5ICppcyogdGhlIHJvbGU6IGByZXNvbHZlUmVzb3VyY2VgIHJlc29sdmVzIGBwcm9qZWN0ID4gdXNlciA+IHN5c3RlbWAgYnkgcG9zaXRpb24gKGBjbGkvc3JjL2xpYi9yZXNvdXJjZXMudHM6MTgxYCkuIEEgcmVwbyBkb2VzIG5vdCBuZWVkIGAtc3lzdGVtYCBpbiBpdHMgbmFtZSB0byBiZSB0aGUgc3lzdGVtIGxheWVyIOKAlCBpdHMgcG9zaXRpb24gc2F5cyBzbywgYW5kIHRoZSBsb2NhbCBjaGVja291dCBkaXIgYH4vLmFnZW50cy8uc3lzdGVtL2AgYWxyZWFkeSBuYW1lcyB0aGUgbGF5ZXIsIG5vdCB0aGUgcmVwby4KClNvIHRoZSBtb3ZlIGlzIG5hcnJvdyBhbmQgZGVsaWJlcmF0ZS4gKipSZW5hbWUgYHBobngtbGFicy8uYWdlbnRzLXN5c3RlbWAg4oaSIGBwaG54LWxhYnMvLmFnZW50c2AqKiDigJQgdGhlIG9uZSBwdWJsaWMgZGVmYXVsdCB0aGUgQ0xJIHNoaXBzLiAqKktlZXAgYHBobngtbGFicy8uYWdlbnRzLWV4dHJhc2AgYnkgbmFtZSwgYW5kIGZsaXAgaXQgcHJpdmF0ZSoqIOKAlCBhbiBvcHQtaW4gcmVwbyB0aGF0IGlzIGFsc28gdGhlIG5hdHVyYWwgaG9tZSBmb3IgdGhlIHByaXZhdGUgc3RlZXJpbmcgbGF5ZXIgKHRoZSBvcGVyYXRpbmcgcHJpbmNpcGxlcyB0aGF0IGJvb3QgdGhlIGZsZWV0IGFuZCBuZXZlciBzaGlwIHB1YmxpY2x5KS4gR2l0SHViIHJlZGlyZWN0cyB0aGUgb2xkIHJlbW90ZSwgc28gdGhlIGxpdmUgZmxlZXQga2VlcHMgcHVsbGluZyB0aHJvdWdoIHRoZSByZW5hbWUuCgpBbmQgY3J1Y2lhbGx5OiAqKm5vdGhpbmcgb24gZGlzayBtb3Zlcy4qKiBgfi8uYWdlbnRzLy5zeXN0ZW0vYCwgYH4vLmFnZW50cy9gLCBhbmQgdGhlIGB+Ly5hZ2VudHMtPGFsaWFzPi9gIHBlZXIgZGlycyBhbGwgc3RheSBleGFjdGx5IGFzIHRoZXkgYXJlLiBUaGlzIGlzIHRoZSB3aG9sZSBwb2ludCBvZiB0aGUgcmV2aXNpb24g4oCUIHRoZSBlYXJsaWVyIGRyYWZ0IHByb3Bvc2VkIHJlLXBsdW1iaW5nIGV2ZXJ5IGNoZWNrb3V0IHVuZGVyIGB+Ly5hZ2VudHMvLnJlcG9zLzxvd25lcj4vYCwgd2hpY2ggaXMgcmVhbCBjaHVybiB0aGF0IGNvbGxpZGVzIHdpdGggdGhlIGluLWZsaWdodCBkZXZpY2UtY29uZmlnIHJlZmFjdG9yIChQSE5YLTMzMTUpLiBEcm9wcGluZyBpdCBtZWFucyB0aGUgY2hhbmdlIGlzIG9uZSByZXBvIHJlbmFtZSBwbHVzIG9uZSB2aXNpYmlsaXR5IGZsaXAuIEEgc2VyaW91cyBjdXN0b21lciBuZXZlciBub3RpY2VzIGl0OyBldmVyeSBhZ2VudCBzdG9wcyB0cmlwcGluZyBvdmVyIGAtc3lzdGVtYCB2cyBgLWV4dHJhc2AuCgpUaGUgZm9sbG93LW9uIHJpYiDigJQga2VlcCB0aGUgYm9vdCBpbmplY3Rpb24gKGAwMy1saW5lYXItaW5qZWN0LXRhc2tzLWNvbnRleHQuc2hgLCBgMDgtaW5qZWN0LXJlcG8taW5mbGlnaHQuc2hgKSBhbmQgYWRkIGEgdGlueSBgVXNlclByb21wdFN1Ym1pdGAgc2NvcGluZyBwYXNzIHRoYXQgZmlsdGVycyB0aGUgYWxyZWFkeS1mZXRjaGVkIHRpY2tldHMsIFBScywgbWVtb3JpZXMsIGFuZCBzZXNzaW9ucyB0byB0aGUgb25lIHByb21wdCBpbiBoYW5kIOKAlCBzdGF5cyBhIHNlcGFyYXRlLCBsYXRlciBsYW5lLiBJdCBpcyBhbiBhZGRpdGlvbiwgc28gdW5kZXIgdGhlIGRlbGV0aW9uIGV0aG9zIGl0IHdhaXRzIGJlaGluZCB0aGUgcmVuYW1lLgoKT25lIGhvbmVzdCBub3RlIG9uIHNlcXVlbmNpbmc6IG9uIHlvdXIgb3duIG5vcnRoIHN0YXIsIHRoZSBoaWdoZXN0LWxldmVyYWdlIGl0ZW0gb3BlbiBpcyBub3QgdGhpcyBjbGVhbnVwIOKAlCBpdCBpcyAqKlBITlgtMzMwNioqLCB0aGUgVXJnZW50IGNvbXBsaWFuY2UgZGVmZWN0IChjb25zdW1lciBDbGF1ZGUgT0F1dGggdG9rZW5zIHVzZWQgc2VydmVyLXNpZGUpLiBUaGlzIHBsYW4gaXMgY3JhZnQ7IHRoYXQgb25lIGlzIGEgY3VzdG9tZXIgd2Fsa2luZy4gSSB3b3VsZCBsYW5kIDMzMDYgZmlyc3QgYW5kIHJ1biB0aGlzIHJpZ2h0IGJlaGluZCBpdC4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWNhbGxvdXQgYXJ0aWZhY3QtY2FsbG91dC13YXJuIj4KPHN0cm9uZz5UaGUgbW92ZTo8L3N0cm9uZz4gZHJvcCBvbmUgY29uZnVzaW5nIHN1ZmZpeCAoPGNvZGU+cGhueC1sYWJzLy5hZ2VudHMtc3lzdGVtPC9jb2RlPiDihpIgPGNvZGU+cGhueC1sYWJzLy5hZ2VudHM8L2NvZGU+KSwgZmxpcCBvbmUgcmVwbydzIHZpc2liaWxpdHkgKDxjb2RlPi5hZ2VudHMtZXh0cmFzPC9jb2RlPiDihpIgcHJpdmF0ZSwgc2FtZSBuYW1lKSwgYW5kIGNoYW5nZSA8c3Ryb25nPnplcm8gbG9jYWwgcGF0aHM8L3N0cm9uZz4uIE1heGltdW0gbmFtaW5nIGNsYXJpdHkgYXQgbmVhci16ZXJvIG9wZXJhdGlvbmFsIHJpc2suCjwvZGl2PgoKIyMgRGF0YQoKVGhlIHJlbmFtZSB0b3VjaGVzIGEgc21hbGwgc3VyZmFjZSDigJQgdGhlIHJlcG8tbmFtZSByZWZlcmVuY2VzIGFuZCB0aGUgcmVtb3RlLWlkZW50aXR5IGNoZWNrcy4gSXQgZGVsaWJlcmF0ZWx5IGxlYXZlcyB0aGUgbGFyZ2Ugc3VyZmFjZSBhbG9uZTogdGhlIGAuc3lzdGVtYCBsb2NhbC1wYXRoIHJlZmVyZW5jZXMsIHRoZSBwZWVyLXNjaGVtZSwgYW5kIHRoZSBsZWdhY3kgbWlncmF0b3IgYWxsIHN0YXksIGJlY2F1c2Uga2VlcGluZyBwYXRocyBhcy1pcyBpcyB0aGUgZGVjaXNpb24uIE1pbmltYWwgYmxhc3QgcmFkaXVzIGlzIHRoZSBmZWF0dXJlLCBub3QgYSBjb21wcm9taXNlLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS13aWRlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTAwIDI4MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJCbGFzdCByYWRpdXM6IG5hbWUgcmVmZXJlbmNlcyBjaGFuZ2VkIGJ5IHRoZSByZW5hbWUgdmVyc3VzIHRoZSBwYXRoIHN1cmZhY2UgbGVmdCB1bmNoYW5nZWQiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPHRleHQgeD0iMTYiIHk9IjI0IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2M4YzhjOCI+Qmxhc3QgcmFkaXVzIOKAlCB3aGF0IHRoZSByZW5hbWUgdG91Y2hlcyB2cy4gd2hhdCBpdCBsZWF2ZXMgYWxvbmUgKGdyZXAsIGNsaS9zcmMgKyBkb2NzLCAyMDI2LTA4LTI4KTwvdGV4dD4KCiAgPCEtLSBjaGFuZ2VkIC0tPgogIDx0ZXh0IHg9IjE2IiB5PSI2NiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNhM2U2MzUiPmFnZW50cy1zeXN0ZW0gLyAtZXh0cmFzIG5hbWUgcmVmczwvdGV4dD4KICA8cmVjdCB4PSIzMjAiIHk9IjU0IiB3aWR0aD0iMjQyIiBoZWlnaHQ9IjE4IiByeD0iNCIgZmlsbD0iI2EzZTYzNSIgb3BhY2l0eT0iMC45Ii8+CiAgPHRleHQgeD0iNTcyIiB5PSI2NyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPjE3MzwvdGV4dD4KICA8dGV4dCB4PSI4MjAiIHk9IjY3IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2EzZTYzNSIgdGV4dC1hbmNob3I9ImVuZCI+Q0hBTkdFRDwvdGV4dD4KCiAgPCEtLSBkaXZpZGVyIC0tPgogIDxsaW5lIHgxPSIxNiIgeTE9Ijg4IiB4Mj0iODg0IiB5Mj0iODgiIHN0cm9rZT0iIzhhOGE4YSIgc3Ryb2tlLXdpZHRoPSIxIiBvcGFjaXR5PSIwLjM1Ii8+CgogIDwhLS0gdW5jaGFuZ2VkIGdyb3VwIC0tPgogIDx0ZXh0IHg9IjE2IiB5PSIxMTIiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIiBmaWxsPSIjMzhiZGY4Ij4uc3lzdGVtIGxvY2FsLXBhdGggcmVmczwvdGV4dD4KICA8cmVjdCB4PSIzMjAiIHk9IjEwMCIgd2lkdGg9IjUzMyIgaGVpZ2h0PSIxOCIgcng9IjQiIGZpbGw9IiMzOGJkZjgiIG9wYWNpdHk9IjAuNDUiLz4KICA8dGV4dCB4PSI4NDMiIHk9IjExMyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPjM4MTwvdGV4dD4KCiAgPHRleHQgeD0iMTYiIHk9IjE1MCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiMzOGJkZjgiPmV4dHJhLXJlcG8gcGVlci1zY2hlbWUgcmVmczwvdGV4dD4KICA8cmVjdCB4PSIzMjAiIHk9IjEzOCIgd2lkdGg9IjExMyIgaGVpZ2h0PSIxOCIgcng9IjQiIGZpbGw9IiMzOGJkZjgiIG9wYWNpdHk9IjAuNDUiLz4KICA8dGV4dCB4PSI0MzMiIHk9IjE1MSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPjgxPC90ZXh0PgoKICA8dGV4dCB4PSIxNiIgeT0iMTg4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iIzM4YmRmOCI+bWlncmF0ZS1mb2xkLnRzIChsZWdhY3kgbWlncmF0b3IgTE9DKTwvdGV4dD4KICA8cmVjdCB4PSIzMjAiIHk9IjE3NiIgd2lkdGg9IjE2OCIgaGVpZ2h0PSIxOCIgcng9IjQiIGZpbGw9IiMzOGJkZjgiIG9wYWNpdHk9IjAuNDUiLz4KICA8dGV4dCB4PSI0ODgiIHk9IjE4OSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPjEyMDwvdGV4dD4KCiAgPHRleHQgeD0iODIwIiB5PSIxNTAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjMzhiZGY4IiB0ZXh0LWFuY2hvcj0iZW5kIj5VTkNIQU5HRUQg4oCUIGtlcHQgb24gcHVycG9zZTwvdGV4dD4KCiAgPGxpbmUgeDE9IjMyMCIgeTE9IjQ4IiB4Mj0iMzIwIiB5Mj0iMjAwIiBzdHJva2U9IiM4YThhOGEiIHN0cm9rZS13aWR0aD0iMSIgb3BhY2l0eT0iMC40Ii8+CiAgPHRleHQgeD0iMzIwIiB5PSIyMjQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5iYXIgbGVuZ3RoIOKInSBjb3VudCDCtyBhYnNvbHV0ZSBudW1iZXJzIGxhYmVsZWQgYXQgcmlnaHQ8L3RleHQ+Cjwvc3ZnPgo8ZmlnY2FwdGlvbj5UaGUgcmVuYW1lIHN3ZWVwcyB+MTczIG5hbWUgcmVmZXJlbmNlcyBhbmQgdGhlIHJlbW90ZS1pZGVudGl0eSBjaGVja3MuIFRoZSAzODEgPGNvZGU+LnN5c3RlbTwvY29kZT4gcGF0aCByZWZzLCA4MSBwZWVyLXNjaGVtZSByZWZzLCBhbmQgdGhlIDEyMC1saW5lIG1pZ3JhdG9yIHN0YXkgdW50b3VjaGVkIOKAlCBubyBwYXRoIGNodXJuLjwvZmlnY2FwdGlvbj4KPC9maWd1cmU+CgojIyBGaWd1cmUKClRoZSBoZXJvOiByZXBvcyBnZXQgcmVuYW1lZCBvbiB0b3AsIGxvY2FsIGNoZWNrb3V0IHN0YXlzIGV4YWN0bHkgYXMgaXQgaXMgb24gdGhlIGJvdHRvbSwgYW5kIHRoZSBzcGluZSBuYW1lcyB3aGF0IGlzIG5vdyB2ZXJzdXMgd2hhdCBpcyBuZXh0LgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWZpZ3VyZS13aWRlIGFydGlmYWN0LWZpZ3VyZS1kaWFncmFtIj4KPHN2ZyB2aWV3Qm94PSIwIDAgOTYwIDQ4MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJCZWZvcmUgYW5kIGFmdGVyIG9mIHRoZSBEb3RBZ2VudHMgcmVwbyBuYW1pbmcsIHdpdGggbG9jYWwgY2hlY2tvdXQgdW5jaGFuZ2VkIiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogIDwhLS0gY29sdW1uIGhlYWRlcnMgLS0+CiAgPHRleHQgeD0iNDAiIHk9IjMwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMyIgZmlsbD0iI2Y1OWUwYiI+QkVGT1JFIOKAlCByb2xlLW5hbWVkIHJlcG9zPC90ZXh0PgogIDx0ZXh0IHg9IjUyMCIgeT0iMzAiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEzIiBmaWxsPSIjYTNlNjM1Ij5BRlRFUiDigJQgb25lIHB1YmxpYyBuYW1lIMK3IGV4dHJhcyBnb2VzIHByaXZhdGU8L3RleHQ+CgogIDx0ZXh0IHg9IjQwIiB5PSI1MiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmdpdGh1YiByZXBvczwvdGV4dD4KICA8dGV4dCB4PSI1MjAiIHk9IjUyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+Z2l0aHViIHJlcG9zPC90ZXh0PgoKICA8IS0tIGJlZm9yZSByZXBvcyAtLT4KICA8cmVjdCB4PSI0MCIgeT0iNjAiIHdpZHRoPSIzODAiIGhlaWdodD0iNDQiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmNTllMGIiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTYiIHk9IjgyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y1OWUwYiI+cGhueC1sYWJzLy5hZ2VudHMtc3lzdGVtPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSI5NyIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPm5wbS1zaGlwcGVkIGRlZmF1bHRzIMK3IHJlYWQtb25seTwvdGV4dD4KCiAgPHJlY3QgeD0iNDAiIHk9IjExMiIgd2lkdGg9IjM4MCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y1OWUwYiIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1NiIgeT0iMTM0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y1OWUwYiI+cGhueC1sYWJzLy5hZ2VudHMtZXh0cmFzPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSIxNDkiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zZWNvbmQgUGhvZW5peCByZXBvIMK3IHB1YmxpYyB0b2RheTwvdGV4dD4KCiAgPHJlY3QgeD0iNDAiIHk9IjE2NCIgd2lkdGg9IjM4MCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMwZTE0MTgiIHN0cm9rZT0iIzM4YmRmOCIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1NiIgeT0iMTg2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+bXVxc2l0bmF3YXovLmFnZW50czwvdGV4dD4KICA8dGV4dCB4PSI1NiIgeT0iMjAxIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+eW91ciB1c2VyIHJlcG88L3RleHQ+CgogIDwhLS0gYWZ0ZXIgcmVwb3MgLS0+CiAgPHJlY3QgeD0iNTIwIiB5PSI2MCIgd2lkdGg9IjQwMCIgaGVpZ2h0PSI0NCIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MzYiIHk9IjgyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2EzZTYzNSI+cGhueC1sYWJzLy5hZ2VudHM8L3RleHQ+CiAgPHRleHQgeD0iNTM2IiB5PSI5NyIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnRoZSBkZWZhdWx0IGNvcmUgwrcgcHVibGljIMK3IHNoaXBzIHdpdGggdGhlIENMSTwvdGV4dD4KCiAgPHJlY3QgeD0iNTIwIiB5PSIxMTIiIHdpZHRoPSI0MDAiIGhlaWdodD0iNDQiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNTM2IiB5PSIxMzQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzhiZGY4Ij5waG54LWxhYnMvLmFnZW50cy1leHRyYXM8L3RleHQ+CiAgPHRleHQgeD0iNTM2IiB5PSIxNDkiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5zYW1lIG5hbWUgwrcgbm93IFBSSVZBVEUgwrcgb3B0LWluIMK3IHN0ZWVyaW5nIGhvbWU8L3RleHQ+CgogIDxyZWN0IHg9IjUyMCIgeT0iMTY0IiB3aWR0aD0iNDAwIiBoZWlnaHQ9IjQ0IiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjUzNiIgeT0iMTg2IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+bXVxc2l0bmF3YXovLmFnZW50czwvdGV4dD4KICA8dGV4dCB4PSI1MzYiIHk9IjIwMSIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnlvdXIgdXNlciByZXBvIMK3IHVuY2hhbmdlZDwvdGV4dD4KCiAgPCEtLSBjb25uZWN0b3JzIC0tPgogIDxsaW5lIHgxPSI0MjAiIHkxPSI4MiIgeDI9IjUyMCIgeTI9IjgyIiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KICA8bGluZSB4MT0iNDIwIiB5MT0iMTM0IiB4Mj0iNTIwIiB5Mj0iMTM0IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KICA8bGluZSB4MT0iNDIwIiB5MT0iMTg2IiB4Mj0iNTIwIiB5Mj0iMTg2IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMSIgc3Ryb2tlLWRhc2hhcnJheT0iMyAzIiBvcGFjaXR5PSIwLjciLz4KICA8dGV4dCB4PSI0NzAiIHk9IjUyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iI2EzZTYzNSIgdGV4dC1hbmNob3I9Im1pZGRsZSI+ZHJvcCAtc3lzdGVtIMK3IGV4dHJhcyDihpIgcHJpdmF0ZTwvdGV4dD4KCiAgPCEtLSBsb2NhbCBjaGVja291dCBiYW5kIOKAlCB1bmNoYW5nZWQgLS0+CiAgPHRleHQgeD0iNDAiIHk9IjI1MiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPmxvY2FsIGNoZWNrb3V0IOKAlCB1bmNoYW5nZWQgKG5vIHBhdGggY2h1cm4pPC90ZXh0PgoKICA8cmVjdCB4PSI0MCIgeT0iMjYyIiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjQ4IiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU2IiB5PSIyODQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzhiZGY4Ij5+Ly5hZ2VudHMvPC90ZXh0PgogIDx0ZXh0IHg9IjU2IiB5PSIyOTkiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj51c2VyIGxheWVyIMK3IGtlZXA8L3RleHQ+CgogIDxyZWN0IHg9IjM0MCIgeT0iMjYyIiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjQ4IiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjM1NiIgeT0iMjg0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+fi8uYWdlbnRzLy5zeXN0ZW0vPC90ZXh0PgogIDx0ZXh0IHg9IjM1NiIgeT0iMjk5IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+c3lzdGVtIGxheWVyIMK3IEtFRVAgKHBvaW50cyBhdCBwaG54LWxhYnMvLmFnZW50cyk8L3RleHQ+CgogIDxyZWN0IHg9IjY0MCIgeT0iMjYyIiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjQ4IiByeD0iOCIgZmlsbD0iIzBlMTQxOCIgc3Ryb2tlPSIjMzhiZGY4IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjY1NiIgeT0iMjg0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iIzM4YmRmOCI+fi8uYWdlbnRzLSZsdDthbGlhcyZndDsvPC90ZXh0PgogIDx0ZXh0IHg9IjY1NiIgeT0iMjk5IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+ZXh0cmEgcmVwb3Mgwrcga2VlcDwvdGV4dD4KCiAgPCEtLSBzcGluZSByaWJib24gLS0+CiAgPHRleHQgeD0iNDAiIHk9IjM0NiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNjOGM4YzgiPk9uZSBzcGluZSDigJQgdGhlIHJlbmFtZSBub3csIHRoZSBzdGVlcmluZyBuZXh0PC90ZXh0PgoKICA8cmVjdCB4PSI0MCIgeT0iMzU4IiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjcyIiByeD0iOCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjU2IiB5PSIzODQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYTNlNjM1Ij5Ob3cgwrcgcHVibGljIGNvcmU8L3RleHQ+CiAgPHRleHQgeD0iNTYiIHk9IjQwMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnJlbmFtZSDihpIgcGhueC1sYWJzLy5hZ2VudHM8L3RleHQ+CiAgPHRleHQgeD0iNTYiIHk9IjQxNiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnRoZSBkZWZhdWx0IHRoYXQgc2hpcHM8L3RleHQ+CgogIDxyZWN0IHg9IjM0MCIgeT0iMzU4IiB3aWR0aD0iMjgwIiBoZWlnaHQ9IjcyIiByeD0iOCIgZmlsbD0iIzBmMTYwYSIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjM1NiIgeT0iMzg0IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2EzZTYzNSI+Tm93IMK3IGV4dHJhcyBwcml2YXRlPC90ZXh0PgogIDx0ZXh0IHg9IjM1NiIgeT0iNDAyIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+LmFnZW50cy1leHRyYXMg4oaSIHByaXZhdGUgwrcgb3B0LWluPC90ZXh0PgogIDx0ZXh0IHg9IjM1NiIgeT0iNDE2IiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+dGhlIHByaXZhdGUgc3RlZXJpbmcgaG9tZTwvdGV4dD4KCiAgPHJlY3QgeD0iNjQwIiB5PSIzNTgiIHdpZHRoPSIyODAiIGhlaWdodD0iNzIiIHJ4PSI4IiBmaWxsPSIjMGUxNDE4IiBzdHJva2U9IiMzOGJkZjgiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iNjU2IiB5PSIzODQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjMzhiZGY4Ij5OZXh0IMK3IGJvb3QgKyBzY29wZTwvdGV4dD4KICA8dGV4dCB4PSI2NTYiIHk9IjQwMiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPnN0ZWVyaW5nIGluamVjdGVkIGF0IFNlc3Npb25TdGFydDwvdGV4dD4KICA8dGV4dCB4PSI2NTYiIHk9IjQxNiIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPisgcHJvbXB0LXRpbWUgcmVsZXZhbmNlIMK3IGxhdGVyIGxhbmU8L3RleHQ+CgogIDx0ZXh0IHg9IjQwIiB5PSI0NjIiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5hbWJlciA9IHJlbmFtZWQgYXdheSDCtyBsaW1lID0gZG9uZSBpbiB0aGlzIHBsYW4gwrcgYmx1ZSA9IHVuY2hhbmdlZCAvIGxhdGVyPC90ZXh0Pgo8L3N2Zz4KPGZpZ2NhcHRpb24+VGhlIHdob2xlIGNoYW5nZTogdHdvIHJlcG8gZWRpdHMgb24gdG9wIChyZW5hbWUsIGZsaXAgcHJpdmF0ZSksIG5vdGhpbmcgbW92ZWQgb24gdGhlIGJvdHRvbSwgYW5kIHRoZSBzdGVlcmluZyArIHNjb3Bpbmcgd29yayBoZWxkIGFzIGFuIGV4cGxpY2l0IG5leHQgbGFuZS48L2ZpZ2NhcHRpb24+CjwvZmlndXJlPgoKIyMjIFNlcXVlbmNpbmcg4oCUIGEgc21hbGwsIGNvbnRhaW5lZCBjaGFuZ2UKCnwgUGhhc2UgfCBNb3ZlIHwgQ2hhbmdlcyAvIHJlbW92ZXMgfCBIb2xkIHwKfCAtLS0gfCAtLS0gfCAtLS0gfCAtLS0gfAp8IDEgfCBSZW5hbWUgYHBobngtbGFicy8uYWdlbnRzLXN5c3RlbWAg4oaSIGBwaG54LWxhYnMvLmFnZW50c2AgfCBUaGUgYC1zeXN0ZW1gIG5hbWluZyBzcGVjaWFsLWNhc2VzICsgdGhlICJ3aGljaCByZXBvIGlzIHdoaWNoIHJvbGUiIGNvbmZ1c2lvbiB8IFJlbW90ZS1pZGVudGl0eSBjaGVja3MgYWNjZXB0IGJvdGggbmFtZXMgZHVyaW5nIGN1dG92ZXIgKEdpdEh1YiByZWRpcmVjdHMgdGhlIFVSTCkgfAp8IDIgfCBGbGlwIGBwaG54LWxhYnMvLmFnZW50cy1leHRyYXNgIHRvICoqcHJpdmF0ZSoqIChrZWVwIHRoZSBuYW1lKSB8IFB1YmxpYyBleHBvc3VyZSBvZiBpbnRlcm5hbCAvIHN0ZWVyaW5nIHJlc291cmNlcyB8IFJlZ2lzdGVyIGFzIGFuIG9wdC1pbiBleHRyYSByZXBvIChgYWdlbnRzIHJlcG8gYWRkYCksIGRpc2FibGVkIGJ5IGRlZmF1bHQgfAp8IOKAlCB8IExvY2FsIHBhdGhzIChgfi8uYWdlbnRzLy5zeXN0ZW1gLCBgfi8uYWdlbnRzLTxhbGlhcz4vYCkgfCAqKk5vdGhpbmcqKiDigJQga2VwdCBhcy1pcyBieSBkZWNpc2lvbiB8IE5vIG1pZ3JhdG9yLCBubyBjaHVybiwgbm8gY29sbGlzaW9uIHdpdGggUEhOWC0zMzE1IHwKfCBuZXh0IHwgUHJpdmF0ZS1zdGVlcmluZyBib290IGhvb2sgKyBwcm9tcHQtdGltZSBzY29waW5nIHBhc3MgfCBBZ2VudHMgYm9vdGluZyB3aXRob3V0IHRoZSBwcmluY2lwbGVzIC8gcmUtZGVyaXZpbmcgY29udGV4dCB8IFNlcGFyYXRlIGxhdGVyIGxhbmU7IGtlZXAgdGhlIGV4aXN0aW5nIGJvb3QgaW5qZWN0aW9uIHwKCmBgYGJhc2gKIyBQaGFzZSAxIOKAlCByZW5hbWUgKG9sZCByZW1vdGUgYXV0by1yZWRpcmVjdHMpOgojICAgR2l0SHViOiAgcGhueC1sYWJzLy5hZ2VudHMtc3lzdGVtICAtPiAgcGhueC1sYWJzLy5hZ2VudHMKIyAgIFVwZGF0ZSByZW1vdGUtaWRlbnRpdHkgY2hlY2tzIHRvIGFjY2VwdCBCT1RIIG5hbWVzIGR1cmluZyBjdXRvdmVyOgojICAgICBpc1N5c3RlbVJlcG9PcmlnaW4gLyBzYW1lR2l0UmVtb3RlIC8gY2Fub25pY2FsR2l0UmVtb3RlICAgKGNsaS9zcmMvbGliL2dpdC50cykKIyBQaGFzZSAyIOKAlCBmbGlwIGV4dHJhcyBwcml2YXRlLCBrZWVwIHRoZSBuYW1lOgojICAgR2l0SHViOiAgc2V0IHBobngtbGFicy8uYWdlbnRzLWV4dHJhcyB2aXNpYmlsaXR5ID0gcHJpdmF0ZQojICAgUmVnaXN0ZXIgb3B0LWluOiAgYWdlbnRzIHJlcG8gYWRkIHBobngtbGFicy8uYWdlbnRzLWV4dHJhcyAgIChkaXNhYmxlZCBieSBkZWZhdWx0KQojIExvY2FsIHBhdGhzICh+Ly5hZ2VudHMvLnN5c3RlbSwgfi8uYWdlbnRzLTxhbGlhcz4vKSBzdGF5IGV4YWN0bHkgYXMgdGhleSBhcmUuCmdyZXAgLXJuICJhZ2VudHMtc3lzdGVtXHxhZ2VudHMtZXh0cmFzIiBjbGkvc3JjIGNsaS9kb2NzICAgIyB+MTczIG5hbWUgcmVmcyB0byBzd2VlcApgYGAKCiMjIFRyYWNraW5nCgotIFtQSE5YLTMyMjldKGh0dHBzOi8vbGluZWFyLmFwcC9waG54L2lzc3VlL1BITlgtMzIyOSkg4oCUIENsZWFuIGFnZW50cy1jbGkgcmVwb3NpdG9yeSByb290IGFuZCBjb25zb2xpZGF0ZSBwcm9qZWN0IHNraWxscyBpbnRvIHN5c3RlbSByZXNvdXJjZXMKLSBbUEhOWC0zMzE1XShodHRwczovL2xpbmVhci5hcHAvcGhueC9pc3N1ZS9QSE5YLTMzMTUpIOKAlCBEZXZpY2Utc2NvcGVkIGNvbmZpZyByZWZhY3RvciAodGhlIGNodXJuIHRoaXMgcmV2aXNpb24gZGVsaWJlcmF0ZWx5IGF2b2lkcyBjb2xsaWRpbmcgd2l0aCkKLSBbUEhOWC0zMzA2XShodHRwczovL2xpbmVhci5hcHAvcGhueC9pc3N1ZS9QSE5YLTMzMDYpIOKAlCBVcmdlbnQgY29tcGxpYW5jZSBkZWZlY3Q7IG91dHJhbmtzIHRoaXMgY2xlYW51cCBvbiB0aGUgbm9ydGggc3Rhcgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>

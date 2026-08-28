@@ -1038,7 +1038,7 @@ function overlayUserRoutineDevices(job: JobConfig, userJob: JobConfig | null): J
  * List all job configs, scanning project > user > system routine dirs.
  * Higher layers shadow lower ones of the same name (first-seen wins): a project
  * routine shadows a user routine, and a user routine shadows a system routine
- * (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents-system).
+ * (`~/.agents/.system/routines/`, shipped via gh:phnx-labs/.agents).
  * When a same-name project routine wins for inspection, the user-layer
  * `devices` allowlist is overlaid only if the project routine does not declare
  * its own allowlist, so CWD project discovery cannot hide an operational fleet

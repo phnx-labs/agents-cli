@@ -17305,7 +17305,7 @@
               "optional": false,
               "variadic": false,
               "negate": false,
-              "defaultValue": "gh:phnx-labs/.agents-system"
+              "defaultValue": "gh:phnx-labs/.agents"
             },
             {
               "flags": "--as <alias>",

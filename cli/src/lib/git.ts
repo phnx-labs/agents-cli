@@ -12,7 +12,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { IS_WINDOWS, isWindowsAbsolutePath, toNativePath } from './platform/index.js';
 import { getPackageLocalPath } from './state.js';
-import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
+import { SYSTEM_REPO_SLUGS } from './types.js';
 
 /**
  * Validate that a clone/pull source uses a safe git transport before it is
@@ -581,7 +581,7 @@ export async function getCurrentBranch(repoPath: string): Promise<string> {
  * repo" as a requested source before adopting it.
  */
 export function canonicalGitRemote(url: string): string {
-  return url
+  const canonical = url
     .trim()
     .replace(/\/+$/, '') // trailing slashes first, so a trailing-slash-after-.git still strips
     .replace(/\.git$/i, '')
@@ -589,6 +589,35 @@ export function canonicalGitRemote(url: string): string {
     .replace(/^[^@/]+@/, '') // strip user@ (git@, ssh user)
     .replace(':', '/') // scp-style host:owner/repo → host/owner/repo (first colon only)
     .toLowerCase();
+  // Fold a renamed repo's old name onto its new one so both compare equal
+  // everywhere (see RENAMED_REMOTE_ALIASES).
+  return RENAMED_REMOTE_ALIASES[canonical] ?? canonical;
+}
+
+/**
+ * Git remotes that denote the SAME repository under an old and a new name, keyed
+ * by canonical `host/owner/repo`. GitHub keeps a redirect across a repo rename
+ * and every existing fleet checkout still points at the old remote, so the two
+ * names must compare equal everywhere remotes are compared —
+ * {@link sameGitRemote} (repo adoption), {@link isSystemRepoRemote} (the
+ * system-origin check), and the DotAgents-layer classifier in state.ts.
+ * `phnx-labs/.agents-system` → `phnx-labs/.agents` (PHNX-3394).
+ */
+const RENAMED_REMOTE_ALIASES: Record<string, string> = {
+  'github.com/phnx-labs/.agents-system': 'github.com/phnx-labs/.agents',
+};
+
+/**
+ * True when a git remote URL (any transport form: ssh, https, scp-style) points
+ * at the system DotAgents repo — the canonical `phnx-labs/.agents` OR its legacy
+ * name `phnx-labs/.agents-system` (PHNX-3394). Pure string check with no git
+ * spawn, so it is unit-testable off a live checkout; {@link isSystemRepoOrigin}
+ * reads a dir's origin and delegates here.
+ */
+export function isSystemRepoRemote(remote: string | null | undefined): boolean {
+  if (!remote) return false;
+  const c = canonicalGitRemote(remote);
+  return SYSTEM_REPO_SLUGS.some((slug) => c === canonicalGitRemote(`https://github.com/${slug}`));
 }
 
 /** True when two git remote URLs point at the same repo across transport forms. */
@@ -1226,18 +1255,17 @@ export async function adoptUserRepoIfNeeded(
 }
 
 /**
- * Check if the repo's origin points to the system repo.
+ * Check if the repo's origin points to the system repo — the new canonical
+ * `phnx-labs/.agents` or its legacy name `phnx-labs/.agents-system`, across any
+ * transport form. Reads the dir's origin and delegates the match to the pure
+ * {@link isSystemRepoRemote}.
  */
 export async function isSystemRepoOrigin(dir: string): Promise<boolean> {
   try {
     const git = simpleGit(dir);
     const remotes = await git.getRemotes(true);
     const origin = remotes.find(r => r.name === 'origin');
-    if (!origin?.refs?.fetch) return false;
-
-    const url = origin.refs.fetch.toLowerCase();
-    const currentSlug = systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase();
-    return url.includes(currentSlug);
+    return isSystemRepoRemote(origin?.refs?.fetch);
   } catch {
     /* not a git repo or no remotes */
     return false;
