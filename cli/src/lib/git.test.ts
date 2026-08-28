@@ -729,15 +729,16 @@ describe('sameGitRemote (adopt-existing repo matching)', () => {
     expect(canonicalGitRemote('https://github.com/phnx-labs/.agents-extras')).toBe('github.com/phnx-labs/.agents-extras');
   });
 
-  it('folds the renamed system repo (.agents-system → .agents) so both names compare equal (PHNX-3394)', () => {
-    // The system repo was renamed; GitHub keeps a redirect and every existing
-    // fleet checkout still points at the old name, so the two must be equal.
-    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-system.git')).toBe('github.com/phnx-labs/.agents');
-    expect(canonicalGitRemote('https://github.com/phnx-labs/.agents-system')).toBe('github.com/phnx-labs/.agents');
-    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents.git')).toBe('github.com/phnx-labs/.agents');
-    expect(sameGitRemote('git@github.com:phnx-labs/.agents-system.git', 'https://github.com/phnx-labs/.agents')).toBe(true);
+  it('folds the renamed system repo (.agents → .agents-system) so both names compare equal (PHNX-3394)', () => {
+    // The system repo was renamed on GitHub to `.agents`, but DEFAULT_SYSTEM_REPO
+    // still clones the pre-rename slug (GitHub's own redirect makes that resolve
+    // fine), so the new name folds onto the old one everywhere they're compared.
+    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents.git')).toBe('github.com/phnx-labs/.agents-system');
+    expect(canonicalGitRemote('https://github.com/phnx-labs/.agents')).toBe('github.com/phnx-labs/.agents-system');
+    expect(canonicalGitRemote('git@github.com:phnx-labs/.agents-system.git')).toBe('github.com/phnx-labs/.agents-system');
+    expect(sameGitRemote('git@github.com:phnx-labs/.agents.git', 'https://github.com/phnx-labs/.agents-system')).toBe(true);
     // The extras repo keeps its name — it must NOT be folded onto anything.
-    expect(sameGitRemote('git@github.com:phnx-labs/.agents-extras.git', 'https://github.com/phnx-labs/.agents')).toBe(false);
+    expect(sameGitRemote('git@github.com:phnx-labs/.agents-extras.git', 'https://github.com/phnx-labs/.agents-system')).toBe(false);
   });
 });
 

@@ -150,15 +150,14 @@ else unions.
 |---|---|---|
 | `<repo>/.agents/` | **Project repo** — project-pinned commands / skills / hooks / rules. | Project maintainers |
 | `~/.agents/` | **User repo** — user resources + ALL operational state (versions, shims, sessions, `agents.yaml`, browser). | You / CLI |
-| `~/.agents/.system/` | **System repo** — npm-shipped defaults ONLY. | Maintainers (`gh:phnx-labs/.agents`, formerly `.agents-system`) |
+| `~/.agents/.system/` | **System repo** — npm-shipped defaults ONLY. | Maintainers (`gh:phnx-labs/.agents-system`, GitHub rename target `phnx-labs/.agents`) |
 
-The system repo was renamed `phnx-labs/.agents-system` → `phnx-labs/.agents`
-(PHNX-3394): the `-system` suffix was redundant once the layering itself is the
-role. The old name is still recognized as the system origin (GitHub keeps a
-rename redirect and every existing fleet checkout points at it), so this is an
-additive back-compat change, not a cutover — see `SYSTEM_REPO_SLUGS` in
-[`src/lib/types.ts`](src/lib/types.ts) and `isSystemRepoRemote` in
-[`src/lib/git.ts`](src/lib/git.ts).
+The system repo was renamed `phnx-labs/.agents-system` → `phnx-labs/.agents` on
+GitHub (PHNX-3394): the `-system` suffix was redundant once the layering itself
+is the role. `DEFAULT_SYSTEM_REPO` still clones the pre-rename slug — GitHub's
+own redirect makes that resolve fine, so there is no forced cutover — and both
+names are recognized as the system origin everywhere a remote is compared, via
+`isSystemRepoRemote` in [`src/lib/git.ts`](src/lib/git.ts).
 
 Extra repos register via `agents repo add <source>` → clone into `~/.agents-<alias>/`
 and participate after the user repo. The companion extras repo
