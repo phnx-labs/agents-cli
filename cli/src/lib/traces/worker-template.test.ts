@@ -246,7 +246,7 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     needsAttention: [{ id: `s-${device}`, title: 't', device, severity: 5, flags: [] }],
     topics: [{ key: 'code', label: 'Code', count: 4, group: 'code' }],
     failures: { byToolError: [{ tool: 'Bash', desc: 'x', cause: 'real', count: 2 }], byCause: { real: 2, guard: 0, hook: 0 } },
-    failurePatterns: [{ label: 'Bash: x', wastedMs: 60000, count: 2 }],
+    failurePatterns: [{ id: 'bash-x', label: 'Bash: x', wastedMs: 60000, sessions: 3, occurrences: 5, exampleSessionIds: [`ex-${device}`] }],
     wastedMsTotal: 120000,
     latency: { firstToolMs: { p50: 100, p90: 900, p99: 5000, max: 9000 } },
     bucketHistory: [],
@@ -289,6 +289,15 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     expect(body.needsAttention).toHaveLength(2);
     expect(body.topics.find((t: { key: string }) => t.key === 'code').count).toBe(8);
     expect(body.syncedAt).toBe(2000); // freshest device wins for the timestamp
+    // The same failure signature on both devices folds into ONE ranked issue with
+    // combined counts — not two half-counted rows keyed the same.
+    expect(body.failurePatterns).toHaveLength(1);
+    const p = body.failurePatterns[0];
+    expect(p.id).toBe('bash-x');
+    expect(p.wastedMs).toBe(120000);
+    expect(p.sessions).toBe(6);
+    expect(p.occurrences).toBe(10);
+    expect(p.exampleSessionIds).toEqual(expect.arrayContaining(['ex-zion', 'ex-mac']));
   });
 
   it('all/sessions/<id> → served from whichever device owns it', async () => {

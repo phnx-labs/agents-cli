@@ -184,6 +184,23 @@ function mergeIndexShards(shards, owner) {
     guard += (f.byCause && f.byCause.guard) || 0;
     hook += (f.byCause && f.byCause.hook) || 0;
   }
+  // Fold failure patterns by their stable id, the same way topics/byToolError fold
+  // by key above — a signature that fired on two devices (a rate limit on the laptop
+  // AND on CI) is ONE ranked issue with combined counts, not two half-counted rows.
+  const patternById = new Map();
+  for (const s of sorted) for (const p of s.failurePatterns || []) {
+    const cur = patternById.get(p.id);
+    if (!cur) {
+      patternById.set(p.id, Object.assign({}, p, { exampleSessionIds: (p.exampleSessionIds || []).slice(0, 5) }));
+    } else {
+      cur.sessions += p.sessions || 0;
+      cur.occurrences += p.occurrences || 0;
+      cur.wastedMs += p.wastedMs || 0;
+      for (const id of p.exampleSessionIds || []) {
+        if (cur.exampleSessionIds.length < 5 && !cur.exampleSessionIds.includes(id)) cur.exampleSessionIds.push(id);
+      }
+    }
+  }
   const latencies = sorted.map((s) => s.latency).filter(Boolean);
 
   return {
@@ -206,7 +223,7 @@ function mergeIndexShards(shards, owner) {
       byToolError: Array.from(byToolError.values()).sort((a, b) => b.count - a.count).slice(0, 50),
       byCause: { real, guard, hook },
     },
-    failurePatterns: sorted.flatMap((s) => s.failurePatterns || [])
+    failurePatterns: Array.from(patternById.values())
       .sort((a, b) => (b.wastedMs || 0) - (a.wastedMs || 0)).slice(0, 25),
     wastedMsTotal: sorted.reduce((n, s) => n + (s.wastedMsTotal || 0), 0),
     latency: latencies.length ? {
