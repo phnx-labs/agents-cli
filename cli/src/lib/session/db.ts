@@ -371,6 +371,26 @@ CREATE TABLE IF NOT EXISTS session_topics (
   topic_json TEXT NOT NULL
 );
 
+-- Derived failure phenotype for traces sync (PHNX-3327). Like session_topics /
+-- session_insights, this is a lazy, stamp-validated cache keyed on
+-- (file_mtime_ms, file_size) and intentionally independent of SCHEMA_VERSION.
+-- Classifying a phenotype needs the full derived SessionTrajectory (ordered
+-- steps, gaps), which buildIndexShard does NOT have from flat tool_calls rows —
+-- so it is computed per-session ONCE (parse -> trajectory -> classify) and cached
+-- here, then read for the WHOLE corpus on every sync. That is what lets the
+-- phenotype grouping dimension fold two identically-signatured sessions into one
+-- cluster regardless of which incremental batch each was first synced in, without
+-- re-parsing transcripts at 10k+ session scale. phenotype_json holds
+-- { phenotype: FailurePhenotype | null } (null = no failure phenotype matched).
+CREATE TABLE IF NOT EXISTS session_phenotypes (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  phenotype_json TEXT NOT NULL
+);
+
 -- Normalized data behind sessions preview. Like session_insights this is a
 -- lazy, stamp-validated cache: opening one session parses only that transcript,
 -- while subsequent processes reuse the derived preview until its bytes change.
@@ -461,6 +481,8 @@ export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
 // paths). Bumping invalidates v1 cache rows so a fresh recompute populates the
 // new field instead of serving a stale digest that predates it.
 const PREVIEW_EXTRACTOR_VERSION = 2;
+/** Bump when classifyPhenotype's output changes so cached phenotypes recompute (PHNX-3327 v1). */
+export const SESSION_PHENOTYPE_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
 interface SessionRow {
@@ -3377,6 +3399,67 @@ export function writeSessionTopics<T>(
         SESSION_TOPIC_EXTRACTOR_VERSION,
         now,
         JSON.stringify(entry.topic),
+      );
+    }
+  })();
+}
+
+/** Read cached failure phenotypes only when their transcript byte stamps still match. */
+export function readSessionPhenotypes<T>(ids: string[]): Map<string, T> {
+  const db = getDB();
+  const out = new Map<string, T>();
+  if (ids.length === 0) return out;
+  const CHUNK = 400;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT sp.session_id AS id, sp.phenotype_json AS phenotypeJson
+      FROM session_phenotypes sp
+      JOIN sessions s ON s.id = sp.session_id
+      WHERE sp.session_id IN (${placeholders})
+        AND sp.extractor_version = ?
+        AND sp.file_mtime_ms IS s.file_mtime_ms
+        AND sp.file_size IS s.file_size
+    `).all(...chunk, SESSION_PHENOTYPE_EXTRACTOR_VERSION) as Array<{ id: string; phenotypeJson: string }>;
+    for (const row of rows) {
+      try {
+        out.set(row.id, JSON.parse(row.phenotypeJson) as T);
+      } catch {
+        // Invalid derived cache data is a miss and self-heals on the next write.
+      }
+    }
+  }
+  return out;
+}
+
+/** Persist failure phenotypes against the exact transcript bytes used to classify them. */
+export function writeSessionPhenotypes<T>(
+  entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; phenotype: T }>,
+): void {
+  if (entries.length === 0) return;
+  const db = getDB();
+  const stmt = db.prepare(`
+    INSERT INTO session_phenotypes
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, phenotype_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      phenotype_json = excluded.phenotype_json
+  `);
+  const now = Date.now();
+  db.transaction(() => {
+    for (const entry of entries) {
+      stmt.run(
+        entry.id,
+        entry.fileMtimeMs,
+        entry.fileSize,
+        SESSION_PHENOTYPE_EXTRACTOR_VERSION,
+        now,
+        JSON.stringify(entry.phenotype),
       );
     }
   })();

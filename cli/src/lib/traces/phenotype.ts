@@ -126,7 +126,7 @@ function isToolStep(step: SessionDetail['steps'][number]): boolean {
   return step.kind === 'tool';
 }
 
-function substantiveSteps(session: SessionDetail): SessionDetail['steps'] {
+function substantiveSteps(session: Pick<SessionDetail, 'steps'>): SessionDetail['steps'] {
   return session.steps.filter((s) => isToolStep(s) && !HUMAN_FACING_TOOLS.has(s.tool ?? s.lane));
 }
 
@@ -141,7 +141,7 @@ function firstStepOrdinalOf(
 }
 
 function lastStepOrdinalOf(
-  session: SessionDetail,
+  session: Pick<SessionDetail, 'steps'>,
   predicate: (step: SessionDetail['steps'][number]) => boolean,
 ): number | undefined {
   let last: number | undefined;
@@ -233,26 +233,47 @@ function reasonOutOfOrder(session: SessionDetail): string {
 }
 
 /**
+ * Did a run that hit tool errors nonetheless *recover and finish*?
+ *
+ * The causal recovery test: a **substantive** tool step (not a human-facing
+ * `AskUserQuestion` / `SendMessage` / `wait`) SUCCEEDED strictly AFTER the last
+ * error's ordinal. A trailing incidental success unrelated to the failure (an
+ * `ls`), or a punt to a human, is NOT recovery — the first is caught because a
+ * lone unrelated ok that is itself the last substantive step still requires a
+ * *later* ordinal than the last error; the second because human-facing tools are
+ * excluded from the substantive set entirely.
+ *
+ * This is the single source of truth for "did this finish", shared by the
+ * false-termination phenotype below and `sync.ts`'s `deriveRunOutcome` — so a
+ * run's console outcome and its failure phenotype can never disagree about
+ * whether it recovered. It reads only the derived steps, never `meta.outcome`,
+ * precisely so `deriveRunOutcome` can call it while it is still *computing*
+ * `meta.outcome`.
+ */
+export function recoveredAfterErrors(session: Pick<SessionDetail, 'steps'>): boolean {
+  const substantive = substantiveSteps(session);
+  if (substantive.length === 0) return false;
+  const last = substantive[substantive.length - 1];
+  if (last.outcome === 'error') return false;
+  const lastErrorOrdinal = lastStepOrdinalOf(session, (s) => s.outcome === 'error');
+  if (lastErrorOrdinal === undefined) return true;
+  return substantive.some(
+    (s) => s.ordinal > lastErrorOrdinal && s.outcome === 'ok' && !HUMAN_FACING_TOOLS.has(s.tool ?? s.lane),
+  );
+}
+
+/**
  * False-termination: the session stopped with an unresolved error.
  *
  * Rubric:
  * - meta outcome is `errored`, and
  * - at least one step outcome is `error`, and
- * - the last non-thinking step is an error or is followed by no successful recovery.
+ * - the run did not causally recover ({@link recoveredAfterErrors}).
  */
 function isFalseTermination(session: SessionDetail): boolean {
   if (session.meta.outcome !== 'errored') return false;
   if (session.meta.errorCount === 0) return false;
-  const substantive = substantiveSteps(session);
-  if (substantive.length === 0) return true;
-  const last = substantive[substantive.length - 1];
-  if (last.outcome === 'error') return true;
-  const lastErrorOrdinal = lastStepOrdinalOf(session, (s) => s.outcome === 'error');
-  if (lastErrorOrdinal === undefined) return false;
-  const recoveryAfter = substantive.some(
-    (s) => s.ordinal > lastErrorOrdinal && s.outcome === 'ok' && !HUMAN_FACING_TOOLS.has(s.tool ?? s.lane),
-  );
-  return !recoveryAfter;
+  return !recoveredAfterErrors(session);
 }
 
 function reasonFalseTermination(session: SessionDetail): string {
@@ -266,19 +287,26 @@ function reasonFalseTermination(session: SessionDetail): string {
 }
 
 /**
- * Premature-completion: declared done while tests were failing or no verification
- * step ran for an engineering task.
+ * Premature-completion: declared done without a verification step for an
+ * engineering task.
  *
  * Rubric:
  * - meta outcome is `completed`, and
  * - the session performed write/edit work, and
- * - either errors were present or no test/build/lint verification step ran.
+ * - no test/build/lint verification step ran.
+ *
+ * `errorCount` is deliberately NOT a signal here. Under truthful outcomes
+ * (PHNX-3387) a `completed` run CAN carry `errorCount > 0` — that is precisely a
+ * recover-then-succeed run, where the errors were *resolved*, not left hanging.
+ * Keying prematurity off `errorCount > 0` would mislabel every such recovery as
+ * premature. (Under the pre-PHNX-3387 `errorCount > 0 ? errored : completed`
+ * derivation this branch was unreachable — a `completed` run always had
+ * `errorCount === 0` — so dropping it changes nothing for a clean-completed run.)
  */
 function isPrematureCompletion(session: SessionDetail): boolean {
   if (session.meta.outcome !== 'completed') return false;
   const didWriteEdit = session.steps.some((s) => WRITE_EDIT_TOOLS.has(s.tool ?? s.lane));
   if (!didWriteEdit) return false;
-  if (session.meta.errorCount > 0) return true;
   const verified = session.steps.some((s) => {
     if (!SHELL_TOOLS.has(s.tool ?? s.lane)) return false;
     const text = stepText(s);
@@ -287,10 +315,7 @@ function isPrematureCompletion(session: SessionDetail): boolean {
   return !verified;
 }
 
-function reasonPrematureCompletion(session: SessionDetail): string {
-  if (session.meta.errorCount > 0) {
-    return `declared completed with ${session.meta.errorCount} unresolved error(s)`;
-  }
+function reasonPrematureCompletion(_session: SessionDetail): string {
   return 'engineering work completed without a test/build/lint verification step';
 }
 
@@ -497,9 +522,9 @@ const OUTCOME_RULES: OutcomeRule[] = [
  * Classify the failure phenotype of a session from its derived trajectory.
  *
  * Definitions (from agent-failure research):
- * - `false-termination`  — stopped with an unresolved error.
- * - `premature-completion` — declared done while tests were failing or no
- *   verification step ran for the engineering work.
+ * - `false-termination`  — stopped with an unresolved error (did not causally recover).
+ * - `premature-completion` — declared done with no verification step for the
+ *   engineering work.
  * - `out-of-order` — a write/edit step occurred before any read/plan of the
  *   target.
  * - `failure-to-act` — stalled or produced no meaningful tool use.

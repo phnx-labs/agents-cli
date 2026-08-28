@@ -26,8 +26,10 @@ import path from 'node:path';
 import {
   getDB,
   readSessionInsights,
+  readSessionPhenotypes,
   readSessionTopics,
   writeSessionInsights,
+  writeSessionPhenotypes,
   writeSessionTopics,
 } from '../session/db.js';
 import type { SessionAgentId, SessionMeta, SessionRunMode } from '../session/types.js';
@@ -48,6 +50,7 @@ import {
   type TraceTopicGroup,
 } from './classify.js';
 import { computeInsights, type FailurePattern } from './insights.js';
+import { classifyPhenotype, recoveredAfterErrors, type FailurePhenotype } from './phenotype.js';
 import type { LatencyInsight } from './segments.js';
 
 // ---------------------------------------------------------------------------
@@ -462,29 +465,57 @@ export function buildIndexShard(
   });
   persistDerivedCache('session-topics', () => writeSessionTopics(missingTopics));
 
+  // Insights (frictionSignals) and phenotype (false-termination / …) both need
+  // the parsed transcript, which flat tool_calls rows don't carry — so both are
+  // lazily derived per-session and cached by transcript mtime+size, then read for
+  // the WHOLE corpus (`rows` = allRows) every sync. That full-corpus read is what
+  // keeps the phenotype grouping dimension consistent: a session synced weeks ago
+  // still contributes its real phenotype from cache, so it can never fragment away
+  // from an identically-signatured session synced this run purely by *when* each
+  // was first seen (PHNX-3327). A cache-miss row is parsed at most once here even
+  // when both derivations are missing.
   const insights = readSessionInsights<InsightFacets>(ids);
+  const phenotypes = readSessionPhenotypes<FailurePhenotype | null>(ids);
   const missingInsights: Array<{
     id: string;
     fileMtimeMs: number | null;
     fileSize: number | null;
     facets: InsightFacets;
   }> = [];
-  for (const row of rows.filter((candidate) => !insights.has(candidate.id))) {
+  const missingPhenotypes: Array<{
+    id: string;
+    fileMtimeMs: number | null;
+    fileSize: number | null;
+    phenotype: FailurePhenotype | null;
+  }> = [];
+  for (const row of rows) {
+    const needInsights = !insights.has(row.id);
+    const needPhenotype = !phenotypes.has(row.id);
+    if (!needInsights && !needPhenotype) continue;
+    let events: ReturnType<typeof parseSession>;
     try {
-      const events = parseSession(row.file_path, row.agent as SessionAgentId);
-      const facets = computeInsightFacets(events);
-      insights.set(row.id, facets);
-      missingInsights.push({
-        id: row.id,
-        fileMtimeMs: row.file_mtime_ms,
-        fileSize: row.file_size,
-        facets,
-      });
+      events = parseSession(row.file_path, row.agent as SessionAgentId);
     } catch {
-      continue;
+      continue; // gone/unreadable transcript — leave both uncached, same as before
+    }
+    if (needInsights) {
+      try {
+        const facets = computeInsightFacets(events);
+        insights.set(row.id, facets);
+        missingInsights.push({ id: row.id, fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, facets });
+      } catch { /* leave this session's facets uncached; recompute next sync */ }
+    }
+    if (needPhenotype) {
+      try {
+        const traj = buildTrajectory(events, rowToMeta(row), { redact: true, knownSecrets });
+        const phenotype = classifyPhenotype(buildSessionDetail(traj));
+        phenotypes.set(row.id, phenotype);
+        missingPhenotypes.push({ id: row.id, fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, phenotype });
+      } catch { /* leave this session's phenotype uncached; recompute next sync */ }
     }
   }
   persistDerivedCache('session-insights', () => writeSessionInsights(missingInsights));
+  persistDerivedCache('session-phenotypes', () => writeSessionPhenotypes(missingPhenotypes));
 
   const needsAttention = rows.flatMap((row): IndexedSession[] => {
     const facets = insights.get(row.id);
@@ -550,7 +581,7 @@ export function buildIndexShard(
   const prevHistory = prevShard?.bucketHistory ?? [];
   const bucketHistory = [...prevHistory, todayStats].slice(-14);
   const driftSignals = computeDriftSignal(prevHistory, todayStats);
-  const patternInsights = computeInsights(rows, calls, prevShard);
+  const patternInsights = computeInsights(rows, calls, prevShard, phenotypes);
 
   return {
     schema: 1,
@@ -634,6 +665,26 @@ function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
 }
 
 /**
+ * Truthful run-level outcome (PHNX-3387).
+ *
+ * A run with zero tool errors `completed`. A run that hit tool errors is
+ * `completed` ONLY when it *causally recovered* — a substantive, non-human-facing
+ * tool step succeeded strictly after the last error ({@link recoveredAfterErrors},
+ * the exact predicate the false-termination phenotype uses). A run that errored
+ * and did NOT recover — it ended in error, punted to a human (`AskUserQuestion`),
+ * or its last action was an incidental unrelated `ls` — stays `errored`.
+ *
+ * This is what makes `surfacedToolFailures` on a `completed` run honest: those
+ * are failures the run recovered from, not a green status hiding an unresolved
+ * failure. It never flips a genuinely-unresolved run to `completed` (no
+ * regression vs the old `errorCount > 0 ? errored : completed`).
+ */
+function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
+  if (traj.errorCount === 0) return 'completed';
+  return recoveredAfterErrors({ steps: traj.steps }) ? 'completed' : 'errored';
+}
+
+/**
  * Map the derived trajectory to the console's SessionDetail shape, stripping
  * local-machine PII (full cwd, account) that would expose filesystem paths if
  * written to R2. `repo` is the cwd basename only.
@@ -661,7 +712,7 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
       errorCount: traj.errorCount,
       tokens: stats.outputTokens ?? 0,
       costUsd: s.costUsd ?? 0,
-      outcome: traj.errorCount > 0 ? 'errored' : 'completed',
+      outcome: deriveRunOutcome(traj),
       repo,
       agent: s.agent,
       model: s.model ?? 'unknown',

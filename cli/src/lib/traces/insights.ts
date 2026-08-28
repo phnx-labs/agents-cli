@@ -12,15 +12,22 @@
  * is enough to reconstruct per-session call order and inter-call gaps without a
  * full `SessionTrajectory` — that is what makes this incremental at scale.
  *
- * Scope note: `FailureSignature` does not yet carry a `phenotype`
- * (false-termination / out-of-order / …, `phenotype.ts`) — classifying that
- * needs the full derived trajectory (turns, ordered steps, gaps), which is
- * only ever materialized per-session during upload, not cached the way
- * `InsightFacets` is. Folding it in is a real, scoped follow-up (see
- * `cli/AGENTS.md`), not a silent omission.
+ * Failure phenotype (false-termination / out-of-order / premature-completion /
+ * failure-to-act, `phenotype.ts`) is folded in as a fourth grouping dimension
+ * (PHNX-3327). Classifying it needs the full derived trajectory, so it is NOT
+ * computed here — the caller passes a per-session `phenotypes` map that
+ * `buildIndexShard` fills from the persisted, mtime+size-keyed
+ * `session_phenotypes` cache for the WHOLE corpus. Keying the group on the
+ * cached-per-session phenotype (never on this run's incremental batch) is what
+ * keeps two identically-signatured sessions in one cluster regardless of when
+ * each was synced. The `signature` OUTPUT is unchanged (`{ tool, cause, key }`);
+ * phenotype is an added dimension carried alongside it, so callers that never
+ * pass a map (the unit tests, a pre-phenotype caller) see the exact prior
+ * grouping.
  */
 
 import { classifyCause, type TraceFailureCause } from './classify.js';
+import type { FailurePhenotype } from './phenotype.js';
 import { computeLatency, type LatencyInsight, type SegmentSession } from './segments.js';
 import { failureDescription, type SyncRow, type ToolCallRow, type TracesIndexShard } from './sync.js';
 
@@ -36,10 +43,17 @@ export interface FailureSignature {
 }
 
 export interface FailurePattern {
-  /** Stable hash of the signature — deep-linkable, unaffected by row order. */
+  /** Stable hash of the signature (incl. phenotype) — deep-linkable, unaffected by row order. */
   id: string;
   label: string;
   signature: FailureSignature;
+  /**
+   * Dominant failure phenotype of the sessions in this cluster, or `null` when
+   * none was classifiable. A fourth grouping dimension (PHNX-3327): two failures
+   * with the same `(tool, cause, key)` but different phenotypes are distinct
+   * patterns.
+   */
+  phenotype: FailurePhenotype | null;
   /** Distinct sessions this pattern occurred in. */
   sessions: number;
   /** Total failing calls matching this signature. */
@@ -109,8 +123,8 @@ export function normalizeErrorKey(desc: string, raw: string | null): string {
   return text.replace(/\s+/g, ' ').trim().slice(0, 160);
 }
 
-function hashSignature(tool: string, cause: string, key: string): string {
-  const input = `${tool} ${cause} ${key}`;
+function hashSignature(tool: string, cause: string, key: string, phenotype: FailurePhenotype | null): string {
+  const input = `${tool} ${cause} ${key} ${phenotype ?? ''}`;
   let hash = 5381;
   for (let i = 0; i < input.length; i++) {
     hash = ((hash << 5) + hash + input.charCodeAt(i)) >>> 0;
@@ -176,6 +190,7 @@ export function computeInsights(
   rows: readonly SyncRow[],
   calls: readonly ToolCallRow[],
   prevShard?: TracesIndexShard | null,
+  phenotypes?: ReadonlyMap<string, FailurePhenotype | null>,
 ): ComputedInsights {
   const bySession = new Map<string, ToolCallRow[]>();
   for (const call of calls) {
@@ -188,6 +203,7 @@ export function computeInsights(
     tool: string;
     cause: TraceFailureCause;
     key: string;
+    phenotype: FailurePhenotype | null;
     sessions: Set<string>;
     occurrences: number;
     wastedMs: number;
@@ -196,17 +212,22 @@ export function computeInsights(
   const groups = new Map<string, Accum>();
 
   for (const [sessionId, sessionCalls] of bySession) {
+    // Phenotype is a per-session property (one classification per session), so
+    // every failing call in this session shares it. A caller that passes no map
+    // (unit tests, a pre-phenotype caller) collapses the dimension to `null`,
+    // yielding the exact prior grouping.
+    const phenotype = phenotypes?.get(sessionId) ?? null;
     const ordered = [...sessionCalls].sort((a, b) => a.ordinal - b.ordinal);
     for (let i = 0; i < ordered.length; i++) {
       const call = ordered[i];
       if (call.outcome !== 'error') continue;
       const cause = classifyCause(call);
       const key = normalizeErrorKey(failureDescription(call, cause), call.error);
-      const groupKey = `${call.tool} ${cause} ${key}`;
+      const groupKey = `${call.tool} ${cause} ${key} ${phenotype ?? ''}`;
 
       let group = groups.get(groupKey);
       if (!group) {
-        group = { tool: call.tool, cause, key, sessions: new Set(), occurrences: 0, wastedMs: 0, examples: [] };
+        group = { tool: call.tool, cause, key, phenotype, sessions: new Set(), occurrences: 0, wastedMs: 0, examples: [] };
         groups.set(groupKey, group);
       }
       group.occurrences++;
@@ -253,7 +274,7 @@ export function computeInsights(
 
   const prevById = new Map((prevShard?.failurePatterns ?? []).map((p) => [p.id, p]));
   const allPatterns: FailurePattern[] = [...groups.values()].map((group) => {
-    const id = hashSignature(group.tool, group.cause, group.key);
+    const id = hashSignature(group.tool, group.cause, group.key, group.phenotype);
     const prev = prevById.get(id);
     const drift: FailurePattern['drift'] = !prev
       ? 'up'
@@ -266,6 +287,7 @@ export function computeInsights(
       id,
       label: labelFor(group.tool, group.cause, group.key),
       signature: { tool: group.tool, cause: group.cause, key: group.key },
+      phenotype: group.phenotype,
       sessions: group.sessions.size,
       occurrences: group.occurrences,
       wastedMs: group.wastedMs,

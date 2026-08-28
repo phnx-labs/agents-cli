@@ -363,6 +363,139 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
   });
 });
 
+// PHNX-3387: meta.outcome is the truthful "did the task FINISH", derived from the
+// causal-recovery predicate shared with the false-termination phenotype
+// (recoveredAfterErrors), NOT from `errorCount > 0`. A recover-then-succeed run is
+// `completed` while still surfacing the failure it recovered from; a run that
+// punted to a human or ended unresolved stays `errored` (no regression).
+describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
+  const step = (ordinal: number, tool: string, outcome: 'ok' | 'error', label: string) => ({
+    ordinal, kind: 'tool' as const, lane: tool, tool, startMs: ordinal * 10, durationMs: 5, outcome, label,
+  });
+  const traj = (steps: ReturnType<typeof step>[]) => ({
+    session: { id: 's', agent: 'claude', model: 'opus-4-8', cwd: '/home/x/repo', costUsd: 0 },
+    spanMs: 1_000, steps, gaps: [], programTimeShare: {},
+    errorCount: steps.filter((s) => s.outcome === 'error').length, redacted: true,
+    stats: { userTurns: 1, assistantTurns: 1, toolCount: steps.length, outputTokens: 0 },
+    truncatedSteps: 0,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  }) as any;
+
+  it('recover-then-succeed → completed, and still surfaces the recovered-from failure', () => {
+    const d = buildSessionDetail(traj([
+      step(1, 'Bash', 'error', 'bun test'), // the task fails
+      step(2, 'Edit', 'ok', 'fix the bug'),
+      step(3, 'Bash', 'ok', 'bun test'), // …and passes on retry
+    ]));
+    expect(d.meta.errorCount).toBe(1);
+    expect(d.meta.outcome).toBe('completed'); // BEFORE this fix: 'errored'
+    // The green run still honestly lists the failure it recovered from.
+    expect(d.surfacedToolFailures).toEqual([{ tool: 'Bash', label: 'bun test', detail: undefined }]);
+  });
+
+  it('human-takeover (punt to AskUserQuestion after a failure) → errored, not completed', () => {
+    // The broken PR's "last tool call ok" heuristic mislabeled this `completed`
+    // because AskUserQuestion succeeded last. The causal predicate excludes
+    // human-facing tools, so the last SUBSTANTIVE step is the error → errored.
+    const d = buildSessionDetail(traj([
+      step(1, 'Bash', 'error', 'bun test'),
+      step(2, 'AskUserQuestion', 'ok', 'which fix do you want?'),
+    ]));
+    expect(d.meta.outcome).toBe('errored');
+  });
+
+  it('an incidental success does not rescue a run that ends unresolved → errored', () => {
+    // A stray successful `ls` before the task fails must not flip the run to
+    // completed: the recovery must come AFTER the last error, and here it does not.
+    const d = buildSessionDetail(traj([
+      step(1, 'Bash', 'ok', 'ls'), // incidental, unrelated to the task
+      step(2, 'Bash', 'error', 'bun test'), // the task fails and the run ends
+    ]));
+    expect(d.meta.outcome).toBe('errored'); // no regression vs errorCount-based derivation
+  });
+
+  it('a clean run with zero errors is completed', () => {
+    const d = buildSessionDetail(traj([step(1, 'Read', 'ok', 'read'), step(2, 'Edit', 'ok', 'write')]));
+    expect(d.meta.outcome).toBe('completed');
+    expect(d.surfacedToolFailures).toEqual([]);
+  });
+});
+
+// PHNX-3327: the phenotype grouping dimension must be populated from the
+// PERSISTED per-session cache over the WHOLE corpus, not from just this sync's
+// incremental batch. Two sessions with an identical (tool, cause, error) failure
+// signature must land in ONE failure cluster even when they were first synced in
+// different runs — the exact fragmentation the broken attempt (#3240) hit, where
+// an old session carried phenotype=null (never in this run's batch) while a new
+// one carried a real value, splitting one signature into two clusters.
+describe('phenotype grouping across the incremental boundary (PHNX-3327)', () => {
+  const transcriptA = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
+  const sessA = 'phenotype-boundary-a';
+  const sessB = 'phenotype-boundary-b';
+
+  function insertSessionRow(sessionId: string, mtimeMs: number, size: number): SyncRow {
+    const db = getDB();
+    db.prepare(`
+      INSERT INTO sessions
+        (id, short_id, agent, timestamp, project, cwd, git_branch, label, duration_ms,
+         model, file_path, file_mtime_ms, file_size, machine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      sessionId, sessionId.slice(0, 8), 'codex', '2026-08-25T00:00:00.000Z', 'agents-cli',
+      '/redacted/agents-cli', 'main', 'Boundary test', 9000, 'gpt-test',
+      transcriptA, mtimeMs, size, 'test-device',
+    );
+    // Identical failing tool call for BOTH sessions → identical (tool, cause, key).
+    db.prepare(`
+      INSERT INTO tool_calls
+        (call_key, session_id, ordinal, timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `).run(`${sessionId}-call`, sessionId, 1, '2026-08-25T00:00:00.000Z', 'exec_command', 'error', 1, 'command failed');
+    return { ...row(mtimeMs, size), id: sessionId, short_id: sessionId.slice(0, 8), file_path: transcriptA };
+  }
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const sessionId of [sessA, sessB]) {
+      for (const table of ['tool_calls', 'session_topics', 'session_insights', 'session_phenotypes']) {
+        db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(sessionId);
+      }
+      db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
+    }
+  });
+
+  it('folds two identically-signatured sessions into ONE cluster across separate syncs', async () => {
+    const { readSessionPhenotypes } = await import('../session/db.js');
+    const stat = fs.statSync(transcriptA);
+    const rowA = insertSessionRow(sessA, stat.mtimeMs, stat.size);
+    const rowB = insertSessionRow(sessB, stat.mtimeMs, stat.size);
+
+    // First sync sees only A — its phenotype is classified once and PERSISTED.
+    const first = buildIndexShard([rowA], 'test-device', 'owner-1');
+    expect(first.failurePatterns).toHaveLength(1);
+    const cachedA = readSessionPhenotypes<string | null>([sessA]);
+    expect(cachedA.has(sessA)).toBe(true); // cached, not thrown away
+
+    // Second sync sees the full corpus. A's transcript is now UNREADABLE, so the
+    // only way A can carry a phenotype into the grouping is the persisted cache —
+    // exactly the "session synced in an earlier batch" case the broken attempt got
+    // wrong (it read phenotype only from THIS run's freshly-parsed sessions, so A
+    // would fall to null and split from B). If the cache is honored, A and B share
+    // both the signature and the phenotype and fold into ONE cluster.
+    const rowAUnreadable: SyncRow = { ...rowA, file_path: '/nonexistent/gone.jsonl' };
+    const second = buildIndexShard([rowAUnreadable, rowB], 'test-device', 'owner-1');
+
+    const shared = second.failurePatterns.filter(
+      (p) => p.signature.tool === 'exec_command' && p.signature.key === 'command failed',
+    );
+    expect(shared).toHaveLength(1); // NOT 2 — the broken-attempt fragmentation
+    expect(shared[0].sessions).toBe(2);
+    expect(shared[0].occurrences).toBe(2);
+    // B's freshly-classified phenotype equals A's cached one (same transcript).
+    expect(shared[0].phenotype).toBe(cachedA.get(sessA));
+  });
+});
+
 describe('traces sync --dry-run local export', () => {
   const dryId = 'trace-dryrun-fixture';
   const dryTranscript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
