@@ -113,18 +113,35 @@ describe('computeInsights', () => {
     expect(result.wastedMsTotal).toBe(30 * 60 * 1000);
   });
 
-  it('keeps an active retry loop uncapped — a long back-off loop is real systemic waste', () => {
-    // Two same-signature failures 45m apart (a slow rate-limit back-off): the full
-    // inter-retry gap is agent-driven waste and must NOT be bounded like a lone stall.
+  it('sums a real active retry loop from its many short gaps — total exceeds a single-gap cap', () => {
+    // A genuine back-off loop: 6 same-signature failures 10m apart. Each inter-retry
+    // gap (10m) is under the 30m cap and counts in full, so the loop's total (50m)
+    // still exceeds one gap's cap — bounding a single gap doesn't hide a real loop.
     const rows = [makeRow('sess-loop', T0)];
+    const calls: ToolCallRow[] = Array.from({ length: 6 }, (_, i) =>
+      makeCall('sess-loop', i + 1, iso(i * 10 * 60 * 1000), 'Bash', 'error', {
+        error: `API rate limit exceeded (try again in ${30 + i}s)`,
+      }),
+    );
+    const result = computeInsights(rows, calls, null);
+    const pattern = result.failurePatterns[0];
+    expect(pattern.occurrences).toBe(6);
+    expect(pattern.wastedMs).toBe(5 * 10 * 60 * 1000); // 5 gaps × 10m = 50m, all counted
+  });
+
+  it('bounds a same-signature failure that recurs hours apart — a chat re-ask, not an active loop', () => {
+    // The reviewer's case: nextIsSameFailure has no temporal check, so two identical
+    // deterministic failures (GPS permanently denied) 4.5h apart would otherwise look
+    // like an "active retry loop" and absorb the whole 4.5h. The per-gap cap prevents it.
+    const rows = [makeRow('sess-reask', T0)];
     const calls: ToolCallRow[] = [
-      makeCall('sess-loop', 1, iso(0), 'Bash', 'error', { error: 'API rate limit exceeded (try again in 60s)' }),
-      makeCall('sess-loop', 2, iso(45 * 60 * 1000), 'Bash', 'error', { error: 'API rate limit exceeded (try again in 90s)' }),
+      makeCall('sess-reask', 1, iso(0), 'user_location', 'error', { error: 'GPS capability denied or unavailable: timeout' }),
+      makeCall('sess-reask', 2, iso(4.5 * 60 * 60 * 1000), 'user_location', 'error', { error: 'GPS capability denied or unavailable: timeout' }),
     ];
     const result = computeInsights(rows, calls, null);
     const pattern = result.failurePatterns[0];
     expect(pattern.occurrences).toBe(2);
-    expect(pattern.wastedMs).toBe(45 * 60 * 1000); // full gap, uncapped
+    expect(pattern.wastedMs).toBe(30 * 60 * 1000); // bounded, not 4.5h
   });
 
   it('bounds the shard to the top-K patterns regardless of corpus size', () => {
