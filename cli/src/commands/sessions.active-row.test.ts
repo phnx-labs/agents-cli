@@ -158,7 +158,7 @@ describe('backfillActiveRowsFromMeta', () => {
     ]);
     backfillActiveRowsFromMeta([s], byId);
     expect(s.version).toBe('2.1.207');
-    // account rides the same index backfill as version (RUSH-3184) so the watch
+    // account rides the same index backfill as version (PHNX-3184) so the watch
     // row carries it and the AGI EXT status bar reads it off the stream instead
     // of spawning a per-tab `agents sessions <id> --device <host> --json`.
     expect(s.account).toBe('muqsit@getrush.ai');

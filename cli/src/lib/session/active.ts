@@ -395,7 +395,7 @@ export interface ActiveSession {
    * Email of the account that produced the session (display-only). Like
    * {@link version}, a running process does not report which account a
    * `--strategy balanced` launch selected, so it is backfilled at render time
-   * from the indexed {@link SessionMeta} by session id (RUSH-3184). This is what
+   * from the indexed {@link SessionMeta} by session id (PHNX-3184). This is what
    * the AGI EXT status bar renders as the session's account — it reads it off the
    * `sessions watch --json` row instead of spawning a per-tab `agents sessions
    * <id> --device <host> --json` (the 2026-08-25 CPU incident, agi-cli#3019).
