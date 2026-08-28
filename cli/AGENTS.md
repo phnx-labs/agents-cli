@@ -93,7 +93,10 @@ normalized-error)` — volatile tokens (ids, counts, countdowns) stripped so 47
 near-identical "rate limit exceeded for user N" errors fold into one pattern —
 and each pattern accumulates `wastedMs` from the inter-call gap in `tool_calls`
 (`ordinal`/`timestamp`, already indexed) whenever the next call repeats the same
-signature (a retry loop) or the gap itself is a stall (≥60s). Patterns are
+signature (a retry loop) or the gap itself is a stall (≥60s) — with each single
+gap bounded to `MAX_GAP_ATTRIBUTION_MS` (30m) so one huge gap (a chat re-ask
+hours later) can't be booked as failure-loop waste; a real active loop is many
+short gaps that still sum large. Patterns are
 **bounded top-K, ranked by wastedMs (impact) — never by raw occurrence count** —
 so a single rare multi-hour loop still outranks a frequent but cheap one.
 Cost stays proportional to this sync's row count (no transcript re-parsing), so
