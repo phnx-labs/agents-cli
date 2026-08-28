@@ -130,7 +130,7 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
   {
     id: 'usage-sync',
     title: 'Usage snapshot sync',
-    description: 'From a personal/desktop box, pushes the per-account usage snapshot to worker peers that cannot read it themselves.',
+    description: 'Bidirectional per-account usage sync: a headed personal/desktop box pushes its snapshot to worker peers, and a worker with a stale cache pulls from the primary — so workers that cannot read the endpoint themselves still route by real capacity.',
   },
 ];
 

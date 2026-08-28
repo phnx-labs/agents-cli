@@ -190,6 +190,62 @@ describe('pullUsageFromPrimary', () => {
     expect(pulled).toBe(false);
   });
 
+  it('parses a Windows primary payload carrying a CLIXML progress banner', () => {
+    // A headed Windows box (win-mini is a live fleet device) reached WITHOUT the
+    // progress-silence prelude prepends a `#< CLIXML <Objs …>` banner to stdout,
+    // exactly as every other remote-JSON boundary strips (remote-cmd.ts). Without
+    // the stripClixml wrap in the pull path this parses as malformed JSON, the
+    // worker's cache stays null, and the PHNX-3392 capacity floor silently becomes
+    // the only thing standing between a blind pool and an exhausted pick.
+    const dir = mkdtempSync(join(tmpdir(), 'agents-usage-pull-clixml-'));
+    tempDirs.push(dir);
+    const primaryCache = join(dir, 'primary.json');
+    const workerCache = join(dir, 'worker.json');
+    const capturedAt = new Date();
+    const usageKey = 'claude:org=alpha';
+    writeClaudeUsageCache(usageKey, {
+      source: 'api',
+      sourceLabel: 'Anthropic',
+      capturedAt,
+      windows: [{
+        key: 'week' as any,
+        label: 'Weekly',
+        shortLabel: 'W',
+        usedPercent: 100,
+        resetsAt: null,
+        windowMinutes: 7 * 24 * 60,
+      }],
+      plan: null,
+      refreshHint: null,
+    }, primaryCache);
+
+    const clixmlBanner =
+      '#< CLIXML\r\n' +
+      '<Objs Version="1.1.0.1" xmlns="http://schemas.microsoft.com/powershell/2004/04">' +
+      '<Obj S="progress" RefId="0"><TN RefId="0"><T>System.Management.Automation.PSCustomObject</T>' +
+      '<T>System.Object</T></TN><MS><I64 N="SourceId">1</I64>' +
+      '<PR N="Record"><AV>Preparing modules for first use.</AV></PR></MS></Obj></Objs>';
+    const primary = { name: 'win-mini', tailscale: { online: true } } as DeviceProfile;
+    const result = pullUsageFromPrimary({
+      selfRole: () => 'worker',
+      listDevices: () => [primary],
+      listRoles: () => ({ 'win-mini': 'personal' }),
+      isPinned: () => true,
+      exportRows: () => exportClaudeUsageCacheRows(workerCache),
+      readRow: (key) => readClaudeUsageCache(key, workerCache),
+      pull: () => ({
+        ok: true,
+        stdout: clixmlBanner + JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows(primaryCache) }),
+      }),
+      ingestRows: (rows) => ingestPeerClaudeUsageRows(rows, workerCache),
+    });
+
+    expect(result).toEqual({ pulledFrom: 'win-mini', merged: 1, skipped: null, error: null });
+    expect(exportClaudeUsageCacheRows(workerCache)[usageKey]).toMatchObject({
+      windows: [{ key: 'week', usedPercent: 100 }],
+    });
+  });
+
   it('fails loud when the primary returns a non-protocol response', () => {
     const primary = { name: 'zion', tailscale: { online: true } } as DeviceProfile;
     const result = pullUsageFromPrimary({

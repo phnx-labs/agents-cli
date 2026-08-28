@@ -517,14 +517,22 @@ usage endpoint needs the `user:profile` scope only the interactive login carries
 interactively. A headless `worker` has just the `user:inference` setup-token,
 which the endpoint 403s, so its `claude-usage.json` stays blank and `agents view`
 shows no S:/W: bars. The `usage-sync` daemon service closes this the same way
-`auth-sync` closes the token gap: each headed daemon PUSHES its identity-keyed
-usage rows to worker peers, which merge them NEWEST-WINS
-(`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`) via the hidden
-`agents __usage-ingest` stdin verb. The push is role-gated (publish on
-personal/desktop, consume on worker/unmarked), single-executor per destination
-(each daemon writes only the destination's own cache), and idempotent
-(timestamp-guarded merge), so two publishers converge regardless of order.
-Driver + planner are pure and unit-tested
+`auth-sync` closes the token gap, and it is **bidirectional** so neither side has
+to be up first. **Push:** each headed daemon PUSHES its identity-keyed usage rows
+to worker peers, which merge them NEWEST-WINS (`ingestPeerClaudeUsageRows`,
+`src/lib/accounting/usage.ts`) via the hidden `agents __usage-ingest` stdin verb.
+**Pull:** a worker whose local cache is empty or stale PULLS from the fleet's
+primary headed box (`pullUsageFromPrimary` picks a reachable, pinned `personal`,
+falling back to `desktop`) via the hidden `agents __usage-export` verb — so a
+worker that started before any headed daemon pushed still gets real capacity on
+its next tick instead of waiting. Both directions are role-gated (publish/serve on
+personal/desktop, consume/pull on worker), single-executor per destination (each
+daemon writes only its own or the destination's cache), and idempotent
+(timestamp-guarded merge), so two publishers converge regardless of order. The
+pull parse is wrapped in `stripClixml` (`src/lib/hosts/remote-cmd.ts`) exactly as
+every other remote-JSON boundary is, so a Windows primary's `agents.ps1` CLIXML
+progress banner can't make every pull fail as malformed JSON and silently blank
+the worker's cache. Driver + planner are pure and unit-tested
 ([`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); the merge and the
 receiver verb have real-file / real-CLI tests
 ([`usage-sync-cache.test.ts`](src/lib/accounting/usage-sync-cache.test.ts),
