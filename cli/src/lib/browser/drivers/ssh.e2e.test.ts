@@ -131,6 +131,21 @@ suite('browser --device live remote (AGENTS_TEST_WIN_HOST)', () => {
         pageCdp.close();
       }
 
+      // Scenario 4b (PHNX-2663): a browser-daemon restart on the driving box
+      // drops the in-memory connection, but the remote browser AND the tunnel
+      // survive. `attachRunningProfile` rehydrates an ssh:// task by re-running
+      // connectSSH for the same key — this proves that reconnect path reuses the
+      // live tunnel (isOwnTunnel) and returns a working CDP, instead of the old
+      // `return null` that surfaced as "Unknown browser task". Do NOT cleanup the
+      // reconnection: it shares the tunnel/remote that Scenario 5 tears down.
+      const reconn = await connectSSH(endpoint, profile);
+      expect(reconn.port).toBe(CDP_PORT);
+      expect(reconn.pid).toBeGreaterThan(0);
+      const relist = (await (
+        await fetch(`http://127.0.0.1:${reconn.port}/json`)
+      ).json()) as Array<{ type: string }>;
+      expect(relist.some((t) => t.type === 'page'), 'reconnect saw no live page target').toBe(true);
+
       // Scenario 5: `browser stop` — cleanup() kills the remote browser BEFORE the
       // tunnel (the regression). Confirm the remote process is actually gone by
       // watching the remote CDP port stop listening.
