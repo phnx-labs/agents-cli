@@ -186,6 +186,11 @@ export function createDaemonHarness(fileSlug: string): {
         // and kills real tmux-wrapped processes every five-minute tick (RUSH-2545).
         AGENTS_HISTORY_DIR: path.join(home, '.agents', '.history'),
         AGENTS_SKIP_MIGRATION: '1',
+        // PHNX-2545 test-home tripwire: name the isolated home this daemon must
+        // resolve its state dir under. If the HOME override above ever failed to
+        // reach the child, runDaemon()'s assertTestDaemonHome() refuses to boot
+        // instead of ticking its scheduler against the operator's real host.
+        AGENTS_DAEMON_TEST_HOME: home,
       },
       detached: true,
       stdio: 'ignore',
