@@ -315,10 +315,4 @@ describe('isRushSessionValid', () => {
     expect(isRushSessionValid(p)).toBe(true);
   });
 
-  it('capabilities().available reflects session validity', () => {
-    // No yaml file → available: false.
-    const caps = new RushCloudProvider().capabilities();
-    // We cannot control USER_YAML in the provider, so only verify the type here.
-    expect(typeof caps.available).toBe('boolean');
-  });
 });

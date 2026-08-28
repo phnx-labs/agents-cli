@@ -23,6 +23,7 @@ const BUNDLE_ENDPOINT = '/api/v1/secrets/bundles';
 interface RushUserYaml {
   session?: {
     access_token?: string;
+    expires_at?: number;
   };
 }
 
@@ -35,6 +36,11 @@ function readRushToken(): string {
   const token = data?.session?.access_token;
   if (!token) {
     throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
+  }
+  const expiresAt = data.session?.expires_at;
+  if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) {
+    const expiredAt = new Date(expiresAt * 1000).toISOString();
+    throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
 }
