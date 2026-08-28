@@ -73,10 +73,11 @@ describe('computeInsights', () => {
     expect(result.wastedMsTotal).toBe(300_000);
   });
 
-  it('ranks by wasted-time impact, not occurrence count — a rare long loop outranks a frequent short one', () => {
+  it('ranks by wasted-time impact, not occurrence count — a rare long stall outranks a frequent short one', () => {
     const rows = [makeRow('sess-big', T0), ...Array.from({ length: 50 }, (_, i) => makeRow(`sess-freq-${i}`, T0))];
     const calls: ToolCallRow[] = [
-      // One session, one failure, an 8-hour stall before the session ends.
+      // One session, one failure, an 8-hour idle before the next (unrelated) call.
+      // The failure did not cause 8h of waste — bound it to the recovery window.
       makeCall('sess-big', 1, iso(0), 'Bash', 'error', { error: 'connection refused' }),
       makeCall('sess-big', 2, iso(8 * 60 * 60 * 1000), 'Bash', 'ok'),
       // 50 sessions, one quick failure each, no follow-up call — zero wasted time.
@@ -89,10 +90,41 @@ describe('computeInsights', () => {
     const big = result.failurePatterns.find((p) => p.signature.tool === 'Bash');
     const frequent = result.failurePatterns.find((p) => p.signature.tool === 'Read');
     expect(big?.occurrences).toBe(1);
-    expect(big?.wastedMs).toBe(8 * 60 * 60 * 1000);
+    // Lone stall bounded to the recovery window, not the full 8h of idle.
+    expect(big?.wastedMs).toBe(30 * 60 * 1000);
     expect(frequent?.occurrences).toBe(50);
     expect(frequent?.wastedMs).toBe(0);
     expect(result.failurePatterns.indexOf(big!)).toBeLessThan(result.failurePatterns.indexOf(frequent!));
+  });
+
+  it('bounds a lone async stall so a chat reply hours later is not booked as failure-loop waste', () => {
+    // The real PHNX-3423 case: rush-assistant in a Slack thread calls a tool that
+    // fails, then the human replies ~4.5h later (an unrelated next call). The raw
+    // >=60s rule booked the whole 4.5h against the failure; it must be bounded.
+    const rows = [makeRow('sess-chat', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-chat', 1, iso(0), 'user_location', 'error', { error: 'GPS capability denied or unavailable: timeout' }),
+      makeCall('sess-chat', 2, iso(4.5 * 60 * 60 * 1000), 'recall', 'ok'),
+    ];
+    const result = computeInsights(rows, calls, null);
+    const pattern = result.failurePatterns.find((p) => p.signature.tool === 'user_location');
+    expect(pattern?.occurrences).toBe(1);
+    expect(pattern?.wastedMs).toBe(30 * 60 * 1000); // bounded, not 4.5h
+    expect(result.wastedMsTotal).toBe(30 * 60 * 1000);
+  });
+
+  it('keeps an active retry loop uncapped — a long back-off loop is real systemic waste', () => {
+    // Two same-signature failures 45m apart (a slow rate-limit back-off): the full
+    // inter-retry gap is agent-driven waste and must NOT be bounded like a lone stall.
+    const rows = [makeRow('sess-loop', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-loop', 1, iso(0), 'Bash', 'error', { error: 'API rate limit exceeded (try again in 60s)' }),
+      makeCall('sess-loop', 2, iso(45 * 60 * 1000), 'Bash', 'error', { error: 'API rate limit exceeded (try again in 90s)' }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    const pattern = result.failurePatterns[0];
+    expect(pattern.occurrences).toBe(2);
+    expect(pattern.wastedMs).toBe(45 * 60 * 1000); // full gap, uncapped
   });
 
   it('bounds the shard to the top-K patterns regardless of corpus size', () => {

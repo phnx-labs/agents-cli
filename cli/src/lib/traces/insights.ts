@@ -69,6 +69,19 @@ const TOP_K_PATTERNS = 25;
 const MAX_EXAMPLE_SESSIONS = 5;
 /** A gap this long right after a failure reads as an idle stall, not think-time (matches sync.ts's own "stalled Xm" threshold). */
 const STALL_MS = 60_000;
+/**
+ * Upper bound on how much of a LONE post-failure stall (the next call is not a
+ * retry of the same failure) is attributable to that failure. Beyond a recovery
+ * window, the idle is not failure-loop waste — it is a human away from a chat
+ * thread, an abandoned session, or an outage. Real single-tool stalls (a hung
+ * typecheck, a slow build) are minutes; async chat gaps and idle sessions are
+ * hours. Without a per-call end timestamp we cannot measure the call's own
+ * blocking time, so we bound the lone stall instead. Retry LOOPS
+ * (nextIsSameFailure) stay uncapped — an active back-off loop is exactly the
+ * systemic waste this engine exists to surface. (Fuller fix: persist per-call
+ * end timestamps and attribute a call's own duration — PHNX-3423 follow-up.)
+ */
+const MAX_LONE_STALL_MS = 30 * 60_000;
 
 // ---------------------------------------------------------------------------
 // Signature normalization — fold volatile per-instance text together
@@ -130,9 +143,12 @@ function labelFor(tool: string, cause: TraceFailureCause, key: string): string {
  *
  * wastedMs attribution: the gap between a failed call and the NEXT call in the
  * same session counts as wasted when either (a) the next call repeats the same
- * signature (a retry loop) or (b) the gap itself is a stall (≥60s) — an idle
- * gap unrelated to a nearby failure is never counted. This is an estimate, not
- * ground truth (a stall could be legitimate user think-time); it is not
+ * signature (a retry loop) — counted in full, or (b) the gap is a stall (≥60s)
+ * before an unrelated next call — counted up to MAX_LONE_STALL_MS. The bound on
+ * (b) stops a single failure from absorbing hours of human-away idle in an async
+ * channel session (a Slack thread the user replies to hours later), which the raw
+ * ≥60s rule mis-booked as failure-loop waste. An idle gap unrelated to a nearby
+ * failure is never counted. This is an estimate, not ground truth; it is not
  * inflated by folding in ordinary processing time between unrelated calls.
  */
 export function computeInsights(
@@ -187,8 +203,13 @@ export function computeInsights(
         next.tool === call.tool &&
         classifyCause(next) === cause &&
         normalizeErrorKey(failureDescription(next, cause), next.error) === key;
-      if (nextIsSameFailure || gapMs >= STALL_MS) {
+      if (nextIsSameFailure) {
+        // Active retry loop: the whole inter-retry gap is real, agent-driven waste.
         group.wastedMs += gapMs;
+      } else if (gapMs >= STALL_MS) {
+        // Lone stall: attribute only a bounded recovery window — beyond it the
+        // idle is human-away / abandoned, not failure-loop waste (see MAX_LONE_STALL_MS).
+        group.wastedMs += Math.min(gapMs, MAX_LONE_STALL_MS);
       }
     }
   }
