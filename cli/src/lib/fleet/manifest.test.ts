@@ -188,7 +188,7 @@ describe('emptyTargetsMessage', () => {
   });
 
   it('stays a plain note for a non-empty roster whose names all dropped out', () => {
-    // A named roster that resolved to zero targets (offline/unresolved) already
+    // A named roster that resolved to zero targets (every name unresolved) already
     // had each skip surfaced by the caller, so this is not the empty-roster case.
     const msg = emptyTargetsMessage(parseFleetManifest({ devices: { 'mac-mini': {} } }));
     expect(msg.style).toBe('plain');
