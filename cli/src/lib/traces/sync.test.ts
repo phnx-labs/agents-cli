@@ -7,7 +7,7 @@ import { getDB, readSessionTopics, INSIGHTS_EXTRACTOR_VERSION } from '../session
 import * as sessionDb from '../session/db.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { ClassifiedTopic } from './classify.js';
-import { buildIndexShard, buildSessionDetail, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
+import { buildIndexShard, buildSessionDetail, classifySessionKind, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
 
 const id = 'trace-rich-fixture';
 const transcript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
@@ -867,14 +867,17 @@ describe('segmented agent vs interactive duration stats (PHNX-3472)', () => {
     insertSpanningCall('seg-agent-1', '2026-08-25T00:15:00.000Z');
     insertSpanningCall('seg-agent-2', '2026-08-25T00:15:00.000Z');
     // One agent run classified by >8 messages, NO tool calls (10min, no calls → active == span).
-    // Two one-shot interactive queries: ≤2 msgs, no tool calls, ~15s each.
+    // Two INTERACTIVE queries: no tool calls, 3–8 msgs (above the ≤2-msg utility floor
+    // — PHNX-3474 — so they stay in the corpus rather than being excluded), ~15s each.
     const shard = buildIndexShard([
       segRow('seg-agent-1', 900_000, { message_count: 2 }),
       segRow('seg-agent-2', 900_000, { message_count: 3 }),
       segRow('seg-agent-msgs', 600_000, { message_count: 12, last_activity: '2026-08-25T00:10:00.000Z' }),
-      segRow('seg-int-1', 15_000, { message_count: 2, last_activity: '2026-08-25T00:00:15.000Z' }),
-      segRow('seg-int-2', 15_000, { message_count: 1, last_activity: '2026-08-25T00:00:15.000Z' }),
-      segRow('seg-nodur', null, { message_count: 2 }), // no duration → excluded from medians, counts against coverage
+      segRow('seg-int-1', 15_000, { message_count: 4, last_activity: '2026-08-25T00:00:15.000Z' }),
+      segRow('seg-int-2', 15_000, { message_count: 5, last_activity: '2026-08-25T00:00:15.000Z' }),
+      // No duration → excluded from medians but counts against coverage. message_count 12
+      // keeps it an AGENT row (not utility), so it stays in the denominator (PHNX-3474).
+      segRow('seg-nodur', null, { message_count: 12 }),
     ], 'test-device', 'owner-1');
 
     // Agent median (900k, 900k, 600k) dwarfs interactive median (15k, 15k).
@@ -899,7 +902,9 @@ describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
       project: 'agents-cli', cwd: '/redacted/agents-cli', git_branch: 'fix/bug', topic: 'fix the bug',
       label, message_count: null, token_count: null, output_tokens: null, input_tokens: null,
       cache_read_tokens: null, cache_write_tokens: null, cost_usd: null, cost_usd_nocache: null,
-      duration_ms: 1000, model: 'rush-test', tool_call_count: null,
+      // A non-null tool_call_count keeps the row out of the utility class (PHNX-3474),
+      // so it stays in the agent corpus and reaches a topic bucket.
+      duration_ms: 1000, model: 'rush-test', tool_call_count: 2,
       file_path: '/nonexistent/no-transcript.jsonl', file_mtime_ms: 1, file_size: 1,
       machine: 'test-device',
     };
@@ -924,8 +929,8 @@ describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
     expect(withRefs).toBeDefined();
     expect(withRefs!.count).toBe(2);
     expect(withRefs!.sessions).toEqual([
-      { id: 'topic-b', title: 'Newer fix' }, // most-recent first
-      { id: 'topic-a', title: 'Older fix' },
+      { id: 'topic-b', title: 'Newer fix', kind: 'agent', harness: 'rush' }, // most-recent first
+      { id: 'topic-a', title: 'Older fix', kind: 'agent', harness: 'rush' },
     ]);
   });
 
@@ -943,5 +948,87 @@ describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
     expect(bucket.count).toBe(45);          // true total unchanged
     expect(bucket.sessions).toHaveLength(30); // capped
     expect(bucket.sessions[0].id).toBe('topic-44'); // most recent kept
+  });
+});
+
+// PHNX-3474: internal utility plumbing — single-shot calls (no tool AND ≤2 msgs) and
+// known internal-prompt signatures (title-gen, watchdog, commit-message, factory
+// worker) — poisons every console stat. They are tagged `utility` and excluded from
+// the corpus: sessionsImported becomes the real agent count, the medians/topic buckets
+// exclude them, and a top-level utilityCount reports how many were dropped. Real agent
+// rows carry kind='agent' + harness so the console can filter by both.
+describe('utility-call classification excludes internal plumbing (PHNX-3474)', () => {
+  const IDS = ['u-title', 'u-watch', 'u-commit', 'u-shape', 'a-real'];
+
+  function kindRow(rowId: string, agent: string, extra: Partial<SyncRow>): SyncRow {
+    return {
+      id: rowId, short_id: rowId.slice(0, 8), agent, origin: 'cli', routine_name: null,
+      routine_run_id: null, version: null, account: null, account_key: null, account_org: null,
+      mode: 'auto', timestamp: '2026-08-25T00:00:00.000Z', last_activity: '2026-08-25T00:10:00.000Z',
+      project: 'agents-cli', cwd: '/redacted/agents-cli', git_branch: 'main', topic: null,
+      label: null, message_count: null, token_count: null, output_tokens: null, input_tokens: null,
+      cache_read_tokens: null, cache_write_tokens: null, cost_usd: null, cost_usd_nocache: null,
+      duration_ms: 5_000, model: 'test-model', tool_call_count: null,
+      file_path: '/nonexistent/no-transcript.jsonl', file_mtime_ms: 1, file_size: 1,
+      machine: 'test-device', ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const rid of IDS) {
+      db.prepare('DELETE FROM tool_calls WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_topics WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_phenotypes WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_insights WHERE session_id = ?').run(rid);
+    }
+  });
+
+  it('classifies the single-shot and signature rows utility, and the tool-using row agent', () => {
+    // no tool call, message_count/tool_call_count is the shape's fallback — assert the
+    // pure classifier directly (the authoritative loaded-call count is passed as 0).
+    expect(classifySessionKind({ topic: 'Generate a 3-4 word title for this chat', label: null, message_count: 2, tool_call_count: null }, 0)).toBe('utility');
+    expect(classifySessionKind({ topic: null, label: 'You are a watchdog monitoring agent sessions', message_count: 1, tool_call_count: null }, 0)).toBe('utility');
+    expect(classifySessionKind({ topic: 'Write a conventional-commit message', label: null, message_count: 1, tool_call_count: null }, 0)).toBe('utility');
+    // the single-shot shape rule: no tool call AND ≤2 messages, no signature.
+    expect(classifySessionKind({ topic: 'quick question', label: null, message_count: 2, tool_call_count: null }, 0)).toBe('utility');
+    // a signature match wins even when the row otherwise looks like an agent run.
+    expect(classifySessionKind({ topic: 'FACTORY WORKER: build the widget', label: null, message_count: 40, tool_call_count: 12 }, 12)).toBe('utility');
+    // a real multi-turn tool-using session is agent.
+    expect(classifySessionKind({ topic: 'fix the bug', label: null, message_count: 20, tool_call_count: 3 }, 3)).toBe('agent');
+    // 3–8 messages with no tool call clears the utility floor → agent (interactive).
+    expect(classifySessionKind({ topic: 'discuss the design', label: null, message_count: 4, tool_call_count: null }, 0)).toBe('agent');
+  });
+
+  it('excludes utility rows from sessionsImported, the medians, and the topic buckets; reports utilityCount', () => {
+    const db = getDB();
+    // One real agent session: a single tool call spanning its whole 10-min duration so
+    // active time == span, plus a topic that lands it in a bucket.
+    db.prepare(`
+      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, 1, '2026-08-25T00:00:00.000Z', '2026-08-25T00:10:00.000Z', 'Bash', '{}', 'ok', 0, null, 0)
+    `).run('a-real-1', 'a-real');
+
+    const shard = buildIndexShard([
+      kindRow('u-title', 'claude', { topic: 'Generate a 3-4 word title for this conversation', message_count: 2 }),
+      kindRow('u-watch', 'claude', { label: 'You are a watchdog monitoring stalled agents', message_count: 1 }),
+      kindRow('u-commit', 'claude', { topic: 'Draft a conventional-commit subject line', message_count: 1 }),
+      kindRow('u-shape', 'claude', { topic: 'single-shot machine call', message_count: 2 }), // no tool, ≤2 msgs
+      kindRow('a-real', 'codex', { topic: 'fix the bug', git_branch: 'fix/bug', message_count: 20, tool_call_count: 3, duration_ms: 600_000 }),
+    ], 'test-device', 'owner-1');
+
+    // Only the one real agent session is imported; the four utility rows are dropped.
+    expect(shard.stats.sessionsImported).toBe(1);
+    expect(shard.utilityCount).toBe(4);
+    // The median is the agent session's active time (600s), not diluted by the ~5s
+    // utility rows that would otherwise pull it toward zero.
+    expect(shard.stats.medianMs).toBe(600_000);
+    expect(shard.stats.agentMedianMs).toBe(600_000);
+    expect(shard.stats.measuredFraction).toBe(1); // the one agent row carried a duration
+
+    // The topic bucket carries only the agent session, tagged kind+harness.
+    const bucket = shard.topics.find((t) => t.sessions.length > 0)!;
+    expect(bucket.sessions).toEqual([{ id: 'a-real', title: 'fix the bug', kind: 'agent', harness: 'codex' }]);
+    expect(shard.topics.flatMap((t) => t.sessions.map((s) => s.id))).not.toContain('u-title');
   });
 });

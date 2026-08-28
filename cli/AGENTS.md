@@ -76,7 +76,19 @@ spanMs/**activeMs**/turns/tools/errorCount/tokens/cost/outcome/repo — plus a p
 rich per-device `index.json`. `activeMs` is `spanMs` minus every idle gap > 120s
 (PHNX-3457) so a session resumed after hours, or left idle mid-turn, reads as
 effort rather than calendar span (the raw span stays available per session as
-`SessionDetail.meta.spanMs`). The index contains duration/error statistics —
+`SessionDetail.meta.spanMs`). **Every index statistic is computed over the AGENT
+corpus ONLY (PHNX-3474):** each session is classified `kind` = `utility` when it is
+internal machine plumbing — no tool call AND ≤2 messages (a single-shot call), or its
+topic/label matches a known internal-prompt signature (title generation, watchdog,
+commit-message writer, factory worker; `classifySessionKind` /
+`UTILITY_PROMPT_SIGNATURES` in `traces/sync.ts`) — otherwise `agent`. Utility rows
+(~68% of the raw corpus: title-gen, watchdog ticks, commit-message writes, factory
+workers, all spawned under the `claude` harness by the Rush app) are **tagged and
+excluded, never deleted** from `sessions.db`, so `sessionsImported` is the real agent
+count, and the medians / needs-attention / tool-error-rate / topic-bucket counts all
+measure agent work; a top-level **`utilityCount`** reports how many were dropped. Each
+session ref (topic-tile `sessions[]`, `needsAttention`) carries `kind` and `harness`
+(the producing agent) so the console can filter by both. The index contains duration/error statistics —
 `medianMs`/`p90Ms` are now the ACTIVE-time percentiles (same keys, new value; the
 fleet-aggregate worker keeps weighted-averaging them unchanged); those blended figures
 sit alongside **segmented** active-time stats (PHNX-3472) — `agentMedianMs`/`agentP90Ms`
@@ -91,7 +103,7 @@ ranked attention flags, metadata/tool-mix topic buckets — the human task taxon
 console treemap renders (Feature work · Bug fixes · Refactor · Debugging · Code review ·
 Release · Blog & docs · Fleet / ops), an ordered rules table in `classify.ts`'s
 `classifyTopic`, keyed within the five stable `TraceTopicGroup` groups, **each bucket
-carrying up to 30 example `sessions` refs (`{id,title}`) so a treemap tile is
+carrying up to 30 example `sessions` refs (`{id,title,kind,harness}`) so a treemap tile is
 drillable into its session list (PHNX-3408)** — and structured tool
 failure cause buckets (`real`, `guard`, `hook`), and a **rolling drift signal**.
 Group-by dimensions for the console insight bar are pure functions in

@@ -14,6 +14,7 @@
     "needAttention": 1,
     "toolErrorRate": 0.6666666666666666
   },
+  "utilityCount": 0,
   "needsAttention": [
     {
       "id": "trace-rich-fixture",
@@ -22,12 +23,13 @@
       "device": "test-device",
       "agent": "codex",
       "model": "gpt-test",
+      "kind": "agent",
       "severity": 7,
       "flags": ["2 errors", "retry loop"]
     }
   ],
   "topics": [
-    { "key": "bugfix", "label": "Bug fixes", "count": 1, "group": "code", "sessions": [{ "id": "trace-rich-fixture", "title": "Fix trace sync" }] }
+    { "key": "bugfix", "label": "Bug fixes", "count": 1, "group": "code", "sessions": [{ "id": "trace-rich-fixture", "title": "Fix trace sync", "kind": "agent", "harness": "codex" }] }
   ],
   "failures": {
     "byToolError": [
