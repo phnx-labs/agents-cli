@@ -440,6 +440,27 @@ describe('buildSessionDetail truthful run outcome (PHNX-3387)', () => {
     expect(d.meta.outcome).toBe('completed');
   });
 
+  it('a failed non-shell tool resolved by the same tool → completed', () => {
+    // Non-shell recovery keys on tool identity: a failed `Edit` is resolved by a
+    // later successful `Edit`, but not by an unrelated `Read`.
+    const d = buildSessionDetail(traj([
+      step(1, 'Edit', 'error', 'old string not found'), // the edit fails
+      step(2, 'Read', 'ok', 'read the file to find the real string'), // unrelated — not recovery on its own
+      step(3, 'Edit', 'ok', 'apply the corrected edit'), // …same tool succeeds → resolves it
+    ]));
+    expect(d.meta.outcome).toBe('completed');
+  });
+
+  it('a failed tool followed only by an unrelated different tool → errored', () => {
+    // The Read succeeds after the failed Edit but does not resolve it (different
+    // tool identity), and no later Edit succeeds → the failed work is unresolved.
+    const d = buildSessionDetail(traj([
+      step(1, 'Edit', 'error', 'old string not found'),
+      step(2, 'Read', 'ok', 'read the file'),
+    ]));
+    expect(d.meta.outcome).toBe('errored');
+  });
+
   it('a clean run with zero errors is completed', () => {
     const d = buildSessionDetail(traj([step(1, 'Read', 'ok', 'read'), step(2, 'Edit', 'ok', 'write')]));
     expect(d.meta.outcome).toBe('completed');
