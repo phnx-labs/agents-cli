@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_68 command groups · 550 commands._
+_67 command groups · 548 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -368,12 +368,6 @@ agents inspect <target>  Inspect one installed agent harness at one version (not
 
 ```
 agents install <identifier>  Install a package: mcp:, skill:, plugin:, or GitHub (gh:user/repo) — one install path (Phase 5)
-```
-
-## list — List installed agent CLI versions
-
-```
-agents list [agent]  List installed agent CLI versions
 ```
 
 ## logs — Show a run log, audit trail, or stats. Subcommands: audit, stats, rotate.
@@ -845,9 +839,8 @@ agents traces sync    Push derived, redacted trajectories (incremental)
 ## trash — Inspect and restore soft-deleted agent version directories
 
 ```
-agents trash                   Inspect and restore soft-deleted agent version directories
-agents trash list [agent]      List soft-deleted version directories (optionally filtered to one agent)
-agents trash restore <target>  Restore a soft-deleted version (e.g. "claude@2.1.110") back to ~/.agents/.history/versions/
+agents trash               Inspect and restore soft-deleted agent version directories
+agents trash list [agent]  List soft-deleted version directories (optionally filtered to one agent)
 ```
 
 ## uninstall — Completely remove agents-cli and restore your original agent configs. Reverses `agents setup`.

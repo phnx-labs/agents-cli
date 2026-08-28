@@ -151,7 +151,6 @@ export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   workflows: [loadWorkflows],
   add: [loadVersions],
   use: [loadVersions],
-  list: [loadVersions],
   remove: [loadVersions],
   rm: [loadVersions],
   purge: [loadVersions],

@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 68,
-  "commands": 550,
+  "groups": 67,
+  "commands": 548,
   "root": {
     "name": "agents",
     "path": "",
@@ -12746,70 +12746,6 @@
           "flags": "--allow-exec-surfaces",
           "description": "With plugin: allow plugins that ship hooks/mcp/bin (same as agents plugins install)",
           "long": "--allow-exec-surfaces",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": []
-    },
-    {
-      "name": "list",
-      "path": "list",
-      "aliases": [],
-      "description": "List installed agent CLI versions",
-      "args": [
-        {
-          "name": "agent",
-          "required": false,
-          "variadic": false,
-          "description": ""
-        }
-      ],
-      "options": [
-        {
-          "flags": "-D, --device <name>",
-          "description": "Run this command on another machine over SSH instead of locally — a registered device, user@host, or `all` to fan out across every registered device. See `agents devices` / `agents hosts`.",
-          "short": "-D",
-          "long": "--device",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--remote-cwd <dir>",
-          "description": "Working directory on the device for --device runs. Resolves on the REMOTE device — pass a '$HOME'-relative path (single-quoted so your local shell doesn't expand it) or a valid remote absolute path; a local ~ expands here and won't exist there (/Users/you vs /home/you). No effect on 'teams add'.",
-          "long": "--remote-cwd",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--no-tty",
-          "description": "Force non-interactive output for --device runs even from a terminal.",
-          "long": "--no-tty",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": true
-        },
-        {
-          "flags": "--any",
-          "description": "With --device <cap> (a capability tag), pick any matching device instead of erroring when several match.",
-          "long": "--any",
           "required": false,
           "optional": false,
           "variadic": false,
@@ -28970,33 +28906,6 @@
             {
               "name": "agent",
               "required": false,
-              "variadic": false,
-              "description": ""
-            }
-          ],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "restore",
-          "path": "trash restore",
-          "aliases": [],
-          "description": "Restore a soft-deleted version (e.g. \"claude@2.1.110\") back to ~/.agents/.history/versions/",
-          "args": [
-            {
-              "name": "target",
-              "required": true,
               "variadic": false,
               "description": ""
             }

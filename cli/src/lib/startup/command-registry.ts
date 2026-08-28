@@ -1,6 +1,6 @@
 const LOADED_COMMAND_NAMES = [
   'accounts', 'auth', 'view', 'inspect', 'feedback', 'commands', 'hooks', 'skills', 'rules', 'memory',
-  'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use', 'list',
+  'permissions', 'mcp', 'clis', 'subagents', 'plugins', 'workflows', 'add', 'use',
   'remove', 'rm', 'purge', 'update', 'prune', 'import', 'registry', 'search', 'install',
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
   'models', 'modes', 'trash', 'restore', 'doctor',
@@ -60,6 +60,10 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * `agents view`, which renders per-account usage with account, version, and
  * auth state beside it (RUSH-3079). `perf` nested under `agents insights perf`
  * — performance metrics are an insight, not a top-level noun (PHNX-3391).
+ * `list` was removed — it was a long-deprecated full duplicate of `agents view`
+ * (it already printed "agents list is now agents view"); `agents view` is the
+ * one version-listing surface (PHNX-3391). The `agents trash restore` subcommand
+ * was likewise removed as an exact duplicate of top-level `agents restore`.
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
@@ -91,6 +95,7 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'apply',
   'beta',
   'perf',
+  'list',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {
