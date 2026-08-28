@@ -14834,7 +14834,7 @@
       "name": "notify",
       "path": "notify",
       "aliases": [],
-      "description": "Deliver to the owner (alias of send --to owner). Channel + target default from notify.owner in agents.yaml.",
+      "description": "[DEPRECATED] Deliver to the owner (alias of send --to owner). Use \"agents feed post\" for new code.",
       "args": [
         {
           "name": "text",
@@ -14945,8 +14945,8 @@
           "negate": false
         }
       ],
-      "examples": "# Same as: agents send --to owner --text \"…\"\n      agents notify --text \"Build finished — PR #1346 is green\"\n      agents notify \"legacy positional still works\"\n\n      # Override channel for this one ping\n      agents notify --text \"fallback\" --channel desktop --to local\n\n      agents notify --text \"probe\" --dry-run --json",
-      "notes": "notify ≡ send --to owner. One delivery stack (lib/channels). Set\n      notify.owner.{channel,to} in agents.yaml once per machine/fleet.\n\n      \n  Planes (do not mix them up):\n    send / notify     - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
+      "examples": "# Deprecated: prefer \"agents feed post --title \"…\" \"…\" --level important\"\n      agents notify --text \"Build finished — PR #1346 is green\"\n      agents notify \"legacy positional still works\"\n\n      # Override channel for this one ping\n      agents notify --text \"fallback\" --channel desktop --to local\n\n      agents notify --text \"probe\" --dry-run --json",
+      "notes": "DEPRECATED. notify ≡ send --to owner and still works, but new callers\n      should use \"agents feed post\" (record + optional broadcast) instead.\n      Set notify.owner.{channel,to} in agents.yaml once per machine/fleet.\n\n      \n  Planes (do not mix them up):\n    send              - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
       "subcommands": []
     },
     {
@@ -22864,7 +22864,7 @@
         }
       ],
       "examples": "# Flag-first envelope (preferred)\n      agents send --channel imessage --to \"+18055550100\" --text \"PR #1803 is green\"\n      agents send --to owner --text \"need a decision on the release\"\n      agents send --channel desktop --to local --text \"deploy finished\" --url https://example.com/pr/1\n      agents send --channel mailbox --to <session-id> --text \"peer note\" --from orchestrator\n\n      # Attach a local file\n      agents send --to owner --text \"screenshot\" --attach ./out/cover.png\n\n      # Owner alias without the notify verb\n      agents send --to owner --text \"wiring test\"\n\n      # Legacy positional text still works\n      agents send \"hi\" --channel desktop --to local\n\n      # Dry-run (resolve provider, no delivery)\n      agents send --to owner --text \"probe\" --dry-run --json",
-      "notes": "Planes (do not mix them up):\n    send / notify     - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
+      "notes": "Planes (do not mix them up):\n    send              - DELIVER a message to a recipient (this command)\n    feed post         - RECORD progress / milestones (optional broadcast may call send)\n    activity          - READ the activity stream (not a send path)\n    message / inject  - CONTROL a running agent (mailbox answer or terminal keystroke)\n\n  --to owner is an address alias for notify.owner in agents.yaml, not a\n  special control path. Agent resume / PTY inject stay on message and\n  sessions inject.",
       "subcommands": []
     },
     {
