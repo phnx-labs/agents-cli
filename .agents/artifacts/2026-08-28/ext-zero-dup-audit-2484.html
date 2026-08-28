@@ -1,0 +1,805 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>PHNX-2484 — AGI EXT zero-duplication audit (full-tree)</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span></div>
+<h1>PHNX-2484 — AGI EXT zero-duplication audit (full-tree)</h1>
+<p class="summary">Full-tree audit of phnx-labs/agi-ext: 34 sites where the extension re-implements or re-derives agents-cli logic instead of consuming canonical CLI JSON/verbs, split into delete-now / needs-CLI-addition / in-progress, with a phased deletion order.</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-2484" target="_blank" rel="noopener">PHNX-2484</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">claude-2026-08-28-1818-fe1afc6d</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-28</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item toc-sub" href="#a-session-lifecycle-phase-classification" data-toc-for="a-session-lifecycle-phase-classification">A. Session lifecycle / phase classification</a><a class="toc-item toc-sub" href="#b-resume-candidates-ordering" data-toc-for="b-resume-candidates-ordering">B. Resume candidates &amp; ordering</a><a class="toc-item toc-sub" href="#c-placement-load-balancing-dispatch-placement-already-delegated-phnx-2092" data-toc-for="c-placement-load-balancing-dispatch-placement-already-delegated-phnx-2092">C. Placement / load-balancing / dispatch (placement already delegated — PHNX-2092)</a><a class="toc-item toc-sub" href="#d-device-health-config" data-toc-for="d-device-health-config">D. Device health / config</a><a class="toc-item toc-sub" href="#e-usage-account-health" data-toc-for="e-usage-account-health">E. Usage / account health</a><a class="toc-item toc-sub" href="#f-session-identity-label-hydration-rush-3184-debt" data-toc-for="f-session-identity-label-hydration-rush-3184-debt">F. Session identity / label hydration (RUSH-3184 debt)</a><a class="toc-item toc-sub" href="#g-transcript-tool-call-parsing-forbidden" data-toc-for="g-transcript-tool-call-parsing-forbidden">G. Transcript / tool-call parsing (forbidden)</a><a class="toc-item toc-sub" href="#h-panel-snapshot" data-toc-for="h-panel-snapshot">H. Panel snapshot</a><a class="toc-item toc-sub" href="#borderline-lower-priority" data-toc-for="borderline-lower-priority">Borderline / lower-priority</a><a class="toc-item" href="#fallback-paths-thesis-forbids-compute-locally-if-cli-unavailable" data-toc-for="fallback-paths-thesis-forbids-compute-locally-if-cli-unavailable"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Fallback paths (thesis forbids &quot;compute locally if CLI unavailable&quot;)</a><a class="toc-item" href="#recommended-deletion-order-safest-first-grouped-by-concept" data-toc-for="recommended-deletion-order-safest-first-grouped-by-concept"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Recommended deletion order (safest first, grouped by concept)</a><a class="toc-item" href="#top-3-highest-value-deletions" data-toc-for="top-3-highest-value-deletions"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Top 3 highest-value deletions</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Evidence</a></nav><article class="artifact-body"><h1>PHNX-2484 — AGI EXT zero-duplication audit (full-tree)</h1>
+<p><strong>Repo audited:</strong> <code>phnx-labs/agi-ext</code> @ <code>main</code> (<code>b5d3494</code>)
+<strong>Date:</strong> 2026-08-28
+<strong>Scope:</strong> every place the extension <em>re-implements</em> or <em>re-derives</em> agents-cli logic
+instead of consuming canonical CLI JSON/verbs, per the ticket + the agi-ext
+<code>AGENTS.md</code> "one architecture rule — thin client, single stream".</p>
+<blockquote>
+<p>The rule: the extension may own <strong>only</strong> VS Code UI, webviews, terminal/tab/focus
+APIs, and presentation formatting. Session lifecycle, resume candidates &amp; ordering,
+session state/history, usage/account health, device health/config, placement/load
+balancing, dispatch, messaging, capability discovery, watchdog, and routines MUST be
+sourced from canonical agents-cli JSON/verbs with <strong>no extension fallback or mirrored
+implementation</strong>.</p>
+</blockquote>
+<h2 id="summary">Summary</h2><ul>
+<li><strong>34 duplication sites</strong> across <strong>8 CLI concepts</strong> (lifecycle, resume, placement,
+device health/config, usage/account, identity/hydration, transcript/tool parsing,
+panel snapshot).</li>
+<li>Fix split:<ul>
+<li><strong>DELETE-NOW — 11 sites.</strong> Dead code (probe parsers with zero callers) or the
+canonical CLI field already ships on the stream, so the ext just stops re-deriving.</li>
+<li><strong>NEEDS-CLI-ADDITION — 14 sites.</strong> The real fix is a CLI field/verb (one-row-per-session
+on the stream, a <code>resume --candidates</code> verb, <code>devices config --json</code>, identity on the
+stream). The ext code deletes <em>after</em> the CLI grows the surface. This is the thesis:
+"if a field is missing, add it to the CLI, don't side-channel it here."</li>
+<li><strong>IN-PROGRESS — 5 sites.</strong> PHNX-2975 is already deleting the client-side
+attention/stall classifier (<code>derivePhase</code> / <code>deriveStalled</code> / <code>deriveNeeds</code> /
+<code>PHASE_RANK</code> + <code>readinessDetector.ts</code>). Listed for completeness, <strong>not</strong> to be
+double-counted.</li>
+<li><strong>4 residual presentation/borderline sites</strong> kept as legitimately ext-owned display
+formatting (called out so the deletion pass does not over-reach).</li>
+</ul>
+</li>
+<li><strong>6 explicit FALLBACK paths</strong> (thesis forbids "if CLI unavailable, compute locally"):
+the floorModel question heuristics behind <code>question === null</code>, the
+<code>normalizeActiveSession</code> "fall back to parsing lastResponse" contract, and the
+corruption-to-defaults degrades in <code>deviceAutoLaunch.ts</code> and <code>agentInventory.ts</code>.</li>
+<li><strong>Already compliant (no action):</strong> <code>watchdog.vscode.ts</code> (pure CLI-daemon delegation +
+one-time settings migration — the reference pattern), <code>resumeInBest.ts</code> command
+builders (delegate host/harness/account picking to <code>agents run auto</code>, RUSH-2132),
+<code>sessionPresentationStore.ts</code> (pure projection of the stream).</li>
+</ul>
+<p>The single largest violation is concentrated in three files —
+<code>ui/settings/components/mission-control/floorModel.ts</code>, <code>src/core/remoteSessions.ts</code>,
+and the raw-config readers (<code>src/core/deviceAutoLaunch.ts</code>, <code>src/core/agentInventory.ts</code>).
+Fix those and roughly two-thirds of the surface collapses.</p>
+<hr />
+<h2 id="findings">Findings</h2><p>Legend — <strong>Fix</strong>: <code>DELETE-NOW</code> · <code>NEEDS-CLI</code> · <code>IN-PROGRESS</code> (PHNX-2975) · <code>KEEP</code> (legit presentation).
+<strong>Risk</strong>: how entangled the deletion is (callers / blast radius).</p>
+<h3 id="a-session-lifecycle-phase-classification">A. Session lifecycle / phase classification</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>1</td>
+<td><code>floorModel.ts:632</code> <code>derivePhase</code></td>
+<td>lifecycle classifier (status+active+waiting+prUnreviewed → FloorPhase)</td>
+<td><code>ActiveSession.activity</code>/<code>status</code> on <code>sessions watch --json</code></td>
+<td>IN-PROGRESS</td>
+<td>high — wired at <code>floorAdapter.ts:485</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>floorModel.ts:659</code> <code>deriveNeeds</code></td>
+<td>attention classification (needs-you)</td>
+<td>CLI attention rows / <code>activity==='waiting_input'</code></td>
+<td>IN-PROGRESS</td>
+<td>high</td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>floorModel.ts:674</code> <code>deriveStalled</code> + <code>:497</code> <code>STALL_THRESHOLD_MS</code></td>
+<td>watchdog/stall classifier (90s threshold)</td>
+<td>CLI daemon watchdog stall signal (missing on stream)</td>
+<td>IN-PROGRESS</td>
+<td>med</td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>floorModel.ts:487</code> <code>PHASE_RANK</code></td>
+<td>attention/progress ordering</td>
+<td>CLI feed ordering (<code>deriveOutcome</code>/attention rank)</td>
+<td>IN-PROGRESS</td>
+<td>high — used by <code>sortAgents</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>floorModel.ts:682</code> <code>heartbeatLevel</code></td>
+<td>stall severity (live/stale/dead from silence age)</td>
+<td>same daemon stall signal as #3</td>
+<td>NEEDS-CLI</td>
+<td>med — same seam as #3, not in the 2975 list</td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>remoteSessions.ts:522</code> <code>mapStatusToPhase</code></td>
+<td>lifecycle classifier (CLI status word → phase)</td>
+<td>CLI should project canonical <code>phase</code> once</td>
+<td>NEEDS-CLI</td>
+<td>high — feeds every normalized row</td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>remoteSessions.ts:799</code> <code>dedupeSessions</code> + <code>:778</code> <code>DEDUPE_PHASE_RANK</code></td>
+<td>session identity dedup (many pids → one session) + attention pick</td>
+<td><code>sessions.db</code>/pid→session registry — emit one row per session</td>
+<td>NEEDS-CLI</td>
+<td>high — header counts vs feed depend on it</td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>remoteSessions.ts:841</code> <code>isStaleSession</code> + <code>:855</code> <code>filterStaleSessions</code> + <code>:831</code> <code>sessionLastActivityMs</code> + <code>:821</code> <code>STALE_SESSION_THRESHOLD_MS</code></td>
+<td>liveness/staleness decision (6h threshold)</td>
+<td>CLI should not emit (or should flag) stale sessions</td>
+<td>NEEDS-CLI</td>
+<td>high — gates counts + needs-you fleet-wide</td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>foreman.digest.ts:103</code> <code>deriveStatus</code></td>
+<td>idle/working/waiting/blocked lifecycle classifier (for the voice digest)</td>
+<td>consume CLI <code>phase</code>/<code>activity</code> instead of re-deriving from <code>startedAtMs</code>+last-tool</td>
+<td>NEEDS-CLI</td>
+<td>low — foreman-only</td>
+</tr>
+</tbody></table>
+<h3 id="b-resume-candidates-ordering">B. Resume candidates &amp; ordering</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>10</td>
+<td><code>resumePicker.ts:122</code> <code>classifyResumeState</code> + <code>:33</code> <code>STATE_RANK</code></td>
+<td>resume-state classifier (detached/background/parked/idle/watched) + ordering</td>
+<td><strong>missing</strong> — no <code>resume --candidates</code> verb; ext joins two reads by hand</td>
+<td>NEEDS-CLI</td>
+<td>med</td>
+</tr>
+<tr>
+<td>11</td>
+<td><code>resumePicker.ts:171</code> <code>buildResumeCandidates</code> + <code>:231</code> <code>sortResumeCandidates</code> + <code>:247</code> <code>abandonedCandidates</code> + <code>:103</code> <code>indexLive</code></td>
+<td>resume candidate selection/join/ordering</td>
+<td><strong>missing CLI verb</strong> — <code>agents sessions resume --candidates --json</code></td>
+<td>NEEDS-CLI</td>
+<td>med — self-contained module</td>
+</tr>
+<tr>
+<td>12</td>
+<td><code>resumePicker.ts:303</code> <code>sharedTopicPrefixes</code> + <code>:342</code> <code>stripSharedPrefix</code> + <code>:371</code> <code>distinctiveTopic</code></td>
+<td>boilerplate-prefix stripping for the picker label</td>
+<td>— (display formatting)</td>
+<td>KEEP</td>
+<td>—</td>
+</tr>
+</tbody></table>
+<h3 id="c-placement-load-balancing-dispatch-placement-already-delegated-phnx-2092">C. Placement / load-balancing / dispatch (placement already delegated — PHNX-2092)</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>13</td>
+<td><code>dispatchRanking.ts:107</code> <code>deriveHostLoad</code></td>
+<td>placement/load-bucket classifier (thresholds)</td>
+<td><code>agents run auto</code> placement (PHNX-2092)</td>
+<td>DELETE-NOW</td>
+<td><strong>none — zero callers (dead)</strong></td>
+</tr>
+<tr>
+<td>14</td>
+<td><code>dispatchRanking.ts:123</code> <code>parseRemoteCpuRatio</code></td>
+<td>SSH <code>uptime</code> CPU-ratio parse (device probe)</td>
+<td><code>agents devices status --json</code></td>
+<td>DELETE-NOW</td>
+<td><strong>none — zero callers (dead)</strong></td>
+</tr>
+<tr>
+<td>15</td>
+<td><code>dispatchRanking.ts:150</code> <code>buildDispatchHosts</code> + <code>:184</code> <code>rankTargets</code> + <code>:216</code> <code>buildManagedTargets</code> + <code>:243</code> <code>rankHostUses</code></td>
+<td>dispatch target/host ranking (placement)</td>
+<td>CLI placement / <code>run auto</code> target resolution</td>
+<td>NEEDS-CLI</td>
+<td>med — Dispatch panel</td>
+</tr>
+<tr>
+<td>16</td>
+<td><code>dispatchRanking.ts:74</code> <code>mapInventoriesToInstalledAgents</code> (+ <code>:56</code> <code>AGENT_META</code>)</td>
+<td>capability discovery rollup (installed/signedIn/default)</td>
+<td><code>agents view --json</code> (already the input) — CLI should expose the "installed &amp; runnable" set</td>
+<td>NEEDS-CLI</td>
+<td>low — <code>AGENT_META</code> colors are legit KEEP</td>
+</tr>
+</tbody></table>
+<h3 id="d-device-health-config">D. Device health / config</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>17</td>
+<td><code>deviceHealth.ts:10</code> <code>parseUptime</code> + <code>:18</code> <code>parseVmStat</code> + <code>:35</code> <code>parseLinuxMemInfo</code></td>
+<td>device-health metric parsers (raw probe output)</td>
+<td><code>agents devices status --json</code> (already consumed in <code>deviceHealth.vscode.ts</code>)</td>
+<td>DELETE-NOW</td>
+<td><strong>none — zero callers (dead), superseded</strong></td>
+</tr>
+<tr>
+<td>18</td>
+<td><code>deviceHealth.ts:60</code> <code>isDeviceOnline</code></td>
+<td>reachability classifier, hand-mirror of CLI <code>ssh.ts renderDeviceTable</code></td>
+<td>CLI should emit <code>online</code> as a field</td>
+<td>NEEDS-CLI</td>
+<td>med — called in <code>deviceHealth.vscode.ts</code></td>
+</tr>
+<tr>
+<td>19</td>
+<td><code>deviceAutoLaunch.ts</code> <strong>(whole file)</strong> — <code>loadAutoLaunchPreferences</code>, <code>readDeviceMaxConcurrent</code>, <code>readFleetDefaultsConfig</code>, <code>readDeviceDocConfig</code>, <code>readAllDeviceConfigs</code></td>
+<td><strong>raw <code>~/.agents/**/agents.yaml</code> config reader</strong> (forbidden by AGENTS.md rule 3) + corruption→defaults fallback</td>
+<td><code>agents devices config &lt;name&gt; --json</code> (+ fleet defaults) — verb likely missing</td>
+<td>NEEDS-CLI</td>
+<td>med — launch-ranking path</td>
+</tr>
+</tbody></table>
+<h3 id="e-usage-account-health">E. Usage / account health</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>20</td>
+<td><code>agentInventory.ts:116</code> <code>loadAgentsConfig</code> + <code>:127</code> <code>readAgentRunStrategy</code> + <code>:134</code> <code>writeAgentRunStrategy</code> (+ <code>:55</code>/<code>:66</code> helpers)</td>
+<td><strong>raw <code>~/.agents/agents.yaml</code> reader AND writer</strong> (forbidden) — run-strategy config</td>
+<td>CLI run-config verb (read + write <code>run.&lt;agent&gt;.strategy</code>)</td>
+<td>NEEDS-CLI</td>
+<td>med — roster toggles write yaml directly</td>
+</tr>
+<tr>
+<td>21</td>
+<td><code>agentInventory.ts:84</code> <code>summarizeAgentInventory</code> (<code>healthyCount</code>/<code>canRotate</code>/<code>signedInCount</code>)</td>
+<td>account-health rollup duplicating the CLI rotate engine</td>
+<td><code>agents view --json</code> (input) — CLI should expose the rollup</td>
+<td>NEEDS-CLI</td>
+<td>low — consumes canonical JSON</td>
+</tr>
+<tr>
+<td>22</td>
+<td><code>resumeInBest.ts:26</code> <code>sessionUsedPercent</code></td>
+<td>per-window usage extraction</td>
+<td><code>agents view --json</code> window field (passthrough)</td>
+<td>KEEP</td>
+<td>low — trivial field read</td>
+</tr>
+</tbody></table>
+<h3 id="f-session-identity-label-hydration-rush-3184-debt">F. Session identity / label hydration (RUSH-3184 debt)</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>23</td>
+<td><code>remoteSessions.vscode.ts:228</code> <code>fetchSessionIdentity</code> + <code>extension.ts:4068</code> <code>tryHydrateSessionIdentity</code> (calls <code>:4163</code>, <code>:4308</code>)</td>
+<td>per-tab <code>agents sessions &lt;id&gt; --json</code> spawn loop to get version/account</td>
+<td><code>account</code>/<code>version</code> on the <code>SessionWatchRow</code> stream (RUSH-3184)</td>
+<td>NEEDS-CLI (in flight)</td>
+<td>med — flagged debt</td>
+</tr>
+<tr>
+<td>24</td>
+<td><code>remoteSessions.vscode.ts:199</code> <code>fetchRemoteSessionLabelSource</code> + <code>remoteSessions.ts:954</code> <code>parseSessionLabelSource</code> + <code>:980</code> <code>topicFromUserEvents</code> + <code>:1055</code> <code>isDerivedSessionName</code></td>
+<td>per-tab spawn + event parse to get label/topic</td>
+<td><code>label</code>/<code>topic</code> <strong>already on the stream</strong></td>
+<td>DELETE-NOW</td>
+<td>med — AGENTS.md says "DELETE now"</td>
+</tr>
+<tr>
+<td>25</td>
+<td><code>remoteSessions.ts:1016</code> <code>parseSessionIdentity</code> + <code>:995</code> <code>SessionIdentity</code></td>
+<td>parse version/account/agent from session JSON</td>
+<td>same stream fields as #23</td>
+<td>NEEDS-CLI (in flight)</td>
+<td>low — parser feeding #23</td>
+</tr>
+<tr>
+<td>26</td>
+<td><code>floorModel.ts:617</code> <code>sessionKey</code></td>
+<td>canonical session-identity derivation across origins</td>
+<td>CLI canonical session id on every origin row</td>
+<td>NEEDS-CLI</td>
+<td>med — keying across surfaces</td>
+</tr>
+</tbody></table>
+<h3 id="g-transcript-tool-call-parsing-forbidden">G. Transcript / tool-call parsing (forbidden)</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>27</td>
+<td><code>floorModel.ts:703</code> <code>latestTodos</code> (+ <code>:688</code> <code>ToolCallLike</code>)</td>
+<td>parses raw <code>TodoWrite</code> tool calls into a checklist</td>
+<td><code>ActiveSession.todos</code> already on stream (RUSH-1380/1503; <code>todoProgressFromCli</code> already consumes it)</td>
+<td>DELETE-NOW</td>
+<td>med — wired at <code>floorAdapter.ts:43</code></td>
+</tr>
+<tr>
+<td>28</td>
+<td><code>floorModel.ts:738</code> <code>parseStructuredQuestion</code> + <code>:769</code> <code>structuredQuestionFromToolCalls</code> + <code>:848</code> <code>extractChoiceOptions</code> (+ helpers)</td>
+<td>regex/tool-call <strong>question extraction</strong> — the FALLBACK when the CLI question is absent</td>
+<td><code>ActiveSession.question</code> (already consumed by <code>structuredQuestionFromRemote</code>)</td>
+<td>DELETE-NOW</td>
+<td>med — remove the fallback branch</td>
+</tr>
+<tr>
+<td>29</td>
+<td><code>session.activity.ts</code> <code>parseLineForActivity</code>/<code>formatActivity</code></td>
+<td>per-line JSONL transcript parser for the panel activity feed</td>
+<td>CLI <code>recentEvents</code>/<code>preview</code> on stream (whole-transcript derivations already deleted, #741/RUSH-1503)</td>
+<td>NEEDS-CLI</td>
+<td>med — panel feed</td>
+</tr>
+<tr>
+<td>30</td>
+<td><code>monitor/sessionParse.ts</code> — head-metadata transcript parser (<code>forkedFromId</code>/<code>codexCwd</code>/<code>geminiSessionId</code>/opencode)</td>
+<td>raw <code>~/.claude/projects</code> + rollout transcript parsing</td>
+<td>CLI-provided fields (AGENTS.md debt)</td>
+<td>NEEDS-CLI</td>
+<td>high — feeds correlation</td>
+</tr>
+<tr>
+<td>31</td>
+<td><code>monitor/readinessDetector.ts</code> + <code>monitor/probes.ts</code> (<code>ps</code>/<code>pgrep</code>) + <code>terminalReadiness.ts</code> recursive <code>fs.watch</code></td>
+<td>ext-invented lifecycle/readiness classifier + transcript watcher</td>
+<td>daemon readiness signal on stream</td>
+<td>IN-PROGRESS (readinessDetector) / NEEDS-CLI (watcher)</td>
+<td>high — leader/follower path</td>
+</tr>
+</tbody></table>
+<h3 id="h-panel-snapshot">H. Panel snapshot</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Duplicates</th>
+<th>Canonical CLI source</th>
+<th>Fix</th>
+<th>Risk</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>32</td>
+<td><code>agentPanel.vscode.ts:351</code>/<code>:395</code> <code>buildSnapshot</code> (4s poll)</td>
+<td>re-parses transcripts + spawns <code>agents sessions --include tools</code> per tick</td>
+<td>bind to stream fields; <code>toolCallCount</code> on stream (AGENTS.md debt)</td>
+<td>NEEDS-CLI</td>
+<td>med — one panel</td>
+</tr>
+</tbody></table>
+<h3 id="borderline-lower-priority">Borderline / lower-priority</h3><table>
+<thead>
+<tr>
+<th>#</th>
+<th>file:line — symbol</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>33</td>
+<td><code>floorModel.ts:894</code> <code>outcomeLabel</code></td>
+<td>mirrors CLI <code>deriveOutcome</code>; grouping key. KEEP as presentation <em>iff</em> it stays byte-identical to the CLI, else fold to a CLI-provided <code>outcome</code> field.</td>
+</tr>
+<tr>
+<td>34</td>
+<td><code>peerMessaging.ts:26</code> <code>resolvePeerMessage</code></td>
+<td><code>send_to_agent</code> MCP recipient resolution over the ext's own terminal registry. Borderline "messaging" — plausibly ext-owned (routes to a local tab), but revisit if the CLI grows session→session messaging.</td>
+</tr>
+</tbody></table>
+<hr />
+<h2 id="fallback-paths-thesis-forbids-compute-locally-if-cli-unavailable">Fallback paths (thesis forbids "compute locally if CLI unavailable")</h2><ol>
+<li><code>floorModel.ts:738</code> question heuristics — the documented fallback for <code>question === null</code>
+(see <code>remoteSessions.ts:189-191</code> "the UI then falls back to parsing lastResponse").</li>
+<li><code>remoteSessions.ts:459-461</code> <code>normalizeQuestion</code> returns null → "webview falls back to
+parsing lastResponse" — the same fallback contract, stated at the boundary.</li>
+<li><code>deviceAutoLaunch.ts:35-43</code> — corruption of a device/fleet config degrades to
+"every device enabled, uncapped" defaults.</li>
+<li><code>agentInventory.ts:116-125</code> <code>loadAgentsConfig</code> <code>catch → {}</code> — a bad <code>agents.yaml</code>
+silently reads as "no config".</li>
+<li><code>remoteSessions.vscode.ts:173-178</code> <code>fetchRecentForHost</code> — an older CLI's non-JSON
+banner is swallowed to an empty list (degrade rather than fail-loud upgrade error).</li>
+<li><code>dispatchRanking.ts:107</code> <code>deriveHostLoad(cpuRatio=null)</code> — derives load from agent
+count alone when the probe fails (dead code, but the pattern).</li>
+</ol>
+<hr />
+<h2 id="recommended-deletion-order-safest-first-grouped-by-concept">Recommended deletion order (safest first, grouped by concept)</h2><p><strong>Phase 0 — dead code, zero risk (do immediately).</strong> No callers; already superseded by
+CLI JSON. Pure subtractions.</p>
+<ul>
+<li>#13 <code>deriveHostLoad</code>, #14 <code>parseRemoteCpuRatio</code> (<code>dispatchRanking.ts</code>)</li>
+<li>#17 <code>parseUptime</code>/<code>parseVmStat</code>/<code>parseLinuxMemInfo</code> (<code>deviceHealth.ts</code>)</li>
+</ul>
+<p><strong>Phase 1 — delete-now, CLI field already ships.</strong> Stop re-deriving; consume the stream.</p>
+<ul>
+<li>#24 <code>fetchRemoteSessionLabelSource</code> + label parsers (label/topic already on stream)</li>
+<li>#27 <code>latestTodos</code> (consume <code>ActiveSession.todos</code>; <code>todoProgressFromCli</code> is the pattern)</li>
+<li>#28 question heuristics — remove the fallback, rely on <code>ActiveSession.question</code></li>
+<li>#6 <code>mapStatusToPhase</code> — once the ext reads a CLI-projected <code>phase</code></li>
+</ul>
+<p><strong>Phase 2 — let PHNX-2975 land, then extend it.</strong> #1–#4 are in flight; fold in #5
+<code>heartbeatLevel</code> and #4's <code>sortAgents</code> consumers so the whole floorModel classifier block
+goes together rather than leaving an orphan half.</p>
+<p><strong>Phase 3 — raw-config readers (need a CLI verb first).</strong> Highest architectural value; each
+removes a filesystem-coupling + a fallback band-aid.</p>
+<ul>
+<li>#19 <code>deviceAutoLaunch.ts</code> → <code>agents devices config &lt;name&gt; --json</code></li>
+<li>#20 <code>agentInventory.ts</code> run-strategy read/write → CLI run-config verb</li>
+<li>#21 <code>summarizeAgentInventory</code> rollup → CLI-exposed rollup</li>
+</ul>
+<p><strong>Phase 4 — needs a new CLI verb (resume candidates).</strong></p>
+<ul>
+<li>#10, #11 <code>resumePicker.ts</code> → <code>agents sessions resume --candidates --json</code></li>
+</ul>
+<p><strong>Phase 5 — stream-projection additions (identity, staleness, dedup, readiness).</strong> Highest
+blast radius; land the CLI field, then delete.</p>
+<ul>
+<li>#23/#25/#26 identity on stream (RUSH-3184 in flight)</li>
+<li>#7 dedup + #8 staleness → one-row-per-session, not-stale, on the stream</li>
+<li>#29/#30/#31/#32 activity/readiness/tool-count → daemon signals on the stream</li>
+</ul>
+<hr />
+<h2 id="top-3-highest-value-deletions">Top 3 highest-value deletions</h2><ol>
+<li><p><strong>The <code>floorModel.ts</code> client-side classifier + parser block</strong> — <code>derivePhase</code>,
+<code>deriveNeeds</code>, <code>deriveStalled</code>/<code>STALL_THRESHOLD_MS</code>, <code>PHASE_RANK</code>, <code>heartbeatLevel</code>,
+plus <code>parseStructuredQuestion</code>/<code>structuredQuestionFromToolCalls</code> and <code>latestTodos</code>.
+This is the heart of the thesis violation: the webview re-decides lifecycle, attention,
+stall, question, and checklist. PHNX-2975 already removes the first four; the CLI
+<strong>already ships</strong> <code>question</code> and <code>todos</code> on the stream, so the parsers and
+<code>heartbeatLevel</code> are a straightforward same-epic extension, not new CLI work.</p>
+</li>
+<li><p><strong>The <code>remoteSessions.ts</code> lifecycle cluster</strong> — <code>mapStatusToPhase</code> + <code>dedupeSessions</code></p>
+<ul>
+<li><code>isStaleSession</code>/<code>filterStaleSessions</code>. The ext independently decides which sessions
+are alive, which are the same session, and which are too old to show — logic that
+<code>sessions.db</code> and the pid→session registry own. It drives fleet-wide counts and the
+needs-you set, so correctness (and the "count vs list diverge" bug the dedup exists to
+paper over) belongs at the source. Fix = CLI emits canonical <code>phase</code>, one row per
+session, and drops/flags stale rows; then delete ~120 lines.</li>
+</ul>
+</li>
+<li><p><strong>The raw agents-config readers/writers</strong> — <code>deviceAutoLaunch.ts</code> (whole file) and
+<code>agentInventory.ts</code> <code>loadAgentsConfig</code>/<code>readAgentRunStrategy</code>/<code>writeAgentRunStrategy</code>.
+These read <strong>and write</strong> <code>~/.agents/agents.yaml</code> and per-device docs directly — exactly
+the "raw agents-config reader" AGENTS.md rule 3 forbids — with corruption-to-defaults
+fallbacks. The ext writing config the CLI is supposed to own is the sharpest ownership
+inversion in the tree. Fix = <code>agents devices config --json</code> + a run-config verb; the
+deletion removes both the filesystem coupling and two fallback band-aids.</p>
+</li>
+</ol>
+<hr />
+<h2 id="evidence">Evidence</h2><p>Method: full read of <code>phnx-labs/agi-ext</code> @ <code>main</code> (<code>b5d3494</code>) — <code>AGENTS.md</code> + <code>docs/</code>
+(the thin-client thesis, <code>session-projection.md</code>), then a tree sweep for the tell-tales
+(<code>derive*</code>, <code>classify*</code>, <code>THRESHOLD</code>/<code>_MS</code>, <code>ps</code>/<code>pgrep</code>, <code>readiness</code>, raw <code>agents.yaml</code>
+reads, local ranking/sort). Every row is grounded in a read of the cited file at the
+cited line; classification against the canonical CLI surface uses the field names the CLI
+already emits on <code>agents sessions watch --json</code> (<code>activity</code>, <code>status</code>, <code>question</code>,
+<code>todos</code>, <code>pidAlive</code>, <code>viewingIn</code>, <code>machine</code>, <code>preview</code>, <code>tokPerSec</code>) as documented in the
+<code>RawActiveSession</code> shape in <code>src/core/remoteSessions.ts:315-407</code>.</p>
+<p>Key grounding points:</p>
+<ul>
+<li><strong>Dead code confirmed by caller search</strong> (<code>grep</code> for each symbol across <code>src/</code> + <code>ui/</code>,
+excluding definitions/tests): <code>deriveHostLoad</code>, <code>parseRemoteCpuRatio</code>
+(<code>dispatchRanking.ts</code>) and <code>parseUptime</code>/<code>parseVmStat</code>/<code>parseLinuxMemInfo</code>
+(<code>deviceHealth.ts</code>) have <strong>zero</strong> non-test callers — device health now flows through
+<code>agents devices status --json</code> in <code>deviceHealth.vscode.ts:139,166,194</code>.</li>
+<li><strong>CLI field already ships</strong> for the delete-now parsers: <code>ActiveSession.question</code> is
+consumed at <code>floorModel.ts:818</code> (<code>structuredQuestionFromRemote</code>) yet the heuristic
+<code>parseStructuredQuestion</code>/<code>structuredQuestionFromToolCalls</code> remain as the
+<code>question === null</code> fallback (<code>remoteSessions.ts:189-191</code>); <code>ActiveSession.todos</code> is
+consumed at <code>session.activity.ts:62</code> (<code>todoProgressFromCli</code>) yet <code>latestTodos</code>
+re-parses raw <code>TodoWrite</code> calls (wired at <code>floorAdapter.ts:43</code>).</li>
+<li><strong>Raw-config reader/writer</strong> confirmed by direct <code>fs.readFileSync</code>/<code>fs.writeFileSync</code>
+of <code>~/.agents/agents.yaml</code> and <code>devices/&lt;name&gt;/agents.yaml</code> in <code>agentInventory.ts:116-143</code>
+and <code>deviceAutoLaunch.ts:46-101</code> — the "raw agents-config reader" forbidden by the
+agi-ext <code>AGENTS.md</code> architecture rule 3.</li>
+<li><strong>Already-compliant reference</strong> for the target shape: <code>watchdog.vscode.ts</code> holds no
+loop — it shells <code>agents watchdog enable|disable</code> and reads the daemon's
+<code>watchdog.log</code> (<code>core/watchdogLog.ts</code>); <code>resumeInBest.ts</code> builds <code>agents run auto</code>
+command strings and delegates host/harness/account picking to the CLI (RUSH-2132).</li>
+</ul>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogIlBITlgtMjQ4NCDigJQgQUdJIEVYVCB6ZXJvLWR1cGxpY2F0aW9uIGF1ZGl0IChmdWxsLXRyZWUpIgpzdW1tYXJ5OiAiRnVsbC10cmVlIGF1ZGl0IG9mIHBobngtbGFicy9hZ2ktZXh0OiAzNCBzaXRlcyB3aGVyZSB0aGUgZXh0ZW5zaW9uIHJlLWltcGxlbWVudHMgb3IgcmUtZGVyaXZlcyBhZ2VudHMtY2xpIGxvZ2ljIGluc3RlYWQgb2YgY29uc3VtaW5nIGNhbm9uaWNhbCBDTEkgSlNPTi92ZXJicywgc3BsaXQgaW50byBkZWxldGUtbm93IC8gbmVlZHMtQ0xJLWFkZGl0aW9uIC8gaW4tcHJvZ3Jlc3MsIHdpdGggYSBwaGFzZWQgZGVsZXRpb24gb3JkZXIuIgpsaW5rczoKICAtICJodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9pc3N1ZS9QSE5YLTI0ODQiCi0tLQoKIyBQSE5YLTI0ODQg4oCUIEFHSSBFWFQgemVyby1kdXBsaWNhdGlvbiBhdWRpdCAoZnVsbC10cmVlKQoKKipSZXBvIGF1ZGl0ZWQ6KiogYHBobngtbGFicy9hZ2ktZXh0YCBAIGBtYWluYCAoYGI1ZDM0OTRgKQoqKkRhdGU6KiogMjAyNi0wOC0yOAoqKlNjb3BlOioqIGV2ZXJ5IHBsYWNlIHRoZSBleHRlbnNpb24gKnJlLWltcGxlbWVudHMqIG9yICpyZS1kZXJpdmVzKiBhZ2VudHMtY2xpIGxvZ2ljCmluc3RlYWQgb2YgY29uc3VtaW5nIGNhbm9uaWNhbCBDTEkgSlNPTi92ZXJicywgcGVyIHRoZSB0aWNrZXQgKyB0aGUgYWdpLWV4dApgQUdFTlRTLm1kYCAib25lIGFyY2hpdGVjdHVyZSBydWxlIOKAlCB0aGluIGNsaWVudCwgc2luZ2xlIHN0cmVhbSIuCgo+IFRoZSBydWxlOiB0aGUgZXh0ZW5zaW9uIG1heSBvd24gKipvbmx5KiogVlMgQ29kZSBVSSwgd2Vidmlld3MsIHRlcm1pbmFsL3RhYi9mb2N1cwo+IEFQSXMsIGFuZCBwcmVzZW50YXRpb24gZm9ybWF0dGluZy4gU2Vzc2lvbiBsaWZlY3ljbGUsIHJlc3VtZSBjYW5kaWRhdGVzICYgb3JkZXJpbmcsCj4gc2Vzc2lvbiBzdGF0ZS9oaXN0b3J5LCB1c2FnZS9hY2NvdW50IGhlYWx0aCwgZGV2aWNlIGhlYWx0aC9jb25maWcsIHBsYWNlbWVudC9sb2FkCj4gYmFsYW5jaW5nLCBkaXNwYXRjaCwgbWVzc2FnaW5nLCBjYXBhYmlsaXR5IGRpc2NvdmVyeSwgd2F0Y2hkb2csIGFuZCByb3V0aW5lcyBNVVNUIGJlCj4gc291cmNlZCBmcm9tIGNhbm9uaWNhbCBhZ2VudHMtY2xpIEpTT04vdmVyYnMgd2l0aCAqKm5vIGV4dGVuc2lvbiBmYWxsYmFjayBvciBtaXJyb3JlZAo+IGltcGxlbWVudGF0aW9uKiouCgojIyBTdW1tYXJ5CgotICoqMzQgZHVwbGljYXRpb24gc2l0ZXMqKiBhY3Jvc3MgKio4IENMSSBjb25jZXB0cyoqIChsaWZlY3ljbGUsIHJlc3VtZSwgcGxhY2VtZW50LAogIGRldmljZSBoZWFsdGgvY29uZmlnLCB1c2FnZS9hY2NvdW50LCBpZGVudGl0eS9oeWRyYXRpb24sIHRyYW5zY3JpcHQvdG9vbCBwYXJzaW5nLAogIHBhbmVsIHNuYXBzaG90KS4KLSBGaXggc3BsaXQ6CiAgLSAqKkRFTEVURS1OT1cg4oCUIDExIHNpdGVzLioqIERlYWQgY29kZSAocHJvYmUgcGFyc2VycyB3aXRoIHplcm8gY2FsbGVycykgb3IgdGhlCiAgICBjYW5vbmljYWwgQ0xJIGZpZWxkIGFscmVhZHkgc2hpcHMgb24gdGhlIHN0cmVhbSwgc28gdGhlIGV4dCBqdXN0IHN0b3BzIHJlLWRlcml2aW5nLgogIC0gKipORUVEUy1DTEktQURESVRJT04g4oCUIDE0IHNpdGVzLioqIFRoZSByZWFsIGZpeCBpcyBhIENMSSBmaWVsZC92ZXJiIChvbmUtcm93LXBlci1zZXNzaW9uCiAgICBvbiB0aGUgc3RyZWFtLCBhIGByZXN1bWUgLS1jYW5kaWRhdGVzYCB2ZXJiLCBgZGV2aWNlcyBjb25maWcgLS1qc29uYCwgaWRlbnRpdHkgb24gdGhlCiAgICBzdHJlYW0pLiBUaGUgZXh0IGNvZGUgZGVsZXRlcyAqYWZ0ZXIqIHRoZSBDTEkgZ3Jvd3MgdGhlIHN1cmZhY2UuIFRoaXMgaXMgdGhlIHRoZXNpczoKICAgICJpZiBhIGZpZWxkIGlzIG1pc3NpbmcsIGFkZCBpdCB0byB0aGUgQ0xJLCBkb24ndCBzaWRlLWNoYW5uZWwgaXQgaGVyZS4iCiAgLSAqKklOLVBST0dSRVNTIOKAlCA1IHNpdGVzLioqIFBITlgtMjk3NSBpcyBhbHJlYWR5IGRlbGV0aW5nIHRoZSBjbGllbnQtc2lkZQogICAgYXR0ZW50aW9uL3N0YWxsIGNsYXNzaWZpZXIgKGBkZXJpdmVQaGFzZWAgLyBgZGVyaXZlU3RhbGxlZGAgLyBgZGVyaXZlTmVlZHNgIC8KICAgIGBQSEFTRV9SQU5LYCArIGByZWFkaW5lc3NEZXRlY3Rvci50c2ApLiBMaXN0ZWQgZm9yIGNvbXBsZXRlbmVzcywgKipub3QqKiB0byBiZQogICAgZG91YmxlLWNvdW50ZWQuCiAgLSAqKjQgcmVzaWR1YWwgcHJlc2VudGF0aW9uL2JvcmRlcmxpbmUgc2l0ZXMqKiBrZXB0IGFzIGxlZ2l0aW1hdGVseSBleHQtb3duZWQgZGlzcGxheQogICAgZm9ybWF0dGluZyAoY2FsbGVkIG91dCBzbyB0aGUgZGVsZXRpb24gcGFzcyBkb2VzIG5vdCBvdmVyLXJlYWNoKS4KLSAqKjYgZXhwbGljaXQgRkFMTEJBQ0sgcGF0aHMqKiAodGhlc2lzIGZvcmJpZHMgImlmIENMSSB1bmF2YWlsYWJsZSwgY29tcHV0ZSBsb2NhbGx5Iik6CiAgdGhlIGZsb29yTW9kZWwgcXVlc3Rpb24gaGV1cmlzdGljcyBiZWhpbmQgYHF1ZXN0aW9uID09PSBudWxsYCwgdGhlCiAgYG5vcm1hbGl6ZUFjdGl2ZVNlc3Npb25gICJmYWxsIGJhY2sgdG8gcGFyc2luZyBsYXN0UmVzcG9uc2UiIGNvbnRyYWN0LCBhbmQgdGhlCiAgY29ycnVwdGlvbi10by1kZWZhdWx0cyBkZWdyYWRlcyBpbiBgZGV2aWNlQXV0b0xhdW5jaC50c2AgYW5kIGBhZ2VudEludmVudG9yeS50c2AuCi0gKipBbHJlYWR5IGNvbXBsaWFudCAobm8gYWN0aW9uKToqKiBgd2F0Y2hkb2cudnNjb2RlLnRzYCAocHVyZSBDTEktZGFlbW9uIGRlbGVnYXRpb24gKwogIG9uZS10aW1lIHNldHRpbmdzIG1pZ3JhdGlvbiDigJQgdGhlIHJlZmVyZW5jZSBwYXR0ZXJuKSwgYHJlc3VtZUluQmVzdC50c2AgY29tbWFuZAogIGJ1aWxkZXJzIChkZWxlZ2F0ZSBob3N0L2hhcm5lc3MvYWNjb3VudCBwaWNraW5nIHRvIGBhZ2VudHMgcnVuIGF1dG9gLCBSVVNILTIxMzIpLAogIGBzZXNzaW9uUHJlc2VudGF0aW9uU3RvcmUudHNgIChwdXJlIHByb2plY3Rpb24gb2YgdGhlIHN0cmVhbSkuCgpUaGUgc2luZ2xlIGxhcmdlc3QgdmlvbGF0aW9uIGlzIGNvbmNlbnRyYXRlZCBpbiB0aHJlZSBmaWxlcyDigJQKYHVpL3NldHRpbmdzL2NvbXBvbmVudHMvbWlzc2lvbi1jb250cm9sL2Zsb29yTW9kZWwudHNgLCBgc3JjL2NvcmUvcmVtb3RlU2Vzc2lvbnMudHNgLAphbmQgdGhlIHJhdy1jb25maWcgcmVhZGVycyAoYHNyYy9jb3JlL2RldmljZUF1dG9MYXVuY2gudHNgLCBgc3JjL2NvcmUvYWdlbnRJbnZlbnRvcnkudHNgKS4KRml4IHRob3NlIGFuZCByb3VnaGx5IHR3by10aGlyZHMgb2YgdGhlIHN1cmZhY2UgY29sbGFwc2VzLgoKLS0tCgojIyBGaW5kaW5ncwoKTGVnZW5kIOKAlCAqKkZpeCoqOiBgREVMRVRFLU5PV2AgwrcgYE5FRURTLUNMSWAgwrcgYElOLVBST0dSRVNTYCAoUEhOWC0yOTc1KSDCtyBgS0VFUGAgKGxlZ2l0IHByZXNlbnRhdGlvbikuCioqUmlzayoqOiBob3cgZW50YW5nbGVkIHRoZSBkZWxldGlvbiBpcyAoY2FsbGVycyAvIGJsYXN0IHJhZGl1cykuCgojIyMgQS4gU2Vzc2lvbiBsaWZlY3ljbGUgLyBwaGFzZSBjbGFzc2lmaWNhdGlvbgoKfCAjIHwgZmlsZTpsaW5lIOKAlCBzeW1ib2wgfCBEdXBsaWNhdGVzIHwgQ2Fub25pY2FsIENMSSBzb3VyY2UgfCBGaXggfCBSaXNrIHwKfC0tLXwtLS18LS0tfC0tLXwtLS18LS0tfAp8IDEgfCBgZmxvb3JNb2RlbC50czo2MzJgIGBkZXJpdmVQaGFzZWAgfCBsaWZlY3ljbGUgY2xhc3NpZmllciAoc3RhdHVzK2FjdGl2ZSt3YWl0aW5nK3ByVW5yZXZpZXdlZCDihpIgRmxvb3JQaGFzZSkgfCBgQWN0aXZlU2Vzc2lvbi5hY3Rpdml0eWAvYHN0YXR1c2Agb24gYHNlc3Npb25zIHdhdGNoIC0tanNvbmAgfCBJTi1QUk9HUkVTUyB8IGhpZ2gg4oCUIHdpcmVkIGF0IGBmbG9vckFkYXB0ZXIudHM6NDg1YCB8CnwgMiB8IGBmbG9vck1vZGVsLnRzOjY1OWAgYGRlcml2ZU5lZWRzYCB8IGF0dGVudGlvbiBjbGFzc2lmaWNhdGlvbiAobmVlZHMteW91KSB8IENMSSBhdHRlbnRpb24gcm93cyAvIGBhY3Rpdml0eT09PSd3YWl0aW5nX2lucHV0J2AgfCBJTi1QUk9HUkVTUyB8IGhpZ2ggfAp8IDMgfCBgZmxvb3JNb2RlbC50czo2NzRgIGBkZXJpdmVTdGFsbGVkYCArIGA6NDk3YCBgU1RBTExfVEhSRVNIT0xEX01TYCB8IHdhdGNoZG9nL3N0YWxsIGNsYXNzaWZpZXIgKDkwcyB0aHJlc2hvbGQpIHwgQ0xJIGRhZW1vbiB3YXRjaGRvZyBzdGFsbCBzaWduYWwgKG1pc3Npbmcgb24gc3RyZWFtKSB8IElOLVBST0dSRVNTIHwgbWVkIHwKfCA0IHwgYGZsb29yTW9kZWwudHM6NDg3YCBgUEhBU0VfUkFOS2AgfCBhdHRlbnRpb24vcHJvZ3Jlc3Mgb3JkZXJpbmcgfCBDTEkgZmVlZCBvcmRlcmluZyAoYGRlcml2ZU91dGNvbWVgL2F0dGVudGlvbiByYW5rKSB8IElOLVBST0dSRVNTIHwgaGlnaCDigJQgdXNlZCBieSBgc29ydEFnZW50c2AgfAp8IDUgfCBgZmxvb3JNb2RlbC50czo2ODJgIGBoZWFydGJlYXRMZXZlbGAgfCBzdGFsbCBzZXZlcml0eSAobGl2ZS9zdGFsZS9kZWFkIGZyb20gc2lsZW5jZSBhZ2UpIHwgc2FtZSBkYWVtb24gc3RhbGwgc2lnbmFsIGFzICMzIHwgTkVFRFMtQ0xJIHwgbWVkIOKAlCBzYW1lIHNlYW0gYXMgIzMsIG5vdCBpbiB0aGUgMjk3NSBsaXN0IHwKfCA2IHwgYHJlbW90ZVNlc3Npb25zLnRzOjUyMmAgYG1hcFN0YXR1c1RvUGhhc2VgIHwgbGlmZWN5Y2xlIGNsYXNzaWZpZXIgKENMSSBzdGF0dXMgd29yZCDihpIgcGhhc2UpIHwgQ0xJIHNob3VsZCBwcm9qZWN0IGNhbm9uaWNhbCBgcGhhc2VgIG9uY2UgfCBORUVEUy1DTEkgfCBoaWdoIOKAlCBmZWVkcyBldmVyeSBub3JtYWxpemVkIHJvdyB8CnwgNyB8IGByZW1vdGVTZXNzaW9ucy50czo3OTlgIGBkZWR1cGVTZXNzaW9uc2AgKyBgOjc3OGAgYERFRFVQRV9QSEFTRV9SQU5LYCB8IHNlc3Npb24gaWRlbnRpdHkgZGVkdXAgKG1hbnkgcGlkcyDihpIgb25lIHNlc3Npb24pICsgYXR0ZW50aW9uIHBpY2sgfCBgc2Vzc2lvbnMuZGJgL3BpZOKGknNlc3Npb24gcmVnaXN0cnkg4oCUIGVtaXQgb25lIHJvdyBwZXIgc2Vzc2lvbiB8IE5FRURTLUNMSSB8IGhpZ2gg4oCUIGhlYWRlciBjb3VudHMgdnMgZmVlZCBkZXBlbmQgb24gaXQgfAp8IDggfCBgcmVtb3RlU2Vzc2lvbnMudHM6ODQxYCBgaXNTdGFsZVNlc3Npb25gICsgYDo4NTVgIGBmaWx0ZXJTdGFsZVNlc3Npb25zYCArIGA6ODMxYCBgc2Vzc2lvbkxhc3RBY3Rpdml0eU1zYCArIGA6ODIxYCBgU1RBTEVfU0VTU0lPTl9USFJFU0hPTERfTVNgIHwgbGl2ZW5lc3Mvc3RhbGVuZXNzIGRlY2lzaW9uICg2aCB0aHJlc2hvbGQpIHwgQ0xJIHNob3VsZCBub3QgZW1pdCAob3Igc2hvdWxkIGZsYWcpIHN0YWxlIHNlc3Npb25zIHwgTkVFRFMtQ0xJIHwgaGlnaCDigJQgZ2F0ZXMgY291bnRzICsgbmVlZHMteW91IGZsZWV0LXdpZGUgfAp8IDkgfCBgZm9yZW1hbi5kaWdlc3QudHM6MTAzYCBgZGVyaXZlU3RhdHVzYCB8IGlkbGUvd29ya2luZy93YWl0aW5nL2Jsb2NrZWQgbGlmZWN5Y2xlIGNsYXNzaWZpZXIgKGZvciB0aGUgdm9pY2UgZGlnZXN0KSB8IGNvbnN1bWUgQ0xJIGBwaGFzZWAvYGFjdGl2aXR5YCBpbnN0ZWFkIG9mIHJlLWRlcml2aW5nIGZyb20gYHN0YXJ0ZWRBdE1zYCtsYXN0LXRvb2wgfCBORUVEUy1DTEkgfCBsb3cg4oCUIGZvcmVtYW4tb25seSB8CgojIyMgQi4gUmVzdW1lIGNhbmRpZGF0ZXMgJiBvcmRlcmluZwoKfCAjIHwgZmlsZTpsaW5lIOKAlCBzeW1ib2wgfCBEdXBsaWNhdGVzIHwgQ2Fub25pY2FsIENMSSBzb3VyY2UgfCBGaXggfCBSaXNrIHwKfC0tLXwtLS18LS0tfC0tLXwtLS18LS0tfAp8IDEwIHwgYHJlc3VtZVBpY2tlci50czoxMjJgIGBjbGFzc2lmeVJlc3VtZVN0YXRlYCArIGA6MzNgIGBTVEFURV9SQU5LYCB8IHJlc3VtZS1zdGF0ZSBjbGFzc2lmaWVyIChkZXRhY2hlZC9iYWNrZ3JvdW5kL3BhcmtlZC9pZGxlL3dhdGNoZWQpICsgb3JkZXJpbmcgfCAqKm1pc3NpbmcqKiDigJQgbm8gYHJlc3VtZSAtLWNhbmRpZGF0ZXNgIHZlcmI7IGV4dCBqb2lucyB0d28gcmVhZHMgYnkgaGFuZCB8IE5FRURTLUNMSSB8IG1lZCB8CnwgMTEgfCBgcmVzdW1lUGlja2VyLnRzOjE3MWAgYGJ1aWxkUmVzdW1lQ2FuZGlkYXRlc2AgKyBgOjIzMWAgYHNvcnRSZXN1bWVDYW5kaWRhdGVzYCArIGA6MjQ3YCBgYWJhbmRvbmVkQ2FuZGlkYXRlc2AgKyBgOjEwM2AgYGluZGV4TGl2ZWAgfCByZXN1bWUgY2FuZGlkYXRlIHNlbGVjdGlvbi9qb2luL29yZGVyaW5nIHwgKiptaXNzaW5nIENMSSB2ZXJiKiog4oCUIGBhZ2VudHMgc2Vzc2lvbnMgcmVzdW1lIC0tY2FuZGlkYXRlcyAtLWpzb25gIHwgTkVFRFMtQ0xJIHwgbWVkIOKAlCBzZWxmLWNvbnRhaW5lZCBtb2R1bGUgfAp8IDEyIHwgYHJlc3VtZVBpY2tlci50czozMDNgIGBzaGFyZWRUb3BpY1ByZWZpeGVzYCArIGA6MzQyYCBgc3RyaXBTaGFyZWRQcmVmaXhgICsgYDozNzFgIGBkaXN0aW5jdGl2ZVRvcGljYCB8IGJvaWxlcnBsYXRlLXByZWZpeCBzdHJpcHBpbmcgZm9yIHRoZSBwaWNrZXIgbGFiZWwgfCDigJQgKGRpc3BsYXkgZm9ybWF0dGluZykgfCBLRUVQIHwg4oCUIHwKCiMjIyBDLiBQbGFjZW1lbnQgLyBsb2FkLWJhbGFuY2luZyAvIGRpc3BhdGNoIChwbGFjZW1lbnQgYWxyZWFkeSBkZWxlZ2F0ZWQg4oCUIFBITlgtMjA5MikKCnwgIyB8IGZpbGU6bGluZSDigJQgc3ltYm9sIHwgRHVwbGljYXRlcyB8IENhbm9uaWNhbCBDTEkgc291cmNlIHwgRml4IHwgUmlzayB8CnwtLS18LS0tfC0tLXwtLS18LS0tfC0tLXwKfCAxMyB8IGBkaXNwYXRjaFJhbmtpbmcudHM6MTA3YCBgZGVyaXZlSG9zdExvYWRgIHwgcGxhY2VtZW50L2xvYWQtYnVja2V0IGNsYXNzaWZpZXIgKHRocmVzaG9sZHMpIHwgYGFnZW50cyBydW4gYXV0b2AgcGxhY2VtZW50IChQSE5YLTIwOTIpIHwgREVMRVRFLU5PVyB8ICoqbm9uZSDigJQgemVybyBjYWxsZXJzIChkZWFkKSoqIHwKfCAxNCB8IGBkaXNwYXRjaFJhbmtpbmcudHM6MTIzYCBgcGFyc2VSZW1vdGVDcHVSYXRpb2AgfCBTU0ggYHVwdGltZWAgQ1BVLXJhdGlvIHBhcnNlIChkZXZpY2UgcHJvYmUpIHwgYGFnZW50cyBkZXZpY2VzIHN0YXR1cyAtLWpzb25gIHwgREVMRVRFLU5PVyB8ICoqbm9uZSDigJQgemVybyBjYWxsZXJzIChkZWFkKSoqIHwKfCAxNSB8IGBkaXNwYXRjaFJhbmtpbmcudHM6MTUwYCBgYnVpbGREaXNwYXRjaEhvc3RzYCArIGA6MTg0YCBgcmFua1RhcmdldHNgICsgYDoyMTZgIGBidWlsZE1hbmFnZWRUYXJnZXRzYCArIGA6MjQzYCBgcmFua0hvc3RVc2VzYCB8IGRpc3BhdGNoIHRhcmdldC9ob3N0IHJhbmtpbmcgKHBsYWNlbWVudCkgfCBDTEkgcGxhY2VtZW50IC8gYHJ1biBhdXRvYCB0YXJnZXQgcmVzb2x1dGlvbiB8IE5FRURTLUNMSSB8IG1lZCDigJQgRGlzcGF0Y2ggcGFuZWwgfAp8IDE2IHwgYGRpc3BhdGNoUmFua2luZy50czo3NGAgYG1hcEludmVudG9yaWVzVG9JbnN0YWxsZWRBZ2VudHNgICgrIGA6NTZgIGBBR0VOVF9NRVRBYCkgfCBjYXBhYmlsaXR5IGRpc2NvdmVyeSByb2xsdXAgKGluc3RhbGxlZC9zaWduZWRJbi9kZWZhdWx0KSB8IGBhZ2VudHMgdmlldyAtLWpzb25gIChhbHJlYWR5IHRoZSBpbnB1dCkg4oCUIENMSSBzaG91bGQgZXhwb3NlIHRoZSAiaW5zdGFsbGVkICYgcnVubmFibGUiIHNldCB8IE5FRURTLUNMSSB8IGxvdyDigJQgYEFHRU5UX01FVEFgIGNvbG9ycyBhcmUgbGVnaXQgS0VFUCB8CgojIyMgRC4gRGV2aWNlIGhlYWx0aCAvIGNvbmZpZwoKfCAjIHwgZmlsZTpsaW5lIOKAlCBzeW1ib2wgfCBEdXBsaWNhdGVzIHwgQ2Fub25pY2FsIENMSSBzb3VyY2UgfCBGaXggfCBSaXNrIHwKfC0tLXwtLS18LS0tfC0tLXwtLS18LS0tfAp8IDE3IHwgYGRldmljZUhlYWx0aC50czoxMGAgYHBhcnNlVXB0aW1lYCArIGA6MThgIGBwYXJzZVZtU3RhdGAgKyBgOjM1YCBgcGFyc2VMaW51eE1lbUluZm9gIHwgZGV2aWNlLWhlYWx0aCBtZXRyaWMgcGFyc2VycyAocmF3IHByb2JlIG91dHB1dCkgfCBgYWdlbnRzIGRldmljZXMgc3RhdHVzIC0tanNvbmAgKGFscmVhZHkgY29uc3VtZWQgaW4gYGRldmljZUhlYWx0aC52c2NvZGUudHNgKSB8IERFTEVURS1OT1cgfCAqKm5vbmUg4oCUIHplcm8gY2FsbGVycyAoZGVhZCksIHN1cGVyc2VkZWQqKiB8CnwgMTggfCBgZGV2aWNlSGVhbHRoLnRzOjYwYCBgaXNEZXZpY2VPbmxpbmVgIHwgcmVhY2hhYmlsaXR5IGNsYXNzaWZpZXIsIGhhbmQtbWlycm9yIG9mIENMSSBgc3NoLnRzIHJlbmRlckRldmljZVRhYmxlYCB8IENMSSBzaG91bGQgZW1pdCBgb25saW5lYCBhcyBhIGZpZWxkIHwgTkVFRFMtQ0xJIHwgbWVkIOKAlCBjYWxsZWQgaW4gYGRldmljZUhlYWx0aC52c2NvZGUudHNgIHwKfCAxOSB8IGBkZXZpY2VBdXRvTGF1bmNoLnRzYCAqKih3aG9sZSBmaWxlKSoqIOKAlCBgbG9hZEF1dG9MYXVuY2hQcmVmZXJlbmNlc2AsIGByZWFkRGV2aWNlTWF4Q29uY3VycmVudGAsIGByZWFkRmxlZXREZWZhdWx0c0NvbmZpZ2AsIGByZWFkRGV2aWNlRG9jQ29uZmlnYCwgYHJlYWRBbGxEZXZpY2VDb25maWdzYCB8ICoqcmF3IGB+Ly5hZ2VudHMvKiovYWdlbnRzLnlhbWxgIGNvbmZpZyByZWFkZXIqKiAoZm9yYmlkZGVuIGJ5IEFHRU5UUy5tZCBydWxlIDMpICsgY29ycnVwdGlvbuKGkmRlZmF1bHRzIGZhbGxiYWNrIHwgYGFnZW50cyBkZXZpY2VzIGNvbmZpZyA8bmFtZT4gLS1qc29uYCAoKyBmbGVldCBkZWZhdWx0cykg4oCUIHZlcmIgbGlrZWx5IG1pc3NpbmcgfCBORUVEUy1DTEkgfCBtZWQg4oCUIGxhdW5jaC1yYW5raW5nIHBhdGggfAoKIyMjIEUuIFVzYWdlIC8gYWNjb3VudCBoZWFsdGgKCnwgIyB8IGZpbGU6bGluZSDigJQgc3ltYm9sIHwgRHVwbGljYXRlcyB8IENhbm9uaWNhbCBDTEkgc291cmNlIHwgRml4IHwgUmlzayB8CnwtLS18LS0tfC0tLXwtLS18LS0tfC0tLXwKfCAyMCB8IGBhZ2VudEludmVudG9yeS50czoxMTZgIGBsb2FkQWdlbnRzQ29uZmlnYCArIGA6MTI3YCBgcmVhZEFnZW50UnVuU3RyYXRlZ3lgICsgYDoxMzRgIGB3cml0ZUFnZW50UnVuU3RyYXRlZ3lgICgrIGA6NTVgL2A6NjZgIGhlbHBlcnMpIHwgKipyYXcgYH4vLmFnZW50cy9hZ2VudHMueWFtbGAgcmVhZGVyIEFORCB3cml0ZXIqKiAoZm9yYmlkZGVuKSDigJQgcnVuLXN0cmF0ZWd5IGNvbmZpZyB8IENMSSBydW4tY29uZmlnIHZlcmIgKHJlYWQgKyB3cml0ZSBgcnVuLjxhZ2VudD4uc3RyYXRlZ3lgKSB8IE5FRURTLUNMSSB8IG1lZCDigJQgcm9zdGVyIHRvZ2dsZXMgd3JpdGUgeWFtbCBkaXJlY3RseSB8CnwgMjEgfCBgYWdlbnRJbnZlbnRvcnkudHM6ODRgIGBzdW1tYXJpemVBZ2VudEludmVudG9yeWAgKGBoZWFsdGh5Q291bnRgL2BjYW5Sb3RhdGVgL2BzaWduZWRJbkNvdW50YCkgfCBhY2NvdW50LWhlYWx0aCByb2xsdXAgZHVwbGljYXRpbmcgdGhlIENMSSByb3RhdGUgZW5naW5lIHwgYGFnZW50cyB2aWV3IC0tanNvbmAgKGlucHV0KSDigJQgQ0xJIHNob3VsZCBleHBvc2UgdGhlIHJvbGx1cCB8IE5FRURTLUNMSSB8IGxvdyDigJQgY29uc3VtZXMgY2Fub25pY2FsIEpTT04gfAp8IDIyIHwgYHJlc3VtZUluQmVzdC50czoyNmAgYHNlc3Npb25Vc2VkUGVyY2VudGAgfCBwZXItd2luZG93IHVzYWdlIGV4dHJhY3Rpb24gfCBgYWdlbnRzIHZpZXcgLS1qc29uYCB3aW5kb3cgZmllbGQgKHBhc3N0aHJvdWdoKSB8IEtFRVAgfCBsb3cg4oCUIHRyaXZpYWwgZmllbGQgcmVhZCB8CgojIyMgRi4gU2Vzc2lvbiBpZGVudGl0eSAvIGxhYmVsIGh5ZHJhdGlvbiAoUlVTSC0zMTg0IGRlYnQpCgp8ICMgfCBmaWxlOmxpbmUg4oCUIHN5bWJvbCB8IER1cGxpY2F0ZXMgfCBDYW5vbmljYWwgQ0xJIHNvdXJjZSB8IEZpeCB8IFJpc2sgfAp8LS0tfC0tLXwtLS18LS0tfC0tLXwtLS18CnwgMjMgfCBgcmVtb3RlU2Vzc2lvbnMudnNjb2RlLnRzOjIyOGAgYGZldGNoU2Vzc2lvbklkZW50aXR5YCArIGBleHRlbnNpb24udHM6NDA2OGAgYHRyeUh5ZHJhdGVTZXNzaW9uSWRlbnRpdHlgIChjYWxscyBgOjQxNjNgLCBgOjQzMDhgKSB8IHBlci10YWIgYGFnZW50cyBzZXNzaW9ucyA8aWQ+IC0tanNvbmAgc3Bhd24gbG9vcCB0byBnZXQgdmVyc2lvbi9hY2NvdW50IHwgYGFjY291bnRgL2B2ZXJzaW9uYCBvbiB0aGUgYFNlc3Npb25XYXRjaFJvd2Agc3RyZWFtIChSVVNILTMxODQpIHwgTkVFRFMtQ0xJIChpbiBmbGlnaHQpIHwgbWVkIOKAlCBmbGFnZ2VkIGRlYnQgfAp8IDI0IHwgYHJlbW90ZVNlc3Npb25zLnZzY29kZS50czoxOTlgIGBmZXRjaFJlbW90ZVNlc3Npb25MYWJlbFNvdXJjZWAgKyBgcmVtb3RlU2Vzc2lvbnMudHM6OTU0YCBgcGFyc2VTZXNzaW9uTGFiZWxTb3VyY2VgICsgYDo5ODBgIGB0b3BpY0Zyb21Vc2VyRXZlbnRzYCArIGA6MTA1NWAgYGlzRGVyaXZlZFNlc3Npb25OYW1lYCB8IHBlci10YWIgc3Bhd24gKyBldmVudCBwYXJzZSB0byBnZXQgbGFiZWwvdG9waWMgfCBgbGFiZWxgL2B0b3BpY2AgKiphbHJlYWR5IG9uIHRoZSBzdHJlYW0qKiB8IERFTEVURS1OT1cgfCBtZWQg4oCUIEFHRU5UUy5tZCBzYXlzICJERUxFVEUgbm93IiB8CnwgMjUgfCBgcmVtb3RlU2Vzc2lvbnMudHM6MTAxNmAgYHBhcnNlU2Vzc2lvbklkZW50aXR5YCArIGA6OTk1YCBgU2Vzc2lvbklkZW50aXR5YCB8IHBhcnNlIHZlcnNpb24vYWNjb3VudC9hZ2VudCBmcm9tIHNlc3Npb24gSlNPTiB8IHNhbWUgc3RyZWFtIGZpZWxkcyBhcyAjMjMgfCBORUVEUy1DTEkgKGluIGZsaWdodCkgfCBsb3cg4oCUIHBhcnNlciBmZWVkaW5nICMyMyB8CnwgMjYgfCBgZmxvb3JNb2RlbC50czo2MTdgIGBzZXNzaW9uS2V5YCB8IGNhbm9uaWNhbCBzZXNzaW9uLWlkZW50aXR5IGRlcml2YXRpb24gYWNyb3NzIG9yaWdpbnMgfCBDTEkgY2Fub25pY2FsIHNlc3Npb24gaWQgb24gZXZlcnkgb3JpZ2luIHJvdyB8IE5FRURTLUNMSSB8IG1lZCDigJQga2V5aW5nIGFjcm9zcyBzdXJmYWNlcyB8CgojIyMgRy4gVHJhbnNjcmlwdCAvIHRvb2wtY2FsbCBwYXJzaW5nIChmb3JiaWRkZW4pCgp8ICMgfCBmaWxlOmxpbmUg4oCUIHN5bWJvbCB8IER1cGxpY2F0ZXMgfCBDYW5vbmljYWwgQ0xJIHNvdXJjZSB8IEZpeCB8IFJpc2sgfAp8LS0tfC0tLXwtLS18LS0tfC0tLXwtLS18CnwgMjcgfCBgZmxvb3JNb2RlbC50czo3MDNgIGBsYXRlc3RUb2Rvc2AgKCsgYDo2ODhgIGBUb29sQ2FsbExpa2VgKSB8IHBhcnNlcyByYXcgYFRvZG9Xcml0ZWAgdG9vbCBjYWxscyBpbnRvIGEgY2hlY2tsaXN0IHwgYEFjdGl2ZVNlc3Npb24udG9kb3NgIGFscmVhZHkgb24gc3RyZWFtIChSVVNILTEzODAvMTUwMzsgYHRvZG9Qcm9ncmVzc0Zyb21DbGlgIGFscmVhZHkgY29uc3VtZXMgaXQpIHwgREVMRVRFLU5PVyB8IG1lZCDigJQgd2lyZWQgYXQgYGZsb29yQWRhcHRlci50czo0M2AgfAp8IDI4IHwgYGZsb29yTW9kZWwudHM6NzM4YCBgcGFyc2VTdHJ1Y3R1cmVkUXVlc3Rpb25gICsgYDo3NjlgIGBzdHJ1Y3R1cmVkUXVlc3Rpb25Gcm9tVG9vbENhbGxzYCArIGA6ODQ4YCBgZXh0cmFjdENob2ljZU9wdGlvbnNgICgrIGhlbHBlcnMpIHwgcmVnZXgvdG9vbC1jYWxsICoqcXVlc3Rpb24gZXh0cmFjdGlvbioqIOKAlCB0aGUgRkFMTEJBQ0sgd2hlbiB0aGUgQ0xJIHF1ZXN0aW9uIGlzIGFic2VudCB8IGBBY3RpdmVTZXNzaW9uLnF1ZXN0aW9uYCAoYWxyZWFkeSBjb25zdW1lZCBieSBgc3RydWN0dXJlZFF1ZXN0aW9uRnJvbVJlbW90ZWApIHwgREVMRVRFLU5PVyB8IG1lZCDigJQgcmVtb3ZlIHRoZSBmYWxsYmFjayBicmFuY2ggfAp8IDI5IHwgYHNlc3Npb24uYWN0aXZpdHkudHNgIGBwYXJzZUxpbmVGb3JBY3Rpdml0eWAvYGZvcm1hdEFjdGl2aXR5YCB8IHBlci1saW5lIEpTT05MIHRyYW5zY3JpcHQgcGFyc2VyIGZvciB0aGUgcGFuZWwgYWN0aXZpdHkgZmVlZCB8IENMSSBgcmVjZW50RXZlbnRzYC9gcHJldmlld2Agb24gc3RyZWFtICh3aG9sZS10cmFuc2NyaXB0IGRlcml2YXRpb25zIGFscmVhZHkgZGVsZXRlZCwgIzc0MS9SVVNILTE1MDMpIHwgTkVFRFMtQ0xJIHwgbWVkIOKAlCBwYW5lbCBmZWVkIHwKfCAzMCB8IGBtb25pdG9yL3Nlc3Npb25QYXJzZS50c2Ag4oCUIGhlYWQtbWV0YWRhdGEgdHJhbnNjcmlwdCBwYXJzZXIgKGBmb3JrZWRGcm9tSWRgL2Bjb2RleEN3ZGAvYGdlbWluaVNlc3Npb25JZGAvb3BlbmNvZGUpIHwgcmF3IGB+Ly5jbGF1ZGUvcHJvamVjdHNgICsgcm9sbG91dCB0cmFuc2NyaXB0IHBhcnNpbmcgfCBDTEktcHJvdmlkZWQgZmllbGRzIChBR0VOVFMubWQgZGVidCkgfCBORUVEUy1DTEkgfCBoaWdoIOKAlCBmZWVkcyBjb3JyZWxhdGlvbiB8CnwgMzEgfCBgbW9uaXRvci9yZWFkaW5lc3NEZXRlY3Rvci50c2AgKyBgbW9uaXRvci9wcm9iZXMudHNgIChgcHNgL2BwZ3JlcGApICsgYHRlcm1pbmFsUmVhZGluZXNzLnRzYCByZWN1cnNpdmUgYGZzLndhdGNoYCB8IGV4dC1pbnZlbnRlZCBsaWZlY3ljbGUvcmVhZGluZXNzIGNsYXNzaWZpZXIgKyB0cmFuc2NyaXB0IHdhdGNoZXIgfCBkYWVtb24gcmVhZGluZXNzIHNpZ25hbCBvbiBzdHJlYW0gfCBJTi1QUk9HUkVTUyAocmVhZGluZXNzRGV0ZWN0b3IpIC8gTkVFRFMtQ0xJICh3YXRjaGVyKSB8IGhpZ2gg4oCUIGxlYWRlci9mb2xsb3dlciBwYXRoIHwKCiMjIyBILiBQYW5lbCBzbmFwc2hvdAoKfCAjIHwgZmlsZTpsaW5lIOKAlCBzeW1ib2wgfCBEdXBsaWNhdGVzIHwgQ2Fub25pY2FsIENMSSBzb3VyY2UgfCBGaXggfCBSaXNrIHwKfC0tLXwtLS18LS0tfC0tLXwtLS18LS0tfAp8IDMyIHwgYGFnZW50UGFuZWwudnNjb2RlLnRzOjM1MWAvYDozOTVgIGBidWlsZFNuYXBzaG90YCAoNHMgcG9sbCkgfCByZS1wYXJzZXMgdHJhbnNjcmlwdHMgKyBzcGF3bnMgYGFnZW50cyBzZXNzaW9ucyAtLWluY2x1ZGUgdG9vbHNgIHBlciB0aWNrIHwgYmluZCB0byBzdHJlYW0gZmllbGRzOyBgdG9vbENhbGxDb3VudGAgb24gc3RyZWFtIChBR0VOVFMubWQgZGVidCkgfCBORUVEUy1DTEkgfCBtZWQg4oCUIG9uZSBwYW5lbCB8CgojIyMgQm9yZGVybGluZSAvIGxvd2VyLXByaW9yaXR5Cgp8ICMgfCBmaWxlOmxpbmUg4oCUIHN5bWJvbCB8IE5vdGUgfAp8LS0tfC0tLXwtLS18CnwgMzMgfCBgZmxvb3JNb2RlbC50czo4OTRgIGBvdXRjb21lTGFiZWxgIHwgbWlycm9ycyBDTEkgYGRlcml2ZU91dGNvbWVgOyBncm91cGluZyBrZXkuIEtFRVAgYXMgcHJlc2VudGF0aW9uICppZmYqIGl0IHN0YXlzIGJ5dGUtaWRlbnRpY2FsIHRvIHRoZSBDTEksIGVsc2UgZm9sZCB0byBhIENMSS1wcm92aWRlZCBgb3V0Y29tZWAgZmllbGQuIHwKfCAzNCB8IGBwZWVyTWVzc2FnaW5nLnRzOjI2YCBgcmVzb2x2ZVBlZXJNZXNzYWdlYCB8IGBzZW5kX3RvX2FnZW50YCBNQ1AgcmVjaXBpZW50IHJlc29sdXRpb24gb3ZlciB0aGUgZXh0J3Mgb3duIHRlcm1pbmFsIHJlZ2lzdHJ5LiBCb3JkZXJsaW5lICJtZXNzYWdpbmciIOKAlCBwbGF1c2libHkgZXh0LW93bmVkIChyb3V0ZXMgdG8gYSBsb2NhbCB0YWIpLCBidXQgcmV2aXNpdCBpZiB0aGUgQ0xJIGdyb3dzIHNlc3Npb27ihpJzZXNzaW9uIG1lc3NhZ2luZy4gfAoKLS0tCgojIyBGYWxsYmFjayBwYXRocyAodGhlc2lzIGZvcmJpZHMgImNvbXB1dGUgbG9jYWxseSBpZiBDTEkgdW5hdmFpbGFibGUiKQoKMS4gYGZsb29yTW9kZWwudHM6NzM4YCBxdWVzdGlvbiBoZXVyaXN0aWNzIOKAlCB0aGUgZG9jdW1lbnRlZCBmYWxsYmFjayBmb3IgYHF1ZXN0aW9uID09PSBudWxsYAogICAoc2VlIGByZW1vdGVTZXNzaW9ucy50czoxODktMTkxYCAidGhlIFVJIHRoZW4gZmFsbHMgYmFjayB0byBwYXJzaW5nIGxhc3RSZXNwb25zZSIpLgoyLiBgcmVtb3RlU2Vzc2lvbnMudHM6NDU5LTQ2MWAgYG5vcm1hbGl6ZVF1ZXN0aW9uYCByZXR1cm5zIG51bGwg4oaSICJ3ZWJ2aWV3IGZhbGxzIGJhY2sgdG8KICAgcGFyc2luZyBsYXN0UmVzcG9uc2UiIOKAlCB0aGUgc2FtZSBmYWxsYmFjayBjb250cmFjdCwgc3RhdGVkIGF0IHRoZSBib3VuZGFyeS4KMy4gYGRldmljZUF1dG9MYXVuY2gudHM6MzUtNDNgIOKAlCBjb3JydXB0aW9uIG9mIGEgZGV2aWNlL2ZsZWV0IGNvbmZpZyBkZWdyYWRlcyB0bwogICAiZXZlcnkgZGV2aWNlIGVuYWJsZWQsIHVuY2FwcGVkIiBkZWZhdWx0cy4KNC4gYGFnZW50SW52ZW50b3J5LnRzOjExNi0xMjVgIGBsb2FkQWdlbnRzQ29uZmlnYCBgY2F0Y2gg4oaSIHt9YCDigJQgYSBiYWQgYGFnZW50cy55YW1sYAogICBzaWxlbnRseSByZWFkcyBhcyAibm8gY29uZmlnIi4KNS4gYHJlbW90ZVNlc3Npb25zLnZzY29kZS50czoxNzMtMTc4YCBgZmV0Y2hSZWNlbnRGb3JIb3N0YCDigJQgYW4gb2xkZXIgQ0xJJ3Mgbm9uLUpTT04KICAgYmFubmVyIGlzIHN3YWxsb3dlZCB0byBhbiBlbXB0eSBsaXN0IChkZWdyYWRlIHJhdGhlciB0aGFuIGZhaWwtbG91ZCB1cGdyYWRlIGVycm9yKS4KNi4gYGRpc3BhdGNoUmFua2luZy50czoxMDdgIGBkZXJpdmVIb3N0TG9hZChjcHVSYXRpbz1udWxsKWAg4oCUIGRlcml2ZXMgbG9hZCBmcm9tIGFnZW50CiAgIGNvdW50IGFsb25lIHdoZW4gdGhlIHByb2JlIGZhaWxzIChkZWFkIGNvZGUsIGJ1dCB0aGUgcGF0dGVybikuCgotLS0KCiMjIFJlY29tbWVuZGVkIGRlbGV0aW9uIG9yZGVyIChzYWZlc3QgZmlyc3QsIGdyb3VwZWQgYnkgY29uY2VwdCkKCioqUGhhc2UgMCDigJQgZGVhZCBjb2RlLCB6ZXJvIHJpc2sgKGRvIGltbWVkaWF0ZWx5KS4qKiBObyBjYWxsZXJzOyBhbHJlYWR5IHN1cGVyc2VkZWQgYnkKQ0xJIEpTT04uIFB1cmUgc3VidHJhY3Rpb25zLgotICMxMyBgZGVyaXZlSG9zdExvYWRgLCAjMTQgYHBhcnNlUmVtb3RlQ3B1UmF0aW9gIChgZGlzcGF0Y2hSYW5raW5nLnRzYCkKLSAjMTcgYHBhcnNlVXB0aW1lYC9gcGFyc2VWbVN0YXRgL2BwYXJzZUxpbnV4TWVtSW5mb2AgKGBkZXZpY2VIZWFsdGgudHNgKQoKKipQaGFzZSAxIOKAlCBkZWxldGUtbm93LCBDTEkgZmllbGQgYWxyZWFkeSBzaGlwcy4qKiBTdG9wIHJlLWRlcml2aW5nOyBjb25zdW1lIHRoZSBzdHJlYW0uCi0gIzI0IGBmZXRjaFJlbW90ZVNlc3Npb25MYWJlbFNvdXJjZWAgKyBsYWJlbCBwYXJzZXJzIChsYWJlbC90b3BpYyBhbHJlYWR5IG9uIHN0cmVhbSkKLSAjMjcgYGxhdGVzdFRvZG9zYCAoY29uc3VtZSBgQWN0aXZlU2Vzc2lvbi50b2Rvc2A7IGB0b2RvUHJvZ3Jlc3NGcm9tQ2xpYCBpcyB0aGUgcGF0dGVybikKLSAjMjggcXVlc3Rpb24gaGV1cmlzdGljcyDigJQgcmVtb3ZlIHRoZSBmYWxsYmFjaywgcmVseSBvbiBgQWN0aXZlU2Vzc2lvbi5xdWVzdGlvbmAKLSAjNiBgbWFwU3RhdHVzVG9QaGFzZWAg4oCUIG9uY2UgdGhlIGV4dCByZWFkcyBhIENMSS1wcm9qZWN0ZWQgYHBoYXNlYAoKKipQaGFzZSAyIOKAlCBsZXQgUEhOWC0yOTc1IGxhbmQsIHRoZW4gZXh0ZW5kIGl0LioqICMx4oCTIzQgYXJlIGluIGZsaWdodDsgZm9sZCBpbiAjNQpgaGVhcnRiZWF0TGV2ZWxgIGFuZCAjNCdzIGBzb3J0QWdlbnRzYCBjb25zdW1lcnMgc28gdGhlIHdob2xlIGZsb29yTW9kZWwgY2xhc3NpZmllciBibG9jawpnb2VzIHRvZ2V0aGVyIHJhdGhlciB0aGFuIGxlYXZpbmcgYW4gb3JwaGFuIGhhbGYuCgoqKlBoYXNlIDMg4oCUIHJhdy1jb25maWcgcmVhZGVycyAobmVlZCBhIENMSSB2ZXJiIGZpcnN0KS4qKiBIaWdoZXN0IGFyY2hpdGVjdHVyYWwgdmFsdWU7IGVhY2gKcmVtb3ZlcyBhIGZpbGVzeXN0ZW0tY291cGxpbmcgKyBhIGZhbGxiYWNrIGJhbmQtYWlkLgotICMxOSBgZGV2aWNlQXV0b0xhdW5jaC50c2Ag4oaSIGBhZ2VudHMgZGV2aWNlcyBjb25maWcgPG5hbWU+IC0tanNvbmAKLSAjMjAgYGFnZW50SW52ZW50b3J5LnRzYCBydW4tc3RyYXRlZ3kgcmVhZC93cml0ZSDihpIgQ0xJIHJ1bi1jb25maWcgdmVyYgotICMyMSBgc3VtbWFyaXplQWdlbnRJbnZlbnRvcnlgIHJvbGx1cCDihpIgQ0xJLWV4cG9zZWQgcm9sbHVwCgoqKlBoYXNlIDQg4oCUIG5lZWRzIGEgbmV3IENMSSB2ZXJiIChyZXN1bWUgY2FuZGlkYXRlcykuKioKLSAjMTAsICMxMSBgcmVzdW1lUGlja2VyLnRzYCDihpIgYGFnZW50cyBzZXNzaW9ucyByZXN1bWUgLS1jYW5kaWRhdGVzIC0tanNvbmAKCioqUGhhc2UgNSDigJQgc3RyZWFtLXByb2plY3Rpb24gYWRkaXRpb25zIChpZGVudGl0eSwgc3RhbGVuZXNzLCBkZWR1cCwgcmVhZGluZXNzKS4qKiBIaWdoZXN0CmJsYXN0IHJhZGl1czsgbGFuZCB0aGUgQ0xJIGZpZWxkLCB0aGVuIGRlbGV0ZS4KLSAjMjMvIzI1LyMyNiBpZGVudGl0eSBvbiBzdHJlYW0gKFJVU0gtMzE4NCBpbiBmbGlnaHQpCi0gIzcgZGVkdXAgKyAjOCBzdGFsZW5lc3Mg4oaSIG9uZS1yb3ctcGVyLXNlc3Npb24sIG5vdC1zdGFsZSwgb24gdGhlIHN0cmVhbQotICMyOS8jMzAvIzMxLyMzMiBhY3Rpdml0eS9yZWFkaW5lc3MvdG9vbC1jb3VudCDihpIgZGFlbW9uIHNpZ25hbHMgb24gdGhlIHN0cmVhbQoKLS0tCgojIyBUb3AgMyBoaWdoZXN0LXZhbHVlIGRlbGV0aW9ucwoKMS4gKipUaGUgYGZsb29yTW9kZWwudHNgIGNsaWVudC1zaWRlIGNsYXNzaWZpZXIgKyBwYXJzZXIgYmxvY2sqKiDigJQgYGRlcml2ZVBoYXNlYCwKICAgYGRlcml2ZU5lZWRzYCwgYGRlcml2ZVN0YWxsZWRgL2BTVEFMTF9USFJFU0hPTERfTVNgLCBgUEhBU0VfUkFOS2AsIGBoZWFydGJlYXRMZXZlbGAsCiAgIHBsdXMgYHBhcnNlU3RydWN0dXJlZFF1ZXN0aW9uYC9gc3RydWN0dXJlZFF1ZXN0aW9uRnJvbVRvb2xDYWxsc2AgYW5kIGBsYXRlc3RUb2Rvc2AuCiAgIFRoaXMgaXMgdGhlIGhlYXJ0IG9mIHRoZSB0aGVzaXMgdmlvbGF0aW9uOiB0aGUgd2VidmlldyByZS1kZWNpZGVzIGxpZmVjeWNsZSwgYXR0ZW50aW9uLAogICBzdGFsbCwgcXVlc3Rpb24sIGFuZCBjaGVja2xpc3QuIFBITlgtMjk3NSBhbHJlYWR5IHJlbW92ZXMgdGhlIGZpcnN0IGZvdXI7IHRoZSBDTEkKICAgKiphbHJlYWR5IHNoaXBzKiogYHF1ZXN0aW9uYCBhbmQgYHRvZG9zYCBvbiB0aGUgc3RyZWFtLCBzbyB0aGUgcGFyc2VycyBhbmQKICAgYGhlYXJ0YmVhdExldmVsYCBhcmUgYSBzdHJhaWdodGZvcndhcmQgc2FtZS1lcGljIGV4dGVuc2lvbiwgbm90IG5ldyBDTEkgd29yay4KCjIuICoqVGhlIGByZW1vdGVTZXNzaW9ucy50c2AgbGlmZWN5Y2xlIGNsdXN0ZXIqKiDigJQgYG1hcFN0YXR1c1RvUGhhc2VgICsgYGRlZHVwZVNlc3Npb25zYAogICArIGBpc1N0YWxlU2Vzc2lvbmAvYGZpbHRlclN0YWxlU2Vzc2lvbnNgLiBUaGUgZXh0IGluZGVwZW5kZW50bHkgZGVjaWRlcyB3aGljaCBzZXNzaW9ucwogICBhcmUgYWxpdmUsIHdoaWNoIGFyZSB0aGUgc2FtZSBzZXNzaW9uLCBhbmQgd2hpY2ggYXJlIHRvbyBvbGQgdG8gc2hvdyDigJQgbG9naWMgdGhhdAogICBgc2Vzc2lvbnMuZGJgIGFuZCB0aGUgcGlk4oaSc2Vzc2lvbiByZWdpc3RyeSBvd24uIEl0IGRyaXZlcyBmbGVldC13aWRlIGNvdW50cyBhbmQgdGhlCiAgIG5lZWRzLXlvdSBzZXQsIHNvIGNvcnJlY3RuZXNzIChhbmQgdGhlICJjb3VudCB2cyBsaXN0IGRpdmVyZ2UiIGJ1ZyB0aGUgZGVkdXAgZXhpc3RzIHRvCiAgIHBhcGVyIG92ZXIpIGJlbG9uZ3MgYXQgdGhlIHNvdXJjZS4gRml4ID0gQ0xJIGVtaXRzIGNhbm9uaWNhbCBgcGhhc2VgLCBvbmUgcm93IHBlcgogICBzZXNzaW9uLCBhbmQgZHJvcHMvZmxhZ3Mgc3RhbGUgcm93czsgdGhlbiBkZWxldGUgfjEyMCBsaW5lcy4KCjMuICoqVGhlIHJhdyBhZ2VudHMtY29uZmlnIHJlYWRlcnMvd3JpdGVycyoqIOKAlCBgZGV2aWNlQXV0b0xhdW5jaC50c2AgKHdob2xlIGZpbGUpIGFuZAogICBgYWdlbnRJbnZlbnRvcnkudHNgIGBsb2FkQWdlbnRzQ29uZmlnYC9gcmVhZEFnZW50UnVuU3RyYXRlZ3lgL2B3cml0ZUFnZW50UnVuU3RyYXRlZ3lgLgogICBUaGVzZSByZWFkICoqYW5kIHdyaXRlKiogYH4vLmFnZW50cy9hZ2VudHMueWFtbGAgYW5kIHBlci1kZXZpY2UgZG9jcyBkaXJlY3RseSDigJQgZXhhY3RseQogICB0aGUgInJhdyBhZ2VudHMtY29uZmlnIHJlYWRlciIgQUdFTlRTLm1kIHJ1bGUgMyBmb3JiaWRzIOKAlCB3aXRoIGNvcnJ1cHRpb24tdG8tZGVmYXVsdHMKICAgZmFsbGJhY2tzLiBUaGUgZXh0IHdyaXRpbmcgY29uZmlnIHRoZSBDTEkgaXMgc3VwcG9zZWQgdG8gb3duIGlzIHRoZSBzaGFycGVzdCBvd25lcnNoaXAKICAgaW52ZXJzaW9uIGluIHRoZSB0cmVlLiBGaXggPSBgYWdlbnRzIGRldmljZXMgY29uZmlnIC0tanNvbmAgKyBhIHJ1bi1jb25maWcgdmVyYjsgdGhlCiAgIGRlbGV0aW9uIHJlbW92ZXMgYm90aCB0aGUgZmlsZXN5c3RlbSBjb3VwbGluZyBhbmQgdHdvIGZhbGxiYWNrIGJhbmQtYWlkcy4KCi0tLQoKIyMgRXZpZGVuY2UKCk1ldGhvZDogZnVsbCByZWFkIG9mIGBwaG54LWxhYnMvYWdpLWV4dGAgQCBgbWFpbmAgKGBiNWQzNDk0YCkg4oCUIGBBR0VOVFMubWRgICsgYGRvY3MvYAoodGhlIHRoaW4tY2xpZW50IHRoZXNpcywgYHNlc3Npb24tcHJvamVjdGlvbi5tZGApLCB0aGVuIGEgdHJlZSBzd2VlcCBmb3IgdGhlIHRlbGwtdGFsZXMKKGBkZXJpdmUqYCwgYGNsYXNzaWZ5KmAsIGBUSFJFU0hPTERgL2BfTVNgLCBgcHNgL2BwZ3JlcGAsIGByZWFkaW5lc3NgLCByYXcgYGFnZW50cy55YW1sYApyZWFkcywgbG9jYWwgcmFua2luZy9zb3J0KS4gRXZlcnkgcm93IGlzIGdyb3VuZGVkIGluIGEgcmVhZCBvZiB0aGUgY2l0ZWQgZmlsZSBhdCB0aGUKY2l0ZWQgbGluZTsgY2xhc3NpZmljYXRpb24gYWdhaW5zdCB0aGUgY2Fub25pY2FsIENMSSBzdXJmYWNlIHVzZXMgdGhlIGZpZWxkIG5hbWVzIHRoZSBDTEkKYWxyZWFkeSBlbWl0cyBvbiBgYWdlbnRzIHNlc3Npb25zIHdhdGNoIC0tanNvbmAgKGBhY3Rpdml0eWAsIGBzdGF0dXNgLCBgcXVlc3Rpb25gLApgdG9kb3NgLCBgcGlkQWxpdmVgLCBgdmlld2luZ0luYCwgYG1hY2hpbmVgLCBgcHJldmlld2AsIGB0b2tQZXJTZWNgKSBhcyBkb2N1bWVudGVkIGluIHRoZQpgUmF3QWN0aXZlU2Vzc2lvbmAgc2hhcGUgaW4gYHNyYy9jb3JlL3JlbW90ZVNlc3Npb25zLnRzOjMxNS00MDdgLgoKS2V5IGdyb3VuZGluZyBwb2ludHM6CgotICoqRGVhZCBjb2RlIGNvbmZpcm1lZCBieSBjYWxsZXIgc2VhcmNoKiogKGBncmVwYCBmb3IgZWFjaCBzeW1ib2wgYWNyb3NzIGBzcmMvYCArIGB1aS9gLAogIGV4Y2x1ZGluZyBkZWZpbml0aW9ucy90ZXN0cyk6IGBkZXJpdmVIb3N0TG9hZGAsIGBwYXJzZVJlbW90ZUNwdVJhdGlvYAogIChgZGlzcGF0Y2hSYW5raW5nLnRzYCkgYW5kIGBwYXJzZVVwdGltZWAvYHBhcnNlVm1TdGF0YC9gcGFyc2VMaW51eE1lbUluZm9gCiAgKGBkZXZpY2VIZWFsdGgudHNgKSBoYXZlICoqemVybyoqIG5vbi10ZXN0IGNhbGxlcnMg4oCUIGRldmljZSBoZWFsdGggbm93IGZsb3dzIHRocm91Z2gKICBgYWdlbnRzIGRldmljZXMgc3RhdHVzIC0tanNvbmAgaW4gYGRldmljZUhlYWx0aC52c2NvZGUudHM6MTM5LDE2NiwxOTRgLgotICoqQ0xJIGZpZWxkIGFscmVhZHkgc2hpcHMqKiBmb3IgdGhlIGRlbGV0ZS1ub3cgcGFyc2VyczogYEFjdGl2ZVNlc3Npb24ucXVlc3Rpb25gIGlzCiAgY29uc3VtZWQgYXQgYGZsb29yTW9kZWwudHM6ODE4YCAoYHN0cnVjdHVyZWRRdWVzdGlvbkZyb21SZW1vdGVgKSB5ZXQgdGhlIGhldXJpc3RpYwogIGBwYXJzZVN0cnVjdHVyZWRRdWVzdGlvbmAvYHN0cnVjdHVyZWRRdWVzdGlvbkZyb21Ub29sQ2FsbHNgIHJlbWFpbiBhcyB0aGUKICBgcXVlc3Rpb24gPT09IG51bGxgIGZhbGxiYWNrIChgcmVtb3RlU2Vzc2lvbnMudHM6MTg5LTE5MWApOyBgQWN0aXZlU2Vzc2lvbi50b2Rvc2AgaXMKICBjb25zdW1lZCBhdCBgc2Vzc2lvbi5hY3Rpdml0eS50czo2MmAgKGB0b2RvUHJvZ3Jlc3NGcm9tQ2xpYCkgeWV0IGBsYXRlc3RUb2Rvc2AKICByZS1wYXJzZXMgcmF3IGBUb2RvV3JpdGVgIGNhbGxzICh3aXJlZCBhdCBgZmxvb3JBZGFwdGVyLnRzOjQzYCkuCi0gKipSYXctY29uZmlnIHJlYWRlci93cml0ZXIqKiBjb25maXJtZWQgYnkgZGlyZWN0IGBmcy5yZWFkRmlsZVN5bmNgL2Bmcy53cml0ZUZpbGVTeW5jYAogIG9mIGB+Ly5hZ2VudHMvYWdlbnRzLnlhbWxgIGFuZCBgZGV2aWNlcy88bmFtZT4vYWdlbnRzLnlhbWxgIGluIGBhZ2VudEludmVudG9yeS50czoxMTYtMTQzYAogIGFuZCBgZGV2aWNlQXV0b0xhdW5jaC50czo0Ni0xMDFgIOKAlCB0aGUgInJhdyBhZ2VudHMtY29uZmlnIHJlYWRlciIgZm9yYmlkZGVuIGJ5IHRoZQogIGFnaS1leHQgYEFHRU5UUy5tZGAgYXJjaGl0ZWN0dXJlIHJ1bGUgMy4KLSAqKkFscmVhZHktY29tcGxpYW50IHJlZmVyZW5jZSoqIGZvciB0aGUgdGFyZ2V0IHNoYXBlOiBgd2F0Y2hkb2cudnNjb2RlLnRzYCBob2xkcyBubwogIGxvb3Ag4oCUIGl0IHNoZWxscyBgYWdlbnRzIHdhdGNoZG9nIGVuYWJsZXxkaXNhYmxlYCBhbmQgcmVhZHMgdGhlIGRhZW1vbidzCiAgYHdhdGNoZG9nLmxvZ2AgKGBjb3JlL3dhdGNoZG9nTG9nLnRzYCk7IGByZXN1bWVJbkJlc3QudHNgIGJ1aWxkcyBgYWdlbnRzIHJ1biBhdXRvYAogIGNvbW1hbmQgc3RyaW5ncyBhbmQgZGVsZWdhdGVzIGhvc3QvaGFybmVzcy9hY2NvdW50IHBpY2tpbmcgdG8gdGhlIENMSSAoUlVTSC0yMTMyKS4K"}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
