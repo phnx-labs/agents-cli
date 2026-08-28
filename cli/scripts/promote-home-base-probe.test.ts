@@ -110,6 +110,74 @@ describe('promote-home-base-probe.sh', () => {
 });
 
 /**
+ * The share-Worker deploy gate (PHNX-3403): with --deploy-worker auto|on the probe
+ * ALSO requires the share endpoint be configured here and the cloudflare.com token
+ * resolve headlessly, so a Worker-touching release cannot publish and then discover
+ * it cannot deploy. `off` skips the gate entirely. The mode rides as the probe's
+ * positional arg ($1), so this passes it and drives the failures via a richer
+ * `agents` stub keyed by env vars.
+ */
+const WORKER_AGENTS_STUB = `#!/usr/bin/env bash
+if [ "$1 $2 $3" = "artifacts share status" ]; then
+  [ "\${STUB_SHARE:-1}" = "1" ] && exit 0 || exit 1
+fi
+if [ "$1 $2" = "secrets exec" ] && [ "$3" = "cloudflare.com" ]; then
+  [ "\${STUB_CF:-1}" = "1" ] && exit 0 || exit 1
+fi
+exit 0
+`;
+
+function runProbeMode(
+  bin: string,
+  mode: string,
+  env: Record<string, string> = {},
+): { status: number | null; out: string } {
+  const r = spawnSync(path.join(bin, 'bash'), [PROBE, mode], {
+    encoding: 'utf-8',
+    env: { PATH: bin, HOME: os.tmpdir(), ...env },
+  });
+  return { status: r.status, out: `${r.stdout}${r.stderr}` };
+}
+
+describe('promote-home-base-probe.sh: --deploy-worker gate (PHNX-3403)', () => {
+  it('off skips the worker gate even when share is unconfigured and CF creds are absent', () => {
+    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
+    const { status, out } = runProbeMode(bin, 'off', { STUB_SHARE: '0', STUB_CF: '0' });
+    expect(status).toBe(0);
+    expect(out).toContain('promote-ready');
+  });
+
+  it('auto passes when share is configured and the cloudflare.com token resolves', () => {
+    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
+    const { status, out } = runProbeMode(bin, 'auto', { STUB_SHARE: '1', STUB_CF: '1' });
+    expect(status).toBe(0);
+    expect(out).toContain('promote-ready');
+  });
+
+  it('auto FAILS, before any mutation, when the share endpoint is not configured', () => {
+    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
+    const { status, out } = runProbeMode(bin, 'auto', { STUB_SHARE: '0', STUB_CF: '1' });
+    expect(status).not.toBe(0);
+    expect(out).toContain('share endpoint not configured');
+    expect(out).toContain('--deploy-worker=off');
+  });
+
+  it('auto FAILS when the cloudflare.com API token is not readable headlessly', () => {
+    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
+    const { status, out } = runProbeMode(bin, 'auto', { STUB_SHARE: '1', STUB_CF: '0' });
+    expect(status).not.toBe(0);
+    expect(out).toContain('cloudflare.com bundle API token');
+  });
+
+  it('on FAILS the same way as auto when creds are missing', () => {
+    const bin = stubBin(ALL_TOOLS, { agents: WORKER_AGENTS_STUB });
+    const { status, out } = runProbeMode(bin, 'on', { STUB_SHARE: '1', STUB_CF: '0' });
+    expect(status).not.toBe(0);
+    expect(out).toContain('cloudflare.com bundle API token');
+  });
+});
+
+/**
  * Execute the REAL `assert_promote_home_base` function body under the same
  * `set -euo pipefail` release.sh runs with. The static ordering test below
  * proves the call is placed right; this proves the function itself fails LOUD.
@@ -146,6 +214,9 @@ function runAssert(probeExit: 'fail' | 'pass'): { status: number | null; out: st
     'set -euo pipefail',
     'ON_HOME_BASE=true',
     'RELEASE_HOME_BASE=testbox',
+    // release.sh always sets DEPLOY_WORKER at parse (default auto); the function
+    // now forwards it to the probe, so the harness must bind it too (PHNX-3403).
+    'DEPLOY_WORKER=off',
     'bold(){ :; }',
     "phase_ok(){ printf 'PHASE_OK: %s\\n' \"$1\"; }",
     "die(){ printf 'DIE: %s\\n' \"$1\" >&2; exit 1; }",
