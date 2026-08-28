@@ -987,7 +987,12 @@ export function registerMonitorsCommands(program: Command): void {
         monitorPath = safeJoin(dir, `${name}.yml`);
         const builtIn = readMonitor(name);
         if (builtIn) {
-          fs.writeFileSync(monitorPath, yaml.stringify(builtIn), 'utf-8');
+          // Route through writeMonitor, NOT a raw yaml.stringify: readMonitor
+          // stamps the derived `scope` (and a built-in's `enabled: true`), and
+          // only writeMonitor strips those from the on-disk schema. A raw dump
+          // would persist `scope: system` into the user copy — dead, contradictory
+          // state that violates the "scope never persists" contract.
+          writeMonitor(builtIn);
           console.log(chalk.gray(`Editing a copy of built-in monitor '${name}' in your user dir: ${monitorPath}`));
         } else {
           const template = yaml.stringify({
