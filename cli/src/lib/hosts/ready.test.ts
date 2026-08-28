@@ -97,6 +97,87 @@ describe('viewAgentSignedIn', () => {
   });
 });
 
+// PHNX-3466: `--device auto` remote placement must judge a box by the SAME strict
+// per-version launchability the LOCAL candidate uses (`collectRunCandidates` →
+// `isLaunchableSignedIn`), not the display `signedIn` that inherits the global
+// HOME login. The signal rides `agents view --json`'s new per-version `launchable`
+// field; these lock the placement seam (`viewAgentAccountEligibility` reads it,
+// `probeRemoteReadiness` maps it into the signal `resolveDeviceAuto` gates on).
+describe('viewAgentAccountEligibility — launchable gates remote placement (PHNX-3466)', () => {
+  it('EXCLUDES a version signed-in-but-not-launchable (inherits global login, empty version home)', () => {
+    // The exact bug: the version home has no per-version credential, so it only
+    // *inherits* the active/global HOME login. `signedIn` reads true (who is
+    // logged in) but the isolated launch dies at spawn — `launchable` is false.
+    const view = JSON.stringify([{ agent: 'claude', versions: [
+      { signedIn: true, launchable: false, usageStatus: 'available' },
+    ] }]);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      // Not ready → excluded from the non-picker `--device auto` candidate set.
+      signedIn: false,
+      // Still picker-eligible: launching it IS the per-version login flow.
+      pickerEligible: true,
+    });
+  });
+
+  it('keeps a blind-but-launchable worker eligible (per-version credential, no usage snapshot — RUSH-2392)', () => {
+    // A worker box with a real per-version setup-token credential but whose usage
+    // endpoint 403s (no snapshot → usageStatus null). launchable is true, so it
+    // stays a valid placement target — the "unverified stays eligible" rule.
+    const view = JSON.stringify([{ agent: 'claude', versions: [
+      { signedIn: true, launchable: true, usageStatus: null },
+    ] }]);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: true,
+      pickerEligible: true,
+    });
+  });
+
+  it('falls back to signedIn on an older remote CLI that omits launchable (no rolling-fleet regression)', () => {
+    // A remote CLI predating the field emits no `launchable`; the gate must read
+    // `signedIn` exactly as it did before — a signed-in version stays eligible.
+    const legacyView = JSON.stringify([{ agent: 'claude', versions: [
+      { signedIn: true, usageStatus: 'available' },
+    ] }]);
+    expect(viewAgentAccountEligibility(legacyView, 'claude')).toEqual({
+      signedIn: true,
+      pickerEligible: true,
+    });
+    // ...and a signed-out legacy version stays excluded-but-picker-eligible.
+    const legacyOut = JSON.stringify([{ agent: 'claude', versions: [{ signedIn: false }] }]);
+    expect(viewAgentAccountEligibility(legacyOut, 'claude')).toEqual({
+      signedIn: false,
+      pickerEligible: true,
+    });
+  });
+
+  it('a box whose only launchable version is throttled is neither ready nor picker-eligible', () => {
+    // launchable:true but rate_limited → not ready, and not picker-eligible
+    // (a login cannot clear a throttle — only a window reset). Matches the
+    // signed-in-but-capped semantics for the launchable signal.
+    const view = JSON.stringify([{ agent: 'claude', versions: [
+      { signedIn: true, launchable: true, usageStatus: 'rate_limited' },
+    ] }]);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: false,
+      pickerEligible: false,
+    });
+  });
+
+  it('one launchable version keeps the device eligible even when a sibling only inherits the global login', () => {
+    // Real multi-version box: v1 empty home (launchable:false), v2 real
+    // per-version login (launchable:true). The device can run claude, so it must
+    // stay eligible — the launchable version carries it.
+    const view = JSON.stringify([{ agent: 'claude', versions: [
+      { signedIn: true, launchable: false, usageStatus: 'available' },
+      { signedIn: true, launchable: true, usageStatus: 'available' },
+    ] }]);
+    expect(viewAgentAccountEligibility(view, 'claude')).toEqual({
+      signedIn: true,
+      pickerEligible: true,
+    });
+  });
+});
+
 describe('parseReadyProbe', () => {
   it('parses version + agent listing from one compound probe', () => {
     const stdout = `2.1.170\n${MARK}\nClaude (balanced)\nCodex (balanced)\n`;

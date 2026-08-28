@@ -11,6 +11,18 @@ export interface ViewJsonVersion {
   isolated: boolean;
   isIsolatedDefault: boolean;
   signedIn: boolean;
+  /**
+   * Whether THIS version home can actually spawn a signed-in agent — the strict
+   * per-version launch truth (`isLaunchableSignedIn`), not the display `signedIn`
+   * above. `signedIn` is true when the version *inherits* the active/global HOME
+   * login even with no per-version credential of its own; such a home shows "who
+   * is logged in" but dies at spawn once launch isolates HOME to it. Automatic
+   * `--device auto` placement gates on THIS field so a remote box is judged by
+   * the same launchability the local candidate uses (`collectRunCandidates` →
+   * `isLaunchableSignedIn`), closing the local/remote asymmetry (PHNX-3466).
+   * Absent on an older remote CLI, whose consumers fall back to `signedIn`.
+   */
+  launchable: boolean;
   /** Live cached authentication verdict for this installed version. */
   authVerdict: AuthVerdict | null;
   email: string | null;

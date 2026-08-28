@@ -141,6 +141,16 @@ offer `launch to sign in`. A device whose picker would contain only throttled
 rows remains excluded; ordinary automatic runs still require a healthy,
 signed-in account before placement.
 
+The sign-in a device is judged by is the **strict per-version launch truth**, not
+the display "who is logged in": a box whose selected harness only inherits the
+active/global HOME login but has no credential in the per-version home the
+isolated run launches is **not** a valid `--device auto` target and is excluded,
+because such a launch would die at spawn. This is the same launchability the
+local candidate uses (`isLaunchableSignedIn`), carried to remote candidates by a
+per-version `launchable` field in `agents view --json` (PHNX-3466). A blind
+worker with a real per-version credential but no readable usage snapshot stays
+eligible — unverified usage is not a logout.
+
 **One carve-out: a missing login is not an exhausted account.** When the only
 thing wrong is that an account is signed out (or its token was revoked), a
 terminal run does NOT fail loud — it launches so you can authenticate, because

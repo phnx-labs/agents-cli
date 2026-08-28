@@ -22,6 +22,7 @@ import {
   getAllCliStates,
   getUnmanagedCliState,
   getAccountInfo,
+  credentialPresence,
   resolveAgentName,
   formatAgentError,
   agentLabel,
@@ -81,7 +82,7 @@ import { listNativeAccounts } from '../lib/account-registry.js';
 import { isGitRepo, getGitSyncStatus } from '../lib/git.js';
 import { getCentralRulesFileName } from '../lib/rules/rules.js';
 import { composeRulesFromState, type ComposedSubrule } from '../lib/rules/compose.js';
-import { getConfiguredRunStrategy } from '../lib/accounting/rotate.js';
+import { getConfiguredRunStrategy, isLaunchableSignedIn } from '../lib/accounting/rotate.js';
 import { resolveRunDefaults } from '../lib/run-defaults.js';
 import { resolveConfiguredModel, type ConfiguredModelSource } from '../lib/models.js';
 import type { ResourceItemJson, ResourceSection, SyncState, VersionResourcesJson, ViewJsonAgent, ViewJsonVersion } from '../lib/view-types.js';
@@ -1521,6 +1522,11 @@ export async function collectAgentsJson(
       isolated: isVersionIsolated(agentId, version),
       isIsolatedDefault: getIsolatedDefault(agentId) === version,
       signedIn: info.signedIn,
+      // The strict per-version launch truth (vs the display `signedIn` above,
+      // which inherits the active/global HOME login). The same primitive
+      // `collectRunCandidates` uses locally, so remote `--device auto` placement
+      // is gated on identical launchability (PHNX-3466).
+      launchable: isLaunchableSignedIn(info.signedIn, credentialPresence(agentId, home)),
       authVerdict: authCache[authCacheKey(host, agentId, version)]?.verdict ?? null,
       email: info.email,
       accountId: info.accountId,

@@ -43,7 +43,7 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
     }).toString('utf-8');
   }
 
-  function viewJson(): { versions: Array<{ version: string; authVerdict: string | null }> } {
+  function viewJson(): { versions: Array<{ version: string; authVerdict: string | null; signedIn: boolean; launchable: boolean }> } {
     return JSON.parse(execFileSync('bun', [path.resolve(process.cwd(), 'src/index.ts'), 'view', 'codex', '--json'], {
       cwd: process.cwd(),
       env: {
@@ -122,5 +122,18 @@ describe.skipIf(process.platform === 'win32')('agents view — isolated installs
       version: '9.9.4',
       authVerdict: 'revoked',
     }));
+  }, 120_000);
+
+  // PHNX-3466: the JSON also carries a per-version `launchable` — the strict
+  // per-version launch truth (`isLaunchableSignedIn`) that remote `--device auto`
+  // placement gates on. This planted version has an empty `.codex` home and no
+  // credential anywhere, so it is not launchable; the field must be present and
+  // false, proving the emission is live (not dead) and matches the signed-out state.
+  it('emits a per-version launchable flag in JSON for remote placement', () => {
+    plantVersion('9.9.4', { isolated: false });
+    const version = viewJson().versions.find((v) => v.version === '9.9.4');
+    expect(version).toBeDefined();
+    expect(version!.signedIn).toBe(false);
+    expect(version!.launchable).toBe(false);
   }, 120_000);
 });
