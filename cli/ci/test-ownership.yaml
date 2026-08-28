@@ -299,6 +299,10 @@ testless:
   - assets/**
   - demo/**
   - skills/**
+  # Repo-root Claude plugin marketplace manifest (PHNX-3337): declarative JSON
+  # consumed by `claude plugin marketplace add`, not executable source. Its
+  # parse/validate contract is covered by cli/src/lib/plugins/agents-cli-plugin.test.ts.
+  - .claude-plugin/**
   - openspec/**
   - native/**
   - apps/ios/**
