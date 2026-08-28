@@ -298,6 +298,33 @@ describe('credential account registry (bundle-canonical)', () => {
       .toThrow('is a claude login and cannot authenticate the codex harness');
   });
 
+  it('resolveSpawnAccount warns and falls back when the configured default is dangling', () => {
+    const danglingId = 'd4a2d110-17fe-4341-a1c5-b1222ed91557';
+    const meta = { accounts: { defaults: { claude: danglingId } } };
+    const writes: string[] = [];
+    const original = process.stderr.write;
+    process.stderr.write = (chunk: string | Uint8Array) => { writes.push(String(chunk)); return true; };
+    try {
+      const result = resolveSpawnAccount(undefined, 'claude', '2.1.220', meta, { base: root });
+      expect(result).toBeNull();
+      const warning = writes.join('');
+      expect(warning).toContain(`default account '${danglingId}' for claude no longer exists`);
+      expect(warning).toContain('falling back to balanced selection');
+      expect(warning).toContain('agents accounts clear-default claude');
+    } finally {
+      process.stderr.write = original;
+    }
+  });
+
+  it('resolveSpawnAccount resolves a name-based default and still accepts legacy uuid defaults', () => {
+    const account = addAccount('by-name', 'openrouter', 'api-key', 'sk-or', root);
+    const byName = resolveSpawnAccount(undefined, 'claude', '2.1.220', { accounts: { defaults: { claude: 'by-name' } } }, { base: root });
+    expect(byName).toMatchObject({ kind: 'provider', name: 'by-name', agent: 'claude' });
+
+    const byLegacyId = resolveSpawnAccount(undefined, 'claude', '2.1.220', { accounts: { defaults: { claude: account.id } } }, { base: root });
+    expect(byLegacyId).toMatchObject({ kind: 'provider', name: 'by-name', agent: 'claude' });
+  });
+
   it('rotates a credential without changing the stable id or name', () => {
     const before = addAccount('work', 'cursor', 'api-key', 'old-key', root);
     setAccountSecret('work', 'new-key', root);
@@ -324,6 +351,15 @@ describe('credential account registry (bundle-canonical)', () => {
     removeAccount('work', root);
     expect(Object.values(readAccountRegistry(root).accounts).some(account => account.name === 'work')).toBe(false);
     expect(() => inspectAccount('work', root)).toThrow("Unknown account 'work'");
+  });
+
+  it('refuses to remove an account that is still the per-harness default (by name or legacy id)', () => {
+    const account = addAccount('default-ref', 'cursor', 'api-key', 'key', root);
+    updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, cursor: 'default-ref' } } }));
+    expect(() => removeAccount('default-ref', root)).toThrow("still referenced by: default cursor");
+
+    updateMeta(meta => ({ ...meta, accounts: { ...meta.accounts, defaults: { ...meta.accounts?.defaults, cursor: account.id } } }));
+    expect(() => removeAccount('default-ref', root)).toThrow("still referenced by: default cursor");
   });
 
   it('validates setup-token shape before storing it', () => {

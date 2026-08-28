@@ -262,8 +262,8 @@ describe('accounts switch + native naming honesty-gate', () => {
     const account = addAccount('switch-work', 'openrouter', 'api-key', 'sk-or-secret', getUserAgentsDir());
     const out = await runAccounts(['switch', 'claude', 'switch-work']);
     expect(out).toContain("claude now uses account 'switch-work'");
-    expect(readMeta().accounts?.defaults?.claude).toBe(account.id);
-    expect(setDefaultAccount('claude', 'switch-work').account.id).toBe(account.id);
+    expect(readMeta().accounts?.defaults?.claude).toBe('switch-work');
+    expect(setDefaultAccount('claude', 'switch-work').account.name).toBe('switch-work');
   });
 
   it('switch <harness> --json lists switchable accounts without changing the default', async () => {
@@ -314,8 +314,8 @@ describe('accounts switch + native naming honesty-gate', () => {
     const native = addNativeAccount('claude-native-default', 'claude', 'native-identity-key-1', 'user@example.com', 'version');
     const result = setDefaultAccount('claude', 'claude-native-default');
     expect(result.agent).toBe('claude');
-    expect(result.account.id).toBe(native.id);
-    expect(readMeta().accounts?.defaults?.claude).toBe(native.id);
+    expect(result.account.name).toBe('claude-native-default');
+    expect(readMeta().accounts?.defaults?.claude).toBe('claude-native-default');
   });
 
   it('label <harness>@<version> refuses a contradictory --account selector', async () => {
