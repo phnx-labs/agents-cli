@@ -40,7 +40,7 @@ import {
 } from '../lib/monitors/config.js';
 import { formatRelativeTime } from '../lib/session/relative-time.js';
 import { evaluateMonitorOnce, POLL_SOURCE_TYPES } from '../lib/monitors/engine.js';
-import { listFires, readState, readLiveness, resolveFireOutcome, type MonitorLiveness } from '../lib/monitors/state.js';
+import { listFires, readState, readLiveness, resolveFireOutcome, getMonitorHistoryDir, type MonitorLiveness } from '../lib/monitors/state.js';
 import { listRuns, getLatestRun, getRunDir } from '../lib/scheduling/routines.js';
 import { getMonitorsDir } from '../lib/state.js';
 import { IS_WINDOWS } from '../lib/platform/index.js';
@@ -260,8 +260,8 @@ async function validateDevice(name: string): Promise<string> {
   return normalized;
 }
 
-/** Parse the source flags into a MonitorSource, exiting on missing/ambiguous input. */
-function buildSource(options: Record<string, any>): MonitorSource {
+/** Parse the source flags into a MonitorSource, exiting on missing/ambiguous input. `name` seeds the --watch-pid running-seen marker. */
+function buildSource(options: Record<string, any>, name: string): MonitorSource {
   const chosen: Array<{ type: MonitorSourceType; source: MonitorSource }> = [];
   if (options.watch) chosen.push({ type: 'command', source: { type: 'command', command: options.watch } });
   if (options.watchPid) {
@@ -278,7 +278,8 @@ function buildSource(options: Record<string, any>): MonitorSource {
       stderrLine(chalk.gray('Pass --force to arm it anyway (e.g. the pid is about to be spawned by a concurrent step).'));
       process.exit(1);
     }
-    chosen.push({ type: 'command', source: { type: 'command', command: pidLivenessCommand(pid) } });
+    const seenRunningMarkerPath = path.join(getMonitorHistoryDir(name), 'pid-watch-seen-running');
+    chosen.push({ type: 'command', source: { type: 'command', command: pidLivenessCommand(pid, seenRunningMarkerPath) } });
   }
   if (options.poll) {
     chosen.push({ type: 'poll', source: { type: 'poll', command: options.poll[0], interval: options.poll[1] } });
@@ -609,7 +610,7 @@ export function registerMonitorsCommands(program: Command): void {
         process.exit(1);
       }
 
-      const source = buildSource(options);
+      const source = buildSource(options, nameOrPath);
       // A --watch-device source name must resolve to a registered fleet member —
       // validate it (fail fast with the registered list) so a typo/removed device
       // can't silently watch the local machine (same gate as --device/--devices).
