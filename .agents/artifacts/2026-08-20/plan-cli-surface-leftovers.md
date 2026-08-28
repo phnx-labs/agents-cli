@@ -2,10 +2,10 @@
 kind: plan
 title: Nest the leftover CLI verbs — beta, apply, feedback, harness
 summary: Four top-level groups in the command reference that are not owned nouns. apply already has a nested home. beta needs a parent pick. feedback can stay. harness should shrink, not be replaced by a new create verb.
-status: draft
+status: shipped
 surface: cli
 header: CLI surface
-footer: Design pick. Nothing ships until the four verdicts land.
+footer: Shipped 2026-08-21 in commit 2aaf8573a (RUSH-2981). All four verdicts landed.
 project: agents-cli
 context: command-reference leftover groups after RUSH-2965 (setup alias)
 tracking: RUSH-2981
@@ -26,6 +26,34 @@ assets:
   - cleanshot-apply.png
   - cleanshot-feedback.png
 ---
+
+## Status — shipped (updated 2026-08-28)
+
+**All four verdicts landed**, in one squashed breaking commit
+`2aaf8573a feat(cli)!: nest beta under setup; retire apply; drop harness login/logout`
+(RUSH-2981), merged to `main` 2026-08-21. Verified against the installed `1.22.54`
+surface on 2026-08-28:
+
+| Verdict | Decided | Shipped | Verified live |
+| --- | --- | --- | --- |
+| `apply` | retire top-level, keep `fleet`/`devices apply` | ✅ | `apply` ∈ `RETIRED_TOP_LEVEL_COMMANDS`; `devices apply` present; `agents apply` → unknown command |
+| `beta` | nest under `setup` | ✅ | `agents setup beta {list,enable,disable}`; root `beta` retired |
+| `feedback` | keep as root leaf | ✅ | still a 0-child leaf, unchanged |
+| `harness` | drop `login`/`logout`, no `create` | ✅ | 7 verbs: `add edit fork list remove rename view`; no `create` added |
+
+Surface delta since this plan was written: **76 → 69 top-level groups** (570 commands);
+42 names now sit in `RETIRED_TOP_LEVEL_COMMANDS`. This plan rode on top of the larger
+`cli-surface-consolidate` wave (RUSH-2579/2580/2581/2692/2864/2932/2984/2989/3001/3079),
+all merged.
+
+**What's left** — nothing on this plan; two follow-ups it deferred as out-of-scope:
+
+1. Empty-`fleet.devices` no-op still prints a quiet "No target devices" instead of an
+   actionable "fleet.devices is empty — set devices: all or name boxes."
+2. Companion `.agents` (ex-`.agents-system`) audit for any hook/skill/rule still
+   teaching `agents apply` / `agents beta`.
+
+Full reconciliation report: `.agents/artifacts/2026-08-28/cli-surface-progress/`.
 
 ## Focus for review
 
@@ -253,11 +281,11 @@ agents run spark "hello"
 
 - [x] Trace apply / fleet / devices / setup fleet (apply works; empty `devices: {}`)
 - [x] Trace feedback (leaf URL opener) and harness (9 verbs, login leftover)
-- [ ] Pick the four verdicts
-- [ ] PR 1 — retire top-level `apply` (copy RUSH-2965)
-- [ ] PR 2 — nest `beta` under the chosen parent
-- [ ] PR 3 — drop `harness login` / `logout`; docs
-- [ ] Feedback: no PR
+- [x] Pick the four verdicts
+- [x] PR 1 — retire top-level `apply` (copy RUSH-2965) — landed in `2aaf8573a`
+- [x] PR 2 — nest `beta` under `setup` — landed in `2aaf8573a`
+- [x] PR 3 — drop `harness login` / `logout`; docs — landed in `2aaf8573a`
+- [x] Feedback: no PR (kept as a root leaf, as decided)
 
 ## Validation
 
@@ -282,6 +310,6 @@ agents run spark "hello"
 
 ## Tracking
 
-- [RUSH-2981](https://linear.app/getrush/issue/RUSH-2981) — nest beta (parent still a pick)
+- [RUSH-2981](https://linear.app/getrush/issue/RUSH-2981) — **done**; shipped in `2aaf8573a` (2026-08-21): nest beta under `setup`, retire top-level `apply`, drop `harness login`/`logout`
 - [RUSH-2965](https://linear.app/getrush/issue/RUSH-2965) — the alias precedent (done)
-- Parked worktree: `.agents/worktrees/nest-setup-beta` (beta-under-setup, uncommitted to main)
+- Reconciliation report (2026-08-28): `.agents/artifacts/2026-08-28/cli-surface-progress/cli-surface-progress.md`
