@@ -355,6 +355,68 @@ describe('runShareUpdate', () => {
     expect(second).toEqual([]);
   });
 
+  // --check is the release train's change-detection entry point (PHNX-3403): it
+  // reports whether a deploy is due and returns WITHOUT deploying or reading any
+  // Cloudflare credentials. The release preflight uses it to skip a Worker deploy
+  // when the shipped worker-template.ts is unchanged.
+  it('--check reports deployNeeded, deploys nothing, and needs no Cloudflare creds', async () => {
+    const { share, config } = await freshShareModules();
+    // Endpoint with NO account id and NO recorded templateHash — the state a
+    // real deploy would reject for missing creds. --check must still resolve.
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: '',
+      workerName: 'worker-existing',
+      bucketName: 'bucket-existing',
+    });
+
+    const request: CloudflareRequester = async () => { throw new Error('check must not call Cloudflare'); };
+    // No token, no account — proves change detection is a pure local render+hash.
+    const result = await share.runShareUpdate({ check: true, request });
+
+    expect(result.checked).toBe(true);
+    expect(result.updated).toBe(false);
+    expect(result.deployNeeded).toBe(true); // no recorded hash → deploy (mirrors updateWorker's undefined-previous behavior)
+    expect(result.deployedHash).toBeUndefined();
+    expect(result.templateHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('--check reports deployNeeded:false once the deployed template matches (still deploys nothing)', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+
+    // A real deploy records the current template hash in config.
+    await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
+
+    const request: CloudflareRequester = async () => { throw new Error('check must not call Cloudflare'); };
+    const result = await share.runShareUpdate({ check: true, request });
+
+    expect(result.checked).toBe(true);
+    expect(result.deployNeeded).toBe(false);
+    expect(result.deployedHash).toBe(result.templateHash);
+  });
+
+  it('--check with --force reports deployNeeded even when the template already matches', async () => {
+    const { share, config } = await freshShareModules();
+    config.writeShareConfig({
+      baseUrl: 'https://share.test',
+      accountId: 'acct_1',
+      workerName: 'worker-one',
+      bucketName: 'bucket-one',
+    });
+    config.storeWriteToken('tok');
+    await share.runShareUpdate({ token: 'cf-token', request: async () => ({}) });
+
+    const result = await share.runShareUpdate({ check: true, force: true, request: async () => { throw new Error('no call'); } });
+    expect(result.deployNeeded).toBe(true);
+  });
+
   it('does not persist templateHash when the secret re-apply fails mid-update (RUSH-2453 self-heal pin)', async () => {
     // writeShareConfig runs only after updateWorker returns successfully. If the
     // second call (setWorkerSecret) throws after the deploy already landed, the

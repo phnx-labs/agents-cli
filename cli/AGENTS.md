@@ -937,6 +937,7 @@ that the caller be on a clean `main`:
 scripts/release.sh <version>                      # dry-run: bump, type-check, tarball preview, detected state
 scripts/release.sh <version> --apply              # tests on an auto-picked fleet worker -> PR + CI -> merge + tag -> build/sign/publish on the home base (mac-mini)
 scripts/release.sh <version> --apply --device <mac>  # sign/publish on <mac> when mac-mini is down -- <mac> must ALREADY be a provisioned signing home base (see below)
+scripts/release.sh <version> --apply --deploy-worker off  # publish only; skip the post-publish share-Worker redeploy
 ```
 
 The release has **three self-selected homes** and prints a `[n/6]` phase tracker,
@@ -961,6 +962,27 @@ would otherwise abort a good CLI release whenever a helper's sources moved. `ass
 auth + a headlessly readable `npmjs.com` `NPM_TOKEN`) before the release's
 first mutation. Helper signing is a separate, source-change-only path and still
 needs a provisioned Mac. The test worker is **not** hardcoded.
+
+**A release redeploys the managed share OG-cover Worker so prod can't drift from
+the shipped template (PHNX-3403).** The Worker that renders share preview cards
+was deployed only by a manual `agents artifacts share update` run, decoupled from
+release — so a release could ship a `worker-template.ts` change while the deployed
+Worker stayed stale (the gap that made PHNX-2835 look shipped while every new share
+still 404'd its cover). `--deploy-worker <auto|on|off>` (default `auto`) closes it:
+after publish, in the home-base phase, `deploy_share_worker` runs the
+**just-published** `@phnx-labs/agents-cli@<version>` (via a pinned `npx`, never the
+box's installed `agents`, so the deployed Worker matches the released source) as
+`agents artifacts share update --bundle cloudflare.com`. `auto` first runs
+`share update --check` — a pure local render+hash that needs **no** Cloudflare
+credentials — and deploys only when the shipped template differs from what the
+endpoint deployed; `on` always redeploys; `off` opts out. The deploy uses bundle
+`cloudflare.com` (the name the home base holds, not the CLI default `cloudflare`),
+`agents secrets exec` resolves it headlessly like the npm token, and the promote
+preflight verifies the share endpoint + that token on the home base **before**
+publishing (so a Worker-touching release can't publish then fail to deploy). A
+deploy failure fails the release loud with the exact manual fallback. It is
+idempotent — the already-published early return redeploys too — so a re-run after a
+publish/deploy split finishes the deploy.
 
 **A `--device` fallback must ALREADY be a provisioned signing home base — it is
 not turnkey.** Signing + notarizing + publishing needs, on that box: the

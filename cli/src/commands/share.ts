@@ -1094,16 +1094,25 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
     .option('--account <id>', 'Cloudflare account id override (default: the configured endpoint\'s account)')
     .option('--token <t>', 'Cloudflare API token (else read from --bundle)')
     .option('--force', 're-deploy even if the deployed template already matches')
+    .option('--check', 'report whether a deploy is needed and exit without deploying (needs no Cloudflare credentials)')
     // Named --update-json, not --json: `share <file>` (the parent) already
     // owns --json for its own publish-time result. Commander resolves an
     // option's long name against the WHOLE ancestor chain, so a same-named
     // child option is silently dropped at parse time (RUSH-2687).
     .option('--update-json', 'emit a machine-readable result')
-    .action(async (opts: { bundle: string; account?: string; token?: string; force?: boolean; updateJson?: boolean }) => {
+    .action(async (opts: { bundle: string; account?: string; token?: string; force?: boolean; check?: boolean; updateJson?: boolean }) => {
       try {
         const result = await runShareUpdate(opts);
         if (opts.updateJson) {
           console.log(JSON.stringify(result, null, 2));
+          return;
+        }
+        if (result.checked) {
+          console.log(
+            result.deployNeeded
+              ? chalk.yellow(`Worker '${result.workerName}' template is outdated — deploy needed (current render ${result.templateHash.slice(0, 12)}…).`)
+              : chalk.dim(`Worker '${result.workerName}' already matches the current template — no deploy needed.`),
+          );
           return;
         }
         if (result.updated) {
@@ -1124,11 +1133,18 @@ Prefer to change visibility without a browser? Use 'agents artifacts share visib
 
       # Force a re-deploy even though the template hash already matches
       agents artifacts share update --force
+
+      # Report whether a deploy is due without deploying (no Cloudflare creds needed)
+      agents artifacts share update --check --update-json
     `,
     notes: `
   Reuses the existing account/worker/bucket from 'agents artifacts share status' and the
   existing write token — it never re-provisions a bucket, touches routes, or
   regenerates the token. See 'agents artifacts share status' for whether an update is due.
+
+  --check renders the current template and compares its hash to what the endpoint last
+  deployed, then exits — deploying nothing and reading no Cloudflare credentials. The
+  release train uses it to decide, before publish, whether a release changes the Worker.
     `,
   });
 
@@ -1523,6 +1539,17 @@ export interface ShareUpdateResult {
   templateHash: string;
   baseUrl: string;
   workerName: string;
+  /** True when this was a `--check` run: nothing was deployed, the fields below
+   * just report whether a deploy WOULD be needed. Used by the release train to
+   * decide during preflight — before it verifies deploy creds — whether this
+   * release even changes the Worker. */
+  checked?: boolean;
+  /** Whether the current `worker-template.ts` render differs from what the
+   * endpoint last deployed (or `--force`/an endpoint with no recorded hash). */
+  deployNeeded?: boolean;
+  /** The template hash the endpoint last deployed, per local config. Undefined
+   * on an endpoint provisioned before the hash field existed. */
+  deployedHash?: string;
 }
 
 /** Re-deploy the Worker script on an ALREADY-provisioned endpoint to match the
@@ -1538,6 +1565,9 @@ export async function runShareUpdate(opts: {
   account?: string;
   token?: string;
   force?: boolean;
+  /** Report whether a deploy is needed and return without deploying. Needs no
+   * Cloudflare credentials — change detection is a pure local render+hash. */
+  check?: boolean;
   request?: CloudflareRequester;
   /** Bind PHOENIX_ID_BASE even when the configured hostname is not the managed domain. */
   managed?: boolean;
@@ -1545,6 +1575,28 @@ export async function runShareUpdate(opts: {
   const cfg = readShareConfig();
   if (!cfg) {
     throw new Error("Not configured. Run 'agents artifacts setup' (to provision) or 'agents artifacts share join' first.");
+  }
+
+  // Change detection is a pure local computation (render + sha256), so it needs
+  // no Cloudflare credentials. The release train calls this in `--check` mode
+  // during preflight — BEFORE it has verified the deploy creds — to decide
+  // whether this release changes the Worker at all. `shareTemplateStatus` is the
+  // same comparator `agents artifacts share status` uses; 'unknown' (an endpoint
+  // with no recorded hash) deploys, mirroring `updateWorker`'s undefined-previous
+  // behavior.
+  const worker = renderWorkerBundle();
+  const templateHash = hashWorkerScript(worker.script);
+  const deployNeeded = opts.force === true || shareTemplateStatus(cfg) !== 'current';
+  if (opts.check) {
+    return {
+      updated: false,
+      checked: true,
+      deployNeeded,
+      templateHash,
+      deployedHash: cfg.templateHash,
+      baseUrl: cfg.baseUrl,
+      workerName: cfg.workerName,
+    };
   }
 
   const { apiToken, accountId: acctFromBundle } = readCloudflareCreds(opts.bundle ?? DEFAULT_CF_BUNDLE, {
@@ -1558,7 +1610,6 @@ export async function runShareUpdate(opts: {
     );
   }
   const writeToken = readWriteToken();
-  const worker = renderWorkerBundle();
   const phoenixIdBase = phoenixIdBaseForDeploy({ managed: opts.managed }, cfg);
   const provisionOpts = {
     ...(opts.request ? { request: opts.request } : {}),
@@ -1581,7 +1632,14 @@ export async function runShareUpdate(opts: {
     writeShareConfig({ ...cfg, accountId, templateHash: result.templateHash });
   }
 
-  return { updated: !result.skipped, templateHash: result.templateHash, baseUrl: cfg.baseUrl, workerName: cfg.workerName };
+  return {
+    updated: !result.skipped,
+    templateHash: result.templateHash,
+    deployNeeded,
+    deployedHash: cfg.templateHash,
+    baseUrl: cfg.baseUrl,
+    workerName: cfg.workerName,
+  };
 }
 
 function cleanHostname(domain: string | undefined): string | undefined {

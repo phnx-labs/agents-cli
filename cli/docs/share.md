@@ -152,6 +152,18 @@ The bar also carries a right-side **stats cluster** — `👁 <n> views · updat
 All of this is a pure Worker-template change, so a deployed endpoint reads
 `outdated` until its owner redeploys with `agents artifacts share update` (no new
 bindings — it reuses R2 and the existing PATCH route).
+`agents artifacts share update --check [--update-json]` reports whether a redeploy
+is due — a pure local render+hash that reads no Cloudflare credentials — without
+deploying.
+
+For the **managed** endpoint (`share.agents-cli.sh`, operated by us), this redeploy
+no longer waits on a manual run: `cli/scripts/release.sh` runs it automatically after
+publish when `worker-template.ts` changed (`--deploy-worker auto|on|off`, default
+`auto`; PHNX-3403), so a release can't ship a template change while prod keeps
+rendering the old card — the gap that made PHNX-2835 look shipped while every new
+share still 404'd its cover. See the *Releasing* section of
+[`cli/AGENTS.md`](../AGENTS.md#releasing). BYO endpoints still redeploy on their own
+owner's `share update`.
 
 ## Listing hidden pages — `share list --scope` / `--all`
 
