@@ -166,6 +166,13 @@ function livenessLabel(monitor: MonitorConfig, state: ReturnType<typeof readStat
   if (liveness.lastError) {
     return chalk.red(`checked ${liveness.checkCount}x · error: ${liveness.lastError.replace(/\s+/g, ' ').slice(0, 60)}`);
   }
+  const latestFire = listFires(monitor.name).at(-1);
+  if (latestFire) {
+    const outcome = resolveFireOutcome(monitor.name, latestFire);
+    if (!outcome.ok) {
+      return chalk.red(`ACTION FAILED ${formatRelativeTime(latestFire.firedAt)}`) + chalk.gray(` · checked ${liveness.checkCount}x`);
+    }
+  }
   if (state?.lastFiredAt) {
     return chalk.green(`fired ${formatRelativeTime(state.lastFiredAt)}`) + chalk.gray(` · checked ${liveness.checkCount}x`);
   }
@@ -650,6 +657,8 @@ export function registerMonitorsCommands(program: Command): void {
         const payload = monitors.map((m) => {
           const state = readState(m.name);
           const liveness = readLiveness(m.name);
+          const latestFire = listFires(m.name).at(-1);
+          const latestOutcome = latestFire ? resolveFireOutcome(m.name, latestFire) : null;
           return {
             name: m.name,
             enabled: m.enabled,
@@ -671,6 +680,8 @@ export function registerMonitorsCommands(program: Command): void {
             lastError: liveness?.lastError ?? null,
             consecutiveErrors: liveness?.consecutiveErrors ?? 0,
             stalled: isStalled(m, liveness),
+            lastActionStatus: latestOutcome?.runStatus ?? null,
+            lastActionFailed: latestOutcome ? !latestOutcome.ok : false,
           };
         });
         stdoutJson(payload);

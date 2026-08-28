@@ -202,7 +202,8 @@ agents monitors remove <name>
 
 ### Actions (exactly one; the event is injected as `{event}`)
 
-- `--run <agent> --prompt '…'` — spawn an agent (shares `--mode`/`--effort`/
+- `--run <agent> --prompt '…'` — spawn a **new headless agent conversation**;
+  it does not resume or re-invoke the session that created the monitor. It shares `--mode`/`--effort`/
   `--action-timeout` with routines), dispatched through `executeJobDetached`.
   Takes a native harness id or a custom harness name (`agents harness list`);
   a custom harness is delegated to `agents run <name>` and pins its own host
@@ -211,6 +212,11 @@ agents monitors remove <name>
   does — a `--run` that shells out to `gh` is not a hollow success when the
   daemon user is already logged in (RUSH-2860; see [routines.md §Sandbox
   Isolation](routines.md#sandbox-isolation)).
+  Native Claude/Codex actions use balanced rotation by default. Claude verifies
+  the selected version with its own `auth status` before spawn and skips stale
+  identity-only accounts. Its narrow managed version HOME mirrors only the hook
+  roots needed by portable `~/...` commands, so hooks resolve without exposing
+  the operator's full `~/.agents` tree.
 - `--routine <name>` — fire an existing routine (attach a monitor to a routine).
 - `--notify [channel]` — notify the owner through the one channel seam
   (`lookupTransport` → provider). The recipient and normal channel come from

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildSpawnEnv, getJobHomePath, hostHasGhAuth, resolveHostGhConfigDir, assertSandboxForwardsHostGhAuth } from './sandbox.js';
+import { buildSpawnEnv, getJobHomePath, hostHasGhAuth, resolveHostGhConfigDir, assertSandboxForwardsHostGhAuth, prepareJobHome } from './sandbox.js';
 import { getUserAgentsDir, getRoutinesDir } from './state.js';
+import { getVersionHomePath } from './installations/versions.js';
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -171,5 +172,31 @@ describe('getJobHomePath — routine-name path containment (C4)', () => {
 
   it('rejects names with null bytes', () => {
     expect(() => getJobHomePath('evil\x00')).toThrow();
+  });
+});
+
+describe('prepareJobHome — monitor/routine agent auth (PHNX-3406)', () => {
+  it('links the balanced Claude account identity but keeps hook-bearing settings out of the routine HOME', () => {
+    const version = `99.0.0-phnx3406-${process.pid}`;
+    const name = `phnx3406-${process.pid}`;
+    const versionHome = getVersionHomePath('claude', version);
+    const configDir = path.join(versionHome, '.claude');
+    fs.mkdirSync(configDir, { recursive: true });
+    fs.writeFileSync(path.join(configDir, '.claude.json'), '{"oauthAccount":{"emailAddress":"routine@example.com"}}');
+    fs.writeFileSync(path.join(configDir, 'settings.json'), JSON.stringify({
+      hooks: { SessionStart: [{ hooks: [{ command: '~/.agents/missing-hook.sh' }] }] },
+    }));
+
+    try {
+      const overlay = prepareJobHome({ name, agent: 'claude', mode: 'auto', enabled: true }, version);
+      expect(fs.realpathSync(path.join(overlay, '.claude', '.claude.json')))
+        .toBe(fs.realpathSync(path.join(configDir, '.claude.json')));
+      const settings = JSON.parse(fs.readFileSync(path.join(overlay, '.claude', 'settings.json'), 'utf8'));
+      expect(settings.hooks).toBeUndefined();
+      expect(settings.permissions).toBeDefined();
+    } finally {
+      fs.rmSync(versionHome, { recursive: true, force: true });
+      fs.rmSync(path.dirname(getJobHomePath(name)), { recursive: true, force: true });
+    }
   });
 });
