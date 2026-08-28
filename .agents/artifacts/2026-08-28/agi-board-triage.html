@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>AGI board triage — 95 open, 9 closed with proof, rule tightened</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header"><div class="header-label">Phoenix Labs / agents-cli</div><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-complete">complete</span></div>
+<h1>AGI board triage — 95 open, 9 closed with proof, rule tightened</h1>
+<p class="summary">Verified all 95 open AGI-project tickets against current code and merged PRs with 7 parallel agents. Closed 9 provably-done with proof. The board's real problem is inflation from noticed-in-passing filing (48 of 95 opened in 3 days), not literal duplicates — so the durable fix is the consolidate-over-create rule, not mass-cancellation.</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">95 open at start (48 opened in the last 3 days)<span class="meta-sep" aria-hidden="true">·</span>9 closed with hard proof<span class="meta-sep" aria-hidden="true">·</span>1 held for owner release call (PHNX-3392)<span class="meta-sep" aria-hidden="true">·</span>8 decisions surfaced (owner call)<span class="meta-sep" aria-hidden="true">·</span>Rule: consolidate-over-create (PR on .agents-system)</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/project/AGI" target="_blank" rel="noopener">AGI project</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">claude-2026-08-27-2148-34c248fc</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-28</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Summary</a><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item" href="#held-yours-to-close-1" data-toc-for="held-yours-to-close-1"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Held — yours to close (1)</a><a class="toc-item" href="#decisions-surfaced-need-your-call-8-left-open" data-toc-for="decisions-surfaced-need-your-call-8-left-open"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Decisions surfaced — need your call (8, left open)</a><a class="toc-item" href="#the-rule-fix-the-durable-part" data-toc-for="the-rule-fix-the-durable-part"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>The rule fix (the durable part)</a><a class="toc-item" href="#honest-notes" data-toc-for="honest-notes"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Honest notes</a></nav><article class="artifact-body"><h2 id="summary">Summary</h2><p>You asked me to check the board myself, close what's already done, and fix the rule
+that lets agents keep minting tickets instead of consolidating. I did all three.</p>
+<p><strong>The board is real and busy: 95 open, and 48 of them (half) were opened in the last
+three days.</strong> That growth rate — not literal duplicates — is the problem. I fanned 7
+agents across the whole board, each verifying its slice against current code and merged
+PRs at <code>file:line</code>. The honest result: most of the 95 are <strong>distinct, genuinely-open
+real bugs</strong>, not spam-duplicates. So the right move was to close what's provably done
+(9), surface what needs your decision (8), and fix the rule so the board stops inflating
+— not to manufacture consolidations that aren't real.</p>
+<h2 id="findings">Findings</h2><p>I fanned 7 agents across all 95 open tickets. Each verified its slice against
+<code>origin/main</code> and merged PRs at <code>file:line</code>. Outcome: <strong>9 provably done</strong> (closed this
+pass), <strong>1 held for your release call</strong>, <strong>8 blocked on your decision</strong>, and the rest —
+~76 — <strong>verified genuinely open, distinct real work</strong>. Literal duplicates were rare;
+the board inflates from noticed-in-passing filing, not copies of one problem.</p>
+<h2 id="evidence">Evidence</h2><p><strong>Closed this pass (9), each with proof:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Ticket</th>
+<th>Was</th>
+<th>Proof</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>PHNX-3405</strong></td>
+<td>Todo</td>
+<td>PR #3229 merged — <code>markFleetRemote</code> forwards actor across the ssh browser-drive seam</td>
+</tr>
+<tr>
+<td><strong>PHNX-3288</strong></td>
+<td>In Review</td>
+<td>PR muqsitnawaz/agents#1836 merged — nanoid 3.3.18 across 12 lockfiles; CVE-2026-67213 cleared</td>
+</tr>
+<tr>
+<td><strong>PHNX-2942</strong></td>
+<td>Todo</td>
+<td><code>verify-delivery-chain.py:248-290</code> counts write-engagement only; landed .agents #374</td>
+</tr>
+<tr>
+<td><strong>PHNX-3188</strong></td>
+<td>Todo</td>
+<td><code>isDirectoryDoc()</code> (resources.ts:160) stops treating dir READMEs/AGENTS.md as slash commands; landed 7a9f57fc0</td>
+</tr>
+<tr>
+<td><strong>PHNX-2148</strong></td>
+<td>Doing</td>
+<td><code>release.sh:20-40</code> replaced the CI-wait-on-head-sha merge with exact-tree attestation — stale-head merge can't occur</td>
+</tr>
+<tr>
+<td><strong>PHNX-2243</strong></td>
+<td>Doing</td>
+<td><code>codex-policy.ts</code> implements the canonical safe-writable policy, consumed by exec.ts + codex adapter</td>
+</tr>
+<tr>
+<td><strong>PHNX-2730</strong></td>
+<td>Doing</td>
+<td><code>tests.yml</code> Windows job is now a scoped smoke + continue-on-error on push-to-main, not a full unsharded required suite</td>
+</tr>
+<tr>
+<td><strong>PHNX-3240</strong></td>
+<td>Todo</td>
+<td><code>test.sh</code> <code>die()</code>=exit 1 fixes the exit-0 fall-through; cli/AGENTS.md documents the <code>agents≥1.22.49</code> requirement</td>
+</tr>
+<tr>
+<td><strong>PHNX-2496</strong></td>
+<td>Todo</td>
+<td>Flaky slot-release test removed — RUSH-2640 flipped semantics so a failed record releases the slot</td>
+</tr>
+</tbody></table>
+<p>Board: <strong>95 → 86 open.</strong></p>
+<h2 id="held-yours-to-close-1">Held — yours to close (1)</h2><ul>
+<li><strong>PHNX-3392</strong> (device roles + per-account usage sync) — all three PRs (#3214, #3217,
+#3233) are <strong>merged to main</strong>; your own comment leaves it In Review pending a fleet
+<strong>release</strong> ("Release is the owner's decision"). Code is done; the release call is
+yours, so I left the state alone.</li>
+</ul>
+<h2 id="decisions-surfaced-need-your-call-8-left-open">Decisions surfaced — need your call (8, left open)</h2><p>These are blocked on a product/owner decision, not on engineering. Each states the choice
+in its body:</p>
+<table>
+<thead>
+<tr>
+<th>Ticket</th>
+<th>The decision</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>PHNX-3322</strong></td>
+<td>Which of the 4 product names wins (agents-cli / agi-cli / AGI CLI / the binary)</td>
+</tr>
+<tr>
+<td><strong>PHNX-3342</strong></td>
+<td>Distribute the OpenRouter/deepseek credential fleet-wide vs keep it zion-only</td>
+</tr>
+<tr>
+<td><strong>PHNX-2847</strong></td>
+<td>Go/no-go on splitting the 3 npm-postinstall mutations (plan committed, awaiting call)</td>
+</tr>
+<tr>
+<td><strong>PHNX-3323</strong></td>
+<td>Finish the <code>notify</code> deprecation vs keep the alias</td>
+</tr>
+<tr>
+<td><strong>PHNX-2519</strong></td>
+<td>Whether check-updates should gate on posture (ticket is "directions, not a design")</td>
+</tr>
+<tr>
+<td><strong>PHNX-3374</strong></td>
+<td>Turn on Cloudflare Browser-Rendering OG mode (product-gated)</td>
+</tr>
+<tr>
+<td><strong>PHNX-3380</strong></td>
+<td>Routines failure-backoff policy (curve / cap / which schedules)</td>
+</tr>
+<tr>
+<td><strong>PHNX-3404</strong></td>
+<td>Register <code>.agents-extras</code> as an opt-in extra repo (nothing consumes it yet)</td>
+</tr>
+</tbody></table>
+<h2 id="the-rule-fix-the-durable-part">The rule fix (the durable part)</h2><p>The ticket-restraint rule already said <em>claim first, don't file what you merely noticed</em>
+(landed #364). It didn't hold — hence 48 new tickets in 3 days. The gap: it never said
+what to do when you <strong>do</strong> have real work that overlaps an existing ticket. Agents open a
+parallel near-duplicate instead of improving the one that's there.</p>
+<p>PR on <code>phnx-labs/.agents-system</code> (branch <code>ticket-consolidate</code>) adds the missing half:</p>
+<ul>
+<li><strong>conventions.md</strong> — <em>claim first; <strong>enrich before you create</strong>; open one only for work
+you're delivering now.</em> "Default to NOT creating." Consolidate into the overlapping
+ticket (comment, sharpen, attach evidence); fold duplicates into one canonical ticket
+and cancel the rest.</li>
+<li><strong>tickets SKILL.md</strong> — an explicit "Enrich before you create" lifecycle step (search
+wider than the exact title), and anti-patterns that name <strong>near-duplicates</strong>.</li>
+</ul>
+<div class="artifact-grid artifact-grid-3">
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">86</div>
+    <div class="artifact-stat-label">open after this pass (was 95)</div>
+  </article>
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">48 / 95</div>
+    <div class="artifact-stat-label">opened in the last 3 days</div>
+  </article>
+  <article class="artifact-stat">
+    <div class="artifact-stat-value">9</div>
+    <div class="artifact-stat-label">closed with hard proof</div>
+  </article>
+</div><h2 id="honest-notes">Honest notes</h2><ul>
+<li><strong>Duplicates were rare.</strong> Each agent looked for overlap in its slice and found almost
+none — this board is distinct real bugs, not copies of one problem. Closing done work
+and stopping the inflow is the fix; cancelling real tickets to hit a number is not.</li>
+<li><strong>One stale-Doing left alone:</strong> PHNX-3229 ("clean repo root") is Doing with nothing
+landed, but it's live owner-scoped work — reset it to Todo if it's abandoned.</li>
+<li><strong>Verification was against <code>origin/main</code> + merged PRs</strong>, not this local checkout (which
+is a few merges behind). Every closed ticket cites a merged PR or a <code>file:line</code> on main.</li>
+</ul>
+</article>
+<footer class="document-footer">AGI board triage — 2026-08-28</footer>
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogQUdJIGJvYXJkIHRyaWFnZSDigJQgOTUgb3BlbiwgOSBjbG9zZWQgd2l0aCBwcm9vZiwgcnVsZSB0aWdodGVuZWQKc3VtbWFyeTogVmVyaWZpZWQgYWxsIDk1IG9wZW4gQUdJLXByb2plY3QgdGlja2V0cyBhZ2FpbnN0IGN1cnJlbnQgY29kZSBhbmQgbWVyZ2VkIFBScyB3aXRoIDcgcGFyYWxsZWwgYWdlbnRzLiBDbG9zZWQgOSBwcm92YWJseS1kb25lIHdpdGggcHJvb2YuIFRoZSBib2FyZCdzIHJlYWwgcHJvYmxlbSBpcyBpbmZsYXRpb24gZnJvbSBub3RpY2VkLWluLXBhc3NpbmcgZmlsaW5nICg0OCBvZiA5NSBvcGVuZWQgaW4gMyBkYXlzKSwgbm90IGxpdGVyYWwgZHVwbGljYXRlcyDigJQgc28gdGhlIGR1cmFibGUgZml4IGlzIHRoZSBjb25zb2xpZGF0ZS1vdmVyLWNyZWF0ZSBydWxlLCBub3QgbWFzcy1jYW5jZWxsYXRpb24uCmhlYWRlcjogUGhvZW5peCBMYWJzIC8gYWdlbnRzLWNsaQpmb290ZXI6IEFHSSBib2FyZCB0cmlhZ2Ug4oCUIDIwMjYtMDgtMjgKc3RhdHVzOiBjb21wbGV0ZQpkYXRlOiAiMjAyNi0wOC0yOCIKZmFjdHM6CiAgLSAiOTUgb3BlbiBhdCBzdGFydCAoNDggb3BlbmVkIGluIHRoZSBsYXN0IDMgZGF5cykiCiAgLSAiOSBjbG9zZWQgd2l0aCBoYXJkIHByb29mIgogIC0gIjEgaGVsZCBmb3Igb3duZXIgcmVsZWFzZSBjYWxsIChQSE5YLTMzOTIpIgogIC0gIjggZGVjaXNpb25zIHN1cmZhY2VkIChvd25lciBjYWxsKSIKICAtICJSdWxlOiBjb25zb2xpZGF0ZS1vdmVyLWNyZWF0ZSAoUFIgb24gLmFnZW50cy1zeXN0ZW0pIgpsaW5rczoKICAtIHVybDogaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvcHJvamVjdC9BR0kKICAgIGxhYmVsOiBBR0kgcHJvamVjdAotLS0KCiMjIFN1bW1hcnkKCllvdSBhc2tlZCBtZSB0byBjaGVjayB0aGUgYm9hcmQgbXlzZWxmLCBjbG9zZSB3aGF0J3MgYWxyZWFkeSBkb25lLCBhbmQgZml4IHRoZSBydWxlCnRoYXQgbGV0cyBhZ2VudHMga2VlcCBtaW50aW5nIHRpY2tldHMgaW5zdGVhZCBvZiBjb25zb2xpZGF0aW5nLiBJIGRpZCBhbGwgdGhyZWUuCgoqKlRoZSBib2FyZCBpcyByZWFsIGFuZCBidXN5OiA5NSBvcGVuLCBhbmQgNDggb2YgdGhlbSAoaGFsZikgd2VyZSBvcGVuZWQgaW4gdGhlIGxhc3QKdGhyZWUgZGF5cy4qKiBUaGF0IGdyb3d0aCByYXRlIOKAlCBub3QgbGl0ZXJhbCBkdXBsaWNhdGVzIOKAlCBpcyB0aGUgcHJvYmxlbS4gSSBmYW5uZWQgNwphZ2VudHMgYWNyb3NzIHRoZSB3aG9sZSBib2FyZCwgZWFjaCB2ZXJpZnlpbmcgaXRzIHNsaWNlIGFnYWluc3QgY3VycmVudCBjb2RlIGFuZCBtZXJnZWQKUFJzIGF0IGBmaWxlOmxpbmVgLiBUaGUgaG9uZXN0IHJlc3VsdDogbW9zdCBvZiB0aGUgOTUgYXJlICoqZGlzdGluY3QsIGdlbnVpbmVseS1vcGVuCnJlYWwgYnVncyoqLCBub3Qgc3BhbS1kdXBsaWNhdGVzLiBTbyB0aGUgcmlnaHQgbW92ZSB3YXMgdG8gY2xvc2Ugd2hhdCdzIHByb3ZhYmx5IGRvbmUKKDkpLCBzdXJmYWNlIHdoYXQgbmVlZHMgeW91ciBkZWNpc2lvbiAoOCksIGFuZCBmaXggdGhlIHJ1bGUgc28gdGhlIGJvYXJkIHN0b3BzIGluZmxhdGluZwrigJQgbm90IHRvIG1hbnVmYWN0dXJlIGNvbnNvbGlkYXRpb25zIHRoYXQgYXJlbid0IHJlYWwuCgojIyBGaW5kaW5ncwoKSSBmYW5uZWQgNyBhZ2VudHMgYWNyb3NzIGFsbCA5NSBvcGVuIHRpY2tldHMuIEVhY2ggdmVyaWZpZWQgaXRzIHNsaWNlIGFnYWluc3QKYG9yaWdpbi9tYWluYCBhbmQgbWVyZ2VkIFBScyBhdCBgZmlsZTpsaW5lYC4gT3V0Y29tZTogKio5IHByb3ZhYmx5IGRvbmUqKiAoY2xvc2VkIHRoaXMKcGFzcyksICoqMSBoZWxkIGZvciB5b3VyIHJlbGVhc2UgY2FsbCoqLCAqKjggYmxvY2tlZCBvbiB5b3VyIGRlY2lzaW9uKiosIGFuZCB0aGUgcmVzdCDigJQKfjc2IOKAlCAqKnZlcmlmaWVkIGdlbnVpbmVseSBvcGVuLCBkaXN0aW5jdCByZWFsIHdvcmsqKi4gTGl0ZXJhbCBkdXBsaWNhdGVzIHdlcmUgcmFyZTsKdGhlIGJvYXJkIGluZmxhdGVzIGZyb20gbm90aWNlZC1pbi1wYXNzaW5nIGZpbGluZywgbm90IGNvcGllcyBvZiBvbmUgcHJvYmxlbS4KCiMjIEV2aWRlbmNlCgoqKkNsb3NlZCB0aGlzIHBhc3MgKDkpLCBlYWNoIHdpdGggcHJvb2Y6KioKCnwgVGlja2V0IHwgV2FzIHwgUHJvb2YgfAp8IC0tLSB8IC0tLSB8IC0tLSB8CnwgKipQSE5YLTM0MDUqKiB8IFRvZG8gfCBQUiAjMzIyOSBtZXJnZWQg4oCUIGBtYXJrRmxlZXRSZW1vdGVgIGZvcndhcmRzIGFjdG9yIGFjcm9zcyB0aGUgc3NoIGJyb3dzZXItZHJpdmUgc2VhbSB8CnwgKipQSE5YLTMyODgqKiB8IEluIFJldmlldyB8IFBSIG11cXNpdG5hd2F6L2FnZW50cyMxODM2IG1lcmdlZCDigJQgbmFub2lkIDMuMy4xOCBhY3Jvc3MgMTIgbG9ja2ZpbGVzOyBDVkUtMjAyNi02NzIxMyBjbGVhcmVkIHwKfCAqKlBITlgtMjk0MioqIHwgVG9kbyB8IGB2ZXJpZnktZGVsaXZlcnktY2hhaW4ucHk6MjQ4LTI5MGAgY291bnRzIHdyaXRlLWVuZ2FnZW1lbnQgb25seTsgbGFuZGVkIC5hZ2VudHMgIzM3NCB8CnwgKipQSE5YLTMxODgqKiB8IFRvZG8gfCBgaXNEaXJlY3RvcnlEb2MoKWAgKHJlc291cmNlcy50czoxNjApIHN0b3BzIHRyZWF0aW5nIGRpciBSRUFETUVzL0FHRU5UUy5tZCBhcyBzbGFzaCBjb21tYW5kczsgbGFuZGVkIDdhOWY1N2ZjMCB8CnwgKipQSE5YLTIxNDgqKiB8IERvaW5nIHwgYHJlbGVhc2Uuc2g6MjAtNDBgIHJlcGxhY2VkIHRoZSBDSS13YWl0LW9uLWhlYWQtc2hhIG1lcmdlIHdpdGggZXhhY3QtdHJlZSBhdHRlc3RhdGlvbiDigJQgc3RhbGUtaGVhZCBtZXJnZSBjYW4ndCBvY2N1ciB8CnwgKipQSE5YLTIyNDMqKiB8IERvaW5nIHwgYGNvZGV4LXBvbGljeS50c2AgaW1wbGVtZW50cyB0aGUgY2Fub25pY2FsIHNhZmUtd3JpdGFibGUgcG9saWN5LCBjb25zdW1lZCBieSBleGVjLnRzICsgY29kZXggYWRhcHRlciB8CnwgKipQSE5YLTI3MzAqKiB8IERvaW5nIHwgYHRlc3RzLnltbGAgV2luZG93cyBqb2IgaXMgbm93IGEgc2NvcGVkIHNtb2tlICsgY29udGludWUtb24tZXJyb3Igb24gcHVzaC10by1tYWluLCBub3QgYSBmdWxsIHVuc2hhcmRlZCByZXF1aXJlZCBzdWl0ZSB8CnwgKipQSE5YLTMyNDAqKiB8IFRvZG8gfCBgdGVzdC5zaGAgYGRpZSgpYD1leGl0IDEgZml4ZXMgdGhlIGV4aXQtMCBmYWxsLXRocm91Z2g7IGNsaS9BR0VOVFMubWQgZG9jdW1lbnRzIHRoZSBgYWdlbnRz4omlMS4yMi40OWAgcmVxdWlyZW1lbnQgfAp8ICoqUEhOWC0yNDk2KiogfCBUb2RvIHwgRmxha3kgc2xvdC1yZWxlYXNlIHRlc3QgcmVtb3ZlZCDigJQgUlVTSC0yNjQwIGZsaXBwZWQgc2VtYW50aWNzIHNvIGEgZmFpbGVkIHJlY29yZCByZWxlYXNlcyB0aGUgc2xvdCB8CgpCb2FyZDogKio5NSDihpIgODYgb3Blbi4qKgoKIyMgSGVsZCDigJQgeW91cnMgdG8gY2xvc2UgKDEpCgotICoqUEhOWC0zMzkyKiogKGRldmljZSByb2xlcyArIHBlci1hY2NvdW50IHVzYWdlIHN5bmMpIOKAlCBhbGwgdGhyZWUgUFJzICgjMzIxNCwgIzMyMTcsCiAgIzMyMzMpIGFyZSAqKm1lcmdlZCB0byBtYWluKio7IHlvdXIgb3duIGNvbW1lbnQgbGVhdmVzIGl0IEluIFJldmlldyBwZW5kaW5nIGEgZmxlZXQKICAqKnJlbGVhc2UqKiAoIlJlbGVhc2UgaXMgdGhlIG93bmVyJ3MgZGVjaXNpb24iKS4gQ29kZSBpcyBkb25lOyB0aGUgcmVsZWFzZSBjYWxsIGlzCiAgeW91cnMsIHNvIEkgbGVmdCB0aGUgc3RhdGUgYWxvbmUuCgojIyBEZWNpc2lvbnMgc3VyZmFjZWQg4oCUIG5lZWQgeW91ciBjYWxsICg4LCBsZWZ0IG9wZW4pCgpUaGVzZSBhcmUgYmxvY2tlZCBvbiBhIHByb2R1Y3Qvb3duZXIgZGVjaXNpb24sIG5vdCBvbiBlbmdpbmVlcmluZy4gRWFjaCBzdGF0ZXMgdGhlIGNob2ljZQppbiBpdHMgYm9keToKCnwgVGlja2V0IHwgVGhlIGRlY2lzaW9uIHwKfCAtLS0gfCAtLS0gfAp8ICoqUEhOWC0zMzIyKiogfCBXaGljaCBvZiB0aGUgNCBwcm9kdWN0IG5hbWVzIHdpbnMgKGFnZW50cy1jbGkgLyBhZ2ktY2xpIC8gQUdJIENMSSAvIHRoZSBiaW5hcnkpIHwKfCAqKlBITlgtMzM0MioqIHwgRGlzdHJpYnV0ZSB0aGUgT3BlblJvdXRlci9kZWVwc2VlayBjcmVkZW50aWFsIGZsZWV0LXdpZGUgdnMga2VlcCBpdCB6aW9uLW9ubHkgfAp8ICoqUEhOWC0yODQ3KiogfCBHby9uby1nbyBvbiBzcGxpdHRpbmcgdGhlIDMgbnBtLXBvc3RpbnN0YWxsIG11dGF0aW9ucyAocGxhbiBjb21taXR0ZWQsIGF3YWl0aW5nIGNhbGwpIHwKfCAqKlBITlgtMzMyMyoqIHwgRmluaXNoIHRoZSBgbm90aWZ5YCBkZXByZWNhdGlvbiB2cyBrZWVwIHRoZSBhbGlhcyB8CnwgKipQSE5YLTI1MTkqKiB8IFdoZXRoZXIgY2hlY2stdXBkYXRlcyBzaG91bGQgZ2F0ZSBvbiBwb3N0dXJlICh0aWNrZXQgaXMgImRpcmVjdGlvbnMsIG5vdCBhIGRlc2lnbiIpIHwKfCAqKlBITlgtMzM3NCoqIHwgVHVybiBvbiBDbG91ZGZsYXJlIEJyb3dzZXItUmVuZGVyaW5nIE9HIG1vZGUgKHByb2R1Y3QtZ2F0ZWQpIHwKfCAqKlBITlgtMzM4MCoqIHwgUm91dGluZXMgZmFpbHVyZS1iYWNrb2ZmIHBvbGljeSAoY3VydmUgLyBjYXAgLyB3aGljaCBzY2hlZHVsZXMpIHwKfCAqKlBITlgtMzQwNCoqIHwgUmVnaXN0ZXIgYC5hZ2VudHMtZXh0cmFzYCBhcyBhbiBvcHQtaW4gZXh0cmEgcmVwbyAobm90aGluZyBjb25zdW1lcyBpdCB5ZXQpIHwKCiMjIFRoZSBydWxlIGZpeCAodGhlIGR1cmFibGUgcGFydCkKClRoZSB0aWNrZXQtcmVzdHJhaW50IHJ1bGUgYWxyZWFkeSBzYWlkICpjbGFpbSBmaXJzdCwgZG9uJ3QgZmlsZSB3aGF0IHlvdSBtZXJlbHkgbm90aWNlZCoKKGxhbmRlZCAjMzY0KS4gSXQgZGlkbid0IGhvbGQg4oCUIGhlbmNlIDQ4IG5ldyB0aWNrZXRzIGluIDMgZGF5cy4gVGhlIGdhcDogaXQgbmV2ZXIgc2FpZAp3aGF0IHRvIGRvIHdoZW4geW91ICoqZG8qKiBoYXZlIHJlYWwgd29yayB0aGF0IG92ZXJsYXBzIGFuIGV4aXN0aW5nIHRpY2tldC4gQWdlbnRzIG9wZW4gYQpwYXJhbGxlbCBuZWFyLWR1cGxpY2F0ZSBpbnN0ZWFkIG9mIGltcHJvdmluZyB0aGUgb25lIHRoYXQncyB0aGVyZS4KClBSIG9uIGBwaG54LWxhYnMvLmFnZW50cy1zeXN0ZW1gIChicmFuY2ggYHRpY2tldC1jb25zb2xpZGF0ZWApIGFkZHMgdGhlIG1pc3NpbmcgaGFsZjoKCi0gKipjb252ZW50aW9ucy5tZCoqIOKAlCAqY2xhaW0gZmlyc3Q7ICoqZW5yaWNoIGJlZm9yZSB5b3UgY3JlYXRlKio7IG9wZW4gb25lIG9ubHkgZm9yIHdvcmsKICB5b3UncmUgZGVsaXZlcmluZyBub3cuKiAiRGVmYXVsdCB0byBOT1QgY3JlYXRpbmcuIiBDb25zb2xpZGF0ZSBpbnRvIHRoZSBvdmVybGFwcGluZwogIHRpY2tldCAoY29tbWVudCwgc2hhcnBlbiwgYXR0YWNoIGV2aWRlbmNlKTsgZm9sZCBkdXBsaWNhdGVzIGludG8gb25lIGNhbm9uaWNhbCB0aWNrZXQKICBhbmQgY2FuY2VsIHRoZSByZXN0LgotICoqdGlja2V0cyBTS0lMTC5tZCoqIOKAlCBhbiBleHBsaWNpdCAiRW5yaWNoIGJlZm9yZSB5b3UgY3JlYXRlIiBsaWZlY3ljbGUgc3RlcCAoc2VhcmNoCiAgd2lkZXIgdGhhbiB0aGUgZXhhY3QgdGl0bGUpLCBhbmQgYW50aS1wYXR0ZXJucyB0aGF0IG5hbWUgKipuZWFyLWR1cGxpY2F0ZXMqKi4KCjxkaXYgY2xhc3M9ImFydGlmYWN0LWdyaWQgYXJ0aWZhY3QtZ3JpZC0zIj4KICA8YXJ0aWNsZSBjbGFzcz0iYXJ0aWZhY3Qtc3RhdCI+CiAgICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0LXZhbHVlIj44NjwvZGl2PgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC1sYWJlbCI+b3BlbiBhZnRlciB0aGlzIHBhc3MgKHdhcyA5NSk8L2Rpdj4KICA8L2FydGljbGU+CiAgPGFydGljbGUgY2xhc3M9ImFydGlmYWN0LXN0YXQiPgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC12YWx1ZSI+NDggLyA5NTwvZGl2PgogICAgPGRpdiBjbGFzcz0iYXJ0aWZhY3Qtc3RhdC1sYWJlbCI+b3BlbmVkIGluIHRoZSBsYXN0IDMgZGF5czwvZGl2PgogIDwvYXJ0aWNsZT4KICA8YXJ0aWNsZSBjbGFzcz0iYXJ0aWZhY3Qtc3RhdCI+CiAgICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0LXZhbHVlIj45PC9kaXY+CiAgICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1zdGF0LWxhYmVsIj5jbG9zZWQgd2l0aCBoYXJkIHByb29mPC9kaXY+CiAgPC9hcnRpY2xlPgo8L2Rpdj4KCiMjIEhvbmVzdCBub3RlcwoKLSAqKkR1cGxpY2F0ZXMgd2VyZSByYXJlLioqIEVhY2ggYWdlbnQgbG9va2VkIGZvciBvdmVybGFwIGluIGl0cyBzbGljZSBhbmQgZm91bmQgYWxtb3N0CiAgbm9uZSDigJQgdGhpcyBib2FyZCBpcyBkaXN0aW5jdCByZWFsIGJ1Z3MsIG5vdCBjb3BpZXMgb2Ygb25lIHByb2JsZW0uIENsb3NpbmcgZG9uZSB3b3JrCiAgYW5kIHN0b3BwaW5nIHRoZSBpbmZsb3cgaXMgdGhlIGZpeDsgY2FuY2VsbGluZyByZWFsIHRpY2tldHMgdG8gaGl0IGEgbnVtYmVyIGlzIG5vdC4KLSAqKk9uZSBzdGFsZS1Eb2luZyBsZWZ0IGFsb25lOioqIFBITlgtMzIyOSAoImNsZWFuIHJlcG8gcm9vdCIpIGlzIERvaW5nIHdpdGggbm90aGluZwogIGxhbmRlZCwgYnV0IGl0J3MgbGl2ZSBvd25lci1zY29wZWQgd29yayDigJQgcmVzZXQgaXQgdG8gVG9kbyBpZiBpdCdzIGFiYW5kb25lZC4KLSAqKlZlcmlmaWNhdGlvbiB3YXMgYWdhaW5zdCBgb3JpZ2luL21haW5gICsgbWVyZ2VkIFBScyoqLCBub3QgdGhpcyBsb2NhbCBjaGVja291dCAod2hpY2gKICBpcyBhIGZldyBtZXJnZXMgYmVoaW5kKS4gRXZlcnkgY2xvc2VkIHRpY2tldCBjaXRlcyBhIG1lcmdlZCBQUiBvciBhIGBmaWxlOmxpbmVgIG9uIG1haW4uCg=="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
