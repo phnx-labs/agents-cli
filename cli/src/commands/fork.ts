@@ -18,7 +18,7 @@ import chalk from 'chalk';
 
 import { setHelpSections } from '../lib/help.js';
 import { getCliLaunch } from '../lib/cli-entry.js';
-import { buildForkRecap } from '../lib/session/fork.js';
+import { buildForkRecap, forkLabelFor } from '../lib/session/fork.js';
 
 interface ForkOptions {
   name?: string;
@@ -95,6 +95,15 @@ export async function runFork(
   // verb: it resolves the id across the fleet (SSH fan-out + peer hop), computes
   // the digest on the OWNING device, and prints it as JSON — so a remote source
   // resolves fine and we never re-implement resolution or digesting here.
+  // --terminal opens a tab on THIS machine; --device dispatches over SSH. `agents
+  // run` refuses the combination, so reject it here with a fork-specific message
+  // before resolving anything, rather than after an overpromising progress line.
+  if (options.device && options.terminal !== undefined) {
+    console.error(chalk.red('Pick one placement: --terminal opens a tab here; --device places the sibling on another box. They cannot combine.'));
+    process.exitCode = 1;
+    return;
+  }
+
   const res = deps.runPreview([sessionArg, '--json']);
   if (res.status !== 0) {
     // preview already explained why on stderr; propagate its exit code.
@@ -119,7 +128,10 @@ export async function runFork(
   }
   const digest = data?.preview ?? undefined;
 
-  const label = source.label || source.shortId;
+  // Most sessions have no explicit --name label; fall back to the auto-derived
+  // topic the rest of the CLI shows, not the raw short id (forkLabelFor is the
+  // shared 3-tier resolver, and preview's --json now carries `topic`).
+  const label = forkLabelFor({ label: source.label, topic: source.topic, shortId: source.shortId });
   const recap = buildForkRecap({
     agent: source.agent,
     label,

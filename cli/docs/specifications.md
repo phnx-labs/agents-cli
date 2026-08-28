@@ -483,10 +483,18 @@ SSH access (§7); rendering sessions that no harness produced.
   [sessions.md](sessions.md):476-477). A non-native-resumable harness MUST
   transparently fall back to rehydrate, never a silent skip
   ([sessions.md](sessions.md):471-474).
-- **SES-21 (MUST).** `fork` MUST copy the transcript under a fresh UUID (git-branch
-  semantics), leaving the original untouched, and MUST refuse harnesses it can't
-  yet handle with a clear message (Claude-only in v1)
-  (`lib/session/fork.ts:1-16,84-86`).
+- **SES-21 (MUST).** `fork` MUST resolve the source session **across the fleet**
+  (the same resolver `preview` uses — `commands/sessions.ts` `resolveSessionMetadataValue`,
+  reached here via `sessions preview <id> --json`), then launch a **new same-harness
+  session seeded with a recap** of the source (`agents run <harness> "<recap>" -i
+  --strategy balanced`), leaving the original untouched. The recap is built from the
+  source's preview digest (`buildForkRecap`, `lib/session/fork.ts`). Because the seed
+  is plain text, fork MUST work for a source on any device and in any REPL harness (no
+  transcript copy, no Claude-only gate). It MUST fail loud — never launch a
+  context-less sibling — when the source cannot be resolved (`commands/fork.ts`
+  `runFork`). Superseded the transcript-copy contract (fresh-UUID copy, Claude-only)
+  in PHNX-2223; the old `forkSession`/`FORKABLE_AGENTS` mechanism is `(resolved)` —
+  removed with its requirement.
 - **SES-21a (MUST).** The tmux helper-process reaper MUST fail closed. A process
   carrying `AGENT_TMUX_SESSION_NAME` MAY be selected only when the corresponding
   tmux owner is present, its pane process is confirmed dead, and it has no
