@@ -7,6 +7,10 @@
     "sessionsImported": 1,
     "medianMs": 9000,
     "p90Ms": 9000,
+    "agentMedianMs": 9000,
+    "agentP90Ms": 9000,
+    "interactiveMedianMs": 0,
+    "measuredFraction": 1,
     "needAttention": 1,
     "toolErrorRate": 0.6666666666666666
   },

@@ -823,6 +823,70 @@ describe('active-time duration stats (PHNX-3457)', () => {
   });
 });
 
+// PHNX-3472: the blended median conflates one-shot interactive queries (63% of the
+// corpus, ~15s) with substantial agent runs (~15min), so the console needs the two
+// segmented. A session is an AGENT run when it made any tool call OR has more than
+// 8 messages; otherwise INTERACTIVE. measuredFraction reports how much of the corpus
+// carried a non-null duration.
+describe('segmented agent vs interactive duration stats (PHNX-3472)', () => {
+  const IDS = ['seg-agent-1', 'seg-agent-2', 'seg-agent-msgs', 'seg-int-1', 'seg-int-2', 'seg-nodur'];
+
+  function segRow(rowId: string, durationMs: number | null, extra: Partial<SyncRow> = {}): SyncRow {
+    return {
+      id: rowId, short_id: rowId.slice(0, 8), agent: 'rush', origin: 'cli', routine_name: null,
+      routine_run_id: null, version: null, account: null, account_key: null, account_org: null,
+      mode: 'auto', timestamp: '2026-08-25T00:00:00.000Z', last_activity: '2026-08-25T00:15:00.000Z',
+      project: 'agents-cli', cwd: '/redacted/agents-cli', git_branch: 'main', topic: 'fix a bug',
+      label: null, message_count: null, token_count: null, output_tokens: null, input_tokens: null,
+      cache_read_tokens: null, cache_write_tokens: null, cost_usd: null, cost_usd_nocache: null,
+      duration_ms: durationMs, model: 'rush-test', tool_call_count: null,
+      file_path: '/nonexistent/no-transcript.jsonl', file_mtime_ms: 1, file_size: 1,
+      machine: 'test-device', ...extra,
+    };
+  }
+
+  // A single tool call spanning the whole session, so active time == duration (no idle gap).
+  function insertSpanningCall(sid: string, endTs: string) {
+    getDB().prepare(`
+      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, 1, '2026-08-25T00:00:00.000Z', ?, 'Bash', '{}', 'ok', 0, null, 0)
+    `).run(`${sid}-1`, sid, endTs);
+  }
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const rid of IDS) {
+      db.prepare('DELETE FROM tool_calls WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_topics WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_phenotypes WHERE session_id = ?').run(rid);
+    }
+  });
+
+  it('segments agent runs (tool calls or >8 msgs) from one-shot interactive queries, and reports coverage', () => {
+    // Two agent runs classified by a tool call (15min each, busy → active == span).
+    insertSpanningCall('seg-agent-1', '2026-08-25T00:15:00.000Z');
+    insertSpanningCall('seg-agent-2', '2026-08-25T00:15:00.000Z');
+    // One agent run classified by >8 messages, NO tool calls (10min, no calls → active == span).
+    // Two one-shot interactive queries: ≤2 msgs, no tool calls, ~15s each.
+    const shard = buildIndexShard([
+      segRow('seg-agent-1', 900_000, { message_count: 2 }),
+      segRow('seg-agent-2', 900_000, { message_count: 3 }),
+      segRow('seg-agent-msgs', 600_000, { message_count: 12, last_activity: '2026-08-25T00:10:00.000Z' }),
+      segRow('seg-int-1', 15_000, { message_count: 2, last_activity: '2026-08-25T00:00:15.000Z' }),
+      segRow('seg-int-2', 15_000, { message_count: 1, last_activity: '2026-08-25T00:00:15.000Z' }),
+      segRow('seg-nodur', null, { message_count: 2 }), // no duration → excluded from medians, counts against coverage
+    ], 'test-device', 'owner-1');
+
+    // Agent median (900k, 900k, 600k) dwarfs interactive median (15k, 15k).
+    expect(shard.stats.agentMedianMs).toBe(900_000);
+    expect(shard.stats.interactiveMedianMs).toBe(15_000);
+    expect(shard.stats.agentMedianMs).toBeGreaterThan(shard.stats.interactiveMedianMs * 10);
+    expect(shard.stats.agentP90Ms).toBe(900_000);
+    // 5 of 6 rows carried a non-null duration.
+    expect(shard.stats.measuredFraction).toBeCloseTo(5 / 6, 10);
+  });
+});
+
 // PHNX-3408: each topic tile carries up to 30 example session refs so the console
 // can drill from the treemap into a category's session list. Without them every
 // tile renders display-only (the consumer gates the click on topic.sessions).

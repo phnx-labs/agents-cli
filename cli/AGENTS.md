@@ -78,7 +78,13 @@ rich per-device `index.json`. `activeMs` is `spanMs` minus every idle gap > 120s
 effort rather than calendar span (the raw span stays available per session as
 `SessionDetail.meta.spanMs`). The index contains duration/error statistics —
 `medianMs`/`p90Ms` are now the ACTIVE-time percentiles (same keys, new value; the
-fleet-aggregate worker keeps weighted-averaging them unchanged); every harness now
+fleet-aggregate worker keeps weighted-averaging them unchanged); those blended figures
+sit alongside **segmented** active-time stats (PHNX-3472) — `agentMedianMs`/`agentP90Ms`
+over AGENT runs (a session with any tool call OR more than 8 messages) and
+`interactiveMedianMs` over the one-shot INTERACTIVE remainder, plus `measuredFraction`
+(share of sessions carrying a non-null duration) — so the console can headline agent
+runs (~15min median) instead of the corpus blend the 63%-one-shot tail pulls to ~15s;
+every harness now
 carries a non-null span (`resolveDurationMs` in `session/db.ts` derives it at upsert
 for rush/grok/kimi/cursor/muse/antigravity, which previously left `duration_ms` NULL) —
 ranked attention flags, metadata/tool-mix topic buckets — the human task taxonomy the
