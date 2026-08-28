@@ -2376,6 +2376,7 @@ export async function renderSessionPreview(
         tokenCount: session.tokenCount,
         costUsd: session.costUsd,
         label: session.label,
+        topic: session.topic,
         ticketId: session.ticketId,
         prUrl: session.prUrl,
       },

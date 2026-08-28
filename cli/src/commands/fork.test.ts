@@ -83,6 +83,33 @@ describe('agents sessions fork (recap-seeded sibling)', () => {
     expect(args.slice(args.indexOf('--device'))).toEqual(expect.arrayContaining(['--device', 'auto']));
   });
 
+  it('falls back to the source topic (not the raw short id) when it has no explicit label', async () => {
+    // The common case: an unnamed session. preview --json carries `topic` but no
+    // `label`; the recap must show the human-meaningful topic.
+    const src = { id: 'dddddddd-1111-2222-3333-444444444444', shortId: 'dddddddd', agent: 'claude', topic: 'wire up the evals console' };
+    const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
+
+    await runFork('dddddddd', {}, deps);
+
+    const [args] = launched;
+    expect(args[2]).toContain('wire up the evals console');
+    expect(args[2]).not.toContain('("dddddddd")');
+    expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of wire up the evals console']));
+  });
+
+  it('rejects --device + --terminal up front, before launching anything', async () => {
+    const src = { id: 'ffffffff-1111-2222-3333-444444444444', shortId: 'ffffffff', agent: 'claude', label: 'x' };
+    const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
+
+    const err = capture('error');
+    await runFork('ffffffff', { device: 'auto', terminal: true }, deps);
+    err.restore();
+
+    expect(process.exitCode).toBe(1);
+    expect(err.text).toContain('cannot combine');
+    expect(launched).toHaveLength(0);
+  });
+
   it('forwards --terminal so the sibling opens in a fresh tab', async () => {
     const src = { id: 'eeeeeeee-1111-2222-3333-444444444444', shortId: 'eeeeeeee', agent: 'claude', label: 'x' };
     const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
