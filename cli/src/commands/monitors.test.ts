@@ -6,7 +6,7 @@
  * stream regressions without mocking monitor internals.
  */
 import { describe, it, expect } from 'vitest';
-import { spawnSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -250,6 +250,49 @@ describe('monitors inspection JSON and stderr', () => {
           if (Number.isFinite(pid) && pid > 0) process.kill(pid, 'SIGTERM');
         } catch { /* already gone */ }
       }
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('--watch-pid refuses to arm on an already-dead pid (PHNX-3023)', () => {
+    const home = makeHome();
+    const dead = spawnSync('/bin/sh', ['-c', 'sh -c "exit 0" & echo $!; wait'], { encoding: 'utf-8' });
+    const deadPid = Number.parseInt(dead.stdout.trim().split('\n')[0], 10);
+
+    const res = run(home, ['add', 'dead-watch', '--watch-pid', String(deadPid), '--notify']);
+
+    expect(res.status).toBe(1);
+    expect(res.stdout).toBe('');
+    expect(res.stderr).toContain('is not running');
+    expect(fs.existsSync(path.join(home, '.agents', 'monitors', 'dead-watch.yml'))).toBe(false);
+  });
+
+  it.skipIf(process.platform === 'win32')('--watch-pid arms a command source that fires on exit, not on-change', () => {
+    const home = makeHome();
+    const deviceDir = path.join(home, '.agents', 'devices', 'testbox');
+    fs.mkdirSync(deviceDir, { recursive: true });
+    fs.writeFileSync(path.join(deviceDir, 'agents.yaml'), 'config:\n  daemonEnabled: false\n');
+    // A direct child of THIS test process (not a shell background job) — stays
+    // alive across the synchronous CLI subprocess call below regardless of how
+    // the sandbox reaps orphaned job-control children.
+    const child = spawn('sleep', ['30']);
+    const pid = child.pid!;
+
+    try {
+      const res = run(home, ['add', 'live-watch', '--watch-pid', String(pid), '--notify'], {
+        AGENTS_SYNC_MACHINE_ID: 'testbox',
+        AGENTS_MONITORS_LOCAL: '1',
+      });
+
+      expect(res.status).toBe(0);
+      expect(`${res.stdout}${res.stderr}`).toContain("Monitor 'live-watch' added");
+      const written = yaml.parse(fs.readFileSync(path.join(home, '.agents', 'monitors', 'live-watch.yml'), 'utf-8'));
+      expect(written.source.type).toBe('command');
+      expect(written.source.command).toContain(`kill -0 ${pid}`);
+      // Defaults to firing on exit, not the plain on-change default --watch gets.
+      expect(written.condition).toEqual({ mode: 'match', match: 'exited' });
+    } finally {
+      child.kill('SIGKILL');
       fs.rmSync(home, { recursive: true, force: true });
     }
   });

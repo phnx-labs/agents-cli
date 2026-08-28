@@ -183,12 +183,28 @@ agents monitors remove <name>
 | Flag | Source | Observation |
 |---|---|---|
 | `--watch '<cmd>'` | command | the command's stdout |
+| `--watch-pid <pid>` | command | `running` / `exited`, polled by the engine — see below |
 | `--poll '<cmd>' <interval>` | poll | stdout, re-run every interval |
 | `--poll-http <url> <interval>` | poll-http | `<status>\n<body>` every interval |
 | `--watch-file <path>` | file | file content (or dir listing) + mtime |
 | `--watch-device <name>` | device | fleet device reachability + headroom bucket |
 | `--ws <url>` | ws | each WebSocket frame (push) |
 | `--on <src:event>` | webhook | a signed github/linear delivery (push) |
+
+`--watch-pid <pid>` is the reliable alternative to a harness's own
+backgrounded-shell exit hook (PHNX-3023): a "will re-invoke me" watch loop
+(`gh pr checks --watch`, a long sleep, a tick poll) never itself exits, so a
+harness that only re-invokes on process exit never wakes for it — the ticket's
+"5 shells still running" that never notified anyone. `--watch-pid` instead has
+the **daemon's own poll loop** check the pid's liveness, independent of the
+session that armed it, and defaults its condition to fire on exit (unlike a
+plain `--watch`, which defaults to on-change). It fails loud at arm time —
+refuses to create the monitor — when the pid is already dead, rather than
+silently arming a watcher pointed at a corpse. Its `--run`/`--notify` action
+still spawns a **new** headless agent conversation or sends a real
+notification; it does not resume the exact session that armed it (see `--run`
+below) — the fix is "you get reliably woken", not "the same conversation
+magically continues".
 
 ### Conditions (how an observation becomes a fire)
 
