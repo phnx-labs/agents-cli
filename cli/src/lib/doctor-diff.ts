@@ -159,6 +159,39 @@ function fileExists(p: string | null | undefined): p is string {
   return !!p && fs.existsSync(p) && !fs.lstatSync(p).isSymbolicLink();
 }
 
+/**
+ * True when `filePath` is a git symlink that was CHECKED OUT AS A PLAIN TEXT
+ * FILE — the shape git produces on a client without symlink support (Windows
+ * without Developer Mode, `core.symlinks=false`). Such a file holds exactly the
+ * link target (a relative path, no trailing newline) instead of the pointed-to
+ * content. `lstat().isSymbolicLink()` is FALSE for it, so callers that only
+ * skip real symlinks (e.g. the rules/permissions alias files CLAUDE.md /
+ * GEMINI.md, which are symlinks to AGENTS.md in the repo) wrongly treat it as
+ * an independent resource that no sync can ever reconcile (PHNX-3187). The
+ * signal is unambiguous: a whole file with no newline whose entire content
+ * resolves to an existing sibling path. Real markdown rule files always contain
+ * newlines, so this never false-positives on genuine content.
+ */
+export function isCheckedOutSymlink(filePath: string): boolean {
+  let content: string;
+  try {
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return false;
+  }
+  // A git symlink blob is the bare target with no newline; any newline means
+  // this is real file content, not a link.
+  if (content.length === 0 || content.length > 255 || /[\r\n]/.test(content)) return false;
+  const target = content.trim();
+  if (!target) return false;
+  const resolved = path.resolve(path.dirname(filePath), target);
+  try {
+    return fs.statSync(resolved).isFile();
+  } catch {
+    return false;
+  }
+}
+
 function findFirst(candidates: SourceCandidate[]): SourceCandidate | null {
   for (const c of candidates) {
     if (fileExists(c.path) || (fs.existsSync(c.path) && fs.lstatSync(c.path).isDirectory())) {
@@ -483,8 +516,13 @@ function listRulesNames(cwd: string, excludeProject = false): Map<string, Source
     try { entries = fs.readdirSync(base.path); } catch { continue; }
     for (const file of entries) {
       if (!file.endsWith('.md') || file === RULES_DOC_FILENAME) continue;
-      const stat = fs.lstatSync(path.join(base.path, file));
-      if (stat.isSymbolicLink()) continue;
+      const filePath = path.join(base.path, file);
+      const stat = fs.lstatSync(filePath);
+      // Skip the CLAUDE.md / GEMINI.md alias symlinks — both when they are real
+      // symlinks (posix) and when git checked them out as plain text files
+      // (Windows), so they are never mistaken for independent rule sources the
+      // writer can't produce (PHNX-3187).
+      if (stat.isSymbolicLink() || isCheckedOutSymlink(filePath)) continue;
       const name = file.replace(/\.md$/, '');
       if (out.has(name)) continue;
       out.set(name, { layer: base.layer, path: path.join(base.path, file), alias: base.alias });

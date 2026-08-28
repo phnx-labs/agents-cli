@@ -211,6 +211,44 @@ describe('permission path handling', () => {
     }
   });
 
+  // PHNX-3187: git checks group yaml out with CRLF on Windows (core.autocrlf).
+  // The rule extractor anchors on the closing quote (`"$`); a trailing '\r'
+  // meant it matched ZERO rules, so `agents doctor --fix` on win-mini wrote an
+  // empty permission set and could never reconcile permissions.
+  it('extracts rules from a CRLF-checked-out permission group (PHNX-3187)', async () => {
+    const home = makeTempHome();
+    const groupsDir = path.join(home, '.agents', 'permissions', 'groups');
+    fs.mkdirSync(groupsDir, { recursive: true });
+    fs.writeFileSync(path.join(groupsDir, 'crlf-safe.yaml'), [
+      'name: crlf-safe',
+      'allow:',
+      '  - "Bash(git:*)"',
+      'deny:',
+      '  - "Write(secrets/**)"',
+      '',
+    ].join('\r\n')); // CRLF, as git would check it out on Windows
+
+    const previousHome = process.env.HOME;
+    process.env.HOME = home;
+    try {
+      vi.resetModules();
+      const { buildPermissionsFromGroups: buildFromGroups } = await import('./permissions.js');
+      expect(buildFromGroups(['crlf-safe'])).toEqual({
+        name: 'built',
+        description: 'Built from groups: crlf-safe',
+        allow: ['Bash(git:*)'],
+        deny: ['Write(secrets/**)'],
+      });
+    } finally {
+      if (previousHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = previousHome;
+      }
+      vi.resetModules();
+    }
+  });
+
   it('keeps legacy bare-list permission group entries as allow rules', async () => {
     const home = makeTempHome();
     const groupsDir = path.join(home, '.agents', 'permissions', 'groups');

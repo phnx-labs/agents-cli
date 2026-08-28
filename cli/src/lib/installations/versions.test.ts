@@ -8,7 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 // directly in this process. getBinaryPath itself is exercised through
 // runVersionSync's isolated-HOME subprocess below, like every other
 // versions.ts function whose paths derive from HOME.
-import { resolveGrokFallbackBinary } from './versions.js';
+import { resolveGrokFallbackBinary, resolveHookSelection } from './versions.js';
 
 const tempDirs: string[] = [];
 
@@ -1761,5 +1761,45 @@ describe('system-scoped selection includes system-layer plugins (RUSH-3207)', ()
     // skipped system-layer plugins — the swarm-plugin bug.
     expect(result.plugins ?? []).toContain('swarm');
     expect(result.plugins ?? []).not.toContain('mine');
+  });
+});
+
+// PHNX-3187: `available.hooks` carries the source filename WITH its extension
+// (`git-guard.sh`), but the doctor/heal resource diff names a hook by its
+// extensionless basename (`git-guard`). A heal pass feeds those diff names
+// straight back as the selection, so the old exact-set filter matched nothing
+// and `agents doctor --fix` could never reconcile a flagged hook. This is what
+// left win-mini's guards permanently "held" once its diff flagged them.
+describe('resolveHookSelection — basename-tolerant hook matching (PHNX-3187)', () => {
+  const available = ['git-guard.sh', '10-feed-publish.py', 'json-field.sh', 'ask-user-question-guard.sh'];
+
+  it('resolves extensionless diff/heal names to the extensioned available name', () => {
+    expect(resolveHookSelection(['git-guard', 'json-field'], available)).toEqual([
+      'git-guard.sh',
+      'json-field.sh',
+    ]);
+  });
+
+  it('resolves numbered .py hooks by basename too', () => {
+    expect(resolveHookSelection(['10-feed-publish'], available)).toEqual(['10-feed-publish.py']);
+  });
+
+  it('still matches exact extensioned names (no regression for full-sync callers)', () => {
+    expect(resolveHookSelection(['git-guard.sh', 'ask-user-question-guard.sh'], available)).toEqual([
+      'git-guard.sh',
+      'ask-user-question-guard.sh',
+    ]);
+  });
+
+  it("'all' returns the whole available set unchanged", () => {
+    expect(resolveHookSelection('all', available)).toEqual(available);
+  });
+
+  it('drops a selection entry that matches nothing, and de-duplicates', () => {
+    expect(resolveHookSelection(['git-guard', 'git-guard.sh', 'nope'], available)).toEqual(['git-guard.sh']);
+  });
+
+  it('undefined selection yields nothing', () => {
+    expect(resolveHookSelection(undefined, available)).toEqual([]);
   });
 });

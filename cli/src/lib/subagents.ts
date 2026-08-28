@@ -35,7 +35,12 @@ export function parseSubagentFrontmatter(filePath: string): SubagentFrontmatter 
 
   try {
     const content = fs.readFileSync(filePath, 'utf-8');
-    const lines = content.split('\n');
+    // Split on CRLF or LF: git checks text files out with CRLF on Windows
+    // (core.autocrlf), so a plain split('\n') leaves a trailing '\r' on every
+    // line and the frontmatter fence `'---\r' !== '---'` never matches —
+    // silently dropping the subagent from discovery so it can never be
+    // installed or reconciled (PHNX-3187).
+    const lines = content.split(/\r?\n/);
 
     // Check for YAML frontmatter
     if (lines[0] === '---') {
@@ -67,7 +72,8 @@ export function getSubagentBody(filePath: string): string {
   }
 
   const content = fs.readFileSync(filePath, 'utf-8');
-  const lines = content.split('\n');
+  // CRLF-robust for the same reason as parseSubagentFrontmatter (PHNX-3187).
+  const lines = content.split(/\r?\n/);
 
   // Skip YAML frontmatter
   if (lines[0] === '---') {

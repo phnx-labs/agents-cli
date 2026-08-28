@@ -235,3 +235,47 @@ describe('diffVersionResources — command-as-skill agents', () => {
     expect(report.kinds.commands.find((c) => c.name === 'foo')?.status).toBe('missing');
   });
 });
+
+// PHNX-3187: rules/CLAUDE.md and rules/GEMINI.md are symlinks to AGENTS.md in
+// the DotAgents repos. On Windows without symlink support git checks them out
+// as PLAIN TEXT FILES whose whole content is the target path ("AGENTS.md"), so
+// lstat().isSymbolicLink() is false and they were mistaken for independent
+// rule sources no sync could ever produce — a permanent doctor "hold".
+// isCheckedOutSymlink is the platform-agnostic detector that closes it.
+describe('isCheckedOutSymlink (PHNX-3187)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'checked-out-symlink-'));
+    fs.writeFileSync(path.join(dir, 'AGENTS.md'), '# Rules\n\nThe canonical rules.\n');
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('flags a git-checked-out symlink text file that resolves to a sibling', async () => {
+    const { isCheckedOutSymlink } = await import('../doctor-diff.js');
+    // A git symlink blob is the bare target with no trailing newline.
+    fs.writeFileSync(path.join(dir, 'CLAUDE.md'), 'AGENTS.md');
+    expect(isCheckedOutSymlink(path.join(dir, 'CLAUDE.md'))).toBe(true);
+  });
+
+  it('does NOT flag a real multi-line markdown rules file', async () => {
+    const { isCheckedOutSymlink } = await import('../doctor-diff.js');
+    fs.writeFileSync(path.join(dir, 'extra.md'), '# Extra\n\nA real rule file.\n');
+    expect(isCheckedOutSymlink(path.join(dir, 'extra.md'))).toBe(false);
+  });
+
+  it('does NOT flag a single-line file whose content is not a real sibling path', async () => {
+    const { isCheckedOutSymlink } = await import('../doctor-diff.js');
+    fs.writeFileSync(path.join(dir, 'note.md'), 'just a one-line note');
+    expect(isCheckedOutSymlink(path.join(dir, 'note.md'))).toBe(false);
+  });
+
+  it('does NOT flag a real posix symlink (its content is the multi-line target)', async () => {
+    const { isCheckedOutSymlink } = await import('../doctor-diff.js');
+    try {
+      fs.symlinkSync('AGENTS.md', path.join(dir, 'GEMINI.md'));
+    } catch {
+      return; // filesystem without symlink support — the checked-out-text case covers it
+    }
+    expect(isCheckedOutSymlink(path.join(dir, 'GEMINI.md'))).toBe(false);
+  });
+});
