@@ -3300,22 +3300,39 @@ export class BrowserService {
    * the race and already registered one for this key. `attachRunningProfile`
    * awaits an ssh-tunnel spawn / CDP connect, so two commands landing right
    * after a daemon restart can each build a connection for the same key; the
-   * loser must tear its own down — an ssh:// connection owns a real tunnel
-   * child + CDP socket, and the `cleanup` docblock says it MUST run whenever the
-   * connection leaves `this.connections`, so silently overwriting it in the map
-   * would leak the tunnel. Returns the winning connection to use.
+   * loser must be released instead of silently overwriting the winner (whose
+   * `cleanup` would then never run).
+   *
+   * The subtlety is the SSH tunnel: when the loser's `connectSSH` landed after
+   * the winner's tunnel had already bound the local port, `isOwnTunnel` makes it
+   * **reuse** that same OS process (`drivers/ssh.ts`) — so both connections carry
+   * the same `pid`/`port`. Calling the loser's `cleanup()` then does
+   * `tunnel.kill()` on the SHARED process and breaks the winner's live CDP. So
+   * when the loser shares the winner's tunnel we close ONLY the loser's own CDP
+   * socket and leave the tunnel to the winner; only a loser that spawned its own
+   * distinct tunnel gets the full `cleanup()` (else it would leak). Returns the
+   * winning connection to use.
    */
   private registerRehydratedConnection(
     key: ConnectionKey,
     conn: ProfileConnection,
   ): ProfileConnection {
     const existing = this.connections.get(key);
-    if (existing) {
-      try { conn.cleanup?.(); } catch { /* best effort — the winner stays live */ }
-      return existing;
+    if (!existing) {
+      this.connections.set(key, conn);
+      return conn;
     }
-    this.connections.set(key, conn);
-    return conn;
+    const sharesTunnel =
+      conn.pid !== 0 && conn.pid === existing.pid && conn.port === existing.port;
+    if (conn.pid !== 0 && !sharesTunnel && conn.cleanup) {
+      // Distinct tunnel — full teardown so this loser's tunnel doesn't leak.
+      try { conn.cleanup(); } catch { /* best effort — the winner stays live */ }
+    } else {
+      // Shared/borrowed tunnel (or a local connection with no tunnel): close
+      // only our own CDP client; killing the tunnel would break the winner.
+      try { conn.cdp.close(); } catch { /* best effort */ }
+    }
+    return existing;
   }
 
   private async rehydrateAllFromDisk(): Promise<void> {

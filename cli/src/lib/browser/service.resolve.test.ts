@@ -362,4 +362,65 @@ describe('disk task state + identity', () => {
 
     await expect(attach(runtimeKey, diskTasks)).resolves.toBeNull();
   }, 30_000);
+
+  it('registerRehydratedConnection keeps the winner and does NOT kill a shared ssh tunnel (PHNX-2663)', () => {
+    const service = new BrowserService();
+    const reg = (
+      service as unknown as {
+        registerRehydratedConnection: (k: string, c: unknown) => unknown;
+        connections: Map<string, unknown>;
+      }
+    );
+    const key = 'p@zion';
+
+    // Winner: registered first, owns the tunnel (pid 4242 on port 9333).
+    const winner = {
+      cdp: { close: vi.fn() },
+      cleanup: vi.fn(),
+      pid: 4242,
+      port: 9333,
+      tasks: new Map(),
+      sessionCache: new Map(),
+      key,
+      profile: 'p',
+    };
+    reg.registerRehydratedConnection(key, winner);
+
+    // Loser: reused the SAME tunnel (same pid+port), then lost the race. Its
+    // cleanup() would tunnel.kill() the shared process and break the winner, so
+    // it must close only its own CDP and leave the tunnel alone.
+    const loser = {
+      cdp: { close: vi.fn() },
+      cleanup: vi.fn(),
+      pid: 4242,
+      port: 9333,
+      tasks: new Map(),
+      sessionCache: new Map(),
+      key,
+      profile: 'p',
+    };
+    const winning = reg.registerRehydratedConnection(key, loser);
+
+    expect(winning).toBe(winner);
+    expect(loser.cleanup).not.toHaveBeenCalled(); // would kill the shared tunnel
+    expect(loser.cdp.close).toHaveBeenCalledTimes(1); // release only our own CDP
+    expect(winner.cleanup).not.toHaveBeenCalled(); // winner stays fully live
+    expect(reg.connections.get(key)).toBe(winner);
+
+    // A loser that spawned its OWN distinct tunnel (different pid) gets the full
+    // teardown instead, so its tunnel doesn't leak.
+    const distinctLoser = {
+      cdp: { close: vi.fn() },
+      cleanup: vi.fn(),
+      pid: 9999,
+      port: 9333,
+      tasks: new Map(),
+      sessionCache: new Map(),
+      key,
+      profile: 'p',
+    };
+    reg.registerRehydratedConnection(key, distinctLoser);
+    expect(distinctLoser.cleanup).toHaveBeenCalledTimes(1);
+    expect(reg.connections.get(key)).toBe(winner);
+  });
 });
