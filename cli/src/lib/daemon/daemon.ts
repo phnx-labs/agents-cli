@@ -862,8 +862,10 @@ export async function runDaemon(): Promise<void> {
   else log('INFO', 'Keychain-reap service disabled');
 
   if (isEnabled('auth-sync')) supervisor.register(new AuthSyncService());
-  if (isEnabled('usage-sync')) supervisor.register(new UsageSyncService());
   else log('INFO', 'Auth-sync service disabled');
+
+  if (isEnabled('usage-sync')) supervisor.register(new UsageSyncService());
+  else log('INFO', 'Usage-sync service disabled');
 
   if (isEnabled('webhook-receiver')) supervisor.register(new WebhookReceiverService());
   else log('INFO', 'Webhook receiver service disabled');

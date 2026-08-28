@@ -11,7 +11,13 @@
  * 2 = malformed input. It fails loud on a bad envelope rather than silently
  * accepting a wrong shape, but a busy cache lock degrades to best-effort inside
  * `ingestPeerClaudeUsageRows` like every other cache writer.
+ *
+ * The payload arrives on stdin, EXCEPT on a Windows receiver: the `agents.ps1`
+ * shim does not forward ssh-piped stdin to the node process, so the pusher writes
+ * the payload to a temp file and passes `agents __usage-ingest --from <path>`
+ * (the same workaround the secrets push uses — `buildWindowsStdinImportCommand`).
  */
+import * as fs from 'fs';
 import { ingestPeerClaudeUsageRows } from './usage.js';
 import type { UsageSyncPayload } from './usage-sync.js';
 
@@ -27,8 +33,26 @@ function readStdin(): Promise<string> {
   });
 }
 
+/** `--from <path>` reads the payload from a file instead of stdin (Windows path). */
+function fromFileArg(argv: string[]): string | null {
+  const i = argv.indexOf('--from');
+  return i !== -1 && argv[i + 1] ? argv[i + 1] : null;
+}
+
 export async function runUsageIngest(): Promise<number> {
-  const raw = (await readStdin()).trim();
+  const fromPath = fromFileArg(process.argv.slice(3));
+  let source: string;
+  if (fromPath) {
+    try {
+      source = fs.readFileSync(fromPath, 'utf-8');
+    } catch (err) {
+      process.stderr.write(`[agents] __usage-ingest: cannot read --from ${fromPath}: ${(err as Error).message}\n`);
+      return 2;
+    }
+  } else {
+    source = await readStdin();
+  }
+  const raw = source.trim();
   if (!raw) return 0; // nothing piped — a no-op tick, not a failure.
 
   let payload: UsageSyncPayload;
@@ -39,7 +63,13 @@ export async function runUsageIngest(): Promise<number> {
     return 2;
   }
 
-  if (!payload || payload.v !== 1 || typeof payload.rows !== 'object' || payload.rows === null) {
+  if (
+    !payload ||
+    payload.v !== 1 ||
+    typeof payload.rows !== 'object' ||
+    payload.rows === null ||
+    Array.isArray(payload.rows) // `typeof [] === 'object'` — an array is NOT a rows map
+  ) {
     process.stderr.write('[agents] __usage-ingest: unrecognized usage-sync payload shape\n');
     return 2;
   }

@@ -63,4 +63,26 @@ describe('agents __usage-ingest (real CLI verb)', () => {
     expect(res.status).toBe(0);
     expect(fs.existsSync(cachePath)).toBe(false);
   });
+
+  it('rejects an ARRAY-shaped rows payload (typeof [] === object) — exit 2, writes nothing', () => {
+    // Regression: `typeof payload.rows !== 'object'` alone accepts an array and
+    // would write a bogus "0"-keyed row. The Array.isArray guard rejects it.
+    const res = run(home, JSON.stringify({ v: 1, rows: [{ capturedAt: null, windows: [] }] }));
+    expect(res.status).toBe(2);
+    expect(fs.existsSync(cachePath)).toBe(false);
+  });
+
+  it('reads the payload from --from <file> (the Windows stdin workaround path)', () => {
+    const file = path.join(home, 'payload.json');
+    fs.writeFileSync(file, payload(63), 'utf-8');
+    const res = spawnSync('bun', ['src/index.ts', '__usage-ingest', '--from', file], {
+      encoding: 'utf-8',
+      env: { ...process.env, HOME: home },
+      cwd: process.cwd(),
+      timeout: 60_000,
+    });
+    expect(res.status).toBe(0);
+    const cache = JSON.parse(fs.readFileSync(cachePath, 'utf-8'));
+    expect(cache['claude:org=alpha'].windows[0].usedPercent).toBe(63);
+  });
 });
