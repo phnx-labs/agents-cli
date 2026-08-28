@@ -18,7 +18,7 @@ import { machineId } from '../lib/session/sync/config.js';
 import { loadDevices, type DeviceProfile } from '../lib/devices/registry.js';
 import { isHostPinned, managedKnownHostsPath } from '../lib/devices/known-hosts.js';
 import { ensureDevicesRegistered } from '../lib/devices/sync.js';
-import { readFleetFile, resolveDesired } from '../lib/fleet/manifest.js';
+import { readFleetFile, resolveDesired, emptyTargetsMessage } from '../lib/fleet/manifest.js';
 import { snapshotAuth } from '../lib/fleet/auth-sync.js';
 import { AUTH_BUNDLE_NAME } from '../lib/secrets/bundles.js';
 import {
@@ -224,7 +224,13 @@ async function runApply(opts: ApplyOptions): Promise<void> {
   }
   if (opts.login === false) desired = desired.map((d) => ({ ...d, login: 'skip' as const }));
   if (desired.length === 0) {
-    console.log(chalk.gray('No target devices — nothing to apply.'));
+    const msg = emptyTargetsMessage(manifest);
+    if (msg.style === 'hint') {
+      console.log(chalk.yellow(msg.lines[0]));
+      for (const line of msg.lines.slice(1)) console.log(chalk.gray(`  ${line}`));
+    } else {
+      console.log(chalk.gray(msg.lines[0]));
+    }
     return;
   }
 

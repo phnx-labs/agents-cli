@@ -2,7 +2,12 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { parseFleetManifest, readFleetFile, resolveDesired } from './manifest.js';
+import {
+  parseFleetManifest,
+  readFleetFile,
+  resolveDesired,
+  emptyTargetsMessage,
+} from './manifest.js';
 
 describe('parseFleetManifest', () => {
   it('accepts defaults + devices: all', () => {
@@ -163,5 +168,29 @@ describe('parseFleetManifest — additive capture fields', () => {
 
   it('rejects non-string routines', () => {
     expect(() => parseFleetManifest({ devices: 'all', routines: [1, 2] })).toThrow(/routines/);
+  });
+});
+
+describe('emptyTargetsMessage', () => {
+  it('gives an actionable hint when the declared roster is empty (fleet.devices: {})', () => {
+    const msg = emptyTargetsMessage(parseFleetManifest({ devices: {} }));
+    expect(msg.style).toBe('hint');
+    expect(msg.lines[0]).toMatch(/fleet\.devices is empty/);
+    // The hint must name both ways to declare a roster, so it is fixable from the message alone.
+    expect(msg.lines.join(' ')).toMatch(/devices: all/);
+    expect(msg.lines.join(' ')).toMatch(/<name>/);
+  });
+
+  it('stays a plain note for devices: all with no online peers (reason surfaced elsewhere)', () => {
+    const msg = emptyTargetsMessage(parseFleetManifest({ devices: 'all' }));
+    expect(msg.style).toBe('plain');
+    expect(msg.lines).toEqual(['No target devices — nothing to apply.']);
+  });
+
+  it('stays a plain note for a non-empty roster whose names all dropped out', () => {
+    // A named roster that resolved to zero targets (offline/unresolved) already
+    // had each skip surfaced by the caller, so this is not the empty-roster case.
+    const msg = emptyTargetsMessage(parseFleetManifest({ devices: { 'mac-mini': {} } }));
+    expect(msg.style).toBe('plain');
   });
 });

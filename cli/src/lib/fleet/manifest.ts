@@ -199,3 +199,32 @@ export function resolveDesired(manifest: FleetManifest, ctx: ResolveContext): De
   }
   return out;
 }
+
+/**
+ * The message to print when a reconcile resolved zero target devices.
+ *
+ * An explicitly empty roster (`fleet.devices: {}` — the default on a fresh box)
+ * is the ACTIONABLE case: the engine ran fine, there is simply nothing declared
+ * to converge, so name the empty key and how to fill it. A gray "nothing to
+ * apply" there reads like the command is dead — the exact confusion that made
+ * `apply` look like a broken command during the RUSH-2981 surface review
+ * (PHNX-3422). Any OTHER zero-target case (a `devices: all` fleet with no online
+ * peers, or an explicit roster whose every name was unresolved/offline) already
+ * had its reason surfaced above, so it stays a plain note.
+ */
+export function emptyTargetsMessage(
+  manifest: FleetManifest,
+): { style: 'hint' | 'plain'; lines: string[] } {
+  const rosterEmpty =
+    manifest.devices !== 'all' && Object.keys(manifest.devices).length === 0;
+  if (rosterEmpty) {
+    return {
+      style: 'hint',
+      lines: [
+        'fleet.devices is empty — nothing to converge.',
+        'Declare a roster in agents.yaml: `fleet: { devices: all }` for every online box, or name them (`fleet: { devices: { <name>: {} } }`), then re-run.',
+      ],
+    };
+  }
+  return { style: 'plain', lines: ['No target devices — nothing to apply.'] };
+}
