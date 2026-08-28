@@ -1,12 +1,13 @@
 /**
- * `agents perf` — latency rollups over the disposable perf SQLite warehouse.
+ * `agents insights perf` — latency rollups over the disposable perf SQLite
+ * warehouse (former top-level `agents perf`, moved under insights in PHNX-3391).
  *
  * Subcommands:
- *   agents perf              multi-section summary (commands + hooks + runs)
- *   agents perf hooks        per-hook p50/p99 + cache hit rates
- *   agents perf commands     slowest CLI command paths (from command.end)
- *   agents perf run          agent.run / perf.timing labels
- *   agents perf friction     sessions stuck repeatedly hitting the same guard
+ *   agents insights perf              multi-section summary (commands + hooks + runs)
+ *   agents insights perf hooks        per-hook p50/p99 + cache hit rates
+ *   agents insights perf commands     slowest CLI command paths (from command.end)
+ *   agents insights perf run          agent.run / perf.timing labels
+ *   agents insights perf friction     sessions stuck repeatedly hitting the same guard
  *
  * Soft-joins sessions.db via shared string keys (session_id, agent, machine) —
  * no foreign keys. Warehouse lives at ~/.agents/.cache/perf/perf.db (safe to wipe).
@@ -230,7 +231,7 @@ export function frictionAction(opts: PerfGlobalOpts): void {
   // --cwd flag — so silently accepting the flag here would look like it
   // filtered when it did nothing. Fail loud instead of no-op.
   if (opts.project) {
-    console.error(chalk.red("agents perf friction does not support --project yet — friction events carry no cwd to filter on."));
+    console.error(chalk.red("agents insights perf friction does not support --project yet — friction events carry no cwd to filter on."));
     process.exitCode = 1;
     return;
   }
@@ -301,7 +302,7 @@ function attachSharedOptions(cmd: Command): Command {
 
 /**
  * Commander binds a flag declared on both parent and child to the *parent*.
- * Merge so `agents perf commands --json` still sees json:true on the leaf.
+ * Merge so `agents insights perf commands --json` still sees json:true on the leaf.
  */
 function leafOpts(cmd: Command): PerfGlobalOpts {
   const parent = cmd.parent && typeof cmd.parent.opts === 'function'
@@ -337,8 +338,8 @@ Examples:
   agents insights perf friction               # sessions stuck retrying the same guard block
 `);
 
-  // Options live on the parent so `agents perf --json` and
-  // `agents perf commands --json` both work (see leafOpts).
+  // Options live on the parent so `agents insights perf --json` and
+  // `agents insights perf commands --json` both work (see leafOpts).
   attachSharedOptions(perf).action(function summary(this: Command) {
     summaryAction(this.opts() as PerfGlobalOpts);
   });
