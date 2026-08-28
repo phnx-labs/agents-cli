@@ -1034,7 +1034,7 @@ export async function resolveRoutineLaunch(
     : false;
   const selectedCredential = config.account
     ? (explicitCredential ? config.account : undefined)
-    : resolveAccountSelection(undefined, agent, meta);
+    : resolveAccountSelection(undefined, agent, meta)?.id;
   if (selectedCredential) {
     // A default/binding may resolve to a native account — never route that
     // through the provider credential path (it has no bundle to resolve).
@@ -1567,7 +1567,7 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   if (!dispatchesViaAgentsRun(config)) {
     const { findUnifiedAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
     const meta = readMeta();
-    const selectedAccount = resolveAccountSelection(config.account, effectiveAgent, meta);
+    const selectedAccount = resolveAccountSelection(config.account, effectiveAgent, meta)?.id;
     if (selectedAccount) {
       // Only a provider account injects env; a native account (explicit or via a
       // device-scoped binding) is read from the harness home and forwards nothing.
@@ -2173,7 +2173,7 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
     const { findAccount, resolveAccountSelection, resolveCredentialAccount } = await import('../account-registry.js');
     const selectedAccount = config.account && !findAccount(config.account)
       ? undefined
-      : resolveAccountSelection(config.account, config.agent! as AgentId, readMeta());
+      : resolveAccountSelection(config.account, config.agent! as AgentId, readMeta())?.id;
     if (selectedAccount) Object.assign(baseEnv, resolveCredentialAccount(selectedAccount, config.agent! as AgentId).env);
   }
   const spawnEnv = dispatchesViaAgentsRun(config)
