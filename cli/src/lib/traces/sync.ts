@@ -732,7 +732,10 @@ export function buildIndexShard(
         group: bucket.group,
         // Up to TOPIC_SESSION_CAP most-recent example sessions, so the console can
         // drill from a tile into its session list. Capped to keep the shard small;
-        // the tile's `count` remains the true total.
+        // the tile's `count` remains the true total. These are correct on this
+        // per-device shard; the fleet-aggregate `/all` view (worker-template.ts,
+        // a must-not-touch R2 worker here) carries only the first device's refs
+        // per topic until PHNX-3464 merges them across devices.
         sessions: bucket.refs
           .sort((a, b) => b.recencyMs - a.recencyMs)
           .slice(0, TOPIC_SESSION_CAP)
