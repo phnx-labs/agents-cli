@@ -157,6 +157,18 @@ describe('lazy managed OG cover', () => {
     expect(store.has('octocat/plan.png')).toBe(false);
   });
 
+  it('returns a diagnostic 500 when the renderer fails', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    await put(worker, env, 'octocat/broken', '<title>Broken</title>');
+    worker.hooks.renderOgCard = async () => { throw new Error('renderer unavailable'); };
+
+    const cover = await worker.default.fetch(new Request('https://share.test/octocat/broken.png'), env);
+    expect(cover.status).toBe(500);
+    expect(cover.headers.get('content-type')).toContain('text/plain');
+    expect(await cover.text()).toBe('OG card render failed: renderer unavailable');
+  });
+
   it('applies the canonical me visibility gate before rendering a missing cover', async () => {
     const worker = await loadWorker();
     const { env, store } = makeEnv();

@@ -5,6 +5,7 @@
 // maps a custom domain.
 
 import { createHash } from 'node:crypto';
+import type { WorkerBundle } from './worker-template.js';
 
 const CF_API = 'https://api.cloudflare.com/client/v4';
 export const SHARE_LIFECYCLE_RULE_ID = 'agents-share-expire-objects';
@@ -148,7 +149,7 @@ export async function deployWorker(
   apiToken: string,
   accountId: string,
   workerName: string,
-  script: string,
+  worker: string | WorkerBundle,
   bucketName: string,
   opts: ProvisionOptions = {},
 ): Promise<void> {
@@ -162,11 +163,15 @@ export async function deployWorker(
   };
   const form = new FormData();
   form.set('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  const bundle = typeof worker === 'string' ? { script: worker, modules: [] } : worker;
   form.set(
     'worker.js',
-    new Blob([script], { type: 'application/javascript+module' }),
+    new Blob([bundle.script], { type: 'application/javascript+module' }),
     'worker.js',
   );
+  for (const module of bundle.modules) {
+    form.set(module.name, new Blob([module.contents], { type: module.contentType }), module.name);
+  }
   await request({
     apiToken,
     method: 'PUT',
@@ -235,11 +240,12 @@ export async function updateWorker(
   accountId: string,
   workerName: string,
   bucketName: string,
-  script: string,
+  worker: string | WorkerBundle,
   writeToken: string,
   previousHash: string | undefined,
   opts: UpdateWorkerOpts = {},
 ): Promise<UpdateWorkerResult> {
+  const script = typeof worker === 'string' ? worker : worker.script;
   const templateHash = hashWorkerScript(script);
   if (!opts.force && previousHash === templateHash) {
     // Script is current so we skip the upload (which would wipe secrets). A
@@ -251,7 +257,7 @@ export async function updateWorker(
     }
     return { templateHash, skipped: true };
   }
-  await deployWorker(apiToken, accountId, workerName, script, bucketName, opts);
+  await deployWorker(apiToken, accountId, workerName, worker, bucketName, opts);
   // Script upload clears bindings/secrets (see JSDoc above). If re-applying
   // WRITE_TOKEN fails here, the live Worker has no write token — every
   // `agents artifacts share` publish/delete 401s until a re-run of `agents artifacts share update`

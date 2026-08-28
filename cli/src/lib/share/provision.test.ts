@@ -18,6 +18,7 @@ import {
   type CloudflareRequest,
   type CloudflareRequester,
 } from './provision.js';
+import { renderWorkerBundle } from './worker-template.js';
 
 describe('share bucket lifecycle', () => {
   it('builds the Cloudflare R2 lifecycle rule that deletes old share objects', () => {
@@ -147,6 +148,28 @@ describe('share Cloudflare provisioning request shape', () => {
       ],
     });
     expect(await (upload?.form?.get('worker.js') as File).text()).toBe('export default {}');
+  });
+
+  it('uploads renderer WASM as compiled modules beside the JavaScript entrypoint', async () => {
+    let upload: CloudflareRequest | undefined;
+    const bundle = renderWorkerBundle();
+    await deployWorker('cf-token', 'acct_1', 'worker-one', bundle, 'bucket-one', {
+      request: async (req) => {
+        upload = req;
+        return {};
+      },
+    });
+
+    expect(bundle.modules).toHaveLength(2);
+    for (const module of bundle.modules) {
+      const part = upload?.form?.get(module.name) as File;
+      expect(part).toBeInstanceOf(File);
+      expect(part.type).toBe('application/wasm');
+      expect(new Uint8Array(await part.arrayBuffer()).subarray(0, 4)).toEqual(
+        new Uint8Array([0x00, 0x61, 0x73, 0x6d]),
+      );
+      expect(bundle.script).toContain(`./${module.name}`);
+    }
   });
 
   it('sets WRITE_TOKEN through the Workers Secrets API', async () => {

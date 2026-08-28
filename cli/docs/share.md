@@ -66,8 +66,12 @@ Worker lazily renders that first request as a deterministic 1200×630 AGI card
 from the page title, description, handle, and visibility, then caches the PNG in
 R2. The cover passes through the canonical page's visibility gate before render,
 so `me`/`org` metadata cannot leak. No browser is launched on the publishing
-machine. BYO endpoints retain the local Chromium screenshot fallback because
-their independently hosted Worker may predate the renderer.
+machine. `agents artifacts share update` uploads Yoga and resvg as compiled WASM
+modules beside the Worker's JavaScript; workerd forbids compiling inlined WASM
+bytes at request time. A renderer initialization failure returns a diagnostic
+`500` and does not cache a missing/broken cover. BYO endpoints retain the local
+Chromium screenshot fallback because their independently hosted Worker may
+predate the renderer.
 
 - **`unlisted` is a capability URL, not a secret.** GET still returns 200; it is
   only hidden from the gallery/listing and marked `noindex`

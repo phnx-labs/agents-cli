@@ -505,12 +505,12 @@ describe('shareTemplateStatus', () => {
 
   it('is current when the recorded hash matches the live template', async () => {
     const { share } = await freshShareModules();
-    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { renderWorkerBundle } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
     expect(
       share.shareTemplateStatus({
         baseUrl: 'x', accountId: 'a', workerName: 'w', bucketName: 'b',
-        templateHash: hashWorkerScript(renderWorkerScript()),
+        templateHash: hashWorkerScript(renderWorkerBundle().script),
       }),
     ).toBe('current');
   });
@@ -845,11 +845,11 @@ describe('formatShareList', () => {
 
 describe('runShareList', () => {
   async function currentConfig(share: typeof import('./share.js')): Promise<{ baseUrl: string; accountId: string; workerName: string; bucketName: string; templateHash: string }> {
-    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { renderWorkerBundle } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
     return {
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
-      templateHash: hashWorkerScript(renderWorkerScript()),
+      templateHash: hashWorkerScript(renderWorkerBundle().script),
     };
   }
 
@@ -1116,11 +1116,11 @@ describe('agents artifacts share list (CLI)', () => {
     // exercises the REAL commander parse, not the `runShareList` unit tests
     // above, which call it directly and would never have caught this.
     const { artifacts, share, config } = await freshShareModules();
-    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { renderWorkerBundle } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
     config.writeShareConfig({
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
-      templateHash: hashWorkerScript(renderWorkerScript()),
+      templateHash: hashWorkerScript(renderWorkerBundle().script),
     });
     // `gh` resolves to a DIFFERENT user than the explicit --for-user below —
     // if that flag were silently dropped, the request would go to
@@ -1164,11 +1164,11 @@ describe('agents artifacts share list (CLI)', () => {
 
   it('a real parse delivers --scope (and --all as an alias) through to runShareList', async () => {
     const { artifacts, share, config } = await freshShareModules();
-    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { renderWorkerBundle } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
     config.writeShareConfig({
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
-      templateHash: hashWorkerScript(renderWorkerScript()),
+      templateHash: hashWorkerScript(renderWorkerBundle().script),
     });
     installFakeGh('octocat');
     // Hidden scopes need an owner bearer; for BYO tests it can come from env.
@@ -1336,11 +1336,11 @@ describe('parseShareRevisions', () => {
 
 describe('runShareRevisions', () => {
   async function currentConfig(share: typeof import('./share.js')): Promise<{ baseUrl: string; accountId: string; workerName: string; bucketName: string; templateHash: string }> {
-    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { renderWorkerBundle } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
     return {
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
-      templateHash: hashWorkerScript(renderWorkerScript()),
+      templateHash: hashWorkerScript(renderWorkerBundle().script),
     };
   }
 
@@ -1479,11 +1479,11 @@ describe('agents artifacts share revisions (CLI)', () => {
     // caught this (verified with a bare commander repro against both
     // `--github-user`/`--json` colliding names before the rename).
     const { artifacts, config } = await freshShareModules();
-    const { renderWorkerScript } = await import('../lib/share/worker-template.js');
+    const { renderWorkerBundle } = await import('../lib/share/worker-template.js');
     const { hashWorkerScript } = await import('../lib/share/provision.js');
     config.writeShareConfig({
       baseUrl: 'https://share.test', accountId: 'a', workerName: 'w', bucketName: 'b',
-      templateHash: hashWorkerScript(renderWorkerScript()),
+      templateHash: hashWorkerScript(renderWorkerBundle().script),
     });
 
     const seenUrls: string[] = [];

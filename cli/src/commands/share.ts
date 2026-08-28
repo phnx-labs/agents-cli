@@ -52,7 +52,7 @@ import {
   type ShareVisibility,
 } from '../lib/share/publish.js';
 import { deleteShare, resolveDeleteTarget, type DeleteShareResult } from '../lib/share/delete.js';
-import { renderWorkerScript } from '../lib/share/worker-template.js';
+import { renderWorkerBundle } from '../lib/share/worker-template.js';
 import { analyticsEnabled } from '../lib/share/analytics.js';
 import {
   phoenixIdBaseForDeploy,
@@ -94,7 +94,7 @@ export function formatSharePublishResult(result: PublishResult, json = false): s
  * never "current" or "outdated", since there is nothing to compare against. */
 export function shareTemplateStatus(cfg: ShareConfig): 'current' | 'outdated' | 'unknown' {
   if (!cfg.templateHash) return 'unknown';
-  return cfg.templateHash === hashWorkerScript(renderWorkerScript()) ? 'current' : 'outdated';
+  return cfg.templateHash === hashWorkerScript(renderWorkerBundle().script) ? 'current' : 'outdated';
 }
 
 /** One published object as reported by the Worker's `?format=json` listing route. */
@@ -1450,7 +1450,8 @@ export async function runShareProvision(opts: {
   const bucketName = opts.bucket;
   const token = generateWriteToken();
   const requestedDomain = cleanHostname(opts.domain) ?? DEFAULT_SHARE_DOMAIN;
-  const script = renderWorkerScript();
+  const worker = renderWorkerBundle();
+  const script = worker.script;
 
   const spin = ora('Provisioning on Cloudflare…').start();
   try {
@@ -1459,7 +1460,7 @@ export async function runShareProvision(opts: {
     spin.text = `R2 bucket '${bucketName}' ready`;
     await configureBucketLifecycle(apiToken, accountId, bucketName, provisionOpts);
     spin.text = `R2 bucket '${bucketName}' lifecycle ready`;
-    await deployWorker(apiToken, accountId, workerName, script, bucketName, provisionOpts);
+    await deployWorker(apiToken, accountId, workerName, worker, bucketName, provisionOpts);
     spin.text = `Worker '${workerName}' deployed`;
     await setWorkerSecret(apiToken, accountId, workerName, token, provisionOpts);
     spin.text = `Worker '${workerName}' write token set`;
@@ -1557,7 +1558,7 @@ export async function runShareUpdate(opts: {
     );
   }
   const writeToken = readWriteToken();
-  const script = renderWorkerScript();
+  const worker = renderWorkerBundle();
   const phoenixIdBase = phoenixIdBaseForDeploy({ managed: opts.managed }, cfg);
   const provisionOpts = {
     ...(opts.request ? { request: opts.request } : {}),
@@ -1570,7 +1571,7 @@ export async function runShareUpdate(opts: {
     accountId,
     cfg.workerName,
     cfg.bucketName,
-    script,
+    worker,
     writeToken,
     cfg.templateHash,
     provisionOpts,

@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Miniflare, type R2Bucket } from 'miniflare';
 import { afterEach, describe, expect, it } from 'vitest';
-import { renderWorkerScript } from './worker-template.js';
+import { renderWorkerBundle, renderWorkerScript } from './worker-template.js';
 import { toHeaderValue, toPercentHeaderValue } from './publish.js';
 
 // PHNX-3278 review blocker #4: worker-template.test.ts drives the real route
@@ -30,6 +30,50 @@ interface R2GetLike {
   text(): Promise<string>;
   arrayBuffer(): Promise<ArrayBuffer>;
 }
+
+describe('managed OG renderer in the real workerd runtime (PHNX-2835)', () => {
+  let mf: Miniflare | undefined;
+
+  afterEach(async () => {
+    await mf?.dispose();
+    mf = undefined;
+  });
+
+  it('loads uploaded WASM modules and renders a branded 1200x630 PNG', async () => {
+    const bundle = renderWorkerBundle();
+    mf = new Miniflare({
+      modules: [
+        { type: 'ESModule', path: 'worker.js', contents: bundle.script },
+        ...bundle.modules.map((module) => ({
+          type: 'CompiledWasm' as const,
+          path: module.name,
+          contents: module.contents,
+        })),
+      ],
+      r2Buckets: ['BUCKET'],
+      bindings: { WRITE_TOKEN: 'secret' },
+    });
+
+    const bucket = await mf.getR2Bucket('BUCKET');
+    await bucket.put('octocat/plan', '<!doctype html><title>Launch plan</title>', {
+      httpMetadata: { contentType: 'text/html; charset=utf-8' },
+      customMetadata: {
+        visibility: 'public',
+        'og-title': 'Launch plan',
+        'og-description': 'Ship it safely',
+      },
+    });
+
+    const cover = await mf.dispatchFetch('https://share.test/octocat/plan.png', {
+      headers: { accept: 'image/png' },
+    });
+    const png = new Uint8Array(await cover.arrayBuffer());
+    expect(cover.status).toBe(200);
+    expect(cover.headers.get('content-type')).toBe('image/png');
+    expect(png.subarray(0, 8)).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(png.byteLength).toBeGreaterThan(10_000);
+  });
+});
 
 /** Load the emitted Worker source as a real ES module (a data: URI is past bun's NameTooLong limit). */
 async function loadWorker() {
