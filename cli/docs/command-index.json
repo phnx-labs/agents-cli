@@ -14567,13 +14567,22 @@
           "name": "list",
           "path": "monitors list",
           "aliases": [],
-          "description": "See all monitors: source, condition, action, owner, and last fire.",
+          "description": "See all monitors across the fleet: source, condition, action, owner, last fire, and the box each lives on.",
           "args": [],
           "options": [
             {
               "flags": "--json",
               "description": "Emit machine-readable JSON",
               "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--local",
+              "description": "This device only — skip the fleet fan-out",
+              "long": "--local",
               "required": false,
               "optional": false,
               "variadic": false,

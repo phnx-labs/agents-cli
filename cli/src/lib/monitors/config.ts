@@ -159,6 +159,15 @@ export interface MonitorConfig {
   variables?: Record<string, string>;
   /** Pin the agent version for `run` actions (omit to use the run strategy). */
   version?: string;
+  /**
+   * Which layer this monitor was read from — `user` (~/.agents/monitors/) or
+   * `system` (the npm-shipped built-in mirror ~/.agents/.system/monitors/).
+   * A DERIVED, runtime-only annotation stamped by `readMonitorFile`, never a
+   * persisted YAML field: it tags a built-in in `list`/`view` (mirroring
+   * routines' `(built-in)` label) and `writeMonitor` strips it before writing,
+   * so materializing a user copy of a built-in always lands as `user`.
+   */
+  scope?: 'user' | 'system';
 }
 
 /**
@@ -449,11 +458,19 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
 }
 
 /**
- * Read and normalize a monitor file. `scope` decides the enabled default when
- * the YAML has no explicit `enabled:` field: a `user` monitor defaults to
- * enabled (MONITOR_DEFAULTS), while a `system` built-in stays opt-in (disabled)
- * until the user enables it — mirroring how routines treat a fresh built-in
- * (lib/routines.ts readJobFile).
+ * Read and normalize a monitor file. A built-in defaults to enabled exactly like
+ * every other system-layer resource (rules, hooks, commands, skills): a monitor
+ * shipped in the system mirror is on for every install unless the user shadows it
+ * with an explicit `enabled: false` (via `agents monitors pause`, which writes a
+ * user copy — the system mirror is pull-only). There is deliberately no
+ * system-scope special-case: monitors used to be the lone outlier that shipped
+ * disabled+invisible (PHNX-2506). `scope` no longer changes the enabled default;
+ * it is retained on the config so `list`/`view` can tag a built-in.
+ *
+ * A shared-input built-in (one whose source polls a fleet-shared queue such as
+ * `gh pr list --author @me`) MUST carry its own `device:` owner pin in the
+ * shipped YAML so exactly one box fires it (SING-9) — being enabled-by-default is
+ * not, on its own, permission to fire on every daemon.
  */
 function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): MonitorConfig | null {
   try {
@@ -465,9 +482,12 @@ function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): M
       ...MONITOR_DEFAULTS,
       ...parsed,
       name: parsed.name || path.basename(filePath).replace(/\.ya?ml$/, ''),
-      // A system built-in with no explicit `enabled:` is opt-in until enabled;
-      // a user monitor keeps the enabled-by-default behavior.
-      enabled: hasEnabled ? parsed.enabled !== false : scope === 'system' ? false : (MONITOR_DEFAULTS.enabled ?? true),
+      // Enabled unless the user explicitly disables it — same default for user
+      // and system layers, so a built-in is visible and on like any other
+      // system resource. `scope` is stamped below for the (built-in) tag, not
+      // used to gate enablement.
+      enabled: hasEnabled ? parsed.enabled !== false : (MONITOR_DEFAULTS.enabled ?? true),
+      scope,
     } as MonitorConfig;
   } catch {
     return null;
@@ -551,6 +571,9 @@ export function writeMonitor(config: MonitorConfig): void {
 
   const output: Record<string, unknown> = { ...config };
   if (output.enabled === true) delete output.enabled;
+  // `scope` is a derived read-time annotation, never part of the on-disk schema —
+  // strip it so a materialized user copy of a built-in doesn't persist `scope: system`.
+  delete output.scope;
   const devArr = output.devices as string[] | undefined;
   if (!devArr || devArr.length === 0) delete output.devices;
 

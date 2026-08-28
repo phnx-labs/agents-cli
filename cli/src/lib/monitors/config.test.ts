@@ -271,40 +271,56 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
     expect(getMonitorPath('dupe')).toBe(path.join(userDir, 'dupe.yml'));
   });
 
-  it('(c) a system built-in with no enabled: field is opt-in (disabled until toggled)', () => {
-    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\n'));
+  it('(c) a system built-in with no enabled: field is ENABLED by default (PHNX-2506)', () => {
+    // The bug: monitors were the lone system-layer resource that shipped
+    // disabled+invisible. A built-in must now be on by default like rules,
+    // hooks, commands, and skills — visible and firing on every install.
+    fs.writeFileSync(path.join(sysDir, 'builtin.yml'), monitorYaml('name: builtin\n'));
 
-    // Read straight from the system layer — opt-in, so disabled.
-    expect(readMonitor('optin')?.enabled).toBe(false);
-    expect(listMonitors().find((m) => m.name === 'optin')?.enabled).toBe(false);
+    expect(readMonitor('builtin')?.enabled).toBe(true);
+    expect(listMonitors().find((m) => m.name === 'builtin')?.enabled).toBe(true);
+    // It is tagged as coming from the system layer so `list`/`view` can mark it.
+    expect(readMonitor('builtin')?.scope).toBe('system');
 
-    // A user monitor with no enabled: field, by contrast, defaults to enabled.
+    // A user monitor with no enabled: field still defaults to enabled too, and is
+    // tagged `user` — same enabled default, distinct scope.
     fs.writeFileSync(path.join(userDir, 'userdefault.yml'), monitorYaml('name: userdefault\n'));
     expect(readMonitor('userdefault')?.enabled).toBe(true);
+    expect(readMonitor('userdefault')?.scope).toBe('user');
+
+    // The healthy opt-OUT path: the user shadows a built-in with enabled: false.
+    fs.writeFileSync(path.join(sysDir, 'off.yml'), monitorYaml('name: off\nenabled: false\n'));
+    expect(readMonitor('off')?.enabled).toBe(false);
   });
 
-  it('(d) enabling a system built-in writes into the USER dir, never the system dir', () => {
-    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\n'));
-    expect(readMonitor('optin')?.enabled).toBe(false);
+  it('(d) pausing a system built-in writes into the USER dir, never the system dir', () => {
+    // Built-ins ship on; the only toggle is pause/resume (there is no enable/disable
+    // verb). Pausing must materialize a user copy — the system mirror is pull-only.
+    fs.writeFileSync(path.join(sysDir, 'builtin.yml'), monitorYaml('name: builtin\n'));
+    expect(readMonitor('builtin')?.enabled).toBe(true);
 
-    setMonitorEnabled('optin', true);
+    setMonitorEnabled('builtin', false); // the `pause` write path
 
     // The user dir now holds the materialized copy; the system mirror is untouched.
-    expect(fs.existsSync(path.join(userDir, 'optin.yml'))).toBe(true);
-    const sysBody = fs.readFileSync(path.join(sysDir, 'optin.yml'), 'utf-8');
-    expect(sysBody).not.toContain('enabled: true');
-    // The user copy now wins and reads enabled.
-    expect(readMonitor('optin')?.enabled).toBe(true);
-    expect(getMonitorPath('optin')).toBe(path.join(userDir, 'optin.yml'));
+    expect(fs.existsSync(path.join(userDir, 'builtin.yml'))).toBe(true);
+    const sysBody = fs.readFileSync(path.join(sysDir, 'builtin.yml'), 'utf-8');
+    expect(sysBody).not.toContain('enabled: false');
+    // `scope` is a derived annotation — it must NOT persist into the written YAML,
+    // or a materialized user copy would carry `scope: system`.
+    expect(fs.readFileSync(path.join(userDir, 'builtin.yml'), 'utf-8')).not.toContain('scope:');
+    // The user copy now wins and reads disabled, tagged as a user-layer monitor.
+    expect(readMonitor('builtin')?.enabled).toBe(false);
+    expect(readMonitor('builtin')?.scope).toBe('user');
+    expect(getMonitorPath('builtin')).toBe(path.join(userDir, 'builtin.yml'));
 
     // Editing (write) also lands in the user dir only.
-    const cfg = readMonitor('optin')!;
+    const cfg = readMonitor('builtin')!;
     cfg.action = { type: 'notify', notifyChannel: 'desktop' };
     writeMonitor(cfg);
     expect(getMonitorsDir()).toBe(userDir);
     expect(getSystemMonitorsDir()).toBe(sysDir);
-    expect(readMonitor('optin')?.action.notifyChannel).toBe('desktop');
+    expect(readMonitor('builtin')?.action.notifyChannel).toBe('desktop');
     // The system file's action was not rewritten.
-    expect(fs.readFileSync(path.join(sysDir, 'optin.yml'), 'utf-8')).toContain('notifyChannel: telegram');
+    expect(fs.readFileSync(path.join(sysDir, 'builtin.yml'), 'utf-8')).toContain('notifyChannel: telegram');
   });
 });

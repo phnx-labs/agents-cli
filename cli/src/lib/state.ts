@@ -548,10 +548,13 @@ export function getMonitorsDir(): string { return process.env.AGENTS_MONITORS_DI
  * Path to built-in monitor definitions shipped in the system repo
  * (`~/.agents/.system/monitors/`). Unioned under the user monitors dir by
  * listMonitors()/readMonitor(): a monitor shipped here is available on every
- * install, and a user monitor of the same name overrides it. A built-in with no
- * `enabled:` field is opt-in — it stays disabled until the user enables it,
- * which materializes a user copy (writes never touch this pull-only mirror). The
- * directory need not exist.
+ * install, and a user monitor of the same name overrides it. A built-in is
+ * enabled by default like every other system-layer resource — it runs on every
+ * install unless the user shadows it with `enabled: false` (via `agents monitors
+ * pause`, which materializes a user copy; writes never touch this pull-only
+ * mirror). A shared-input built-in still carries its own `device:` owner pin in
+ * the shipped YAML so exactly one box fires it (SING-9). The directory need not
+ * exist.
  */
 export function getSystemMonitorsDir(): string { return process.env.AGENTS_SYSTEM_MONITORS_DIR ?? SYSTEM_MONITORS_DIR; }
 

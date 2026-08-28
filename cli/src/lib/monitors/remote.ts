@@ -24,10 +24,29 @@ import { monitorFingerprint } from './fingerprint.js';
 /** Recursion guard: a peer answering the fan-out must not fan out again. */
 export const NO_MONITOR_FANOUT_ENV = 'AGENTS_MONITORS_LOCAL';
 
+/**
+ * The owning box's view of a remote monitor, beyond its behavioral identity —
+ * enough for `monitors list` to render it (enabled/placement/scope) and show a
+ * one-line liveness note without a second round-trip. All optional: a peer on an
+ * older CLI may omit them, and the duplicate guard never reads them.
+ */
+export interface RemoteMonitorDisplay {
+  enabled?: boolean;
+  owner?: string;
+  scope?: 'user' | 'system';
+  stalled?: boolean;
+  checkCount?: number;
+  lastCheckedAt?: string | null;
+  lastFiredAt?: string | null;
+  lastActionFailed?: boolean;
+}
+
 /** One monitor as seen on a peer, tagged with the box it lives on. */
 export interface RemoteMonitor {
   machine: string;
   monitor: Pick<MonitorConfig, 'name' | 'source' | 'condition' | 'action'>;
+  /** The owning box's enabled/placement/scope/liveness view, for `list` display. */
+  display?: RemoteMonitorDisplay;
 }
 
 /**
@@ -50,13 +69,24 @@ export function parseRemoteMonitors(stdout: string, machine: string): RemoteMoni
   const out: RemoteMonitor[] = [];
   for (const row of rows) {
     if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
-    const m = row as Partial<MonitorConfig>;
+    const m = row as Record<string, unknown> & Partial<MonitorConfig>;
     // Without source+condition+action there is no identity to compare, so the
     // row cannot participate in the duplicate check either way.
     if (!m.name || !m.source || !m.condition || !m.action) continue;
+    const display: RemoteMonitorDisplay = {
+      enabled: typeof m.enabled === 'boolean' ? m.enabled : undefined,
+      owner: typeof m.owner === 'string' ? m.owner : undefined,
+      scope: m.scope === 'system' || m.scope === 'user' ? m.scope : undefined,
+      stalled: typeof m.stalled === 'boolean' ? m.stalled : undefined,
+      checkCount: typeof m.checkCount === 'number' ? m.checkCount : undefined,
+      lastCheckedAt: typeof m.lastCheckedAt === 'string' ? m.lastCheckedAt : undefined,
+      lastFiredAt: typeof m.lastFiredAt === 'string' ? m.lastFiredAt : undefined,
+      lastActionFailed: typeof m.lastActionFailed === 'boolean' ? m.lastActionFailed : undefined,
+    };
     out.push({
       machine,
       monitor: { name: m.name, source: m.source, condition: m.condition, action: m.action },
+      display,
     });
   }
   return out;

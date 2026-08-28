@@ -450,7 +450,7 @@ agents monitors                   Durable event-triggered watchers: watch a sour
 agents monitors add [nameOrPath]  Create a monitor from inline flags or a YAML file. Auto-starts the daemon unless daemon.enabled is false.
 agents monitors device [name]     View or (re)pin the OWNER device — the single machine that evaluates + fires (exactly-once).
 agents monitors edit [name]       Open a monitor’s YAML in $EDITOR.
-agents monitors list              See all monitors: source, condition, action, owner, and last fire.
+agents monitors list              See all monitors across the fleet: source, condition, action, owner, last fire, and the box each lives on.
 agents monitors logs [name]       Show the latest action run’s status + report. --run for a specific run, --full for raw stdout.
 agents monitors pause [name]      Temporarily disable a monitor. Stops watching until resumed.
 agents monitors remove [name]     Delete a monitor. Stops watching; past fire history remains on disk.

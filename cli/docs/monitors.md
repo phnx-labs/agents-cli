@@ -41,10 +41,16 @@ Each monitor is a YAML file in `~/.agents/monitors/` (the user layer) or, for a
 built-in shipped with the CLI, `~/.agents/.system/monitors/` (the system layer,
 from `gh:phnx-labs/.agents-system`). `listMonitors()`/`readMonitor()` union the
 two — the user layer shadows a system built-in of the same name, exactly like
-routines' project/user/system resolution. A system built-in with no `enabled:`
-field is **opt-in**: it stays disabled until you enable it, which materializes a
-user copy (enable/edit/delete always write the user dir; the system mirror is
-pull-only). The same background daemon that runs routines
+routines' project/user/system resolution. A system built-in is **enabled by
+default**, like every other system-layer resource (rules, hooks, commands,
+skills): it runs on every install unless you shadow it with `enabled: false`
+(via `agents monitors pause`, which materializes a user copy — pause/edit/delete
+always write the user dir; the system mirror is pull-only, and there is no
+`enable`/`disable` verb). A shared-input built-in still carries its own `device:`
+owner pin in the shipped YAML so exactly one box fires it (SING-9). Each monitor
+carries its read-time `scope` (`user`/`system`), so `agents monitors list` tags a
+built-in `(built-in)` and `--json` emits `scope` + `builtin`. The same background
+daemon that runs routines
 (`agents routines start`) hosts a **monitor engine** beside the cron scheduler. On each tick it evaluates every enabled, device-owned monitor that
 is due, applies the condition through the native state-diff store, and on a fire
 dispatches the action through the exact `executeJobDetached` path cron and webhook
@@ -52,8 +58,11 @@ fires use.
 
 ### Built-in: `pr-merge-on-green`
 
-Opt-in. Polls every 5 minutes for **this user's** open PRs that are CI-green and
-non-author-approved, then dispatches `claude` to rebase-merge them.
+On by default. Polls every 5 minutes for **this user's** open PRs that are
+CI-green and non-author-approved, then dispatches `claude` to rebase-merge them.
+Because it polls a fleet-shared queue (`--author @me` is identical on every box),
+the shipped YAML must pin a single owner `device:` so exactly one daemon fires it
+(SING-9) — otherwise every box's daemon would race to merge the same PR.
 
 The **built-in YAML** lives in `gh:phnx-labs/.agents-system` (`monitors/pr-merge-on-green.yml`)
 and polls `monitors/pr-merge-on-green.sh` — `gh search prs` plus `gh pr view --repo`,
@@ -69,13 +78,15 @@ agents _internal mergeable-prs    # owner/repo#n, or empty
 ```
 
 ```bash
-agents monitors enable pr-merge-on-green
 agents monitors test pr-merge-on-green    # dry-run: observation + would-fire
+agents monitors pause pr-merge-on-green    # opt OUT — materializes a user copy with enabled: false
 ```
 
-A user copy created by an older `enable` still has the broken `gh pr list`
-command (no `--repo`, `reviewDecision == APPROVED` only). Re-enable to pick up
-the new poll: `agents monitors remove pr-merge-on-green && agents monitors enable pr-merge-on-green`.
+The built-in is on by default; there is no `enable` verb (`pause`/`resume` are the
+toggle, and they write the user dir only). A stale user copy from an older,
+never-shipped `enable` step still has the broken `gh pr list` command (no `--repo`,
+`reviewDecision == APPROVED` only); delete it to fall back to the current shipped
+poll: `agents monitors remove pr-merge-on-green`.
 
 ### The one genuinely new piece: native state-diff
 
@@ -113,14 +124,17 @@ rateLimit:                   # firehose guard — auto-pause if exceeded
 Two different things wear the word "monitor", and they live in different places
 on purpose:
 
-| | Path | Checked in? |
+| | Path | Rides the repo to every box? |
 |---|---|---|
-| **Definition** — what to watch, when, what to do | `~/.agents/monitors/<name>.yml` (user), `~/.agents/.system/monitors/` (built-in) | yes — it should ride the repo to every box |
+| **Built-in definition** — shipped watcher (e.g. `pr-merge-on-green`) | `~/.agents/.system/monitors/<name>.yml` | yes — via the npm-shipped system repo, available on every install |
+| **User definition** — an agent's per-work-item watcher | `~/.agents/monitors/<name>.yml` | **no — deliberately per-machine.** Agents create these per PR/issue; syncing would push every ephemeral watcher onto every box (the accumulation the double-trigger guard exists to stop). Fleet **visibility** comes from `agents monitors list` fanning out, not from git-syncing the files |
 | **Running state** — last-seen value, fire history, rate-limit counters | `~/.agents/.history/monitors/<name>/state.json` + `fires/<id>/` | no — it is per-machine and regenerable |
 
 Nothing but the definition is ever written into `monitors/`: the only writers of
 that directory are the monitor file's read, write, and delete. Runtime lives
-under `.history/`, which is excluded, so the split needs no extra rules.
+under `.history/`, which is excluded, so the split needs no extra rules. Because
+user watchers stay local, "which box is watching what" is answered by the
+list fan-out (below), not by pulling a synced dir.
 
 ### The double-trigger guard
 
@@ -167,7 +181,8 @@ agents monitors add cert-issued \
   --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \
   --match issued --notify telegram --device zion
 
-agents monitors list                  # all monitors, source, action, owner, liveness (checked Nx / never polled / STALLED / fired)
+agents monitors list                  # every monitor on every fleet device, tagged (built-in) + owning box; source, action, owner, liveness (checked Nx / never polled / STALLED / fired)
+agents monitors list --local          # this device only — skip the fleet fan-out
 agents monitors view <name>           # full config + liveness + current watched-state + recent fires
 agents monitors test <name>           # DRY-RUN: evaluate once, print event + would-fire (no action)
 agents monitors edit <name>           # $EDITOR on the YAML

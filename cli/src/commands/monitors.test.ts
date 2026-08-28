@@ -152,6 +152,33 @@ describe('monitors inspection JSON and stderr', () => {
     expect(payload[0].lastActionFailed).toBe(true);
   });
 
+  it('a system built-in is visible, enabled, and tagged (built-in) — PHNX-2506 items 1+2', () => {
+    const home = makeHome();
+    // A shipped built-in with no `enabled:` field. Before the fix this listed as
+    // disabled and untagged; now it must read enabled and carry scope=system.
+    writeSystemMonitor(home, {
+      name: 'pr-merge-on-green',
+      source: { type: 'poll', command: 'gh pr list --author @me', interval: '2m' },
+      condition: { mode: 'on-change' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+
+    // --local skips the fleet fan-out so the assertion is deterministic.
+    const jsonRes = run(home, ['list', '--json', '--local']);
+    expect(jsonRes.status).toBe(0);
+    const payload = JSON.parse(jsonRes.stdout);
+    const row = payload.find((r: any) => r.name === 'pr-merge-on-green');
+    expect(row).toBeDefined();
+    expect(row.enabled).toBe(true);
+    expect(row.builtin).toBe(true);
+    expect(row.scope).toBe('system');
+
+    // The human listing tags it and does not bury it.
+    const textRes = run(home, ['list', '--local']);
+    expect(textRes.stdout).toContain('pr-merge-on-green');
+    expect(textRes.stdout).toContain('(built-in)');
+  });
+
   it('test --json evaluates once, prints the dry-run decision as JSON, and writes no state', () => {
     const home = makeHome();
     // The monitor command runs through the host shell, so it has to be
@@ -303,7 +330,7 @@ describe('monitors inspection JSON and stderr', () => {
     () => {
       const home = makeHome();
       const sysFile = path.join(home, '.agents', '.system', 'monitors', 'ci-built-in.yml');
-      // A built-in with no `enabled:` field (opt-in) and no user copy.
+      // A built-in with no `enabled:` field (enabled by default) and no user copy.
       writeSystemMonitor(home, {
         name: 'ci-built-in',
         source: { type: 'poll', command: 'echo hi', interval: '30s' },
