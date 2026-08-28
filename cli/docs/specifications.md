@@ -3648,6 +3648,20 @@ readiness/context fields RT-1..RT-8 describe.
   validate a temporary copy, then atomically replace, so an invalid edit leaves the
   prior bytes untouched and a valid-but-unready edit replaces the definition **and**
   pauses it. Status: **[Intended]** (see RT-GAP-1).
+- **RT-12 (MUST).** At **fire** time, before spawning a routine's body, the daemon MUST
+  preflight the resolved account's sign-in and, when it is **provably** signed out
+  (auth-health verdict `revoked` or `unconfigured` for the rotation-resolved
+  `(agent, version)`), record a terminal **`blocked`** run with readiness
+  `agent_auth_failed` and a version-targeted re-login repair — never a spawned run that
+  401s and lands as `failed` (RT-7: a dead account is a different operational state from
+  a body that ran and threw). Unlike the add-time smoke (RT-5), the fire-time check is
+  **cache-only** (the daemon-warmed auth-health cache, `readAuthHealth`): a live network
+  smoke on every fire would risk a 429 storm and add latency to every tick. It MUST fail
+  **open** on any non-blocking or missing verdict (`live`/`rate_limited`/`unverified`/
+  `expired`/`error`/absent), so a stale or absent probe never wedges a routine.
+  Implemented in `fireTimeAuthReadiness` (`lib/routine-readiness.ts`), called from
+  `executeJob`/`executeJobDetached` after rotation resolves the account
+  (`lib/daemon/runner.ts`). Status: **Current** (PHNX-3415).
 
 ### 4. Run history owns attempts; statuses distinguish outcomes
 
@@ -3708,6 +3722,12 @@ readiness/context fields RT-1..RT-8 describe.
   headless auth smoke fails and it saves **paused** with `agent_auth_failed`, and a
   terminal `blocked` run is visible in `agents routines runs` before any session exists
   (RT-5, RT-6, RT-7).
+- **GIVEN** an active routine whose rotation-resolved account is `revoked`/`unconfigured`
+  in the auth-health cache, **WHEN** the daemon fires it, **THEN** it records a terminal
+  `blocked`/`agent_auth_failed` run with the re-login repair and spawns nothing — not a
+  `failed` run that burned a session (RT-12, RT-7); **GIVEN** the cache verdict is
+  `rate_limited`/`unverified`/`expired`/`error` or absent, **THEN** the fire proceeds
+  (fail open, RT-12).
 - **GIVEN** a routine still executing when its next slot arrives, **WHEN** the slot
   fires, **THEN** exactly one instance runs and the new occurrence records a `skipped`
   run linked to the active run — not a second concurrent launch (SING-13, RT-7).

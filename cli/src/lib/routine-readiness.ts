@@ -15,7 +15,9 @@ import * as path from 'path';
 import * as TOML from 'smol-toml';
 import type { JobConfig } from './scheduling/routines.js';
 import { resolveJobExecutionContext, resolveHostStrategy } from './scheduling/routines.js';
-import { evaluateRoutineReadiness, type RoutineReadinessResult, type PlacementMode } from './routine-context.js';
+import { evaluateRoutineReadiness, type RoutineReadinessResult, type RoutineReadiness, type PlacementMode } from './routine-context.js';
+import { readAuthHealth, type AuthVerdict } from './auth-health.js';
+import { machineId } from './machine-id.js';
 import { getVersionHomePath, isVersionInstalled, resolveVersion } from './installations/versions.js';
 import { probeLocalFleetAuth } from './auth-health.js';
 import { resolveHostRunTarget } from './hosts/run-target.js';
@@ -23,6 +25,46 @@ import { hostIdentityArgs, sshTargetFor } from './hosts/types.js';
 import { probeHost } from './hosts/ready.js';
 import { sshExec, shellQuote } from './ssh-exec.js';
 import { encodePowershell, powershellQuote, POWERSHELL_PROGRESS_SILENCE } from './hosts/remote-cmd.js';
+
+/**
+ * Verdicts that make a FIRE-TIME auth preflight block the run: the last live
+ * probe found the account either server-rejected (`revoked`) or with no
+ * credential at all (`unconfigured` — the "Please run /login" / "no account
+ * signed in" case, which is the most common way a routine's dispatch account
+ * goes dead). Everything else fails OPEN: `rate_limited` is still authenticated,
+ * `expired` self-heals on the next refresh, `unverified` means signed-in but no
+ * live probe endpoint (codex/grok), and `error` is indeterminate — none of those
+ * should stop a fire. This is deliberately BROADER than {@link isDeadVerdict}
+ * (display-only, `revoked` alone): a signed-out account must block a fire, not
+ * just paint a red cell.
+ */
+function fireBlockingAuthVerdict(verdict: AuthVerdict): boolean {
+  return verdict === 'revoked' || verdict === 'unconfigured';
+}
+
+/**
+ * Fire-time auth preflight: read the daemon-warmed auth-health cache for the
+ * exact (agent, version) a routine has resolved to run, and return an
+ * `agent_auth_failed` blocker when that account is provably signed out — so the
+ * daemon records a terminal `blocked` run (with the re-login repair) instead of
+ * spawning a doomed run that 401s and burns a session (PHNX-3415).
+ *
+ * Cache-only (no network, no prompt — the daemon refreshes the cache
+ * periodically and `fleet ping` writes it), and fails OPEN on a missing or
+ * non-blocking verdict so a stale/absent probe never wedges a routine. It is
+ * checked AFTER version rotation resolves the account (`launch.chain[0]`), so it
+ * judges the identity the run will actually use, never a rotated-past dead pin.
+ */
+export function fireTimeAuthReadiness(agent: string, version: string): RoutineReadiness | null {
+  const health = readAuthHealth(machineId(), agent, version);
+  if (!health || !fireBlockingAuthVerdict(health.verdict)) return null;
+  const who = health.account ? ` (${health.account})` : '';
+  return {
+    code: 'agent_auth_failed',
+    message: `the ${agent}${who} account is signed out — the last auth probe returned '${health.verdict}', so this run would fail authentication`,
+    repair: `agents run ${agent}@${version} -- login`,
+  };
+}
 
 /**
  * Evaluate whether a routine is ready to activate on this box. `probeAgent`

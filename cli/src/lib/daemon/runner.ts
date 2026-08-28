@@ -78,7 +78,6 @@ import {
   type RotateCandidate,
   type RotateResult,
 } from '../accounting/rotate.js';
-import { readAuthHealth, isDeadVerdict } from '../auth-health.js';
 import { machineId } from '../machine-id.js';
 import { isHeadedDeviceRole, selfConfiguredDeviceRole } from '../device-config.js';
 import { isSelfUpdatingAgent, ROUTINE_AGENT_IDS, isAgentHardDeprecated, hardDeprecationError } from '../agents.js';
@@ -1599,26 +1598,26 @@ async function executeJobPlaced(config: JobConfig, deps: LoopDeps | undefined, a
   // copies only THIS run's transcript out of a shared per-version home (RUSH-2271).
   snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
-  // Auth preflight: if the last live probe rejected this (agent, version)'s
-  // token (verdict `revoked`), the run is guaranteed to fail auth — fail fast
-  // before spawning instead of producing a doomed run + poisoned report. Cache-
-  // only (the daemon refreshes it periodically); fail OPEN on any non-revoked or
-  // missing verdict so a stale/absent probe or a network blip never blocks a
-  // run, and agents with no live probe (codex/gemini/grok) are never blocked.
+  // Auth preflight: if the resolved account is provably signed out (revoked or
+  // unconfigured), record a terminal `blocked`/`agent_auth_failed` run with the
+  // re-login repair instead of spawning a doomed run that 401s and burns a
+  // session (PHNX-3415). `blocked` (readiness rejection, no body ran) is kept
+  // distinct from `failed` (a body ran and errored) per RT-7. Cache-only + fails
+  // OPEN — see fireTimeAuthReadiness.
   const preflightVersion = launch.chain[0]?.version;
-  if (preflightVersion) {
-    const health = readAuthHealth(machineId(), effectiveAgent, preflightVersion);
-    if (health && isDeadVerdict(health.verdict)) {
-      const reason = `auth_preflight: ${health.verdict}`;
-      process.stderr.write(
-        `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} token ${health.verdict} — skipping run (re-login required)\n`,
-      );
-      finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
-      writeRunMeta(meta);
-      timer.end({ status: 'failed', exitCode: 1, runId, error: reason });
-      archiveRoutineTranscripts(meta, runDir, overlayHome);
-      return { meta, reportPath: null };
-    }
+  // Dynamic import breaks the routine-readiness -> scheduling/routines -> runner cycle.
+  const { fireTimeAuthReadiness } = await import('../routine-readiness.js');
+  const authBlocker = preflightVersion ? fireTimeAuthReadiness(effectiveAgent, preflightVersion) : null;
+  if (authBlocker) {
+    process.stderr.write(
+      `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} ${authBlocker.code} — skipping run (${authBlocker.repair})\n`,
+    );
+    meta.readiness = authBlocker;
+    finalizeRunMeta(meta, 'blocked', null, { errorMessage: `blocked: ${authBlocker.code} — ${authBlocker.message}` });
+    writeRunMeta(meta);
+    timer.end({ status: 'blocked', runId, error: authBlocker.code });
+    archiveRoutineTranscripts(meta, runDir, overlayHome);
+    return { meta, reportPath: null };
   }
 
   const timeoutMs = parseTimeout(config.timeout) || 10 * 60 * 1000;
@@ -2215,27 +2214,25 @@ async function executeJobDetachedClaimed(config: JobConfig, attempt: RoutineAtte
   // copies only THIS run's transcript out of a shared per-version home (RUSH-2271).
   snapshotRoutineTranscriptBase(meta, runDir, overlayHome);
 
-  // Auth preflight (mirrors executeJob): with no injected token, a daemon-fired
-  // Claude routine authenticates via the pinned account's own CLAUDE_CONFIG_DIR
-  // login. If the last live probe rejected that (agent, version)'s token, the run
-  // is guaranteed to 401 — fail fast with a re-login hint instead of spawning a
-  // doomed run + poisoned report. Cache-only; fails OPEN on any non-dead/missing
-  // verdict, and agents with no live probe (codex/gemini/grok) are never blocked.
+  // Auth preflight (mirrors executeJob): a provably signed-out resolved account
+  // records a terminal `blocked`/`agent_auth_failed` run with the re-login repair
+  // instead of spawning a doomed run that 401s and burns a session (PHNX-3415).
+  // Cache-only + fails OPEN — see fireTimeAuthReadiness.
   const preflightVersion = launch.chain[0]?.version;
-  if (preflightVersion) {
-    const health = readAuthHealth(machineId(), effectiveAgent, preflightVersion);
-    if (health && isDeadVerdict(health.verdict)) {
-      const reason = `auth_preflight: ${health.verdict}`;
-      process.stderr.write(
-        `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} token ${health.verdict} — skipping run (re-login required)\n`,
-      );
-      try { fs.closeSync(stdoutFd); } catch { /* already closed */ }
-      finalizeRunMeta(meta, 'failed', 1, { errorMessage: reason });
-      writeRunMeta(meta);
-      archiveRoutineTranscripts(meta, runDir, overlayHome);
-      timer.end({ status: 'failed', exitCode: 1, runId, error: reason });
-      return meta;
-    }
+  // Dynamic import breaks the routine-readiness -> scheduling/routines -> runner cycle.
+  const { fireTimeAuthReadiness } = await import('../routine-readiness.js');
+  const authBlocker = preflightVersion ? fireTimeAuthReadiness(effectiveAgent, preflightVersion) : null;
+  if (authBlocker) {
+    process.stderr.write(
+      `[agents] routine ${config.name}: ${effectiveAgent}@${preflightVersion} ${authBlocker.code} — skipping run (${authBlocker.repair})\n`,
+    );
+    try { fs.closeSync(stdoutFd); } catch { /* already closed */ }
+    meta.readiness = authBlocker;
+    finalizeRunMeta(meta, 'blocked', null, { errorMessage: `blocked: ${authBlocker.code} — ${authBlocker.message}` });
+    writeRunMeta(meta);
+    archiveRoutineTranscripts(meta, runDir, overlayHome);
+    timer.end({ status: 'blocked', runId, error: authBlocker.code });
+    return meta;
   }
 
   const child = spawn(cmd[0], cmd.slice(1), {
