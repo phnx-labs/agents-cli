@@ -1532,29 +1532,8 @@ export type TmuxWrapDecision =
   | { kind: 'undurable' };
 
 /**
- * Decide whether to run an interactive agent INSIDE a detached tmux session on
- * the shared socket (then attach the current TTY) instead of a bare spawn.
- *
- * The wrap is opt-in via this device's `tmux.enabled` (`configEnabled`): a
- * unique `%pane` handle so `agents sessions --active` can tell co-located
- * agents apart and `agents focus` re-attaches without forking, plus scrollback
- * and mouse at the operator's keyboard. Off means OFF, for local and remote
- * runs alike (PHNX-3316) — a followed `--device` run left bare is protected by
- * reconnect-and-resume (lib/hosts/reconnect.ts), which rejoins the live pane
- * when one exists and resumes the harness session from disk when it does not.
- * The RUSH-3125 forced remote wrap conflated durability with that preference
- * and surprised every operator who had explicitly left tmux off.
- *
- * One case still wraps regardless: a followed remote run whose launcher has
- * no TTY (CI, scripts, another agent) gives the peer nothing to attach to —
- * the detached pane is the run's only interface, not an ergonomics choice.
- *
- * The per-run opt-outs bind everything: `--raw` / `--no-tmux` /
- * `AGENTS_NO_TMUX=1` are explicit "I want the bare process" requests, and an
- * escape hatch that silently stopped applying over `--device` would be worse
- * than the bare run the user asked for.
- *
- * Pure, so the gate is unit-tested independently of the (side-effecting) spawn.
+ * Tmux is opt-in except when a TTY-less remote launch would otherwise have no
+ * interface. Explicit per-run opt-outs always win.
  */
 export function resolveTmuxWrap(ctx: TmuxWrapContext): TmuxWrapDecision {
   // A headless `-p` run has no TTY to attach, Windows has no tmux path, and
@@ -1582,24 +1561,6 @@ export function resolveTmuxWrap(ctx: TmuxWrapContext): TmuxWrapDecision {
 }
 
 /**
- * Build the shell command that runs an agent inside a tmux pane with the exact
- * env the bare spawn would use. tmux runs it via `sh -c <cmd>`; we `exec env
- * K=V … <agent> <args…>` so:
- *   - `env` materializes the full agent env INTO the pane, independent of the
- *     (possibly stale, shared) tmux server environment — additive, so tmux's own
- *     $TMUX / $TMUX_PANE still reach the agent for provenance detection;
- *   - `exec` replaces the shell so the agent is the pane's leaf process (clean
- *     `#{pane_pid}`, clean signal delivery on detach/kill).
- * Keys are filtered to valid identifiers so exported shell functions
- * (`BASH_FUNC_*%%`) can't make `env` choke.
- *
- * `redactEnvValues` replaces every value with a `<redacted>` marker while keeping
- * the KEY names. The env map here carries resolved secrets bundles (options.env),
- * so the real string would embed secret VALUES — which get persisted verbatim
- * into SessionMeta.cmd on disk (tmux/session.ts). The launched command uses the
- * real values; the stored/informational copy uses the redacted form (RUSH-1758).
- */
-/**
  * True when `options.sessionId` is an id the HARNESS actually received, and so a
  * real, resumable handle — rather than one the launcher generated for its own
  * bookkeeping and the agent never saw.
@@ -1625,6 +1586,10 @@ export function isHarnessKnownSessionId(
   return agent === 'claude';
 }
 
+/**
+ * Build the pane command without inheriting stale tmux-server env. Redacted
+ * copies keep secret values out of persisted SessionMeta commands.
+ */
 export function buildTmuxAgentCommand(
   executable: string,
   args: string[],

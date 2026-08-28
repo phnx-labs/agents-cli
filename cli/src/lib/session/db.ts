@@ -3919,15 +3919,9 @@ export function topSessionsByCost(
   }));
 }
 
-/** Look up a single session by its unique ID. */
 /**
- * Batch-resolve session ids to the machine each one runs on, in ONE indexed
- * query. `getActiveSessions` needs only this column for every live row, and
- * `getSessionById` would re-`prepare` a `SELECT *` and materialize a full
- * `SessionMeta` per id to read it — mirrors {@link findSessionsByShortIds}'s
- * single-round-trip pattern. Ids absent from the index are simply absent from
- * the map. Best-effort: an unavailable DB yields an empty map, so the live view
- * still renders (the caller then leaves rows attributed to this box).
+ * Read machine attribution in batches without materializing full sessions.
+ * Failure is best-effort so the live view can still render local attribution.
  */
 export function findSessionMachinesByIds(ids: string[]): Map<string, string> {
   const out = new Map<string, string>();
@@ -3956,20 +3950,7 @@ export function getSessionById(id: string): SessionMeta | null {
   return row ? rowToMeta(row) : null;
 }
 
-/**
- * Resolve a full-or-partial session id against the index, exact-first then
- * prefix — the DB-backed equivalent of resolveSessionById() that runs over the
- * SQLite table instead of a pre-loaded array. Matches both the full id and the
- * short id. An exact hit short-circuits so a complete id never also drags in its
- * prefix siblings. `scope` narrows by agent / version / project (cwd) so an
- * ambiguous prefix disambiguates against the caller's context.
- *
- * Routes through the full querySessions existence check (NOT skipExistenceCheck)
- * on purpose (RUSH-2436): that check now KEEPS a file-gone session whose user
- * turns still live in session_text (flagged archived) and only suppresses a
- * contentless phantom — so `agents sessions <id>` resolves an archived session
- * instead of failing with "No session found", while a phantom id still misses.
- */
+/** Exact ids win over prefixes; the normal existence check preserves archived content but excludes phantoms. */
 export function findSessionsById(
   idQuery: string,
   scope: Pick<QueryOptions, 'agent' | 'version' | 'cwd' | 'project'> = {},
@@ -3981,19 +3962,7 @@ export function findSessionsById(
   return querySessions({ ...scope, idPrefix: q });
 }
 
-/**
- * Batch-resolve many 8-char short ids to their sessions in ONE indexed query.
- * The live-scan path (listTmuxAgentSessions) turns every `ag-<agent>-<shortid>`
- * tmux pane name back into a full session id this way, so it pays a single
- * `short_id IN (…)` round-trip per scan instead of N per-pane lookups.
- *
- * Returns a map keyed by short_id (lowercased). Short ids are the first 8 chars
- * of the lowercase session UUID (deriveShortId), so a lowercased `IN` matches and
- * still uses idx_sessions_short_id. When several sessions share a short id — only
- * time-ordered ids (ULID/UUIDv7) ever collide; random UUIDv4 short ids are unique
- * in practice — the most-recently-active one wins (the caller can further
- * disambiguate by cwd).
- */
+/** Batch-resolve pane short ids; on collision the most recently active session wins. */
 export function findSessionsByShortIds(shortIds: string[]): Map<string, SessionMeta> {
   const out = new Map<string, SessionMeta>();
   const uniq = [...new Set(shortIds.map((s) => s.trim().toLowerCase()).filter(Boolean))];

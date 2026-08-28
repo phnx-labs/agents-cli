@@ -57,14 +57,7 @@ import { claudeProjectDirName } from '../project-key.js';
 
 const execFileAsync = promisify(execFile);
 
-/**
- * The owner (actor id) to show for a session in `--active`. Prefers the actor
- * recorded on the live-attribution source (the pid registry / teammate record),
- * but falls back to the durable per-session actor sidecar — written at spawn and,
- * unlike the pid entry, NOT overwritten by the SessionStart hook's own by-pid
- * write. Without this fallback a real `agents run` shows no owner whenever the
- * hook's actor-less entry wins the by-pid file (RUSH-2018 fix).
- */
+/** Prefer live actor attribution; the durable sidecar survives actor-less hook rewrites. */
 export function resolveOwner(pidActor: string | null | undefined, sessionId: string | undefined): string | undefined {
   return pidActor ?? (sessionId ? readSessionActorRecord(sessionId)?.actor : undefined) ?? undefined;
 }
@@ -855,18 +848,8 @@ interface LiveTerminalEntry {
 }
 
 /**
- * Read the live-terminals registry, dedupe by sessionId.
- *
- * A pid-alive entry is a live session. A pid-DEAD entry is normally noise — a
- * terminal that closed a moment ago, before its window republished — and is
- * dropped. But a dead pid whose owning window ALSO stopped republishing is the
- * signature of a crash: the window went down hard and never ran the teardown that
- * would have removed this entry. Those are KEPT, so the session reaches the
- * listing at all — it used to vanish outright, a VS Code crash simply erasing its
- * agents from `--active`. Such a row arrives as `closed` (dead pid) carrying the
- * stale `windowHeartbeatMs`, which is what {@link foldHostLink} promotes to
- * `crashed`. `pidDead` is local to the dedupe below: a live entry must win a dead
- * one for the same session.
+ * Keep dead entries only when their window heartbeat also stopped, proving a crash;
+ * a live duplicate always wins.
  */
 function readLiveTerminals(): LiveTerminalEntry[] {
   let raw: string;
@@ -917,20 +900,8 @@ const CLAUDE_SESSION_FILE_CACHE_MAX = 256;
 const claudeSessionFileCache = new Map<string, string>();
 
 /**
- * Locate the active Claude session file for a process. If we know the session
- * UUID (from terminal env or team parent), prefer the exact match. Otherwise
- * fall back to the most-recent-mtime .jsonl in the project's folder.
- *
- * Searches EVERY version-home project root, not just the live `~/.claude`
- * symlink. `~/.claude` points at the currently-installed agent version; a
- * session launched under an EARLIER version keeps its transcript under that
- * version's home (`…/.history/versions/claude/<ver>/home/.claude/projects/`).
- * Resolving only `~/.claude/projects` meant that the instant a newer version
- * was installed, every still-running older-version session lost its transcript
- * here — no `sessionFile`, so no start/activity time, so `agents sessions`
- * rendered it `unknown` and the watchdog skipped it as "no activity timestamp".
- * `getAgentSessionDirs('claude','projects')` is the same version-aware enumerator
- * the rest of the CLI uses, so this stays in lockstep with discovery.
+ * Search every version home because the live ~/.claude symlink moves after upgrades
+ * while older running sessions keep writing to their original home.
  */
 function findClaudeSessionFile(cwd: string, sessionId?: string): string | undefined {
   // Only memoize when the exact session UUID is known. Without an id the
@@ -2512,17 +2483,7 @@ export function foldHostLink(rows: ActiveSession[]): void {
       s.presence = undefined;
     }
     if (link === 'host-gone' && s.status === 'closed') s.status = 'crashed';
-    // Only idle/input_required are promoted — a `running` session keeps its
-    // status (SES-18a). Extending this to a running agent with no client was
-    // tried and reverted: since RUSH-3125 wraps every remote interactive run in
-    // a detached tmux pane, "running with zero attached clients" is the NORMAL
-    // steady state between check-ins, and that path writes no detach record, so
-    // `deliberatelyDetached` is false for it. Promoting it would relabel every
-    // remote agent as orphaned whenever nobody is looking — the over-reporting
-    // this file's header calls worthless. Telling a stranded agent from a
-    // healthy unattended one needs to know a client was EXPECTED and LOST, which
-    // no signal available here carries; that belongs with the peer-side pane
-    // ownership work, not this function.
+    // A clientless running remote pane is normal; only stopped work can be called orphaned.
     else if (link === 'no-client' && (s.status === 'idle' || s.status === 'input_required')) {
       s.status = 'orphaned';
     }
@@ -2536,18 +2497,7 @@ function recapLine(s: string | undefined, max = 120): string | undefined {
   return t.length > max ? t.slice(0, max - 1).trimEnd() + '…' : t;
 }
 
-/**
- * The recap ladder (RUSH-3011): compute a row's shown {@link ActiveSession.title}
- * + {@link RecapSource} from the best available source, plus the cleaned first
- * prompt (`userPromptClean`/`userPromptKind`) and the `lastAgentLine`. Pure over
- * one row; exported for tests and folded in by {@link foldRecap}.
- *
- * Ladder, best-first: a `/rename`/harness `label` → the last assistant line →
- * the first-prompt topic. The `last` rung is agent-derived, so a session that
- * produced work stops showing its stale first prompt as the title. (`topic` is
- * the row's already-extracted first line, so image detection here is
- * path-based; a pure-attachment turn with no first-line text stays on `prompt`.)
- */
+/** Labels win, then the last assistant line, then the first-prompt topic. */
 export function deriveSessionRecap(
   row: Pick<ActiveSession, 'label' | 'topic' | 'tail'>,
 ): { title?: string; recapSource?: RecapSource; userPromptClean?: string; userPromptKind?: UserPromptKind; lastAgentLine?: string } {
@@ -2578,17 +2528,7 @@ export function foldRecap(rows: ActiveSession[]): void {
   }
 }
 
-/**
- * True when a crash-leaked orphan is genuinely DEAD and should be reaped from the
- * reconnectable set rather than shown as resumable forever (RUSH-3011 / issue #3b).
- *
- * The gate is `abandoned` (no transcript write in {@link ABANDONED_STALE_MS}) AND
- * a dead pid — exactly "past the stale threshold whose pid is gone". A live pid
- * (an idle-but-unfinished session, the highest-risk state) is NEVER reaped, and
- * neither is a recently-`closed`/`crashed` session that just exited (still
- * resumable). `pidAlive` absent (a cloud row or an older peer that can't prove
- * death) also stays un-reaped — reaping is fail-safe, never a guess.
- */
+/** Reap only stale sessions with proven-dead pids; unknown or live processes remain recoverable. */
 export function isReapableOrphan(
   row: Pick<ActiveSession, 'status' | 'pidAlive'>,
 ): boolean {
