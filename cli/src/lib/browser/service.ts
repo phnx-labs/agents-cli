@@ -3221,8 +3221,44 @@ export class BrowserService {
     const port = existingInfo?.port ?? parsed?.port;
     if (port === undefined) return null;
     const host = parsed?.host && parsed.host !== 'localhost' ? parsed.host : 'localhost';
-    // ssh:// endpoints need a tunnel; soft rehydrate only handles local CDP.
-    if (resolved.target.startsWith('ssh:')) return null;
+
+    // ssh:// endpoints: a daemon restart killed this box's tunnel, but the
+    // browser is still running on the FAR side — so the caller's tasks are
+    // valid, only the local hop is gone. Re-establish the tunnel and reconnect
+    // CDP (connectSSH attaches to the already-running remote browser via
+    // isOwnTunnel — it never launches one, so this stays a soft-attach), then
+    // merge the disk tasks. Without this, a remote agent driving a browser host
+    // after a restart got "Unknown browser task" for a tab that was still alive
+    // (PHNX-2663). A failure returns null exactly like the local-CDP path, so
+    // the caller falls through to disk reconcile rather than crashing.
+    if (resolved.target.startsWith('ssh:')) {
+      try {
+        const conn = await connectSSH(resolved.target, profile, key, { persistRemote: true });
+        await this.enableDomains(conn.cdp);
+        const tasks = this.loadTaskState(key);
+        for (const [k, t] of diskTasks) {
+          if (!tasks.has(k)) tasks.set(k, t);
+        }
+        return {
+          cdp: conn.cdp,
+          port: conn.port,
+          pid: conn.pid,
+          electron: profile.electron,
+          browserType: profile.browser,
+          targetFilter: resolved.targetFilter ?? profile.targetFilter,
+          key,
+          profile: bare,
+          tasks,
+          sessionCache: new Map(),
+          // Carry the tunnel teardown so removing this connection kills the
+          // ssh hop — otherwise it leaks across the next restart (see the
+          // `cleanup` docblock on ProfileConnection).
+          cleanup: conn.cleanup,
+        };
+      } catch {
+        return null;
+      }
+    }
 
     try {
       const { wsUrl, browser } = await discoverBrowserWsUrl(port, host, bare);
