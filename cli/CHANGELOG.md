@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **`--strategy balanced` no longer routes to a weekly-exhausted Claude account on worker boxes; a missing usage snapshot is treated as unknown (fails closed) instead of full capacity (PHNX-3392).** A worker's usage cache is empty (the setup-token lacks the `user:profile` scope, so `/api/oauth/usage` 403s — RUSH-2392), and `capacityWeight(null, …)` scored that absence as 100 — max weight — making a blind, actually-exhausted account the top pick. The null arm now draws `UNVERIFIED_WEIGHT` (1): any verified-healthy account outranks an unverifiable one, while an all-unverified pool still draws a pick. Pinned by spec GWT-E5c, a pure unit test (`capacity.test.ts`), and a real-cache-path regression test proving a persisted 7d-100% `week` window makes the account ineligible. Source: `cli/src/lib/accounting/capacity.ts`, `cli/src/lib/accounting/{capacity.test.ts,rotate.test.ts}`.
+
 ## 1.22.56
 
 - **Scheduled routines claim a durable per-occurrence slot, so a duplicate delivery or a catch-up of the same slot can't double-launch (PHNX-3215).** The forward-timer path keyed its single-fire claim on croner's `currentRun()`, which is the jittered wall-clock fire instant, not the aligned schedule boundary — so two timer callbacks for one occurrence minted different run ids and both launched, and a live fire never collided with its catch-up twin. The scheduler now floors the fire to the aligned `(routine, scheduledFor)` boundary (`fireSlot`/`alignedSlotForFire`), the same derivation catch-up uses, making the atomic slot claim a structural guarantee (SING-15/16, self-overlap SING-13). Source: `cli/src/lib/scheduler.ts`, `cli/src/lib/scheduling/routines.ts`, `cli/src/lib/overdue.ts`.

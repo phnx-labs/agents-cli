@@ -32,6 +32,7 @@ import { invalidateInstalledVersionsCache } from '../installations/versions.js';
 import { runWithFallback } from '../exec.js';
 import type { AgentId } from '../types.js';
 import {
+  mergeClaudeUsageCacheWindows,
   noteClaudeSessionLimit,
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
@@ -383,6 +384,51 @@ describe('balanced excludes an account refused by Claude session quota (RUSH-285
   });
 });
 
+describe('balanced excludes a weekly-exhausted account once the week window is cached (PHNX-3392, GWT-E5c)', () => {
+  // Fix C (claude-statusline.ts `ingestClaudeStatusLineUsage`) persists a
+  // 7d-100% `week` window when a run hits its weekly limit — via
+  // `mergeClaudeUsageCacheWindows`, the exact write path exercised here against
+  // a real cache file. Once that row exists, `hasUsageAvailable` (rotate.ts)
+  // reads the snapshot as rate_limited and the account is INELIGIBLE — the
+  // next `collectRunCandidates` → `pickBalancedCandidate` cannot return it.
+  it('a real 7d-100% week window in the cache makes the account ineligible, not merely down-weighted', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'rotate-week-limit-'));
+    const previous = setClaudeUsageCachePathForTest(path.join(root, 'usage.json'));
+    try {
+      const exhaustedKey = 'claude:org=exhausted';
+      mergeClaudeUsageCacheWindows(exhaustedKey, {
+        source: 'live',
+        sourceLabel: 'Claude response rate limits',
+        capturedAt: new Date(),
+        windows: [{
+          key: 'week',
+          label: 'Current week',
+          shortLabel: 'W',
+          usedPercent: 100,
+          resetsAt: new Date(Date.now() + 24 * 3600 * 1000),
+          windowMinutes: 10_080,
+        }],
+      });
+      const exhausted = candidate({
+        version: '2.1.223',
+        usageKey: exhaustedKey,
+        usageSnapshot: readClaudeUsageCache(exhaustedKey),
+      });
+      expect(exhausted.usageSnapshot).not.toBeNull();
+      const healthy = candidate({ version: '2.1.224' });
+
+      const result = pickBalancedCandidate([exhausted, healthy]);
+
+      expect(result?.picked.version).toBe('2.1.224');
+      expect(result?.excluded.map((entry) => entry.version)).toEqual(['2.1.223']);
+      expect(result?.healthy.map((entry) => entry.version)).toEqual(['2.1.224']);
+    } finally {
+      setClaudeUsageCachePathForTest(previous);
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 /** Build a UsageSnapshot from `[key, usedPercent]` pairs. */
 function snapshot(windows: Array<{ key: UsageWindowKey; usedPercent: number }>): UsageSnapshot {
   return {
@@ -693,7 +739,9 @@ describe('--strategy available applies the same freshness rule as balanced', () 
 
 describe('capacityWeight — deprioritizes an account projected to cap soon', () => {
   it('is weekly headroom when there is no projection', () => {
-    expect(capacityWeight(null, null)).toBe(100);
+    // A null snapshot is UNVERIFIED, not full capacity (PHNX-3392, GWT-E5c) —
+    // the dedicated fail-closed contract lives in capacity.test.ts.
+    expect(capacityWeight(null, null)).toBe(1);
     expect(capacityWeight(50, null)).toBe(50);
     expect(capacityWeight(90, null)).toBe(10);
   });

@@ -2995,6 +2995,22 @@ and claude `2.1.187` is signed in on the same device; When `agents run claude
 run resolves; Then it fails loud with `exhausted` naming each version as
 `signed_out` rather than launching the default.
 
+**GWT-E5c — Absence of a usage signal is NOT capacity (PHNX-3392).**
+Given a `balanced` pool on a worker box where no account can read
+`/api/oauth/usage` (setup-token scope gap, RUSH-2392); When
+`pickBalancedCandidate` scores the pool; Then an account whose weekly window is
+unknown MUST NOT be scored as full-capacity (`capacityWeight`'s null arm is
+`UNVERIFIED_WEIGHT`, floored at 1 — `lib/accounting/capacity.ts:24,38-46`), so
+an unverifiable account MUST NOT outrank a verified-healthy one in a mixed pool,
+yet an all-unverified pool still draws a pick. The missing signal MUST be
+supplied by the daemon (a sanctioned SING-1a collector) — the worker daemon
+pulling from a headed peer, and/or the shipped headed→worker push
+(`usage-sync`) — NOT by a fetch on the launch path, which MUST stay cache-only
+(SING-1a). A run that HITS its weekly limit MUST also persist a `rate_limited`
+`week` window (`lib/claude-statusline.ts:91`) so the next
+`collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
+(`lib/accounting/rotate.ts:226-247`).
+
 **GWT-E6 — `--device` forwards actor env, refuses `--secrets`.**
 Given `agents run claude "..." --device workbox --secrets prod`; When the
 command is built; Then it fails loud pre-dispatch with

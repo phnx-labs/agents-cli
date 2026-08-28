@@ -494,7 +494,16 @@ verdict (signed in AND not rate-limited). `harnesses` is the per-install view;
 network fetch unless `--refresh`), and `deriveUsageStatusFromSnapshot` (throttle
 state). Claude's managed status-line command also writes the native five-hour
 and seven-day rate limits from normal interactive responses into that same
-identity-keyed cache; it never reads or refreshes OAuth credentials. The fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
+identity-keyed cache; it never reads or refreshes OAuth credentials. Two
+invariants ride on that writer (PHNX-3392, spec GWT-E5c): a run that hits its
+weekly limit persists a `rate_limited` `week` window
+([`claude-statusline.ts`](src/lib/claude-statusline.ts) →
+`mergeClaudeUsageCacheWindows`), so the next `collectRunCandidates` excludes
+the account; and a MISSING snapshot is treated as unknown, never as headroom —
+`capacityWeight(null, …)` draws `UNVERIFIED_WEIGHT` (1), not full capacity, so
+a blind account on a worker box (usage 403s, RUSH-2392) can't outrank a
+verified-healthy one, while an all-unverified pool still draws a pick. The
+fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
 `devices harnesses --local --json` worker, same per-device + overall deadlines).
 Everything but the collector is pure and unit-tested
 ([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent
