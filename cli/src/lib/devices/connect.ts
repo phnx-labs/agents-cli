@@ -16,6 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { assertValidSshTarget, shellQuote } from '../ssh-exec.js';
+import { resolveActor, actorEnv } from '../actor.js';
 import { getCliLaunch } from '../cli-entry.js';
 import { encodePwshBase64 } from '../pwsh.js';
 import { homeRemainder, remoteCdPrefix } from '../project-root.js';
@@ -107,24 +108,40 @@ export function isAgentsBrowserDrive(cmd: string[]): boolean {
 }
 
 /**
- * Prefix a remote command so the far side sees `AGENTS_FLEET_REMOTE=1` — the
- * marker the browser consent gate reads. `wrapRemoteCommand` joins the argv
- * with spaces (POSIX) or base64-encodes it for PowerShell, so a
- * shell-appropriate leading token rides through both: `env VAR=1 …` on POSIX,
- * `$env:VAR='1'; …` on PowerShell.
+ * Prefix a remote command with the provenance the far-side browser needs: the
+ * `AGENTS_FLEET_REMOTE=1` consent marker AND the caller's resolved actor
+ * (`AGENTS_ACTOR*`/`GIT_*`). Without the actor, a task created over
+ * `agents ssh <host> 'agents browser …'` is stamped `UNRESOLVED@<host>` because
+ * the peer re-resolves identity from its own (empty) env — the same RUSH-2028
+ * gap the `--device` dispatch already closes via `withActorEnv`, applied here to
+ * the `agents ssh` browser-drive seam so ownership is honest across BOTH paths.
  *
- * Already-marked argv (the `--device` fan-out stamps this before
- * {@link buildSshInvocation}) is left unchanged so the prefix is not doubled.
+ * `wrapRemoteCommand` joins the argv with spaces (POSIX) or base64-encodes it for
+ * PowerShell, so a shell-appropriate prelude rides through both: `env VAR=v …` on
+ * POSIX, `$env:VAR='v'; …` on PowerShell. The marker stays the FIRST token so the
+ * consent gate and the idempotency guard below both still key on it.
+ *
+ * `provenanceEnv` is injectable so tests can pin a deterministic actor; it
+ * defaults to the live resolved actor. Already-marked argv (the `--device`
+ * fan-out stamps the marker before {@link buildSshInvocation}) is left unchanged
+ * so nothing is doubled.
  */
-export function markFleetRemote(cmd: string[], device: Pick<DeviceProfile, 'shell'>): string[] {
+export function markFleetRemote(
+  cmd: string[],
+  device: Pick<DeviceProfile, 'shell'>,
+  provenanceEnv: Record<string, string> = actorEnv(resolveActor()),
+): string[] {
   if (device.shell === 'powershell') {
-    return cmd[0] === `$env:AGENTS_FLEET_REMOTE='1';`
-      ? cmd
-      : [`$env:AGENTS_FLEET_REMOTE='1';`, ...cmd];
+    if (cmd[0]?.startsWith(`$env:AGENTS_FLEET_REMOTE=`)) return cmd;
+    const prelude = [
+      `$env:AGENTS_FLEET_REMOTE='1';`,
+      ...Object.entries(provenanceEnv).map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}';`),
+    ];
+    return [...prelude, ...cmd];
   }
-  return cmd[0] === 'env' && cmd[1] === 'AGENTS_FLEET_REMOTE=1'
-    ? cmd
-    : ['env', 'AGENTS_FLEET_REMOTE=1', ...cmd];
+  if (cmd[0] === 'env' && cmd[1] === 'AGENTS_FLEET_REMOTE=1') return cmd;
+  const actorTokens = Object.entries(provenanceEnv).map(([k, v]) => shellQuote(`${k}=${v}`));
+  return ['env', 'AGENTS_FLEET_REMOTE=1', ...actorTokens, ...cmd];
 }
 
 /**

@@ -318,8 +318,10 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
       ['agents', 'browser', 'navigate', '--url', 'https://example.com'],
       '/shim',
     );
-    expect(args[args.length - 1]).toBe(
-      'env AGENTS_FLEET_REMOTE=1 agents browser navigate --url https://example.com',
+    // Marker stays first; actor provenance tokens (PHNX-3317 ownership) may ride
+    // between it and the command, so match structurally rather than byte-exact.
+    expect(args[args.length - 1]).toMatch(
+      /^env AGENTS_FLEET_REMOTE=1 .*agents browser navigate --url https:\/\/example\.com$/,
     );
     // The local ssh-client overlay is askpass-only — the marker must ride the
     // remote command, not this process's env (OpenSSH does not forward it).
@@ -346,22 +348,22 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
 
   it('marks the ag alias and the quoted single-string form', () => {
     const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
-    expect(buildSshInvocation(posix, ['ag', 'browser', 'screenshot'], '/shim').args.at(-1)).toBe(
-      'env AGENTS_FLEET_REMOTE=1 ag browser screenshot',
+    expect(buildSshInvocation(posix, ['ag', 'browser', 'screenshot'], '/shim').args.at(-1)).toMatch(
+      /^env AGENTS_FLEET_REMOTE=1 .*ag browser screenshot$/,
     );
     expect(
       buildSshInvocation(posix, ['agents browser navigate --url https://example.com'], '/shim').args.at(-1),
-    ).toBe('env AGENTS_FLEET_REMOTE=1 agents browser navigate --url https://example.com');
+    ).toMatch(/^env AGENTS_FLEET_REMOTE=1 .*agents browser navigate --url https:\/\/example\.com$/);
   });
 
   it('marks the standalone browser binary so agents ssh box browser … is gated too', () => {
     const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
     expect(
       buildSshInvocation(posix, ['browser', 'navigate', '--url', 'https://evil.example'], '/shim').args.at(-1),
-    ).toBe('env AGENTS_FLEET_REMOTE=1 browser navigate --url https://evil.example');
+    ).toMatch(/^env AGENTS_FLEET_REMOTE=1 .*browser navigate --url https:\/\/evil\.example$/);
     expect(
       buildSshInvocation(posix, ['browser navigate --url https://evil.example'], '/shim').args.at(-1),
-    ).toBe('env AGENTS_FLEET_REMOTE=1 browser navigate --url https://evil.example');
+    ).toMatch(/^env AGENTS_FLEET_REMOTE=1 .*browser navigate --url https:\/\/evil\.example$/);
 
     const remote = buildSshInvocation(
       posix,
@@ -397,17 +399,62 @@ describe('buildSshInvocation — fleet-remote consent marker (PHNX-3065)', () =>
       ['agents', 'browser', 'screenshot'],
       '/shim',
     );
-    expect(decodePowerShell(args[args.length - 1] as string)).toBe(
-      "$env:AGENTS_FLEET_REMOTE='1'; agents browser screenshot",
+    expect(decodePowerShell(args[args.length - 1] as string)).toMatch(
+      /^\$env:AGENTS_FLEET_REMOTE='1'; .*agents browser screenshot$/,
     );
   });
 
   it('does not double-prefix a command the --device fan-out already marked', () => {
     const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
-    const already = markFleetRemote(['agents', 'browser', 'start'], posix);
+    // Fan-out already stamped the marker; a fixed actor keeps the argv deterministic.
+    const already = markFleetRemote(['agents', 'browser', 'start'], posix, {
+      AGENTS_ACTOR: 'claude@yosemite-m1',
+      AGENTS_ACTOR_KIND: 'agent',
+    });
     const { args } = buildSshInvocation(posix, already, '/shim');
-    expect(args.at(-1)).toBe('env AGENTS_FLEET_REMOTE=1 agents browser start');
+    // The marker is not doubled (guard keys on the first token), and the already
+    // present actor is not re-stamped either.
+    expect(args.at(-1)).toBe(
+      'env AGENTS_FLEET_REMOTE=1 AGENTS_ACTOR=claude@yosemite-m1 AGENTS_ACTOR_KIND=agent agents browser start',
+    );
     expect((args.at(-1) as string).match(/AGENTS_FLEET_REMOTE/g)).toHaveLength(1);
+    expect((args.at(-1) as string).match(/AGENTS_ACTOR=/g)).toHaveLength(1);
+  });
+
+  it('forwards the caller actor so a task created over `agents ssh` is owned by the real caller, not UNRESOLVED@host (PHNX-3317)', () => {
+    const posix = dev({ name: 'peer', user: 'me', auth: { method: 'key' } });
+    const marked = markFleetRemote(['agents', 'browser', 'start'], posix, {
+      AGENTS_ACTOR: 'claude@yosemite-m1',
+      AGENTS_ACTOR_KIND: 'agent',
+      AGENTS_ACTOR_NAME: 'Muqsit Nawaz',
+    });
+    // Marker first (consent gate + idempotency guard key on it), then the actor
+    // env, then the command. A value with a space is shell-quoted so wrapRemoteCommand's
+    // naive join stays one word on the remote shell.
+    expect(marked).toEqual([
+      'env',
+      'AGENTS_FLEET_REMOTE=1',
+      'AGENTS_ACTOR=claude@yosemite-m1',
+      'AGENTS_ACTOR_KIND=agent',
+      "'AGENTS_ACTOR_NAME=Muqsit Nawaz'",
+      'agents',
+      'browser',
+      'start',
+    ]);
+
+    // PowerShell dialect exports each var as its own $env: statement.
+    const win = markFleetRemote(['agents', 'browser', 'start'], { shell: 'powershell' }, {
+      AGENTS_ACTOR: 'claude@yosemite-m1',
+      AGENTS_ACTOR_KIND: 'agent',
+    });
+    expect(win).toEqual([
+      "$env:AGENTS_FLEET_REMOTE='1';",
+      "$env:AGENTS_ACTOR='claude@yosemite-m1';",
+      "$env:AGENTS_ACTOR_KIND='agent';",
+      'agents',
+      'browser',
+      'start',
+    ]);
   });
 });
 

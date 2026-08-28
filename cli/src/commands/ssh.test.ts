@@ -218,39 +218,27 @@ describe('leasedBoxRemoteCmd — crabbox ssh consent marker (PHNX-3065)', () => 
   // trySshLeasedBox does not go through buildSshInvocation; it stamps via this
   // helper. Pin the exact remote argv so a leased-box browser drive cannot
   // skip AGENTS_FLEET_REMOTE the way the registered-device path used to.
+  // The marker leads; actor provenance tokens (PHNX-3317 ownership) ride between
+  // it and the command, so assert the marker prefix + command tail structurally
+  // (the resolved actor is environment-dependent, not byte-pinnable here).
   it('stamps AGENTS_FLEET_REMOTE on agents/ag browser drives', () => {
-    expect(leasedBoxRemoteCmd(['agents', 'browser', 'navigate', '--url', 'https://example.com'])).toEqual([
-      'env',
-      'AGENTS_FLEET_REMOTE=1',
-      'agents',
-      'browser',
-      'navigate',
-      '--url',
-      'https://example.com',
-    ]);
-    expect(leasedBoxRemoteCmd(['ag', 'browser', 'screenshot'])).toEqual([
-      'env',
-      'AGENTS_FLEET_REMOTE=1',
-      'ag',
-      'browser',
-      'screenshot',
-    ]);
+    const a = leasedBoxRemoteCmd(['agents', 'browser', 'navigate', '--url', 'https://example.com']);
+    expect(a.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
+    expect(a.slice(-5)).toEqual(['agents', 'browser', 'navigate', '--url', 'https://example.com']);
+
+    const b = leasedBoxRemoteCmd(['ag', 'browser', 'screenshot']);
+    expect(b.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
+    expect(b.slice(-3)).toEqual(['ag', 'browser', 'screenshot']);
   });
 
   it('stamps the standalone browser binary (the P0 hole the registered-device path also closed)', () => {
-    expect(leasedBoxRemoteCmd(['browser', 'navigate', '--url', 'https://evil.example'])).toEqual([
-      'env',
-      'AGENTS_FLEET_REMOTE=1',
-      'browser',
-      'navigate',
-      '--url',
-      'https://evil.example',
-    ]);
-    expect(leasedBoxRemoteCmd(['browser navigate --url https://evil.example'])).toEqual([
-      'env',
-      'AGENTS_FLEET_REMOTE=1',
-      'browser navigate --url https://evil.example',
-    ]);
+    const a = leasedBoxRemoteCmd(['browser', 'navigate', '--url', 'https://evil.example']);
+    expect(a.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
+    expect(a.slice(-4)).toEqual(['browser', 'navigate', '--url', 'https://evil.example']);
+
+    const b = leasedBoxRemoteCmd(['browser navigate --url https://evil.example']);
+    expect(b.slice(0, 2)).toEqual(['env', 'AGENTS_FLEET_REMOTE=1']);
+    expect(b.at(-1)).toBe('browser navigate --url https://evil.example');
   });
 
   it('leaves non-browser commands unmarked', () => {
