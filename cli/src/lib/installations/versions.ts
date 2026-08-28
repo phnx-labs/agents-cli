@@ -2956,7 +2956,10 @@ export function syncResourcesToVersion(agent: AgentId, version: string, selectio
   if (pluginsToSync.length > 0 && pluginsWriter) {
     if (options.allowExecSurfaces) {
       const allPlugins = discoverPlugins();
-      cleanOrphanedPluginSkills(agent, versionHome, new Set(allPlugins.map(p => p.name)));
+      // Pass the discovered plugins (with marketplace provenance) so a stale
+      // install under one marketplace is trashed even when another marketplace
+      // still ships that name — the PHNX-2618 shadow `code` plugin.
+      cleanOrphanedPluginSkills(agent, versionHome, allPlugins);
       const pluginMap = new Map(allPlugins.map(p => [p.name, p]));
       for (const name of pluginsToSync) {
         const plugin = pluginMap.get(name);

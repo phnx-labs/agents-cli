@@ -1595,17 +1595,113 @@ function cleanLegacyFlatLayout(
 // ─── Orphan cleanup ───────────────────────────────────────────────────────────
 
 /**
- * Remove orphaned plugin entries from a version home. An entry is "orphan" if
- * its plugin name is not in the active plugin set. Soft-deletes the affected
+ * The active plugin set, either as bare names (legacy callers / the dual-dash
+ * sweep, which has no marketplace to key on) or as the discovered plugins
+ * themselves (which carry marketplace provenance, enabling per-marketplace
+ * orphan detection — the PHNX-2618 shadow case below).
+ */
+export type ActivePluginsInput = Set<string> | Array<{ name: string; marketplace?: string }>;
+
+interface ActivePluginIndex {
+  /** Every active plugin name across all marketplaces. */
+  names: Set<string>;
+  /** `${marketplace} ${name}` for each active plugin, or null when the
+   * caller passed bare names (marketplace-aware detection disabled). */
+  pairs: Set<string> | null;
+}
+
+function pairKey(marketplace: string, name: string): string {
+  return `${marketplace} ${name}`;
+}
+
+function indexActivePlugins(input: ActivePluginsInput): ActivePluginIndex {
+  if (input instanceof Set) return { names: input, pairs: null };
+  const names = new Set<string>();
+  const pairs = new Set<string>();
+  for (const p of input) {
+    names.add(p.name);
+    // A discovered plugin always carries provenance; the type allows undefined,
+    // so mirror discovery's own default (a marketplace-less plugin is the user
+    // "agents-cli" marketplace — see discoverPlugins / buildDiscoveredPlugin).
+    pairs.add(pairKey(p.marketplace ?? MARKETPLACE_NAME, p.name));
+  }
+  return { names, pairs };
+}
+
+/**
+ * Does the SOURCE repo backing a synthesized marketplace exist on disk? A
+ * marketplace's version-home install is only authoritative-cleanable when its
+ * source repo is present: a present repo missing a plugin means that plugin was
+ * genuinely removed, while an absent repo (a project we're not in, a removed
+ * extra repo) is merely unreachable and must not be mistaken for deletion.
+ *
+ * We check the REPO root, not the plugins/ subdir: the user repo (~/.agents/)
+ * always exists but its plugins/ dir may not, and "user repo present, no `code`
+ * plugin in it" is exactly what makes an `agents-cli` `code` shadow a real
+ * orphan (PHNX-2618).
+ */
+function marketplaceSourceRepoExists(marketplaceName: string, cwd: string): boolean {
+  const spec = marketplaceSpecForName(marketplaceName, cwd);
+  switch (spec.kind) {
+    case 'user': return fs.existsSync(path.dirname(getPluginsDir()));
+    case 'system': return fs.existsSync(path.dirname(getSystemPluginsDir()));
+    case 'extra': return fs.existsSync(path.dirname(getExtraPluginsDir(spec.alias)));
+    case 'project': {
+      const root = getProjectPluginsDir(cwd);
+      return root != null && fs.existsSync(path.dirname(root));
+    }
+  }
+}
+
+/**
+ * Is a version-home marketplace-plugin install an orphan (safe to trash)?
+ *
+ * A version-home plugin is keyed by (marketplace, name), not name alone — the
+ * bug PHNX-2618 exposed. When the same plugin name lives in two marketplaces
+ * (e.g. a legacy `code` under `agents-cli` and the current `code` under
+ * `agents-system`), a name-only test keeps BOTH alive because the name is active
+ * somewhere, so the stale copy never gets cleaned and serves deleted skills.
+ *
+ *   - Pair still active → keep.
+ *   - Pair gone, but the marketplace's source repo is present (authoritative) →
+ *     orphan. Trash it even though another marketplace still ships that name.
+ *   - Pair gone AND the source repo is absent (unreachable) → fall back to the
+ *     original name-only test so an unrelated sync can't trash a plugin whose
+ *     source simply isn't on this box / in this cwd right now.
+ *
+ * When `pairs` is null (a legacy bare-name caller), this reduces to the original
+ * name-only behavior unchanged.
+ */
+function isOrphanMarketplacePlugin(
+  marketplaceName: string,
+  pluginName: string,
+  active: ActivePluginIndex,
+  cwd: string,
+): boolean {
+  if (active.pairs === null) return !active.names.has(pluginName);
+  if (active.pairs.has(pairKey(marketplaceName, pluginName))) return false;
+  if (marketplaceSourceRepoExists(marketplaceName, cwd)) return true;
+  return !active.names.has(pluginName);
+}
+
+/**
+ * Remove orphaned plugin entries from a version home. A marketplace-plugin
+ * install is "orphan" when no active source plugin matches its (marketplace,
+ * name) pair (see isOrphanMarketplacePlugin). Soft-deletes the affected
  * marketplace plugin dir to ~/.agents/.trash/plugins/. Also cleans up any
  * legacy dual-dash skills/ directories from older agents-cli versions.
+ *
+ * Pass the discovered plugins (`discoverPlugins()`) for marketplace-aware
+ * detection; a bare `Set<string>` of names keeps the original name-only behavior.
  */
 export function cleanOrphanedPluginSkills(
   agent: AgentId,
   versionHome: string,
-  activePluginNames: Set<string>,
+  activePlugins: ActivePluginsInput,
   version?: string
 ): string[] {
+  const active = indexActivePlugins(activePlugins);
+  const cwd = process.cwd();
   const removed: string[] = [];
 
   // 1. Walk every marketplace's install dir and trash entries no longer active.
@@ -1616,7 +1712,7 @@ export function cleanOrphanedPluginSkills(
     let trashedHere = false;
     for (const entry of fs.readdirSync(mktPluginsDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      if (activePluginNames.has(entry.name)) continue;
+      if (!isOrphanMarketplacePlugin(name, entry.name, active, cwd)) continue;
       try {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const trashDir = path.join(getTrashPluginsDir(), agent, version || 'unknown', entry.name);
@@ -1652,7 +1748,7 @@ export function cleanOrphanedPluginSkills(
       const dashIdx = entry.name.indexOf('--');
       if (dashIdx === -1) continue;
       const pluginName = entry.name.slice(0, dashIdx);
-      if (activePluginNames.has(pluginName)) continue;
+      if (active.names.has(pluginName)) continue;
       try {
         const stamp = new Date().toISOString().replace(/[:.]/g, '-');
         const trashDir = path.join(getTrashPluginsDir(), agent, version || 'unknown', entry.name);
@@ -1677,7 +1773,8 @@ export interface VersionPluginDiff {
 
 export function diffVersionPlugins(agent: AgentId, version: string): VersionPluginDiff {
   const versionHome = getVersionHomePath(agent, version);
-  const activePlugins = new Set(discoverPlugins().map(p => p.name));
+  const active = indexActivePlugins(discoverPlugins());
+  const cwd = process.cwd();
   const orphans: string[] = [];
 
   for (const name of listVersionMarketplaceNames(agent, versionHome)) {
@@ -1685,7 +1782,7 @@ export function diffVersionPlugins(agent: AgentId, version: string): VersionPlug
     if (!fs.existsSync(mktPluginsDir)) continue;
     for (const entry of fs.readdirSync(mktPluginsDir, { withFileTypes: true })) {
       if (!entry.isDirectory() || entry.name.startsWith('.')) continue;
-      if (!activePlugins.has(entry.name)) {
+      if (isOrphanMarketplacePlugin(name, entry.name, active, cwd)) {
         orphans.push(entry.name);
       }
     }
@@ -1699,7 +1796,7 @@ export function diffVersionPlugins(agent: AgentId, version: string): VersionPlug
       const dashIdx = entry.name.indexOf('--');
       if (dashIdx === -1) continue;
       const pluginName = entry.name.slice(0, dashIdx);
-      if (!activePlugins.has(pluginName)) {
+      if (!active.names.has(pluginName)) {
         orphans.push(entry.name);
       }
     }
