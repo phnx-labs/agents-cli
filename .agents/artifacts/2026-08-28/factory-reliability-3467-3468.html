@@ -1,0 +1,609 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Factory reliability — PHNX-3467 &amp; PHNX-3468 findings</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">report</span><span class="status-badge status-draft">draft</span></div>
+<h1>Factory reliability — PHNX-3467 &amp; PHNX-3468 findings</h1>
+<p class="summary">Two Factory-reliability sub-tasks of PHNX-2653. 3467 (orphaned refresh children): needs-fix, bounded the one unbounded agents-CLI spawn in agi-ext (PR agi-ext#16). 3468 (near-instant boot): profiled — top costs are the Claude setup-token scrypt decrypt (~150ms), an uncached resolveVersion walk, and a serial per-launch self-heal chain; report + plan, no blind fix.
+</p>
+<div class="meta" aria-label="Artifact metadata"><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3467" target="_blank" rel="noopener">PHNX-3467</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/issue/PHNX-3468" target="_blank" rel="noopener">PHNX-3468</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-ext/pull/16" target="_blank" rel="noopener">PR #16</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">claude-2026-08-28-1818-fe1afc6d</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-28</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#findings" data-toc-for="findings"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Findings</a><a class="toc-item" href="#phnx-3467-no-orphaned-untracked-refresh-child-processes-across-sleep-wake-churn" data-toc-for="phnx-3467-no-orphaned-untracked-refresh-child-processes-across-sleep-wake-churn"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>PHNX-3467 — no orphaned/untracked refresh child processes across sleep/wake &amp; churn</a><a class="toc-item toc-sub" href="#what-is-already-handled-and-is-not-the-leak" data-toc-for="what-is-already-handled-and-is-not-the-leak">What is already handled (and is NOT the leak)</a><a class="toc-item toc-sub" href="#the-factory-app-is-also-not-the-leak" data-toc-for="the-factory-app-is-also-not-the-leak">The &quot;Factory&quot; app is also NOT the leak</a><a class="toc-item toc-sub" href="#the-real-unbounded-untracked-path" data-toc-for="the-real-unbounded-untracked-path">The real unbounded/untracked path</a><a class="toc-item toc-sub" href="#is-the-current-in-flight-work-enough-no" data-toc-for="is-the-current-in-flight-work-enough-no">Is the current in-flight work enough? No.</a><a class="toc-item toc-sub" href="#fix-shipped-agi-ext-16" data-toc-for="fix-shipped-agi-ext-16">Fix shipped — agi-ext#16</a><a class="toc-item" href="#phnx-3468-new-agent-boot-near-instant-1s-local" data-toc-for="phnx-3468-new-agent-boot-near-instant-1s-local"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>PHNX-3468 — new-agent boot near-instant (~1s local)</a><a class="toc-item toc-sub" href="#measurement-notes-how-to-reproduce" data-toc-for="measurement-notes-how-to-reproduce">Measurement notes / how to reproduce</a><a class="toc-item toc-sub" href="#top-costs-ranked-by-payoff" data-toc-for="top-costs-ranked-by-payoff">Top costs, ranked by payoff</a><a class="toc-item toc-sub" href="#recommendation-for-phnx-3468" data-toc-for="recommendation-for-phnx-3468">Recommendation for PHNX-3468</a><a class="toc-item" href="#evidence" data-toc-for="evidence"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Evidence</a><a class="toc-item" href="#summary" data-toc-for="summary"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Summary</a></nav><article class="artifact-body"><h1>Factory reliability — PHNX-3467 &amp; PHNX-3468 findings</h1>
+<p>Epic: <strong>PHNX-2653</strong> — Factory app (menubar + extension) UX &amp; reliability.
+Two investigation-first sub-tasks. Date: 2026-08-28.</p>
+<p>Both criteria were investigated against the real code in <code>agents-cli</code>
+(<code>cli/</code>) and <code>agi-ext</code>. Device names, home paths, and identifiers are
+anonymized per artifact rules.</p>
+<hr />
+<h2 id="findings">Findings</h2><ul>
+<li><strong>PHNX-3467 — needs-fix, shipped as <code>agi-ext#16</code>.</strong> The Swift menubar helper's
+child-reaping machinery is airtight <em>for its own children</em>, and the Factory /
+<code>agents-dbg</code> app spawns no CLI children at all. But the extension had one
+genuinely unbounded, untracked refresh spawn — <code>handoff.ts</code> <code>runAgentsSessions</code>
+— the single agents-CLI runner in the repo with no <code>timeout</code>. Across sleep/wake
+a wedged child orphans and latches the in-flight guard forever. Bounded it
+(15s SIGTERM); verified a hung child is killed at ~209 ms.</li>
+<li><strong>PHNX-3468 — profiled, report + plan, no blind fix.</strong> Dominant boot cost is
+the Claude setup-token <code>scrypt</code> decrypt (~150–170 ms/launch, uncached across
+processes), then an uncached <code>resolveVersion</code> cwd→root walk called ~5×/launch,
+then a serial per-launch filesystem self-heal chain. The biggest cut is on the
+credential path and the cheapest cut has a daemon-staleness caveat, so both are
+design decisions rather than a safe drive-by — the task was explicit not to ship
+a speculative fix.</li>
+</ul>
+<h2 id="phnx-3467-no-orphaned-untracked-refresh-child-processes-across-sleep-wake-churn">PHNX-3467 — no orphaned/untracked refresh child processes across sleep/wake &amp; churn</h2><p><strong>Verdict: needs-fix → fix shipped as PR (<code>agi-ext#16</code>).</strong> Not already
+covered by the Swift machinery; a real unbounded/untracked path existed in the
+extension, and it was the <em>one</em> agents-CLI runner in the repo without a deadline.</p>
+<h3 id="what-is-already-handled-and-is-not-the-leak">What is already handled (and is NOT the leak)</h3><p>The <strong>Swift menubar helper</strong> in <code>agents-cli</code> (<code>cli/menubar/.../ChildProcess.swift</code>)
+is the extensively-hardened secret-broker/status helper, and it is airtight for
+its own children. Every timer-driven CLI call it makes is:</p>
+<ul>
+<li><strong>Bounded</strong> — 30s default deadline, 180s for the pathological <code>doctor --json</code>
+(measured 136s idle); past the deadline the child is terminated.</li>
+<li><strong>Group-killed</strong> — spawned as its own process-group leader
+(<code>POSIX_SPAWN_SETPGROUP</code>), so a timeout <code>kill(-pgid)</code>s the whole subtree (the
+CLI <em>and</em> every <code>node -e</code> probe it forked). Foundation's <code>Process</code> cannot set a
+process group — that is why it is raw <code>posix_spawn</code>.</li>
+<li><strong>Reaped by the next launch</strong> — live children recorded in
+<code>~/.agents/.cache/state/menubar-children</code>; <code>reapOrphansFromPreviousLaunch()</code>
+runs in <code>main.swift</code> <em>before</em> the first AppKit call, because the crash being
+recovered from (SIGSEGV in <code>SLSNewConnection</code>) runs no exit handler.</li>
+</ul>
+<p>This machinery was built after a real incident: 38 orphaned <code>doctor</code>s + 92
+orphaned <code>node -e</code> probes, ~13 of 18 cores, load 490. <strong>The concern in the
+ticket is genuinely covered — for the Swift helper's children.</strong> It is not the
+source of the leak.</p>
+<h3 id="the-factory-app-is-also-not-the-leak">The "Factory" app is also NOT the leak</h3><p>The <code>agents-dbg</code> / Factory app lives in <code>agi-ext/app/</code> (an Electron
+<code>BrowserWindow</code>, <strong>not</strong> a Tray/menubar app — no <code>NSStatusBar</code>, no <code>.swift</code>, no
+<code>Tray</code> anywhere in the repo). Its 5s poll (<code>app/main.ts</code> <code>POLL_MS = 5000</code> →
+<code>FloorPoll</code>) reads <code>~/.agents/{teams,swarm}/agents/*/meta.json</code> off disk plus a
+<strong>single <code>fetch()</code> bounded by <code>AbortSignal.timeout(5000)</code></strong>. It spawns <strong>no CLI
+children at all</strong> (its own code comments about "burning <code>agents</code> calls every 5s"
+are stale). Tracked, bounded, nothing to leak.</p>
+<h3 id="the-real-unbounded-untracked-path">The real unbounded/untracked path</h3><p><strong><code>agi-ext/src/core/handoff.ts</code> <code>runAgentsSessions</code></strong> — an <code>execFile('agents', …)</code>
+with <strong>no <code>timeout</code>, no retained handle, no <code>.kill()</code>, no <code>AbortController</code></strong>:</p>
+<pre><code>function runAgentsSessions(args, cwd) {
+  return new Promise((resolve, reject) =&gt; {
+    execFile('agents', args, { cwd, maxBuffer: 8*1024*1024 }, (err, stdout) =&gt;
+      err ? reject(err) : resolve(stdout));
+  });
+}
+</code></pre>
+<p>It is driven on a cadence by the agent panel
+(<code>src/vscode/agentPanel.vscode.ts</code> — a 4s <code>setInterval</code> on <code>main</code>,
+<code>getSessionToolStatsViaAgentsCli</code> → <code>computeSessionToolStats</code> →
+<code>runAgentsSessions</code>) and per-terminal by <code>extension.ts</code>.</p>
+<p>Why this leaks specifically across <strong>sleep/wake and churn</strong>:</p>
+<ol>
+<li><strong>No timeout while every sibling has one.</strong> <code>agentsBin.ts</code> <code>runAgentsArgs</code>
+(30s), <code>foreman.sources.ts</code> (3s), <code>tasks.vscode.ts</code> (15s) all pass a
+<code>timeout</code>. <code>runAgentsSessions</code> was the lone outlier.</li>
+<li><strong>No sleep/wake reaping anywhere in <code>agi-ext</code></strong> — no <code>powerMonitor</code>
+(Electron) and no <code>NSWorkspace willSleep/didWake</code> hooks exist. The poll pauses
+only on webview <em>visibility</em> changes, never on suspend/resume. A child in
+flight when the machine sleeps is never bounded or killed.</li>
+<li><strong>The in-flight guard converts a hung child into a permanent orphan.</strong>
+<code>toolStatsInFlight</code> coalesces callers onto one subprocess so a slow call can't
+<em>stack</em> — but a child that never returns (wedged on a stuck FS/network read, a
+classic post-wake state) leaves the promise <strong>latched forever</strong>, so that
+session's stats never recover <em>and</em> the child is never reaped.</li>
+</ol>
+<h3 id="is-the-current-in-flight-work-enough-no">Is the current in-flight work enough? No.</h3><p>Two unmerged branches already rework this area:
+<code>agents/spawn-storm</code> (PHNX-2833) removes the 4s poll cadence (event-driven
+redraw, "the daemon is the only scheduler"), and <code>agents/poll-timers-3447</code>
+reworks the webview polling. <strong>Neither touches <code>handoff.ts</code></strong> — the unbounded
+spawn survives whichever lands. Removing the poll lowers spawn <em>frequency</em>; it
+does not bound an <em>individual</em> wedged child. So the fix is orthogonal and still
+required.</p>
+<h3 id="fix-shipped-agi-ext-16">Fix shipped — <code>agi-ext#16</code></h3><p>Add a 15s deadline (<code>killSignal: 'SIGTERM'</code>) to the <code>execFile</code> in
+<code>runAgentsSessions</code> — the source-correct, single-chokepoint fix covering all
+three callers, matching the repo's existing bounded-runner convention. The
+timeout is injectable so a <strong>real-path</strong> regression test
+(<code>src/core/handoff.timeout.test.ts</code>) proves a hung child is killed without
+waiting the production budget.</p>
+<p><strong>Verified:</strong> the real <code>execFile</code> path against a fake <code>agents</code> on <code>PATH</code> that
+<code>sleep 30</code>s is SIGTERM-killed at <strong>~209 ms</strong> (near the injected 200 ms budget),
+not left running for 30 s.</p>
+<blockquote>
+<p>The larger, AGENTS.md-tracked rework — fold <code>runAgentsSessions</code> into the
+canonical <code>agentsBin.ts</code> resolver, and bind <code>toolCallCount</code>/<code>todos</code> onto the
+single <code>agents feed watch</code> stream so the poll (and this spawn) can be <em>deleted</em>
+— remains the durable end state, and is deliberately out of scope for this
+low-risk hardening. It should be tracked on the spawn-storm/stream-binding
+effort, not blocked on it.</p>
+</blockquote>
+<hr />
+<h2 id="phnx-3468-new-agent-boot-near-instant-1s-local">PHNX-3468 — new-agent boot near-instant (~1s local)</h2><p><strong>Verdict: profiled; report + ranked plan. No blind fix shipped</strong> — the top cost
+is on the credential path and the cheapest cut carries a daemon-staleness caveat
+that is a design decision, not a slam-dunk. Details below.</p>
+<h3 id="measurement-notes-how-to-reproduce">Measurement notes / how to reproduce</h3><p>The launch path already carries <strong>first-party instrumentation</strong> — no new
+timing code is needed:</p>
+<ul>
+<li><code>spawnAgent</code> wraps the spawn in <code>createTimer('agent.run', …)</code>
+(<code>cli/src/lib/exec.ts</code>), marks <code>startup</code> at the moment of <code>spawn()</code>, and
+<code>timer.end()</code> on child close. <code>startup</code> = wall time from entering <code>spawnAgent</code>
+to the child actually spawning — exactly the boot cost.</li>
+<li>Samples spool to a SQLite perf warehouse at <code>~/.agents/.cache/perf/perf.db</code>.</li>
+<li>A purpose-built microbench exists: <code>cli/src/lib/exec.bench.ts</code>
+(<code>vitest bench</code>), benchmarking <code>buildExecEnv</code> / <code>buildExecCommand</code> /
+<code>execAgent</code> against the real <code>~/.agents</code> layout, using <code>--version</code> passthrough
+so the harness short-circuits before any network/session work (a network-free
+spawn-overhead measurement).</li>
+</ul>
+<p><strong>Environment limits on this pass:</strong> live <code>agents run</code>, <code>vitest bench</code>, and
+<code>bun test</code> are process-spawn-blocked in the authoring sandbox, so the isolated
+<code>startup</code> phase could not be re-measured live here. The installed CLI
+(v1.22.54) stores only the <em>total</em> <code>agent.run</code> duration in <code>perf.db</code> (the
+<code>startup</code> phase break-out is not persisted), so that warehouse can't isolate
+boot either. Figures below combine what could be measured live (CLI cold-start)
+with the codebase's own committed measurements (the bench docblock) and
+structural call-graph analysis.</p>
+<p><strong>Measured live on a fleet box (warm page cache, best of 3):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Command</th>
+<th>Time</th>
+<th>What it exercises</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>agents --version</code></td>
+<td><strong>~0.07–0.09 s</strong></td>
+<td>bun process start + minimal arg parse</td>
+</tr>
+<tr>
+<td><code>agents run --help</code> (warm)</td>
+<td>~0.08 s</td>
+<td>run command <em>definition</em> only (commander lazy-loads the action module)</td>
+</tr>
+<tr>
+<td><code>agents run --help</code> (cold page cache)</td>
+<td><strong>~0.44 s</strong></td>
+<td>same, first hit after idle</td>
+</tr>
+<tr>
+<td><code>agents --help</code> (full top-level)</td>
+<td><strong>~0.86 s</strong></td>
+<td>eager registration of the whole command tree</td>
+</tr>
+</tbody></table>
+<p>So the CLI's own floor is ~70–90 ms warm; a cold-cache first invocation of a
+subcommand is ~440 ms before any real work. Neither reaches the exec hot path
+(sync/version/token), which lives behind commander's lazy action load.</p>
+<h3 id="top-costs-ranked-by-payoff">Top costs, ranked by payoff</h3><h4>1. <code>resolveClaudeSetupToken</code> scrypt decrypt — DOMINANT (~150–170 ms/launch, Claude signed-in)</h4>
+<p><code>buildExecEnv</code> (<code>cli/src/lib/exec.ts</code>) eagerly calls the Claude adapter's
+<code>resolveClaudeSetupToken</code> (<code>cli/src/lib/claude-account-token.ts</code>) for <strong>every
+resolved Claude version whose version home has a signed-in account</strong>. That runs
+an AES key derivation via <code>scryptSync</code> to decrypt the file-backed <code>auth</code>
+bundle. <strong>The repo's own bench docblock measures this at ~150–170 ms per call</strong>
+(<code>exec.bench.ts</code>), and it is the single largest driver of <code>buildExecEnv</code>.</p>
+<ul>
+<li>A version home with <strong>no</strong> signed-in account short-circuits at ~0.07 ms — so
+the cost is entirely gated on whether <em>that specific version</em> is logged in.</li>
+<li>RUSH-2317 added a <strong>process-lifetime</strong> cache keyed by home + credential
+fingerprint — but this <strong>does not help a plain <code>agents run</code></strong>: every real CLI
+invocation is its own fresh process, so the cache starts empty and the one
+call pays the full ~150 ms. It only pays off inside a long-lived orchestrator
+(loop/teams) that calls <code>buildExecEnv</code> many times.</li>
+</ul>
+<p><strong>Cut (highest payoff, but not low-risk):</strong> derive the token <strong>lazily</strong> — only
+when the harness actually needs it, rather than eagerly in every <code>buildExecEnv</code>
+— or persist a decrypted-token cache <strong>across processes</strong> keyed to the
+credential fingerprint, or move the setup-token to a cheaper at-rest format/KDF.
+All three touch the credential path and need care (SEC review, cache-poisoning /
+staleness on account switch). Recommend a scoped ticket, not a drive-by.</p>
+<h4>2. <code>resolveVersion</code> cwd→root walk — repeated, uncached (cheapest structural win)</h4>
+<p><code>resolveVersion</code> → <code>getProjectVersion</code> (<code>cli/src/lib/installations/store.ts</code>)
+walks <strong>every parent directory from cwd to root</strong>, doing <code>existsSync</code> +
+<code>readFileSync</code> + <code>yaml.parse</code> for any <code>agents.yaml</code> it finds. This walk is <strong>not
+cached</strong>, and <code>resolveVersion</code> is called <strong>~5× per launch</strong> (<code>buildExecEnv</code>,
+<code>buildExecCommand</code>, two self-heal sites in <code>commands/exec.ts</code>, and
+<code>runWithFallback</code>). Cost scales with cwd depth (worktrees run several levels
+deep).</p>
+<p><strong>Cut:</strong> memoize <code>getProjectVersion</code>/<code>resolveVersion</code> per <code>(agent, cwd)</code>.
+<strong>Caveat that makes this a design decision, not a blind fix:</strong> <code>resolveVersion</code>
+is shared with the <strong>long-lived daemon</strong>, where cwd varies and <code>agents.yaml</code> can
+change during the process's life — a naive process-global memo would serve stale
+versions there. The safe form is <strong>request-scoped</strong> memoization (one launch
+action), or a mtime-invalidated cache like the one <code>readMeta</code> already uses
+(<code>state.ts</code>). Low-risk <em>if scoped correctly</em>; that scoping is the decision.</p>
+<h4>3. Per-launch filesystem self-heal chain — skip-fast but serial</h4>
+<p>The run action <code>await</code>s a <strong>serial chain</strong> of independent filesystem probes
+before spawning: <code>ensureAgentRunnable</code> → <code>resolveLaunchBinary</code> →
+<code>applyActiveRulesPresetAtRun</code> (rules re-sync, mtime+size sentinel skip-fast) →
+(interactive only) a login preflight. Each is individually cheap when nothing
+changed, but they run <strong>sequentially</strong> and each stats the disk.</p>
+<blockquote>
+<p>Note on the "config sync every run?" question: the <strong>broad</strong> resource sync
+(commands/skills/hooks/mcp, <code>syncResourcesToVersion</code>) is <strong>NOT</strong> on the run
+path — it runs at install / <code>agents use</code> / <code>agents sync</code> only. Only <strong>rules</strong>
+re-application runs per launch, and it is sentinel-gated.</p>
+</blockquote>
+<p><strong>Cut:</strong> these probes are independent of each other and of <code>buildExecEnv</code>'s
+token decrypt — parallelize them (<code>Promise.all</code>) and/or make the staleness
+sentinels even cheaper. Low-risk, medium payoff, but measure the sentinel-hit
+cost first to confirm it's material.</p>
+<h4>Not on the plain-local hot path (verified, don't chase these)</h4>
+<ul>
+<li><strong>Secrets/share broker</strong> — only if <code>--secrets</code> is passed, or if share is
+configured <em>and</em> the token isn't already in env (<code>shareRuntimeEnv</code>
+short-circuits otherwise). No unconditional broker handshake.</li>
+<li><strong>tmux wrap</strong> — <code>tmux.enabled</code> defaults <strong>off</strong>; a plain local run takes the
+bare <code>spawn</code> branch. Large if a box opts in (serial tmux round-trips), but not
+the default.</li>
+<li><strong>Prewarm pool</strong> — there is <strong>no</strong> CLI-side agent prewarm pool on the boot
+path (the <code>prewarm</code> hits are the <em>extension's</em> config, not a CLI pool).</li>
+<li><strong><code>actor</code> resolution</strong> — process-lifetime cached; but a genuinely fresh
+terminal with no inherited <code>AGENTS_ACTOR</code> on an SSH box can pay a
+<code>spawnSync('tailscale','whois')</code> up to 2 s on the first call. Environment-
+dependent; check whether the launching terminal inherits <code>AGENTS_ACTOR</code>.</li>
+</ul>
+<h3 id="recommendation-for-phnx-3468">Recommendation for PHNX-3468</h3><ol>
+<li><strong>First, restore the measurement.</strong> Persist the <code>startup</code> phase into <code>perf.db</code>
+(it's already computed by <code>createTimer</code>) so boot is trackable across the
+fleet, then read real p50/p90 <code>startup</code> numbers. Everything below is graded
+against that.</li>
+<li><strong>Attack #2 (version-walk memoization, request-scoped) first</strong> — the
+cheapest, most localized win, no credential surface.</li>
+<li><strong>Then #3 (parallelize the pre-spawn self-heal chain).</strong></li>
+<li><strong>Scope #1 (token decrypt) as its own ticket</strong> — biggest single number
+(~150 ms) but on the credential path; lazy derivation or cross-process cache
+needs a deliberate SEC-aware design.</li>
+</ol>
+<p>No fix was shipped for 3468: the biggest cost is credential-path work, and the
+cheapest cut has a daemon-staleness caveat — both are design decisions, and the
+task was explicit not to ship a speculative fix.</p>
+<hr />
+<h2 id="evidence">Evidence</h2><p>Anchors backing the findings above.</p>
+<p><strong>PHNX-3467 (file:line):</strong></p>
+<ul>
+<li><code>agi-ext/src/core/handoff.ts</code> <code>runAgentsSessions</code> — pre-fix <code>execFile('agents', …)</code>
+with <code>{ cwd, maxBuffer }</code> and <strong>no</strong> <code>timeout</code>. Sibling runners that <em>do</em> bound:
+<code>src/core/agentsBin.ts</code> <code>runAgentsArgs</code> (<code>timeout: 30_000</code>),
+<code>src/vscode/foreman.sources.ts</code> (<code>timeout: 3_000</code>), <code>src/vscode/tasks.vscode.ts</code>
+(<code>timeout: 15_000</code>).</li>
+<li>Cadence driver: <code>src/vscode/agentPanel.vscode.ts</code> 4s <code>setInterval</code> →
+<code>getSessionToolStatsViaAgentsCli</code> → <code>computeSessionToolStats</code> → <code>runAgentsSessions</code>;
+also <code>src/vscode/extension.ts</code> per-terminal.</li>
+<li>In-flight latch: <code>toolStatsInFlight</code> coalesces callers (comment at
+<code>handoff.ts</code> "so a slow <code>agents sessions</code> call can't stack across ticks") — but
+never times out a hung promise.</li>
+<li>No <code>powerMonitor</code> / <code>NSWorkspace willSleep|didWake</code> anywhere in <code>agi-ext</code>
+(grep-verified); poll pauses on webview visibility only.</li>
+<li>In-flight branches <code>agents/spawn-storm</code> (PHNX-2833) and
+<code>agents/poll-timers-3447</code> change none of <code>handoff.ts</code> (diff-verified).</li>
+<li><strong>Runtime proof of the fix:</strong> the real <code>execFile</code> path against a fake <code>agents</code>
+on <code>PATH</code> running <code>sleep 30</code> is SIGTERM-killed at <strong>~209 ms</strong> with an injected
+200 ms budget (mirrors <code>src/core/handoff.timeout.test.ts</code>).</li>
+</ul>
+<p><strong>PHNX-3468 (measured + cited):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Signal</th>
+<th>Value</th>
+<th>Source</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>CLI floor, <code>agents --version</code> (warm)</td>
+<td>~0.07–0.09 s</td>
+<td>measured live, best of 3</td>
+</tr>
+<tr>
+<td><code>agents run --help</code>, cold page cache</td>
+<td>~0.44 s</td>
+<td>measured live</td>
+</tr>
+<tr>
+<td><code>agents --help</code> full tree</td>
+<td>~0.86 s</td>
+<td>measured live</td>
+</tr>
+<tr>
+<td>Claude setup-token <code>scrypt</code> decrypt</td>
+<td>~150–170 ms/call</td>
+<td><code>cli/src/lib/exec.bench.ts</code> docblock (committed measurement)</td>
+</tr>
+<tr>
+<td>logged-out short-circuit (same code path)</td>
+<td>~0.07 ms</td>
+<td><code>cli/src/lib/claude-account-token.ts</code></td>
+</tr>
+<tr>
+<td><code>resolveVersion</code> cwd→root walk</td>
+<td>uncached, ~5×/launch</td>
+<td><code>cli/src/lib/installations/store.ts</code>, call sites in <code>exec.ts</code> + <code>commands/exec.ts</code></td>
+</tr>
+</tbody></table>
+<blockquote>
+<p>Live <code>agents run</code> / <code>vitest bench</code> / <code>bun test</code> are process-spawn-blocked in
+the authoring sandbox, so the isolated <code>startup</code> phase could not be re-measured
+live; the installed CLI (v1.22.54) persists only the <em>total</em> <code>agent.run</code>
+duration in <code>~/.agents/.cache/perf/perf.db</code>, not the <code>startup</code> break-out. The
+~150 ms figure is the repo's own committed benchmark measurement, not a guess.</p>
+</blockquote>
+<hr />
+<h2 id="summary">Summary</h2><table>
+<thead>
+<tr>
+<th>Ticket</th>
+<th>Outcome</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><strong>PHNX-3467</strong></td>
+<td><strong>needs-fix → PR <code>agi-ext#16</code>.</strong> Swift helper machinery is airtight for its own children and the Factory/agents-dbg app spawns no CLI children; the real leak was <code>handoff.ts</code> <code>runAgentsSessions</code>, the one agents-CLI runner with no deadline. Bounded it (15s SIGTERM) with a verified real-path regression test. Orthogonal to the in-flight spawn-storm/poll-timer branches.</td>
+</tr>
+<tr>
+<td><strong>PHNX-3468</strong></td>
+<td><strong>profiled → report + plan, no blind fix.</strong> Top costs: (1) Claude setup-token scrypt decrypt ~150 ms/launch, uncached across processes; (2) uncached <code>resolveVersion</code> cwd→root walk ~5×/launch; (3) serial per-launch FS self-heal chain. Recommended order: persist the <code>startup</code> phase metric, then request-scoped version memoization, then parallelize the self-heal chain, then a scoped credential-path ticket for the token decrypt.</td>
+</tr>
+</tbody></table>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHJlcG9ydAp0aXRsZTogIkZhY3RvcnkgcmVsaWFiaWxpdHkg4oCUIFBITlgtMzQ2NyAmIFBITlgtMzQ2OCBmaW5kaW5ncyIKc3VtbWFyeTogPgogIFR3byBGYWN0b3J5LXJlbGlhYmlsaXR5IHN1Yi10YXNrcyBvZiBQSE5YLTI2NTMuIDM0NjcgKG9ycGhhbmVkIHJlZnJlc2gKICBjaGlsZHJlbik6IG5lZWRzLWZpeCwgYm91bmRlZCB0aGUgb25lIHVuYm91bmRlZCBhZ2VudHMtQ0xJIHNwYXduIGluIGFnaS1leHQKICAoUFIgYWdpLWV4dCMxNikuIDM0NjggKG5lYXItaW5zdGFudCBib290KTogcHJvZmlsZWQg4oCUIHRvcCBjb3N0cyBhcmUgdGhlCiAgQ2xhdWRlIHNldHVwLXRva2VuIHNjcnlwdCBkZWNyeXB0ICh+MTUwbXMpLCBhbiB1bmNhY2hlZCByZXNvbHZlVmVyc2lvbiB3YWxrLAogIGFuZCBhIHNlcmlhbCBwZXItbGF1bmNoIHNlbGYtaGVhbCBjaGFpbjsgcmVwb3J0ICsgcGxhbiwgbm8gYmxpbmQgZml4LgpzdGF0dXM6IGRyYWZ0CmxpbmtzOgogIC0gaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvaXNzdWUvUEhOWC0zNDY3CiAgLSBodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9pc3N1ZS9QSE5YLTM0NjgKICAtIGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWV4dC9wdWxsLzE2Ci0tLQoKIyBGYWN0b3J5IHJlbGlhYmlsaXR5IOKAlCBQSE5YLTM0NjcgJiBQSE5YLTM0NjggZmluZGluZ3MKCkVwaWM6ICoqUEhOWC0yNjUzKiog4oCUIEZhY3RvcnkgYXBwIChtZW51YmFyICsgZXh0ZW5zaW9uKSBVWCAmIHJlbGlhYmlsaXR5LgpUd28gaW52ZXN0aWdhdGlvbi1maXJzdCBzdWItdGFza3MuIERhdGU6IDIwMjYtMDgtMjguCgpCb3RoIGNyaXRlcmlhIHdlcmUgaW52ZXN0aWdhdGVkIGFnYWluc3QgdGhlIHJlYWwgY29kZSBpbiBgYWdlbnRzLWNsaWAKKGBjbGkvYCkgYW5kIGBhZ2ktZXh0YC4gRGV2aWNlIG5hbWVzLCBob21lIHBhdGhzLCBhbmQgaWRlbnRpZmllcnMgYXJlCmFub255bWl6ZWQgcGVyIGFydGlmYWN0IHJ1bGVzLgoKLS0tCgojIyBGaW5kaW5ncwoKLSAqKlBITlgtMzQ2NyDigJQgbmVlZHMtZml4LCBzaGlwcGVkIGFzIGBhZ2ktZXh0IzE2YC4qKiBUaGUgU3dpZnQgbWVudWJhciBoZWxwZXIncwogIGNoaWxkLXJlYXBpbmcgbWFjaGluZXJ5IGlzIGFpcnRpZ2h0ICpmb3IgaXRzIG93biBjaGlsZHJlbiosIGFuZCB0aGUgRmFjdG9yeSAvCiAgYGFnZW50cy1kYmdgIGFwcCBzcGF3bnMgbm8gQ0xJIGNoaWxkcmVuIGF0IGFsbC4gQnV0IHRoZSBleHRlbnNpb24gaGFkIG9uZQogIGdlbnVpbmVseSB1bmJvdW5kZWQsIHVudHJhY2tlZCByZWZyZXNoIHNwYXduIOKAlCBgaGFuZG9mZi50c2AgYHJ1bkFnZW50c1Nlc3Npb25zYAogIOKAlCB0aGUgc2luZ2xlIGFnZW50cy1DTEkgcnVubmVyIGluIHRoZSByZXBvIHdpdGggbm8gYHRpbWVvdXRgLiBBY3Jvc3Mgc2xlZXAvd2FrZQogIGEgd2VkZ2VkIGNoaWxkIG9ycGhhbnMgYW5kIGxhdGNoZXMgdGhlIGluLWZsaWdodCBndWFyZCBmb3JldmVyLiBCb3VuZGVkIGl0CiAgKDE1cyBTSUdURVJNKTsgdmVyaWZpZWQgYSBodW5nIGNoaWxkIGlzIGtpbGxlZCBhdCB+MjA5IG1zLgotICoqUEhOWC0zNDY4IOKAlCBwcm9maWxlZCwgcmVwb3J0ICsgcGxhbiwgbm8gYmxpbmQgZml4LioqIERvbWluYW50IGJvb3QgY29zdCBpcwogIHRoZSBDbGF1ZGUgc2V0dXAtdG9rZW4gYHNjcnlwdGAgZGVjcnlwdCAofjE1MOKAkzE3MCBtcy9sYXVuY2gsIHVuY2FjaGVkIGFjcm9zcwogIHByb2Nlc3NlcyksIHRoZW4gYW4gdW5jYWNoZWQgYHJlc29sdmVWZXJzaW9uYCBjd2TihpJyb290IHdhbGsgY2FsbGVkIH41w5cvbGF1bmNoLAogIHRoZW4gYSBzZXJpYWwgcGVyLWxhdW5jaCBmaWxlc3lzdGVtIHNlbGYtaGVhbCBjaGFpbi4gVGhlIGJpZ2dlc3QgY3V0IGlzIG9uIHRoZQogIGNyZWRlbnRpYWwgcGF0aCBhbmQgdGhlIGNoZWFwZXN0IGN1dCBoYXMgYSBkYWVtb24tc3RhbGVuZXNzIGNhdmVhdCwgc28gYm90aCBhcmUKICBkZXNpZ24gZGVjaXNpb25zIHJhdGhlciB0aGFuIGEgc2FmZSBkcml2ZS1ieSDigJQgdGhlIHRhc2sgd2FzIGV4cGxpY2l0IG5vdCB0byBzaGlwCiAgYSBzcGVjdWxhdGl2ZSBmaXguCgojIyBQSE5YLTM0Njcg4oCUIG5vIG9ycGhhbmVkL3VudHJhY2tlZCByZWZyZXNoIGNoaWxkIHByb2Nlc3NlcyBhY3Jvc3Mgc2xlZXAvd2FrZSAmIGNodXJuCgoqKlZlcmRpY3Q6IG5lZWRzLWZpeCDihpIgZml4IHNoaXBwZWQgYXMgUFIgKGBhZ2ktZXh0IzE2YCkuKiogTm90IGFscmVhZHkKY292ZXJlZCBieSB0aGUgU3dpZnQgbWFjaGluZXJ5OyBhIHJlYWwgdW5ib3VuZGVkL3VudHJhY2tlZCBwYXRoIGV4aXN0ZWQgaW4gdGhlCmV4dGVuc2lvbiwgYW5kIGl0IHdhcyB0aGUgKm9uZSogYWdlbnRzLUNMSSBydW5uZXIgaW4gdGhlIHJlcG8gd2l0aG91dCBhIGRlYWRsaW5lLgoKIyMjIFdoYXQgaXMgYWxyZWFkeSBoYW5kbGVkIChhbmQgaXMgTk9UIHRoZSBsZWFrKQoKVGhlICoqU3dpZnQgbWVudWJhciBoZWxwZXIqKiBpbiBgYWdlbnRzLWNsaWAgKGBjbGkvbWVudWJhci8uLi4vQ2hpbGRQcm9jZXNzLnN3aWZ0YCkKaXMgdGhlIGV4dGVuc2l2ZWx5LWhhcmRlbmVkIHNlY3JldC1icm9rZXIvc3RhdHVzIGhlbHBlciwgYW5kIGl0IGlzIGFpcnRpZ2h0IGZvcgppdHMgb3duIGNoaWxkcmVuLiBFdmVyeSB0aW1lci1kcml2ZW4gQ0xJIGNhbGwgaXQgbWFrZXMgaXM6CgotICoqQm91bmRlZCoqIOKAlCAzMHMgZGVmYXVsdCBkZWFkbGluZSwgMTgwcyBmb3IgdGhlIHBhdGhvbG9naWNhbCBgZG9jdG9yIC0tanNvbmAKICAobWVhc3VyZWQgMTM2cyBpZGxlKTsgcGFzdCB0aGUgZGVhZGxpbmUgdGhlIGNoaWxkIGlzIHRlcm1pbmF0ZWQuCi0gKipHcm91cC1raWxsZWQqKiDigJQgc3Bhd25lZCBhcyBpdHMgb3duIHByb2Nlc3MtZ3JvdXAgbGVhZGVyCiAgKGBQT1NJWF9TUEFXTl9TRVRQR1JPVVBgKSwgc28gYSB0aW1lb3V0IGBraWxsKC1wZ2lkKWBzIHRoZSB3aG9sZSBzdWJ0cmVlICh0aGUKICBDTEkgKmFuZCogZXZlcnkgYG5vZGUgLWVgIHByb2JlIGl0IGZvcmtlZCkuIEZvdW5kYXRpb24ncyBgUHJvY2Vzc2AgY2Fubm90IHNldCBhCiAgcHJvY2VzcyBncm91cCDigJQgdGhhdCBpcyB3aHkgaXQgaXMgcmF3IGBwb3NpeF9zcGF3bmAuCi0gKipSZWFwZWQgYnkgdGhlIG5leHQgbGF1bmNoKiog4oCUIGxpdmUgY2hpbGRyZW4gcmVjb3JkZWQgaW4KICBgfi8uYWdlbnRzLy5jYWNoZS9zdGF0ZS9tZW51YmFyLWNoaWxkcmVuYDsgYHJlYXBPcnBoYW5zRnJvbVByZXZpb3VzTGF1bmNoKClgCiAgcnVucyBpbiBgbWFpbi5zd2lmdGAgKmJlZm9yZSogdGhlIGZpcnN0IEFwcEtpdCBjYWxsLCBiZWNhdXNlIHRoZSBjcmFzaCBiZWluZwogIHJlY292ZXJlZCBmcm9tIChTSUdTRUdWIGluIGBTTFNOZXdDb25uZWN0aW9uYCkgcnVucyBubyBleGl0IGhhbmRsZXIuCgpUaGlzIG1hY2hpbmVyeSB3YXMgYnVpbHQgYWZ0ZXIgYSByZWFsIGluY2lkZW50OiAzOCBvcnBoYW5lZCBgZG9jdG9yYHMgKyA5MgpvcnBoYW5lZCBgbm9kZSAtZWAgcHJvYmVzLCB+MTMgb2YgMTggY29yZXMsIGxvYWQgNDkwLiAqKlRoZSBjb25jZXJuIGluIHRoZQp0aWNrZXQgaXMgZ2VudWluZWx5IGNvdmVyZWQg4oCUIGZvciB0aGUgU3dpZnQgaGVscGVyJ3MgY2hpbGRyZW4uKiogSXQgaXMgbm90IHRoZQpzb3VyY2Ugb2YgdGhlIGxlYWsuCgojIyMgVGhlICJGYWN0b3J5IiBhcHAgaXMgYWxzbyBOT1QgdGhlIGxlYWsKClRoZSBgYWdlbnRzLWRiZ2AgLyBGYWN0b3J5IGFwcCBsaXZlcyBpbiBgYWdpLWV4dC9hcHAvYCAoYW4gRWxlY3Ryb24KYEJyb3dzZXJXaW5kb3dgLCAqKm5vdCoqIGEgVHJheS9tZW51YmFyIGFwcCDigJQgbm8gYE5TU3RhdHVzQmFyYCwgbm8gYC5zd2lmdGAsIG5vCmBUcmF5YCBhbnl3aGVyZSBpbiB0aGUgcmVwbykuIEl0cyA1cyBwb2xsIChgYXBwL21haW4udHNgIGBQT0xMX01TID0gNTAwMGAg4oaSCmBGbG9vclBvbGxgKSByZWFkcyBgfi8uYWdlbnRzL3t0ZWFtcyxzd2FybX0vYWdlbnRzLyovbWV0YS5qc29uYCBvZmYgZGlzayBwbHVzIGEKKipzaW5nbGUgYGZldGNoKClgIGJvdW5kZWQgYnkgYEFib3J0U2lnbmFsLnRpbWVvdXQoNTAwMClgKiouIEl0IHNwYXducyAqKm5vIENMSQpjaGlsZHJlbiBhdCBhbGwqKiAoaXRzIG93biBjb2RlIGNvbW1lbnRzIGFib3V0ICJidXJuaW5nIGBhZ2VudHNgIGNhbGxzIGV2ZXJ5IDVzIgphcmUgc3RhbGUpLiBUcmFja2VkLCBib3VuZGVkLCBub3RoaW5nIHRvIGxlYWsuCgojIyMgVGhlIHJlYWwgdW5ib3VuZGVkL3VudHJhY2tlZCBwYXRoCgoqKmBhZ2ktZXh0L3NyYy9jb3JlL2hhbmRvZmYudHNgIGBydW5BZ2VudHNTZXNzaW9uc2AqKiDigJQgYW4gYGV4ZWNGaWxlKCdhZ2VudHMnLCDigKYpYAp3aXRoICoqbm8gYHRpbWVvdXRgLCBubyByZXRhaW5lZCBoYW5kbGUsIG5vIGAua2lsbCgpYCwgbm8gYEFib3J0Q29udHJvbGxlcmAqKjoKCmBgYHRzCmZ1bmN0aW9uIHJ1bkFnZW50c1Nlc3Npb25zKGFyZ3MsIGN3ZCkgewogIHJldHVybiBuZXcgUHJvbWlzZSgocmVzb2x2ZSwgcmVqZWN0KSA9PiB7CiAgICBleGVjRmlsZSgnYWdlbnRzJywgYXJncywgeyBjd2QsIG1heEJ1ZmZlcjogOCoxMDI0KjEwMjQgfSwgKGVyciwgc3Rkb3V0KSA9PgogICAgICBlcnIgPyByZWplY3QoZXJyKSA6IHJlc29sdmUoc3Rkb3V0KSk7CiAgfSk7Cn0KYGBgCgpJdCBpcyBkcml2ZW4gb24gYSBjYWRlbmNlIGJ5IHRoZSBhZ2VudCBwYW5lbAooYHNyYy92c2NvZGUvYWdlbnRQYW5lbC52c2NvZGUudHNgIOKAlCBhIDRzIGBzZXRJbnRlcnZhbGAgb24gYG1haW5gLApgZ2V0U2Vzc2lvblRvb2xTdGF0c1ZpYUFnZW50c0NsaWAg4oaSIGBjb21wdXRlU2Vzc2lvblRvb2xTdGF0c2Ag4oaSCmBydW5BZ2VudHNTZXNzaW9uc2ApIGFuZCBwZXItdGVybWluYWwgYnkgYGV4dGVuc2lvbi50c2AuCgpXaHkgdGhpcyBsZWFrcyBzcGVjaWZpY2FsbHkgYWNyb3NzICoqc2xlZXAvd2FrZSBhbmQgY2h1cm4qKjoKCjEuICoqTm8gdGltZW91dCB3aGlsZSBldmVyeSBzaWJsaW5nIGhhcyBvbmUuKiogYGFnZW50c0Jpbi50c2AgYHJ1bkFnZW50c0FyZ3NgCiAgICgzMHMpLCBgZm9yZW1hbi5zb3VyY2VzLnRzYCAoM3MpLCBgdGFza3MudnNjb2RlLnRzYCAoMTVzKSBhbGwgcGFzcyBhCiAgIGB0aW1lb3V0YC4gYHJ1bkFnZW50c1Nlc3Npb25zYCB3YXMgdGhlIGxvbmUgb3V0bGllci4KMi4gKipObyBzbGVlcC93YWtlIHJlYXBpbmcgYW55d2hlcmUgaW4gYGFnaS1leHRgKiog4oCUIG5vIGBwb3dlck1vbml0b3JgCiAgIChFbGVjdHJvbikgYW5kIG5vIGBOU1dvcmtzcGFjZSB3aWxsU2xlZXAvZGlkV2FrZWAgaG9va3MgZXhpc3QuIFRoZSBwb2xsIHBhdXNlcwogICBvbmx5IG9uIHdlYnZpZXcgKnZpc2liaWxpdHkqIGNoYW5nZXMsIG5ldmVyIG9uIHN1c3BlbmQvcmVzdW1lLiBBIGNoaWxkIGluCiAgIGZsaWdodCB3aGVuIHRoZSBtYWNoaW5lIHNsZWVwcyBpcyBuZXZlciBib3VuZGVkIG9yIGtpbGxlZC4KMy4gKipUaGUgaW4tZmxpZ2h0IGd1YXJkIGNvbnZlcnRzIGEgaHVuZyBjaGlsZCBpbnRvIGEgcGVybWFuZW50IG9ycGhhbi4qKgogICBgdG9vbFN0YXRzSW5GbGlnaHRgIGNvYWxlc2NlcyBjYWxsZXJzIG9udG8gb25lIHN1YnByb2Nlc3Mgc28gYSBzbG93IGNhbGwgY2FuJ3QKICAgKnN0YWNrKiDigJQgYnV0IGEgY2hpbGQgdGhhdCBuZXZlciByZXR1cm5zICh3ZWRnZWQgb24gYSBzdHVjayBGUy9uZXR3b3JrIHJlYWQsIGEKICAgY2xhc3NpYyBwb3N0LXdha2Ugc3RhdGUpIGxlYXZlcyB0aGUgcHJvbWlzZSAqKmxhdGNoZWQgZm9yZXZlcioqLCBzbyB0aGF0CiAgIHNlc3Npb24ncyBzdGF0cyBuZXZlciByZWNvdmVyICphbmQqIHRoZSBjaGlsZCBpcyBuZXZlciByZWFwZWQuCgojIyMgSXMgdGhlIGN1cnJlbnQgaW4tZmxpZ2h0IHdvcmsgZW5vdWdoPyBOby4KClR3byB1bm1lcmdlZCBicmFuY2hlcyBhbHJlYWR5IHJld29yayB0aGlzIGFyZWE6CmBhZ2VudHMvc3Bhd24tc3Rvcm1gIChQSE5YLTI4MzMpIHJlbW92ZXMgdGhlIDRzIHBvbGwgY2FkZW5jZSAoZXZlbnQtZHJpdmVuCnJlZHJhdywgInRoZSBkYWVtb24gaXMgdGhlIG9ubHkgc2NoZWR1bGVyIiksIGFuZCBgYWdlbnRzL3BvbGwtdGltZXJzLTM0NDdgCnJld29ya3MgdGhlIHdlYnZpZXcgcG9sbGluZy4gKipOZWl0aGVyIHRvdWNoZXMgYGhhbmRvZmYudHNgKiog4oCUIHRoZSB1bmJvdW5kZWQKc3Bhd24gc3Vydml2ZXMgd2hpY2hldmVyIGxhbmRzLiBSZW1vdmluZyB0aGUgcG9sbCBsb3dlcnMgc3Bhd24gKmZyZXF1ZW5jeSo7IGl0CmRvZXMgbm90IGJvdW5kIGFuICppbmRpdmlkdWFsKiB3ZWRnZWQgY2hpbGQuIFNvIHRoZSBmaXggaXMgb3J0aG9nb25hbCBhbmQgc3RpbGwKcmVxdWlyZWQuCgojIyMgRml4IHNoaXBwZWQg4oCUIGBhZ2ktZXh0IzE2YAoKQWRkIGEgMTVzIGRlYWRsaW5lIChga2lsbFNpZ25hbDogJ1NJR1RFUk0nYCkgdG8gdGhlIGBleGVjRmlsZWAgaW4KYHJ1bkFnZW50c1Nlc3Npb25zYCDigJQgdGhlIHNvdXJjZS1jb3JyZWN0LCBzaW5nbGUtY2hva2Vwb2ludCBmaXggY292ZXJpbmcgYWxsCnRocmVlIGNhbGxlcnMsIG1hdGNoaW5nIHRoZSByZXBvJ3MgZXhpc3RpbmcgYm91bmRlZC1ydW5uZXIgY29udmVudGlvbi4gVGhlCnRpbWVvdXQgaXMgaW5qZWN0YWJsZSBzbyBhICoqcmVhbC1wYXRoKiogcmVncmVzc2lvbiB0ZXN0Cihgc3JjL2NvcmUvaGFuZG9mZi50aW1lb3V0LnRlc3QudHNgKSBwcm92ZXMgYSBodW5nIGNoaWxkIGlzIGtpbGxlZCB3aXRob3V0CndhaXRpbmcgdGhlIHByb2R1Y3Rpb24gYnVkZ2V0LgoKKipWZXJpZmllZDoqKiB0aGUgcmVhbCBgZXhlY0ZpbGVgIHBhdGggYWdhaW5zdCBhIGZha2UgYGFnZW50c2Agb24gYFBBVEhgIHRoYXQKYHNsZWVwIDMwYHMgaXMgU0lHVEVSTS1raWxsZWQgYXQgKip+MjA5IG1zKiogKG5lYXIgdGhlIGluamVjdGVkIDIwMCBtcyBidWRnZXQpLApub3QgbGVmdCBydW5uaW5nIGZvciAzMCBzLgoKPiBUaGUgbGFyZ2VyLCBBR0VOVFMubWQtdHJhY2tlZCByZXdvcmsg4oCUIGZvbGQgYHJ1bkFnZW50c1Nlc3Npb25zYCBpbnRvIHRoZQo+IGNhbm9uaWNhbCBgYWdlbnRzQmluLnRzYCByZXNvbHZlciwgYW5kIGJpbmQgYHRvb2xDYWxsQ291bnRgL2B0b2Rvc2Agb250byB0aGUKPiBzaW5nbGUgYGFnZW50cyBmZWVkIHdhdGNoYCBzdHJlYW0gc28gdGhlIHBvbGwgKGFuZCB0aGlzIHNwYXduKSBjYW4gYmUgKmRlbGV0ZWQqCj4g4oCUIHJlbWFpbnMgdGhlIGR1cmFibGUgZW5kIHN0YXRlLCBhbmQgaXMgZGVsaWJlcmF0ZWx5IG91dCBvZiBzY29wZSBmb3IgdGhpcwo+IGxvdy1yaXNrIGhhcmRlbmluZy4gSXQgc2hvdWxkIGJlIHRyYWNrZWQgb24gdGhlIHNwYXduLXN0b3JtL3N0cmVhbS1iaW5kaW5nCj4gZWZmb3J0LCBub3QgYmxvY2tlZCBvbiBpdC4KCi0tLQoKIyMgUEhOWC0zNDY4IOKAlCBuZXctYWdlbnQgYm9vdCBuZWFyLWluc3RhbnQgKH4xcyBsb2NhbCkKCioqVmVyZGljdDogcHJvZmlsZWQ7IHJlcG9ydCArIHJhbmtlZCBwbGFuLiBObyBibGluZCBmaXggc2hpcHBlZCoqIOKAlCB0aGUgdG9wIGNvc3QKaXMgb24gdGhlIGNyZWRlbnRpYWwgcGF0aCBhbmQgdGhlIGNoZWFwZXN0IGN1dCBjYXJyaWVzIGEgZGFlbW9uLXN0YWxlbmVzcyBjYXZlYXQKdGhhdCBpcyBhIGRlc2lnbiBkZWNpc2lvbiwgbm90IGEgc2xhbS1kdW5rLiBEZXRhaWxzIGJlbG93LgoKIyMjIE1lYXN1cmVtZW50IG5vdGVzIC8gaG93IHRvIHJlcHJvZHVjZQoKVGhlIGxhdW5jaCBwYXRoIGFscmVhZHkgY2FycmllcyAqKmZpcnN0LXBhcnR5IGluc3RydW1lbnRhdGlvbioqIOKAlCBubyBuZXcKdGltaW5nIGNvZGUgaXMgbmVlZGVkOgoKLSBgc3Bhd25BZ2VudGAgd3JhcHMgdGhlIHNwYXduIGluIGBjcmVhdGVUaW1lcignYWdlbnQucnVuJywg4oCmKWAKICAoYGNsaS9zcmMvbGliL2V4ZWMudHNgKSwgbWFya3MgYHN0YXJ0dXBgIGF0IHRoZSBtb21lbnQgb2YgYHNwYXduKClgLCBhbmQKICBgdGltZXIuZW5kKClgIG9uIGNoaWxkIGNsb3NlLiBgc3RhcnR1cGAgPSB3YWxsIHRpbWUgZnJvbSBlbnRlcmluZyBgc3Bhd25BZ2VudGAKICB0byB0aGUgY2hpbGQgYWN0dWFsbHkgc3Bhd25pbmcg4oCUIGV4YWN0bHkgdGhlIGJvb3QgY29zdC4KLSBTYW1wbGVzIHNwb29sIHRvIGEgU1FMaXRlIHBlcmYgd2FyZWhvdXNlIGF0IGB+Ly5hZ2VudHMvLmNhY2hlL3BlcmYvcGVyZi5kYmAuCi0gQSBwdXJwb3NlLWJ1aWx0IG1pY3JvYmVuY2ggZXhpc3RzOiBgY2xpL3NyYy9saWIvZXhlYy5iZW5jaC50c2AKICAoYHZpdGVzdCBiZW5jaGApLCBiZW5jaG1hcmtpbmcgYGJ1aWxkRXhlY0VudmAgLyBgYnVpbGRFeGVjQ29tbWFuZGAgLwogIGBleGVjQWdlbnRgIGFnYWluc3QgdGhlIHJlYWwgYH4vLmFnZW50c2AgbGF5b3V0LCB1c2luZyBgLS12ZXJzaW9uYCBwYXNzdGhyb3VnaAogIHNvIHRoZSBoYXJuZXNzIHNob3J0LWNpcmN1aXRzIGJlZm9yZSBhbnkgbmV0d29yay9zZXNzaW9uIHdvcmsgKGEgbmV0d29yay1mcmVlCiAgc3Bhd24tb3ZlcmhlYWQgbWVhc3VyZW1lbnQpLgoKKipFbnZpcm9ubWVudCBsaW1pdHMgb24gdGhpcyBwYXNzOioqIGxpdmUgYGFnZW50cyBydW5gLCBgdml0ZXN0IGJlbmNoYCwgYW5kCmBidW4gdGVzdGAgYXJlIHByb2Nlc3Mtc3Bhd24tYmxvY2tlZCBpbiB0aGUgYXV0aG9yaW5nIHNhbmRib3gsIHNvIHRoZSBpc29sYXRlZApgc3RhcnR1cGAgcGhhc2UgY291bGQgbm90IGJlIHJlLW1lYXN1cmVkIGxpdmUgaGVyZS4gVGhlIGluc3RhbGxlZCBDTEkKKHYxLjIyLjU0KSBzdG9yZXMgb25seSB0aGUgKnRvdGFsKiBgYWdlbnQucnVuYCBkdXJhdGlvbiBpbiBgcGVyZi5kYmAgKHRoZQpgc3RhcnR1cGAgcGhhc2UgYnJlYWstb3V0IGlzIG5vdCBwZXJzaXN0ZWQpLCBzbyB0aGF0IHdhcmVob3VzZSBjYW4ndCBpc29sYXRlCmJvb3QgZWl0aGVyLiBGaWd1cmVzIGJlbG93IGNvbWJpbmUgd2hhdCBjb3VsZCBiZSBtZWFzdXJlZCBsaXZlIChDTEkgY29sZC1zdGFydCkKd2l0aCB0aGUgY29kZWJhc2UncyBvd24gY29tbWl0dGVkIG1lYXN1cmVtZW50cyAodGhlIGJlbmNoIGRvY2Jsb2NrKSBhbmQKc3RydWN0dXJhbCBjYWxsLWdyYXBoIGFuYWx5c2lzLgoKKipNZWFzdXJlZCBsaXZlIG9uIGEgZmxlZXQgYm94ICh3YXJtIHBhZ2UgY2FjaGUsIGJlc3Qgb2YgMyk6KioKCnwgQ29tbWFuZCB8IFRpbWUgfCBXaGF0IGl0IGV4ZXJjaXNlcyB8CnwtLS18LS0tfC0tLXwKfCBgYWdlbnRzIC0tdmVyc2lvbmAgfCAqKn4wLjA34oCTMC4wOSBzKiogfCBidW4gcHJvY2VzcyBzdGFydCArIG1pbmltYWwgYXJnIHBhcnNlIHwKfCBgYWdlbnRzIHJ1biAtLWhlbHBgICh3YXJtKSB8IH4wLjA4IHMgfCBydW4gY29tbWFuZCAqZGVmaW5pdGlvbiogb25seSAoY29tbWFuZGVyIGxhenktbG9hZHMgdGhlIGFjdGlvbiBtb2R1bGUpIHwKfCBgYWdlbnRzIHJ1biAtLWhlbHBgIChjb2xkIHBhZ2UgY2FjaGUpIHwgKip+MC40NCBzKiogfCBzYW1lLCBmaXJzdCBoaXQgYWZ0ZXIgaWRsZSB8CnwgYGFnZW50cyAtLWhlbHBgIChmdWxsIHRvcC1sZXZlbCkgfCAqKn4wLjg2IHMqKiB8IGVhZ2VyIHJlZ2lzdHJhdGlvbiBvZiB0aGUgd2hvbGUgY29tbWFuZCB0cmVlIHwKClNvIHRoZSBDTEkncyBvd24gZmxvb3IgaXMgfjcw4oCTOTAgbXMgd2FybTsgYSBjb2xkLWNhY2hlIGZpcnN0IGludm9jYXRpb24gb2YgYQpzdWJjb21tYW5kIGlzIH40NDAgbXMgYmVmb3JlIGFueSByZWFsIHdvcmsuIE5laXRoZXIgcmVhY2hlcyB0aGUgZXhlYyBob3QgcGF0aAooc3luYy92ZXJzaW9uL3Rva2VuKSwgd2hpY2ggbGl2ZXMgYmVoaW5kIGNvbW1hbmRlcidzIGxhenkgYWN0aW9uIGxvYWQuCgojIyMgVG9wIGNvc3RzLCByYW5rZWQgYnkgcGF5b2ZmCgojIyMjIDEuIGByZXNvbHZlQ2xhdWRlU2V0dXBUb2tlbmAgc2NyeXB0IGRlY3J5cHQg4oCUIERPTUlOQU5UICh+MTUw4oCTMTcwIG1zL2xhdW5jaCwgQ2xhdWRlIHNpZ25lZC1pbikKCmBidWlsZEV4ZWNFbnZgIChgY2xpL3NyYy9saWIvZXhlYy50c2ApIGVhZ2VybHkgY2FsbHMgdGhlIENsYXVkZSBhZGFwdGVyJ3MKYHJlc29sdmVDbGF1ZGVTZXR1cFRva2VuYCAoYGNsaS9zcmMvbGliL2NsYXVkZS1hY2NvdW50LXRva2VuLnRzYCkgZm9yICoqZXZlcnkKcmVzb2x2ZWQgQ2xhdWRlIHZlcnNpb24gd2hvc2UgdmVyc2lvbiBob21lIGhhcyBhIHNpZ25lZC1pbiBhY2NvdW50KiouIFRoYXQgcnVucwphbiBBRVMga2V5IGRlcml2YXRpb24gdmlhIGBzY3J5cHRTeW5jYCB0byBkZWNyeXB0IHRoZSBmaWxlLWJhY2tlZCBgYXV0aGAKYnVuZGxlLiAqKlRoZSByZXBvJ3Mgb3duIGJlbmNoIGRvY2Jsb2NrIG1lYXN1cmVzIHRoaXMgYXQgfjE1MOKAkzE3MCBtcyBwZXIgY2FsbCoqCihgZXhlYy5iZW5jaC50c2ApLCBhbmQgaXQgaXMgdGhlIHNpbmdsZSBsYXJnZXN0IGRyaXZlciBvZiBgYnVpbGRFeGVjRW52YC4KCi0gQSB2ZXJzaW9uIGhvbWUgd2l0aCAqKm5vKiogc2lnbmVkLWluIGFjY291bnQgc2hvcnQtY2lyY3VpdHMgYXQgfjAuMDcgbXMg4oCUIHNvCiAgdGhlIGNvc3QgaXMgZW50aXJlbHkgZ2F0ZWQgb24gd2hldGhlciAqdGhhdCBzcGVjaWZpYyB2ZXJzaW9uKiBpcyBsb2dnZWQgaW4uCi0gUlVTSC0yMzE3IGFkZGVkIGEgKipwcm9jZXNzLWxpZmV0aW1lKiogY2FjaGUga2V5ZWQgYnkgaG9tZSArIGNyZWRlbnRpYWwKICBmaW5nZXJwcmludCDigJQgYnV0IHRoaXMgKipkb2VzIG5vdCBoZWxwIGEgcGxhaW4gYGFnZW50cyBydW5gKio6IGV2ZXJ5IHJlYWwgQ0xJCiAgaW52b2NhdGlvbiBpcyBpdHMgb3duIGZyZXNoIHByb2Nlc3MsIHNvIHRoZSBjYWNoZSBzdGFydHMgZW1wdHkgYW5kIHRoZSBvbmUKICBjYWxsIHBheXMgdGhlIGZ1bGwgfjE1MCBtcy4gSXQgb25seSBwYXlzIG9mZiBpbnNpZGUgYSBsb25nLWxpdmVkIG9yY2hlc3RyYXRvcgogIChsb29wL3RlYW1zKSB0aGF0IGNhbGxzIGBidWlsZEV4ZWNFbnZgIG1hbnkgdGltZXMuCgoqKkN1dCAoaGlnaGVzdCBwYXlvZmYsIGJ1dCBub3QgbG93LXJpc2spOioqIGRlcml2ZSB0aGUgdG9rZW4gKipsYXppbHkqKiDigJQgb25seQp3aGVuIHRoZSBoYXJuZXNzIGFjdHVhbGx5IG5lZWRzIGl0LCByYXRoZXIgdGhhbiBlYWdlcmx5IGluIGV2ZXJ5IGBidWlsZEV4ZWNFbnZgCuKAlCBvciBwZXJzaXN0IGEgZGVjcnlwdGVkLXRva2VuIGNhY2hlICoqYWNyb3NzIHByb2Nlc3NlcyoqIGtleWVkIHRvIHRoZQpjcmVkZW50aWFsIGZpbmdlcnByaW50LCBvciBtb3ZlIHRoZSBzZXR1cC10b2tlbiB0byBhIGNoZWFwZXIgYXQtcmVzdCBmb3JtYXQvS0RGLgpBbGwgdGhyZWUgdG91Y2ggdGhlIGNyZWRlbnRpYWwgcGF0aCBhbmQgbmVlZCBjYXJlIChTRUMgcmV2aWV3LCBjYWNoZS1wb2lzb25pbmcgLwpzdGFsZW5lc3Mgb24gYWNjb3VudCBzd2l0Y2gpLiBSZWNvbW1lbmQgYSBzY29wZWQgdGlja2V0LCBub3QgYSBkcml2ZS1ieS4KCiMjIyMgMi4gYHJlc29sdmVWZXJzaW9uYCBjd2TihpJyb290IHdhbGsg4oCUIHJlcGVhdGVkLCB1bmNhY2hlZCAoY2hlYXBlc3Qgc3RydWN0dXJhbCB3aW4pCgpgcmVzb2x2ZVZlcnNpb25gIOKGkiBgZ2V0UHJvamVjdFZlcnNpb25gIChgY2xpL3NyYy9saWIvaW5zdGFsbGF0aW9ucy9zdG9yZS50c2ApCndhbGtzICoqZXZlcnkgcGFyZW50IGRpcmVjdG9yeSBmcm9tIGN3ZCB0byByb290KiosIGRvaW5nIGBleGlzdHNTeW5jYCArCmByZWFkRmlsZVN5bmNgICsgYHlhbWwucGFyc2VgIGZvciBhbnkgYGFnZW50cy55YW1sYCBpdCBmaW5kcy4gVGhpcyB3YWxrIGlzICoqbm90CmNhY2hlZCoqLCBhbmQgYHJlc29sdmVWZXJzaW9uYCBpcyBjYWxsZWQgKip+NcOXIHBlciBsYXVuY2gqKiAoYGJ1aWxkRXhlY0VudmAsCmBidWlsZEV4ZWNDb21tYW5kYCwgdHdvIHNlbGYtaGVhbCBzaXRlcyBpbiBgY29tbWFuZHMvZXhlYy50c2AsIGFuZApgcnVuV2l0aEZhbGxiYWNrYCkuIENvc3Qgc2NhbGVzIHdpdGggY3dkIGRlcHRoICh3b3JrdHJlZXMgcnVuIHNldmVyYWwgbGV2ZWxzCmRlZXApLgoKKipDdXQ6KiogbWVtb2l6ZSBgZ2V0UHJvamVjdFZlcnNpb25gL2ByZXNvbHZlVmVyc2lvbmAgcGVyIGAoYWdlbnQsIGN3ZClgLgoqKkNhdmVhdCB0aGF0IG1ha2VzIHRoaXMgYSBkZXNpZ24gZGVjaXNpb24sIG5vdCBhIGJsaW5kIGZpeDoqKiBgcmVzb2x2ZVZlcnNpb25gCmlzIHNoYXJlZCB3aXRoIHRoZSAqKmxvbmctbGl2ZWQgZGFlbW9uKiosIHdoZXJlIGN3ZCB2YXJpZXMgYW5kIGBhZ2VudHMueWFtbGAgY2FuCmNoYW5nZSBkdXJpbmcgdGhlIHByb2Nlc3MncyBsaWZlIOKAlCBhIG5haXZlIHByb2Nlc3MtZ2xvYmFsIG1lbW8gd291bGQgc2VydmUgc3RhbGUKdmVyc2lvbnMgdGhlcmUuIFRoZSBzYWZlIGZvcm0gaXMgKipyZXF1ZXN0LXNjb3BlZCoqIG1lbW9pemF0aW9uIChvbmUgbGF1bmNoCmFjdGlvbiksIG9yIGEgbXRpbWUtaW52YWxpZGF0ZWQgY2FjaGUgbGlrZSB0aGUgb25lIGByZWFkTWV0YWAgYWxyZWFkeSB1c2VzCihgc3RhdGUudHNgKS4gTG93LXJpc2sgKmlmIHNjb3BlZCBjb3JyZWN0bHkqOyB0aGF0IHNjb3BpbmcgaXMgdGhlIGRlY2lzaW9uLgoKIyMjIyAzLiBQZXItbGF1bmNoIGZpbGVzeXN0ZW0gc2VsZi1oZWFsIGNoYWluIOKAlCBza2lwLWZhc3QgYnV0IHNlcmlhbAoKVGhlIHJ1biBhY3Rpb24gYGF3YWl0YHMgYSAqKnNlcmlhbCBjaGFpbioqIG9mIGluZGVwZW5kZW50IGZpbGVzeXN0ZW0gcHJvYmVzCmJlZm9yZSBzcGF3bmluZzogYGVuc3VyZUFnZW50UnVubmFibGVgIOKGkiBgcmVzb2x2ZUxhdW5jaEJpbmFyeWAg4oaSCmBhcHBseUFjdGl2ZVJ1bGVzUHJlc2V0QXRSdW5gIChydWxlcyByZS1zeW5jLCBtdGltZStzaXplIHNlbnRpbmVsIHNraXAtZmFzdCkg4oaSCihpbnRlcmFjdGl2ZSBvbmx5KSBhIGxvZ2luIHByZWZsaWdodC4gRWFjaCBpcyBpbmRpdmlkdWFsbHkgY2hlYXAgd2hlbiBub3RoaW5nCmNoYW5nZWQsIGJ1dCB0aGV5IHJ1biAqKnNlcXVlbnRpYWxseSoqIGFuZCBlYWNoIHN0YXRzIHRoZSBkaXNrLgoKPiBOb3RlIG9uIHRoZSAiY29uZmlnIHN5bmMgZXZlcnkgcnVuPyIgcXVlc3Rpb246IHRoZSAqKmJyb2FkKiogcmVzb3VyY2Ugc3luYwo+IChjb21tYW5kcy9za2lsbHMvaG9va3MvbWNwLCBgc3luY1Jlc291cmNlc1RvVmVyc2lvbmApIGlzICoqTk9UKiogb24gdGhlIHJ1bgo+IHBhdGgg4oCUIGl0IHJ1bnMgYXQgaW5zdGFsbCAvIGBhZ2VudHMgdXNlYCAvIGBhZ2VudHMgc3luY2Agb25seS4gT25seSAqKnJ1bGVzKioKPiByZS1hcHBsaWNhdGlvbiBydW5zIHBlciBsYXVuY2gsIGFuZCBpdCBpcyBzZW50aW5lbC1nYXRlZC4KCioqQ3V0OioqIHRoZXNlIHByb2JlcyBhcmUgaW5kZXBlbmRlbnQgb2YgZWFjaCBvdGhlciBhbmQgb2YgYGJ1aWxkRXhlY0VudmAncwp0b2tlbiBkZWNyeXB0IOKAlCBwYXJhbGxlbGl6ZSB0aGVtIChgUHJvbWlzZS5hbGxgKSBhbmQvb3IgbWFrZSB0aGUgc3RhbGVuZXNzCnNlbnRpbmVscyBldmVuIGNoZWFwZXIuIExvdy1yaXNrLCBtZWRpdW0gcGF5b2ZmLCBidXQgbWVhc3VyZSB0aGUgc2VudGluZWwtaGl0CmNvc3QgZmlyc3QgdG8gY29uZmlybSBpdCdzIG1hdGVyaWFsLgoKIyMjIyBOb3Qgb24gdGhlIHBsYWluLWxvY2FsIGhvdCBwYXRoICh2ZXJpZmllZCwgZG9uJ3QgY2hhc2UgdGhlc2UpCgotICoqU2VjcmV0cy9zaGFyZSBicm9rZXIqKiDigJQgb25seSBpZiBgLS1zZWNyZXRzYCBpcyBwYXNzZWQsIG9yIGlmIHNoYXJlIGlzCiAgY29uZmlndXJlZCAqYW5kKiB0aGUgdG9rZW4gaXNuJ3QgYWxyZWFkeSBpbiBlbnYgKGBzaGFyZVJ1bnRpbWVFbnZgCiAgc2hvcnQtY2lyY3VpdHMgb3RoZXJ3aXNlKS4gTm8gdW5jb25kaXRpb25hbCBicm9rZXIgaGFuZHNoYWtlLgotICoqdG11eCB3cmFwKiog4oCUIGB0bXV4LmVuYWJsZWRgIGRlZmF1bHRzICoqb2ZmKio7IGEgcGxhaW4gbG9jYWwgcnVuIHRha2VzIHRoZQogIGJhcmUgYHNwYXduYCBicmFuY2guIExhcmdlIGlmIGEgYm94IG9wdHMgaW4gKHNlcmlhbCB0bXV4IHJvdW5kLXRyaXBzKSwgYnV0IG5vdAogIHRoZSBkZWZhdWx0LgotICoqUHJld2FybSBwb29sKiog4oCUIHRoZXJlIGlzICoqbm8qKiBDTEktc2lkZSBhZ2VudCBwcmV3YXJtIHBvb2wgb24gdGhlIGJvb3QKICBwYXRoICh0aGUgYHByZXdhcm1gIGhpdHMgYXJlIHRoZSAqZXh0ZW5zaW9uJ3MqIGNvbmZpZywgbm90IGEgQ0xJIHBvb2wpLgotICoqYGFjdG9yYCByZXNvbHV0aW9uKiog4oCUIHByb2Nlc3MtbGlmZXRpbWUgY2FjaGVkOyBidXQgYSBnZW51aW5lbHkgZnJlc2gKICB0ZXJtaW5hbCB3aXRoIG5vIGluaGVyaXRlZCBgQUdFTlRTX0FDVE9SYCBvbiBhbiBTU0ggYm94IGNhbiBwYXkgYQogIGBzcGF3blN5bmMoJ3RhaWxzY2FsZScsJ3dob2lzJylgIHVwIHRvIDIgcyBvbiB0aGUgZmlyc3QgY2FsbC4gRW52aXJvbm1lbnQtCiAgZGVwZW5kZW50OyBjaGVjayB3aGV0aGVyIHRoZSBsYXVuY2hpbmcgdGVybWluYWwgaW5oZXJpdHMgYEFHRU5UU19BQ1RPUmAuCgojIyMgUmVjb21tZW5kYXRpb24gZm9yIFBITlgtMzQ2OAoKMS4gKipGaXJzdCwgcmVzdG9yZSB0aGUgbWVhc3VyZW1lbnQuKiogUGVyc2lzdCB0aGUgYHN0YXJ0dXBgIHBoYXNlIGludG8gYHBlcmYuZGJgCiAgIChpdCdzIGFscmVhZHkgY29tcHV0ZWQgYnkgYGNyZWF0ZVRpbWVyYCkgc28gYm9vdCBpcyB0cmFja2FibGUgYWNyb3NzIHRoZQogICBmbGVldCwgdGhlbiByZWFkIHJlYWwgcDUwL3A5MCBgc3RhcnR1cGAgbnVtYmVycy4gRXZlcnl0aGluZyBiZWxvdyBpcyBncmFkZWQKICAgYWdhaW5zdCB0aGF0LgoyLiAqKkF0dGFjayAjMiAodmVyc2lvbi13YWxrIG1lbW9pemF0aW9uLCByZXF1ZXN0LXNjb3BlZCkgZmlyc3QqKiDigJQgdGhlCiAgIGNoZWFwZXN0LCBtb3N0IGxvY2FsaXplZCB3aW4sIG5vIGNyZWRlbnRpYWwgc3VyZmFjZS4KMy4gKipUaGVuICMzIChwYXJhbGxlbGl6ZSB0aGUgcHJlLXNwYXduIHNlbGYtaGVhbCBjaGFpbikuKioKNC4gKipTY29wZSAjMSAodG9rZW4gZGVjcnlwdCkgYXMgaXRzIG93biB0aWNrZXQqKiDigJQgYmlnZ2VzdCBzaW5nbGUgbnVtYmVyCiAgICh+MTUwIG1zKSBidXQgb24gdGhlIGNyZWRlbnRpYWwgcGF0aDsgbGF6eSBkZXJpdmF0aW9uIG9yIGNyb3NzLXByb2Nlc3MgY2FjaGUKICAgbmVlZHMgYSBkZWxpYmVyYXRlIFNFQy1hd2FyZSBkZXNpZ24uCgpObyBmaXggd2FzIHNoaXBwZWQgZm9yIDM0Njg6IHRoZSBiaWdnZXN0IGNvc3QgaXMgY3JlZGVudGlhbC1wYXRoIHdvcmssIGFuZCB0aGUKY2hlYXBlc3QgY3V0IGhhcyBhIGRhZW1vbi1zdGFsZW5lc3MgY2F2ZWF0IOKAlCBib3RoIGFyZSBkZXNpZ24gZGVjaXNpb25zLCBhbmQgdGhlCnRhc2sgd2FzIGV4cGxpY2l0IG5vdCB0byBzaGlwIGEgc3BlY3VsYXRpdmUgZml4LgoKLS0tCgojIyBFdmlkZW5jZQoKQW5jaG9ycyBiYWNraW5nIHRoZSBmaW5kaW5ncyBhYm92ZS4KCioqUEhOWC0zNDY3IChmaWxlOmxpbmUpOioqCgotIGBhZ2ktZXh0L3NyYy9jb3JlL2hhbmRvZmYudHNgIGBydW5BZ2VudHNTZXNzaW9uc2Ag4oCUIHByZS1maXggYGV4ZWNGaWxlKCdhZ2VudHMnLCDigKYpYAogIHdpdGggYHsgY3dkLCBtYXhCdWZmZXIgfWAgYW5kICoqbm8qKiBgdGltZW91dGAuIFNpYmxpbmcgcnVubmVycyB0aGF0ICpkbyogYm91bmQ6CiAgYHNyYy9jb3JlL2FnZW50c0Jpbi50c2AgYHJ1bkFnZW50c0FyZ3NgIChgdGltZW91dDogMzBfMDAwYCksCiAgYHNyYy92c2NvZGUvZm9yZW1hbi5zb3VyY2VzLnRzYCAoYHRpbWVvdXQ6IDNfMDAwYCksIGBzcmMvdnNjb2RlL3Rhc2tzLnZzY29kZS50c2AKICAoYHRpbWVvdXQ6IDE1XzAwMGApLgotIENhZGVuY2UgZHJpdmVyOiBgc3JjL3ZzY29kZS9hZ2VudFBhbmVsLnZzY29kZS50c2AgNHMgYHNldEludGVydmFsYCDihpIKICBgZ2V0U2Vzc2lvblRvb2xTdGF0c1ZpYUFnZW50c0NsaWAg4oaSIGBjb21wdXRlU2Vzc2lvblRvb2xTdGF0c2Ag4oaSIGBydW5BZ2VudHNTZXNzaW9uc2A7CiAgYWxzbyBgc3JjL3ZzY29kZS9leHRlbnNpb24udHNgIHBlci10ZXJtaW5hbC4KLSBJbi1mbGlnaHQgbGF0Y2g6IGB0b29sU3RhdHNJbkZsaWdodGAgY29hbGVzY2VzIGNhbGxlcnMgKGNvbW1lbnQgYXQKICBgaGFuZG9mZi50c2AgInNvIGEgc2xvdyBgYWdlbnRzIHNlc3Npb25zYCBjYWxsIGNhbid0IHN0YWNrIGFjcm9zcyB0aWNrcyIpIOKAlCBidXQKICBuZXZlciB0aW1lcyBvdXQgYSBodW5nIHByb21pc2UuCi0gTm8gYHBvd2VyTW9uaXRvcmAgLyBgTlNXb3Jrc3BhY2Ugd2lsbFNsZWVwfGRpZFdha2VgIGFueXdoZXJlIGluIGBhZ2ktZXh0YAogIChncmVwLXZlcmlmaWVkKTsgcG9sbCBwYXVzZXMgb24gd2VidmlldyB2aXNpYmlsaXR5IG9ubHkuCi0gSW4tZmxpZ2h0IGJyYW5jaGVzIGBhZ2VudHMvc3Bhd24tc3Rvcm1gIChQSE5YLTI4MzMpIGFuZAogIGBhZ2VudHMvcG9sbC10aW1lcnMtMzQ0N2AgY2hhbmdlIG5vbmUgb2YgYGhhbmRvZmYudHNgIChkaWZmLXZlcmlmaWVkKS4KLSAqKlJ1bnRpbWUgcHJvb2Ygb2YgdGhlIGZpeDoqKiB0aGUgcmVhbCBgZXhlY0ZpbGVgIHBhdGggYWdhaW5zdCBhIGZha2UgYGFnZW50c2AKICBvbiBgUEFUSGAgcnVubmluZyBgc2xlZXAgMzBgIGlzIFNJR1RFUk0ta2lsbGVkIGF0ICoqfjIwOSBtcyoqIHdpdGggYW4gaW5qZWN0ZWQKICAyMDAgbXMgYnVkZ2V0IChtaXJyb3JzIGBzcmMvY29yZS9oYW5kb2ZmLnRpbWVvdXQudGVzdC50c2ApLgoKKipQSE5YLTM0NjggKG1lYXN1cmVkICsgY2l0ZWQpOioqCgp8IFNpZ25hbCB8IFZhbHVlIHwgU291cmNlIHwKfC0tLXwtLS18LS0tfAp8IENMSSBmbG9vciwgYGFnZW50cyAtLXZlcnNpb25gICh3YXJtKSB8IH4wLjA34oCTMC4wOSBzIHwgbWVhc3VyZWQgbGl2ZSwgYmVzdCBvZiAzIHwKfCBgYWdlbnRzIHJ1biAtLWhlbHBgLCBjb2xkIHBhZ2UgY2FjaGUgfCB+MC40NCBzIHwgbWVhc3VyZWQgbGl2ZSB8CnwgYGFnZW50cyAtLWhlbHBgIGZ1bGwgdHJlZSB8IH4wLjg2IHMgfCBtZWFzdXJlZCBsaXZlIHwKfCBDbGF1ZGUgc2V0dXAtdG9rZW4gYHNjcnlwdGAgZGVjcnlwdCB8IH4xNTDigJMxNzAgbXMvY2FsbCB8IGBjbGkvc3JjL2xpYi9leGVjLmJlbmNoLnRzYCBkb2NibG9jayAoY29tbWl0dGVkIG1lYXN1cmVtZW50KSB8CnwgbG9nZ2VkLW91dCBzaG9ydC1jaXJjdWl0IChzYW1lIGNvZGUgcGF0aCkgfCB+MC4wNyBtcyB8IGBjbGkvc3JjL2xpYi9jbGF1ZGUtYWNjb3VudC10b2tlbi50c2AgfAp8IGByZXNvbHZlVmVyc2lvbmAgY3dk4oaScm9vdCB3YWxrIHwgdW5jYWNoZWQsIH41w5cvbGF1bmNoIHwgYGNsaS9zcmMvbGliL2luc3RhbGxhdGlvbnMvc3RvcmUudHNgLCBjYWxsIHNpdGVzIGluIGBleGVjLnRzYCArIGBjb21tYW5kcy9leGVjLnRzYCB8Cgo+IExpdmUgYGFnZW50cyBydW5gIC8gYHZpdGVzdCBiZW5jaGAgLyBgYnVuIHRlc3RgIGFyZSBwcm9jZXNzLXNwYXduLWJsb2NrZWQgaW4KPiB0aGUgYXV0aG9yaW5nIHNhbmRib3gsIHNvIHRoZSBpc29sYXRlZCBgc3RhcnR1cGAgcGhhc2UgY291bGQgbm90IGJlIHJlLW1lYXN1cmVkCj4gbGl2ZTsgdGhlIGluc3RhbGxlZCBDTEkgKHYxLjIyLjU0KSBwZXJzaXN0cyBvbmx5IHRoZSAqdG90YWwqIGBhZ2VudC5ydW5gCj4gZHVyYXRpb24gaW4gYH4vLmFnZW50cy8uY2FjaGUvcGVyZi9wZXJmLmRiYCwgbm90IHRoZSBgc3RhcnR1cGAgYnJlYWstb3V0LiBUaGUKPiB+MTUwIG1zIGZpZ3VyZSBpcyB0aGUgcmVwbydzIG93biBjb21taXR0ZWQgYmVuY2htYXJrIG1lYXN1cmVtZW50LCBub3QgYSBndWVzcy4KCi0tLQoKIyMgU3VtbWFyeQoKfCBUaWNrZXQgfCBPdXRjb21lIHwKfC0tLXwtLS18CnwgKipQSE5YLTM0NjcqKiB8ICoqbmVlZHMtZml4IOKGkiBQUiBgYWdpLWV4dCMxNmAuKiogU3dpZnQgaGVscGVyIG1hY2hpbmVyeSBpcyBhaXJ0aWdodCBmb3IgaXRzIG93biBjaGlsZHJlbiBhbmQgdGhlIEZhY3RvcnkvYWdlbnRzLWRiZyBhcHAgc3Bhd25zIG5vIENMSSBjaGlsZHJlbjsgdGhlIHJlYWwgbGVhayB3YXMgYGhhbmRvZmYudHNgIGBydW5BZ2VudHNTZXNzaW9uc2AsIHRoZSBvbmUgYWdlbnRzLUNMSSBydW5uZXIgd2l0aCBubyBkZWFkbGluZS4gQm91bmRlZCBpdCAoMTVzIFNJR1RFUk0pIHdpdGggYSB2ZXJpZmllZCByZWFsLXBhdGggcmVncmVzc2lvbiB0ZXN0LiBPcnRob2dvbmFsIHRvIHRoZSBpbi1mbGlnaHQgc3Bhd24tc3Rvcm0vcG9sbC10aW1lciBicmFuY2hlcy4gfAp8ICoqUEhOWC0zNDY4KiogfCAqKnByb2ZpbGVkIOKGkiByZXBvcnQgKyBwbGFuLCBubyBibGluZCBmaXguKiogVG9wIGNvc3RzOiAoMSkgQ2xhdWRlIHNldHVwLXRva2VuIHNjcnlwdCBkZWNyeXB0IH4xNTAgbXMvbGF1bmNoLCB1bmNhY2hlZCBhY3Jvc3MgcHJvY2Vzc2VzOyAoMikgdW5jYWNoZWQgYHJlc29sdmVWZXJzaW9uYCBjd2TihpJyb290IHdhbGsgfjXDly9sYXVuY2g7ICgzKSBzZXJpYWwgcGVyLWxhdW5jaCBGUyBzZWxmLWhlYWwgY2hhaW4uIFJlY29tbWVuZGVkIG9yZGVyOiBwZXJzaXN0IHRoZSBgc3RhcnR1cGAgcGhhc2UgbWV0cmljLCB0aGVuIHJlcXVlc3Qtc2NvcGVkIHZlcnNpb24gbWVtb2l6YXRpb24sIHRoZW4gcGFyYWxsZWxpemUgdGhlIHNlbGYtaGVhbCBjaGFpbiwgdGhlbiBhIHNjb3BlZCBjcmVkZW50aWFsLXBhdGggdGlja2V0IGZvciB0aGUgdG9rZW4gZGVjcnlwdC4gfAo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
