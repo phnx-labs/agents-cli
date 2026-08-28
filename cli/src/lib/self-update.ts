@@ -356,6 +356,56 @@ export function deriveGlobalPrefix(packageRoot: string): string {
 }
 
 /**
+ * Sweep npm arborist's "retired" staging dir for `packageRoot` before a
+ * reify (PHNX-3393).
+ *
+ * npm (@npmcli/arborist) reifies an install by first renaming the tree it is
+ * about to replace out of the way into a sibling directory —
+ * `retirePath(from)` in arborist's own source names it
+ * `.<basename>-<8-char sha1 hash of the full path>`, sibling to `from` — then
+ * stages the new tree and renames it into place. Because the hash is a pure
+ * function of `packageRoot`'s path, that staging path is IDENTICAL on every
+ * reify of this install. A crash between the retire-rename and the final
+ * rename (SIGKILL, a killed terminal, a box that lost power mid-upgrade)
+ * leaves that exact directory behind, non-empty. `rename(2)` cannot replace a
+ * non-empty directory, so every subsequent upgrade's reify fails ENOTEMPTY at
+ * the same path forever — nothing about a plain retry ever clears it.
+ *
+ * Removing any stale `.<basename>-*` sibling before install self-heals this:
+ * npm re-stages cleanly once the collision is gone. Matches only the
+ * retire-path shape (a dot-prefixed sibling starting with the package's own
+ * basename), so an unrelated dotfile in the same directory is left alone.
+ * Best-effort per entry: one unremovable sibling must not block the rest.
+ */
+export function sweepStaleInstallStaging(packageRoot: string): string[] {
+  const resolved = path.resolve(packageRoot);
+  const dir = path.dirname(resolved);
+  const base = path.basename(resolved);
+  const escapedBase = base.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const stagingPattern = new RegExp(`^\\.${escapedBase}-[a-zA-Z0-9]+$`);
+
+  let entries: string[];
+  try {
+    entries = fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+
+  const swept: string[] = [];
+  for (const entry of entries) {
+    if (!stagingPattern.test(entry)) continue;
+    const full = path.join(dir, entry);
+    try {
+      fs.rmSync(full, { recursive: true, force: true });
+      swept.push(full);
+    } catch {
+      /* best-effort — one unremovable stager must not block the rest */
+    }
+  }
+  return swept;
+}
+
+/**
  * Install `spec` into an explicit global prefix. `--prefix` pins the
  * destination no matter which npm binary PATH resolves. `--ignore-scripts`
  * skips lifecycle scripts; the caller refreshes alias shims afterwards via

@@ -18,7 +18,8 @@ export type HealCheckId =
   | 'hook-manifest'
   | 'shims'
   | 'shadowing'
-  | 'path';
+  | 'path'
+  | 'install-staging';
 
 /** When the daemon schedules a check. */
 export type HealCadence = 'startup' | 'frequent' | 'periodic';
