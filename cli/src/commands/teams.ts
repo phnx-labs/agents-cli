@@ -1579,7 +1579,7 @@ export function registerTeamsCommands(program: Command): void {
     .alias('ls')
     .description('List your teams, most recent activity first')
     .option('-a, --agent <agent>', 'Filter: only teams with this agent (e.g. claude or claude@2.1.112)')
-    .option('--status <status>', 'Filter: only teams with this status (working, done, failed, or empty)')
+    .option('--status <status>', 'Filter: only teams with this status (working, done, stranded, failed, or empty)')
     .option('--since <time>', 'Filter: teams active after this time (e.g. "2h", "7d", or ISO date)')
     .option('--until <time>', 'Filter: teams active before this time (e.g. "30d", or ISO date)')
     .option('-n, --limit <n>', 'Show at most this many teams (default: 20)', '20')
