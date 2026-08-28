@@ -20,7 +20,31 @@ function makeWorker(opts: {
         return {
           body: item.body,
           httpMetadata: item.httpMetadata ?? {},
+          async text() {
+            return item.body;
+          },
         };
+      },
+      // Mirror R2's delimited list: `delimitedPrefixes` are the distinct next-path
+      // segments under `prefix`, which is exactly how the worker enumerates devices.
+      async list(opts: { prefix?: string; delimiter?: string }) {
+        const prefix = opts?.prefix ?? '';
+        const delimiter = opts?.delimiter;
+        const objects: Array<{ key: string }> = [];
+        const delimitedPrefixes = new Set<string>();
+        for (const key of bucket.keys()) {
+          if (!key.startsWith(prefix)) continue;
+          if (delimiter) {
+            const rest = key.slice(prefix.length);
+            const idx = rest.indexOf(delimiter);
+            if (idx >= 0) {
+              delimitedPrefixes.add(prefix + rest.slice(0, idx + 1));
+              continue;
+            }
+          }
+          objects.push({ key });
+        }
+        return { objects, delimitedPrefixes: Array.from(delimitedPrefixes), truncated: false };
       },
       async put(
         key: string,
@@ -204,6 +228,109 @@ describe('traces worker — BYO static write-token namespace enforcement', () =>
       method: 'PUT',
       headers: { authorization: 'Bearer secret', 'content-type': 'application/json' },
       body: '{}',
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+// PHNX-3397: the CLI writes per-device shards (<userId>/<hostname>/…) but the
+// console asks for the "all agents" view (<userId>/all/…). `all` is not stored;
+// the worker synthesizes it by listing device prefixes and merging on read.
+describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
+  const shard = (device: string, over: Record<string, unknown> = {}) => ({
+    schema: 1,
+    device,
+    owner: userId,
+    syncedAt: 1000,
+    stats: { sessionsImported: 10, medianMs: 100, p90Ms: 900, needAttention: 3, toolErrorRate: 0.05 },
+    needsAttention: [{ id: `s-${device}`, title: 't', device, severity: 5, flags: [] }],
+    topics: [{ key: 'code', label: 'Code', count: 4, group: 'code' }],
+    failures: { byToolError: [{ tool: 'Bash', desc: 'x', cause: 'real', count: 2 }], byCause: { real: 2, guard: 0, hook: 0 } },
+    failurePatterns: [{ label: 'Bash: x', wastedMs: 60000, count: 2 }],
+    wastedMsTotal: 120000,
+    latency: { firstToolMs: { p50: 100, p90: 900, p99: 5000, max: 9000 } },
+    bucketHistory: [],
+    driftSignals: [],
+    ...over,
+  });
+
+  it('single device → exact passthrough, relabelled device:"all"', async () => {
+    const bucket = new Map([
+      [`${userId}/zion/index.json`, { body: JSON.stringify(shard('zion')) }],
+    ]);
+    const w = makeWorker({ verifyResult: { userId, email: '' }, bucket });
+    const res = await w.fetch(`https://traces/${userId}/all/index.json`, {
+      headers: { authorization: 'Bearer tok' },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.device).toBe('all');
+    expect(body.stats.sessionsImported).toBe(10);
+    expect(body.wastedMsTotal).toBe(120000);
+    expect(body.failurePatterns).toHaveLength(1);
+    expect(body.latency.firstToolMs.p50).toBe(100);
+  });
+
+  it('two devices → summed counts, concatenated lists, summed wasted time', async () => {
+    const bucket = new Map([
+      [`${userId}/zion/index.json`, { body: JSON.stringify(shard('zion')) }],
+      [`${userId}/mac/index.json`, { body: JSON.stringify(shard('mac', { syncedAt: 2000 })) }],
+    ]);
+    const w = makeWorker({ verifyResult: { userId, email: '' }, bucket });
+    const res = await w.fetch(`https://traces/${userId}/all/index.json`, {
+      headers: { authorization: 'Bearer tok' },
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.device).toBe('all');
+    expect(body.stats.sessionsImported).toBe(20);
+    expect(body.stats.needAttention).toBe(6);
+    expect(body.wastedMsTotal).toBe(240000);
+    expect(body.needsAttention).toHaveLength(2);
+    expect(body.topics.find((t: { key: string }) => t.key === 'code').count).toBe(8);
+    expect(body.syncedAt).toBe(2000); // freshest device wins for the timestamp
+  });
+
+  it('all/sessions/<id> → served from whichever device owns it', async () => {
+    const bucket = new Map([
+      [`${userId}/zion/index.json`, { body: JSON.stringify(shard('zion')) }],
+      [`${userId}/mac/index.json`, { body: JSON.stringify(shard('mac')) }],
+      [`${userId}/mac/sessions/abc.json`, { body: '{"id":"abc","device":"mac"}' }],
+    ]);
+    const w = makeWorker({ verifyResult: { userId, email: '' }, bucket });
+    const res = await w.fetch(`https://traces/${userId}/all/sessions/abc.json`, {
+      headers: { authorization: 'Bearer tok' },
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ id: 'abc', device: 'mac' });
+  });
+
+  it('all/sessions/<id> for a missing id → 404', async () => {
+    const bucket = new Map([
+      [`${userId}/zion/index.json`, { body: JSON.stringify(shard('zion')) }],
+    ]);
+    const w = makeWorker({ verifyResult: { userId, email: '' }, bucket });
+    const res = await w.fetch(`https://traces/${userId}/all/sessions/nope.json`, {
+      headers: { authorization: 'Bearer tok' },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('no synced devices → 404 (not a fabricated empty shard)', async () => {
+    const w = makeWorker({ verifyResult: { userId, email: '' }, bucket: new Map() });
+    const res = await w.fetch(`https://traces/${userId}/all/index.json`, {
+      headers: { authorization: 'Bearer tok' },
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it('aggregation still enforces owner — foreign bearer on /all → 403', async () => {
+    const bucket = new Map([
+      [`${userId}/zion/index.json`, { body: JSON.stringify(shard('zion')) }],
+    ]);
+    const w = makeWorker({ verifyResult: { userId: otherUserId, email: '' }, bucket });
+    const res = await w.fetch(`https://traces/${userId}/all/index.json`, {
+      headers: { authorization: 'Bearer tok' },
     });
     expect(res.status).toBe(403);
   });
