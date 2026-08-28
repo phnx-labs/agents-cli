@@ -46,12 +46,15 @@ Surface delta since this plan was written: **76 → 67 top-level groups** (548 c
 `cli-surface-consolidate` wave (RUSH-2579/2580/2581/2692/2864/2932/2984/2989/3001/3079),
 all merged.
 
-**What's left** — nothing on this plan; two follow-ups it deferred as out-of-scope:
+**What's left** — nothing on this plan; two deferred follow-ups, now resolved:
 
-1. Empty-`fleet.devices` no-op still prints a quiet "No target devices" instead of an
-   actionable "fleet.devices is empty — set devices: all or name boxes."
-2. Companion `.agents` (ex-`.agents-system`) audit for any hook/skill/rule still
-   teaching `agents apply` / `agents beta`.
+1. Empty-`fleet.devices` no-op still prints a quiet "No target devices" (`apply.ts:227`)
+   instead of an actionable "fleet.devices is empty — set devices: all or name boxes."
+   **Filed as [PHNX-3422](https://linear.app/getrush/issue/PHNX-3422)** (2026-08-28).
+2. Companion `.agents` (ex-`.agents-system`) audit for any hook/skill/rule still teaching
+   `agents apply` / `agents beta`. **Audited `origin/main` 2026-08-28 — clean, no stale
+   root-spelling teaching found**, so no ticket (per the "state it when the audit finds no
+   consumer" convention).
 
 Full reconciliation report: `.agents/artifacts/2026-08-28/cli-surface-progress/`.
 
@@ -312,4 +315,5 @@ agents run spark "hello"
 
 - [RUSH-2981](https://linear.app/getrush/issue/RUSH-2981) — **done**; shipped in `2aaf8573a` (2026-08-21): nest beta under `setup`, retire top-level `apply`, drop `harness login`/`logout`
 - [RUSH-2965](https://linear.app/getrush/issue/RUSH-2965) — the alias precedent (done)
+- [PHNX-3422](https://linear.app/getrush/issue/PHNX-3422) — follow-up: actionable empty-`fleet.devices` hint (deferred from this plan's Risks)
 - Reconciliation report (2026-08-28): `.agents/artifacts/2026-08-28/cli-surface-progress/cli-surface-progress.md`
