@@ -885,7 +885,7 @@ describe('formatUsageSummary expected window slots', () => {
     capturedAt: new Date(NOW),
   };
 
-  it('renders a red missing session slot and keeps the week column aligned', () => {
+  it('renders a neutral missing session slot and keeps the week column aligned', () => {
     const weekOnly = formatUsageSummary(null, {
       ...base,
       windows: [{ key: 'week' as const, label: 'Week', shortLabel: 'W', usedPercent: 81, resetsAt: null, windowMinutes: 10080 }],
@@ -898,7 +898,7 @@ describe('formatUsageSummary expected window slots', () => {
       ],
     }, 3, { expectedWindows });
 
-    expect(weekOnly).toContain('S: █████ unavailable');
+    expect(weekOnly).toContain('S: ┄┄┄┄┄ unavailable');
     expect(weekOnly.indexOf('W:')).toBe(both.indexOf('W:'));
   });
 
@@ -908,7 +908,7 @@ describe('formatUsageSummary expected window slots', () => {
       windows: [{ key: 'session' as const, label: 'Session', shortLabel: 'S', usedPercent: 0, resetsAt: null, windowMinutes: 300 }],
     }, 3, { expectedWindows });
     expect(rendered).toContain('S: ░░░░░ 0%');
-    expect(rendered).toContain('W: █████ unavailable');
+    expect(rendered).toContain('W: ┄┄┄┄┄ unavailable');
   });
 });
 
