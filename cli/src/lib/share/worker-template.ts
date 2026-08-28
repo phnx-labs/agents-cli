@@ -73,11 +73,63 @@ import { fileURLToPath } from 'node:url';
  * until its owner re-runs `agents artifacts share update`. Cosmetic renames are not
  * worth that; change this text only alongside a real Worker behavior change.
  */
-let bundledWorkerScript: string | undefined;
+export interface WorkerModule {
+  name: string;
+  contentType: 'application/wasm';
+  contents: Uint8Array<ArrayBuffer>;
+}
 
-/** Bundle the Worker and its renderer into one uploadable ES module. */
+export interface WorkerBundle {
+  script: string;
+  modules: WorkerModule[];
+}
+
+let bundledWorker: WorkerBundle | undefined;
+let nodeWorkerScript: string | undefined;
+
+/** Bundle the Worker renderer into an ES module plus workerd-compiled WASM modules. */
+export function renderWorkerBundle(): WorkerBundle {
+  if (bundledWorker) return bundledWorker;
+  const result = buildSync({
+    stdin: {
+      contents: renderWorkerSource(),
+      loader: 'js',
+      resolveDir: dirname(fileURLToPath(import.meta.url)),
+      sourcefile: 'agents-share-worker.js',
+    },
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2022',
+    write: false,
+    outdir: 'worker-bundle',
+    assetNames: '[name]-[hash]',
+    minify: true,
+    // Fonts are plain data and can live in JavaScript. WASM must remain a
+    // compiled module: workerd deliberately forbids runtime code generation,
+    // so esbuild's `binary` loader produces a bundle that works in Node but
+    // throws "Wasm code generation disallowed by embedder" in Cloudflare.
+    loader: { '.wasm': 'copy', '.woff': 'binary' },
+  });
+  const script = result.outputFiles.find((output) => output.path.endsWith('.js'));
+  if (!script) throw new Error('Worker bundling produced no JavaScript output.');
+  const modules = result.outputFiles
+    .filter((output) => output.path.endsWith('.wasm'))
+    .map((output) => ({
+      name: output.path.split('/').pop()!,
+      contentType: 'application/wasm' as const,
+      contents: new Uint8Array(output.contents),
+    }));
+  if (modules.length !== 2) {
+    throw new Error(`Worker bundling produced ${modules.length} WASM modules; expected yoga and resvg.`);
+  }
+  bundledWorker = { script: script.text, modules };
+  return bundledWorker;
+}
+
+/** Single-file representation for direct Node tests, which cannot import compiled WASM modules. */
 export function renderWorkerScript(): string {
-  if (bundledWorkerScript) return bundledWorkerScript;
+  if (nodeWorkerScript) return nodeWorkerScript;
   const result = buildSync({
     stdin: {
       contents: renderWorkerSource(),
@@ -94,9 +146,9 @@ export function renderWorkerScript(): string {
     loader: { '.wasm': 'binary', '.woff': 'binary' },
   });
   const output = result.outputFiles[0];
-  if (!output) throw new Error('Worker bundling produced no JavaScript output.');
-  bundledWorkerScript = output.text;
-  return bundledWorkerScript;
+  if (!output) throw new Error('Worker test bundling produced no JavaScript output.');
+  nodeWorkerScript = output.text;
+  return nodeWorkerScript;
 }
 
 /** Unbundled Worker source. Kept separate so esbuild can resolve npm modules. */
@@ -493,13 +545,22 @@ export default {
 
             const pageHtml = await page.text();
             const meta = page.customMetadata || {};
-            const png = await hooks.renderOgCard({
-              title: meta['og-title'] || extractHtmlMeta(pageHtml, 'title') || meta.label || segments[1],
-              description: meta['og-description'] || extractHtmlMeta(pageHtml, 'description') || '',
-              handle: segments[0],
-              visibility: pageVisibility,
-              orgDomain: meta.org_domain || '',
-            });
+            let png;
+            try {
+              png = await hooks.renderOgCard({
+                title: meta['og-title'] || extractHtmlMeta(pageHtml, 'title') || meta.label || segments[1],
+                description: meta['og-description'] || extractHtmlMeta(pageHtml, 'description') || '',
+                handle: segments[0],
+                visibility: pageVisibility,
+                orgDomain: meta.org_domain || '',
+              });
+            } catch (error) {
+              const detail = error instanceof Error ? error.message : String(error);
+              return new Response('OG card render failed: ' + detail, {
+                status: 500,
+                headers: { 'content-type': 'text/plain; charset=utf-8' },
+              });
+            }
             const beforeStore = await env.BUCKET.get(pagePath);
             if (!beforeStore || beforeStore.etag !== page.etag) { existingCover = null; continue; }
             await env.BUCKET.put(path, png, {

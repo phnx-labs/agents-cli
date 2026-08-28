@@ -34,6 +34,13 @@ workspace-domain Google account, never a personal `gmail.com`. The full model is
 [`docs/share.md`](docs/share.md); the publication boundary is
 [`docs/observability.md`](docs/observability.md).
 
+The managed OG renderer is a multipart module-Worker deployment: JavaScript and
+font bytes live in the main bundle, while Yoga and resvg are uploaded as compiled
+WASM modules (`renderWorkerBundle` → `deployWorker`). Do not inline WASM with
+esbuild's `binary` loader: Node permits the resulting runtime compilation but
+workerd rejects it. The real-workerd render in `worker-template.integration.test.ts`
+is the contract test for this boundary.
+
 `agents artifacts share list` mirrors the public gallery by default. Use
 `--scope unlisted|me|org` or `--all` (alias for `--scope all`) to list the
 authenticated owner's hidden pages; the CLI forwards the owner's bearer and a
