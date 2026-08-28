@@ -683,7 +683,7 @@ function configureInsightsCommand(cmd: Command): void {
       Two paths under one verb:
         bare \`agents insights\`     — transcript behaviour (tools, friction, rhythm, by account)
         \`agents insights mix\`      — cheap counters from sessions.db + usage.db
-      Latency is \`agents perf\` (not mix). Quota is \`agents view\`. Spend is
+      Latency is \`agents insights perf\` (not mix). Quota is \`agents view\`. Spend is
       \`agents insights cost\`; shipped output is \`agents insights output\`. Skill/slash popularity
       is \`agents sessions stats\`. Former top-level \`agents trends\` is \`agents insights mix\`.
       One recipe is \`agents insights mix <recipe>\` (e.g. \`harness-mix\`); \`--list\` names them.

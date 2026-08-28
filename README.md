@@ -11,7 +11,7 @@
   <a href="https://github.com/phnx-labs/agi-cli"><img src="https://img.shields.io/badge/github-phnx--labs%2Fagi--cli-blue?style=flat-square" alt="github" /></a>
 </p>
 
-**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents perf` / `agents insights`, fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
+**A framework for running a distributed agent factory.** Dispatch Claude, Codex, Antigravity, Grok, and more across your own machines, in parallel, on your existing subscriptions. Measure every run with `agents insights` (latency lives at `agents insights perf`), fold what you learn back into `AGENTS.md` and skills, then put the loop on a schedule with routines and monitors. Spawn parallel teams in isolated terminals or dispatch to the cloud for a PR. Watch live state across the fleet, nudge stalled runs, and message agents mid-flight. Store secrets behind Touch ID, drive real browsers and Electron apps, and steer the whole fleet from a menu bar — all from one CLI.
 
 <p align="center">
   <a href="https://github.com/anthropics/claude-code" title="Claude Code"><img src="assets/harnesses/anthropic.svg" height="32" alt="Claude Code" /></a>
@@ -110,7 +110,7 @@ agents teams add checkout codex  "Write tests for the new code" --name qa --afte
 agents teams start checkout --watch
 
 # Measure what happened -- latency, friction, dead-weight skills
-agents perf commands --days 7      # slowest CLI entrypoints
+agents insights perf commands --days 7   # slowest CLI entrypoints
 agents insights --since 30d        # friction, harness comparison, ranked actions
 
 # Fold the lesson back into the harness -- every agent picks it up next run
@@ -125,7 +125,7 @@ agents routines add nightly-payments-audit \
 agents menubar setup
 ```
 
-`agents perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); monitors fire it on a change instead of a clock ([Monitors](#monitors)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
+`agents insights perf` reads a disposable warehouse at `~/.agents/.cache/perf/perf.db` -- hook, command, and run timing rollups, deletable any time. `agents insights` (alias `agents sessions insights`) is deterministic and offline: it caches per-session facets, compares harnesses, and ranks actions by evidence count -- no model call unless you pass `--narrative`. Routines put any of this on a cron ([Routines](#routines)); monitors fire it on a change instead of a clock ([Monitors](#monitors)); the menu bar is the always-on control surface for the fleet these commands drive ([Menu bar](#menu-bar)).
 
 ---
 
