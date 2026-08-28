@@ -27,7 +27,7 @@ const tmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
 const TEST_HOME = fs.mkdtempSync(path.join(tmpBase, 'agents-pty-test-'));
 process.env.HOME = TEST_HOME;
 
-const { runPtyServer, captureProcessStartTime, getSocketPath, derivePtyEndpoint, buildSentinelCommand } = await import('../pty-server.js');
+const { runPtyServer, captureProcessStartTime, getSocketPath, derivePtyEndpoint, buildSentinelCommand, describeNativePtyLoadFailure } = await import('../pty-server.js');
 
 // The multiarch fork BAKES Linux prebuilds (glibc + musl, all Node ABIs incl.
 // 22/24) into its npm tarball, so the native binary is present on Linux even
@@ -185,6 +185,64 @@ describe('buildSentinelCommand (shell-aware exec wrapper)', () => {
       .toBe('Get-ChildItem; echo "__AGENTS_PTY_DONE__:$LASTEXITCODE"');
     expect(buildSentinelCommand('pwsh', 'Get-ChildItem'))
       .toBe('Get-ChildItem; echo "__AGENTS_PTY_DONE__:$LASTEXITCODE"');
+  });
+});
+
+// Regression guard for PHNX-2740: the native binding must actually LOAD and
+// spawn on the platform running the suite. The Linux prebuilds are baked into
+// the npm tarball for every Node ABI, so on a Linux runner this is a hard
+// requirement — a bump that drops the ABI the runner uses (or a broken install)
+// fails here instead of silently skipping. It also exercises the real critical
+// path (spawn -> onData -> onExit), no mocks. On macOS/Windows the prebuild is
+// fetched at install and CI does not run those, so we only assert-or-skip there.
+describe('native pty binding loads and spawns on this platform', () => {
+  it.skipIf(process.platform !== 'linux')('LINUX: loads the binding and round-trips a real shell', async () => {
+    const mod: any = await import('@homebridge/node-pty-prebuilt-multiarch');
+    const nodePty = mod.default?.spawn ? mod.default : mod;
+    expect(typeof nodePty.spawn).toBe('function');
+
+    const output = await new Promise<string>((resolve, reject) => {
+      const proc = nodePty.spawn(process.env.SHELL || 'bash', ['-c', 'echo PTY_LOADS_OK'], {
+        name: 'xterm-256color', cols: 80, rows: 24, cwd: TEST_HOME, env: process.env,
+      });
+      let buf = '';
+      proc.onData((d: string) => { buf += d; });
+      proc.onExit(() => resolve(buf));
+      setTimeout(() => reject(new Error('pty spawn did not exit in time')), 5000);
+    });
+    expect(output).toContain('PTY_LOADS_OK');
+  }, 10_000);
+
+  it.skipIf(process.platform === 'linux')('non-Linux: binding must load if present (fetched at install)', async () => {
+    if (!nodePtyLoadable) return; // prebuild not fetched in this env — nothing to assert
+    const mod: any = await import('@homebridge/node-pty-prebuilt-multiarch');
+    const nodePty = mod.default?.spawn ? mod.default : mod;
+    expect(typeof nodePty.spawn).toBe('function');
+  });
+});
+
+describe('describeNativePtyLoadFailure (actionable, not a raw MODULE_NOT_FOUND)', () => {
+  it('names the platform, Node ABI, a remediation, and the underlying error', () => {
+    const err = Object.assign(new Error("Cannot find module '../build/Debug/pty.node'"), {
+      code: 'MODULE_NOT_FOUND',
+    });
+    const lines = describeNativePtyLoadFailure(err);
+    const text = lines.join('\n');
+
+    // Platform + ABI so a user can tell whether their Node is simply too new.
+    expect(text).toContain(`${process.platform}-${process.arch}`);
+    expect(text).toContain(`ABI ${process.versions.modules}`);
+    // A concrete fix, not just "install it".
+    expect(text).toContain('npm rebuild @homebridge/node-pty-prebuilt-multiarch');
+    // The real error is preserved for debugging, never swallowed.
+    expect(text).toContain("Cannot find module '../build/Debug/pty.node'");
+    // Never the bare failure with no guidance.
+    expect(text).not.toBe('MODULE_NOT_FOUND');
+  });
+
+  it('handles a non-Error thrown value without crashing', () => {
+    const lines = describeNativePtyLoadFailure('some string failure');
+    expect(lines.join('\n')).toContain('some string failure');
   });
 });
 

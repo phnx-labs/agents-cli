@@ -119,6 +119,44 @@ export function buildSentinelCommand(shell: string, command: string): string {
   return `${command}; echo "${SENTINEL}:$?"`;
 }
 
+/**
+ * Turn a native-binding load failure into an actionable, platform-aware message.
+ *
+ * The binding is `@homebridge/node-pty-prebuilt-multiarch`'s `pty.node`. On Linux
+ * it is baked into the npm tarball and always present; on macOS/Windows it is
+ * fetched per host + Node ABI at install time by the package's `prebuild-install`
+ * postinstall. The common failure is a Node runtime whose ABI has no published
+ * prebuild (the PHNX-2740 darwin-arm64 case): `prebuild-install` finds nothing,
+ * the build-from-source fallback also fails, and the loader throws a bare
+ * `Cannot find module '.../pty.node'` / MODULE_NOT_FOUND with no clue what to do.
+ *
+ * Pure (returns the lines) so it can be unit-tested without spawning the server.
+ */
+export function describeNativePtyLoadFailure(err: unknown): string[] {
+  const detail = err instanceof Error ? (err.stack || err.message) : String(err);
+  const abi = process.versions.modules;
+  const nodeVersion = process.version;
+  const platform = `${process.platform}-${process.arch}`;
+  const lines = [
+    `agents pty could not load its native terminal binding (@homebridge/node-pty-prebuilt-multiarch).`,
+    `  platform: ${platform}   node: ${nodeVersion} (ABI ${abi})`,
+    ``,
+    `The prebuilt binary for this platform + Node ABI is missing. On macOS/Windows`,
+    `it is downloaded at install time; a Node version newer than any published`,
+    `prebuild, or an install that skipped the postinstall, leaves it absent.`,
+    ``,
+    `Fix it by reinstalling so the native binding is fetched or built:`,
+    `  npm rebuild @homebridge/node-pty-prebuilt-multiarch   # rebuild for this Node`,
+    `  # or reinstall the CLI:  npm i -g @phnx-labs/agents-cli`,
+    `If your Node (ABI ${abi}) is newer than the shipped prebuilds, install an LTS`,
+    `Node and retry, or ensure a C++ toolchain is present for the source build.`,
+    ``,
+    `Underlying error:`,
+    ...detail.split('\n').map(l => `  ${l}`),
+  ];
+  return lines;
+}
+
 /** Get the PTY helper directory, creating it if needed. */
 function getPtyDir(): string {
   const dir = getPtyDirRoot();
@@ -213,9 +251,16 @@ export async function runPtyServer(): Promise<void> {
   let XtermTerminal: any;
 
   try {
-    // The Homebridge multiarch fork of node-pty: API-identical (same 1.x N-API
-    // codebase) but ships prebuilt binaries for Linux glibc + musl, x64 + arm64
-    // (plus macOS/Windows), so no compiler is needed on Linux/Alpine/arm64.
+    // The Homebridge multiarch fork of node-pty (API-identical to the 1.x N-API
+    // upstream). Its npm tarball BAKES IN the Linux prebuilds (glibc + musl, every
+    // arch + Node ABI), so Linux never needs a compiler or a network fetch. The
+    // darwin-arm64 / win32 binaries are NOT in the tarball — they are downloaded
+    // per host+Node-ABI at install time by the package's own `prebuild-install`
+    // postinstall (gated by bun's `trustedDependencies`). That fetch fails when the
+    // running Node ABI is newer than any published prebuild (e.g. 0.13.1 shipped no
+    // darwin-arm64 above Node 24 / ABI 137, so Node 25/26 fell through to a
+    // build-from-source that also failed — PHNX-2740), leaving a raw MODULE_NOT_FOUND.
+    // Fail loud with the platform/ABI and a concrete remediation instead.
     nodePty = await import('@homebridge/node-pty-prebuilt-multiarch');
     // Handle ESM default export
     if (nodePty.default?.spawn) nodePty = nodePty.default;
@@ -235,8 +280,7 @@ export async function runPtyServer(): Promise<void> {
       }
     } catch {}
   } catch (err) {
-    console.error('node-pty (@homebridge/node-pty-prebuilt-multiarch) is required for PTY support.');
-    console.error('Install: bun add @homebridge/node-pty-prebuilt-multiarch');
+    for (const line of describeNativePtyLoadFailure(err)) console.error(line);
     process.exit(1);
   }
 

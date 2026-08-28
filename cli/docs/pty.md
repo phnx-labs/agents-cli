@@ -69,6 +69,31 @@ the PTY log path, and the recent log tail. The log path is also shown by
 `agents pty server status` and normally lives under
 `~/.agents/.cache/helpers/pty/logs.jsonl`.
 
+### Native binding
+
+The sidecar drives a real PTY through `@homebridge/node-pty-prebuilt-multiarch`, a
+native N-API addon. Linux prebuilds (glibc + musl, every arch and Node ABI) are
+baked into the npm tarball, so Linux needs no compiler or network fetch. The
+**macOS/Windows** binaries are downloaded per host + Node ABI at install time by
+the package's own `prebuild-install` postinstall — which is why the dep sits in
+`package.json`'s `trustedDependencies` (bun otherwise skips install scripts).
+
+That fetch has no prebuild to grab when your Node runtime is newer than any the
+package published (the PHNX-2740 case: `@homebridge/node-pty-prebuilt-multiarch@0.13.1`
+shipped no darwin-arm64 binary above Node 24, so Node 25/26 on Apple Silicon had
+nothing to load). When the binding genuinely can't load, the sidecar now **fails
+loud** with your platform, the running Node ABI, and a remediation instead of a raw
+`MODULE_NOT_FOUND`. To recover:
+
+```bash
+npm rebuild @homebridge/node-pty-prebuilt-multiarch   # fetch/build for your Node
+# or reinstall the CLI so the postinstall reruns:
+npm i -g @phnx-labs/agents-cli
+```
+
+If your Node is newer than every published prebuild, install a current LTS Node
+(or ensure a C++ toolchain is present so the source build can run) and retry.
+
 ## Command Reference
 
 ### Session lifecycle
