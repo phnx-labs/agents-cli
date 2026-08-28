@@ -4,11 +4,13 @@
  * These used to live as the top-level `agents trends` tree. That name was a
  * peer of `agents insights` with overlapping "analytics" meaning, so agents and
  * humans kept picking the wrong verb. The cheap counter path (sessions index +
- * usage.db) still exists — it is now `agents insights mix` and the recipe
- * subcommands below. Latency stays on `agents perf`; quota on `agents view`.
+ * usage.db) still exists — it is now `agents insights mix`. Latency stays on
+ * `agents perf`; quota on `agents view`.
  *
- * Former top-level `agents trends` is gone. The nested spelling
- * `agents insights trends` is an alias of `agents insights mix`.
+ * One surface, not five: the board is `agents insights mix`, one section is
+ * `agents insights mix <recipe>`, and `--list` names the recipe ids. The former
+ * per-recipe shortcut commands (`harness-mix`, `model-mix`, …), the `recipes`
+ * lister, and the `trends` alias were removed — `mix` already did all three.
  */
 
 import type { Command } from 'commander';
@@ -82,24 +84,54 @@ export function renderMixDashboard(days: number, asJson: boolean, bannerLabel = 
  *
  * Layout:
  *   <parent> mix                 multi-recipe board
- *   <parent> trends              alias of mix (former top-level `agents trends`)
- *   <parent> recipes             list recipe ids
+ *   <parent> mix <recipe>        one baked recipe (harness-mix, model-mix, …)
+ *   <parent> mix --list          list recipe ids
  *   <parent> query               raw usage.db rows
- *   <parent> harness-mix|…       one baked recipe
  */
 export function registerMixCommands(parent: Command): void {
   const banner = 'agents insights mix';
 
   const mix = parent
-    .command('mix')
-    .description('Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)')
+    .command('mix [recipe]')
+    .description('Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.')
     .option('--days <n>', 'Days of history to include', '7')
+    .option('--list', 'List baked recipe ids and exit')
     .option('--json', 'Emit JSON instead of tables')
-    .action(function summary(this: Command) {
+    .action(function summary(this: Command, recipe: string | undefined) {
       // optsWithGlobals(): --json collides by name with the `insights` parent, so
       // commander binds it to the parent and this.opts() never sees it. Merging
-      // ancestor opts is what the per-recipe leaves below already do.
-      const o = this.optsWithGlobals() as MixOpts;
+      // ancestor opts is what the per-recipe path below already does.
+      const o = this.optsWithGlobals() as MixOpts & { list?: boolean };
+      if (o.list) {
+        const list = listRecipes();
+        if (o.json) {
+          console.log(JSON.stringify(list, null, 2));
+          return;
+        }
+        for (const r of list) {
+          console.log(`${r.id.padEnd(22)} ${r.store.padEnd(10)} ${r.title}`);
+        }
+        return;
+      }
+      if (recipe) {
+        if (!(RECIPE_IDS as readonly string[]).includes(recipe)) {
+          console.error(`Unknown recipe '${recipe}'. Known: ${(RECIPE_IDS as readonly string[]).join(', ')} (or 'agents insights mix --list').`);
+          process.exitCode = 1;
+          return;
+        }
+        const win = analyticsWindow(parseMixDays(o.days));
+        const section = runRecipe(recipe as RecipeId, win);
+        if (o.json) {
+          console.log(JSON.stringify({ window: win, section }, null, 2));
+          return;
+        }
+        if (section.empty) {
+          console.log(chalk.gray(`No data for recipe '${recipe}' in the last ${win.days} days.`));
+          return;
+        }
+        printMixSection(section);
+        return;
+      }
       renderMixDashboard(parseMixDays(o.days), Boolean(o.json), banner);
     });
 
@@ -112,37 +144,23 @@ export function registerMixCommands(parent: Command): void {
       agents insights mix --days 30
 
       # One recipe as JSON
-      agents insights harness-mix --json
+      agents insights mix harness-mix --json
+
+      # List baked recipe ids
+      agents insights mix --list
 
       # Raw usage events
       agents insights query --kind secret --days 7
-
-      # List baked recipe ids
-      agents insights recipes
     `,
     notes: `
       Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.
-      Empty recipes are skipped on the default mix board.
+      Empty recipes are skipped on the default mix board. Pass one recipe id
+      (\`agents insights mix harness-mix\`) for just that section; \`--list\` names them.
       This is the cheap counter path. Behavioural report (transcript content, account split)
       is bare \`agents insights\`. Latency is \`agents perf\`; quota is \`agents view\`.
       Skill/slash-command popularity is \`agents sessions stats\`.
     `,
   });
-
-  parent.command('recipes')
-    .description('List baked mix-recipe ids')
-    .option('--json', 'Emit JSON')
-    .action(function recipes(this: Command) {
-      const o = this.optsWithGlobals() as { json?: boolean };
-      const list = listRecipes();
-      if (o.json) {
-        console.log(JSON.stringify(list, null, 2));
-        return;
-      }
-      for (const r of list) {
-        console.log(`${r.id.padEnd(22)} ${r.store.padEnd(10)} ${r.title}`);
-      }
-    });
 
   parent.command('query')
     .description('Raw usage-event query (usage.db)')
@@ -191,47 +209,4 @@ export function registerMixCommands(parent: Command): void {
       });
     });
 
-  for (const id of RECIPE_IDS) {
-    parent.command(id)
-      .description(`Mix recipe: ${id}`)
-      .option('--days <n>', 'Days of history', '7')
-      .option('--json', 'Emit JSON')
-      .action(function recipeAction(this: Command) {
-        // optsWithGlobals() merges the `insights` parent opts, so the name-colliding
-        // --json/--since reach this leaf (see the sibling commands above).
-        const o = this.optsWithGlobals() as MixOpts;
-        const win = analyticsWindow(parseMixDays(o.days));
-        const section = runRecipe(id as RecipeId, win);
-        if (o.json) {
-          console.log(JSON.stringify({ window: win, section }, null, 2));
-          return;
-        }
-        if (section.empty) {
-          console.log(chalk.gray(`No data for recipe '${id}' in the last ${win.days} days.`));
-          return;
-        }
-        printMixSection(section);
-      });
-  }
-
-  // Nested home for the former top-level `agents trends` spelling.
-  const trends = parent
-    .command('trends')
-    .description('Alias of `mix` — former top-level `agents trends`')
-    .option('--days <n>', 'Days of history to include', '7')
-    .option('--json', 'Emit JSON instead of tables')
-    .action(function summary(this: Command) {
-      const o = this.optsWithGlobals() as MixOpts;
-      renderMixDashboard(parseMixDays(o.days), Boolean(o.json), banner);
-    });
-  setHelpSections(trends, {
-    examples: `
-      agents insights trends
-      agents insights mix
-    `,
-    notes: `
-      \`agents insights trends\` is the nested spelling of the former top-level
-      \`agents trends\`. Prefer \`agents insights mix\`.
-    `,
-  });
 }

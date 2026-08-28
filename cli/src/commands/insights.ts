@@ -31,7 +31,8 @@
  * the coaching prose by piping the AGGREGATE (never raw transcripts) through a headless
  * `claude -p`.
  *
- * Former top-level `agents trends` is `agents insights mix` / `agents insights trends`.
+ * Former top-level `agents trends` is `agents insights mix` (one section:
+ * `agents insights mix <recipe>`; `--list` names them).
  */
 
 import type { Command } from 'commander';
@@ -664,7 +665,7 @@ function configureInsightsCommand(cmd: Command): void {
       # Counter mix board (harness/model/token/secrets recipes) — former agents trends
       agents insights mix
       agents insights mix --days 30
-      agents insights harness-mix --json
+      agents insights mix harness-mix --json
       agents insights query --kind secret --days 7
 
       # One account only, all of its history
@@ -682,8 +683,8 @@ function configureInsightsCommand(cmd: Command): void {
         \`agents insights mix\`      — cheap counters from sessions.db + usage.db
       Latency is \`agents perf\` (not mix). Quota is \`agents view\`. Spend is
       \`agents insights cost\`; shipped output is \`agents insights output\`. Skill/slash popularity
-      is \`agents sessions stats\`. Former top-level \`agents trends\` is \`agents insights mix\`
-      (also \`agents insights trends\`).
+      is \`agents sessions stats\`. Former top-level \`agents trends\` is \`agents insights mix\`.
+      One recipe is \`agents insights mix <recipe>\` (e.g. \`harness-mix\`); \`--list\` names them.
 
       The behavioural report parses in-scope transcripts once and caches facets; later runs
       re-read only files that changed. \`--refresh\` forces a full re-read.

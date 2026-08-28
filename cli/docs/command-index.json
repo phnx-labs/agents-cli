@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "command": "agents",
   "groups": 69,
-  "commands": 570,
+  "commands": 550,
   "root": {
     "name": "agents",
     "path": "",
@@ -11947,48 +11947,9 @@
           "negate": false
         }
       ],
-      "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents view`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+      "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights mix harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
+      "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents view`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`.\n      One recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
       "subcommands": [
-        {
-          "name": "browser-activity",
-          "path": "insights browser-activity",
-          "aliases": [],
-          "description": "Mix recipe: browser-activity",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
         {
           "name": "cost",
           "path": "insights cost",
@@ -12074,50 +12035,18 @@
           "subcommands": []
         },
         {
-          "name": "harness-mix",
-          "path": "insights harness-mix",
-          "aliases": [],
-          "description": "Mix recipe: harness-mix",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
           "name": "mix",
           "path": "insights mix",
           "aliases": [],
-          "description": "Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)",
-          "args": [],
+          "description": "Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.",
+          "args": [
+            {
+              "name": "recipe",
+              "required": false,
+              "variadic": false,
+              "description": ""
+            }
+          ],
           "options": [
             {
               "flags": "--days <n>",
@@ -12128,6 +12057,15 @@
               "variadic": false,
               "negate": false,
               "defaultValue": "7"
+            },
+            {
+              "flags": "--list",
+              "description": "List baked recipe ids and exit",
+              "long": "--list",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
             },
             {
               "flags": "--json",
@@ -12149,47 +12087,8 @@
               "negate": false
             }
           ],
-          "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights harness-mix --json\n\n      # Raw usage events\n      agents insights query --kind secret --days 7\n\n      # List baked recipe ids\n      agents insights recipes",
-          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
-          "subcommands": []
-        },
-        {
-          "name": "model-mix",
-          "path": "insights model-mix",
-          "aliases": [],
-          "description": "Mix recipe: model-mix",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
+          "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights mix harness-mix --json\n\n      # List baked recipe ids\n      agents insights mix --list\n\n      # Raw usage events\n      agents insights query --kind secret --days 7",
+          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board. Pass one recipe id\n      (`agents insights mix harness-mix`) for just that section; `--list` names them.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
           "subcommands": []
         },
         {
@@ -12404,271 +12303,6 @@
               "negate": false
             }
           ],
-          "subcommands": []
-        },
-        {
-          "name": "recipes",
-          "path": "insights recipes",
-          "aliases": [],
-          "description": "List baked mix-recipe ids",
-          "args": [],
-          "options": [
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "resource-mix",
-          "path": "insights resource-mix",
-          "aliases": [],
-          "description": "Mix recipe: resource-mix",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "secrets-hot",
-          "path": "insights secrets-hot",
-          "aliases": [],
-          "description": "Mix recipe: secrets-hot",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "session-volume",
-          "path": "insights session-volume",
-          "aliases": [],
-          "description": "Mix recipe: session-volume",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "token-ratio",
-          "path": "insights token-ratio",
-          "aliases": [],
-          "description": "Mix recipe: token-ratio",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "tools-per-session",
-          "path": "insights tools-per-session",
-          "aliases": [],
-          "description": "Mix recipe: tools-per-session",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "trends",
-          "path": "insights trends",
-          "aliases": [],
-          "description": "Alias of `mix` — former top-level `agents trends`",
-          "args": [],
-          "options": [
-            {
-              "flags": "--days <n>",
-              "description": "Days of history to include",
-              "long": "--days",
-              "required": true,
-              "optional": false,
-              "variadic": false,
-              "negate": false,
-              "defaultValue": "7"
-            },
-            {
-              "flags": "--json",
-              "description": "Emit JSON instead of tables",
-              "long": "--json",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            },
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "examples": "agents insights trends\n      agents insights mix",
-          "notes": "`agents insights trends` is the nested spelling of the former top-level\n      `agents trends`. Prefer `agents insights mix`.",
           "subcommands": []
         }
       ]
@@ -24380,93 +24014,22 @@
               "negate": false
             }
           ],
-          "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
-          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents view`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`\n      (also `agents insights trends`).\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
+          "examples": "# Behavioural report — last 30 days, split by Claude account (default)\n      agents insights\n\n      # Which repo is eating the time\n      agents insights --by project --since 90d\n\n      # Counter mix board (harness/model/token/secrets recipes) — former agents trends\n      agents insights mix\n      agents insights mix --days 30\n      agents insights mix harness-mix --json\n      agents insights query --kind secret --days 7\n\n      # One account only, all of its history\n      agents insights --account \"Turing Labs\" --all\n\n      # Machine-readable, for a dashboard or a slash command\n      agents sessions insights --agent claude --agent codex --json\n\n      # Add a written read on what to change\n      agents insights --narrative",
+          "notes": "Two paths under one verb:\n        bare `agents insights`     — transcript behaviour (tools, friction, rhythm, by account)\n        `agents insights mix`      — cheap counters from sessions.db + usage.db\n      Latency is `agents perf` (not mix). Quota is `agents view`. Spend is\n      `agents insights cost`; shipped output is `agents insights output`. Skill/slash popularity\n      is `agents sessions stats`. Former top-level `agents trends` is `agents insights mix`.\n      One recipe is `agents insights mix <recipe>` (e.g. `harness-mix`); `--list` names them.\n\n      The behavioural report parses in-scope transcripts once and caches facets; later runs\n      re-read only files that changed. `--refresh` forces a full re-read.\n\n      `agents insights` is the top-level alias of `agents sessions insights`.\n      Repeat `--agent` to compare several harnesses in one report.\n\n      Everything except `--narrative` is local and makes no network calls.",
           "subcommands": [
-            {
-              "name": "browser-activity",
-              "path": "sessions insights browser-activity",
-              "aliases": [],
-              "description": "Mix recipe: browser-activity",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "harness-mix",
-              "path": "sessions insights harness-mix",
-              "aliases": [],
-              "description": "Mix recipe: harness-mix",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
             {
               "name": "mix",
               "path": "sessions insights mix",
               "aliases": [],
-              "description": "Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)",
-              "args": [],
+              "description": "Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.",
+              "args": [
+                {
+                  "name": "recipe",
+                  "required": false,
+                  "variadic": false,
+                  "description": ""
+                }
+              ],
               "options": [
                 {
                   "flags": "--days <n>",
@@ -24477,6 +24040,15 @@
                   "variadic": false,
                   "negate": false,
                   "defaultValue": "7"
+                },
+                {
+                  "flags": "--list",
+                  "description": "List baked recipe ids and exit",
+                  "long": "--list",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
                 },
                 {
                   "flags": "--json",
@@ -24498,47 +24070,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights harness-mix --json\n\n      # Raw usage events\n      agents insights query --kind secret --days 7\n\n      # List baked recipe ids\n      agents insights recipes",
-              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
-              "subcommands": []
-            },
-            {
-              "name": "model-mix",
-              "path": "sessions insights model-mix",
-              "aliases": [],
-              "description": "Mix recipe: model-mix",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
+              "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights mix harness-mix --json\n\n      # List baked recipe ids\n      agents insights mix --list\n\n      # Raw usage events\n      agents insights query --kind secret --days 7",
+              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board. Pass one recipe id\n      (`agents insights mix harness-mix`) for just that section; `--list` names them.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
               "subcommands": []
             },
             {
@@ -24615,271 +24148,6 @@
                   "negate": false
                 }
               ],
-              "subcommands": []
-            },
-            {
-              "name": "recipes",
-              "path": "sessions insights recipes",
-              "aliases": [],
-              "description": "List baked mix-recipe ids",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "resource-mix",
-              "path": "sessions insights resource-mix",
-              "aliases": [],
-              "description": "Mix recipe: resource-mix",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "secrets-hot",
-              "path": "sessions insights secrets-hot",
-              "aliases": [],
-              "description": "Mix recipe: secrets-hot",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "session-volume",
-              "path": "sessions insights session-volume",
-              "aliases": [],
-              "description": "Mix recipe: session-volume",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "token-ratio",
-              "path": "sessions insights token-ratio",
-              "aliases": [],
-              "description": "Mix recipe: token-ratio",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "tools-per-session",
-              "path": "sessions insights tools-per-session",
-              "aliases": [],
-              "description": "Mix recipe: tools-per-session",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "subcommands": []
-            },
-            {
-              "name": "trends",
-              "path": "sessions insights trends",
-              "aliases": [],
-              "description": "Alias of `mix` — former top-level `agents trends`",
-              "args": [],
-              "options": [
-                {
-                  "flags": "--days <n>",
-                  "description": "Days of history to include",
-                  "long": "--days",
-                  "required": true,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false,
-                  "defaultValue": "7"
-                },
-                {
-                  "flags": "--json",
-                  "description": "Emit JSON instead of tables",
-                  "long": "--json",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                },
-                {
-                  "flags": "-h, --help",
-                  "description": "Show help",
-                  "short": "-h",
-                  "long": "--help",
-                  "required": false,
-                  "optional": false,
-                  "variadic": false,
-                  "negate": false
-                }
-              ],
-              "examples": "agents insights trends\n      agents insights mix",
-              "notes": "`agents insights trends` is the nested spelling of the former top-level\n      `agents trends`. Prefer `agents insights mix`.",
               "subcommands": []
             }
           ]

@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_69 command groups · 570 commands._
+_69 command groups · 550 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -346,21 +346,11 @@ agents import <agent>  Import an existing unmanaged agent install into agents-cl
 ## insights — How work looks — behavioural report (default) or counter mix (`mix`, recipes)
 
 ```
-agents insights                    How work looks — behavioural report (default) or counter mix (`mix`, recipes)
-agents insights browser-activity   Mix recipe: browser-activity
-agents insights cost               Roll up $ cost and duration across local agent sessions
-agents insights harness-mix        Mix recipe: harness-mix
-agents insights mix                Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)
-agents insights model-mix          Mix recipe: model-mix
-agents insights output             Productivity rollup — token burn vs shipped output (PRs, commits) across agents
-agents insights query              Raw usage-event query (usage.db)
-agents insights recipes            List baked mix-recipe ids
-agents insights resource-mix       Mix recipe: resource-mix
-agents insights secrets-hot        Mix recipe: secrets-hot
-agents insights session-volume     Mix recipe: session-volume
-agents insights token-ratio        Mix recipe: token-ratio
-agents insights tools-per-session  Mix recipe: tools-per-session
-agents insights trends             Alias of `mix` — former top-level `agents trends`
+agents insights               How work looks — behavioural report (default) or counter mix (`mix`, recipes)
+agents insights cost          Roll up $ cost and duration across local agent sessions
+agents insights mix [recipe]  Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.
+agents insights output        Productivity rollup — token burn vs shipped output (PRs, commits) across agents
+agents insights query         Raw usage-event query (usage.db)
 ```
 
 ## inspect — Inspect one installed agent harness at one version (not a model), or a DotAgents repo — paths, capabilities, resources, and hook capable/on-disk/wired state.
@@ -718,41 +708,31 @@ agents send [text]  Deliver a message through a channel provider (imessage, slac
 ## sessions — Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
 
 ```
-agents sessions [query]                     Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
-agents sessions backfill                    Populate derived session data explicitly.
-agents sessions backfill resources          Derive historical skill/slash-command usage once into the local SQLite index.
-agents sessions backfill tools              Parse historical tool calls once into the local SQLite index.
-agents sessions bookmark [ids...]           Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
-agents sessions detach <id>                 Send a live agent to the background — stop its terminal, keep it working headless
-agents sessions export [selectors...]       Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions fork <session>              Branch a session into a new, independent copy you can continue separately. The original is untouched.
-agents sessions import [bundle]             Restore an export bundle (file, - for stdin, or --from-host <h>) into the local session store, deduping against what you already have.
-agents sessions inject <sessionId> <text>   Deliver text (+ Enter) into the terminal a running session lives in — nudge a stalled agent.
-agents sessions insights                    How work looks — behavioural report (default) or counter mix (`mix`, recipes)
-agents sessions insights browser-activity   Mix recipe: browser-activity
-agents sessions insights harness-mix        Mix recipe: harness-mix
-agents sessions insights mix                Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db)
-agents sessions insights model-mix          Mix recipe: model-mix
-agents sessions insights query              Raw usage-event query (usage.db)
-agents sessions insights recipes            List baked mix-recipe ids
-agents sessions insights resource-mix       Mix recipe: resource-mix
-agents sessions insights secrets-hot        Mix recipe: secrets-hot
-agents sessions insights session-volume     Mix recipe: session-volume
-agents sessions insights token-ratio        Mix recipe: token-ratio
-agents sessions insights tools-per-session  Mix recipe: tools-per-session
-agents sessions insights trends             Alias of `mix` — former top-level `agents trends`
-agents sessions migrate [session-id]        Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
-agents sessions migrations                  Show the migration ledger — sessions handed off to/from other machines.
-agents sessions optimize                    Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
-agents sessions preview <id>                Show one rich session card without rendering the full transcript
-agents sessions render <selectors...>       Render one or more sessions as readable, redacted Markdown for review or sharing.
-agents sessions resume [query] [prompt]     Resume a session by id (strict), or multi-select history into terminal tabs/splits.
-agents sessions share <session>             Publish one session as a redacted, self-contained web page and print the link.
-agents sessions stats                       Which skills/commands you actually invoke, and which installed ones are dead weight.
-agents sessions stop <id>                   Stop a live agent outright — end its process and tear down its tmux/mux session
-agents sessions tail [sessionId]            Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
-agents sessions trace <selectors...>        Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
-agents sessions watch                       Stream canonical live and recoverable session row changes as NDJSON
+agents sessions [query]                    Find, browse, and read agent conversation transcripts. Live roster: `agents sessions --active`.
+agents sessions backfill                   Populate derived session data explicitly.
+agents sessions backfill resources         Derive historical skill/slash-command usage once into the local SQLite index.
+agents sessions backfill tools             Parse historical tool calls once into the local SQLite index.
+agents sessions bookmark [ids...]          Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
+agents sessions detach <id>                Send a live agent to the background — stop its terminal, keep it working headless
+agents sessions export [selectors...]      Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
+agents sessions fork <session>             Branch a session into a new, independent copy you can continue separately. The original is untouched.
+agents sessions import [bundle]            Restore an export bundle (file, - for stdin, or --from-host <h>) into the local session store, deduping against what you already have.
+agents sessions inject <sessionId> <text>  Deliver text (+ Enter) into the terminal a running session lives in — nudge a stalled agent.
+agents sessions insights                   How work looks — behavioural report (default) or counter mix (`mix`, recipes)
+agents sessions insights mix [recipe]      Counter recipes — harness/model mix, token ratios, resource frequency (sessions index + usage.db). Bare shows the board; pass a recipe id for one section.
+agents sessions insights query             Raw usage-event query (usage.db)
+agents sessions migrate [session-id]       Relocate a running session onto another machine (fleet worker, device, or ephemeral box), then stop the source here.
+agents sessions migrations                 Show the migration ledger — sessions handed off to/from other machines.
+agents sessions optimize                   Compact the session search index (FTS5), reclaiming bloat from repeated re-indexing
+agents sessions preview <id>               Show one rich session card without rendering the full transcript
+agents sessions render <selectors...>      Render one or more sessions as readable, redacted Markdown for review or sharing.
+agents sessions resume [query] [prompt]    Resume a session by id (strict), or multi-select history into terminal tabs/splits.
+agents sessions share <session>            Publish one session as a redacted, self-contained web page and print the link.
+agents sessions stats                      Which skills/commands you actually invoke, and which installed ones are dead weight.
+agents sessions stop <id>                  Stop a live agent outright — end its process and tear down its tmux/mux session
+agents sessions tail [sessionId]           Stream compact live lines from a session file as events are written. Long-running: Ctrl+C to stop. Claude and Codex only.
+agents sessions trace <selectors...>       Visualize a session as a trajectory — a tool-call timeline you can read at a glance. Opens a visual for a person; prints a compact trajectory for an agent.
+agents sessions watch                      Stream canonical live and recoverable session row changes as NDJSON
 ```
 
 ## setup — Set up agents-cli, or re-open the capability onboarding hub.

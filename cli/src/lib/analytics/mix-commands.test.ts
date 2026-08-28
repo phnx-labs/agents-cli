@@ -1,6 +1,7 @@
 /**
  * Mix tree registration — real commander, no mocks.
- * Covers the insights-owned mix path and the deprecated trends alias.
+ * Covers the insights-owned mix path: the board, `mix <recipe>`, and `mix --list`
+ * (the former standalone recipe shortcuts, `recipes`, and `trends` are gone).
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
@@ -106,13 +107,13 @@ describe('insights mix registration', () => {
     expect(parsed.sections.length).toBeGreaterThan(0);
   });
 
-  it('agents insights harness-mix runs a single recipe', async () => {
+  it('agents insights mix <recipe> runs a single recipe', async () => {
     const program = new Command();
     program.exitOverride();
     registerInsightsCommand(program);
 
     const { out, err } = await capture(async () => {
-      await program.parseAsync(['node', 'agents', 'insights', 'harness-mix', '--json']);
+      await program.parseAsync(['node', 'agents', 'insights', 'mix', 'harness-mix', '--json']);
     });
     expect(err).not.toMatch(/deprecated/i);
     const parsed = JSON.parse(out);
@@ -121,19 +122,41 @@ describe('insights mix registration', () => {
   });
 });
 
-describe('nested insights trends alias of mix', () => {
-  it('returns the mix dashboard without a deprecation line', async () => {
+describe('mix consolidates recipes/trends/shortcuts into one command', () => {
+  it('agents insights mix --list names the baked recipe ids', async () => {
     const program = new Command();
     program.exitOverride();
     registerInsightsCommand(program);
 
-    const { out, err } = await capture(async () => {
-      await program.parseAsync(['node', 'agents', 'insights', 'trends', '--json']);
+    const { out } = await capture(async () => {
+      await program.parseAsync(['node', 'agents', 'insights', 'mix', '--list', '--json']);
     });
-    expect(err).not.toMatch(/deprecated/i);
-    const parsed = JSON.parse(out);
-    expect(parsed.window.days).toBe(7);
-    expect(parsed.sections.length).toBeGreaterThan(0);
+    const parsed = JSON.parse(out) as Array<{ id: string }>;
+    expect(parsed.map((r) => r.id)).toContain('harness-mix');
+  });
+
+  it('agents insights mix <unknown-recipe> fails loud', async () => {
+    const program = new Command();
+    program.exitOverride();
+    registerInsightsCommand(program);
+
+    const { err } = await capture(async () => {
+      await program.parseAsync(['node', 'agents', 'insights', 'mix', 'not-a-recipe']);
+    });
+    expect(err).toMatch(/Unknown recipe 'not-a-recipe'/);
+    expect(process.exitCode).toBe(1);
+    process.exitCode = 0;
+  });
+
+  it('the former standalone shortcut / trends / recipes spellings are gone', async () => {
+    for (const gone of ['harness-mix', 'trends', 'recipes']) {
+      const program = new Command();
+      program.exitOverride();
+      registerInsightsCommand(program);
+      await expect(
+        program.parseAsync(['node', 'agents', 'insights', gone]),
+      ).rejects.toThrow();
+    }
   });
 });
 
@@ -141,13 +164,13 @@ describe('insights subcommands honor --json despite the parent-option collision'
   // --json collides by long-name with the `insights` parent, so commander binds
   // it to the parent; each leaf must read optsWithGlobals() or it prints the
   // human table (invalid for machine callers). Regression for the whole group.
-  for (const sub of ['mix', 'trends', 'recipes', 'query', 'harness-mix']) {
-    it(`agents insights ${sub} --json emits parseable JSON`, async () => {
+  for (const argv of [['mix'], ['mix', 'harness-mix'], ['mix', '--list'], ['query']]) {
+    it(`agents insights ${argv.join(' ')} --json emits parseable JSON`, async () => {
       const program = new Command();
       program.exitOverride();
       registerInsightsCommand(program);
       const { out } = await capture(async () => {
-        await program.parseAsync(['node', 'agents', 'insights', sub, '--json']);
+        await program.parseAsync(['node', 'agents', 'insights', ...argv, '--json']);
       });
       expect(() => JSON.parse(out)).not.toThrow();
     });
