@@ -3,7 +3,8 @@
 # Runs every HEADLESS "AGI Menu" (menubar helper) self-test and fails on any FAIL.
 #
 # The helper's self-tests (SingleInstanceSelfTest, ChildProcessSelfTest,
-# GuardsSelfTest, IssueSelfTest, ActiveSessionSelfTest, RoutineSelfTest) are
+# GuardsSelfTest, IssueSelfTest, ActiveSessionSelfTest, RoutineSelfTest,
+# DoctorSelfTest, DeviceSelfTest) are
 # env-gated modes of the binary that exit
 # BEFORE the GUI/AppKit path (Guards.enforceForInteractiveLaunch in main.swift),
 # so they run headless — no display, no signing, no bundle. Until this script
@@ -36,7 +37,7 @@ if [ ! -x "$BIN" ]; then
 fi
 
 fail=0
-for mode in MENUBAR_GUARD_TEST MENUBAR_ISSUE_TEST MENUBAR_SINGLE_TEST MENUBAR_CHILD_TEST MENUBAR_ACTIVE_TEST MENUBAR_ROUTINE_TEST MENUBAR_DOCTOR_TEST; do
+for mode in MENUBAR_GUARD_TEST MENUBAR_ISSUE_TEST MENUBAR_SINGLE_TEST MENUBAR_CHILD_TEST MENUBAR_ACTIVE_TEST MENUBAR_ROUTINE_TEST MENUBAR_DOCTOR_TEST MENUBAR_DEVICE_TEST; do
   echo "=== $mode ==="
   if ! env "$mode=1" "$BIN"; then
     echo "  $mode FAILED" >&2

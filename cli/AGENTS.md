@@ -714,7 +714,11 @@ keys living in `devices/<name>/agents.yaml` `config.autoLaunch{Enabled,Preferred
 sync with `agents repo push/pull`. The four verbs are task-shaped forwarding
 spellings for `agents devices config <name> auto-launch.{enabled,preferred}
 <on|off>` — the one canonical per-device settings surface — so they print a
-deprecation-style "running that for you" notice and defer to it.
+deprecation-style "running that for you" notice and defer to it. The **menu bar**
+surfaces `auto-launch.preferred` as a per-device **★ Favorite / Unfavorite**
+toggle (writing that same canonical `devices config … auto-launch.preferred
+on|off`, no separate store): a favorited device shows a ★ and sorts directly below
+the current machine, above the rest, in the DEVICES section (PHNX-2376).
 
 `devices.<name>.description` (stored as `description`) is the free-text sibling
 of `role`: one line saying what the box is FOR — "gpu box — cuda 12.4", "release

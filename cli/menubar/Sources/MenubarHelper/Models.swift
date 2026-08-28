@@ -234,11 +234,20 @@ struct WatchdogCounts: Decodable {
 // at render time from the daemon-warmed .fleet-stats.json (LocalState.deviceLoads);
 // online/offline is deliberately NOT carried (the registry's tailscale flag is
 // stale in both directions), so the menu never claims a status it can't back.
-struct Device: Decodable {
+struct Device: Decodable, Equatable {
     let name: String
     let platform: String
     let interactive: Bool
     let isLocal: Bool
+    // The device's `auto-launch.preferred` flag (a "favorite"): the same
+    // per-device config that boosts a box in AGI EXT's auto-launch ranking
+    // (cli/CLAUDE.md → auto-launch.preferred). Optional so a snapshot from an
+    // older installed `agents` CLI that predates the field still decodes —
+    // version skew between the helper and the on-PATH CLI is real.
+    let preferred: Bool?
+
+    // Nil (an older snapshot with no field) reads as not-favorited.
+    var isPreferred: Bool { preferred ?? false }
 }
 
 // `agents menubar snapshot --json` — the single repeating CLI read owned by

@@ -189,6 +189,18 @@ enum AgentsCLI {
     static func deviceRegister(_ name: String) { runDetached(argv(["devices", "register", name])) }
     static func deviceIgnore(_ name: String) { runDetached(argv(["devices", "ignore", name])) }
 
+    // Favorite a device: set its `auto-launch.preferred` flag on (unfavorite = off).
+    // This is the SAME per-device config the auto-launch ranker honors — not a
+    // separate favorites store — written through the one canonical settings surface
+    // (`devices config <name> auto-launch.preferred <on|off>`, cli/CLAUDE.md). The
+    // next snapshot poll re-reads it, so the ★ and re-sort follow. TS owns the truth.
+    static func devicePrefer(_ name: String) {
+        runDetached(argv(["devices", "config", name, "auto-launch.preferred", "on"]))
+    }
+    static func deviceUnprefer(_ name: String) {
+        runDetached(argv(["devices", "config", name, "auto-launch.preferred", "off"]))
+    }
+
     /// Take the operator to a blocked session: attach its terminal, or open a new
     /// tab and resume it (`agents focus` decides, and handles a remote host).
     ///
