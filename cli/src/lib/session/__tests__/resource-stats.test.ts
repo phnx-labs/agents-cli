@@ -147,11 +147,15 @@ describe('queryResourceUsageStats — aggregate rollup', () => {
 });
 
 describe('resourceUsageCoverage', () => {
-  it('reports distinct sessions carrying the signal vs. total indexed', () => {
-    const { covered, total } = resourceUsageCoverage();
+  it('reports distinct sessions carrying the signal, sessions scanned, and total indexed', () => {
+    const { covered, scanned, total } = resourceUsageCoverage();
     // A, B, C carry seeded usage; D was seeded WITHOUT a usage row (backfill fills it).
     expect(covered).toBe(3);
     expect(total).toBe(4);
+    // No backfill has run in THIS describe yet, so no resource_scan_ledger rows —
+    // scan coverage is 0 even though 3 sessions carry seeded usage. This is the
+    // PHNX-2301 distinction: with-usage is not scan coverage.
+    expect(scanned).toBe(0);
   });
 });
 
