@@ -95,7 +95,7 @@ export function registerStatusCommand(syncCmd: Command): void {
     // "N missing" — surface it distinctly so the real problem isn't buried (PHNX-3301).
     if (status.user.notGitRepo) {
       console.log(
-        `  ${'~/.agents (user repo)'.padEnd(28)} ${chalk.yellow('not a git repo — will adopt on next `agents repo sync user`')}`,
+        `  ${'~/.agents (user repo)'.padEnd(28)} ${chalk.yellow('not a git repo — will adopt on next `agents sync` (or `agents repo sync user`)')}`,
       );
     }
     if (status.agents.length === 0) {

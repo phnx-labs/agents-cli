@@ -16,7 +16,7 @@
  *   reconcile-> refresh({ skipPrompts }) — re-materialize resources into homes
  */
 
-import { pullRepo } from './git.js';
+import { pullRepo, adoptUserRepoIfNeeded } from './git.js';
 import { getUserAgentsDir, getEnabledExtraRepos } from './state.js';
 import { listRemoteBundles, pullBundle } from './secrets/sync.js';
 import { SYNC_PASSPHRASE_ENV } from './secrets/sync-passphrase.js';
@@ -76,6 +76,12 @@ export interface UmbrellaResult {
    * Empty when nothing was declined — never conflated with "nothing to do".
    */
   declined: string[];
+  /**
+   * The (agent, version) pairs the reconcile stage actually wrote into — the set
+   * the caller re-verifies for residual drift so the `✓ sync: reconciled` line is
+   * never printed while drift it was asked to fix stays put (PHNX-3186).
+   */
+  reconciledVersions: Array<{ agent: string; version: string }>;
 }
 
 export interface RunUmbrellaArgs {
@@ -101,7 +107,7 @@ export interface RunUmbrellaArgs {
 export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaResult> {
   const { flags, log, yes, passphrase, quiet = false } = args;
   const plan = planUmbrellaStages(flags);
-  const result: UmbrellaResult = { plan, reconciled: false, declined: [] };
+  const result: UmbrellaResult = { plan, reconciled: false, declined: [], reconciledVersions: [] };
 
   if (plan.fetchRepos) {
     const dirs = [
@@ -111,6 +117,24 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     let pulled = 0;
     const errors: string[] = [];
     for (const { alias, dir } of dirs) {
+      // A box where `~/.agents` is present but not a git repo (or lost its
+      // `.git`) is a partial install: `pullRepo` there silently fails while the
+      // umbrella still reported `✓ reconciled`, so fleet dotfiles/resources never
+      // propagated and nothing said so (PHNX-3239, m0). Adopt it in place first —
+      // the same self-heal `agents sync user` runs (PHNX-3301) — so the pull has a
+      // real repo to fast-forward. A box that cannot be adopted (no recorded
+      // remote) fails LOUD into `errors` with the reason, never a silent no-op.
+      if (alias === 'user') {
+        const adopted = await adoptUserRepoIfNeeded(dir);
+        if (adopted && !adopted.success) {
+          const hint = adopted.needsUrl ? ' — git-back it: agents repo pull user <git-url>' : '';
+          errors.push(`${alias}: ${adopted.error}${hint}`);
+          continue;
+        }
+        if (adopted?.success) {
+          log(`repos: ${alias} adopted in place → ${adopted.commit} (${adopted.materialized} file(s) materialized)`);
+        }
+      }
       const r = await pullRepo(dir);
       if (r.success) {
         pulled++;
@@ -161,6 +185,7 @@ export async function runUmbrellaSync(args: RunUmbrellaArgs): Promise<UmbrellaRe
     const refreshed = await refresh({ skipPrompts: yes, quiet });
     result.reconciled = true;
     result.declined = refreshed.declined;
+    result.reconciledVersions = refreshed.reconciled;
 
     // Keep already-registered devices' reachability current, and surface newly
     // appeared tailnet nodes as "pending" for the menu-bar Register/Ignore gate

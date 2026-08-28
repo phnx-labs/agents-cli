@@ -47,9 +47,11 @@ import type { DiscoveredPlugin } from './types.js';
 import { pluginInstallDir, repairableManifestFields } from './plugins/plugin-marketplace.js';
 import { markdownToToml } from './convert.js';
 import { listCommandsInVersionHome, getVersionCommandsDir, listPluginCommandNames } from './commands.js';
-import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName } from './command-skills.js';
+import { shouldInstallCommandAsSkill, commandSkillMatches, commandSkillName, skillSourceExists, readSkillSourceCommandMarker } from './command-skills.js';
+import { trustedSkillRoots } from './staleness/writers/sources.js';
 import { gooseCommandMatches, gooseCommandsDir } from './goose-commands.js';
 import { supports } from './capabilities.js';
+import { isDirectoryDoc } from './resources.js';
 import { listSkillsInVersionHome, getVersionSkillsDir } from './plugins/skills.js';
 import { listHookEntriesFromDir, type HookWiringReport } from './hooks/install.js';
 import { getResourceInventory, type ResourceInventory } from './resource-inventory.js';
@@ -205,10 +207,19 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.md')) continue;
       const name = entry.name.replace(/\.md$/, '');
+      // Directory docs (README/AGENTS/CLAUDE/GEMINI) live in commands/ but are
+      // documentation, not commands. `discoverCommands` and `resolveResource`
+      // both refuse them, so the sync writer never installs them — mirror that
+      // here or every one false-reports as a missing command no sync can clear.
+      if (isDirectoryDoc('commands', name)) continue;
       if (sourceByName.has(name)) continue;
       sourceByName.set(name, { layer: base.layer, path: path.join(base.path, entry.name), alias: base.alias });
     }
   }
+
+  // The trusted skill roots the commands-as-skills writer consults to decide
+  // whether a real skill of the same name already owns a command's target slot.
+  const skillRoots = asSkill ? trustedSkillRoots() : [];
 
   const rows: ResourceDiff[] = [];
   const seen = new Set<string>();
@@ -216,6 +227,27 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
   for (const [name, src] of sourceByName) {
     seen.add(name);
     if (!installed.has(name)) {
+      // Command-as-skill agents (codex >= 0.117, kimi): when a real skill of the
+      // same name exists in the sources, the skill wins the shared
+      // `skills/<name>/` slot and `installCommandSkillToVersion` deliberately
+      // writes no command wrapper (versions.ts keeps the real skill in
+      // skillsToSync and overwrites any wrapper). The command's behavior is
+      // provided by that same-named skill, so it is NOT missing drift — reporting
+      // it so drove an unclearable "N missing" loop (PHNX-3186). Mirror the
+      // writer's skip predicate exactly: a skill source of this name whose
+      // `agents_command` marker is not this command (a real skill, or a different
+      // command).
+      if (asSkill && skillSourceExists(name, skillRoots) && readSkillSourceCommandMarker(name, skillRoots) !== name) {
+        rows.push({
+          kind: 'commands',
+          name,
+          status: 'ok',
+          source: src.layer,
+          sourcePath: src.path,
+          detail: 'provided by same-named skill',
+        });
+        continue;
+      }
       rows.push({ kind: 'commands', name, status: 'missing', source: src.layer, sourcePath: src.path });
       continue;
     }
@@ -271,6 +303,10 @@ function diffCommands(agent: AgentId, version: string, cwd: string, excludeProje
   const pluginCommands = listPluginCommandNames();
   for (const name of installed) {
     if (seen.has(name)) continue;
+    // Directory docs are excluded from the source scan above; a leftover copy in
+    // the home is not a command orphan — leave it out of the command diff
+    // entirely rather than flip it to a spurious `extra` row.
+    if (isDirectoryDoc('commands', name)) continue;
     if (pluginCommands.has(name)) continue;
     const extraHome = asSkill
       ? path.join(agentDir, 'skills', commandSkillName(name), 'SKILL.md')
@@ -486,11 +522,15 @@ function diffRules(agent: AgentId, version: string, cwd: string, excludeProject 
   const configDir = path.join(versionHome, agentConfigDirName(agent));
   const sourcesByName = listRulesNames(cwd, excludeProject);
 
-  // Files actually present in the version home.
+  // Files actually present in the version home. Include *.md siblings AND the
+  // agent's own instructions filename even when it is not *.md — cursor's rules
+  // file is `.cursorrules`, so an `.md`-only scan never saw it and reported the
+  // AGENTS rule `missing` on every sync, a phantom no reconcile could clear
+  // (PHNX-3186).
   const homeFiles = new Set<string>();
   if (fs.existsSync(configDir)) {
     for (const f of fs.readdirSync(configDir)) {
-      if (!f.endsWith('.md')) continue;
+      if (!f.endsWith('.md') && f !== agentConfig.instructionsFile) continue;
       homeFiles.add(f);
     }
   }
@@ -706,7 +746,13 @@ export function diffVersionResources(
   if (requested.has('rules')) empty.rules = diffRules(agent, version, cwd, excludeProject);
   if (requested.has('mcp')) empty.mcp = diffPresenceOnly('mcp', available.mcp, synced.mcp);
   if (requested.has('permissions')) empty.permissions = diffPresenceOnly('permissions', available.permissions, synced.permissions);
-  if (requested.has('subagents')) empty.subagents = diffPresenceOnly('subagents', available.subagents, synced.subagents);
+  // Subagents are version-gated (e.g. kimi >= 0.29.0). A version below the floor
+  // is never written any subagent by the sync writer, so counting the source
+  // ones as "missing" is phantom drift no sync can clear (PHNX-3186). Zero the
+  // available set when unsupported; a stale installed copy still surfaces `extra`.
+  if (requested.has('subagents')) {
+    empty.subagents = diffPresenceOnly('subagents', supports(agent, 'subagents', version).ok ? available.subagents : [], synced.subagents);
+  }
   if (requested.has('plugins')) empty.plugins = diffPlugins(agent, version, cwd);
   if (requested.has('promptcuts')) empty.promptcuts = diffPromptcuts();
 

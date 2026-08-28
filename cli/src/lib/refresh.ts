@@ -119,6 +119,12 @@ function migratePromptcutsToRoot(agentsDir: string, quiet = false): void {
 export interface RefreshResult {
   /** User-facing sentences, one per refused resource, prefixed with the agent. */
   declined: string[];
+  /**
+   * The exact (agent, version) pairs this refresh reconciled — the set a
+   * post-reconcile verification must re-check for residual drift, so it never
+   * flags a version the reconcile never targeted (PHNX-3186).
+   */
+  reconciled: Array<{ agent: AgentId; version: string }>;
 }
 
 export async function refresh(options: RefreshOptions = {}): Promise<RefreshResult> {
@@ -129,6 +135,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
   // Resources this pass refused to write, surfaced by the caller. An empty
   // synced list cannot also mean "declined and here is why" (RUSH-2700).
   const declined: string[] = [];
+  const reconciled: Array<{ agent: AgentId; version: string }> = [];
 
   migratePromptcutsToRoot(agentsDir, quiet);
 
@@ -271,6 +278,7 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
             selection,
             { available, ...(forceFullSync ? { force: true as const } : {}) },
           );
+          reconciled.push({ agent: agentId, version: ver });
           if (syncResult.commands) kinds.add('commands');
           if (syncResult.skills) kinds.add('skills');
           if (syncResult.hooks) kinds.add('hooks');
@@ -445,5 +453,5 @@ export async function refresh(options: RefreshOptions = {}): Promise<RefreshResu
     for (const reason of declined) log(`  ${chalk.yellow(reason)}`);
   }
 
-  return { declined };
+  return { declined, reconciled };
 }
