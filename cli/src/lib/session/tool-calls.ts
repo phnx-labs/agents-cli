@@ -554,48 +554,93 @@ export class ToolCallCollector {
   }
 }
 
+/** Fold one normalized event into a collector (the full-file harness contract). */
+function foldEventIntoCollector(collector: ToolCallCollector, event: SessionEvent): void {
+  if (event.type === 'tool_use') {
+    collector.start({
+      timestamp: event.timestamp,
+      tool: event.tool || 'unknown',
+      input: event.args,
+      command: event.command,
+      sourceCallId: event.callId,
+    });
+  } else if (event.type === 'tool_result') {
+    collector.finish({
+      timestamp: event.timestamp,
+      sourceCallId: event.callId,
+      tool: event.tool,
+      success: event.success,
+      outcome: event.outcome,
+      exitCode: event.exitCode,
+      statusCode: event.statusCode,
+      errorCode: event.errorCode,
+      output: event.output,
+    });
+  } else if (event.type === 'error' && event.tool) {
+    const structuredError = event.outcome === 'error' || event.success === false;
+    const evidence = event.content || event.output || 'Tool execution failed';
+    collector.finish({
+      timestamp: event.timestamp,
+      sourceCallId: event.callId,
+      tool: event.tool,
+      success: structuredError ? false : undefined,
+      outcome: event.outcome,
+      exitCode: event.exitCode,
+      statusCode: event.statusCode,
+      errorCode: event.errorCode,
+      error: structuredError ? evidence : undefined,
+      output: structuredError ? undefined : evidence,
+    });
+  }
+}
+
+/** The prior scan's resume point for an append-only event stream. */
+export interface EventToolScanResumePoint {
+  /** ToolCallCollector snapshot after folding `eventCount` events. */
+  snapshot: ToolCallCollectorSnapshot;
+  /** How many events had been folded when the snapshot was taken. */
+  eventCount: number;
+}
+
+export interface EventToolScanResult {
+  /** The CHANGED calls — an append-safe upsert set, not the whole history. */
+  calls: IndexedToolCall[];
+  /** Serialized-ready snapshot to persist for the next incremental scan. */
+  snapshot: ToolCallCollectorSnapshot;
+  /** Events folded so far — the next scan's resume offset into `events`. */
+  eventCount: number;
+}
+
+/**
+ * Derive tool calls from a full-file harness's normalized events, optionally
+ * RESUMING from a prior scan of the same append-only stream.
+ *
+ * Without `prior` this is a full parse from event 0 (identical to the legacy
+ * {@link toolCallsFromEvents}). With `prior`, the collector is seeded from the
+ * prior snapshot and only events at or after `prior.eventCount` are folded — so
+ * an active session that grew by a few turns re-derives (and re-redacts) only
+ * those new tool calls instead of re-sanitizing its entire history on every
+ * daemon warm tick (PHNX-3411). The ordinals continue deterministically from the
+ * snapshot, so folding [0..k) then [k..n) yields the same index as folding
+ * [0..n) once, and the CHANGED set is safe to persist with `mode: 'append'`.
+ *
+ * The caller is responsible for only supplying `prior` when the stream is still
+ * an append of what was scanned before (same source, un-truncated,
+ * `prior.eventCount <= events.length`); anything else must full-scan.
+ */
+export function scanEventToolCalls(
+  events: SessionEvent[],
+  prior?: EventToolScanResumePoint,
+): EventToolScanResult {
+  const startIndex = prior ? Math.min(prior.eventCount, events.length) : 0;
+  const collector = new ToolCallCollector(prior?.snapshot);
+  for (let i = startIndex; i < events.length; i++) foldEventIntoCollector(collector, events[i]);
+  return { calls: collector.drainChanged(), snapshot: collector.snapshot(), eventCount: events.length };
+}
+
 /** Build indexed calls from the normalized parser contract used by full-file harnesses. */
 export function toolCallsFromEvents(events: SessionEvent[]): IndexedToolCall[] {
-  const collector = new ToolCallCollector();
-  for (const event of events) {
-    if (event.type === 'tool_use') {
-      collector.start({
-        timestamp: event.timestamp,
-        tool: event.tool || 'unknown',
-        input: event.args,
-        command: event.command,
-        sourceCallId: event.callId,
-      });
-    } else if (event.type === 'tool_result') {
-      collector.finish({
-        timestamp: event.timestamp,
-        sourceCallId: event.callId,
-        tool: event.tool,
-        success: event.success,
-        outcome: event.outcome,
-        exitCode: event.exitCode,
-        statusCode: event.statusCode,
-        errorCode: event.errorCode,
-        output: event.output,
-      });
-    } else if (event.type === 'error' && event.tool) {
-      const structuredError = event.outcome === 'error' || event.success === false;
-      const evidence = event.content || event.output || 'Tool execution failed';
-      collector.finish({
-        timestamp: event.timestamp,
-        sourceCallId: event.callId,
-        tool: event.tool,
-        success: structuredError ? false : undefined,
-        outcome: event.outcome,
-        exitCode: event.exitCode,
-        statusCode: event.statusCode,
-        errorCode: event.errorCode,
-        error: structuredError ? evidence : undefined,
-        output: structuredError ? undefined : evidence,
-      });
-    }
-  }
-  return collector.drainChanged();
+  return scanEventToolCalls(events).calls;
 }
 
 export function toolCallKey(sessionId: string, ordinal: number): string {

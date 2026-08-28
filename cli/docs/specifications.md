@@ -815,8 +815,9 @@ SSH access (§7); rendering sessions that no harness produced.
   is recorded, the ledger's source path does not match, or the file is shorter
   than what was already parsed. A record with no trailing newline MUST be indexed
   but MUST NOT advance `parsed_offset`, so re-reading it next scan re-derives the
-  same ordinals rather than duplicating the call. Harnesses parsed whole into
-  memory record no resume point and stay full replaces.
+  same ordinals rather than duplicating the call. In the `ensureToolIndex`
+  backfill path, harnesses parsed whole into memory record no resume point and
+  stay full replaces.
   Every `tool_call_text` row MUST be addressed by the `rowid` of the `tool_calls`
   row it describes; its `call_key` is UNINDEXED, so a `call_key` predicate scans
   the entire index once per call.
@@ -824,6 +825,24 @@ SSH access (§7); rendering sessions that no harness produced.
   (`maintainSessionSearchIndex`) so index health does not depend on a human
   running `agents sessions optimize`
   (`lib/session/tool-index.ts`; `lib/session/tool-store.ts`; `lib/session/db.ts`).
+- **SES-42b (MUST).** The daemon warm-tick indexer (`upsertSessionsBatch`) MUST NOT
+  re-derive a changed full-file-harness session's whole tool history on every
+  tick. A changed session is re-parsed for metadata, but its tool calls MUST be
+  derived incrementally: the tool ledger records how many normalized events were
+  folded (`parsed_offset`, reused as an EVENT COUNT for full-file harnesses, not a
+  byte offset) plus the collector snapshot (`parser_state`), and a later scan of
+  the same append-only stream MUST fold only events at or after that count and
+  persist with `mode: 'append'` (`planEventToolResume` in `lib/session/tool-store.ts`,
+  `scanEventToolCalls` in `lib/session/tool-calls.ts`). The resume point MUST be
+  refused — forcing one full replace from event 0 — when the extractor version
+  differs, no resume point is recorded, the ledger's source path does not match,
+  the tool source shrank below the recorded size, or more events were folded than
+  the file now yields (a rewrite, not an append). The incremental index MUST equal
+  a full re-parse of the same final transcript. claude/codex are unaffected: their
+  warm-tick resume rides the content-scan ledger's byte offset (SES-42), so they
+  record no event-count resume point here. This closes the O(session)-per-tick
+  synchronous cost that blocked the daemon event loop and starved browser IPC
+  (PHNX-3411) (`lib/session/db.ts`; `lib/session/tool-store.ts`; `lib/session/tool-calls.ts`).
 - **SES-35 (MUST).** Fleet tool search MUST cap each peer's stdout at 16 MiB,
   query at most six peers concurrently, and subtract the exact encoded local
   envelope plus 64 KiB of coordinator headroom from the 15 MiB aggregate receive
