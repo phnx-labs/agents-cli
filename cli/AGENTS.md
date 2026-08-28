@@ -143,13 +143,16 @@ reporting 0% error rate while a run burned hours in a failed-tool retry loop).
 
 `meta.outcome` is the **truthful** run outcome (PHNX-3387): a run with tool
 errors reads `completed` ONLY when it *causally recovered* — a substantive,
-non-human-facing tool step succeeded strictly after the last error, the exact
-predicate the false-termination phenotype uses (`recoveredAfterErrors` in
+non-human-facing tool step succeeded strictly after the last error AND resolved
+the failed work (its **work signature** — the effective program for a shell step,
+the tool identity otherwise — matches an errored step's), the exact predicate the
+false-termination phenotype uses (`recoveredAfterErrors` in
 [`phenotype.ts`](src/lib/traces/phenotype.ts), shared with `deriveRunOutcome` in
 [`sync.ts`](src/lib/traces/sync.ts) so the console outcome and the phenotype can
 never disagree about whether a run finished). A run whose last substantive step
-is the error, or whose only post-error steps are human-facing (a punt to
-`AskUserQuestion`), stays `errored`. This is what makes
+is the error, whose only post-error steps are human-facing (a punt to
+`AskUserQuestion`), or whose only post-error success is unrelated work (a failed
+`bun test` followed by an incidental `ls`), stays `errored`. This is what makes
 `surfacedToolFailures` on a `completed` run honest: those are failures the run
 recovered from, not a green status hiding an unresolved one. It never flips a
 genuinely-unresolved run to `completed` (no regression vs the old

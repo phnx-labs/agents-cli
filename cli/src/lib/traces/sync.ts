@@ -669,20 +669,20 @@ function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
  *
  * A run with zero tool errors `completed`. A run that hit tool errors is
  * `completed` ONLY when it *causally recovered* — a substantive, non-human-facing
- * tool step succeeded strictly after the last error ({@link recoveredAfterErrors},
- * the exact predicate the false-termination phenotype uses). A run whose last
- * substantive step is the error, or whose only post-error steps are human-facing
+ * tool step succeeded strictly after the last error AND resolved the failed work
+ * (its work signature matches an errored step's), the exact predicate the
+ * false-termination phenotype uses ({@link recoveredAfterErrors}). A run whose
+ * last substantive step is the error, whose only post-error steps are human-facing
  * (a punt to `AskUserQuestion` — the case the broken "last tool call ok" heuristic
- * mislabeled `completed`), stays `errored`.
+ * mislabeled `completed`), or whose only post-error success is unrelated work (a
+ * failed `bun test` followed by an incidental `ls`) stays `errored`.
  *
  * This is what makes `surfacedToolFailures` on a `completed` run honest: those
  * are failures the run recovered from, not a green status hiding an unresolved
  * failure. It never flips a run that ended unresolved to `completed` (no
- * regression vs the old `errorCount > 0 ? errored : completed`). Like the
- * false-termination phenotype it reuses, it treats a substantive non-human
- * success strictly after the last error as recovery — it cannot distinguish a
- * meaningful fix from an incidental trailing success — which is the deliberate
- * resolution boundary the review pointed `deriveRunOutcome` at, not a new one.
+ * regression vs the old `errorCount > 0 ? errored : completed`), and it does not
+ * flip a run whose failed work was never resolved just because some later,
+ * unrelated call happened to succeed.
  */
 function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
   if (traj.errorCount === 0) return 'completed';
