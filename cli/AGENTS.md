@@ -491,6 +491,29 @@ Everything but the collector is pure and unit-tested
 ([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent
 coverage is `ALL_AGENT_IDS`-driven, so a new harness is included automatically.
 
+**Usage is a per-account fact, fleet-synced from headed boxes (PHNX-3392).** A
+Claude rate limit is metered per ACCOUNT, so the 5h/weekly numbers are identical
+on every box — but only a headed device (`personal`/`desktop`) can READ them: the
+usage endpoint needs the `user:profile` scope only the interactive login carries
+(RUSH-2392), and the status-line writer above only fires on a box that runs Claude
+interactively. A headless `worker` has just the `user:inference` setup-token,
+which the endpoint 403s, so its `claude-usage.json` stays blank and `agents view`
+shows no S:/W: bars. The `usage-sync` daemon service closes this the same way
+`auth-sync` closes the token gap: each headed daemon PUSHES its identity-keyed
+usage rows to worker peers, which merge them NEWEST-WINS
+(`ingestPeerClaudeUsageRows`, `src/lib/accounting/usage.ts`) via the hidden
+`agents __usage-ingest` stdin verb. The push is role-gated (publish on
+personal/desktop, consume on worker/unmarked), single-executor per destination
+(each daemon writes only the destination's own cache), and idempotent
+(timestamp-guarded merge), so two publishers converge regardless of order.
+Driver + planner are pure and unit-tested
+([`usage-sync.test.ts`](src/lib/accounting/usage-sync.test.ts)); the merge and the
+receiver verb have real-file / real-CLI tests
+([`usage-sync-cache.test.ts`](src/lib/accounting/usage-sync-cache.test.ts),
+[`usage-ingest.e2e.test.ts`](src/lib/accounting/usage-ingest.e2e.test.ts)). A
+synced row reads as `last_seen` (cached), never a live fetch, so a worker's bar is
+honest about being a propagated snapshot.
+
 ### 11. Session recovery is one decision on the origin device
 
 `resolveSessionRecovery` in `src/lib/session/recovery.ts` is the only place that
