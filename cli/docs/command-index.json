@@ -1542,6 +1542,15 @@
                   "negate": false
                 },
                 {
+                  "flags": "--check",
+                  "description": "report whether a deploy is needed and exit without deploying (needs no Cloudflare credentials)",
+                  "long": "--check",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                },
+                {
                   "flags": "--update-json",
                   "description": "emit a machine-readable result",
                   "long": "--update-json",
@@ -1561,8 +1570,8 @@
                   "negate": false
                 }
               ],
-              "examples": "# Push a worker-template.ts change out to your already-provisioned endpoint\n      agents artifacts share update\n\n      # Force a re-deploy even though the template hash already matches\n      agents artifacts share update --force",
-              "notes": "Reuses the existing account/worker/bucket from 'agents artifacts share status' and the\n  existing write token — it never re-provisions a bucket, touches routes, or\n  regenerates the token. See 'agents artifacts share status' for whether an update is due.",
+              "examples": "# Push a worker-template.ts change out to your already-provisioned endpoint\n      agents artifacts share update\n\n      # Force a re-deploy even though the template hash already matches\n      agents artifacts share update --force\n\n      # Report whether a deploy is due without deploying (no Cloudflare creds needed)\n      agents artifacts share update --check --update-json",
+              "notes": "Reuses the existing account/worker/bucket from 'agents artifacts share status' and the\n  existing write token — it never re-provisions a bucket, touches routes, or\n  regenerates the token. See 'agents artifacts share status' for whether an update is due.\n\n  --check renders the current template and compares its hash to what the endpoint last\n  deployed, then exits — deploying nothing and reading no Cloudflare credentials. The\n  release train uses it to decide, before publish, whether a release changes the Worker.",
               "subcommands": []
             },
             {
