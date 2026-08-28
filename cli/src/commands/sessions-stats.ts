@@ -48,6 +48,20 @@ interface StatsOpts {
 
 const DEFAULT_TOP = 20;
 
+/**
+ * The recorded-set the zero-counts must be read against (PHNX-2301). A resource
+ * only records an EXPLICIT invocation from a harness that emits the event:
+ * `Skill` tool calls come from Claude + Kimi, slash-commands from Claude only
+ * (`SKILL_TOOL_NAME_BY_AGENT` in `lib/session/highlights.ts`, slash-command
+ * parsing in `lib/session/parse.ts`). A session under any other harness — or an
+ * auto-triggered skill, which emits no event on any harness — contributes
+ * nothing, so its resources read as 0 whether or not they were used. Keep these
+ * in lockstep with the writer: widening them here without a verified transcript
+ * tool-name would make the caveat lie about coverage it does not have.
+ */
+const RECORDING_SKILL_HARNESSES = ['claude', 'kimi'] as const;
+const RECORDING_COMMAND_HARNESSES = ['claude'] as const;
+
 /** One installed resource, keyed the same way session_resource_usage stores it. */
 export interface InstalledResource {
   kind: 'skill' | 'command';
@@ -194,7 +208,7 @@ async function statsAction(cmd: Command): Promise<void> {
     process.stdout.write(
       JSON.stringify(
         {
-          schemaVersion: 1,
+          schemaVersion: 2,
           kind: 'sessions-stats',
           generatedAt: new Date().toISOString(),
           filters: {
@@ -208,9 +222,21 @@ async function statsAction(cmd: Command): Promise<void> {
           signal: {
             explicitOnly: true,
             note: 'Explicit invocations only (slash commands + Skill tool calls). Auto-triggered skills emit no event and read as 0. Skill invocations are recorded for Claude and Kimi; slash-commands for Claude only.',
+            // Structured recorded-set so a machine consumer can tell a zero from a
+            // non-recording harness apart from a genuine non-use (PHNX-2301): a
+            // zeroInvoked resource may simply have been auto-triggered, or only
+            // used under a harness not in these sets.
+            recording: {
+              skills: RECORDING_SKILL_HARNESSES,
+              commands: RECORDING_COMMAND_HARNESSES,
+            },
           },
           coverage: {
+            // sessionsWithUsage/sessionsIndexed kept for the SES-IF-4b envelope
+            // contract; sessionsScanned is the honest backfill-coverage numerator
+            // (ledger rows), distinct from the absolute sessionsWithUsage count.
             sessionsWithUsage: coverage.covered,
+            sessionsScanned: coverage.scanned,
             sessionsIndexed: coverage.total,
           },
           totals: {
@@ -279,7 +305,7 @@ function renderHuman(args: {
   kind: 'skill' | 'command' | undefined;
   ranked: ResourceStatRow[];
   zeroInvoked: InstalledResource[];
-  coverage: { covered: number; total: number };
+  coverage: { covered: number; scanned: number; total: number };
   totalInvocations: number;
   allInvokedCount: number;
   top: number;
@@ -300,9 +326,13 @@ function renderHuman(args: {
       chalk.gray(`  ·  ${allInvokedCount} invoked · ${totalInvocations} invocation${totalInvocations !== 1 ? 's' : ''}` +
         (scopeBits.length ? `  ·  ${scopeBits.join(' · ')}` : '')),
   );
+  // Scan coverage (ledger) is the honest "has the backfill folded in history?"
+  // signal and drives the hint; sessionsWithUsage is an ABSOLUTE count of sessions
+  // carrying ≥1 explicit invocation, which stays small at full scan coverage
+  // because most sessions invoke nothing (PHNX-2301).
   out.push(
-    chalk.gray(`  coverage: ${coverage.covered}/${coverage.total} sessions carry the signal`) +
-      (coverage.total > 0 && coverage.covered / coverage.total < 0.5
+    chalk.gray(`  coverage: ${coverage.scanned}/${coverage.total} sessions scanned · ${coverage.covered} carry an explicit invocation`) +
+      (coverage.total > 0 && coverage.scanned / coverage.total < 0.5
         ? chalk.yellow('  — run `agents sessions backfill resources` to fold in history')
         : ''),
   );
@@ -321,8 +351,11 @@ function renderHuman(args: {
     out.push('');
   }
 
-  // Zero-invoked section (the dead weight).
-  out.push(chalk.bold('Installed but never invoked') + chalk.gray(`  (${zeroInvoked.length})`));
+  // Zero-invoked section (the dead weight). "Never invoked" is scoped to the
+  // recorded set: never EXPLICITLY invoked under a recording harness (skills
+  // Claude+Kimi, commands Claude-only) — it may still have been auto-triggered or
+  // used under another harness, which is why this is dead-weight EVIDENCE, not proof.
+  out.push(chalk.bold('Installed but never explicitly invoked') + chalk.gray(`  (${zeroInvoked.length})`));
   if (zeroInvoked.length === 0) {
     out.push(chalk.gray('  (every installed resource has at least one explicit invocation in this window)'));
   } else {

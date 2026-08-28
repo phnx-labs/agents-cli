@@ -3878,17 +3878,43 @@ export function queryResourceUsageStats(
 }
 
 /**
- * Coverage of the resource-usage signal: how many distinct sessions carry any
- * row in session_resource_usage vs. the total indexed. A low ratio means the
- * historical backfill (`agents sessions backfill resources`) hasn't run — the
- * stats surface uses this to tell the user their zero-counts may just be
- * un-scanned history, not genuine non-use.
+ * Coverage of the resource-usage signal, as three honest facts:
+ *
+ * - `scanned`  — sessions the resource extractor has actually processed, i.e.
+ *   those carrying a `resource_scan_ledger` row at the current
+ *   `RESOURCE_INDEX_VERSION`. This is the true "has the historical backfill run"
+ *   signal: the ledger is stamped for EVERY scanned session, including ones that
+ *   invoked nothing (`resource_count = 0`), so `scanned/total` rises to ~1 after
+ *   `agents sessions backfill resources` regardless of how sparse explicit
+ *   invocations are.
+ * - `covered`  — distinct sessions that carry AT LEAST ONE row in
+ *   `session_resource_usage`, i.e. that actually recorded an explicit invocation.
+ *   This is an ABSOLUTE signal count, not a coverage ratio: it stays small even
+ *   at full scan coverage because most sessions invoke no skill/command, and a
+ *   non-recording harness contributes none by construction.
+ * - `total`    — sessions indexed.
+ *
+ * The two were previously conflated: `covered/total` was framed as coverage and
+ * read ~1.2% even after a full backfill (most sessions genuinely invoke nothing),
+ * so the "run the backfill" hint never cleared. Keying the hint on `scanned/total`
+ * fixes that — see `commands/sessions-stats.ts` (PHNX-2301).
  */
-export function resourceUsageCoverage(): { covered: number; total: number } {
+export function resourceUsageCoverage(): { covered: number; scanned: number; total: number } {
   const db = getDB();
   const covered = (db.prepare(`SELECT COUNT(DISTINCT session_id) AS n FROM session_resource_usage`).get() as { n: number }).n;
+  // JOIN sessions so a ledger row for a since-vanished transcript (dropped from
+  // `sessions` but not yet from the ledger) can't inflate scan coverage past the
+  // indexed set. Only rows at the current extractor version count as scanned —
+  // a stale-version row is re-derived on the next backfill, so it is not yet
+  // "covered" for this extractor.
+  const scanned = (db.prepare(`
+    SELECT COUNT(*) AS n
+    FROM resource_scan_ledger l
+    JOIN sessions s ON s.id = l.session_id
+    WHERE l.extractor_version = ?
+  `).get(RESOURCE_INDEX_VERSION) as { n: number }).n;
   const total = (db.prepare(`SELECT COUNT(*) AS n FROM sessions`).get() as { n: number }).n;
-  return { covered, total };
+  return { covered, scanned, total };
 }
 
 /** Has this session's resource usage been derived at the current extractor version for this exact file? */

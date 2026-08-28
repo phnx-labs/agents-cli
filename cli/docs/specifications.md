@@ -1086,7 +1086,16 @@ The command surface (bare `sessions [query]`, `preview`, `tail`, `resume`, `deta
   count each resource identity (kind + name) once — merging source layers — and
   MUST record only EXPLICIT invocations (slash commands + `Skill` tool calls), so
   an auto-triggered skill reads as 0 (skill invocations come from Claude + Kimi,
-  slash-commands from Claude only); the envelope's `signal` field states this.
+  slash-commands from Claude only); the envelope's `signal` field states this and
+  its `signal.recording` field names the recorded set so a zero is not over-read.
+  The `coverage` object MUST distinguish SCAN coverage from with-usage coverage:
+  `sessionsScanned` counts sessions carrying a `resource_scan_ledger` row at the
+  current `RESOURCE_INDEX_VERSION` (the "has the backfill run" signal, which
+  reaches ~`sessionsIndexed` after a full backfill because the ledger is stamped
+  for every scanned session, incl. zero-usage ones), while `sessionsWithUsage`
+  stays the ABSOLUTE count of sessions with ≥1 explicit invocation — the
+  backfill hint keys on `sessionsScanned/sessionsIndexed`, never on
+  `sessionsWithUsage`, which is sparse by nature and would nag forever (PHNX-2301).
   `sessions backfill resources --json` MUST emit the versioned
   `resources-backfill` envelope and populate `session_resource_usage` for
   historical sessions gated by `resource_scan_ledger`, never silently re-scanning
