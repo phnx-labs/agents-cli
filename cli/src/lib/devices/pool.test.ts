@@ -3,56 +3,90 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 
-import { filterAutoPool, isAutoPoolMember, listWorkerDevices, describeAutoPool } from './pool.js';
+import { filterAutoPool, isAutoPoolMember, listWorkerDevices, describeAutoPool, autoLaunchPreferredSet } from './pool.js';
 
 // The pure rule (roles + mode injected) is exercised directly; the stored-config
 // path re-imports against a throwaway HOME so it reads a REAL agents.yaml, the
-// same pattern device-config.test.ts uses. No mocks either way.
+// same pattern device-config.test.ts uses. No mocks either way. The pure calls
+// inject `autoLaunch: {}` alongside `roles` so neither role nor auto-launch rule
+// touches disk.
 
 const FLEET = ['zion', 'yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone'];
 
 describe('filterAutoPool (the allowlist rule)', () => {
   it('leaves the pool untouched when nothing is marked', () => {
-    expect(filterAutoPool(FLEET, { mode: 'workers', roles: {} })).toEqual(FLEET);
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles: {}, autoLaunch: {} })).toEqual(FLEET);
   });
 
   it('narrows to the marked workers once ANY device is marked worker', () => {
     const roles = { 'yosemite-s0': 'worker', 'yosemite-s1': 'worker' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['yosemite-s0', 'yosemite-s1']);
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles, autoLaunch: {} })).toEqual(['yosemite-s0', 'yosemite-s1']);
   });
 
   it('never picks a personal device, even with no worker marked', () => {
     const roles = { zion: 'personal' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles, autoLaunch: {} })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
   });
 
   it('never picks a desktop device — the headed release/credential box is off-limits too', () => {
     const roles = { 'mac-mini': 'desktop' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['zion', 'yosemite-s0', 'yosemite-s1', 'iphone']);
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles, autoLaunch: {} })).toEqual(['zion', 'yosemite-s0', 'yosemite-s1', 'iphone']);
   });
 
   it('auto.pool=all drops the worker allowlist but keeps personal AND desktop out', () => {
     const roles = { 'yosemite-s0': 'worker', zion: 'personal', 'mac-mini': 'desktop' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'all', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'iphone']);
+    expect(filterAutoPool(FLEET, { mode: 'all', roles, autoLaunch: {} })).toEqual(['yosemite-s0', 'yosemite-s1', 'iphone']);
+  });
+
+  it('drops a device the operator disabled (auto-launch.enabled = false), whatever the mode', () => {
+    // `agents devices disable zion` removes it from EVERY auto path — here even
+    // with no worker mark and even under auto.pool=all.
+    const autoLaunch = { zion: { enabled: false } };
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles: {}, autoLaunch })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
+    expect(filterAutoPool(FLEET, { mode: 'all', roles: {}, autoLaunch })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
+  });
+
+  it('a disabled worker is dropped even though it carries the worker mark', () => {
+    // disable wins over the allowlist: a worker turned off is not a candidate.
+    const roles = { 'yosemite-s0': 'worker', 'yosemite-s1': 'worker' } as const;
+    const autoLaunch = { 'yosemite-s0': { enabled: false } };
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles, autoLaunch })).toEqual(['yosemite-s1']);
+  });
+
+  it('preferred does NOT narrow the pool — it only boosts ranking', () => {
+    // A preference is a rank hint, never an exclusion; every device stays.
+    const autoLaunch = { 'mac-mini': { preferred: true } };
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles: {}, autoLaunch })).toEqual(FLEET);
+  });
+
+  it('disable matches by normalized name, so an FQDN candidate is still dropped', () => {
+    const autoLaunch = { zion: { enabled: false } };
+    expect(filterAutoPool(['ZION', 'mac-mini'], { mode: 'workers', roles: {}, autoLaunch })).toEqual(['mac-mini']);
   });
 
   it('returns empty rather than widening back to the fleet when no worker is a candidate', () => {
     // Both marked workers are offline, so neither is in the candidate list. The
     // caller must fail loud; silently re-adding the laptop is the bug this pins.
     const roles = { 'yosemite-s0': 'worker', 'yosemite-s1': 'worker' } as const;
-    expect(filterAutoPool(['zion', 'mac-mini'], { mode: 'workers', roles })).toEqual([]);
+    expect(filterAutoPool(['zion', 'mac-mini'], { mode: 'workers', roles, autoLaunch: {} })).toEqual([]);
   });
 
   it('matches hosts by normalized name, so an FQDN candidate still resolves', () => {
     const roles = { 'yosemite-s0': 'worker' } as const;
-    expect(filterAutoPool(['YOSEMITE-S0', 'zion'], { mode: 'workers', roles })).toEqual(['YOSEMITE-S0']);
+    expect(filterAutoPool(['YOSEMITE-S0', 'zion'], { mode: 'workers', roles, autoLaunch: {} })).toEqual(['YOSEMITE-S0']);
   });
 
   it('isAutoPoolMember answers for one host', () => {
     const roles = { 'yosemite-s0': 'worker', zion: 'personal' } as const;
-    expect(isAutoPoolMember('yosemite-s0', { mode: 'workers', roles })).toBe(true);
-    expect(isAutoPoolMember('zion', { mode: 'workers', roles })).toBe(false);
-    expect(isAutoPoolMember('mac-mini', { mode: 'workers', roles })).toBe(false);
+    expect(isAutoPoolMember('yosemite-s0', { mode: 'workers', roles, autoLaunch: {} })).toBe(true);
+    expect(isAutoPoolMember('zion', { mode: 'workers', roles, autoLaunch: {} })).toBe(false);
+    expect(isAutoPoolMember('mac-mini', { mode: 'workers', roles, autoLaunch: {} })).toBe(false);
+  });
+
+  it('isAutoPoolMember answers false for a disabled host', () => {
+    const autoLaunch = { 'yosemite-s0': { enabled: false } };
+    expect(isAutoPoolMember('yosemite-s0', { mode: 'all', roles: {}, autoLaunch })).toBe(false);
+    expect(isAutoPoolMember('yosemite-s1', { mode: 'all', roles: {}, autoLaunch })).toBe(true);
   });
 
   it('describeAutoPool names the workers, and says when the mark is being ignored', () => {
@@ -65,6 +99,15 @@ describe('filterAutoPool (the allowlist rule)', () => {
   it('listWorkerDevices returns only the worker marks', () => {
     const roles = { 'yosemite-s0': 'worker', zion: 'personal' } as const;
     expect(listWorkerDevices({ roles })).toEqual(['yosemite-s0']);
+  });
+
+  it('autoLaunchPreferredSet returns the boosted hosts, normalized', () => {
+    const autoLaunch = { 'mac-mini': { preferred: true }, zion: { enabled: false } };
+    const preferred = autoLaunchPreferredSet(['MAC-MINI', 'zion'], { autoLaunch });
+    expect(preferred.has('mac-mini')).toBe(true);
+    // A disabled-but-not-preferred device is not in the preferred set.
+    expect(preferred.has('zion')).toBe(false);
+    expect(preferred.size).toBe(1);
   });
 });
 
@@ -184,5 +227,34 @@ describe('roles read from the per-device docs', () => {
   it('rejects an auto.pool mode outside the vocabulary', async () => {
     const mod = await freshPool();
     expect(() => mod.setConfigValue('auto.pool', 'some')).toThrow(/workers \| all/);
+  });
+
+  it('`devices disable` (auto-launch.enabled off) drops the box from the pool on the next read', async () => {
+    // The acceptance path: `agents devices disable zion` removes zion from
+    // candidates. `setAutoLaunchEnabled(false)` is exactly what the CLI verb writes.
+    const mod = await freshPool();
+    mod.setAutoLaunchEnabled('zion', false);
+    expect(mod.isAutoLaunchEnabled('zion')).toBe(false);
+    expect(mod.filterAutoPool(FLEET)).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
+    // Re-enabling restores it.
+    mod.setAutoLaunchEnabled('zion', true);
+    expect(mod.filterAutoPool(FLEET)).toEqual(FLEET);
+  });
+
+  it('`devices prefer` (auto-launch.preferred on) surfaces in the preferred set, without narrowing the pool', async () => {
+    // `agents devices prefer mac-mini` boosts ranking — it never drops a box.
+    const mod = await freshPool();
+    mod.setAutoLaunchPreferred('mac-mini', true);
+    expect(mod.isAutoLaunchPreferred('mac-mini')).toBe(true);
+    expect(mod.autoLaunchPreferredSet(FLEET).has('mac-mini')).toBe(true);
+    expect(mod.filterAutoPool(FLEET)).toEqual(FLEET);
+  });
+
+  it('a fleet-default disable reaches a doc-less device via the candidate roster', async () => {
+    const mod = await freshPool();
+    mod.setConfigValue('auto-launch.enabled', false, { fleet: true });
+    // No device has a doc; filterAutoPool passes its pool as the roster, so the
+    // fleet-wide disable empties the whole fleet.
+    expect(mod.filterAutoPool(FLEET)).toEqual([]);
   });
 });

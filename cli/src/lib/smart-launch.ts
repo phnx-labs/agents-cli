@@ -9,7 +9,7 @@
 import { queryAffinityRollup, type AffinityRow } from './session/db.js';
 import { localMachineId } from './session/origin-machine.js';
 import { loadDevicesSync } from './devices/registry.js';
-import { describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
+import { autoLaunchPreferredSet, describeAutoPool, filterAutoPool, isAutoPoolMember } from './devices/pool.js';
 import { normalizeHost } from './machine-id.js';
 import { probePoolSignals } from './teams/placement-probe.js';
 import { pickBestDevice, type DevicePlacementSignal } from './teams/scheduler.js';
@@ -178,6 +178,12 @@ export async function resolveDeviceAuto(
     /** Route only to devices with a row the interactive account picker can launch. */
     accountPicker?: boolean;
     probe?: (pool: string[], agent?: AgentType) => Promise<Map<string, DevicePlacementSignal>>;
+    /**
+     * Preferred hosts (`auto-launch.preferred`) that get the ranking boost.
+     * Defaults to the stored fleet block resolved over the candidate pool;
+     * injectable so a test pins it without touching disk.
+     */
+    preferred?: ReadonlySet<string>;
   } = {},
 ): Promise<DeviceAutoPlan> {
   const local = normalizeHost(opts.localMachine ?? localMachineId());
@@ -211,7 +217,10 @@ export async function resolveDeviceAuto(
   if (eligiblePool.length === 0) {
     throw new Error(formatNoHealthyDeviceError(pool, signals, agent));
   }
-  const picked = pickBestDevice(eligiblePool, [], { signals, agentLabel: agent });
+  // `agents devices prefer <name>` boosts a device in the ranking — resolved
+  // over the same pool so a fleet default reaches a doc-less box.
+  const preferred = opts.preferred ?? autoLaunchPreferredSet(pool, { roster: pool });
+  const picked = pickBestDevice(eligiblePool, [], { signals, agentLabel: agent, preferred });
   return {
     host: picked === local ? null : picked,
     pickedDeviceKey: picked,

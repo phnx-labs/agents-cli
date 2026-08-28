@@ -677,6 +677,25 @@ list` folds the `★ interactive` star INTO the `personal` role rather than
 printing both (the star still shows for a non-personal box pinned as
 `interactive.host`).
 
+`auto-launch.enabled` / `auto-launch.preferred` are the per-device switches that
+modulate that SAME `filterAutoPool` pool — one placement rule, not a second one.
+`agents devices disable <name>` sets `auto-launch.enabled` = false and drops the
+box from the pool the same way a `personal`/`desktop` role does, so it leaves
+EVERY automatic-placement path (`run`, `teams`, `ssh auto`, the AGI EXT launch
+commands) at once; `agents devices enable <name>` (the default) restores it.
+`agents devices prefer <name>` sets `auto-launch.preferred` = true, which does NOT
+narrow the pool — it BOOSTS the box in the ranker: `autoLaunchPreferredSet`
+(`pool.ts`) feeds `pickBestDevice` (`teams/scheduler.ts`), which ranks a preferred
+device ahead of its load-equal peers, after the signed-in tier and before load, so
+the boost overrides load-based ordering without overriding hard health;
+`agents devices unprefer <name>` removes it. Both flags are **shared** device-scope
+keys living in `devices/<name>/agents.yaml` `config.autoLaunch{Enabled,Preferred}`
+(a fleet-wide default rides `fleet.defaults.config`, set with `--fleet`), so they
+sync with `agents repo push/pull`. The four verbs are task-shaped forwarding
+spellings for `agents devices config <name> auto-launch.{enabled,preferred}
+<on|off>` — the one canonical per-device settings surface — so they print a
+deprecation-style "running that for you" notice and defer to it.
+
 `devices.<name>.description` (stored as `description`) is the free-text sibling
 of `role`: one line saying what the box is FOR — "gpu box — cuda 12.4", "release
 runner" — where `role` is the two-value placement switch. Like `role` it is

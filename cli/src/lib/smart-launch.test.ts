@@ -122,6 +122,18 @@ describe('resolveDeviceAuto', () => {
     expect(plan.pickedDeviceKey).toBe('idle');
   });
 
+  it('ranks a preferred device ahead of a less-loaded one (agents devices prefer)', async () => {
+    // `busy-preferred` is loaded heavier than `idle`, but the operator boosted
+    // it — so it wins. Without the boost `idle` would.
+    const probe = async () => new Map([
+      ['idle', { reachable: true, loadPercent: 5, memPercent: 5, headroom: 'idle', installed: true, signedIn: true }],
+      ['busy-preferred', { reachable: true, loadPercent: 60, memPercent: 30, headroom: 'busy', installed: true, signedIn: true }],
+    ] as const);
+    const base = { localMachine: 'local', eligibleHosts: ['idle', 'busy-preferred'], probe } as const;
+    expect((await resolveDeviceAuto('codex', { ...base })).host).toBe('idle');
+    expect((await resolveDeviceAuto('codex', { ...base, preferred: new Set(['busy-preferred']) })).host).toBe('busy-preferred');
+  });
+
   it('fails loud when live probing cannot evaluate placement', async () => {
     await expect(resolveDeviceAuto('codex', {
       localMachine: 'local',
