@@ -12,7 +12,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { simpleGit } from 'simple-git';
-import { tryAutoPull, isGitRepo } from './git.js';
+import { tryAutoPullSystemRepo, isGitRepo } from './git.js';
 import {
   getSystemAgentsDir,
   getUserAgentsDir,
@@ -114,7 +114,12 @@ async function processTarget(target: RepoTarget): Promise<void> {
         // by a detached worker.
         await notifyRepo(target);
       } else {
-        await tryAutoPull(target.dir);
+        // Verify origin is the EXPECTED system remote before fast-forwarding —
+        // the system repo ships hooks that run as shell, so a pull from a
+        // repointed origin is RCE. An unexpected origin is refused, not pulled
+        // (PHNX-2957). The detached worker has no terminal to warn on; the
+        // foreground `agents use` path surfaces the refusal to the operator.
+        await tryAutoPullSystemRepo(target.dir);
       }
     } else {
       await notifyRepo(target);

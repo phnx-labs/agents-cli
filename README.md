@@ -59,6 +59,20 @@ Everything here — and every other command in this README — is free and needs
 The command surface teaches setup through `agents setup` and group-level `--help`.
 The durable system model starts at [`cli/docs/README.md`](cli/docs/README.md).
 
+**What `agents setup` installs, and what auto-updates.** Setup clones a small public
+**system repo** (`phnx-labs/.agents-system`) into `~/.agents/.system/`. It ships the
+default resources — including **hooks**, which run as shell commands on tool events —
+and its checkout **fast-forwards from its origin** when you run `agents use` (and, only
+if you opt in with `AGENTS_AUTO_PULL=1`, in the background). Two safeguards bound that:
+the pull is `merge --ff-only` (it can never rewrite your local history), and it is
+**verified against the expected origin** — a checkout whose `origin` is not the canonical
+system repo (or the exact repo you named in `AGENTS_SYSTEM_REPO`) is refused, never
+pulled, so a repointed remote cannot slip hook code onto your machine. To pin or opt out:
+set `AGENTS_SYSTEM_REPO=gh:you/your-fork` to track your own audited copy, run
+`agents setup --no-system-repo` to skip the clone entirely, or check out a specific tag
+in `~/.agents/.system/` (a fast-forward only advances a moving branch, so a detached tag
+stays put).
+
 **Learn (concepts):** [Loop + graph engineering](https://agi-cli.sh/learn/loop-and-graph-engineering) · [Teams as graph engineering](https://agi-cli.sh/learn/teams-graph-engineering) · [Sessions · index + cross-device](https://agi-cli.sh/learn/sessions-index) · [Distributed fleet execution](https://agi-cli.sh/learn/distributed-fleet). Also: [harness engineering](https://agi-cli.sh/learn/harness-engineering) · [visual longform](https://share.agents-cli.sh/muqsitnawaz/agents-loop-and-graph-engineering).
 
 Already installed? `agents upgrade` updates agi-cli itself to the latest version (`agents upgrade 1.2.3` for a specific version or dist-tag, `-y` to skip the confirm prompt). The command is `upgrade` on every platform -- do not reach for `agents update`, which updates an installed **agent harness**, not agi-cli (and on macOS, `agents helper update` is a third thing: it reinstalls the keychain helper).

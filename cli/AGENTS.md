@@ -198,6 +198,17 @@ own redirect makes that resolve fine, so there is no forced cutover — and both
 names are recognized as the system origin everywhere a remote is compared, via
 `isSystemRepoRemote` in [`src/lib/git.ts`](src/lib/git.ts).
 
+**The system repo ships hooks that run as shell, so its auto-pull is
+origin-verified (PHNX-2957).** Both fast-forward paths — `agents use`
+(foreground) and the opt-in `AGENTS_AUTO_PULL=1` background worker — route
+through `tryAutoPullSystemRepo`, which pulls **only** when `origin` passes
+`isExpectedSystemRepoRemote`: the canonical `isSystemRepoRemote`, or the exact
+`AGENTS_SYSTEM_REPO` the operator pointed at. A repointed/unexpected origin is
+**refused** (never fast-forwarded), since a pull from an attacker's fork would be
+remote code execution on the next command that loads a system hook. Never widen a
+system-repo pull to bypass this guard; a legitimate alternate upstream is
+expressed through `AGENTS_SYSTEM_REPO`, not an unverified pull.
+
 Extra repos register via `agents repo add <source>` → clone into `~/.agents-<alias>/`
 and participate after the user repo. The companion extras repo
 `phnx-labs/.agents-extras` keeps its name but is now **private and opt-in**: it is
