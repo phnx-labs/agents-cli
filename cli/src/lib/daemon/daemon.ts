@@ -717,6 +717,44 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
   }
 }
 
+/**
+ * Test-home tripwire (PHNX-2545). The routines/daemon test suite spawns real
+ * `agents __daemon-run` processes against an isolated /tmp HOME. If that HOME
+ * override fails to reach the child — an `env: {...process.env}` spawn that
+ * forgot to set it, a login shell that reset HOME — the daemon resolves its
+ * state dir under the operator's REAL home and its scheduler/watchdog then tick
+ * against shared production state. That is the exact leak the ticket reports:
+ * real test daemons found alive on a fleet box, each a second live scheduler
+ * racing the legitimate one, in violation of the execution-singularity spec.
+ *
+ * A test that spawns a daemon sets AGENTS_DAEMON_TEST_HOME to the isolated home
+ * it provisioned. When that marker is present, this daemon's resolved state dir
+ * MUST sit under it; otherwise the daemon refuses to boot — failing loud before
+ * it claims an instance, writes a pid, or fires a single tick (the throw is
+ * caught in index.ts's `__daemon-run` handler, logged, and exits non-zero) —
+ * rather than running in the wrong directory against the real host. In
+ * production the marker is never set, so this is a no-op there.
+ *
+ * `daemonDir`/`testHome` are injectable so the pure guard is unit-testable
+ * without spawning a process; the defaults read the live daemon dir and env.
+ */
+export function assertTestDaemonHome(
+  daemonDir: string = getDaemonDir(),
+  testHome: string | undefined = process.env.AGENTS_DAEMON_TEST_HOME,
+): void {
+  if (!testHome) return;
+  const root = path.resolve(testHome);
+  const dir = path.resolve(daemonDir);
+  if (dir !== root && !dir.startsWith(root + path.sep)) {
+    const msg =
+      `Daemon test-home tripwire (PHNX-2545): AGENTS_DAEMON_TEST_HOME is ${root}, but this ` +
+      `daemon's state dir resolved to ${dir} — the isolated HOME override did not reach this ` +
+      `__daemon-run child, so it would schedule against the real host. Refusing to start.`;
+    log('ERROR', msg);
+    throw new Error(msg);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Module-level periodic maintenance helpers (RUSH-2422)
 //
@@ -733,6 +771,12 @@ export function warnEphemeralDaemonRoot(resolveBin: () => string = getAgentsBinP
 // ---------------------------------------------------------------------------
 
 export async function runDaemon(): Promise<void> {
+  // PHNX-2545 test-home tripwire — FIRST, before this daemon claims an instance,
+  // writes a pid, or fires any tick. A test-spawned daemon that lost its isolated
+  // HOME override must refuse to run against the operator's real state rather than
+  // schedule against the real host. No-op in production (the marker is never set).
+  assertTestDaemonHome();
+
   // Single-instance guard (last-wins, SING-11): a direct `agents __daemon-run`
   // (manual, or a service-manager restart racing a live predecessor) EVICTS the
   // incumbent and becomes the survivor. claimDaemonInstance returns false only

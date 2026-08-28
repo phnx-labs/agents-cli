@@ -19,7 +19,7 @@ import * as os from 'os';
 import * as net from 'net';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { startDetached, startDaemon } from './daemon.js';
+import { startDetached, startDaemon, assertTestDaemonHome } from './daemon.js';
 import { ipcEndpoint } from '../platform/index.js';
 import { DIST_ENTRY, REPO_ROOT, installKeychainHermeticity } from './daemon.test-fixture.js';
 
@@ -482,6 +482,85 @@ describe('daemon self-terminate guard on a missing state dir (RUSH-2367)', () =>
         if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
         if (pid) await waitFor(() => !alive(pid!), 5_000);
         try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* already gone */ }
+      }
+    },
+    30_000,
+  );
+});
+
+/**
+ * Test-home tripwire (PHNX-2545). The pure guard, plus a REAL boot: a daemon
+ * whose AGENTS_DAEMON_TEST_HOME marker names a home that does NOT contain its
+ * resolved state dir — the shape of a test spawn whose isolated HOME override
+ * failed to reach the child — must refuse to start rather than schedule its
+ * scheduler/watchdog against the operator's real host.
+ */
+describe('daemon test-home tripwire (PHNX-2545)', () => {
+  it('no-op when the marker is unset (production)', () => {
+    expect(() => assertTestDaemonHome('/anywhere/.agents/.cache/helpers/daemon', undefined)).not.toThrow();
+  });
+
+  it('passes when the daemon dir sits under the marked test home', () => {
+    const home = '/tmp/agents-routines-add-abc';
+    const dir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+    expect(() => assertTestDaemonHome(dir, home)).not.toThrow();
+    // The home itself as the dir is degenerate-but-under, still allowed.
+    expect(() => assertTestDaemonHome(home, home)).not.toThrow();
+  });
+
+  it('throws when the daemon dir escapes the marked test home', () => {
+    const testHome = '/tmp/agents-routines-add-abc';
+    const realDir = path.join(os.homedir(), '.agents', '.cache', 'helpers', 'daemon');
+    expect(() => assertTestDaemonHome(realDir, testHome)).toThrow(/test-home tripwire/i);
+    // A sibling prefix must not satisfy the startsWith check (path.sep boundary).
+    expect(() => assertTestDaemonHome('/tmp/agents-routines-add-abc-evil/x', testHome)).toThrow(/test-home tripwire/i);
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'a real __daemon-run refuses to boot when its marked test home does not contain its state dir',
+    async () => {
+      if (!fs.existsSync(DIST_ENTRY)) {
+        execFileSync('npm', ['run', 'build'], { cwd: REPO_ROOT, stdio: 'ignore' });
+      }
+
+      const tmpHome = fs.mkdtempSync(path.join('/tmp', 'agd-triphome-'));
+      const otherHome = fs.mkdtempSync(path.join('/tmp', 'agd-tripother-'));
+      const systemDir = path.join(tmpHome, '.agents', '.system');
+      fs.mkdirSync(systemDir, { recursive: true });
+      execFileSync('git', ['init', '-q', systemDir]);
+
+      const pidFile = path.join(tmpHome, '.agents', '.cache', 'helpers', 'daemon', 'daemon.pid');
+      const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+      const waitFor = async (cond: () => boolean, timeoutMs: number) => {
+        const start = Date.now();
+        while (Date.now() - start < timeoutMs) {
+          if (cond()) return true;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+        return cond();
+      };
+
+      const childEnv = {
+        ...process.env,
+        HOME: tmpHome,
+        // Marker names a DIFFERENT home than the one HOME resolves the state dir
+        // under — the tripwire must fire and the daemon must never come up.
+        AGENTS_DAEMON_TEST_HOME: otherHome,
+      };
+      delete childEnv.CLAUDE_CODE_OAUTH_TOKEN;
+
+      let pid: number | null = null;
+      try {
+        pid = startDetached({ agentsBin: DIST_ENTRY, logPath: path.join(tmpHome, 'daemon.log'), env: childEnv }).pid!;
+        expect(pid).toBeTruthy();
+        // It aborts at boot: the process dies quickly and never writes its pid file.
+        expect(await waitFor(() => !alive(pid!), 15_000)).toBe(true);
+        expect(fs.existsSync(pidFile)).toBe(false);
+      } finally {
+        if (pid) { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+        if (pid) await waitFor(() => !alive(pid!), 5_000);
+        try { fs.rmSync(tmpHome, { recursive: true, force: true }); } catch { /* already gone */ }
+        try { fs.rmSync(otherHome, { recursive: true, force: true }); } catch { /* already gone */ }
       }
     },
     30_000,

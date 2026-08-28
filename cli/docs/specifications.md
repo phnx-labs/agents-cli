@@ -3356,6 +3356,19 @@ a machine-wide process sweep.)
   (`lib/secrets/reaper.ts:156-180`, wired into the reap tick at `lib/daemon/daemon.ts:911`).
   Every daemon-owned process class — daemon, browser, tunnel, and keychain helper
   including the `watch-lock` watcher — has a recovery layer.
+- **SING-11c (MUST).** A daemon spawned by the test suite MUST NOT run its scheduler
+  against the operator's real state. Where SING-11b reaps a leaked test daemon *after
+  the fact*, this is the *boot-time* preventive guard for the same class (PHNX-2545,
+  the routines suite leaving real `__daemon-run` processes alive on a fleet box): the
+  test-daemon spawn sets `AGENTS_DAEMON_TEST_HOME` to the isolated home it provisioned,
+  and `runDaemon` (`lib/daemon/daemon.ts`, `assertTestDaemonHome`) MUST — before it
+  claims an instance, writes a pid, or fires any tick — refuse to boot when its resolved
+  state dir does not sit under that home, i.e. when the isolated `HOME` override failed
+  to reach the child and the daemon would otherwise schedule against the real host. The
+  marker is never set in production, so the guard is a no-op there. The routines
+  daemon-spawn helper (`commands/routines.test-fixture.ts`, `startIsolatedDaemon`) sets
+  the marker, and the per-file leak detector it registers (`registerLeakDetector`)
+  remains the after-the-fact backstop for a worker killed before its own `finally`.
 - **SING-12 (MUST).** `stopDaemon` (`lib/daemon/daemon.ts`) MUST assert its postcondition,
   not assume it: after the SIGTERM → grace → `killTree` sequence it MUST verify the
   browser IPC binding was released, the secrets broker socket was released (a stale
