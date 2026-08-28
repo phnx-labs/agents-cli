@@ -114,15 +114,17 @@ Why this leaks specifically across **sleep/wake and churn**:
    classic post-wake state) leaves the promise **latched forever**, so that
    session's stats never recover *and* the child is never reaped.
 
-### Is the current in-flight work enough? No.
+### Is the poll-removal work enough? No.
 
-Two unmerged branches already rework this area:
-`agents/spawn-storm` (PHNX-2833) removes the 4s poll cadence (event-driven
-redraw, "the daemon is the only scheduler"), and `agents/poll-timers-3447`
-reworks the webview polling. **Neither touches `handoff.ts`** — the unbounded
-spawn survives whichever lands. Removing the poll lowers spawn *frequency*; it
-does not bound an *individual* wedged child. So the fix is orthogonal and still
-required.
+The PHNX-2833 poll-removal has **already landed on `origin/main`** — the agent
+panel no longer runs a 4s `setInterval` (its code now reads "replaces the old 4s
+setInterval poll"), so the session-tool-stats spawn is **event-driven** now
+(webview visibility / window-focus refresh + per-terminal handoff), not a
+cadence. That change does **not** touch `handoff.ts`; the unbounded spawn
+survives it. And removing the cadence actually *strengthens* the case for
+bounding: with no stacking pressure, an individual **hung** child is the only
+remaining orphan vector — exactly what a deadline fixes. So this fix is
+orthogonal to the poll-removal and still required.
 
 ### Fix shipped — `agi-ext#16`
 
@@ -305,8 +307,9 @@ Anchors backing the findings above.
   never times out a hung promise.
 - No `powerMonitor` / `NSWorkspace willSleep|didWake` anywhere in `agi-ext`
   (grep-verified); poll pauses on webview visibility only.
-- In-flight branches `agents/spawn-storm` (PHNX-2833) and
-  `agents/poll-timers-3447` change none of `handoff.ts` (diff-verified).
+- PHNX-2833 poll-removal is already on `origin/main` (`agentPanel.vscode.ts`
+  now reads "replaces the old 4s setInterval poll"); it changes none of
+  `handoff.ts` (diff-verified), so the unbounded spawn survives it.
 - **Runtime proof of the fix:** the real `execFile` path against a fake `agents`
   on `PATH` running `sleep 30` is SIGTERM-killed at **~209 ms** with an injected
   200 ms budget (mirrors `src/core/handoff.timeout.test.ts`).
@@ -334,5 +337,5 @@ Anchors backing the findings above.
 
 | Ticket | Outcome |
 |---|---|
-| **PHNX-3467** | **needs-fix → PR `agi-ext#16`.** Swift helper machinery is airtight for its own children and the Factory/agents-dbg app spawns no CLI children; the real leak was `handoff.ts` `runAgentsSessions`, the one agents-CLI runner with no deadline. Bounded it (15s SIGTERM) with a verified real-path regression test. Orthogonal to the in-flight spawn-storm/poll-timer branches. |
+| **PHNX-3467** | **needs-fix → PR `agi-ext#16`.** Swift helper machinery is airtight for its own children and the Factory/agents-dbg app spawns no CLI children; the real leak was `handoff.ts` `runAgentsSessions`, the one agents-CLI runner with no deadline. Bounded it (15s SIGTERM) with a verified real-path regression test. Orthogonal to the PHNX-2833 poll-removal (already on main) — that killed the cadence, this bounds an individual hung child. |
 | **PHNX-3468** | **profiled → report + plan, no blind fix.** Top costs: (1) Claude setup-token scrypt decrypt ~150 ms/launch, uncached across processes; (2) uncached `resolveVersion` cwd→root walk ~5×/launch; (3) serial per-launch FS self-heal chain. Recommended order: persist the `startup` phase metric, then request-scoped version memoization, then parallelize the self-heal chain, then a scoped credential-path ticket for the token decrypt. |
