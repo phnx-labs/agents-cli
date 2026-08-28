@@ -31,7 +31,7 @@ import { stringifyDoc } from './yaml-io.js';
 import { execFileSync } from 'child_process';
 import { ensureLockTarget, atomicWriteFileSync, withFileLock } from './fs-atomic.js';
 import type { Meta, RegistryType } from './types.js';
-import { SYSTEM_REPO_SLUGS } from './types.js';
+import { DEFAULT_SYSTEM_REPO, systemRepoSlug } from './types.js';
 import { machineId } from './machine-id.js';
 
 const HOME = process.env.HOME ?? os.homedir();
@@ -89,11 +89,11 @@ const SYSTEM_PERMISSIONS_DIR = path.join(SYSTEM_AGENTS_DIR, 'permissions');
 const SYSTEM_SUBAGENTS_DIR = path.join(SYSTEM_AGENTS_DIR, 'subagents');
 const SYSTEM_WORKFLOWS_DIR = path.join(SYSTEM_AGENTS_DIR, 'workflows');
 const SYSTEM_PLUGINS_DIR = path.join(SYSTEM_AGENTS_DIR, 'plugins');
-// Built-in routines shipped in the system repo (gh:phnx-labs/.agents).
+// Built-in routines shipped in the system repo (gh:phnx-labs/.agents-system).
 // Unioned under user routines by listJobs()/readJob() so a routine shipped here
 // fires for every install, while a user routine of the same name overrides it.
 const SYSTEM_ROUTINES_DIR = path.join(SYSTEM_AGENTS_DIR, 'routines');
-// Built-in monitors shipped in the system repo (gh:phnx-labs/.agents).
+// Built-in monitors shipped in the system repo (gh:phnx-labs/.agents-system).
 // Unioned under user monitors by listMonitors()/readMonitor() so a monitor
 // shipped here is available on every install, while a user monitor of the same
 // name overrides it (a built-in with no `enabled:` field stays opt-in).
@@ -260,9 +260,7 @@ function gitOriginSlug(dir: string): string | null {
 
 /** Slugs of the user + system DotAgents repos — a checkout of any of these is not a project layer. */
 function canonicalDotAgentsRepoSlugs(): Set<string> {
-  // Both the new canonical `.agents` name and its legacy `.agents-system` alias
-  // (PHNX-3394) — a checkout of either is the system layer, not a project layer.
-  const slugs = new Set<string>(SYSTEM_REPO_SLUGS);
+  const slugs = new Set<string>([systemRepoSlug(DEFAULT_SYSTEM_REPO).toLowerCase()]);
   for (const dir of [USER_AGENTS_DIR, SYSTEM_AGENTS_DIR]) {
     const slug = gitOriginSlug(dir);
     if (slug) slugs.add(slug);
