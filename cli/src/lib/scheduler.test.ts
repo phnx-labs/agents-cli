@@ -1,8 +1,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { Cron } from 'croner';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { JobScheduler } from './scheduler.js';
-import { writeJob, deleteJob, type JobConfig } from './scheduling/routines.js';
+import { JobScheduler, fireSlot } from './scheduler.js';
+import { writeJob, deleteJob, slotRunId, type JobConfig } from './scheduling/routines.js';
+import { missedRunId } from './catchup.js';
 import * as activation from './routine-activation.js';
 import { getUserAgentsDir } from './state.js';
 
@@ -70,5 +72,28 @@ describe('JobScheduler.reloadAll — device activation refresh', () => {
     expect(scheduler.listScheduled().some((j) => j.name === name)).toBe(true);
 
     scheduler.stopAll();
+  });
+});
+
+describe('fireSlot — aligned, unconditional occurrence key (SING-15)', () => {
+  it('floors a jittered fire instant to the aligned schedule boundary', () => {
+    const cron = new Cron('0 9 * * 1-5', { paused: true });
+    const boundary = new Date('2026-08-28T09:00:00.000Z');
+    // croner's currentRun() carries wall-clock jitter — simulate a fire 4 ms late.
+    vi.spyOn(cron, 'currentRun').mockReturnValue(new Date(boundary.getTime() + 4));
+
+    const slot = fireSlot(cron);
+    expect(slot.toISOString()).toBe(boundary.toISOString());
+    expect(slot.getMilliseconds()).toBe(0);
+    // The forward-dispatch key and the catch-up key for one occurrence collide.
+    expect(slotRunId(slot)).toBe(missedRunId(boundary));
+  });
+
+  it('returns a concrete aligned slot even when currentRun() is null', () => {
+    const cron = new Cron('0 9 * * 1-5', { paused: true });
+    vi.spyOn(cron, 'currentRun').mockReturnValue(null);
+    const slot = fireSlot(cron);
+    // Never undefined: the forward path always carries a durable claim key.
+    expect(slot).toBeInstanceOf(Date);
   });
 });

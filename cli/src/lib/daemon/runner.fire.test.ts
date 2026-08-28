@@ -1,9 +1,12 @@
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { Cron } from 'croner';
 import { executeJob, executeJobDetached } from './runner.js';
 import { slotRunId, claimRunSlot, getRunDir, getJobRunsDir, readRunMeta } from '../scheduling/routines.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
+import { fireSlot } from '../scheduler.js';
+import { missedRunId } from '../catchup.js';
 import * as activation from '../routine-activation.js';
 
 const describeSpawn = process.platform === 'win32' ? describe.skip : describe;
@@ -75,6 +78,28 @@ describeSpawn('single-fire + overlap + blocked (executeJobDetached)', () => {
     expect(first.scheduledFor).toBe(scheduledFor.toISOString());
     expect(first.triggerKind).toBe('schedule');
     // Exactly one run directory exists for this routine.
+    const dirs = fs.readdirSync(getJobRunsDir(cfg.name)).filter((d) => !d.startsWith('.'));
+    expect(dirs).toEqual([first.runId]);
+  });
+
+  it('a scheduler-derived aligned slot dispatches once and dedups a duplicate delivery (SING-15)', async () => {
+    const cfg = commandConfig('slot-derived', 'exit 0');
+    // Drive the slot through the REAL forward-timer derivation, not a hand-injected
+    // clean Date: fireSlot floors croner's jittered currentRun() to the aligned
+    // boundary. A prior bug keyed on the jittered instant, so two deliveries of one
+    // occurrence minted distinct ids and both launched.
+    const cron = new Cron(cfg.schedule, { paused: true });
+    const boundary = new Date('2026-08-07T03:00:00.000Z');
+    vi.spyOn(cron, 'currentRun').mockReturnValue(new Date(boundary.getTime() + 7));
+    const slot = fireSlot(cron);
+    expect(slot.getMilliseconds()).toBe(0);
+    expect(slotRunId(slot)).toBe(missedRunId(boundary)); // collides with catch-up
+
+    const first = await executeJobDetached(cfg, undefined, { kind: 'schedule', scheduledFor: slot });
+    await waitTerminal(cfg.name, first.runId);
+    const second = await executeJobDetached(cfg, undefined, { kind: 'schedule', scheduledFor: slot });
+    expect(second.runId).toBe(first.runId);
+    expect(first.runId).toBe(slotRunId(slot));
     const dirs = fs.readdirSync(getJobRunsDir(cfg.name)).filter((d) => !d.startsWith('.'));
     expect(dirs).toEqual([first.runId]);
   });
