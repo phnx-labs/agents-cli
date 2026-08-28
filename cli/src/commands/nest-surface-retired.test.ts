@@ -69,8 +69,13 @@ describe('RUSH-2989 nested leftover aliases', () => {
     expect(artifacts?.commands.map((c) => c.name())).toContain('unshare');
     const events = program.commands.find((c) => c.name() === 'events');
     expect(events?.commands.map((c) => c.name())).toContain('audit');
+    // The nested `insights trends` alias was itself removed in the recipe
+    // collapse: `agents insights mix` is the one counter surface, so `trends`
+    // survives only as a retired top-level name (asserted below), with no
+    // nested home. `insights mix` remains.
     const insights = program.commands.find((c) => c.name() === 'insights');
-    expect(insights?.commands.map((c) => c.name())).toContain('trends');
+    expect(insights?.commands.map((c) => c.name())).not.toContain('trends');
+    expect(insights?.commands.map((c) => c.name())).toContain('mix');
 
     for (const name of ['unshare', 'audit', 'trends'] as const) {
       expect(isKnownTopLevelCommand(name)).toBe(false);
