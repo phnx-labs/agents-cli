@@ -2,7 +2,7 @@
  * Version management commands for installing, switching, and removing agent CLIs.
  *
  * Implements `agents add`, `agents prune`, `agents remove` (alias),
- * `agents use`, and the deprecated `agents list`. Handles npm-based installation,
+ * and `agents use`. Handles npm-based installation,
  * shim creation, config symlink
  * switching, resource sync prompts, and project-level version pinning.
  */
@@ -388,7 +388,7 @@ function configureVersionPruneCommand(cmd: Command, commandName: VersionPruneVer
   cmd.action((specs: string[], options) => versionPruneAction(specs, options, commandName));
 }
 
-/** Register `agents add`, `agents prune`, `agents remove`, `agents use`, and `agents list` (deprecated). */
+/** Register `agents add`, `agents prune`, `agents remove`, and `agents use`. */
 export function registerVersionsCommands(program: Command): void {
   const addCmd = program
     .command('add <specs...>')
