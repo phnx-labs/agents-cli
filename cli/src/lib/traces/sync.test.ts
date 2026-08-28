@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDB, readSessionTopics, INSIGHTS_EXTRACTOR_VERSION } from '../session/db.js';
+import * as sessionDb from '../session/db.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { ClassifiedTopic } from './classify.js';
 import { buildIndexShard, buildSessionDetail, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
@@ -182,6 +183,72 @@ describe('rich traces index shard', () => {
     expect(indexBody.driftSignals).toHaveLength(1);
     expect(indexBody.driftSignals[0].bucket).toBe('bugfix');
     expect(indexBody.driftSignals[0].severity).toBe('degrading');
+  });
+
+  // PHNX-3401: on an active machine the Rush app holds sessions.db, so the topics/
+  // insights cache write-back inside buildIndexShard waits out busy_timeout and
+  // throws SQLITE_BUSY. That used to propagate out and (via syncTraces' swallow)
+  // leave the console index 59h stale with no insight fields. The write-back is a
+  // pure cache warm-up — the shard reads the in-memory maps — so a locked write
+  // must NOT abort the build. This asserts the index stays complete and the failure
+  // is surfaced (warned), not silent.
+  it('still builds a complete shard when the cache write-back is locked (PHNX-3401)', () => {
+    const stat = fs.statSync(transcript);
+    const first = row(stat.mtimeMs, stat.size);
+    const db = getDB();
+    db.prepare(`
+      INSERT INTO sessions
+        (id, short_id, agent, timestamp, project, cwd, git_branch, label, duration_ms,
+         model, file_path, file_mtime_ms, file_size, machine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      first.id, first.short_id, first.agent, first.timestamp, first.project, first.cwd,
+      first.git_branch, first.label, first.duration_ms, first.model, first.file_path,
+      first.file_mtime_ms, first.file_size, first.machine,
+    );
+    db.prepare(`
+      INSERT INTO tool_calls
+        (call_key, session_id, ordinal, timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `).run('lock-call-1', id, 1, first.timestamp, 'exec_command', 'error', 1, 'command failed');
+    db.prepare(`
+      INSERT INTO session_insights
+        (session_id, file_mtime_ms, file_size, extractor_version, computed_at, facets)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      id, first.file_mtime_ms, first.file_size, INSIGHTS_EXTRACTOR_VERSION, Date.now(),
+      JSON.stringify({ frictionSignals: { 'failed tool loop: exec_command': 1 }, correctionSignals: {} }),
+    );
+
+    // topics are uncached (beforeEach deleted them) → buildIndexShard will attempt
+    // the write-back; make it throw exactly as a locked DB does.
+    const write = vi.spyOn(sessionDb, 'writeSessionTopics').mockImplementation(() => {
+      throw new Error('database is locked');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      let shard!: ReturnType<typeof buildIndexShard>;
+      expect(() => {
+        shard = buildIndexShard([first], 'test-device', 'owner-1');
+      }).not.toThrow();
+
+      // The aggregated shard is still complete — the insight fields the console
+      // renders are present, not dropped by the locked write.
+      expect(shard.wastedMsTotal).toBeTypeOf('number');
+      expect(Array.isArray(shard.failurePatterns)).toBe(true);
+      expect(shard.latency).toBeDefined();
+      expect(shard.needsAttention.length).toBeGreaterThan(0);
+      expect(shard.stats.sessionsImported).toBe(1);
+
+      // ...and the degraded cache write is surfaced, not silent.
+      expect(write).toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('session-topics cache warm-up skipped'),
+      );
+    } finally {
+      write.mockRestore();
+      warn.mockRestore();
+    }
   });
 });
 
