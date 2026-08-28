@@ -8,6 +8,8 @@ import {
   toolCallEvidenceBytes,
   toolCallKey,
   type IndexedToolCall,
+  type ToolCallCollectorSnapshot,
+  type EventToolScanResumePoint,
 } from './tool-calls.js';
 import type { SessionMeta } from './types.js';
 
@@ -90,7 +92,14 @@ export function purgeMissingToolCallsInDirectory(
 export interface ToolScanResumePoint {
   /** Serialized ToolCallCollector snapshot at `parsedOffset`. */
   parserState: string;
-  /** Byte offset just past the last complete record consumed. */
+  /**
+   * Where a later scan may resume. For the streaming (claude/codex) path this is
+   * a BYTE offset just past the last complete record consumed. For the full-file
+   * harness path (`planEventToolResume`) it is instead the COUNT of normalized
+   * events already folded — the two never share a session (a session is one
+   * agent, and the streaming path is claude/codex only), so the column carries
+   * whichever meaning that agent's resumer wrote.
+   */
   parsedOffset: number;
 }
 
@@ -283,4 +292,60 @@ export function persistToolCalls(
     );
   });
   txn();
+}
+
+/**
+ * Decide whether a changed full-file-harness session can RESUME its tool index
+ * from the last scan instead of re-deriving every call (PHNX-3411).
+ *
+ * The warm-tick indexer re-derives tool calls for a changed session on every
+ * tick, and for an ACTIVE large session that means re-sanitizing tens of
+ * thousands of calls each time — the synchronous work that wedged the daemon
+ * event loop. Streaming harnesses (claude/codex) already resume from a byte
+ * offset; every other harness re-parses the whole file, so this brings them the
+ * same benefit at the EVENT level: the ledger stores how many events were folded
+ * (`parsed_offset`) plus the collector snapshot (`parser_state`), and a later
+ * scan folds only the newly appended events.
+ *
+ * Returns the prior resume point when it is safe to append, or `null` (full
+ * re-scan) whenever the stored prefix may no longer describe the current file:
+ * a different extractor, no recorded resume point, a source the ledger row does
+ * not describe, a transcript that shrank below what was already parsed (a
+ * truncation/rewrite, not an append), more events already folded than the file
+ * now yields, or a snapshot that does not read back.
+ */
+export function planEventToolResume(
+  db: Database.Database,
+  sessionId: string,
+  sourcePath: string,
+  stamp: { fileMtimeMs: number; fileSize: number },
+  currentEventCount: number,
+): EventToolScanResumePoint | null {
+  const row = db.prepare(`
+    SELECT file_path, file_size, extractor_version, parsed_offset, parser_state
+    FROM tool_scan_ledger WHERE session_id = ?
+  `).get(sessionId) as {
+    file_path: string;
+    file_size: number;
+    extractor_version: number;
+    parsed_offset: number | null;
+    parser_state: string | null;
+  } | undefined;
+  if (!row) return null;
+  if (row.extractor_version !== TOOL_INDEX_VERSION) return null;
+  if (row.parsed_offset === null || !Number.isSafeInteger(row.parsed_offset) || row.parsed_offset < 0) return null;
+  if (row.file_path !== canonicalToolLedgerPath(sourcePath)) return null;
+  if (stamp.fileSize < row.file_size) return null;
+  // The file grew but reports fewer events than were already folded — the prefix
+  // was rewritten, not appended to. Re-scan from scratch.
+  if (row.parsed_offset > currentEventCount) return null;
+  if (row.parser_state === null) return null;
+  let snapshot: ToolCallCollectorSnapshot;
+  try {
+    snapshot = JSON.parse(row.parser_state) as ToolCallCollectorSnapshot;
+  } catch {
+    return null;
+  }
+  if (snapshot?.v !== 1 || !Number.isSafeInteger(snapshot.nextOrdinal)) return null;
+  return { snapshot, eventCount: row.parsed_offset };
 }

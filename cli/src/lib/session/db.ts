@@ -17,8 +17,8 @@ import { getSessionsDir, getSessionsDbPath } from '../state.js';
 import { query as queryEvents, queryToolUsageForSessions } from '../feed/events.js';
 import { machineForSessionFile } from '../origin-machine.js';
 import { loadSessionActorIndex, readSessionActorRecord } from './actor-sidecar.js';
-import { toolCallsFromEvents, type IndexedToolCall } from './tool-calls.js';
-import { persistToolCalls, toolEvidenceSourcePath } from './tool-store.js';
+import { scanEventToolCalls, type IndexedToolCall } from './tool-calls.js';
+import { persistToolCalls, planEventToolResume, toolEvidenceSourcePath, type ToolScanResumePoint } from './tool-store.js';
 import { buildClaudeAccountIndex, resolveClaudeAccount } from './claude-accounts.js';
 import {
   extractBackgroundShells,
@@ -2414,6 +2414,13 @@ export function upsertSessionsBatch(
     toolCalls?: IndexedToolCall[];
     toolScan?: ScanStamp;
     toolIndexMode?: 'replace' | 'append';
+    /**
+     * Where the NEXT scan of this full-file-harness session may resume its tool
+     * index (PHNX-3411). Computed internally in the enrichment map below; not
+     * supplied by callers. Persisted alongside the tool ledger so an active
+     * session re-derives only its newly appended tool calls next tick.
+     */
+    toolResume?: ToolScanResumePoint | null;
   }>,
 ): void {
   if (entries.length === 0) return;
@@ -2481,6 +2488,21 @@ export function upsertSessionsBatch(
       // metadata fall back to exactly one normalized parse here.
       const events = entry.events ?? parseSession(entry.meta.filePath, entry.meta.agent);
       writeResourceUsage(entry.meta.id, events, entry.meta.cwd);
+      // Resume the tool index from the last scan of this append-only stream when
+      // it is safe to (PHNX-3411). A live session's transcript grows every tick,
+      // so a full re-derive re-sanitizes its ENTIRE tool history each time — the
+      // synchronous O(session) work that wedged the daemon event loop for the
+      // 11 non-streaming harnesses. `planEventToolResume` returns the prior
+      // snapshot only when the file is still an append of what was scanned
+      // before; otherwise `prior` is null and this is a full replace from
+      // event 0 (identical index, just re-derived).
+      // No tool stamp (a scanner that carried no scan record) means the resume
+      // point cannot be size-guarded, so full-scan rather than trust a stale
+      // offset. persistToolCalls below also skips a resume-less write.
+      const prior = toolScan
+        ? planEventToolResume(db, entry.meta.id, toolSourcePath, toolScan, events.length)
+        : null;
+      const scanned = scanEventToolCalls(events, prior ?? undefined);
       return {
         ...entry,
         meta: {
@@ -2489,11 +2511,14 @@ export function upsertSessionsBatch(
           recentDirectoriesTouched: extractRecentDirectoriesTouched(events, entry.meta.cwd),
           ...fanOutCounts(events, entry.meta.agent),
         },
-        toolCalls: toolCallsFromEvents(events),
+        // The CHANGED calls only. On a resume these are the newly appended tail
+        // (append-safe upsert); on a full scan they are the whole history.
+        toolCalls: scanned.calls,
         toolScan,
-        // These are complete event arrays, not an appended tail. Append would
-        // duplicate existing evidence even when persistToolCalls supports it.
-        toolIndexMode: 'replace' as const,
+        toolIndexMode: (prior ? 'append' : 'replace') as 'replace' | 'append',
+        // Persist where the NEXT scan resumes: the collector snapshot + how many
+        // events this scan folded.
+        toolResume: { parserState: JSON.stringify(scanned.snapshot), parsedOffset: scanned.eventCount },
       };
     } catch {
       return entry;
@@ -2659,7 +2684,13 @@ export function upsertSessionsBatch(
     const toolScan = entry.toolScan ?? entry.scan;
     if (!toolScan || !entry.toolCalls) continue;
     try {
-      persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, { mode: entry.toolIndexMode ?? 'replace' });
+      // `resume` is set only by the full-file harness path above; claude/codex
+      // pass none, so their tool ledger keeps carrying no event-offset resume
+      // point (their resume rides the content-scan ledger instead) — unchanged.
+      persistToolCalls(db, entry.meta, entry.toolCalls, toolScan, {
+        mode: entry.toolIndexMode ?? 'replace',
+        resume: entry.toolResume,
+      });
     } catch {
       // Boundary is intentionally retryable via tool_scan_ledger.
     }
