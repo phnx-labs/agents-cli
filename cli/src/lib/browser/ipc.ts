@@ -102,6 +102,33 @@ const SOCKET_WAIT_TIMEOUT_MS = 15_000;
  */
 const SOCKET_WAIT_STABLE_PROBES = 2;
 
+/**
+ * How long a single {@link probeDaemonResponsive} attempt waits for the daemon to
+ * answer a trivial `version` request before giving up (PHNX-3411).
+ *
+ * A unix-socket `connect` succeeds at the KERNEL level the moment the connection
+ * is queued in the listen backlog — it does NOT require the server's event loop
+ * to run. So a daemon whose event loop is blocked (e.g. a long synchronous burst
+ * on the shared loop) still passes {@link isDaemonReachable}: the socket accepts,
+ * but the request is never serviced. The live symptom on zion was exactly this —
+ * `browser.sock` accepted every connection while the daemon re-indexed sessions,
+ * then never replied, so cross-device browser drives hung or surfaced a confusing
+ * bare socket timeout. Requiring an actual reply is the only probe that tells a
+ * healthy daemon apart from a wedged one.
+ */
+const RESPONSIVENESS_PROBE_TIMEOUT_MS = 1_500;
+
+/**
+ * Consecutive missed {@link probeDaemonResponsive} attempts before a *reachable*
+ * daemon is declared wedged. One missed reply can be a transient GC pause on an
+ * otherwise-healthy loop, so a single failure never condemns the daemon; a daemon
+ * that cannot answer a trivial `version` request across this whole window has a
+ * genuinely blocked event loop. The added latency (attempts × timeout) is paid
+ * ONLY on the wedged path — where the alternative was an indefinite hang — while
+ * a healthy daemon answers the first attempt in ~1ms.
+ */
+const RESPONSIVENESS_PROBE_ATTEMPTS = 3;
+
 export interface IPCRequestOptions {
   autoStartDaemon?: boolean;
 }
@@ -162,6 +189,58 @@ function probeDaemon(endpoint: string, timeoutMs = 500): Promise<boolean> {
  * file existing on disk is not proof a daemon is listening on it. */
 export async function isDaemonReachable(): Promise<boolean> {
   return probeDaemon(getIpcEndpoint());
+}
+
+/**
+ * Can the daemon actually REPLY right now? Opens a connection and requires a
+ * parseable response to a `version` request within `timeoutMs`. Unlike
+ * {@link probeDaemon} (which resolves on the kernel-level `connect`), this only
+ * succeeds when the daemon's event loop is running and services the request — so
+ * it is the one probe that distinguishes a healthy daemon from a wedged one whose
+ * loop is blocked (PHNX-3411). Resolves false on connect error, timeout, an early
+ * close, or an unparseable reply. `version` is the right probe: its handler is
+ * trivial and synchronous (never touches the browser), so a slow reply means the
+ * loop is blocked, not that a real action is in flight.
+ */
+function probeDaemonResponsive(endpoint: string, timeoutMs = RESPONSIVENESS_PROBE_TIMEOUT_MS): Promise<boolean> {
+  return new Promise((resolve) => {
+    const sock = net.createConnection(endpoint);
+    let buffer = '';
+    let done = false;
+    const finish = (ok: boolean) => { if (done) return; done = true; clearTimeout(timer); sock.destroy(); resolve(ok); };
+    const timer = setTimeout(() => finish(false), timeoutMs);
+    sock.on('connect', () => { sock.write(JSON.stringify({ action: 'version' }) + '\n'); });
+    sock.on('data', (data) => {
+      buffer += data.toString();
+      const idx = buffer.indexOf('\n');
+      if (idx === -1) return;
+      try {
+        const resp = JSON.parse(buffer.slice(0, idx)) as IPCResponse;
+        finish(resp.ok === true);
+      } catch {
+        finish(false);
+      }
+    });
+    sock.on('error', () => finish(false));
+    sock.on('close', () => finish(false));
+  });
+}
+
+/**
+ * Is a *reachable* daemon actually responsive, or is its event loop wedged
+ * (PHNX-3411)? Retries {@link probeDaemonResponsive} up to
+ * {@link RESPONSIVENESS_PROBE_ATTEMPTS} times so a single transient miss (a GC
+ * pause) never condemns a healthy daemon; returns true as soon as any attempt
+ * gets a reply, and false only when every attempt fails.
+ */
+export async function isDaemonResponsive(
+  endpoint: string = getIpcEndpoint(),
+  attempts: number = RESPONSIVENESS_PROBE_ATTEMPTS,
+): Promise<boolean> {
+  for (let i = 0; i < attempts; i++) {
+    if (await probeDaemonResponsive(endpoint)) return true;
+  }
+  return false;
 }
 
 /**
@@ -1264,6 +1343,25 @@ async function prepareIPC(
       );
     }
     await new Promise((r) => setTimeout(r, 300));
+  }
+
+  // The socket accepts connections — but a unix-socket `connect` succeeds at the
+  // kernel level even when the daemon's event loop is blocked and never services
+  // the request (PHNX-3411). Require a real reply before treating the daemon as
+  // usable, so a wedged daemon fails LOUD with an accurate, actionable error
+  // instead of the confusing bare socket timeout / indefinite hang the browser
+  // verb would otherwise hit (including inside reconcileDaemonVersion's own
+  // version probe, which has no response timeout). Skipped for callers that opt
+  // out of auto-start — they want the clean BrowserDaemonNotRunningError instead.
+  if (autoStartDaemon && !(await isDaemonResponsive(getIpcEndpoint()))) {
+    throw new Error(
+      actionable(
+        'Browser daemon is running but unresponsive — its event loop is blocked, so it accepts the connection but never replies.',
+        `Endpoint: ${getIpcEndpoint()}`,
+        `Log: ${getDaemonLogPath()}`,
+        'Next: agents browser stop --daemon   (resets the wedged daemon; the next browser command restarts it)',
+      ),
+    );
   }
 
   // Before serving a real request, make sure the daemon isn't running stale

@@ -8,6 +8,7 @@ import {
   formatBrowserDaemonNotRunningError,
   getSocketPath,
   isDaemonReachable,
+  isDaemonResponsive,
   resetBrowserDaemon,
   sendIPCRequest,
   shouldRestartStaleDaemon,
@@ -35,6 +36,7 @@ vi.mock('../state.js', async (importOriginal) => ({
 vi.mock('../daemon/daemon.js', () => ({
   startDaemon: vi.fn(),
   stopDaemon: vi.fn(),
+  getDaemonLogPath: vi.fn(() => '/tmp/agents-cli-daemon.log'),
 }));
 
 afterEach(() => {
@@ -158,6 +160,62 @@ describe('isDaemonReachable (connection probe, not file existence)', () => {
     // After the listener goes away, reachability flips back to false.
     expect(await isDaemonReachable()).toBe(false);
   });
+});
+
+// PHNX-3411: a unix-socket `connect` succeeds at the kernel level even when the
+// daemon's event loop is blocked, so isDaemonReachable() alone cannot tell a
+// healthy daemon from a wedged one. isDaemonResponsive requires an actual reply.
+describe('isDaemonResponsive (a reply, not just an accept — PHNX-3411)', () => {
+  it('is false for a daemon that accepts the connection but never replies (wedged loop)', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    // Accept the connection but never reply — exactly a blocked event loop. The
+    // server-side sockets are tracked only so the test can tear them down; the
+    // handler deliberately does nothing with the request.
+    const accepted: net.Socket[] = [];
+    const server = net.createServer((sock) => { accepted.push(sock); });
+    await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
+    try {
+      expect(await isDaemonReachable()).toBe(true);
+      expect(await isDaemonResponsive(ipcEndpoint(socketPath), 2)).toBe(false);
+    } finally {
+      for (const s of accepted) s.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('is true for a daemon that replies to a version request', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    const server = net.createServer((sock) => {
+      sock.on('data', () => sock.write(JSON.stringify({ ok: true, version: '1.0.0' }) + '\n'));
+    });
+    await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
+    try {
+      expect(await isDaemonResponsive(ipcEndpoint(socketPath), 2)).toBe(true);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
+
+  it('fails loud through sendIPCRequest when the daemon is reachable but wedged', async () => {
+    const socketPath = getSocketPath();
+    mkdirSync(path.dirname(socketPath), { recursive: true });
+    const accepted: net.Socket[] = [];
+    const server = net.createServer((sock) => { accepted.push(sock); }); // accepts, never replies
+    await new Promise<void>((resolve) => server.listen(ipcEndpoint(socketPath), () => resolve()));
+    try {
+      // autoStartDaemon defaults on; the daemon IS reachable, so prepareIPC must
+      // NOT try to start a second one — it must surface the wedge, by name.
+      await expect(sendIPCRequest({ action: 'status' })).rejects.toThrow(
+        /running but unresponsive/,
+      );
+      expect(startDaemon).not.toHaveBeenCalled();
+    } finally {
+      for (const s of accepted) s.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  }, 20_000);
 });
 
 describe('shouldRestartStaleDaemon', () => {

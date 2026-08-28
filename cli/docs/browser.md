@@ -44,6 +44,17 @@ agent process
 The daemon auto-starts on the first command that needs it. Commands that only
 inspect local state (`ps`, `profiles list`) do not start it.
 
+Liveness is a *reply*, not just an accept. The daemon shares one event loop with
+the rest of `agents __daemon-run`, and a unix-socket `connect` succeeds at the
+kernel level even when that loop is blocked — so a busy daemon accepts on
+`browser.sock` while never servicing the request. Before running a verb the CLI
+requires the daemon to actually answer a `version` probe; a reachable-but-wedged
+daemon fails loud (`Browser daemon is running but unresponsive — its event loop
+is blocked…`) with the daemon log path and the recovery verb, instead of the old
+confusing `Timeout waiting for browser daemon socket` or an indefinite hang. Reset
+it with `agents browser stop --daemon` — the next browser command restarts it
+clean (PHNX-3411).
+
 Tasks are addressed by a short machine id (8 hex chars). `browser status`
 shows a human **label** (`--title` if given, else the first navigated host,
 else `untitled`). In the common case you never type a handle: the CLI stamps
