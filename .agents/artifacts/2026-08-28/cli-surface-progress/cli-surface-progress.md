@@ -12,7 +12,7 @@ links:
 
 Two plans drove the "simplify the `agents` CLI surface" work you remember. The
 **RUSH-2981 leftovers plan** (`apply` / `beta` / `feedback` / `harness`) is
-**fully merged and live** in the `1.22.54` CLI you're running. It rode on top of
+**fully merged and live** in the CLI you're running. It rode on top of
 a larger, also-landed **cli-surface-consolidate** wave (~12 tickets) that nested
 or removed the bulk of the non-noun root verbs. A third look-alike artifact is a
 *different* track (perf/analytics), not surface work. The two follow-ups the
