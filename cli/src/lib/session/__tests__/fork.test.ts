@@ -1,83 +1,72 @@
-import { afterAll, describe, expect, it } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
+import { describe, expect, it } from 'vitest';
 
-// Set HOME (and AGENTS_REAL_HOME) before db.js / fork.js load so their
-// module-level base dirs resolve inside an isolated temp HOME. Running
-// in-process under vitest uses node:sqlite; the shipped standalone binary runs
-// bun:sqlite, whose named binds are covered by src/lib/sqlite.test.ts.
-const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'fork-test-'));
-process.env.HOME = TEST_HOME;
-process.env.AGENTS_REAL_HOME = TEST_HOME;
+import { buildForkRecap, forkLabelFor } from '../fork.js';
 
-const { forkSession } = await import('../fork.js');
-const { closeDB, getSessionById } = await import('../db.js');
-type SessionMeta = import('../types.js').SessionMeta;
-
-afterAll(() => {
-  closeDB();
-  fs.rmSync(TEST_HOME, { recursive: true, force: true });
+describe('forkLabelFor', () => {
+  it('prefers label, then topic, then short id', () => {
+    expect(forkLabelFor({ label: 'Prix Evals', topic: 't', shortId: 'abcd1234' })).toBe('Prix Evals');
+    expect(forkLabelFor({ label: '', topic: 'the topic', shortId: 'abcd1234' })).toBe('the topic');
+    expect(forkLabelFor({ label: undefined, topic: undefined, shortId: 'abcd1234' } as any)).toBe('abcd1234');
+  });
 });
 
-/** Write a Claude transcript under TEST_HOME and return its metadata. `tag`
- *  is an 8-char prefix so the derived shortId is predictable. */
-function makeSource(tag: string): SessionMeta {
-  const id = `${tag}-2222-3333-4444-555555555555`;
-  const proj = path.join(TEST_HOME, '.claude', 'projects', '-tmp-x');
-  fs.mkdirSync(proj, { recursive: true });
-  const filePath = path.join(proj, `${id}.jsonl`);
-  fs.writeFileSync(filePath, [
-    JSON.stringify({ type: 'user', sessionId: id, cwd: '/tmp/x', message: { role: 'user', content: [{ type: 'text', text: 'hello world' }] } }),
-    JSON.stringify({ type: 'assistant', sessionId: id, message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } }),
-  ].join('\n'));
-  return {
-    id, shortId: id.slice(0, 8), agent: 'claude',
-    timestamp: '2026-01-01T00:00:00.000Z', filePath, cwd: '/tmp/x',
-  };
-}
+describe('buildForkRecap', () => {
+  it('folds label, cwd, ticket, last line, and changes into a seed with a /continue escape hatch', () => {
+    const recap = buildForkRecap({
+      agent: 'claude',
+      label: 'Prix Evals',
+      cwd: '/home/u/src/prix',
+      ticketId: 'PHNX-3397',
+      machine: 'yosemite-m1',
+      shortId: 'b61cad38',
+      id: 'b61cad38-ede2-4c1d-93de-9b8eef14607d',
+      lastAssistant: 'the stat strip is real, insight widgets need gaps 1 & 2 closed.',
+      changes: { created: 3, modified: 3, deleted: 7 },
+    });
 
-describe('forkSession', () => {
-  it('copies the transcript under a new id, leaves the original untouched, and registers the fork', () => {
-    const source = makeSource('aaaaaaaa');
-    const res = forkSession(source, { now: '2026-07-18T00:00:00.000Z' });
-
-    const origAfter = fs.readFileSync(source.filePath, 'utf-8');
-    const forkContent = fs.readFileSync(res.filePath, 'utf-8');
-
-    // New file, named by the new id, beside the original.
-    expect(fs.existsSync(res.filePath)).toBe(true);
-    expect(path.basename(res.filePath)).toBe(`${res.newId}.jsonl`);
-    expect(path.dirname(res.filePath)).toBe(path.dirname(source.filePath));
-
-    // Original untouched.
-    expect(origAfter).toContain('hello world');
-    expect(origAfter).toContain(source.id);
-    expect(origAfter).not.toContain(res.newId);
-
-    // Fork is a copy with the embedded id rewritten.
-    expect(forkContent).toContain('hello world');
-    expect(forkContent).toContain(res.newId);
-    expect(forkContent).not.toContain(source.id);
-
-    // Registered in the index and resolvable immediately.
-    const row = getSessionById(res.newId);
-    expect(row).not.toBeNull();
-    expect(row!.filePath).toBe(res.filePath);
-    expect(res.label).toBe('fork of aaaaaaaa');
-    expect(row!.label).toBe('fork of aaaaaaaa');
+    expect(recap).toContain('Continue a prior claude session ("Prix Evals")');
+    expect(recap).toContain('Working directory: /home/u/src/prix');
+    expect(recap).toContain('Ticket: PHNX-3397');
+    expect(recap).toContain('insight widgets need gaps 1 & 2 closed');
+    expect(recap).toContain('Changes so far: +3 ~3 -7.');
+    // The escape hatch names the OWNING device and the full id for /continue.
+    expect(recap).toContain('Source session b61cad38 on yosemite-m1');
+    expect(recap).toContain('/continue b61cad38-ede2-4c1d-93de-9b8eef14607d');
   });
 
-  it('honors an explicit --name label', () => {
-    const source = makeSource('bbbbbbbb');
-    const res = forkSession(source, { name: 'try redis instead' });
-    expect(res.label).toBe('try redis instead');
-    expect(getSessionById(res.newId)!.label).toBe('try redis instead');
+  it('omits optional lines when their data is absent (minimal source)', () => {
+    const recap = buildForkRecap({
+      agent: 'codex',
+      label: 'quick thing',
+      shortId: 'deadbeef',
+      id: 'deadbeef-0000-0000-0000-000000000000',
+    });
+    expect(recap).toContain('Continue a prior codex session ("quick thing")');
+    expect(recap).not.toContain('Working directory:');
+    expect(recap).not.toContain('Ticket:');
+    expect(recap).not.toContain('It last said:');
+    expect(recap).not.toContain('Changes so far:');
+    // No owning-device suffix when machine is unknown.
+    expect(recap).toContain('Source session deadbeef — run');
   });
 
-  it('throws when the source transcript is missing', () => {
-    const source = makeSource('cccccccc');
-    fs.rmSync(source.filePath);
-    expect(() => forkSession(source)).toThrow(/transcript not found/);
+  it('drops an all-zero change tally rather than printing "+0 ~0 -0"', () => {
+    const recap = buildForkRecap({
+      agent: 'claude', label: 'x', shortId: 'abcd1234', id: 'abcd1234-0000-0000-0000-000000000000',
+      changes: { created: 0, modified: 0, deleted: 0 },
+    });
+    expect(recap).not.toContain('Changes so far:');
+  });
+
+  it('collapses whitespace and caps a very long last line', () => {
+    const long = 'word '.repeat(500);
+    const recap = buildForkRecap({
+      agent: 'claude', label: 'x', shortId: 'abcd1234', id: 'abcd1234-0000-0000-0000-000000000000',
+      lastAssistant: long,
+    });
+    const lastLine = recap.split('\n').find((l) => l.startsWith('It last said:'))!;
+    expect(lastLine.length).toBeLessThan(430); // 400-char cap + framing
+    expect(lastLine).toContain('…');
+    expect(lastLine).not.toContain('\n');
   });
 });

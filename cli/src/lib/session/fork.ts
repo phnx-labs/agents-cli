@@ -1,124 +1,88 @@
 /**
  * Session forking — branch an existing conversation into a new, independent
- * session that can be continued separately, leaving the original untouched.
+ * sibling that continues the work, leaving the original untouched.
  *
  * `resume` continues the SAME conversation (same id, same file — it appends).
- * `fork` copies the transcript under a FRESH session id, so continuing the fork
- * diverges from the original instead of mutating it. This is the "git branch"
- * of conversations.
+ * `fork` launches a NEW same-harness session, load-balanced, seeded with a
+ * recap of the source so it picks up where the original left off. This is the
+ * "git branch" of conversations.
  *
- * v1 supports Claude, whose session id IS its `<id>.jsonl` filename and which
- * resumes natively via `--resume`. A fork is therefore: copy the transcript to
- * a new-uuid filename in the same directory, rewrite the embedded `sessionId`
- * on each line, register the new session in the index, and label it. Other
- * agents (codex single-file; grok/kimi multi-file; opencode DB-only) are a
- * natural follow-up and are refused up front for now.
+ * The recap — not a transcript copy — is what makes fork work across every
+ * device and every REPL harness: the sibling is handed plain text as its opening
+ * input, so it never has to reach a transcript that may live on another box. The
+ * source is resolved cross-fleet by the same resolver `preview` uses; this module
+ * owns only the pure recap text the resolved data folds into.
  */
-import { randomUUID } from 'crypto';
-import * as fs from 'fs';
-import * as path from 'path';
-
 import type { SessionMeta } from './types.js';
-import { upsertSession } from './db.js';
-import { recordRunName } from './run-names.js';
-import { deriveShortId } from '../text/short-id.js';
 
-/** Agents that `fork` can branch today (see the module doc for why). */
-export const FORKABLE_AGENTS = ['claude'] as const;
-
-/** Whether a session's agent can be forked by {@link forkSession}. */
-export function isForkableAgent(agent: string): boolean {
-  return (FORKABLE_AGENTS as readonly string[]).includes(agent);
+/** File-change tally as `sessions preview --json` serializes it (digest.changes). */
+export interface ForkRecapChanges {
+  created: number;
+  modified: number;
+  deleted: number;
 }
 
-/** Outcome of a successful fork. */
-export interface ForkResult {
-  /** The new session's full id. */
-  newId: string;
-  /** The new session's short id (first 8 chars), for display/resume. */
-  shortId: string;
-  /** Absolute path of the copied transcript. */
-  filePath: string;
-  /** The label applied to the fork. */
+/** Everything the recap seed is built from — resolved cross-fleet before launch. */
+export interface ForkRecapInput {
+  /** Source harness id — the sibling launches the same one. */
+  agent: string;
+  /** Display label for the source (label → topic → short id, resolved by the caller). */
   label: string;
+  /** Source working directory, so the sibling re-roots itself. */
+  cwd?: string;
+  /** Linear/GitHub ticket the source was bound to, if any. */
+  ticketId?: string;
+  /** Device that owns the source transcript, for the `/continue` escape hatch. */
+  machine?: string;
+  /** Short + full id, so the sibling can pull full history with `/continue <id>`. */
+  shortId: string;
+  id: string;
+  /** The source's last assistant line — the single best "where it left off" signal. */
+  lastAssistant?: string;
+  /** Changed-files tally so far. */
+  changes?: ForkRecapChanges;
+}
+
+/** Longest last-assistant excerpt carried into the seed — enough to convey intent
+ * without pasting a wall of text (decision: Recap, not Full digest). */
+const LAST_LINE_CAP = 400;
+
+/** Collapse whitespace and cap length so a multi-paragraph final message becomes
+ * one scannable recap line. */
+function trimLastLine(text: string): string {
+  const collapsed = text.replace(/\s+/g, ' ').trim();
+  if (collapsed.length <= LAST_LINE_CAP) return collapsed;
+  return `${collapsed.slice(0, LAST_LINE_CAP).trimEnd()}…`;
+}
+
+/** Resolve the human display label the caller passes in from a raw SessionMeta. */
+export function forkLabelFor(session: Pick<SessionMeta, 'label' | 'topic' | 'shortId'>): string {
+  return session.label || session.topic || session.shortId;
 }
 
 /**
- * Rewrite the per-line `sessionId` field of a Claude JSONL transcript to a new
- * id. Claude resolves a conversation by its filename, so this is belt-and-braces
- * (keeps the in-file id consistent with the new filename); malformed lines are
- * passed through untouched.
+ * Build the recap-seed prompt handed to the forked sibling as its opening input.
+ *
+ * Pure and deterministic (unit-tested) — no filesystem, no spawn — so the launch
+ * orchestration in `commands/fork.ts` stays the only side-effecting layer.
  */
-function rewriteSessionId(transcript: string, newId: string): string {
-  return transcript
-    .split('\n')
-    .map((line) => {
-      if (!line.trim()) return line;
-      try {
-        const obj = JSON.parse(line) as Record<string, unknown>;
-        if (typeof obj.sessionId === 'string') {
-          obj.sessionId = newId;
-          return JSON.stringify(obj);
-        }
-        return line;
-      } catch {
-        return line;
-      }
-    })
-    .join('\n');
-}
+export function buildForkRecap(input: ForkRecapInput): string {
+  const lines: string[] = [];
+  lines.push(`Continue a prior ${input.agent} session ("${input.label}"). Pick up where it left off — do not restart it.`);
+  if (input.cwd) lines.push(`Working directory: ${input.cwd}`);
+  if (input.ticketId) lines.push(`Ticket: ${input.ticketId}`);
 
-/**
- * Fork a Claude session into a new, independent one.
- *
- * Copies `source.filePath` to a new `<uuid>.jsonl` beside it, rewrites the
- * embedded session id, registers the new session in the index, and records a
- * `--name`-style label. Returns the new ids/path. Throws if the source
- * transcript is missing.
- *
- * @param source  The resolved metadata of the session being forked.
- * @param opts.name  Optional explicit label; defaults to `fork of <original>`.
- * @param now  ISO timestamp to stamp the fork with (injectable for tests).
- */
-export function forkSession(source: SessionMeta, opts: { name?: string; now?: string } = {}): ForkResult {
-  if (!fs.existsSync(source.filePath)) {
-    throw new Error(`transcript not found for session ${source.shortId}: ${source.filePath}`);
+  const last = input.lastAssistant ? trimLastLine(input.lastAssistant) : '';
+  if (last) lines.push(`It last said: "${last}"`);
+
+  const chg = input.changes;
+  if (chg && (chg.created || chg.modified || chg.deleted)) {
+    lines.push(`Changes so far: +${chg.created} ~${chg.modified} -${chg.deleted}.`);
   }
 
-  const newId = randomUUID();
-  const shortId = deriveShortId(newId);
-  const dir = path.dirname(source.filePath);
-  const filePath = path.join(dir, `${newId}.jsonl`);
-
-  const transcript = fs.readFileSync(source.filePath, 'utf-8');
-  const rewritten = rewriteSessionId(transcript, newId);
-  fs.writeFileSync(filePath, rewritten);
-
-  const original = source.label || source.topic || source.shortId;
-  const label = opts.name || `fork of ${original}`;
-
-  // Label sidecar (seeds the DB label; survives rescans until an agent title
-  // supersedes it), mirroring `agents run --name`.
-  recordRunName({ sessionId: newId, name: label, agent: source.agent, cwd: source.cwd });
-
-  // Register the new session so it resolves immediately (by `agents sessions resume`,
-  // `agents sessions`, etc.) without waiting for the next scan.
-  const stamp = opts.now ?? new Date().toISOString();
-  const meta: SessionMeta = {
-    ...source,
-    id: newId,
-    shortId,
-    filePath,
-    label,
-    timestamp: stamp,
-    lastActivity: stamp,
-    // The fork has not opened its own PR / team; drop origin-specific refs.
-    prUrl: undefined,
-    prNumber: undefined,
-    teamOrigin: undefined,
-    spawnedTeam: undefined,
-  };
-  upsertSession(meta, rewritten);
-
-  return { newId, shortId, filePath, label };
+  const origin = input.machine ? ` on ${input.machine}` : '';
+  lines.push(
+    `Source session ${input.shortId}${origin} — run \`/continue ${input.id}\` if you need the full transcript.`,
+  );
+  return lines.join('\n');
 }

@@ -23607,7 +23607,7 @@
           "name": "fork",
           "path": "sessions fork",
           "aliases": [],
-          "description": "Branch a session into a new, independent copy you can continue separately. The original is untouched.",
+          "description": "Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.",
           "args": [
             {
               "name": "session",
@@ -23619,10 +23619,28 @@
           "options": [
             {
               "flags": "--name <label>",
-              "description": "Label for the fork (default: \"fork of <original>\")",
+              "description": "Session label for the fork (default: \"fork of <original>\")",
               "long": "--name",
               "required": true,
               "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--device <host>",
+              "description": "Place the sibling on a fleet device (name or \"auto\"); defaults to here",
+              "long": "--device",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--terminal [backend]",
+              "description": "Open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place",
+              "long": "--terminal",
+              "required": false,
+              "optional": true,
               "variadic": false,
               "negate": false
             },
@@ -23637,8 +23655,8 @@
               "negate": false
             }
           ],
-          "examples": "# Fork a session by (partial) id, then continue the fork\n    agents sessions fork 4f3a9c21\n    agents sessions resume <new-id>\n\n    # Give the fork a name\n    agents sessions fork 4f3a9c21 --name \"try redis instead\"",
-          "notes": "- 'resume' continues the SAME conversation; 'fork' copies it under a new id so the two diverge.\n    - The fork is a full copy of the conversation so far; continuing it never touches the original.\n    - Resolve the session the same way as resume: an exact or prefix id fragment.\n    - Native copy currently supports: claude. For other harnesses, branch by\n      starting a fresh agent and seeding it with '/continue <id>' — the source stays put.",
+          "examples": "# Fork a session by (partial) id — launches a same-harness sibling seeded with a recap\n    agents sessions fork 4f3a9c21\n\n    # Name the fork's session label\n    agents sessions fork 4f3a9c21 --name \"try redis instead\"\n\n    # Place the sibling on a fleet worker instead of here\n    agents sessions fork 4f3a9c21 --device auto\n\n    # Open the sibling in a fresh terminal tab where you work\n    agents sessions fork 4f3a9c21 --terminal",
+          "notes": "- 'resume' continues the SAME conversation; 'fork' launches a NEW same-harness\n      session seeded with a recap of the source, so the two diverge.\n    - Works cross-device and cross-harness: the source is resolved across the fleet\n      and the sibling gets a plain-text recap, so it never reaches the source transcript.\n    - The recap carries the source id — the sibling can run '/continue <id>' for the\n      full history if it needs more than the recap.\n    - Resolve the source the same way as resume: an exact or prefix id fragment.",
           "subcommands": []
         },
         {

@@ -704,7 +704,7 @@ agents sessions backfill tools             Parse historical tool calls once into
 agents sessions bookmark [ids...]          Bookmark sessions so they are easy to find again — list them with --bookmarks, or `b` in the browser.
 agents sessions detach <id>                Send a live agent to the background — stop its terminal, keep it working headless
 agents sessions export [selectors...]      Bundle sessions (by id, query, or the parent selection flags like --since/-a) into a portable archive.
-agents sessions fork <session>             Branch a session into a new, independent copy you can continue separately. The original is untouched.
+agents sessions fork <session>             Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.
 agents sessions import [bundle]            Restore an export bundle (file, - for stdin, or --from-host <h>) into the local session store, deduping against what you already have.
 agents sessions inject <sessionId> <text>  Deliver text (+ Enter) into the terminal a running session lives in — nudge a stalled agent.
 agents sessions insights                   How work looks — behavioural report (default) or counter mix (`mix`, recipes)
