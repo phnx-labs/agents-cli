@@ -2254,12 +2254,13 @@ schema (`--json` passes through each agent's native stream format).
   without the Touch-ID-gated login item (`lib/claude-account-token.ts:9-16`).
   Two run classes MUST instead be left on the per-version login (also the only
   credential carrying the `user:profile` scope usage reads require, RUSH-2392):
-  - **any run on a `personal` device** — the user's own interactive box
-    (`config.role: personal`, e.g. zion) — interactive TUI OR headless one-shot
-    (`agents run claude "<prompt>"`) alike. That box is the single origin of the
-    login, so it MUST authenticate from it for every run (RUSH-2395). Before this,
-    gating on run mode alone routed a headless run on the laptop onto the
-    setup-token and hijacked the login.
+  - **any run on a headed device** — `personal` (the user's own interactive box,
+    `config.role: personal`, e.g. zion) OR `desktop` (a headed always-on box,
+    `config.role: desktop`, e.g. a Mac mini) — interactive TUI OR headless one-shot
+    (`agents run claude "<prompt>"`) alike. Both hold a real per-version login
+    (`isHeadedDeviceRole`), so they MUST authenticate from it for every run
+    (RUSH-2395). Before this, gating on run mode alone routed a headless run on the
+    laptop onto the setup-token and hijacked the login.
   - **an interactive run on any device.** **`resolveInteractive` means "this run
     opens a TUI", NOT "a human is present"** — do not read it as the latter.
     `watchdog/rotate.ts` builds `agents run auto --interactive` unattended, so the
@@ -2298,9 +2299,9 @@ schema (`--json` passes through each agent's native stream format).
     EVERY background caller (daemon usage warm `usage-refresh.ts`, auth-health probe
     `auth-health.ts`, watchdog, `collectRunCandidates`).
   - Only `agents view` sets the flag, and only for a **foreground human render on a
-    `personal` device**: `allowInteractiveUsageLogin(role, isTTY)` (`commands/view.ts`)
-    returns true iff `selfConfiguredDeviceRole() === 'personal'` AND
-    `process.stdout.isTTY`. A `--json`/piped reader (returns early via
+    headed device** (`personal` or `desktop`): `allowInteractiveUsageLogin(role, isTTY)`
+    (`commands/view.ts`) returns true iff `isHeadedDeviceRole(selfConfiguredDeviceRole())`
+    AND `process.stdout.isTTY`. A `--json`/piped reader (returns early via
     `collectAgentsJson`, or non-TTY) and any `worker`/unmarked device MUST leave it
     unset. Role alone is insufficient — a scripted refresh MUST NOT silently acquire
     the interactive credential.
@@ -2308,7 +2309,7 @@ schema (`--json` passes through each agent's native stream format).
     interactive OAuth login and return it when present, so `agents view --refresh`
     repopulates the session (5h) + week (7d) windows for every signed-in account. This
     is the ONLY credential carrying `user:profile` (RUSH-2392), mirroring why EXEC-2a
-    defers a personal-device run to the login.
+    defers a headed-device (personal/desktop) run to the login.
   - A usage read MUST NOT refresh an access token
     (`claudeUsageAccessTokenNoRefresh`): an expired interactive login reports
     `expired-credential`, never a silent refresh. Window freshness

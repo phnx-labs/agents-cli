@@ -45,13 +45,13 @@ export interface ExecConfigEnvCtx {
   /** resolveInteractive(options) — computed once by the caller. */
   interactive: boolean;
   /**
-   * The role marked on THIS machine (worker | personal | undefined), resolved
-   * once by the caller from selfConfiguredDeviceRole(). A `personal` device is
-   * the user's own interactive box: it holds a real per-version login and the
-   * credential decision MUST defer to it for EVERY run — interactive OR headless
-   * — never the worker-only setup-token (RUSH-2395). Injected as a plain value
-   * (not imported) to keep the adapter import-leaf. Absent/undefined is treated
-   * as non-personal (worker-equivalent).
+   * The role marked on THIS machine (worker | personal | desktop | undefined),
+   * resolved once by the caller from selfConfiguredDeviceRole(). A headed device
+   * (`personal` or `desktop` — see isHeadedDeviceRole) holds a real per-version
+   * login and the credential decision MUST defer to it for EVERY run — interactive
+   * OR headless — never the worker-only setup-token (RUSH-2395). Injected as a
+   * plain value (not imported) to keep the adapter import-leaf. Absent/undefined
+   * is treated as non-headed (worker-equivalent).
    */
   deviceRole?: ConfiguredDeviceRole;
   /**
