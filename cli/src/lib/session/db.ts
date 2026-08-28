@@ -2468,17 +2468,23 @@ export function upsertSessionsBatch(
         ? { ...entry, meta: { ...entry.meta, ...fanOutCounts(entry.events, entry.meta.agent) } }
         : entry;
     }
-    if (!entry.events) {
-      // Scanner produced no events (e.g. Kimi reads only summary.json, Grok
-      // reads only summary.json, OpenCode reads only metadata). Calling
-      // parseSession here would read + redact the full transcript on every warm
-      // tick for every changed session — wedging the daemon event loop on large
-      // active files (PHNX-3411). Defer tool-call indexing to runDeferredToolIndex
-      // which uses ensureToolIndex with tool_scan_ledger stamps and byte/file
-      // budget caps so it never blocks the warm tick.
+    // Harnesses whose scanners produce no events AND whose parseSession reads a
+    // potentially large flat transcript file (not a compact SQLite DB). Calling
+    // parseSession on the warm tick for an active large session wedges the Node
+    // event loop for seconds, making browser IPC miss its connection window
+    // (PHNX-3411). Defer their tool-call indexing to runDeferredToolIndex, which
+    // uses ensureToolIndex with tool_scan_ledger stamps and byte/file budget caps.
+    // NOT opencode — parseOpenCode issues a targeted SQLite query, so it is fast
+    // even for large sessions and its results populate recentDirectoriesTouched.
+    const LARGE_TRANSCRIPT_AGENTS: ReadonlySet<string> = new Set(['kimi', 'grok']);
+    if (!entry.events && LARGE_TRANSCRIPT_AGENTS.has(entry.meta.agent)) {
       return entry;
     }
-    // Scanner already normalized the transcript — enrich without re-opening it.
+    // Enrich the entry. When the scanner already provided events, use them
+    // directly (no transcript re-read). When it didn't — e.g. OpenCode whose
+    // scanner produces only metadata but whose parseOpenCode is a fast SQLite
+    // query — fall back to parseSession. Agents that would call an expensive
+    // flat-file parse already returned above.
     try {
       const toolSourcePath = toolEvidenceSourcePath(entry.meta.filePath, entry.meta.agent);
       const toolScan = toolSourcePath === entry.meta.filePath
@@ -2487,7 +2493,7 @@ export function upsertSessionsBatch(
             const stat = fs.statSync(toolSourcePath);
             return { fileMtimeMs: stat.mtimeMs, fileSize: stat.size };
           })();
-      const events = entry.events;
+      const events = entry.events ?? parseSession(entry.meta.filePath, entry.meta.agent);
       writeResourceUsage(entry.meta.id, events, entry.meta.cwd);
       return {
         ...entry,
@@ -3237,18 +3243,18 @@ export function querySessions(options: QueryOptions = {}): SessionMeta[] {
 /**
  * Cheap query for the daemon's deferred tool-index pass (PHNX-3411).
  *
- * Returns the most-recently-active non-claude/codex sessions that have a
- * transcript file path. The caller feeds these into ensureToolIndex, which
- * consults tool_scan_ledger to skip already-current rows and applies byte/file
- * budget caps — so only genuinely stale sessions pay the parse cost, and the
- * daemon tick is never wedged by the size of an active large transcript.
+ * Returns the most-recently-active sessions whose parseSession reads a large
+ * flat transcript (kimi: wire.jsonl, grok: chat_history.jsonl). Their scanners
+ * produce no events, so upsertSessionsBatch skips them in the warm tick to
+ * avoid wedging the event loop. ensureToolIndex uses tool_scan_ledger stamps
+ * to skip already-current rows and applies byte/file budget caps.
  */
 export function querySessionsForDeferredToolIndex(limit: number): SessionMeta[] {
   const db = getDB();
   const rows = db.prepare(`
     SELECT * FROM sessions
     WHERE file_path IS NOT NULL
-      AND agent NOT IN ('claude', 'codex')
+      AND agent IN ('kimi', 'grok')
     ORDER BY last_activity DESC, timestamp DESC
     LIMIT ?
   `).all(limit) as SessionRow[];
