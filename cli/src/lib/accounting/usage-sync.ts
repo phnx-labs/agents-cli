@@ -25,7 +25,7 @@
  * The planner is pure so tests cover every skip/push branch with no SSH.
  */
 import { sshExec } from '../ssh-exec.js';
-import { buildRemoteAgentsInvocation } from '../hosts/remote-cmd.js';
+import { buildRemoteAgentsInvocation, buildWindowsStdinAgentsCommand, remoteShellFor } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { sshTargetFor } from '../devices/connect.js';
@@ -120,7 +120,13 @@ export interface UsageSyncDeps {
 function defaultUsagePush(device: DeviceProfile, payload: string): { ok: boolean; message?: string } {
   const target = sshTargetFor(device);
   const os = resolveRemoteOsSync(device.name);
-  const remoteCmd = buildRemoteAgentsInvocation(['__usage-ingest'], undefined, os);
+  // A Windows peer's `agents.ps1` shim does not forward ssh-piped stdin, so hand
+  // the payload through a temp file (`--from`) instead of stdin — same workaround
+  // the secrets push uses. A POSIX peer reads stdin directly.
+  const remoteCmd =
+    remoteShellFor(os) === 'powershell'
+      ? buildWindowsStdinAgentsCommand(['__usage-ingest'])
+      : buildRemoteAgentsInvocation(['__usage-ingest'], undefined, os);
   const res = sshExec(target, remoteCmd, { input: payload, timeoutMs: USAGE_PUSH_DEADLINE_MS });
   if (res.timedOut) return { ok: false, message: 'timed out' };
   if (res.code !== 0) return { ok: false, message: res.stderr.trim() || `remote exit ${res.code}` };

@@ -381,6 +381,29 @@ export function buildWindowsAgentsCommand(cmd: WindowsAgentsCommand): string {
  * (Credential Manager, or the headless file store when there's no logon
  * session), matching a local `agents secrets import`.
  */
+/**
+ * Run `agents <args> --from <tmp>` on a Windows peer, feeding the ssh-piped stdin
+ * through a temp file — the `agents.ps1` shim does not forward piped stdin to the
+ * node process, so a verb that reads stdin must be handed a file instead. The
+ * generic sibling of {@link buildWindowsStdinImportCommand}; the receiving verb
+ * MUST accept `--from <path>` (see `usage-ingest.ts`). The temp file is removed in
+ * a `finally` so a throw mid-run never leaves the payload behind.
+ */
+export function buildWindowsStdinAgentsCommand(args: string[]): string {
+  const forwarded = args.map(powershellQuote).join(' ');
+  const script = [
+    POWERSHELL_PROGRESS_SILENCE,
+    '$in = [Console]::In.ReadToEnd()',
+    '$tmp = $null',
+    `try { $tmp = [System.IO.Path]::GetTempFileName(); [System.IO.File]::WriteAllText($tmp, $in); ` +
+      `& agents ${forwarded} --from $tmp; $code = $LASTEXITCODE } ` +
+      `finally { if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue } }`,
+    'if ($null -eq $code) { $code = 1 }',
+    'exit $code',
+  ].join('; ');
+  return `powershell -NoProfile -EncodedCommand ${encodePowershell(script)}`;
+}
+
 export function buildWindowsStdinImportCommand(bundle: string, opts: { force?: boolean; policyNever?: boolean } = {}): string {
   const force = opts.force ? ' --force' : '';
   const policy = opts.policyNever ? ' --policy never --i-understand' : '';

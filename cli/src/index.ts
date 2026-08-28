@@ -16,6 +16,7 @@
  *   - `__secrets-get` / `__secrets-ping` / `__secrets-lock` (SYNC_* tokens)
  *   - `__shim`
  *   - `__claude-statusline`
+ *   - `__usage-ingest`
  *   - `__daemon-run`
  *
  * The tokens are imported from the leaf module sync-commands.ts — the SAME

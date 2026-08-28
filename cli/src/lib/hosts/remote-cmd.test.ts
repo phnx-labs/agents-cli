@@ -5,6 +5,7 @@ import {
   buildRemoteAgentsInvocation,
   buildWindowsAgentsCommand,
   buildWindowsStdinImportCommand,
+  buildWindowsStdinAgentsCommand,
   posixEnvExports,
   remoteShellFor,
   powershellQuote,
@@ -338,6 +339,18 @@ describe('buildWindowsStdinImportCommand', () => {
     const script = decodeWindows(buildWindowsStdinImportCommand('linear.app'));
     expect(script).toContain('agents secrets import \'linear.app\' --from $tmp;');
     expect(script).not.toContain('--force');
+  });
+
+  it('buildWindowsStdinAgentsCommand bridges ssh stdin to any verb via --from $tmp', () => {
+    const script = decodeWindows(buildWindowsStdinAgentsCommand(['__usage-ingest']));
+    expect(script.startsWith("$ProgressPreference = 'SilentlyContinue'; ")).toBe(true);
+    expect(script).toContain('[Console]::In.ReadToEnd()');
+    expect(script).toContain('[System.IO.Path]::GetTempFileName()');
+    // Runs the verb against the temp FILE, never a hanging `--from -`.
+    expect(script).toContain('agents \'__usage-ingest\' --from $tmp');
+    expect(script).not.toContain('--from -');
+    expect(script).toContain('Remove-Item -LiteralPath $tmp -Force');
+    expect(script).toContain('exit $code');
   });
 
   it('sets policy never in the same import process', () => {

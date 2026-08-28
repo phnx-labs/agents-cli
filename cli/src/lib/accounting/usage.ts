@@ -2319,6 +2319,14 @@ function parseCapturedAtMs(capturedAt: string | null | undefined): number | null
  * already wrote. An incoming row with no `capturedAt` cannot prove it is newer, so
  * it never displaces an existing timestamped row. Returns the count updated.
  * Locked + atomic like every other cache writer.
+ *
+ * Deliberately NOT role-gated on the receiver. "Consume only on worker/unmarked"
+ * is a SENDER-side optimization (don't waste a push on a headed peer that reads
+ * its own usage), not a safety invariant — the actual safety property is this
+ * newest-wins guard. Receiving on a headed box is harmless (its fresher local
+ * status-line row survives) or helpful (an account it is signed into but never
+ * runs now shows a usage bar), so gating here on the receiver's own — laggier —
+ * view of its role would only reject legitimate data.
  */
 export function ingestPeerClaudeUsageRows(
   rows: Record<string, CachedUsageSnapshot>,
