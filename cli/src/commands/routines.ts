@@ -360,13 +360,19 @@ function renderRoutineRows({ jobs, scheduler, overdueSet, link, now, local = tru
 
     const overdueTag = overdueSet.has(job.name) ? chalk.yellow(' (overdue)') : '';
 
+    // Append the concrete reason a routine did not complete (auth_failed, wedged,
+    // blocked, missed) right in the Last Status cell, so the list answers "why"
+    // without a drill-in. Only for non-completed local runs; peer rows stay blank.
+    const reason = latestRun ? runFailureReason(latestRun) : null;
+    const reasonTag = reason ? chalk.gray(` — ${reason}`) : '';
+
     const agentLabelPadded = job.command
       ? chalk.magenta('command'.padEnd(10))
       : job.workflow
         ? chalk.magenta(`wf:${job.workflow}`.padEnd(10))
         : (job.agent || '').padEnd(10);
     console.log(
-      `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}`
+      `  ${chalk.cyan(job.name.padEnd(NAME_W))} ${agentLabelPadded} ${repoCell}${' '.repeat(repoPadding)} ${deviceCell}${' '.repeat(devicePad)} ${schedStr.padEnd(SCHED_W)} ${enabledStr}${' '.repeat(enabledPad)} ${chalk.gray(nextStr.padEnd(NEXT_W))} ${statusColor(lastStatus)}${overdueTag}${reasonTag}`
     );
   }
 }
@@ -759,6 +765,35 @@ function routineMatchesQuery(job: JobConfig, q: string): boolean {
     .includes(q);
 }
 
+/** Friendly one-liners for the claim a `skipped` run lost. */
+const SKIP_REASON_LABEL: Record<NonNullable<RunMeta['skipReason']>, string> = {
+  active_run: 'wedged: a prior run is still active',
+  duplicate_slot: 'duplicate slot (already fired)',
+  wrong_owner: 'pinned to another device',
+};
+
+/**
+ * The short, human reason a run did not simply complete — for inline display in
+ * the list/detail so "why did it fail" needs no dig into the run dir. Prefers the
+ * concrete `errorMessage` (which carries `auth_failed: …`, OAuth-revoked, timeouts),
+ * then the readiness block for a `blocked` run, then the mapped skip reason. Returns
+ * null for a healthy (`completed`/`running`) run, which needs no annotation.
+ */
+export function runFailureReason(run: RunMeta): string | null {
+  if (run.status === 'completed' || run.status === 'running') return null;
+  const compact = (s: string): string => {
+    const one = s.replace(/\s+/g, ' ').trim();
+    return one.length > 80 ? one.slice(0, 79) + '…' : one;
+  };
+  if (run.errorMessage) return compact(run.errorMessage);
+  if (run.status === 'blocked' && run.readiness) {
+    return compact(run.readiness.message || run.readiness.code);
+  }
+  if (run.skipReason) return SKIP_REASON_LABEL[run.skipReason];
+  if (run.status === 'missed') return 'scheduler was not running when it came due';
+  return null;
+}
+
 /** One compact routine row for the browser list: name · kind · schedule · next · last. */
 function routineBrowserRow(
   job: JobConfig,
@@ -828,7 +863,12 @@ function buildRoutineDetail(job: JobConfig, scheduler: JobScheduler, now: Date):
           ? chalk.red(run.status)
           : chalk.yellow(run.status);
       const dur = run.completedAt ? ` ${formatRunDuration(run.startedAt, run.completedAt)}` : '';
-      lines.push(`  ${run.startedAt}  ${status}${dur}`);
+      // Surface WHY a run did not complete, inline, so "looking at status" does not
+      // require digging into the run dir. auth_failed / OAuth-revoked, a wedged
+      // active-run skip, or a readiness block all live on the RunMeta already.
+      const reason = runFailureReason(run);
+      const why = reason ? chalk.gray(` — ${reason}`) : '';
+      lines.push(`  ${run.startedAt}  ${status}${dur}${why}`);
     }
   }
 
@@ -2028,6 +2068,10 @@ export function registerRoutinesCommands(program: Command): void {
         chalk.gray(formatRunDuration(run.startedAt, run.completedAt)) +
         (run.exitCode !== null && run.exitCode !== undefined ? chalk.gray(`  exit ${run.exitCode}`) : '')
       );
+      // The structured reason (auth_failed, blocked readiness, wedged skip) — the
+      // report/stdout tail below often buries or omits it, so name it up front.
+      const logsReason = runFailureReason(run);
+      if (logsReason) console.log(chalk.red('reason: ') + chalk.gray(logsReason));
       console.log(chalk.gray('─'.repeat(60)));
 
       const reportPath = path.join(getRunDir(name, runId), 'report.md');
