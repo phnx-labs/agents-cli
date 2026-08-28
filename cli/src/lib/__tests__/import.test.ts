@@ -74,7 +74,11 @@ describe('resolvePackageDirFromBinary', () => {
   });
 
   it('returns null for a binary that has no package.json on the walk-up', () => {
-    const bareDir = path.join(tmp, 'bare');
+    // Nest deep enough that resolvePackageDirFromBinary's bounded 6-level walk-up
+    // stays INSIDE this clean temp tree and never reaches os.tmpdir()'s ancestors.
+    // Some fleet workers set TMPDIR under a dir tree with a package.json within 6
+    // levels, which made this flake by resolving to that ambient package (PHNX-3434).
+    const bareDir = path.join(tmp, 'l1', 'l2', 'l3', 'l4', 'l5');
     fs.mkdirSync(bareDir, { recursive: true });
     const binaryPath = path.join(bareDir, 'standalone');
     fs.writeFileSync(binaryPath, '#!/bin/sh\nexit 0\n');

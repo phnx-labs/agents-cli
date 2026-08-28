@@ -77,7 +77,10 @@ describe('JobScheduler.reloadAll — device activation refresh', () => {
 
 describe('fireSlot — aligned, unconditional occurrence key (SING-15)', () => {
   it('floors a jittered fire instant to the aligned schedule boundary', () => {
-    const cron = new Cron('0 9 * * 1-5', { paused: true });
+    // Pin the schedule to UTC: without it, croner uses the worker's LOCAL zone,
+    // so "0 9" fires at 09:00 local (16:00 UTC on a PDT box) and the floored
+    // boundary lands on the previous day — the source of the flake (PHNX-3436).
+    const cron = new Cron('0 9 * * 1-5', { paused: true, timezone: 'UTC' });
     const boundary = new Date('2026-08-28T09:00:00.000Z');
     // croner's currentRun() carries wall-clock jitter — simulate a fire 4 ms late.
     vi.spyOn(cron, 'currentRun').mockReturnValue(new Date(boundary.getTime() + 4));
