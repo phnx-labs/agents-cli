@@ -366,6 +366,19 @@ CREATE TABLE IF NOT EXISTS session_topics (
   topic_json TEXT NOT NULL
 );
 
+-- Derived failure-phenotype classification for traces sync. Stamp-validated cache
+-- keyed by the transcript's mtime+size; value_json may be the JSON string "null"
+-- when classifyPhenotype returned null (that is a valid, cached result — absence
+-- from this table is a cache miss, not a null phenotype).
+CREATE TABLE IF NOT EXISTS session_phenotypes (
+  session_id TEXT PRIMARY KEY,
+  file_mtime_ms INTEGER,
+  file_size INTEGER,
+  extractor_version INTEGER NOT NULL,
+  computed_at INTEGER NOT NULL,
+  value_json TEXT NOT NULL
+);
+
 -- Normalized data behind sessions preview. Like session_insights this is a
 -- lazy, stamp-validated cache: opening one session parses only that transcript,
 -- while subsequent processes reuse the derived preview until its bytes change.
@@ -452,6 +465,8 @@ CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(st
 export const INSIGHTS_EXTRACTOR_VERSION = 7;
 /** Bump when classifyTopic's output changes so cached topics recompute (human task taxonomy v2). */
 export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
+/** Bump when classifyPhenotype's output changes so cached rows recompute. */
+export const SESSION_PHENOTYPE_EXTRACTOR_VERSION = 1;
 const PREVIEW_EXTRACTOR_VERSION = 1;
 
 /** Raw row shape returned from the sessions table. */
@@ -3344,6 +3359,67 @@ export function writeSessionTopics<T>(
         SESSION_TOPIC_EXTRACTOR_VERSION,
         now,
         JSON.stringify(entry.topic),
+      );
+    }
+  })();
+}
+
+/** Read cached failure phenotypes only when their transcript byte stamps still match. */
+export function readSessionPhenotypes<T>(ids: string[]): Map<string, T | null> {
+  const db = getDB();
+  const out = new Map<string, T | null>();
+  if (ids.length === 0) return out;
+  const CHUNK = 400;
+  for (let i = 0; i < ids.length; i += CHUNK) {
+    const chunk = ids.slice(i, i + CHUNK);
+    const placeholders = chunk.map(() => '?').join(',');
+    const rows = db.prepare(`
+      SELECT sp.session_id AS id, sp.value_json AS valueJson
+      FROM session_phenotypes sp
+      JOIN sessions s ON s.id = sp.session_id
+      WHERE sp.session_id IN (${placeholders})
+        AND sp.extractor_version = ?
+        AND sp.file_mtime_ms IS s.file_mtime_ms
+        AND sp.file_size IS s.file_size
+    `).all(...chunk, SESSION_PHENOTYPE_EXTRACTOR_VERSION) as Array<{ id: string; valueJson: string }>;
+    for (const row of rows) {
+      try {
+        out.set(row.id, JSON.parse(row.valueJson) as T | null);
+      } catch {
+        // Invalid cache row is a miss; self-heals on next write.
+      }
+    }
+  }
+  return out;
+}
+
+/** Persist failure phenotypes against the exact transcript bytes used to classify them. */
+export function writeSessionPhenotypes<T>(
+  entries: Array<{ id: string; fileMtimeMs: number | null; fileSize: number | null; value: T | null }>,
+): void {
+  if (entries.length === 0) return;
+  const db = getDB();
+  const stmt = db.prepare(`
+    INSERT INTO session_phenotypes
+      (session_id, file_mtime_ms, file_size, extractor_version, computed_at, value_json)
+    VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id) DO UPDATE SET
+      file_mtime_ms = excluded.file_mtime_ms,
+      file_size = excluded.file_size,
+      extractor_version = excluded.extractor_version,
+      computed_at = excluded.computed_at,
+      value_json = excluded.value_json
+  `);
+  const now = Date.now();
+  db.transaction(() => {
+    for (const entry of entries) {
+      stmt.run(
+        entry.id,
+        entry.fileMtimeMs,
+        entry.fileSize,
+        SESSION_PHENOTYPE_EXTRACTOR_VERSION,
+        now,
+        JSON.stringify(entry.value),
       );
     }
   })();

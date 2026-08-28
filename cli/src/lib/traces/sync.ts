@@ -26,8 +26,10 @@ import path from 'node:path';
 import {
   getDB,
   readSessionInsights,
+  readSessionPhenotypes,
   readSessionTopics,
   writeSessionInsights,
+  writeSessionPhenotypes,
   writeSessionTopics,
 } from '../session/db.js';
 import type { SessionAgentId, SessionMeta, SessionRunMode } from '../session/types.js';
@@ -234,6 +236,21 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
     }
   }
 
+  // Persist freshly-computed phenotypes to the stamp-keyed cache so subsequent
+  // incremental syncs covering only newer sessions still have phenotype data for
+  // ALL sessions when building the cross-session failure-cluster index.
+  if (phenotypes.size > 0) {
+    const phenotypeEntries = limited
+      .filter((r) => phenotypes.has(r.id))
+      .map((r) => ({
+        id: r.id,
+        fileMtimeMs: r.file_mtime_ms ?? null,
+        fileSize: r.file_size ?? null,
+        value: phenotypes.get(r.id) ?? null,
+      }));
+    writeSessionPhenotypes(phenotypeEntries);
+  }
+
   let indexError: string | undefined;
   if (!opts.skipIndex) {
     try {
@@ -250,7 +267,16 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       } else if (backend) {
         prevShard = await getIndexShard(backend, device);
       }
-      const shard = buildIndexShard(allRows, device, owner, prevShard, phenotypes);
+      // Read phenotypes for the full corpus (not just this batch) from the cache,
+      // then overlay this run's freshly-computed values. Without this, carryover
+      // sessions from prior syncs land in phenotype=null and merge into the wrong
+      // failure cluster in buildIndexShard.
+      const allRowIds = allRows.map((r) => r.id);
+      const mergedPhenotypes = readSessionPhenotypes<FailurePhenotype>(allRowIds);
+      for (const [id, value] of phenotypes) {
+        mergedPhenotypes.set(id, value);
+      }
+      const shard = buildIndexShard(allRows, device, owner, prevShard, mergedPhenotypes);
       if (dryRun && outDir) {
         fs.writeFileSync(path.join(outDir, 'index.json'), JSON.stringify(shard, null, 2));
       } else {
