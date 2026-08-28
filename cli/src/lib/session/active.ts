@@ -168,7 +168,7 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness'
+  'version' | 'account' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness'
 >;
 
 export function backfillActiveRowsFromMeta(
@@ -180,6 +180,7 @@ export function backfillActiveRowsFromMeta(
     const m = metaById.get(s.sessionId);
     if (!m) continue;
     if (!s.version && m.version) s.version = m.version;
+    if (!s.account && m.account) s.account = m.account;
     if (!s.label && m.label) s.label = m.label;
     if (!s.ticket && m.ticketId) s.ticket = { id: m.ticketId, url: linearIssueUrl(m.ticketId) };
     if (!s.pr && m.prUrl) s.pr = { url: m.prUrl, number: m.prNumber };
@@ -390,6 +391,18 @@ export interface ActiveSession {
    * id (RUSH-2205), never asserted by a source.
    */
   version?: string;
+  /**
+   * Email of the account that produced the session (display-only). Like
+   * {@link version}, a running process does not report which account a
+   * `--strategy balanced` launch selected, so it is backfilled at render time
+   * from the indexed {@link SessionMeta} by session id (RUSH-3184). This is what
+   * the AGI EXT status bar renders as the session's account — it reads it off the
+   * `sessions watch --json` row instead of spawning a per-tab `agents sessions
+   * <id> --device <host> --json` (the 2026-08-25 CPU incident, agi-cli#3019).
+   * Never group on this — two orgs can share one email; group on the index's
+   * `accountKey`.
+   */
+  account?: string;
   /**
    * Last-activity epoch — the transcript's last write (mtime). Distinct from
    * {@link startedAtMs} (session START): a session begun 3h ago but last touched

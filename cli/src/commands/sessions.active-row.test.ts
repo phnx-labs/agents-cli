@@ -151,13 +151,17 @@ function meta(over: Partial<SessionMeta> = {}): SessionMeta {
 }
 
 describe('backfillActiveRowsFromMeta', () => {
-  it('fills version/ticket/PR/label/created onto a live row that lacks them', () => {
-    const s = active({ sessionId: 'sid-1', version: undefined, ticket: undefined, pr: undefined, label: undefined, startedAtMs: undefined });
+  it('fills version/account/ticket/PR/label/created onto a live row that lacks them', () => {
+    const s = active({ sessionId: 'sid-1', version: undefined, account: undefined, ticket: undefined, pr: undefined, label: undefined, startedAtMs: undefined });
     const byId = new Map<string, SessionMeta>([
-      ['sid-1', meta({ id: 'sid-1', version: '2.1.207', label: 'refresh auth', ticketId: 'RUSH-2198', prUrl: 'https://github.com/o/r/pull/2091', prNumber: 2091, timestamp: '2026-07-30T10:00:00.000Z' })],
+      ['sid-1', meta({ id: 'sid-1', version: '2.1.207', account: 'muqsit@getrush.ai', label: 'refresh auth', ticketId: 'RUSH-2198', prUrl: 'https://github.com/o/r/pull/2091', prNumber: 2091, timestamp: '2026-07-30T10:00:00.000Z' })],
     ]);
     backfillActiveRowsFromMeta([s], byId);
     expect(s.version).toBe('2.1.207');
+    // account rides the same index backfill as version (RUSH-3184) so the watch
+    // row carries it and the AGI EXT status bar reads it off the stream instead
+    // of spawning a per-tab `agents sessions <id> --device <host> --json`.
+    expect(s.account).toBe('muqsit@getrush.ai');
     expect(s.label).toBe('refresh auth');
     expect(s.ticket?.id).toBe('RUSH-2198');
     expect(s.pr?.number).toBe(2091);
@@ -176,12 +180,13 @@ describe('backfillActiveRowsFromMeta', () => {
   });
 
   it('never overrides a value the live row already carries (live wins)', () => {
-    const s = active({ sessionId: 'sid-2', version: '9.9.9', ticket: { id: 'LIVE-1' }, startedAtMs: 111 });
+    const s = active({ sessionId: 'sid-2', version: '9.9.9', account: 'live@getrush.ai', ticket: { id: 'LIVE-1' }, startedAtMs: 111 });
     const byId = new Map<string, SessionMeta>([
-      ['sid-2', meta({ id: 'sid-2', version: '2.1.207', ticketId: 'RUSH-2198', timestamp: '2026-07-30T10:00:00.000Z' })],
+      ['sid-2', meta({ id: 'sid-2', version: '2.1.207', account: 'index@getrush.ai', ticketId: 'RUSH-2198', timestamp: '2026-07-30T10:00:00.000Z' })],
     ]);
     backfillActiveRowsFromMeta([s], byId);
     expect(s.version).toBe('9.9.9');
+    expect(s.account).toBe('live@getrush.ai');
     expect(s.ticket?.id).toBe('LIVE-1');
     expect(s.startedAtMs).toBe(111);
   });
