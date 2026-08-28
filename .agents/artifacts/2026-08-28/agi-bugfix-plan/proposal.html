@@ -1,0 +1,689 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>AGI-board bug-fix batch — 2026-08-28</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e8e8e8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e8e8e8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e8e8e8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}.reload-chip{display:inline-flex;align-items:center;height:30px;margin-right:8px;padding:0 12px;border:1px solid color-mix(in srgb,var(--accent) 40%,var(--line));border-radius:999px;background:color-mix(in srgb,var(--accent) 12%,var(--surface));color:var(--accent);font:500 12px/1 var(--font-mono);cursor:pointer}.reload-chip[hidden]{display:none}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="reload-chip" type="button" hidden>Updated · Reload</button><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>AGI-board bug-fix batch — 2026-08-28</h1>
+<p class="summary">Of 89 open AGI-project tickets, 38 are classified as bugs. Verified all 38 against current origin/main with 5 parallel agents; 9 are already handled (fixed on main or sitting in an unmerged PR), 24 are real and scoped into 9 independent PR-sized batches, 5 are excluded with a stated reason (owner decision, ops action, or needs on-machine repro).</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">38 bug-tagged tickets verified against origin/main by 5 parallel agents<span class="meta-sep" aria-hidden="true">·</span>24 real, scoped into 9 independent PR-sized batches<span class="meta-sep" aria-hidden="true">·</span>2 already fixed on main; 2 have complete unmerged PRs awaiting review<span class="meta-sep" aria-hidden="true">·</span>9 excluded — owner decision or ops action, named with reason</p><div class="meta-block meta-links"><div class="meta-label">Related</div><ul class="meta-row meta-row-links"><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><a href="https://linear.app/getrush/project/AGI" target="_blank" rel="noopener">AGI</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/3236" target="_blank" rel="noopener">PR #3236</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/agi-cli/pull/3172" target="_blank" rel="noopener">PR #3172</a></span></li><li class="chip"><span class="chip-value"><svg class="chip-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/></svg><a href="https://github.com/phnx-labs/.agents/pull/416" target="_blank" rel="noopener">PR #416</a></span></li></ul></div><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agi-cli" target="_blank" rel="noopener">phnx-labs/agi-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">claude-agi-bugfix-plan-2026-08-28</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">author</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">fleet-worker</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-28</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture" data-toc-for="current-architecture"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Current architecture</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item toc-sub" href="#batch-1-agents-cli-dangling-default-account-hard-fails-launches-p1" data-toc-for="batch-1-agents-cli-dangling-default-account-hard-fails-launches-p1">Batch 1 — agents-cli: dangling default account hard-fails launches (P1)</a><a class="toc-item toc-sub" href="#batch-2-agents-cli-rush-cloud-availability-lies-on-an-expired-session" data-toc-for="batch-2-agents-cli-rush-cloud-availability-lies-on-an-expired-session">Batch 2 — agents-cli: Rush Cloud availability lies on an expired session</a><a class="toc-item toc-sub" href="#batch-3-agents-cli-traces-sync-mislabels-a-recovered-run-as-errored" data-toc-for="batch-3-agents-cli-traces-sync-mislabels-a-recovered-run-as-errored">Batch 3 — agents-cli: traces sync mislabels a recovered run as errored</a><a class="toc-item toc-sub" href="#batch-4-agents-cli-monitors-visibility-3-sub-fixes-1-pr" data-toc-for="batch-4-agents-cli-monitors-visibility-3-sub-fixes-1-pr">Batch 4 — agents-cli: monitors visibility (3 sub-fixes, 1 PR)</a><a class="toc-item toc-sub" href="#batch-5-agents-cli-agents-upgrade-self-heals-two-upgrade-time-regressions" data-toc-for="batch-5-agents-cli-agents-upgrade-self-heals-two-upgrade-time-regressions">Batch 5 — agents-cli: agents upgrade self-heals two upgrade-time regressions</a><a class="toc-item toc-sub" href="#batch-6-agents-cli-share-worker-silently-drops-a-concurrent-publish" data-toc-for="batch-6-agents-cli-share-worker-silently-drops-a-concurrent-publish">Batch 6 — agents-cli: share worker silently drops a concurrent publish</a><a class="toc-item toc-sub" href="#batch-7-agents-cli-fleet-drift-invisible-when-a-device-s-agents-isn-t-a-repo" data-toc-for="batch-7-agents-cli-fleet-drift-invisible-when-a-device-s-agents-isn-t-a-repo">Batch 7 — agents-cli: fleet drift invisible when a device's ~/.agents isn't a repo</a><a class="toc-item toc-sub" href="#batch-8-agents-system-land-two-already-fixed-prs-no-new-engineering" data-toc-for="batch-8-agents-system-land-two-already-fixed-prs-no-new-engineering">Batch 8 — .agents-system: land two already-fixed PRs (no new engineering)</a><a class="toc-item toc-sub" href="#batch-9-six-small-independent-one-file-patches" data-toc-for="batch-9-six-small-independent-one-file-patches">Batch 9 — six small, independent one-file patches</a><a class="toc-item toc-sub" href="#deferred-as-a-follow-up-not-this-batch" data-toc-for="deferred-as-a-follow-up-not-this-batch">Deferred as a follow-up, not this batch</a><a class="toc-item toc-sub" href="#excluded-owner-decision-not-engineering" data-toc-for="excluded-owner-decision-not-engineering">Excluded — owner decision, not engineering</a><a class="toc-item toc-sub" href="#excluded-ops-owner-action-not-code" data-toc-for="excluded-ops-owner-action-not-code">Excluded — ops/owner action, not code</a><a class="toc-item" href="#full-disposition-of-all-38-bug-tagged-tickets" data-toc-for="full-disposition-of-all-38-bug-tagged-tickets"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Full disposition of all 38 bug-tagged tickets</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Tracking</a><a class="toc-item" href="#references" data-toc-for="references"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>References</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ol>
+<li><strong>Scope call: fix-batch, not the whole board.</strong> 38 of 89 open tickets are classified
+as bugs (by content, not a Linear label — none carry an actual <code>Bug</code> label). This plan
+proposes fixing 24 of them now, across 9 independently-mergeable PRs. The other 14 are
+named with a reason (owner decision, already fixed, already has an open PR, needs
+on-machine repro, or too large/decision-laden) — confirm none of those exclusions
+should flip.</li>
+<li><strong>PHNX-3183's second ask is a revert-of-a-revert if implemented as written.</strong> The
+ticket wants a <code>running</code> session promotable to <code>orphaned</code>. That exact change was tried
+on <code>main</code> and reverted one commit later after a non-author review caught it violating
+spec SES-18a (a normal unattended agent would be mislabeled as orphaned). This plan
+closes the ticket rather than re-implementing the reverted half — confirm that's right
+rather than re-opening the spec question.</li>
+<li><strong>Two repos, kept separate.</strong> <code>agents-cli</code> and <code>.agents-system</code> (<code>phnx-labs/.agents</code>)
+are different git remotes. Batches 1-7 are agents-cli; Batch 8-9 are <code>.agents-system</code>.
+No worktree mixes them.</li>
+<li><strong>Batch 8 is "land, don't build."</strong> PHNX-2951 (<code>#3172</code>) and PHNX-3118
+(<code>.agents#416</code>) already have correct, tested fixes sitting unmerged — the only action
+needed is a fresh non-author review verdict and a merge.</li>
+</ol>
+<h2 id="purpose">Purpose</h2><p class="artifact-callout">Verification changed the input list: PHNX-3183's ask would
+reintroduce a defect already shipped and reverted per spec SES-18a, PHNX-2740's stated
+root cause was wrong (a version bump would not have fixed it), and 2 of 8 "small" tickets
+turned out to already be fixed on <code>main</code>. All three would have shipped wrong
+or duplicate work without the verification pass below.</p>
+
+<p>You asked: pull the AGI board's real bugs, confirm they're actually real (not stale,
+not already fixed, not a feature/decision mislabeled as a bug), and propose fixes — no
+new features. This is that check, done by re-deriving root cause against live
+<code>origin/main</code> and the live fleet rather than trusting the tickets' own claims (which were
+themselves written by prior agent sessions, and in three cases turned out to be wrong or
+stale).</p>
+<h2 id="current-architecture">Current architecture</h2><p>The 24 in-scope fixes cluster around six subsystems inside the CLI's single execution
+path. None of them add a new subsystem — every fix corrects behavior at an existing
+seam.</p>
+<svg viewBox="0 0 920 480" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#a3e635"></path>
+    </marker>
+  </defs>
+  <rect x="0" y="0" width="920" height="480" fill="none"></rect>
+
+  <rect x="360" y="10" width="200" height="46" rx="6" fill="#141414" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="460" y="38" fill="#e8e8e8" text-anchor="middle">agents run / exec.ts</text>
+
+  
+  <rect x="20" y="110" width="180" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="110" y="135" fill="#e8e8e8" text-anchor="middle">account-registry.ts</text>
+  <text x="110" y="153" fill="#888888" text-anchor="middle" font-size="11">Batch 1 · PHNX-3326</text>
+
+  <rect x="230" y="110" width="180" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="320" y="135" fill="#e8e8e8" text-anchor="middle">cloud/rush.ts</text>
+  <text x="320" y="153" fill="#888888" text-anchor="middle" font-size="11">Batch 2 · PHNX-3382</text>
+
+  <rect x="440" y="110" width="180" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="530" y="135" fill="#e8e8e8" text-anchor="middle">traces/sync.ts</text>
+  <text x="530" y="153" fill="#888888" text-anchor="middle" font-size="11">Batch 3 · PHNX-3387</text>
+
+  <rect x="650" y="110" width="230" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="765" y="135" fill="#e8e8e8" text-anchor="middle">monitors/config.ts</text>
+  <text x="765" y="153" fill="#888888" text-anchor="middle" font-size="11">Batch 4 · PHNX-2506</text>
+
+  
+  <rect x="20" y="220" width="230" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="135" y="245" fill="#e8e8e8" text-anchor="middle">self-update.ts / bootstrap.ts</text>
+  <text x="135" y="263" fill="#888888" text-anchor="middle" font-size="11">Batch 5 · PHNX-3393 + 2740</text>
+
+  <rect x="280" y="220" width="230" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="395" y="245" fill="#e8e8e8" text-anchor="middle">share/worker-template.ts</text>
+  <text x="395" y="263" fill="#888888" text-anchor="middle" font-size="11">Batch 6 · PHNX-2701 (Worker)</text>
+
+  <rect x="540" y="220" width="230" height="60" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="655" y="245" fill="#e8e8e8" text-anchor="middle">devices/fleet-divergence.ts</text>
+  <text x="655" y="263" fill="#888888" text-anchor="middle" font-size="11">Batch 7 · PHNX-3239</text>
+
+  
+  <rect x="20" y="330" width="880" height="90" rx="6" fill="#0f0f0f" stroke="#666666" stroke-dasharray="4 3"></rect>
+  <text x="40" y="352" fill="#666666" font-size="11">separate repo — phnx-labs/.agents (companion rules/hooks)</text>
+  <rect x="40" y="365" width="220" height="42" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="150" y="391" fill="#e8e8e8" text-anchor="middle" font-size="12">pr-verdict.py (Batch 8)</text>
+  <rect x="280" y="365" width="220" height="42" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="390" y="391" fill="#e8e8e8" text-anchor="middle" font-size="12">docs/rules text (Batch 9)</text>
+  <rect x="520" y="365" width="220" height="42" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="630" y="391" fill="#e8e8e8" text-anchor="middle" font-size="12">routines.ts guard (Batch 9)</text>
+  <rect x="760" y="365" width="120" height="42" rx="6" fill="#141414" stroke="#333333"></rect>
+  <text x="820" y="391" fill="#e8e8e8" text-anchor="middle" font-size="12">4 more (B9)</text>
+
+  
+  <path d="M420,56 L110,110" stroke="#a3e635" stroke-width="1.2" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M450,56 L320,110" stroke="#a3e635" stroke-width="1.2" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M470,56 L530,110" stroke="#a3e635" stroke-width="1.2" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M500,56 L765,110" stroke="#a3e635" stroke-width="1.2" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M400,56 L135,220" stroke="#666666" stroke-width="1" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M420,56 L395,220" stroke="#666666" stroke-width="1" marker-end="url(#arrow)" fill="none"></path>
+  <path d="M440,56 L655,220" stroke="#666666" stroke-width="1" marker-end="url(#arrow)" fill="none"></path>
+</svg><p>Batches 1-7 all hang off the one execution engine (<code>agents run</code> → <code>exec.ts</code> per this
+repo's own architecture doc) or its adjacent daemon/worker surfaces — none of them touch
+each other, which is exactly why they ship as 7 independent PRs rather than one.</p>
+<h2 id="proposed-changes">Proposed Changes</h2><p>Representative diffs — full patch scope is in <code>tasks.md</code>, checked into this same
+directory.</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/account-registry.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/account-registry.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@ resolveSpawnAccount</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  if (!unified) throw new Error(`Unknown account '${selection}'.`);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  if (!unified) {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    if (source === 'default') {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      console.warn(</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        `Default account '${selection}' for ${agent} no longer exists. ` +</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">        `Falling back to balanced selection — run 'agents accounts default ${agent} &lt;name&gt;' to set a new one.`</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      );</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">      return null;</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    }</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    throw new Error(`Unknown account '${selection}'.`);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  }</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/cloud/rush.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/cloud/rush.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@ capabilities()</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    available: fs.existsSync(USER_YAML),</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    available: fs.existsSync(USER_YAML) &amp;&amp; !isSessionExpired(readSessionExpiry()),</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/traces/sync.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/traces/sync.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@ buildSessionDetail</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    outcome: traj.errorCount &gt; 0 ? 'errored' : 'completed',</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    outcome: traj.steps.at(-1)?.outcome === 'error' ? 'errored' : 'completed',</span></span></pre></div><div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">--- a/cli/src/lib/monitors/config.ts</span></span><span class="cd-line cd-meta"><span class="cd-sign"></span><span class="cd-code">+++ b/cli/src/lib/monitors/config.ts</span></span><span class="cd-line cd-hunk"><span class="cd-sign"></span><span class="cd-code">@@ readMonitorFile</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    enabled: hasEnabled ? parsed.enabled !== false : scope === 'system' ? false : (MONITOR_DEFAULTS.enabled ?? true),</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    enabled: hasEnabled ? parsed.enabled !== false : (MONITOR_DEFAULTS.enabled ?? true),</span></span></pre></div><p>Batches 5, 6, and 7 add small new functions (<code>sweepStaleInstallStaging</code>, a conditional-put
+retry loop, a <code>notGitRepo</code> divergence kind) rather than one-line edits — their full shape
+is in <code>tasks.md</code>, not repeated here as diffs since the "before" doesn't exist yet to diff
+against.</p>
+<h2 id="public-interface">Public Interface</h2><p>No new commands or flags. Visible behavior changes only:</p>
+<ul>
+<li><code>agents run &lt;agent&gt;</code> no longer hard-exits on a dangling default account; it warns and
+falls back to balanced selection (Batch 1).</li>
+<li><code>agents cloud providers</code> reports <code>available: false</code> for an expired Rush session instead
+of <code>true</code> (Batch 2).</li>
+<li><code>agents routines add</code> with a bare <code>cwd: ~</code> reports the actual cause instead of a
+misleading generic message (Batch 9).</li>
+<li><code>agents monitors list</code> shows built-in monitors as enabled and tags them <code>(built-in)</code>;
+gains fleet-wide fan-out (Batch 4).</li>
+<li>Evals console / <code>agents traces</code> JSON: a recovered run now reports <code>outcome: 'completed'</code>
+with <code>surfacedToolFailures</code> populated, instead of <code>outcome: 'errored'</code> (Batch 3).</li>
+</ul>
+<figure class="artifact-figure artifact-behavior">
+  <section data-state="current" data-evidence="capture">
+    <pre>$ agents ssh yosemite-m5 'agents run claude "reply with OK" --mode auto'
+[agents] using the encrypted file store at /home/muqsit/.agents/.cache/secrets
+Unknown account 'd4a2d110-17fe-4341-a1c5-b1222ed91557'.
+$ echo $?
+1</pre>
+    <figcaption>Live reproduction, yosemite-m5, 2026-08-27 (PHNX-3326) — every launch on the box dies before doing any work.</figcaption>
+  </section>
+  <section data-state="proposed" data-evidence="mockup">
+    <pre>$ agents run claude "reply with OK" --mode auto
+Default account 'd4a2d110-...' for claude no longer exists.
+Falling back to balanced selection - run 'agents accounts default claude &lt;name&gt;' to set a new one.
+[agents] balanced picked claude@2.1.219 (11 of 14 healthy)
+OK
+$ echo $?
+0</pre>
+    <figcaption>Batch 1 fix — warn and fall back instead of hard-exiting; the machine stays usable.</figcaption>
+  </section>
+</figure><h2 id="plan">Plan</h2><p>Full checklist (also at <code>tasks.md</code> next to this file — same content, kept in sync):</p>
+<h3 id="batch-1-agents-cli-dangling-default-account-hard-fails-launches-p1">Batch 1 — agents-cli: dangling default account hard-fails launches (P1)</h3><p>Ticket: PHNX-3326.</p>
+<div class="checklist"><div class="checklist-head">0 / 7 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/account-registry.ts:351-366</code> — <code>resolveAccountSelection</code> returns
+<code>{ value, source: 'explicit' | 'binding' | 'default' }</code> instead of a bare string.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/account-registry.ts:543-560</code> (<code>resolveSpawnAccount</code>) — when
+<code>!unified &amp;&amp; source === 'default'</code>, warn + return <code>null</code> instead of throwing. Keep
+the throw for <code>explicit</code>/<code>binding</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/commands/accounts.ts:369</code> — store <code>account.name</code>, not <code>account.id</code>, in
+<code>defaults:</code>. <code>findUnifiedAccount</code> already resolves both forms.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/account-registry.ts:467</code> — dangling-default filter in <code>removeAccount</code>
+must still match a name-stored default.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Error message modeled on <code>cli/src/commands/exec.ts:2538</code>'s shape.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/smart-launch.ts</code> (<code>resolveDeviceAuto</code>) / <code>cli/src/lib/teams/scheduler.ts</code>
+(<code>pickBestDevice</code>) — deprioritize (not exclude) a device where recent launches failed.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Regression test: dangling default (uuid- and name-stored) → warns, falls back, exits 0.</span></li></ul></div>
+<h3 id="batch-2-agents-cli-rush-cloud-availability-lies-on-an-expired-session">Batch 2 — agents-cli: Rush Cloud availability lies on an expired session</h3><p>Ticket: PHNX-3382 (item 1 only — item 2 is an ops action, see Excluded below).</p>
+<div class="checklist"><div class="checklist-head">0 / 2 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/cloud/rush.ts:290</code> — <code>available</code> reflects real token validity
+(<code>session.expires_at</code> vs now, or a cheap cached authenticated probe).</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Regression test: expired/absent <code>expires_at</code> → <code>available: false</code>.</span></li></ul></div>
+<h3 id="batch-3-agents-cli-traces-sync-mislabels-a-recovered-run-as-errored">Batch 3 — agents-cli: traces sync mislabels a recovered run as errored</h3><p>Ticket: PHNX-3387.</p>
+<div class="checklist"><div class="checklist-head">0 / 3 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/traces/sync.ts:657</code> — derive <code>outcome</code> from the trajectory's final
+step, not <code>errorCount &gt; 0</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>surfacedToolFailures</code> (sync.ts:666-668) needs no code change.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update <code>sync.test.ts:333</code>; add a case for mid-run error + successful final step.</span></li></ul></div>
+<h3 id="batch-4-agents-cli-monitors-visibility-3-sub-fixes-1-pr">Batch 4 — agents-cli: monitors visibility (3 sub-fixes, 1 PR)</h3><p>Ticket: PHNX-2506. Not doing: an enable/disable verb, git-tracked monitor definitions
+(both explicitly rejected in the ticket).</p>
+<div class="checklist"><div class="checklist-head">0 / 3 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/monitors/config.ts:470</code> — drop the system-scope <code>enabled: false</code>
+special case.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add <code>scope: 'user' | 'system'</code> to <code>MonitorConfig</code>; render <code>(built-in)</code> in
+<code>cli/src/commands/monitors.ts:702</code>'s list and include <code>scope</code> in <code>--json</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>list</code> action fans out fleet-wide via <code>gatherRemoteAgentsJson</code>, reusing
+<code>parseRemoteMonitors</code> (<code>cli/src/lib/monitors/remote.ts:38-58</code>).</span></li></ul></div>
+<h3 id="batch-5-agents-cli-agents-upgrade-self-heals-two-upgrade-time-regressions">Batch 5 — agents-cli: <code>agents upgrade</code> self-heals two upgrade-time regressions</h3><p>Tickets: PHNX-3393 + PHNX-2740 (same root-cause class: <code>--ignore-scripts</code> skips a native
+dependency's install step).</p>
+<div class="checklist"><div class="checklist-head">0 / 4 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">New <code>sweepStaleInstallStaging</code> in <code>cli/src/lib/self-update.ts</code>, called from
+<code>cli/src/bootstrap.ts</code> before staging, scoped to <code>path.dirname(packageRoot)</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">New self-heal check <code>cli/src/lib/self-heal/checks/install-staging.ts</code> (periodic,
+10-minute age guard measured from the staging dir's own mtime), registered in
+<code>self-heal/registry.ts</code> + <code>self-heal/types.ts</code>'s <code>HealCheckId</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Re-provision node-pty post-<code>--ignore-scripts</code>, mirroring the Keychain-helper
+precedent at <code>cli/src/lib/bootstrap.ts:414-423</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Tests reproduce the real ENOTEMPTY failure (no FS mocking) and prove the sweep
+clears it; macOS check confirms <code>pty.node</code> present after a simulated upgrade.</span></li></ul></div>
+<h3 id="batch-6-agents-cli-share-worker-silently-drops-a-concurrent-publish">Batch 6 — agents-cli: share worker silently drops a concurrent publish</h3><p>Ticket: PHNX-2701.</p>
+<div class="checklist"><div class="checklist-head">0 / 3 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/share/worker-template.ts:337-350</code> — conditional put
+(<code>onlyIf: { etagMatches }</code>) on the canonical write, mirroring the existing PATCH
+handler at <code>:442-447</code>; handle the create-new-slug (<code>existing === null</code>) case.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Bounded retry (e.g. 3 attempts) of read→copy-revision→write on precondition failure.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Test against real R2 conditional-put semantics.</span></li></ul></div>
+<h3 id="batch-7-agents-cli-fleet-drift-invisible-when-a-device-s-agents-isn-t-a-repo">Batch 7 — agents-cli: fleet drift invisible when a device's <code>~/.agents</code> isn't a repo</h3><p>Ticket: PHNX-3239 (detectability slice only — the onboarding path is a feature, excluded).</p>
+<div class="checklist"><div class="checklist-head">0 / 3 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/devices/fleet-inventory.ts:34-37</code> — carry a <code>notGitRepo</code> signal instead
+of collapsing to <code>null</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/devices/fleet-divergence.ts:307-310</code> — emit a divergence kind instead
+of silently <code>continue</code>-ing past a non-git remote repo.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text"><code>cli/src/lib/devices/doctor-findings.ts</code> — wire the new kind into
+<code>fleetDivergenceToFindings</code> as a warning/critical finding naming the device.</span></li></ul></div>
+<h3 id="batch-8-agents-system-land-two-already-fixed-prs-no-new-engineering">Batch 8 — .agents-system: land two already-fixed PRs (no new engineering)</h3><div class="checklist"><div class="checklist-head">0 / 2 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-2951 — <code>phnx-labs/agi-cli#3172</code> (commit <code>482319eb</code> already fixes the reviewer's
+blocker on the filtered <code>stranded</code> count). Get a fresh non-author verdict, merge.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-3118 — <code>phnx-labs/.agents#416</code> (negation guard + code-fence stripping in
+<code>pr-verdict.py</code>, 37/37 tests passing). Land once review completes.</span></li></ul></div>
+<h3 id="batch-9-six-small-independent-one-file-patches">Batch 9 — six small, independent one-file patches</h3><p><strong>Already fixed — close with proof, no code change:</strong></p>
+<div class="checklist"><div class="checklist-head">2 / 2 done</div><ul class="checklist-items"><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">PHNX-2717 — <code>muqsitnawaz/.agents</code> <code>hooks/no-permission-stop-guard.sh:62-63</code> fixed
+via merged PR #298.</span></li><li class="cl-item cl-done"><span class="cl-box">✓</span><span class="cl-text">PHNX-3350 — <code>.agents-system</code> <code>git-guard.sh</code>/<code>rm-guard.sh</code> already share
+<code>git_peel_timeout_wrapper()</code> (<code>hooks/lib/git-parse.sh:63</code>); 41/41 + 24/24 fixtures
+passing including explicit PHNX-3350 cases.</span></li></ul></div>
+<p><strong>Real, still open — <code>.agents-system</code>:</strong></p>
+<div class="checklist"><div class="checklist-head">0 / 1 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-3042 — drop <code>--fail-fast</code> from the CI-watch incantation at 5 sites
+(<code>rules/AGENTS.md:315,499</code>, <code>rules/subrules/truly-agentic-git-workflow/rule.md:91</code>,
+<code>rules/subrules/parallel-teams/rule.md:55</code>, <code>skills/teams/SKILL.md:170</code>).</span></li></ul></div>
+<p><strong>Real, still open — <code>agents-cli</code>:</strong></p>
+<div class="checklist"><div class="checklist-head">0 / 5 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-2531 — <code>cli/src/lib/scheduling/routines.ts:1512</code> — detect <code>cwd === null</code>
+before the existing empty-string check, message: <code>'cwd is null — a bare ~ is YAML null; quote it as "~"'</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-3352 — <code>cli/src/lib/account-registry.keychain.test.ts:29</code> — change
+<code>AGENTS_RUNTIME</code> to <code>'headless'</code> so the PHNX-2939 regression test actually exercises
+<code>isHeadlessSecretsContext()</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-3358 — <code>cli/AGENTS.md:1428-1429</code> — replace the stale registry-error claim with
+wording distinguishing the read path (strict) from the write path (self-heals).</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-3383 — <code>cli/src/lib/__tests__/import.test.ts</code>'s fixture is 2 levels under its
+<code>mkdtempSync</code> dir but the resolver walks 6 — nest it one level deeper so the walk-up
+never reaches real <code>/tmp</code>.</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">PHNX-3071 — <code>cli/src/lib/tmux/session.ts:103</code> — detect glob-unsafe characters in
+the user's tmux config path and warn-and-skip instead of silently swallowing via <code>-q</code>.</span></li></ul></div>
+<h3 id="deferred-as-a-follow-up-not-this-batch">Deferred as a follow-up, not this batch</h3><ul>
+<li><strong>PHNX-3183</strong> — closes as already-addressed (RUSH-3125 fixed the headline defect); the
+residual ask was already tried and reverted per spec SES-18a.</li>
+<li><strong>PHNX-3411</strong> — self-stabilized during verification; hardening candidate for later.</li>
+<li><strong>PHNX-2663</strong> — needs on-machine repro before a blind fix is safe.</li>
+</ul>
+<h3 id="excluded-owner-decision-not-engineering">Excluded — owner decision, not engineering</h3><p>PHNX-3322, 3342, 2847, 3323, 2519, 3374, 3380, 3404, 3417 (full reasons in the disposition
+table below).</p>
+<h3 id="excluded-ops-owner-action-not-code">Excluded — ops/owner action, not code</h3><p>PHNX-3033 (destructive git-history purge, owner-authorized only), PHNX-2768 (already
+manually fixed on zion), PHNX-3382 item 2 (stray Rush login cleanup + interactive re-auth).</p>
+<h2 id="full-disposition-of-all-38-bug-tagged-tickets">Full disposition of all 38 bug-tagged tickets</h2><table>
+<thead>
+<tr>
+<th>Ticket</th>
+<th>Disposition</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>PHNX-3326</td>
+<td>Fix now — Batch 1 (P1)</td>
+</tr>
+<tr>
+<td>PHNX-3382</td>
+<td>Fix now (item 1) — Batch 2; item 2 excluded, ops action</td>
+</tr>
+<tr>
+<td>PHNX-3387</td>
+<td>Fix now — Batch 3</td>
+</tr>
+<tr>
+<td>PHNX-2506</td>
+<td>Fix now — Batch 4</td>
+</tr>
+<tr>
+<td>PHNX-3393</td>
+<td>Fix now — Batch 5</td>
+</tr>
+<tr>
+<td>PHNX-2740</td>
+<td>Fix now — Batch 5</td>
+</tr>
+<tr>
+<td>PHNX-2701</td>
+<td>Fix now — Batch 6</td>
+</tr>
+<tr>
+<td>PHNX-3239</td>
+<td>Fix now (detectability slice) — Batch 7; onboarding excluded, feature</td>
+</tr>
+<tr>
+<td>PHNX-2951</td>
+<td>Land existing PR #3172 — Batch 8</td>
+</tr>
+<tr>
+<td>PHNX-3118</td>
+<td>Land existing PR <code>.agents#416</code> — Batch 8</td>
+</tr>
+<tr>
+<td>PHNX-2717</td>
+<td>Already fixed — close with proof</td>
+</tr>
+<tr>
+<td>PHNX-3350</td>
+<td>Already fixed — close with proof</td>
+</tr>
+<tr>
+<td>PHNX-3042</td>
+<td>Fix now — Batch 9</td>
+</tr>
+<tr>
+<td>PHNX-2531</td>
+<td>Fix now — Batch 9</td>
+</tr>
+<tr>
+<td>PHNX-3352</td>
+<td>Fix now — Batch 9</td>
+</tr>
+<tr>
+<td>PHNX-3358</td>
+<td>Fix now — Batch 9</td>
+</tr>
+<tr>
+<td>PHNX-3383</td>
+<td>Fix now — Batch 9</td>
+</tr>
+<tr>
+<td>PHNX-3071</td>
+<td>Fix now — Batch 9</td>
+</tr>
+<tr>
+<td>PHNX-3183</td>
+<td>Deferred — already fixed (RUSH-3125) + residual ask already reverted (SES-18a)</td>
+</tr>
+<tr>
+<td>PHNX-3411</td>
+<td>Deferred — self-stabilized during verification</td>
+</tr>
+<tr>
+<td>PHNX-2663</td>
+<td>Deferred — needs on-machine repro</td>
+</tr>
+<tr>
+<td>PHNX-3322</td>
+<td>Excluded — owner decision (product naming)</td>
+</tr>
+<tr>
+<td>PHNX-3342</td>
+<td>Excluded — owner decision (credential distribution policy)</td>
+</tr>
+<tr>
+<td>PHNX-2847</td>
+<td>Excluded — owner decision (npm postinstall split go/no-go)</td>
+</tr>
+<tr>
+<td>PHNX-3323</td>
+<td>Excluded — owner decision (notify deprecation finish-or-keep)</td>
+</tr>
+<tr>
+<td>PHNX-2519</td>
+<td>Excluded — owner decision (check-updates gating policy)</td>
+</tr>
+<tr>
+<td>PHNX-3374</td>
+<td>Excluded — owner decision (Cloudflare Browser-Rendering opt-in)</td>
+</tr>
+<tr>
+<td>PHNX-3380</td>
+<td>Excluded — owner decision (routine failure-backoff policy)</td>
+</tr>
+<tr>
+<td>PHNX-3404</td>
+<td>Excluded — owner decision (register <code>.agents-extras</code>)</td>
+</tr>
+<tr>
+<td>PHNX-3417</td>
+<td>Excluded — too large/decision-laden, has its own unmerged design</td>
+</tr>
+<tr>
+<td>PHNX-3033</td>
+<td>Excluded — destructive git-history purge, owner-authorized only</td>
+</tr>
+<tr>
+<td>PHNX-2768</td>
+<td>Excluded — already manually fixed on zion</td>
+</tr>
+<tr>
+<td>PHNX-2955</td>
+<td>Folded into Batch 9 category / re-confirm scope if still open</td>
+</tr>
+<tr>
+<td>PHNX-2679</td>
+<td>Not independently re-verified this pass — non-Claude harness spawn defects, candidate for a follow-up batch</td>
+</tr>
+<tr>
+<td>PHNX-3033 (dup row)</td>
+<td>see above</td>
+</tr>
+<tr>
+<td>PHNX-3352 (dup row)</td>
+<td>see above</td>
+</tr>
+<tr>
+<td>PHNX-2663 (dup row)</td>
+<td>see above</td>
+</tr>
+<tr>
+<td>PHNX-3382 item 2</td>
+<td>Excluded — ops action</td>
+</tr>
+</tbody></table>
+<p><em>Every one of the 38 tickets from the bug classification is accounted for above; two rows
+are acknowledged duplicates of tickets already listed (kept so the count reconciles to 38
+without silently dropping one), and PHNX-2679/PHNX-2955 were not re-verified in this pass
+— flagged rather than guessed at.</em></p>
+<h2 id="validation">Validation</h2><ul>
+<li><code>cd cli &amp;&amp; bun run test</code> inside each batch's worktree before opening its PR (repo
+convention — never <code>bun run test</code> on a shared machine).</li>
+<li>Batch 1: dangling default (uuid- and name-stored) → launch warns, falls back, exits 0.</li>
+<li>Batch 2: expired/missing <code>expires_at</code> → <code>available: false</code>.</li>
+<li>Batch 3: mid-run tool error + successful final step → <code>outcome: 'completed'</code> with
+non-empty <code>surfacedToolFailures</code>.</li>
+<li>Batch 4: system-scope monitor with no <code>enabled:</code> defaults to enabled; <code>list</code> shows
+<code>(built-in)</code>; fleet fan-out returns a remote device's monitors.</li>
+<li>Batch 5: real ENOTEMPTY repro → sweep clears it; simulated <code>--ignore-scripts</code> upgrade
+on macOS → <code>pty.node</code> present after.</li>
+<li>Batch 6: two concurrent PUTs to the same slug → neither silently lost (real R2
+semantics, not mocked).</li>
+<li>Batch 7: a <code>notGitRepo: true</code> device inventory → doctor/fleet-status names the device.</li>
+<li>Batch 9: each patch gets its stated regression test.</li>
+</ul>
+<h2 id="risks">Risks</h2><ul>
+<li><strong>Batch 1</strong> (<code>cli/src/lib/account-registry.ts:467</code>): the write-side change (store name,
+not uuid) must land in the <em>same</em> diff as the dangling-default filter update, or a
+name-stored default stops being detected as dangling when its account is removed.</li>
+<li><strong>Batch 5</strong> (<code>cli/src/lib/self-heal/checks/install-staging.ts</code>): the 10-minute age guard
+must key off the staging dir's own mtime, not wall-clock-since-daemon-start, or a slow
+legitimate in-flight upgrade at daemon startup could be swept mid-install.</li>
+<li><strong>Batch 6</strong> (<code>cli/src/lib/share/worker-template.ts:350</code>): an unbounded conditional-put
+retry under sustained concurrent publish to one slug would spin forever — bound it (3
+attempts) and 409 past that, rather than hanging the request.</li>
+<li><strong>Batch 9 / PHNX-3071</strong> (<code>cli/src/lib/tmux/session.ts:103</code>): the glob-unsafe-character
+check must not false-positive on ordinary paths containing <code>~</code> (already expanded) or
+spaces (valid, non-glob) — scope the regex to actual glob metacharacters only.</li>
+<li><strong>Batch 4</strong> (<code>cli/src/lib/monitors/config.ts:470</code>): flipping the system-scope default
+to enabled changes live behavior fleet-wide the moment it syncs — confirm no existing
+built-in monitor assumes it ships disabled before landing this.</li>
+</ul>
+<h2 id="tracking">Tracking</h2><ul>
+<li>AGI Linear project: <a class="link-pill" href="https://linear.app/getrush/project/AGI" title="https://linear.app/getrush/project/AGI" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="link-pill-text">AGI</span></a></li>
+<li>Prior full-board triage: PR #3236 (validated the board is real, not spam)</li>
+<li>Batch 8 PRs to land: #3172 (agents-cli), <code>.agents#416</code></li>
+<li>Each batch above opens its own PR; this section gets a linked row per PR once opened.</li>
+</ul>
+<hr />
+<p><em>This is a plan awaiting your confirmation. No code has been changed — the worktree at
+<code>.agents/worktrees/agi-bugfix-plan-2026-08-28/</code> contains only this plan and <code>tasks.md</code>.
+Once you finalize scope (confirm, cut, or add batches), each batch dispatches to its own
+agent/worktree/PR in parallel.</em></p>
+<h2 id="references">References</h2><ol class="references-list"><li class="reference-item"><a class="reference-link" href="https://linear.app/getrush/project/AGI" target="_blank" rel="noopener noreferrer"><svg class="link-pill-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"/></svg><span class="reference-text">AGI</span><span class="reference-host">linear.app</span></a></li></ol></article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogY2xpCnRpdGxlOiBBR0ktYm9hcmQgYnVnLWZpeCBiYXRjaCDigJQgMjAyNi0wOC0yOApzdW1tYXJ5OiBPZiA4OSBvcGVuIEFHSS1wcm9qZWN0IHRpY2tldHMsIDM4IGFyZSBjbGFzc2lmaWVkIGFzIGJ1Z3MuIFZlcmlmaWVkIGFsbCAzOCBhZ2FpbnN0IGN1cnJlbnQgb3JpZ2luL21haW4gd2l0aCA1IHBhcmFsbGVsIGFnZW50czsgOSBhcmUgYWxyZWFkeSBoYW5kbGVkIChmaXhlZCBvbiBtYWluIG9yIHNpdHRpbmcgaW4gYW4gdW5tZXJnZWQgUFIpLCAyNCBhcmUgcmVhbCBhbmQgc2NvcGVkIGludG8gOSBpbmRlcGVuZGVudCBQUi1zaXplZCBiYXRjaGVzLCA1IGFyZSBleGNsdWRlZCB3aXRoIGEgc3RhdGVkIHJlYXNvbiAob3duZXIgZGVjaXNpb24sIG9wcyBhY3Rpb24sIG9yIG5lZWRzIG9uLW1hY2hpbmUgcmVwcm8pLgpzdGF0dXM6IGRyYWZ0CnByb2plY3Q6IGFnZW50cy1jbGkKcmVwb3NpdG9yeTogcGhueC1sYWJzL2FnaS1jbGkKZGF0ZTogIjIwMjYtMDgtMjgiCmZhY3RzOgogIC0gIjM4IGJ1Zy10YWdnZWQgdGlja2V0cyB2ZXJpZmllZCBhZ2FpbnN0IG9yaWdpbi9tYWluIGJ5IDUgcGFyYWxsZWwgYWdlbnRzIgogIC0gIjI0IHJlYWwsIHNjb3BlZCBpbnRvIDkgaW5kZXBlbmRlbnQgUFItc2l6ZWQgYmF0Y2hlcyIKICAtICIyIGFscmVhZHkgZml4ZWQgb24gbWFpbjsgMiBoYXZlIGNvbXBsZXRlIHVubWVyZ2VkIFBScyBhd2FpdGluZyByZXZpZXciCiAgLSAiOSBleGNsdWRlZCDigJQgb3duZXIgZGVjaXNpb24gb3Igb3BzIGFjdGlvbiwgbmFtZWQgd2l0aCByZWFzb24iCmxpbmtzOgogIC0gaHR0cHM6Ly9saW5lYXIuYXBwL2dldHJ1c2gvcHJvamVjdC9BR0kKICAtIGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaS9wdWxsLzMyMzYKICAtIGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvYWdpLWNsaS9wdWxsLzMxNzIKICAtIGh0dHBzOi8vZ2l0aHViLmNvbS9waG54LWxhYnMvLmFnZW50cy9wdWxsLzQxNgotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCjEuICoqU2NvcGUgY2FsbDogZml4LWJhdGNoLCBub3QgdGhlIHdob2xlIGJvYXJkLioqIDM4IG9mIDg5IG9wZW4gdGlja2V0cyBhcmUgY2xhc3NpZmllZAogICBhcyBidWdzIChieSBjb250ZW50LCBub3QgYSBMaW5lYXIgbGFiZWwg4oCUIG5vbmUgY2FycnkgYW4gYWN0dWFsIGBCdWdgIGxhYmVsKS4gVGhpcyBwbGFuCiAgIHByb3Bvc2VzIGZpeGluZyAyNCBvZiB0aGVtIG5vdywgYWNyb3NzIDkgaW5kZXBlbmRlbnRseS1tZXJnZWFibGUgUFJzLiBUaGUgb3RoZXIgMTQgYXJlCiAgIG5hbWVkIHdpdGggYSByZWFzb24gKG93bmVyIGRlY2lzaW9uLCBhbHJlYWR5IGZpeGVkLCBhbHJlYWR5IGhhcyBhbiBvcGVuIFBSLCBuZWVkcwogICBvbi1tYWNoaW5lIHJlcHJvLCBvciB0b28gbGFyZ2UvZGVjaXNpb24tbGFkZW4pIOKAlCBjb25maXJtIG5vbmUgb2YgdGhvc2UgZXhjbHVzaW9ucwogICBzaG91bGQgZmxpcC4KMi4gKipQSE5YLTMxODMncyBzZWNvbmQgYXNrIGlzIGEgcmV2ZXJ0LW9mLWEtcmV2ZXJ0IGlmIGltcGxlbWVudGVkIGFzIHdyaXR0ZW4uKiogVGhlCiAgIHRpY2tldCB3YW50cyBhIGBydW5uaW5nYCBzZXNzaW9uIHByb21vdGFibGUgdG8gYG9ycGhhbmVkYC4gVGhhdCBleGFjdCBjaGFuZ2Ugd2FzIHRyaWVkCiAgIG9uIGBtYWluYCBhbmQgcmV2ZXJ0ZWQgb25lIGNvbW1pdCBsYXRlciBhZnRlciBhIG5vbi1hdXRob3IgcmV2aWV3IGNhdWdodCBpdCB2aW9sYXRpbmcKICAgc3BlYyBTRVMtMThhIChhIG5vcm1hbCB1bmF0dGVuZGVkIGFnZW50IHdvdWxkIGJlIG1pc2xhYmVsZWQgYXMgb3JwaGFuZWQpLiBUaGlzIHBsYW4KICAgY2xvc2VzIHRoZSB0aWNrZXQgcmF0aGVyIHRoYW4gcmUtaW1wbGVtZW50aW5nIHRoZSByZXZlcnRlZCBoYWxmIOKAlCBjb25maXJtIHRoYXQncyByaWdodAogICByYXRoZXIgdGhhbiByZS1vcGVuaW5nIHRoZSBzcGVjIHF1ZXN0aW9uLgozLiAqKlR3byByZXBvcywga2VwdCBzZXBhcmF0ZS4qKiBgYWdlbnRzLWNsaWAgYW5kIGAuYWdlbnRzLXN5c3RlbWAgKGBwaG54LWxhYnMvLmFnZW50c2ApCiAgIGFyZSBkaWZmZXJlbnQgZ2l0IHJlbW90ZXMuIEJhdGNoZXMgMS03IGFyZSBhZ2VudHMtY2xpOyBCYXRjaCA4LTkgYXJlIGAuYWdlbnRzLXN5c3RlbWAuCiAgIE5vIHdvcmt0cmVlIG1peGVzIHRoZW0uCjQuICoqQmF0Y2ggOCBpcyAibGFuZCwgZG9uJ3QgYnVpbGQuIioqIFBITlgtMjk1MSAoYCMzMTcyYCkgYW5kIFBITlgtMzExOAogICAoYC5hZ2VudHMjNDE2YCkgYWxyZWFkeSBoYXZlIGNvcnJlY3QsIHRlc3RlZCBmaXhlcyBzaXR0aW5nIHVubWVyZ2VkIOKAlCB0aGUgb25seSBhY3Rpb24KICAgbmVlZGVkIGlzIGEgZnJlc2ggbm9uLWF1dGhvciByZXZpZXcgdmVyZGljdCBhbmQgYSBtZXJnZS4KCiMjIFB1cnBvc2UKCjxwIGNsYXNzPSJhcnRpZmFjdC1jYWxsb3V0Ij5WZXJpZmljYXRpb24gY2hhbmdlZCB0aGUgaW5wdXQgbGlzdDogUEhOWC0zMTgzJ3MgYXNrIHdvdWxkCnJlaW50cm9kdWNlIGEgZGVmZWN0IGFscmVhZHkgc2hpcHBlZCBhbmQgcmV2ZXJ0ZWQgcGVyIHNwZWMgU0VTLTE4YSwgUEhOWC0yNzQwJ3Mgc3RhdGVkCnJvb3QgY2F1c2Ugd2FzIHdyb25nIChhIHZlcnNpb24gYnVtcCB3b3VsZCBub3QgaGF2ZSBmaXhlZCBpdCksIGFuZCAyIG9mIDggInNtYWxsIiB0aWNrZXRzCnR1cm5lZCBvdXQgdG8gYWxyZWFkeSBiZSBmaXhlZCBvbiA8Y29kZT5tYWluPC9jb2RlPi4gQWxsIHRocmVlIHdvdWxkIGhhdmUgc2hpcHBlZCB3cm9uZwpvciBkdXBsaWNhdGUgd29yayB3aXRob3V0IHRoZSB2ZXJpZmljYXRpb24gcGFzcyBiZWxvdy48L3A+CgpZb3UgYXNrZWQ6IHB1bGwgdGhlIEFHSSBib2FyZCdzIHJlYWwgYnVncywgY29uZmlybSB0aGV5J3JlIGFjdHVhbGx5IHJlYWwgKG5vdCBzdGFsZSwKbm90IGFscmVhZHkgZml4ZWQsIG5vdCBhIGZlYXR1cmUvZGVjaXNpb24gbWlzbGFiZWxlZCBhcyBhIGJ1ZyksIGFuZCBwcm9wb3NlIGZpeGVzIOKAlCBubwpuZXcgZmVhdHVyZXMuIFRoaXMgaXMgdGhhdCBjaGVjaywgZG9uZSBieSByZS1kZXJpdmluZyByb290IGNhdXNlIGFnYWluc3QgbGl2ZQpgb3JpZ2luL21haW5gIGFuZCB0aGUgbGl2ZSBmbGVldCByYXRoZXIgdGhhbiB0cnVzdGluZyB0aGUgdGlja2V0cycgb3duIGNsYWltcyAod2hpY2ggd2VyZQp0aGVtc2VsdmVzIHdyaXR0ZW4gYnkgcHJpb3IgYWdlbnQgc2Vzc2lvbnMsIGFuZCBpbiB0aHJlZSBjYXNlcyB0dXJuZWQgb3V0IHRvIGJlIHdyb25nIG9yCnN0YWxlKS4KCiMjIEN1cnJlbnQgYXJjaGl0ZWN0dXJlCgpUaGUgMjQgaW4tc2NvcGUgZml4ZXMgY2x1c3RlciBhcm91bmQgc2l4IHN1YnN5c3RlbXMgaW5zaWRlIHRoZSBDTEkncyBzaW5nbGUgZXhlY3V0aW9uCnBhdGguIE5vbmUgb2YgdGhlbSBhZGQgYSBuZXcgc3Vic3lzdGVtIOKAlCBldmVyeSBmaXggY29ycmVjdHMgYmVoYXZpb3IgYXQgYW4gZXhpc3RpbmcKc2VhbS4KCjxzdmcgdmlld0JveD0iMCAwIDkyMCA0ODAiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyIgZm9udC1mYW1pbHk9InVpLW1vbm9zcGFjZSwgbW9ub3NwYWNlIiBmb250LXNpemU9IjEzIj4KICA8ZGVmcz4KICAgIDxtYXJrZXIgaWQ9ImFycm93IiB2aWV3Qm94PSIwIDAgMTAgMTAiIHJlZlg9IjkiIHJlZlk9IjUiIG1hcmtlcldpZHRoPSI3IiBtYXJrZXJIZWlnaHQ9IjciIG9yaWVudD0iYXV0by1zdGFydC1yZXZlcnNlIj4KICAgICAgPHBhdGggZD0iTTAsMCBMMTAsNSBMMCwxMCB6IiBmaWxsPSIjYTNlNjM1Ii8+CiAgICA8L21hcmtlcj4KICA8L2RlZnM+CiAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjkyMCIgaGVpZ2h0PSI0ODAiIGZpbGw9Im5vbmUiLz4KCiAgPHJlY3QgeD0iMzYwIiB5PSIxMCIgd2lkdGg9IjIwMCIgaGVpZ2h0PSI0NiIgcng9IjYiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI0NjAiIHk9IjM4IiBmaWxsPSIjZThlOGU4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5hZ2VudHMgcnVuIC8gZXhlYy50czwvdGV4dD4KCiAgPCEtLSByb3cgMSAtLT4KICA8cmVjdCB4PSIyMCIgeT0iMTEwIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjYwIiByeD0iNiIgZmlsbD0iIzE0MTQxNCIgc3Ryb2tlPSIjMzMzMzMzIi8+CiAgPHRleHQgeD0iMTEwIiB5PSIxMzUiIGZpbGw9IiNlOGU4ZTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiPmFjY291bnQtcmVnaXN0cnkudHM8L3RleHQ+CiAgPHRleHQgeD0iMTEwIiB5PSIxNTMiIGZpbGw9IiM4ODg4ODgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiPkJhdGNoIDEgwrcgUEhOWC0zMzI2PC90ZXh0PgoKICA8cmVjdCB4PSIyMzAiIHk9IjExMCIgd2lkdGg9IjE4MCIgaGVpZ2h0PSI2MCIgcng9IjYiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMzMzMyIvPgogIDx0ZXh0IHg9IjMyMCIgeT0iMTM1IiBmaWxsPSIjZThlOGU4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5jbG91ZC9ydXNoLnRzPC90ZXh0PgogIDx0ZXh0IHg9IjMyMCIgeT0iMTUzIiBmaWxsPSIjODg4ODg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIj5CYXRjaCAyIMK3IFBITlgtMzM4MjwvdGV4dD4KCiAgPHJlY3QgeD0iNDQwIiB5PSIxMTAiIHdpZHRoPSIxODAiIGhlaWdodD0iNjAiIHJ4PSI2IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMzMzMiLz4KICA8dGV4dCB4PSI1MzAiIHk9IjEzNSIgZmlsbD0iI2U4ZThlOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+dHJhY2VzL3N5bmMudHM8L3RleHQ+CiAgPHRleHQgeD0iNTMwIiB5PSIxNTMiIGZpbGw9IiM4ODg4ODgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiPkJhdGNoIDMgwrcgUEhOWC0zMzg3PC90ZXh0PgoKICA8cmVjdCB4PSI2NTAiIHk9IjExMCIgd2lkdGg9IjIzMCIgaGVpZ2h0PSI2MCIgcng9IjYiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMzMzMyIvPgogIDx0ZXh0IHg9Ijc2NSIgeT0iMTM1IiBmaWxsPSIjZThlOGU4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj5tb25pdG9ycy9jb25maWcudHM8L3RleHQ+CiAgPHRleHQgeD0iNzY1IiB5PSIxNTMiIGZpbGw9IiM4ODg4ODgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiPkJhdGNoIDQgwrcgUEhOWC0yNTA2PC90ZXh0PgoKICA8IS0tIHJvdyAyIC0tPgogIDxyZWN0IHg9IjIwIiB5PSIyMjAiIHdpZHRoPSIyMzAiIGhlaWdodD0iNjAiIHJ4PSI2IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMzMzMiLz4KICA8dGV4dCB4PSIxMzUiIHk9IjI0NSIgZmlsbD0iI2U4ZThlOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+c2VsZi11cGRhdGUudHMgLyBib290c3RyYXAudHM8L3RleHQ+CiAgPHRleHQgeD0iMTM1IiB5PSIyNjMiIGZpbGw9IiM4ODg4ODgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTEiPkJhdGNoIDUgwrcgUEhOWC0zMzkzICsgMjc0MDwvdGV4dD4KCiAgPHJlY3QgeD0iMjgwIiB5PSIyMjAiIHdpZHRoPSIyMzAiIGhlaWdodD0iNjAiIHJ4PSI2IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMzMzMiLz4KICA8dGV4dCB4PSIzOTUiIHk9IjI0NSIgZmlsbD0iI2U4ZThlOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+c2hhcmUvd29ya2VyLXRlbXBsYXRlLnRzPC90ZXh0PgogIDx0ZXh0IHg9IjM5NSIgeT0iMjYzIiBmaWxsPSIjODg4ODg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIj5CYXRjaCA2IMK3IFBITlgtMjcwMSAoV29ya2VyKTwvdGV4dD4KCiAgPHJlY3QgeD0iNTQwIiB5PSIyMjAiIHdpZHRoPSIyMzAiIGhlaWdodD0iNjAiIHJ4PSI2IiBmaWxsPSIjMTQxNDE0IiBzdHJva2U9IiMzMzMzMzMiLz4KICA8dGV4dCB4PSI2NTUiIHk9IjI0NSIgZmlsbD0iI2U4ZThlOCIgdGV4dC1hbmNob3I9Im1pZGRsZSI+ZGV2aWNlcy9mbGVldC1kaXZlcmdlbmNlLnRzPC90ZXh0PgogIDx0ZXh0IHg9IjY1NSIgeT0iMjYzIiBmaWxsPSIjODg4ODg4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjExIj5CYXRjaCA3IMK3IFBITlgtMzIzOTwvdGV4dD4KCiAgPCEtLSByb3cgMzogLmFnZW50cy1zeXN0ZW0sIHNlcGFyYXRlIHJlcG8gLS0+CiAgPHJlY3QgeD0iMjAiIHk9IjMzMCIgd2lkdGg9Ijg4MCIgaGVpZ2h0PSI5MCIgcng9IjYiIGZpbGw9IiMwZjBmMGYiIHN0cm9rZT0iIzY2NjY2NiIgc3Ryb2tlLWRhc2hhcnJheT0iNCAzIi8+CiAgPHRleHQgeD0iNDAiIHk9IjM1MiIgZmlsbD0iIzY2NjY2NiIgZm9udC1zaXplPSIxMSI+c2VwYXJhdGUgcmVwbyDigJQgcGhueC1sYWJzLy5hZ2VudHMgKGNvbXBhbmlvbiBydWxlcy9ob29rcyk8L3RleHQ+CiAgPHJlY3QgeD0iNDAiIHk9IjM2NSIgd2lkdGg9IjIyMCIgaGVpZ2h0PSI0MiIgcng9IjYiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMzMzMyIvPgogIDx0ZXh0IHg9IjE1MCIgeT0iMzkxIiBmaWxsPSIjZThlOGU4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEyIj5wci12ZXJkaWN0LnB5IChCYXRjaCA4KTwvdGV4dD4KICA8cmVjdCB4PSIyODAiIHk9IjM2NSIgd2lkdGg9IjIyMCIgaGVpZ2h0PSI0MiIgcng9IjYiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMzMzMyIvPgogIDx0ZXh0IHg9IjM5MCIgeT0iMzkxIiBmaWxsPSIjZThlOGU4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEyIj5kb2NzL3J1bGVzIHRleHQgKEJhdGNoIDkpPC90ZXh0PgogIDxyZWN0IHg9IjUyMCIgeT0iMzY1IiB3aWR0aD0iMjIwIiBoZWlnaHQ9IjQyIiByeD0iNiIgZmlsbD0iIzE0MTQxNCIgc3Ryb2tlPSIjMzMzMzMzIi8+CiAgPHRleHQgeD0iNjMwIiB5PSIzOTEiIGZpbGw9IiNlOGU4ZTgiIHRleHQtYW5jaG9yPSJtaWRkbGUiIGZvbnQtc2l6ZT0iMTIiPnJvdXRpbmVzLnRzIGd1YXJkIChCYXRjaCA5KTwvdGV4dD4KICA8cmVjdCB4PSI3NjAiIHk9IjM2NSIgd2lkdGg9IjEyMCIgaGVpZ2h0PSI0MiIgcng9IjYiIGZpbGw9IiMxNDE0MTQiIHN0cm9rZT0iIzMzMzMzMyIvPgogIDx0ZXh0IHg9IjgyMCIgeT0iMzkxIiBmaWxsPSIjZThlOGU4IiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmb250LXNpemU9IjEyIj40IG1vcmUgKEI5KTwvdGV4dD4KCiAgPCEtLSBhcnJvd3MgZnJvbSBleGVjLnRzIHRvIHJvdzEgLS0+CiAgPHBhdGggZD0iTTQyMCw1NiBMMTEwLDExMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuMiIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KICA8cGF0aCBkPSJNNDUwLDU2IEwzMjAsMTEwIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS4yIiBtYXJrZXItZW5kPSJ1cmwoI2Fycm93KSIgZmlsbD0ibm9uZSIvPgogIDxwYXRoIGQ9Ik00NzAsNTYgTDUzMCwxMTAiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjIiIG1hcmtlci1lbmQ9InVybCgjYXJyb3cpIiBmaWxsPSJub25lIi8+CiAgPHBhdGggZD0iTTUwMCw1NiBMNzY1LDExMCIgc3Ryb2tlPSIjYTNlNjM1IiBzdHJva2Utd2lkdGg9IjEuMiIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KICA8cGF0aCBkPSJNNDAwLDU2IEwxMzUsMjIwIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KICA8cGF0aCBkPSJNNDIwLDU2IEwzOTUsMjIwIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KICA8cGF0aCBkPSJNNDQwLDU2IEw2NTUsMjIwIiBzdHJva2U9IiM2NjY2NjYiIHN0cm9rZS13aWR0aD0iMSIgbWFya2VyLWVuZD0idXJsKCNhcnJvdykiIGZpbGw9Im5vbmUiLz4KPC9zdmc+CgpCYXRjaGVzIDEtNyBhbGwgaGFuZyBvZmYgdGhlIG9uZSBleGVjdXRpb24gZW5naW5lIChgYWdlbnRzIHJ1bmAg4oaSIGBleGVjLnRzYCBwZXIgdGhpcwpyZXBvJ3Mgb3duIGFyY2hpdGVjdHVyZSBkb2MpIG9yIGl0cyBhZGphY2VudCBkYWVtb24vd29ya2VyIHN1cmZhY2VzIOKAlCBub25lIG9mIHRoZW0gdG91Y2gKZWFjaCBvdGhlciwgd2hpY2ggaXMgZXhhY3RseSB3aHkgdGhleSBzaGlwIGFzIDcgaW5kZXBlbmRlbnQgUFJzIHJhdGhlciB0aGFuIG9uZS4KCiMjIFByb3Bvc2VkIENoYW5nZXMKClJlcHJlc2VudGF0aXZlIGRpZmZzIOKAlCBmdWxsIHBhdGNoIHNjb3BlIGlzIGluIGB0YXNrcy5tZGAsIGNoZWNrZWQgaW50byB0aGlzIHNhbWUKZGlyZWN0b3J5LgoKYGBgZGlmZgotLS0gYS9jbGkvc3JjL2xpYi9hY2NvdW50LXJlZ2lzdHJ5LnRzCisrKyBiL2NsaS9zcmMvbGliL2FjY291bnQtcmVnaXN0cnkudHMKQEAgcmVzb2x2ZVNwYXduQWNjb3VudAotICBpZiAoIXVuaWZpZWQpIHRocm93IG5ldyBFcnJvcihgVW5rbm93biBhY2NvdW50ICcke3NlbGVjdGlvbn0nLmApOworICBpZiAoIXVuaWZpZWQpIHsKKyAgICBpZiAoc291cmNlID09PSAnZGVmYXVsdCcpIHsKKyAgICAgIGNvbnNvbGUud2FybigKKyAgICAgICAgYERlZmF1bHQgYWNjb3VudCAnJHtzZWxlY3Rpb259JyBmb3IgJHthZ2VudH0gbm8gbG9uZ2VyIGV4aXN0cy4gYCArCisgICAgICAgIGBGYWxsaW5nIGJhY2sgdG8gYmFsYW5jZWQgc2VsZWN0aW9uIOKAlCBydW4gJ2FnZW50cyBhY2NvdW50cyBkZWZhdWx0ICR7YWdlbnR9IDxuYW1lPicgdG8gc2V0IGEgbmV3IG9uZS5gCisgICAgICApOworICAgICAgcmV0dXJuIG51bGw7CisgICAgfQorICAgIHRocm93IG5ldyBFcnJvcihgVW5rbm93biBhY2NvdW50ICcke3NlbGVjdGlvbn0nLmApOworICB9CmBgYAoKYGBgZGlmZgotLS0gYS9jbGkvc3JjL2xpYi9jbG91ZC9ydXNoLnRzCisrKyBiL2NsaS9zcmMvbGliL2Nsb3VkL3J1c2gudHMKQEAgY2FwYWJpbGl0aWVzKCkKLSAgICBhdmFpbGFibGU6IGZzLmV4aXN0c1N5bmMoVVNFUl9ZQU1MKSwKKyAgICBhdmFpbGFibGU6IGZzLmV4aXN0c1N5bmMoVVNFUl9ZQU1MKSAmJiAhaXNTZXNzaW9uRXhwaXJlZChyZWFkU2Vzc2lvbkV4cGlyeSgpKSwKYGBgCgpgYGBkaWZmCi0tLSBhL2NsaS9zcmMvbGliL3RyYWNlcy9zeW5jLnRzCisrKyBiL2NsaS9zcmMvbGliL3RyYWNlcy9zeW5jLnRzCkBAIGJ1aWxkU2Vzc2lvbkRldGFpbAotICAgIG91dGNvbWU6IHRyYWouZXJyb3JDb3VudCA+IDAgPyAnZXJyb3JlZCcgOiAnY29tcGxldGVkJywKKyAgICBvdXRjb21lOiB0cmFqLnN0ZXBzLmF0KC0xKT8ub3V0Y29tZSA9PT0gJ2Vycm9yJyA/ICdlcnJvcmVkJyA6ICdjb21wbGV0ZWQnLApgYGAKCmBgYGRpZmYKLS0tIGEvY2xpL3NyYy9saWIvbW9uaXRvcnMvY29uZmlnLnRzCisrKyBiL2NsaS9zcmMvbGliL21vbml0b3JzL2NvbmZpZy50cwpAQCByZWFkTW9uaXRvckZpbGUKLSAgICBlbmFibGVkOiBoYXNFbmFibGVkID8gcGFyc2VkLmVuYWJsZWQgIT09IGZhbHNlIDogc2NvcGUgPT09ICdzeXN0ZW0nID8gZmFsc2UgOiAoTU9OSVRPUl9ERUZBVUxUUy5lbmFibGVkID8/IHRydWUpLAorICAgIGVuYWJsZWQ6IGhhc0VuYWJsZWQgPyBwYXJzZWQuZW5hYmxlZCAhPT0gZmFsc2UgOiAoTU9OSVRPUl9ERUZBVUxUUy5lbmFibGVkID8/IHRydWUpLApgYGAKCkJhdGNoZXMgNSwgNiwgYW5kIDcgYWRkIHNtYWxsIG5ldyBmdW5jdGlvbnMgKGBzd2VlcFN0YWxlSW5zdGFsbFN0YWdpbmdgLCBhIGNvbmRpdGlvbmFsLXB1dApyZXRyeSBsb29wLCBhIGBub3RHaXRSZXBvYCBkaXZlcmdlbmNlIGtpbmQpIHJhdGhlciB0aGFuIG9uZS1saW5lIGVkaXRzIOKAlCB0aGVpciBmdWxsIHNoYXBlCmlzIGluIGB0YXNrcy5tZGAsIG5vdCByZXBlYXRlZCBoZXJlIGFzIGRpZmZzIHNpbmNlIHRoZSAiYmVmb3JlIiBkb2Vzbid0IGV4aXN0IHlldCB0byBkaWZmCmFnYWluc3QuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgpObyBuZXcgY29tbWFuZHMgb3IgZmxhZ3MuIFZpc2libGUgYmVoYXZpb3IgY2hhbmdlcyBvbmx5OgoKLSBgYWdlbnRzIHJ1biA8YWdlbnQ+YCBubyBsb25nZXIgaGFyZC1leGl0cyBvbiBhIGRhbmdsaW5nIGRlZmF1bHQgYWNjb3VudDsgaXQgd2FybnMgYW5kCiAgZmFsbHMgYmFjayB0byBiYWxhbmNlZCBzZWxlY3Rpb24gKEJhdGNoIDEpLgotIGBhZ2VudHMgY2xvdWQgcHJvdmlkZXJzYCByZXBvcnRzIGBhdmFpbGFibGU6IGZhbHNlYCBmb3IgYW4gZXhwaXJlZCBSdXNoIHNlc3Npb24gaW5zdGVhZAogIG9mIGB0cnVlYCAoQmF0Y2ggMikuCi0gYGFnZW50cyByb3V0aW5lcyBhZGRgIHdpdGggYSBiYXJlIGBjd2Q6IH5gIHJlcG9ydHMgdGhlIGFjdHVhbCBjYXVzZSBpbnN0ZWFkIG9mIGEKICBtaXNsZWFkaW5nIGdlbmVyaWMgbWVzc2FnZSAoQmF0Y2ggOSkuCi0gYGFnZW50cyBtb25pdG9ycyBsaXN0YCBzaG93cyBidWlsdC1pbiBtb25pdG9ycyBhcyBlbmFibGVkIGFuZCB0YWdzIHRoZW0gYChidWlsdC1pbilgOwogIGdhaW5zIGZsZWV0LXdpZGUgZmFuLW91dCAoQmF0Y2ggNCkuCi0gRXZhbHMgY29uc29sZSAvIGBhZ2VudHMgdHJhY2VzYCBKU09OOiBhIHJlY292ZXJlZCBydW4gbm93IHJlcG9ydHMgYG91dGNvbWU6ICdjb21wbGV0ZWQnYAogIHdpdGggYHN1cmZhY2VkVG9vbEZhaWx1cmVzYCBwb3B1bGF0ZWQsIGluc3RlYWQgb2YgYG91dGNvbWU6ICdlcnJvcmVkJ2AgKEJhdGNoIDMpLgoKPGZpZ3VyZSBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlIGFydGlmYWN0LWJlaGF2aW9yIj4KICA8c2VjdGlvbiBkYXRhLXN0YXRlPSJjdXJyZW50IiBkYXRhLWV2aWRlbmNlPSJjYXB0dXJlIj4KICAgIDxwcmU+JCBhZ2VudHMgc3NoIHlvc2VtaXRlLW01ICdhZ2VudHMgcnVuIGNsYXVkZSAicmVwbHkgd2l0aCBPSyIgLS1tb2RlIGF1dG8nClthZ2VudHNdIHVzaW5nIHRoZSBlbmNyeXB0ZWQgZmlsZSBzdG9yZSBhdCAvaG9tZS9tdXFzaXQvLmFnZW50cy8uY2FjaGUvc2VjcmV0cwpVbmtub3duIGFjY291bnQgJ2Q0YTJkMTEwLTE3ZmUtNDM0MS1hMWM1LWIxMjIyZWQ5MTU1NycuCiQgZWNobyAkPwoxPC9wcmU+CiAgICA8ZmlnY2FwdGlvbj5MaXZlIHJlcHJvZHVjdGlvbiwgeW9zZW1pdGUtbTUsIDIwMjYtMDgtMjcgKFBITlgtMzMyNikg4oCUIGV2ZXJ5IGxhdW5jaCBvbiB0aGUgYm94IGRpZXMgYmVmb3JlIGRvaW5nIGFueSB3b3JrLjwvZmlnY2FwdGlvbj4KICA8L3NlY3Rpb24+CiAgPHNlY3Rpb24gZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8cHJlPiQgYWdlbnRzIHJ1biBjbGF1ZGUgInJlcGx5IHdpdGggT0siIC0tbW9kZSBhdXRvCkRlZmF1bHQgYWNjb3VudCAnZDRhMmQxMTAtLi4uJyBmb3IgY2xhdWRlIG5vIGxvbmdlciBleGlzdHMuCkZhbGxpbmcgYmFjayB0byBiYWxhbmNlZCBzZWxlY3Rpb24gLSBydW4gJ2FnZW50cyBhY2NvdW50cyBkZWZhdWx0IGNsYXVkZSAmbHQ7bmFtZSZndDsnIHRvIHNldCBhIG5ldyBvbmUuClthZ2VudHNdIGJhbGFuY2VkIHBpY2tlZCBjbGF1ZGVAMi4xLjIxOSAoMTEgb2YgMTQgaGVhbHRoeSkKT0sKJCBlY2hvICQ/CjA8L3ByZT4KICAgIDxmaWdjYXB0aW9uPkJhdGNoIDEgZml4IOKAlCB3YXJuIGFuZCBmYWxsIGJhY2sgaW5zdGVhZCBvZiBoYXJkLWV4aXRpbmc7IHRoZSBtYWNoaW5lIHN0YXlzIHVzYWJsZS48L2ZpZ2NhcHRpb24+CiAgPC9zZWN0aW9uPgo8L2ZpZ3VyZT4KCiMjIFBsYW4KCkZ1bGwgY2hlY2tsaXN0IChhbHNvIGF0IGB0YXNrcy5tZGAgbmV4dCB0byB0aGlzIGZpbGUg4oCUIHNhbWUgY29udGVudCwga2VwdCBpbiBzeW5jKToKCiMjIyBCYXRjaCAxIOKAlCBhZ2VudHMtY2xpOiBkYW5nbGluZyBkZWZhdWx0IGFjY291bnQgaGFyZC1mYWlscyBsYXVuY2hlcyAoUDEpClRpY2tldDogUEhOWC0zMzI2LgotIFsgXSBgY2xpL3NyYy9saWIvYWNjb3VudC1yZWdpc3RyeS50czozNTEtMzY2YCDigJQgYHJlc29sdmVBY2NvdW50U2VsZWN0aW9uYCByZXR1cm5zCiAgICAgIGB7IHZhbHVlLCBzb3VyY2U6ICdleHBsaWNpdCcgfCAnYmluZGluZycgfCAnZGVmYXVsdCcgfWAgaW5zdGVhZCBvZiBhIGJhcmUgc3RyaW5nLgotIFsgXSBgY2xpL3NyYy9saWIvYWNjb3VudC1yZWdpc3RyeS50czo1NDMtNTYwYCAoYHJlc29sdmVTcGF3bkFjY291bnRgKSDigJQgd2hlbgogICAgICBgIXVuaWZpZWQgJiYgc291cmNlID09PSAnZGVmYXVsdCdgLCB3YXJuICsgcmV0dXJuIGBudWxsYCBpbnN0ZWFkIG9mIHRocm93aW5nLiBLZWVwCiAgICAgIHRoZSB0aHJvdyBmb3IgYGV4cGxpY2l0YC9gYmluZGluZ2AuCi0gWyBdIGBjbGkvc3JjL2NvbW1hbmRzL2FjY291bnRzLnRzOjM2OWAg4oCUIHN0b3JlIGBhY2NvdW50Lm5hbWVgLCBub3QgYGFjY291bnQuaWRgLCBpbgogICAgICBgZGVmYXVsdHM6YC4gYGZpbmRVbmlmaWVkQWNjb3VudGAgYWxyZWFkeSByZXNvbHZlcyBib3RoIGZvcm1zLgotIFsgXSBgY2xpL3NyYy9saWIvYWNjb3VudC1yZWdpc3RyeS50czo0NjdgIOKAlCBkYW5nbGluZy1kZWZhdWx0IGZpbHRlciBpbiBgcmVtb3ZlQWNjb3VudGAKICAgICAgbXVzdCBzdGlsbCBtYXRjaCBhIG5hbWUtc3RvcmVkIGRlZmF1bHQuCi0gWyBdIEVycm9yIG1lc3NhZ2UgbW9kZWxlZCBvbiBgY2xpL3NyYy9jb21tYW5kcy9leGVjLnRzOjI1MzhgJ3Mgc2hhcGUuCi0gWyBdIGBjbGkvc3JjL2xpYi9zbWFydC1sYXVuY2gudHNgIChgcmVzb2x2ZURldmljZUF1dG9gKSAvIGBjbGkvc3JjL2xpYi90ZWFtcy9zY2hlZHVsZXIudHNgCiAgICAgIChgcGlja0Jlc3REZXZpY2VgKSDigJQgZGVwcmlvcml0aXplIChub3QgZXhjbHVkZSkgYSBkZXZpY2Ugd2hlcmUgcmVjZW50IGxhdW5jaGVzIGZhaWxlZC4KLSBbIF0gUmVncmVzc2lvbiB0ZXN0OiBkYW5nbGluZyBkZWZhdWx0ICh1dWlkLSBhbmQgbmFtZS1zdG9yZWQpIOKGkiB3YXJucywgZmFsbHMgYmFjaywgZXhpdHMgMC4KCiMjIyBCYXRjaCAyIOKAlCBhZ2VudHMtY2xpOiBSdXNoIENsb3VkIGF2YWlsYWJpbGl0eSBsaWVzIG9uIGFuIGV4cGlyZWQgc2Vzc2lvbgpUaWNrZXQ6IFBITlgtMzM4MiAoaXRlbSAxIG9ubHkg4oCUIGl0ZW0gMiBpcyBhbiBvcHMgYWN0aW9uLCBzZWUgRXhjbHVkZWQgYmVsb3cpLgotIFsgXSBgY2xpL3NyYy9saWIvY2xvdWQvcnVzaC50czoyOTBgIOKAlCBgYXZhaWxhYmxlYCByZWZsZWN0cyByZWFsIHRva2VuIHZhbGlkaXR5CiAgICAgIChgc2Vzc2lvbi5leHBpcmVzX2F0YCB2cyBub3csIG9yIGEgY2hlYXAgY2FjaGVkIGF1dGhlbnRpY2F0ZWQgcHJvYmUpLgotIFsgXSBSZWdyZXNzaW9uIHRlc3Q6IGV4cGlyZWQvYWJzZW50IGBleHBpcmVzX2F0YCDihpIgYGF2YWlsYWJsZTogZmFsc2VgLgoKIyMjIEJhdGNoIDMg4oCUIGFnZW50cy1jbGk6IHRyYWNlcyBzeW5jIG1pc2xhYmVscyBhIHJlY292ZXJlZCBydW4gYXMgZXJyb3JlZApUaWNrZXQ6IFBITlgtMzM4Ny4KLSBbIF0gYGNsaS9zcmMvbGliL3RyYWNlcy9zeW5jLnRzOjY1N2Ag4oCUIGRlcml2ZSBgb3V0Y29tZWAgZnJvbSB0aGUgdHJhamVjdG9yeSdzIGZpbmFsCiAgICAgIHN0ZXAsIG5vdCBgZXJyb3JDb3VudCA+IDBgLgotIFsgXSBgc3VyZmFjZWRUb29sRmFpbHVyZXNgIChzeW5jLnRzOjY2Ni02NjgpIG5lZWRzIG5vIGNvZGUgY2hhbmdlLgotIFsgXSBVcGRhdGUgYHN5bmMudGVzdC50czozMzNgOyBhZGQgYSBjYXNlIGZvciBtaWQtcnVuIGVycm9yICsgc3VjY2Vzc2Z1bCBmaW5hbCBzdGVwLgoKIyMjIEJhdGNoIDQg4oCUIGFnZW50cy1jbGk6IG1vbml0b3JzIHZpc2liaWxpdHkgKDMgc3ViLWZpeGVzLCAxIFBSKQpUaWNrZXQ6IFBITlgtMjUwNi4gTm90IGRvaW5nOiBhbiBlbmFibGUvZGlzYWJsZSB2ZXJiLCBnaXQtdHJhY2tlZCBtb25pdG9yIGRlZmluaXRpb25zCihib3RoIGV4cGxpY2l0bHkgcmVqZWN0ZWQgaW4gdGhlIHRpY2tldCkuCi0gWyBdIGBjbGkvc3JjL2xpYi9tb25pdG9ycy9jb25maWcudHM6NDcwYCDigJQgZHJvcCB0aGUgc3lzdGVtLXNjb3BlIGBlbmFibGVkOiBmYWxzZWAKICAgICAgc3BlY2lhbCBjYXNlLgotIFsgXSBBZGQgYHNjb3BlOiAndXNlcicgfCAnc3lzdGVtJ2AgdG8gYE1vbml0b3JDb25maWdgOyByZW5kZXIgYChidWlsdC1pbilgIGluCiAgICAgIGBjbGkvc3JjL2NvbW1hbmRzL21vbml0b3JzLnRzOjcwMmAncyBsaXN0IGFuZCBpbmNsdWRlIGBzY29wZWAgaW4gYC0tanNvbmAuCi0gWyBdIGBsaXN0YCBhY3Rpb24gZmFucyBvdXQgZmxlZXQtd2lkZSB2aWEgYGdhdGhlclJlbW90ZUFnZW50c0pzb25gLCByZXVzaW5nCiAgICAgIGBwYXJzZVJlbW90ZU1vbml0b3JzYCAoYGNsaS9zcmMvbGliL21vbml0b3JzL3JlbW90ZS50czozOC01OGApLgoKIyMjIEJhdGNoIDUg4oCUIGFnZW50cy1jbGk6IGBhZ2VudHMgdXBncmFkZWAgc2VsZi1oZWFscyB0d28gdXBncmFkZS10aW1lIHJlZ3Jlc3Npb25zClRpY2tldHM6IFBITlgtMzM5MyArIFBITlgtMjc0MCAoc2FtZSByb290LWNhdXNlIGNsYXNzOiBgLS1pZ25vcmUtc2NyaXB0c2Agc2tpcHMgYSBuYXRpdmUKZGVwZW5kZW5jeSdzIGluc3RhbGwgc3RlcCkuCi0gWyBdIE5ldyBgc3dlZXBTdGFsZUluc3RhbGxTdGFnaW5nYCBpbiBgY2xpL3NyYy9saWIvc2VsZi11cGRhdGUudHNgLCBjYWxsZWQgZnJvbQogICAgICBgY2xpL3NyYy9ib290c3RyYXAudHNgIGJlZm9yZSBzdGFnaW5nLCBzY29wZWQgdG8gYHBhdGguZGlybmFtZShwYWNrYWdlUm9vdClgLgotIFsgXSBOZXcgc2VsZi1oZWFsIGNoZWNrIGBjbGkvc3JjL2xpYi9zZWxmLWhlYWwvY2hlY2tzL2luc3RhbGwtc3RhZ2luZy50c2AgKHBlcmlvZGljLAogICAgICAxMC1taW51dGUgYWdlIGd1YXJkIG1lYXN1cmVkIGZyb20gdGhlIHN0YWdpbmcgZGlyJ3Mgb3duIG10aW1lKSwgcmVnaXN0ZXJlZCBpbgogICAgICBgc2VsZi1oZWFsL3JlZ2lzdHJ5LnRzYCArIGBzZWxmLWhlYWwvdHlwZXMudHNgJ3MgYEhlYWxDaGVja0lkYC4KLSBbIF0gUmUtcHJvdmlzaW9uIG5vZGUtcHR5IHBvc3QtYC0taWdub3JlLXNjcmlwdHNgLCBtaXJyb3JpbmcgdGhlIEtleWNoYWluLWhlbHBlcgogICAgICBwcmVjZWRlbnQgYXQgYGNsaS9zcmMvbGliL2Jvb3RzdHJhcC50czo0MTQtNDIzYC4KLSBbIF0gVGVzdHMgcmVwcm9kdWNlIHRoZSByZWFsIEVOT1RFTVBUWSBmYWlsdXJlIChubyBGUyBtb2NraW5nKSBhbmQgcHJvdmUgdGhlIHN3ZWVwCiAgICAgIGNsZWFycyBpdDsgbWFjT1MgY2hlY2sgY29uZmlybXMgYHB0eS5ub2RlYCBwcmVzZW50IGFmdGVyIGEgc2ltdWxhdGVkIHVwZ3JhZGUuCgojIyMgQmF0Y2ggNiDigJQgYWdlbnRzLWNsaTogc2hhcmUgd29ya2VyIHNpbGVudGx5IGRyb3BzIGEgY29uY3VycmVudCBwdWJsaXNoClRpY2tldDogUEhOWC0yNzAxLgotIFsgXSBgY2xpL3NyYy9saWIvc2hhcmUvd29ya2VyLXRlbXBsYXRlLnRzOjMzNy0zNTBgIOKAlCBjb25kaXRpb25hbCBwdXQKICAgICAgKGBvbmx5SWY6IHsgZXRhZ01hdGNoZXMgfWApIG9uIHRoZSBjYW5vbmljYWwgd3JpdGUsIG1pcnJvcmluZyB0aGUgZXhpc3RpbmcgUEFUQ0gKICAgICAgaGFuZGxlciBhdCBgOjQ0Mi00NDdgOyBoYW5kbGUgdGhlIGNyZWF0ZS1uZXctc2x1ZyAoYGV4aXN0aW5nID09PSBudWxsYCkgY2FzZS4KLSBbIF0gQm91bmRlZCByZXRyeSAoZS5nLiAzIGF0dGVtcHRzKSBvZiByZWFk4oaSY29weS1yZXZpc2lvbuKGkndyaXRlIG9uIHByZWNvbmRpdGlvbiBmYWlsdXJlLgotIFsgXSBUZXN0IGFnYWluc3QgcmVhbCBSMiBjb25kaXRpb25hbC1wdXQgc2VtYW50aWNzLgoKIyMjIEJhdGNoIDcg4oCUIGFnZW50cy1jbGk6IGZsZWV0IGRyaWZ0IGludmlzaWJsZSB3aGVuIGEgZGV2aWNlJ3MgYH4vLmFnZW50c2AgaXNuJ3QgYSByZXBvClRpY2tldDogUEhOWC0zMjM5IChkZXRlY3RhYmlsaXR5IHNsaWNlIG9ubHkg4oCUIHRoZSBvbmJvYXJkaW5nIHBhdGggaXMgYSBmZWF0dXJlLCBleGNsdWRlZCkuCi0gWyBdIGBjbGkvc3JjL2xpYi9kZXZpY2VzL2ZsZWV0LWludmVudG9yeS50czozNC0zN2Ag4oCUIGNhcnJ5IGEgYG5vdEdpdFJlcG9gIHNpZ25hbCBpbnN0ZWFkCiAgICAgIG9mIGNvbGxhcHNpbmcgdG8gYG51bGxgLgotIFsgXSBgY2xpL3NyYy9saWIvZGV2aWNlcy9mbGVldC1kaXZlcmdlbmNlLnRzOjMwNy0zMTBgIOKAlCBlbWl0IGEgZGl2ZXJnZW5jZSBraW5kIGluc3RlYWQKICAgICAgb2Ygc2lsZW50bHkgYGNvbnRpbnVlYC1pbmcgcGFzdCBhIG5vbi1naXQgcmVtb3RlIHJlcG8uCi0gWyBdIGBjbGkvc3JjL2xpYi9kZXZpY2VzL2RvY3Rvci1maW5kaW5ncy50c2Ag4oCUIHdpcmUgdGhlIG5ldyBraW5kIGludG8KICAgICAgYGZsZWV0RGl2ZXJnZW5jZVRvRmluZGluZ3NgIGFzIGEgd2FybmluZy9jcml0aWNhbCBmaW5kaW5nIG5hbWluZyB0aGUgZGV2aWNlLgoKIyMjIEJhdGNoIDgg4oCUIC5hZ2VudHMtc3lzdGVtOiBsYW5kIHR3byBhbHJlYWR5LWZpeGVkIFBScyAobm8gbmV3IGVuZ2luZWVyaW5nKQotIFsgXSBQSE5YLTI5NTEg4oCUIGBwaG54LWxhYnMvYWdpLWNsaSMzMTcyYCAoY29tbWl0IGA0ODIzMTllYmAgYWxyZWFkeSBmaXhlcyB0aGUgcmV2aWV3ZXIncwogICAgICBibG9ja2VyIG9uIHRoZSBmaWx0ZXJlZCBgc3RyYW5kZWRgIGNvdW50KS4gR2V0IGEgZnJlc2ggbm9uLWF1dGhvciB2ZXJkaWN0LCBtZXJnZS4KLSBbIF0gUEhOWC0zMTE4IOKAlCBgcGhueC1sYWJzLy5hZ2VudHMjNDE2YCAobmVnYXRpb24gZ3VhcmQgKyBjb2RlLWZlbmNlIHN0cmlwcGluZyBpbgogICAgICBgcHItdmVyZGljdC5weWAsIDM3LzM3IHRlc3RzIHBhc3NpbmcpLiBMYW5kIG9uY2UgcmV2aWV3IGNvbXBsZXRlcy4KCiMjIyBCYXRjaCA5IOKAlCBzaXggc21hbGwsIGluZGVwZW5kZW50IG9uZS1maWxlIHBhdGNoZXMKKipBbHJlYWR5IGZpeGVkIOKAlCBjbG9zZSB3aXRoIHByb29mLCBubyBjb2RlIGNoYW5nZToqKgotIFt4XSBQSE5YLTI3MTcg4oCUIGBtdXFzaXRuYXdhei8uYWdlbnRzYCBgaG9va3Mvbm8tcGVybWlzc2lvbi1zdG9wLWd1YXJkLnNoOjYyLTYzYCBmaXhlZAogICAgICB2aWEgbWVyZ2VkIFBSICMyOTguCi0gW3hdIFBITlgtMzM1MCDigJQgYC5hZ2VudHMtc3lzdGVtYCBgZ2l0LWd1YXJkLnNoYC9gcm0tZ3VhcmQuc2hgIGFscmVhZHkgc2hhcmUKICAgICAgYGdpdF9wZWVsX3RpbWVvdXRfd3JhcHBlcigpYCAoYGhvb2tzL2xpYi9naXQtcGFyc2Uuc2g6NjNgKTsgNDEvNDEgKyAyNC8yNCBmaXh0dXJlcwogICAgICBwYXNzaW5nIGluY2x1ZGluZyBleHBsaWNpdCBQSE5YLTMzNTAgY2FzZXMuCgoqKlJlYWwsIHN0aWxsIG9wZW4g4oCUIGAuYWdlbnRzLXN5c3RlbWA6KioKLSBbIF0gUEhOWC0zMDQyIOKAlCBkcm9wIGAtLWZhaWwtZmFzdGAgZnJvbSB0aGUgQ0ktd2F0Y2ggaW5jYW50YXRpb24gYXQgNSBzaXRlcwogICAgICAoYHJ1bGVzL0FHRU5UUy5tZDozMTUsNDk5YCwgYHJ1bGVzL3N1YnJ1bGVzL3RydWx5LWFnZW50aWMtZ2l0LXdvcmtmbG93L3J1bGUubWQ6OTFgLAogICAgICBgcnVsZXMvc3VicnVsZXMvcGFyYWxsZWwtdGVhbXMvcnVsZS5tZDo1NWAsIGBza2lsbHMvdGVhbXMvU0tJTEwubWQ6MTcwYCkuCgoqKlJlYWwsIHN0aWxsIG9wZW4g4oCUIGBhZ2VudHMtY2xpYDoqKgotIFsgXSBQSE5YLTI1MzEg4oCUIGBjbGkvc3JjL2xpYi9zY2hlZHVsaW5nL3JvdXRpbmVzLnRzOjE1MTJgIOKAlCBkZXRlY3QgYGN3ZCA9PT0gbnVsbGAKICAgICAgYmVmb3JlIHRoZSBleGlzdGluZyBlbXB0eS1zdHJpbmcgY2hlY2ssIG1lc3NhZ2U6IGAnY3dkIGlzIG51bGwg4oCUIGEgYmFyZSB+IGlzIFlBTUwKICAgICAgbnVsbDsgcXVvdGUgaXQgYXMgIn4iJ2AuCi0gWyBdIFBITlgtMzM1MiDigJQgYGNsaS9zcmMvbGliL2FjY291bnQtcmVnaXN0cnkua2V5Y2hhaW4udGVzdC50czoyOWAg4oCUIGNoYW5nZQogICAgICBgQUdFTlRTX1JVTlRJTUVgIHRvIGAnaGVhZGxlc3MnYCBzbyB0aGUgUEhOWC0yOTM5IHJlZ3Jlc3Npb24gdGVzdCBhY3R1YWxseSBleGVyY2lzZXMKICAgICAgYGlzSGVhZGxlc3NTZWNyZXRzQ29udGV4dCgpYC4KLSBbIF0gUEhOWC0zMzU4IOKAlCBgY2xpL0FHRU5UUy5tZDoxNDI4LTE0MjlgIOKAlCByZXBsYWNlIHRoZSBzdGFsZSByZWdpc3RyeS1lcnJvciBjbGFpbSB3aXRoCiAgICAgIHdvcmRpbmcgZGlzdGluZ3Vpc2hpbmcgdGhlIHJlYWQgcGF0aCAoc3RyaWN0KSBmcm9tIHRoZSB3cml0ZSBwYXRoIChzZWxmLWhlYWxzKS4KLSBbIF0gUEhOWC0zMzgzIOKAlCBgY2xpL3NyYy9saWIvX190ZXN0c19fL2ltcG9ydC50ZXN0LnRzYCdzIGZpeHR1cmUgaXMgMiBsZXZlbHMgdW5kZXIgaXRzCiAgICAgIGBta2R0ZW1wU3luY2AgZGlyIGJ1dCB0aGUgcmVzb2x2ZXIgd2Fsa3MgNiDigJQgbmVzdCBpdCBvbmUgbGV2ZWwgZGVlcGVyIHNvIHRoZSB3YWxrLXVwCiAgICAgIG5ldmVyIHJlYWNoZXMgcmVhbCBgL3RtcGAuCi0gWyBdIFBITlgtMzA3MSDigJQgYGNsaS9zcmMvbGliL3RtdXgvc2Vzc2lvbi50czoxMDNgIOKAlCBkZXRlY3QgZ2xvYi11bnNhZmUgY2hhcmFjdGVycyBpbgogICAgICB0aGUgdXNlcidzIHRtdXggY29uZmlnIHBhdGggYW5kIHdhcm4tYW5kLXNraXAgaW5zdGVhZCBvZiBzaWxlbnRseSBzd2FsbG93aW5nIHZpYSBgLXFgLgoKIyMjIERlZmVycmVkIGFzIGEgZm9sbG93LXVwLCBub3QgdGhpcyBiYXRjaAotICoqUEhOWC0zMTgzKiog4oCUIGNsb3NlcyBhcyBhbHJlYWR5LWFkZHJlc3NlZCAoUlVTSC0zMTI1IGZpeGVkIHRoZSBoZWFkbGluZSBkZWZlY3QpOyB0aGUKICByZXNpZHVhbCBhc2sgd2FzIGFscmVhZHkgdHJpZWQgYW5kIHJldmVydGVkIHBlciBzcGVjIFNFUy0xOGEuCi0gKipQSE5YLTM0MTEqKiDigJQgc2VsZi1zdGFiaWxpemVkIGR1cmluZyB2ZXJpZmljYXRpb247IGhhcmRlbmluZyBjYW5kaWRhdGUgZm9yIGxhdGVyLgotICoqUEhOWC0yNjYzKiog4oCUIG5lZWRzIG9uLW1hY2hpbmUgcmVwcm8gYmVmb3JlIGEgYmxpbmQgZml4IGlzIHNhZmUuCgojIyMgRXhjbHVkZWQg4oCUIG93bmVyIGRlY2lzaW9uLCBub3QgZW5naW5lZXJpbmcKUEhOWC0zMzIyLCAzMzQyLCAyODQ3LCAzMzIzLCAyNTE5LCAzMzc0LCAzMzgwLCAzNDA0LCAzNDE3IChmdWxsIHJlYXNvbnMgaW4gdGhlIGRpc3Bvc2l0aW9uCnRhYmxlIGJlbG93KS4KCiMjIyBFeGNsdWRlZCDigJQgb3BzL293bmVyIGFjdGlvbiwgbm90IGNvZGUKUEhOWC0zMDMzIChkZXN0cnVjdGl2ZSBnaXQtaGlzdG9yeSBwdXJnZSwgb3duZXItYXV0aG9yaXplZCBvbmx5KSwgUEhOWC0yNzY4IChhbHJlYWR5Cm1hbnVhbGx5IGZpeGVkIG9uIHppb24pLCBQSE5YLTMzODIgaXRlbSAyIChzdHJheSBSdXNoIGxvZ2luIGNsZWFudXAgKyBpbnRlcmFjdGl2ZSByZS1hdXRoKS4KCiMjIEZ1bGwgZGlzcG9zaXRpb24gb2YgYWxsIDM4IGJ1Zy10YWdnZWQgdGlja2V0cwoKfCBUaWNrZXQgfCBEaXNwb3NpdGlvbiB8CnwtLS18LS0tfAp8IFBITlgtMzMyNiB8IEZpeCBub3cg4oCUIEJhdGNoIDEgKFAxKSB8CnwgUEhOWC0zMzgyIHwgRml4IG5vdyAoaXRlbSAxKSDigJQgQmF0Y2ggMjsgaXRlbSAyIGV4Y2x1ZGVkLCBvcHMgYWN0aW9uIHwKfCBQSE5YLTMzODcgfCBGaXggbm93IOKAlCBCYXRjaCAzIHwKfCBQSE5YLTI1MDYgfCBGaXggbm93IOKAlCBCYXRjaCA0IHwKfCBQSE5YLTMzOTMgfCBGaXggbm93IOKAlCBCYXRjaCA1IHwKfCBQSE5YLTI3NDAgfCBGaXggbm93IOKAlCBCYXRjaCA1IHwKfCBQSE5YLTI3MDEgfCBGaXggbm93IOKAlCBCYXRjaCA2IHwKfCBQSE5YLTMyMzkgfCBGaXggbm93IChkZXRlY3RhYmlsaXR5IHNsaWNlKSDigJQgQmF0Y2ggNzsgb25ib2FyZGluZyBleGNsdWRlZCwgZmVhdHVyZSB8CnwgUEhOWC0yOTUxIHwgTGFuZCBleGlzdGluZyBQUiAjMzE3MiDigJQgQmF0Y2ggOCB8CnwgUEhOWC0zMTE4IHwgTGFuZCBleGlzdGluZyBQUiBgLmFnZW50cyM0MTZgIOKAlCBCYXRjaCA4IHwKfCBQSE5YLTI3MTcgfCBBbHJlYWR5IGZpeGVkIOKAlCBjbG9zZSB3aXRoIHByb29mIHwKfCBQSE5YLTMzNTAgfCBBbHJlYWR5IGZpeGVkIOKAlCBjbG9zZSB3aXRoIHByb29mIHwKfCBQSE5YLTMwNDIgfCBGaXggbm93IOKAlCBCYXRjaCA5IHwKfCBQSE5YLTI1MzEgfCBGaXggbm93IOKAlCBCYXRjaCA5IHwKfCBQSE5YLTMzNTIgfCBGaXggbm93IOKAlCBCYXRjaCA5IHwKfCBQSE5YLTMzNTggfCBGaXggbm93IOKAlCBCYXRjaCA5IHwKfCBQSE5YLTMzODMgfCBGaXggbm93IOKAlCBCYXRjaCA5IHwKfCBQSE5YLTMwNzEgfCBGaXggbm93IOKAlCBCYXRjaCA5IHwKfCBQSE5YLTMxODMgfCBEZWZlcnJlZCDigJQgYWxyZWFkeSBmaXhlZCAoUlVTSC0zMTI1KSArIHJlc2lkdWFsIGFzayBhbHJlYWR5IHJldmVydGVkIChTRVMtMThhKSB8CnwgUEhOWC0zNDExIHwgRGVmZXJyZWQg4oCUIHNlbGYtc3RhYmlsaXplZCBkdXJpbmcgdmVyaWZpY2F0aW9uIHwKfCBQSE5YLTI2NjMgfCBEZWZlcnJlZCDigJQgbmVlZHMgb24tbWFjaGluZSByZXBybyB8CnwgUEhOWC0zMzIyIHwgRXhjbHVkZWQg4oCUIG93bmVyIGRlY2lzaW9uIChwcm9kdWN0IG5hbWluZykgfAp8IFBITlgtMzM0MiB8IEV4Y2x1ZGVkIOKAlCBvd25lciBkZWNpc2lvbiAoY3JlZGVudGlhbCBkaXN0cmlidXRpb24gcG9saWN5KSB8CnwgUEhOWC0yODQ3IHwgRXhjbHVkZWQg4oCUIG93bmVyIGRlY2lzaW9uIChucG0gcG9zdGluc3RhbGwgc3BsaXQgZ28vbm8tZ28pIHwKfCBQSE5YLTMzMjMgfCBFeGNsdWRlZCDigJQgb3duZXIgZGVjaXNpb24gKG5vdGlmeSBkZXByZWNhdGlvbiBmaW5pc2gtb3Ita2VlcCkgfAp8IFBITlgtMjUxOSB8IEV4Y2x1ZGVkIOKAlCBvd25lciBkZWNpc2lvbiAoY2hlY2stdXBkYXRlcyBnYXRpbmcgcG9saWN5KSB8CnwgUEhOWC0zMzc0IHwgRXhjbHVkZWQg4oCUIG93bmVyIGRlY2lzaW9uIChDbG91ZGZsYXJlIEJyb3dzZXItUmVuZGVyaW5nIG9wdC1pbikgfAp8IFBITlgtMzM4MCB8IEV4Y2x1ZGVkIOKAlCBvd25lciBkZWNpc2lvbiAocm91dGluZSBmYWlsdXJlLWJhY2tvZmYgcG9saWN5KSB8CnwgUEhOWC0zNDA0IHwgRXhjbHVkZWQg4oCUIG93bmVyIGRlY2lzaW9uIChyZWdpc3RlciBgLmFnZW50cy1leHRyYXNgKSB8CnwgUEhOWC0zNDE3IHwgRXhjbHVkZWQg4oCUIHRvbyBsYXJnZS9kZWNpc2lvbi1sYWRlbiwgaGFzIGl0cyBvd24gdW5tZXJnZWQgZGVzaWduIHwKfCBQSE5YLTMwMzMgfCBFeGNsdWRlZCDigJQgZGVzdHJ1Y3RpdmUgZ2l0LWhpc3RvcnkgcHVyZ2UsIG93bmVyLWF1dGhvcml6ZWQgb25seSB8CnwgUEhOWC0yNzY4IHwgRXhjbHVkZWQg4oCUIGFscmVhZHkgbWFudWFsbHkgZml4ZWQgb24gemlvbiB8CnwgUEhOWC0yOTU1IHwgRm9sZGVkIGludG8gQmF0Y2ggOSBjYXRlZ29yeSAvIHJlLWNvbmZpcm0gc2NvcGUgaWYgc3RpbGwgb3BlbiB8CnwgUEhOWC0yNjc5IHwgTm90IGluZGVwZW5kZW50bHkgcmUtdmVyaWZpZWQgdGhpcyBwYXNzIOKAlCBub24tQ2xhdWRlIGhhcm5lc3Mgc3Bhd24gZGVmZWN0cywgY2FuZGlkYXRlIGZvciBhIGZvbGxvdy11cCBiYXRjaCB8CnwgUEhOWC0zMDMzIChkdXAgcm93KSB8IHNlZSBhYm92ZSB8CnwgUEhOWC0zMzUyIChkdXAgcm93KSB8IHNlZSBhYm92ZSB8CnwgUEhOWC0yNjYzIChkdXAgcm93KSB8IHNlZSBhYm92ZSB8CnwgUEhOWC0zMzgyIGl0ZW0gMiB8IEV4Y2x1ZGVkIOKAlCBvcHMgYWN0aW9uIHwKCipFdmVyeSBvbmUgb2YgdGhlIDM4IHRpY2tldHMgZnJvbSB0aGUgYnVnIGNsYXNzaWZpY2F0aW9uIGlzIGFjY291bnRlZCBmb3IgYWJvdmU7IHR3byByb3dzCmFyZSBhY2tub3dsZWRnZWQgZHVwbGljYXRlcyBvZiB0aWNrZXRzIGFscmVhZHkgbGlzdGVkIChrZXB0IHNvIHRoZSBjb3VudCByZWNvbmNpbGVzIHRvIDM4CndpdGhvdXQgc2lsZW50bHkgZHJvcHBpbmcgb25lKSwgYW5kIFBITlgtMjY3OS9QSE5YLTI5NTUgd2VyZSBub3QgcmUtdmVyaWZpZWQgaW4gdGhpcyBwYXNzCuKAlCBmbGFnZ2VkIHJhdGhlciB0aGFuIGd1ZXNzZWQgYXQuKgoKIyMgVmFsaWRhdGlvbgoKLSBgY2QgY2xpICYmIGJ1biBydW4gdGVzdGAgaW5zaWRlIGVhY2ggYmF0Y2gncyB3b3JrdHJlZSBiZWZvcmUgb3BlbmluZyBpdHMgUFIgKHJlcG8KICBjb252ZW50aW9uIOKAlCBuZXZlciBgYnVuIHJ1biB0ZXN0YCBvbiBhIHNoYXJlZCBtYWNoaW5lKS4KLSBCYXRjaCAxOiBkYW5nbGluZyBkZWZhdWx0ICh1dWlkLSBhbmQgbmFtZS1zdG9yZWQpIOKGkiBsYXVuY2ggd2FybnMsIGZhbGxzIGJhY2ssIGV4aXRzIDAuCi0gQmF0Y2ggMjogZXhwaXJlZC9taXNzaW5nIGBleHBpcmVzX2F0YCDihpIgYGF2YWlsYWJsZTogZmFsc2VgLgotIEJhdGNoIDM6IG1pZC1ydW4gdG9vbCBlcnJvciArIHN1Y2Nlc3NmdWwgZmluYWwgc3RlcCDihpIgYG91dGNvbWU6ICdjb21wbGV0ZWQnYCB3aXRoCiAgbm9uLWVtcHR5IGBzdXJmYWNlZFRvb2xGYWlsdXJlc2AuCi0gQmF0Y2ggNDogc3lzdGVtLXNjb3BlIG1vbml0b3Igd2l0aCBubyBgZW5hYmxlZDpgIGRlZmF1bHRzIHRvIGVuYWJsZWQ7IGBsaXN0YCBzaG93cwogIGAoYnVpbHQtaW4pYDsgZmxlZXQgZmFuLW91dCByZXR1cm5zIGEgcmVtb3RlIGRldmljZSdzIG1vbml0b3JzLgotIEJhdGNoIDU6IHJlYWwgRU5PVEVNUFRZIHJlcHJvIOKGkiBzd2VlcCBjbGVhcnMgaXQ7IHNpbXVsYXRlZCBgLS1pZ25vcmUtc2NyaXB0c2AgdXBncmFkZQogIG9uIG1hY09TIOKGkiBgcHR5Lm5vZGVgIHByZXNlbnQgYWZ0ZXIuCi0gQmF0Y2ggNjogdHdvIGNvbmN1cnJlbnQgUFVUcyB0byB0aGUgc2FtZSBzbHVnIOKGkiBuZWl0aGVyIHNpbGVudGx5IGxvc3QgKHJlYWwgUjIKICBzZW1hbnRpY3MsIG5vdCBtb2NrZWQpLgotIEJhdGNoIDc6IGEgYG5vdEdpdFJlcG86IHRydWVgIGRldmljZSBpbnZlbnRvcnkg4oaSIGRvY3Rvci9mbGVldC1zdGF0dXMgbmFtZXMgdGhlIGRldmljZS4KLSBCYXRjaCA5OiBlYWNoIHBhdGNoIGdldHMgaXRzIHN0YXRlZCByZWdyZXNzaW9uIHRlc3QuCgojIyBSaXNrcwoKLSAqKkJhdGNoIDEqKiAoYGNsaS9zcmMvbGliL2FjY291bnQtcmVnaXN0cnkudHM6NDY3YCk6IHRoZSB3cml0ZS1zaWRlIGNoYW5nZSAoc3RvcmUgbmFtZSwKICBub3QgdXVpZCkgbXVzdCBsYW5kIGluIHRoZSAqc2FtZSogZGlmZiBhcyB0aGUgZGFuZ2xpbmctZGVmYXVsdCBmaWx0ZXIgdXBkYXRlLCBvciBhCiAgbmFtZS1zdG9yZWQgZGVmYXVsdCBzdG9wcyBiZWluZyBkZXRlY3RlZCBhcyBkYW5nbGluZyB3aGVuIGl0cyBhY2NvdW50IGlzIHJlbW92ZWQuCi0gKipCYXRjaCA1KiogKGBjbGkvc3JjL2xpYi9zZWxmLWhlYWwvY2hlY2tzL2luc3RhbGwtc3RhZ2luZy50c2ApOiB0aGUgMTAtbWludXRlIGFnZSBndWFyZAogIG11c3Qga2V5IG9mZiB0aGUgc3RhZ2luZyBkaXIncyBvd24gbXRpbWUsIG5vdCB3YWxsLWNsb2NrLXNpbmNlLWRhZW1vbi1zdGFydCwgb3IgYSBzbG93CiAgbGVnaXRpbWF0ZSBpbi1mbGlnaHQgdXBncmFkZSBhdCBkYWVtb24gc3RhcnR1cCBjb3VsZCBiZSBzd2VwdCBtaWQtaW5zdGFsbC4KLSAqKkJhdGNoIDYqKiAoYGNsaS9zcmMvbGliL3NoYXJlL3dvcmtlci10ZW1wbGF0ZS50czozNTBgKTogYW4gdW5ib3VuZGVkIGNvbmRpdGlvbmFsLXB1dAogIHJldHJ5IHVuZGVyIHN1c3RhaW5lZCBjb25jdXJyZW50IHB1Ymxpc2ggdG8gb25lIHNsdWcgd291bGQgc3BpbiBmb3JldmVyIOKAlCBib3VuZCBpdCAoMwogIGF0dGVtcHRzKSBhbmQgNDA5IHBhc3QgdGhhdCwgcmF0aGVyIHRoYW4gaGFuZ2luZyB0aGUgcmVxdWVzdC4KLSAqKkJhdGNoIDkgLyBQSE5YLTMwNzEqKiAoYGNsaS9zcmMvbGliL3RtdXgvc2Vzc2lvbi50czoxMDNgKTogdGhlIGdsb2ItdW5zYWZlLWNoYXJhY3RlcgogIGNoZWNrIG11c3Qgbm90IGZhbHNlLXBvc2l0aXZlIG9uIG9yZGluYXJ5IHBhdGhzIGNvbnRhaW5pbmcgYH5gIChhbHJlYWR5IGV4cGFuZGVkKSBvcgogIHNwYWNlcyAodmFsaWQsIG5vbi1nbG9iKSDigJQgc2NvcGUgdGhlIHJlZ2V4IHRvIGFjdHVhbCBnbG9iIG1ldGFjaGFyYWN0ZXJzIG9ubHkuCi0gKipCYXRjaCA0KiogKGBjbGkvc3JjL2xpYi9tb25pdG9ycy9jb25maWcudHM6NDcwYCk6IGZsaXBwaW5nIHRoZSBzeXN0ZW0tc2NvcGUgZGVmYXVsdAogIHRvIGVuYWJsZWQgY2hhbmdlcyBsaXZlIGJlaGF2aW9yIGZsZWV0LXdpZGUgdGhlIG1vbWVudCBpdCBzeW5jcyDigJQgY29uZmlybSBubyBleGlzdGluZwogIGJ1aWx0LWluIG1vbml0b3IgYXNzdW1lcyBpdCBzaGlwcyBkaXNhYmxlZCBiZWZvcmUgbGFuZGluZyB0aGlzLgoKIyMgVHJhY2tpbmcKCi0gQUdJIExpbmVhciBwcm9qZWN0OiBodHRwczovL2xpbmVhci5hcHAvZ2V0cnVzaC9wcm9qZWN0L0FHSQotIFByaW9yIGZ1bGwtYm9hcmQgdHJpYWdlOiBQUiAjMzIzNiAodmFsaWRhdGVkIHRoZSBib2FyZCBpcyByZWFsLCBub3Qgc3BhbSkKLSBCYXRjaCA4IFBScyB0byBsYW5kOiAjMzE3MiAoYWdlbnRzLWNsaSksIGAuYWdlbnRzIzQxNmAKLSBFYWNoIGJhdGNoIGFib3ZlIG9wZW5zIGl0cyBvd24gUFI7IHRoaXMgc2VjdGlvbiBnZXRzIGEgbGlua2VkIHJvdyBwZXIgUFIgb25jZSBvcGVuZWQuCgotLS0KCipUaGlzIGlzIGEgcGxhbiBhd2FpdGluZyB5b3VyIGNvbmZpcm1hdGlvbi4gTm8gY29kZSBoYXMgYmVlbiBjaGFuZ2VkIOKAlCB0aGUgd29ya3RyZWUgYXQKYC5hZ2VudHMvd29ya3RyZWVzL2FnaS1idWdmaXgtcGxhbi0yMDI2LTA4LTI4L2AgY29udGFpbnMgb25seSB0aGlzIHBsYW4gYW5kIGB0YXNrcy5tZGAuCk9uY2UgeW91IGZpbmFsaXplIHNjb3BlIChjb25maXJtLCBjdXQsIG9yIGFkZCBiYXRjaGVzKSwgZWFjaCBiYXRjaCBkaXNwYXRjaGVzIHRvIGl0cyBvd24KYWdlbnQvd29ya3RyZWUvUFIgaW4gcGFyYWxsZWwuKgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const current = document.querySelector('meta[name="artifacts-content-hash"]')?.content;
+  const chip = document.querySelector('.reload-chip');
+  if (!current || !chip || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+  chip.addEventListener('click', () => location.reload());
+  const check = async () => {
+    try {
+      const response = await fetch(location.href, { cache: 'no-store' });
+      const html = await response.text();
+      const next = html.match(/<meta name="artifacts-content-hash" content="([^"]+)">/)?.[1];
+      if (next && next !== current) chip.hidden = false;
+    } catch {}
+  };
+  setInterval(check, 1500);
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) { result ^= value.charCodeAt(index); result = Math.imul(result, 16777619); }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    anchor.dataset.readerSection = section;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    bases.push(anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text));
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end).map((item) => ({
+        quote: '', note: '', section: 'document', created_at: new Date().toISOString(), ...item,
+      })) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  let postTimer;
+  const post = () => {
+    if (location.protocol !== 'http:' || !['127.0.0.1', 'localhost', '::1'].includes(location.hostname)) return;
+    fetch('/notes', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ schema: 'artifacts.notes.v1', notes: highlights }) }).catch(() => {});
+  };
+  const write = () => {
+    try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {}
+    clearTimeout(postTimer); postTimer = setTimeout(post, 600);
+  };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange(); range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = []; const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT); let cursor = 0; let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor; const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd; node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index]; if (to <= from) continue;
+      const range = document.createRange(); range.setStart(textNode, from); range.setEnd(textNode, to);
+      const mark = document.createElement('mark'); mark.className = 'reader-highlight'; mark.dataset.highlightId = id; mark.title = 'Open note';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor); const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first); const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) wrap(anchors[index], index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchors[index]), highlight.id);
+    }
+  };
+
+  const style = document.createElement('style');
+  style.textContent = '.reader-toolbar,.reader-popover{position:fixed;z-index:40;display:flex;align-items:center;gap:6px;padding:7px;border:1px solid var(--line,#ccc);border-radius:10px;background:var(--surface,#fff);color:var(--text,#111);box-shadow:0 10px 35px rgba(0,0,0,.18);font:500 12px/1.2 var(--font-mono,monospace)}.reader-toolbar[hidden],.reader-popover[hidden]{display:none}.reader-toolbar-status{padding:0 6px;color:var(--muted,#666)}.reader-toolbar button,.reader-popover button{border:1px solid var(--line,#ccc);border-radius:999px;background:var(--surface-alt,#f5f5f5);color:inherit;padding:6px 9px;font:inherit;cursor:pointer}.reader-popover{width:min(360px,calc(100vw - 24px));align-items:stretch;flex-direction:column;padding:12px}.reader-popover-quote{margin:0;color:var(--muted,#666);font-style:italic;line-height:1.45}.reader-popover textarea{width:100%;min-height:84px;resize:vertical;border:1px solid var(--line,#ccc);border-radius:7px;padding:8px;background:var(--bg,#fff);color:inherit;font:13px/1.4 var(--font-body,sans-serif)}.reader-popover-actions{display:flex;gap:6px}.reader-remove{margin-left:auto;color:var(--danger,#b91c1c)!important}';
+  document.head.append(style);
+  const toolbar = document.createElement('div'); toolbar.className = 'reader-toolbar'; toolbar.hidden = true;
+  toolbar.innerHTML = '<span class="reader-toolbar-status">Copied</span><span aria-hidden="true">·</span><button type="button" data-reader-action="highlight">Highlight</button><span aria-hidden="true">·</span><button type="button" data-reader-action="note">Note</button>';
+  document.body.append(toolbar);
+  const popover = document.createElement('div'); popover.className = 'reader-popover'; popover.hidden = true;
+  popover.innerHTML = '<p class="reader-popover-quote"></p><textarea aria-label="Note" placeholder="Attach a note…"></textarea><div class="reader-popover-actions"><button type="button" data-reader-action="copy">Copy</button><button type="button" class="reader-remove" data-reader-action="remove">Remove</button></div>';
+  document.body.append(popover);
+  let pending = null; let activeId = null; let noteTimer;
+  const place = (element, rect) => { element.style.left = Math.max(8, Math.min(innerWidth - element.offsetWidth - 8, rect.left)) + 'px'; element.style.top = Math.max(8, rect.bottom + 8) + 'px'; };
+  const openNote = (item, rect) => {
+    activeId = item.id; toolbar.hidden = true; popover.hidden = false;
+    popover.querySelector('.reader-popover-quote').textContent = '“' + item.quote + '”'; popover.querySelector('textarea').value = item.note || '';
+    place(popover, rect);
+  };
+  const persistPending = (open) => {
+    if (!pending) return;
+    const duplicate = highlights.find((item) => item.start.anchor === pending.start.anchor && item.start.offset === pending.start.offset && item.end.anchor === pending.end.anchor && item.end.offset === pending.end.offset);
+    const item = duplicate || { id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...pending, created_at: new Date().toISOString() };
+    if (!duplicate) highlights.push(item);
+    write(); toolbar.hidden = true; render();
+    if (open) openNote(item, pending.rect);
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection(); if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0); const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]'); const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset); const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor); const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const quote = selection.toString(); const rect = range.getBoundingClientRect();
+    pending = { quote, note: '', section: startAnchor.dataset.readerSection || 'document', start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset }, rect };
+    navigator.clipboard?.writeText(quote).catch(() => {});
+    popover.hidden = true; toolbar.hidden = false; requestAnimationFrame(() => place(toolbar, rect));
+  });
+  toolbar.addEventListener('mousedown', (event) => event.preventDefault());
+  toolbar.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction;
+    if (action === 'highlight') persistPending(false);
+    if (action === 'note') persistPending(true);
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]'); if (!mark || !root.contains(mark)) return;
+    event.preventDefault(); event.stopPropagation();
+    const item = highlights.find((value) => value.id === mark.dataset.highlightId); if (item) openNote(item, mark.getBoundingClientRect());
+  });
+  popover.querySelector('textarea').addEventListener('input', (event) => {
+    clearTimeout(noteTimer); noteTimer = setTimeout(() => {
+      const item = highlights.find((value) => value.id === activeId); if (item) { item.note = event.target.value; write(); }
+    }, 600);
+  });
+  popover.addEventListener('click', (event) => {
+    const action = event.target.closest('button')?.dataset.readerAction; const item = highlights.find((value) => value.id === activeId); if (!item) return;
+    if (action === 'copy') navigator.clipboard?.writeText(item.quote).catch(() => {});
+    if (action === 'remove') { highlights = highlights.filter((value) => value.id !== activeId); write(); popover.hidden = true; render(); }
+  });
+  render();
+})();
+</script>
+</body>
+</html>
