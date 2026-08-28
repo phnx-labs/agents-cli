@@ -88,6 +88,16 @@ export interface PlacementOptions {
   /** Human label of the requested agent (e.g. `claude@2.1.112`) for the
    * fail-loud message. */
   agentLabel?: string;
+  /**
+   * Normalized hosts boosted with `auto-launch.preferred` (set by
+   * `agents devices prefer <name>`). A preferred device ranks ahead of a
+   * non-preferred one among the eligible survivors — after the signed-in tier
+   * (a preferred box that can't run the agent is still no use) and before load,
+   * so an operator boost overrides load-based ordering without overriding hard
+   * health. Empty/undefined leaves the ranking unchanged. See
+   * {@link autoLaunchPreferredSet}.
+   */
+  preferred?: ReadonlySet<string>;
 }
 
 /** Why a device was excluded from the viable set, for the fail-loud message. */
@@ -362,6 +372,13 @@ export function pickBestDevice(
     // (a) signed-in agent first.
     const signedIn = (sa?.signedIn === true ? 0 : 1) - (sb?.signedIn === true ? 0 : 1);
     if (signedIn !== 0) return signedIn;
+    // (a2) operator-preferred device next — `agents devices prefer <name>`
+    // boosts a box above its load-equal peers, overriding load-based order.
+    const preferred = opts?.preferred;
+    if (preferred && preferred.size > 0) {
+      const pref = (preferred.has(a) ? 0 : 1) - (preferred.has(b) ? 0 : 1);
+      if (pref !== 0) return pref;
+    }
     // (b) lower load — coarse headroom tier, then raw load cost.
     const tier = headroomTier(sa?.headroom) - headroomTier(sb?.headroom);
     if (tier !== 0) return tier;

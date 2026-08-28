@@ -243,6 +243,36 @@ describe('pickBestDevice — health/harness/load ranking (RUSH-2002)', () => {
     expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
   });
 
+  it('a preferred device outranks a less-loaded non-preferred one', () => {
+    // `agents devices prefer box-a` boosts it above box-b even though box-b is
+    // idle and box-a is busy — the operator boost overrides load-based order.
+    const signals = sig({
+      'box-a': { headroom: 'busy' },
+      'box-b': { headroom: 'idle' },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals })).toBe('box-b');
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals, preferred: new Set(['box-a']) })).toBe('box-a');
+  });
+
+  it('a signed-out preferred device does NOT jump ahead of a signed-in one', () => {
+    // Preference boosts within the health tier, not over it — a box that can't
+    // run the agent stays behind one that can, boosted or not.
+    const signals = sig({
+      'box-a': { installed: true, signedIn: false, headroom: 'idle' },
+      'box-b': { installed: true, signedIn: true, headroom: 'idle' },
+    });
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals, preferred: new Set(['box-a']) })).toBe('box-b');
+  });
+
+  it('with two preferred devices the load tiebreak still decides between them', () => {
+    const signals = sig({
+      'box-a': { headroom: 'busy' },
+      'box-b': { headroom: 'idle' },
+    });
+    // Both boosted → the boost cancels and lower load wins.
+    expect(pickBestDevice(['box-a', 'box-b'], [], { signals, preferred: new Set(['box-a', 'box-b']) })).toBe('box-b');
+  });
+
   it('load tier outranks teammate count', () => {
     // box-a is idle but already has a teammate; box-b is busy and empty.
     // Lower load (tier) wins over fewer teammates per the ranking order.

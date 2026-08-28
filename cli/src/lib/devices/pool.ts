@@ -16,12 +16,27 @@
  * | no device marked | every online device (unchanged behavior) |
  * | some marked `worker` | ONLY those workers |
  * | marked `personal` / `desktop` | never, under either state |
+ * | `auto-launch.enabled` off | never, whatever its role or the mode |
  *
- * `auto.pool all` turns the allowlist off; `personal` and `desktop` stay
+ * `auto.pool all` turns the WORKER allowlist off; `personal` and `desktop` stay
  * excluded, because a box the user sits at (personal) or a headed always-on
  * release/credential box (desktop) is marked precisely so agents stay off it.
+ *
+ * A device the operator turned off with `agents devices disable <name>`
+ * (`auto-launch.enabled` = false) is dropped here too — one operator switch,
+ * one place, so `disable` removes a box from EVERY automatic-placement path
+ * (run/teams/ssh auto), not just one surface. Its sibling
+ * `auto-launch.preferred` does not narrow the pool; it BOOSTS a member in the
+ * ranker ({@link autoLaunchPreferredSet}, applied by `pickBestDevice`).
  */
-import { autoPoolMode, listConfiguredDeviceRoles, type AutoPoolMode, type ConfiguredDeviceRole } from '../device-config.js';
+import {
+  autoPoolMode,
+  listConfiguredDeviceRoles,
+  loadAutoLaunchPreferences,
+  type AutoLaunchPreference,
+  type AutoPoolMode,
+  type ConfiguredDeviceRole,
+} from '../device-config.js';
 import { normalizeHost } from '../machine-id.js';
 
 /**
@@ -46,6 +61,14 @@ export interface AutoPoolOptions {
    * {@link listConfiguredDeviceRoles}.
    */
   roster?: string[];
+  /**
+   * Auto-launch flags by device name; defaults to the fleet-shared block for
+   * the roster (or the pool). A device whose `enabled` is `false` is dropped
+   * from the pool. Inject `{}` in a pure unit test to keep the rule off disk,
+   * exactly as `roles: {}` does for the role rule. See
+   * {@link loadAutoLaunchPreferences}.
+   */
+  autoLaunch?: Record<string, AutoLaunchPreference>;
 }
 
 /**
@@ -60,7 +83,9 @@ export function filterAutoPool(pool: string[], opts: AutoPoolOptions = {}): stri
   const roles = opts.roles ?? listConfiguredDeviceRoles(opts.roster ?? pool);
   const byHost = new Map(Object.entries(roles).map(([name, role]) => [normalizeHost(name), role]));
   const roleOf = (host: string) => byHost.get(normalizeHost(host));
+  const disabled = disabledAutoLaunchSet(pool, opts);
   const eligible = pool.filter((host) => {
+    if (disabled.has(normalizeHost(host))) return false;
     const role = roleOf(host);
     return role === undefined || !NEVER_AUTO.has(role);
   });
@@ -69,6 +94,31 @@ export function filterAutoPool(pool: string[], opts: AutoPoolOptions = {}): stri
   const anyWorkerMarked = [...byHost.values()].some((role) => role === 'worker');
   if (!anyWorkerMarked) return eligible;
   return eligible.filter((host) => roleOf(host) === 'worker');
+}
+
+/** Normalized hosts the operator turned off with `auto-launch.enabled` = false. */
+function disabledAutoLaunchSet(pool: string[], opts: AutoPoolOptions): Set<string> {
+  const prefs = opts.autoLaunch ?? loadAutoLaunchPreferences(opts.roster ?? pool);
+  return new Set(
+    Object.entries(prefs)
+      .filter(([, pref]) => pref.enabled === false)
+      .map(([name]) => normalizeHost(name)),
+  );
+}
+
+/**
+ * Normalized hosts the operator boosted with `auto-launch.preferred` = true —
+ * the set `pickBestDevice` ranks ahead of its peers. Unlike the disable drop,
+ * a preference never removes a device: an eligible non-preferred box is still
+ * picked when no preferred one is available.
+ */
+export function autoLaunchPreferredSet(pool: string[], opts: AutoPoolOptions = {}): Set<string> {
+  const prefs = opts.autoLaunch ?? loadAutoLaunchPreferences(opts.roster ?? pool);
+  return new Set(
+    Object.entries(prefs)
+      .filter(([, pref]) => pref.preferred === true)
+      .map(([name]) => normalizeHost(name)),
+  );
 }
 
 /** True when this host is one automatic placement may pick. */

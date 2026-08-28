@@ -373,7 +373,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'shared',
     type: 'bool',
     defaultValue: true,
-    description: 'Whether AGI EXT auto-launch may pick this device (default on).',
+    description: 'Whether `--device auto` (run, teams, AGI EXT) may pick this device (default on). Off drops it from every automatic-placement path.',
   },
   {
     name: 'auto-launch.preferred',
@@ -382,7 +382,7 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'shared',
     type: 'bool',
     defaultValue: false,
-    description: 'Boost this device in AGI EXT auto-launch ranking (default off).',
+    description: 'Boost this device in `--device auto` ranking (default off) — picked ahead of load-equal peers when eligible.',
   },
 ];
 
@@ -835,7 +835,11 @@ export function autoPoolMode(): AutoPoolMode {
 
 // ─── Auto-launch preferences (Factory auto-host selection) ────────────────────
 
-/** A device's auto-launch flags, as read by Factory's launch ranking. */
+/**
+ * A device's auto-launch flags, read by the automatic-placement pool
+ * (`filterAutoPool` drops `enabled: false`; `pickBestDevice` boosts
+ * `preferred: true` — see `lib/devices/pool.ts`) and by the menu-bar snapshot.
+ */
 export interface AutoLaunchPreference {
   enabled?: boolean;
   preferred?: boolean;
