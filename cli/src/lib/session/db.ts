@@ -457,7 +457,10 @@ CREATE INDEX IF NOT EXISTS idx_computer_sessions_started ON computer_sessions(st
 export const INSIGHTS_EXTRACTOR_VERSION = 7;
 /** Bump when classifyTopic's output changes so cached topics recompute (human task taxonomy v2). */
 export const SESSION_TOPIC_EXTRACTOR_VERSION = 2;
-const PREVIEW_EXTRACTOR_VERSION = 1;
+// Bumped to 2 (PHNX-2973): the digest now carries `changedFiles` (per-file
+// paths). Bumping invalidates v1 cache rows so a fresh recompute populates the
+// new field instead of serving a stale digest that predates it.
+const PREVIEW_EXTRACTOR_VERSION = 2;
 
 /** Raw row shape returned from the sessions table. */
 interface SessionRow {

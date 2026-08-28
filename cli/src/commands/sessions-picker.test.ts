@@ -14,6 +14,7 @@ import * as path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import {
   buildPreview,
+  buildSessionPreviewDigest,
   clearPreviewMemoryCacheForTest,
   clearRemoteDigestCacheForTest,
   extractTiming,
@@ -634,6 +635,46 @@ describe('sanitizeRemoteDigest — version-skew and shape defense', () => {
     expect(d!.todos).toEqual({ items: [{ content: 'step', status: 'pending', activeForm: undefined }], done: 0, total: 5, activeForm: undefined });
     // Non-http(s) URLs never become OSC 8 hyperlinks.
     expect(d!.links).toEqual([{ kind: 'other', url: 'https://github.com/a/b', label: 'a/b' }]);
+  });
+
+  it('keeps well-formed changedFiles and drops bad path/op entries (PHNX-2973)', () => {
+    const d = sanitizeRemoteDigest({
+      schemaVersion: 1,
+      changedFiles: [
+        { path: 'cli/src/a.ts', op: 'created' },
+        { path: '\x1b[31msrc/b.ts\x1b[0m', op: 'modified' },
+        { path: 'src/c.ts', op: 'nonsense' }, // bad op → dropped
+        { path: 42, op: 'deleted' },           // bad path → dropped
+        'junk',                                 // not an object → dropped
+      ],
+    });
+    expect(d).toBeDefined();
+    expect(d!.changedFiles).toEqual([
+      { path: 'cli/src/a.ts', op: 'created' },
+      { path: 'src/b.ts', op: 'modified' }, // terminal escapes scrubbed
+    ]);
+  });
+});
+
+/**
+ * PHNX-2973: the digest carries the real per-file paths it used to collapse to
+ * bare {created,modified,deleted} counts, so a consumer (the AGI EXT Fleet
+ * detail panel) can render a per-file diff list — not just the totals.
+ */
+describe('buildSessionPreviewDigest — changedFiles (PHNX-2973)', () => {
+  const tool = (name: string, filePath?: string, command?: string): SessionEvent =>
+    ({ type: 'tool_use', tool: name, path: filePath, command } as SessionEvent);
+
+  it('exposes per-file paths alongside the roll-up counts', () => {
+    const digest = buildSessionPreviewDigest(
+      [tool('Write', 'src/new.ts'), tool('Edit', 'src/existing.ts')],
+      mk({ cwd: '/repo' }),
+    );
+    expect(digest.changes).toEqual({ created: 1, modified: 1, deleted: 0 });
+    expect(digest.changedFiles).toEqual([
+      { path: 'src/new.ts', op: 'created' },
+      { path: 'src/existing.ts', op: 'modified' },
+    ]);
   });
 });
 

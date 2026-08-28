@@ -24,6 +24,7 @@ import { terminalWidth, stringWidth } from '../lib/session/width.js';
 import { itemPicker } from '../lib/picker.js';
 import { createMemoryCache } from '../lib/memory-cache.js';
 import { classifyFileChanges, changeCounts, toolHistogram, detectTestResult } from '../lib/session/digest.js';
+import type { FileChange, FileOp } from '../lib/session/digest.js';
 import {
   extractArtifacts,
   extractBackgroundShells,
@@ -283,6 +284,14 @@ export function sanitizeRemoteDigest(raw: unknown): SessionPreviewDigest | undef
     backgroundShellCount: optNum(d.backgroundShellCount),
     toolTags: strList(d.toolTags),
     changes,
+    // Per-file paths from an untrusted peer: keep only well-formed {path, op}
+    // entries (path scrubbed of terminal escapes, op a known FileOp), bounded
+    // like the local build so a hostile peer can't flood the pane.
+    changedFiles: objList<FileChange>(d.changedFiles, (f) => {
+      const path = str(f.path);
+      const op = f.op === 'created' || f.op === 'modified' || f.op === 'deleted' ? (f.op as FileOp) : undefined;
+      return path && op ? { path, op } : undefined;
+    }).slice(0, CHANGED_FILES_MAX),
     dirs: strList(d.dirs),
     repos: strList(d.repos),
     artifacts: objList(d.artifacts, (a) => {
@@ -734,6 +743,10 @@ const LAST_RESPONSE_MAX_LINES = 15;
 const LAST_RESPONSE_MAX_LINES_WITH_TODOS = 8;
 const TODOS_MAX_ITEMS = 5;
 const DIRS_TOUCHED_MAX = 5;
+// Upper bound on the per-file `changedFiles` list carried on the digest. High
+// enough to cover any real session's edits, low enough that a runaway rewrite
+// can't bloat the cached JSON. The `changes` counts stay the true totals.
+const CHANGED_FILES_MAX = 200;
 
 export interface SessionPreviewDigest {
   schemaVersion: 1;
@@ -748,6 +761,16 @@ export interface SessionPreviewDigest {
   backgroundShellCount?: number;
   toolTags: string[];
   changes: ReturnType<typeof changeCounts>;
+  /**
+   * The per-file source paths behind `changes`. `changes` keeps the roll-up
+   * counts every existing consumer already reads; `changedFiles` carries the
+   * real path + op the CLI computed at scan time (via classifyFileChanges) and
+   * used to discard — kept so a consumer that renders a per-file diff list (the
+   * AGI EXT Fleet detail panel, PHNX-2973) has the paths, not just the totals.
+   * Capped so a session that rewrote thousands of files can't bloat the cached
+   * digest / JSON payload; the `changes` counts stay the true totals.
+   */
+  changedFiles: FileChange[];
   dirs: string[];
   repos: string[];
   artifacts: ReturnType<typeof extractArtifacts>;
@@ -850,6 +873,10 @@ export function buildSessionPreviewDigest(events: SessionEvent[], session: Sessi
     backgroundShellCount,
     toolTags: [...toolTags],
     changes: chg,
+    // Full per-file list the picker used to collapse to `chg` and throw away.
+    // Bounded so a mass-rewrite session can't blow up the cached digest; the
+    // counts above remain the true totals.
+    changedFiles: changes.slice(0, CHANGED_FILES_MAX),
     dirs: directoriesTouched(session, events, changes),
     repos: extractRepos(events, session.cwd),
     artifacts: extractArtifacts(changes),
