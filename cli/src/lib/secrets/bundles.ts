@@ -245,13 +245,26 @@ export function assertReservedBundleBackend(name: string, backend: SecretsBacken
 
 /**
  * Check the reserved `auth` bundle. `ok` is true when absent or file-backed.
+ *
+ * Read-only status probe (`agents doctor`, `agents fleet apply`) — unlike the
+ * destructive-write guards `bundleExists()`/`hasKeychainToken()` document
+ * themselves as failing loud for, a diagnostic MUST NOT crash the whole
+ * command because ONE optional finding could not reach the keychain (e.g. the
+ * macOS Keychain helper source is unavailable — PHNX-3385). Treat an
+ * unreachable keychain the same as "bundle absent": nothing to warn about.
  */
 export function inspectReservedAuthBundle(): {
   exists: boolean;
   backend: SecretsBackend | null;
   ok: boolean;
 } {
-  if (!bundleExists(AUTH_BUNDLE_NAME)) {
+  let exists: boolean;
+  try {
+    exists = bundleExists(AUTH_BUNDLE_NAME);
+  } catch {
+    return { exists: false, backend: null, ok: true };
+  }
+  if (!exists) {
     return { exists: false, backend: null, ok: true };
   }
   const backend = bundleBackend(AUTH_BUNDLE_NAME);

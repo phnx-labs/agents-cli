@@ -554,17 +554,31 @@ async function syncMintedBundles(accountName: string, device: string): Promise<F
   }
 }
 
-/** True when a Claude setup-token is already seeded on this box (setup status). */
+/**
+ * True when a Claude setup-token is already seeded on this box (setup status).
+ *
+ * Read-only status probe (`agents setup`, `agents doctor`) — the reserved
+ * auth-bundle check below MUST NOT crash the whole command because the
+ * keychain could not be reached (e.g. the macOS Keychain helper source is
+ * unavailable — PHNX-3385); `bundleExists()`/`hasKeychainToken()` document
+ * themselves as failing loud, but that contract is for destructive-write
+ * guards, not a diagnostic. An unreachable keychain here just means "cannot
+ * confirm the reserved bundle," reported honestly rather than propagated.
+ */
 export function hasMintedSetupToken(): { ready: boolean; detail: string } {
   const records = Object.values(readAccountRegistry().accounts);
   const setup = records.filter((a) => a.auth === 'setup-token' && a.provider === 'anthropic');
   if (setup.length) {
     return { ready: true, detail: `${setup.length} Claude setup-token account${setup.length === 1 ? '' : 's'}` };
   }
-  if (bundleExists(AUTH_BUNDLE) && bundleBackend(AUTH_BUNDLE) === 'file') {
-    const bundle = readBundle(AUTH_BUNDLE);
-    const keys = Object.keys(bundle.vars).filter((k) => k.startsWith('CLAUDE_CODE_OAUTH_TOKEN_'));
-    if (keys.length) return { ready: true, detail: `reserved auth bundle (${keys.length} account key${keys.length === 1 ? '' : 's'})` };
+  try {
+    if (bundleExists(AUTH_BUNDLE) && bundleBackend(AUTH_BUNDLE) === 'file') {
+      const bundle = readBundle(AUTH_BUNDLE);
+      const keys = Object.keys(bundle.vars).filter((k) => k.startsWith('CLAUDE_CODE_OAUTH_TOKEN_'));
+      if (keys.length) return { ready: true, detail: `reserved auth bundle (${keys.length} account key${keys.length === 1 ? '' : 's'})` };
+    }
+  } catch (err) {
+    return { ready: false, detail: `could not check the reserved auth bundle: ${(err as Error).message}` };
   }
   return { ready: false, detail: 'no Claude setup-token minted — agents accounts mint claude' };
 }
