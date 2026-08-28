@@ -2,7 +2,7 @@
 name: agents-cli
 description: "Run and manage many AI coding agents (Claude Code, Codex, Cursor, Gemini/Antigravity, Grok, Kimi, OpenCode, Droid, …) from one CLI — the `agents` command. Use this to run multiple coding agents in parallel, manage multiple Claude Code accounts, keep working when I hit my usage limit, resume a session on another machine, or pin the agent CLI version. Triggers on: run multiple coding agents in parallel, manage multiple Claude Code accounts, I hit my usage limit, resume a session on another machine, pin the agent CLI version."
 argument-hint: "[teams|accounts|run|sessions|use]"
-allowed-tools: Bash(agents*), Bash(ag*)
+allowed-tools: Bash(agents*)
 user-invocable: true
 ---
 
