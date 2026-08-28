@@ -20,7 +20,7 @@ import {
   startDaemon,
 } from '../lib/daemon/daemon.js';
 import { findDuplicateMonitor, monitorFingerprint } from '../lib/monitors/fingerprint.js';
-import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV } from '../lib/monitors/remote.js';
+import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV, type RemoteMonitor, type RemoteMonitorDisplay } from '../lib/monitors/remote.js';
 import {
   listMonitors,
   readMonitor,
@@ -126,6 +126,66 @@ function ownerLabel(monitor: MonitorConfig): string {
   if (monitor.device) return monitor.device;
   if (monitor.devices && monitor.devices.length > 0) return monitor.devices.join(',');
   return 'all';
+}
+
+/** The `(built-in)` tag for a system-layer monitor, mirroring routines' list. */
+function builtinTag(monitor: Pick<MonitorConfig, 'scope'>): string {
+  return monitor.scope === 'system' ? chalk.gray(' (built-in)') : '';
+}
+
+/**
+ * A one-line liveness note for a monitor living on a PEER, reconstructed from the
+ * `--json` fields that box reported (it computes the colorized local label, which
+ * doesn't cross the wire). Deliberately terse — the owning box's `monitors view`
+ * has the full detail.
+ */
+function remoteLivenessNote(d?: RemoteMonitorDisplay): string {
+  if (!d) return chalk.gray('—');
+  if (d.enabled === false) return chalk.gray('paused');
+  if (d.stalled) return chalk.red('STALLED');
+  if (d.lastActionFailed) return chalk.red('ACTION FAILED');
+  if (d.lastFiredAt) return chalk.green(`fired ${formatRelativeTime(d.lastFiredAt)}`);
+  if (typeof d.checkCount === 'number' && d.checkCount > 0) return chalk.gray(`checked ${d.checkCount}x`);
+  if (d.lastCheckedAt) return chalk.gray(`checked ${formatRelativeTime(d.lastCheckedAt)}`);
+  return chalk.yellow('never polled');
+}
+
+/**
+ * Print a stderr note when the fleet fan-out couldn't consult every box, so a
+ * partial listing never silently reads as "these are all the monitors there are".
+ */
+function fleetReachNote(fleet: { discoveryFailed: boolean; skipped: string[] }): void {
+  if (fleet.discoveryFailed) {
+    stderrLine(chalk.yellow('  Note: could not reach the device registry — the fleet was not checked, only this device is shown.'));
+  } else if (fleet.skipped.length > 0) {
+    stderrLine(chalk.yellow(`  Note: could not reach ${fleet.skipped.length} device(s): ${fleet.skipped.join(', ')} — their monitors are not shown.`));
+  }
+}
+
+/** A remote monitor rendered into the same `--json` row shape as a local one. */
+function remoteMonitorJsonRow(r: RemoteMonitor): Record<string, unknown> {
+  const d = r.display;
+  return {
+    machine: r.machine,
+    name: r.monitor.name,
+    enabled: d?.enabled ?? null,
+    source: r.monitor.source,
+    condition: r.monitor.condition,
+    action: r.monitor.action,
+    owner: d?.owner ?? null,
+    scope: d?.scope ?? null,
+    builtin: d?.scope === 'system',
+    runsHere: false,
+    lastSeenAt: null,
+    lastFiredAt: d?.lastFiredAt ?? null,
+    lastCheckedAt: d?.lastCheckedAt ?? null,
+    checkCount: d?.checkCount ?? 0,
+    lastError: null,
+    consecutiveErrors: 0,
+    stalled: d?.stalled ?? false,
+    lastActionStatus: null,
+    lastActionFailed: d?.lastActionFailed ?? false,
+  };
 }
 
 /** A monitor's evaluation cadence in ms (falls back to the engine default). */
@@ -688,17 +748,39 @@ export function registerMonitorsCommands(program: Command): void {
   // ─── list ────────────────────────────────────────────────────────────────────
   monitorsCmd
     .command('list')
-    .description('See all monitors: source, condition, action, owner, and last fire.')
+    .description('See all monitors across the fleet: source, condition, action, owner, last fire, and the box each lives on.')
     .option('--json', 'Emit machine-readable JSON')
-    .action((options: { json?: boolean }) => {
+    .option('--local', 'This device only — skip the fleet fan-out')
+    .action(async (options: { json?: boolean; local?: boolean }) => {
+      const self = machineId();
       const monitors = listMonitors();
+      // A peer answering the fan-out (NO_MONITOR_FANOUT_ENV set) reports its own
+      // box only, so the parent's gather is a flat union and never recurses. The
+      // duplicate guard reads exactly this bare local array, so its shape must not
+      // change when the env is set. `--local` is the same opt-out for a human.
+      const peerMode = !!process.env[NO_MONITOR_FANOUT_ENV];
+      const localOnly = peerMode || options.local === true;
+
+      let fleet: Awaited<ReturnType<typeof gatherFleetMonitors>> | null = null;
+      if (!localOnly) {
+        // Same cross-machine fan-out `sessions --active` and the add-time guard
+        // use — visibility, not git-sync (PHNX-2506 item 3). Never throws; an
+        // unreachable fleet degrades to an empty remote set plus skipped names.
+        fleet = await gatherFleetMonitors();
+      }
+      // Peers may echo this box's own monitors back (a synced mirror, or the box
+      // resolving its own name); drop anything on `self` so local rows aren't
+      // double-listed.
+      const remote = (fleet?.monitors ?? []).filter((r) => normalizeHost(r.machine) !== self);
+
       if (options.json) {
-        const payload = monitors.map((m) => {
+        const localRows = monitors.map((m) => {
           const state = readState(m.name);
           const liveness = readLiveness(m.name);
           const latestFire = listFires(m.name).at(-1);
           const latestOutcome = latestFire ? resolveFireOutcome(m.name, latestFire) : null;
           return {
+            machine: self,
             name: m.name,
             enabled: m.enabled,
             source: m.source,
@@ -709,6 +791,11 @@ export function registerMonitorsCommands(program: Command): void {
             // exactly the case it exists for. `source` already ships whole.
             action: m.action,
             owner: ownerLabel(m),
+            // `scope`/`builtin` (PHNX-2506 item 2): where the monitor came from,
+            // so "is this a shipped built-in?" is answerable without knowing the
+            // system mirror exists. Peers read `scope` off this field.
+            scope: m.scope ?? 'user',
+            builtin: m.scope === 'system',
             runsHere: monitorRunsOnThisDevice(m),
             lastSeenAt: state?.lastSeenAt ?? null,
             lastFiredAt: state?.lastFiredAt ?? null,
@@ -723,24 +810,47 @@ export function registerMonitorsCommands(program: Command): void {
             lastActionFailed: latestOutcome ? !latestOutcome.ok : false,
           };
         });
-        stdoutJson(payload);
+        stdoutJson([...localRows, ...remote.map(remoteMonitorJsonRow)]);
         return;
       }
-      if (monitors.length === 0) {
+
+      if (monitors.length === 0 && remote.length === 0) {
         console.log(chalk.gray('No monitors configured'));
         console.log(chalk.gray('  Add one: agents monitors add <name> --poll "<cmd>" 30s --match fail --run claude --prompt "..."'));
+        if (fleet && (fleet.discoveryFailed || fleet.skipped.length > 0)) fleetReachNote(fleet);
         return;
       }
+
       console.log(chalk.bold('Monitors\n'));
-      for (const m of monitors) {
-        const state = readState(m.name);
-        const liveness = readLiveness(m.name);
-        const enabled = m.enabled ? chalk.green('on') : chalk.gray('off');
-        const here = monitorRunsOnThisDevice(m);
-        const owner = here ? ownerLabel(m) : chalk.gray(ownerLabel(m));
-        console.log(`  ${chalk.cyan(m.name.padEnd(22))} ${enabled.padEnd(3)} ${sourceLabel(m.source)}`);
-        console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${owner}`)}  ${livenessLabel(m, state, liveness)}`);
+      // This box first — it has full liveness detail.
+      if (monitors.length > 0) {
+        if (remote.length > 0) console.log(chalk.gray(`  ${self} (this device)`));
+        for (const m of monitors) {
+          const state = readState(m.name);
+          const liveness = readLiveness(m.name);
+          const enabled = m.enabled ? chalk.green('on') : chalk.gray('off');
+          const here = monitorRunsOnThisDevice(m);
+          const owner = here ? ownerLabel(m) : chalk.gray(ownerLabel(m));
+          console.log(`  ${chalk.cyan(m.name.padEnd(22))} ${enabled.padEnd(3)} ${sourceLabel(m.source)}${builtinTag(m)}`);
+          console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${owner}`)}  ${livenessLabel(m, state, liveness)}`);
+        }
       }
+      // Then each peer's monitors, grouped by the box they live on.
+      const byMachine = new Map<string, RemoteMonitor[]>();
+      for (const r of remote) {
+        const key = r.machine;
+        (byMachine.get(key) ?? byMachine.set(key, []).get(key)!).push(r);
+      }
+      for (const machine of [...byMachine.keys()].sort()) {
+        console.log(chalk.gray(`\n  ${machine}`));
+        for (const r of byMachine.get(machine)!) {
+          const m = r.monitor;
+          const enabled = r.display?.enabled === false ? chalk.gray('off') : chalk.green('on');
+          console.log(`  ${chalk.cyan(m.name.padEnd(22))} ${enabled.padEnd(3)} ${sourceLabel(m.source)}${builtinTag({ scope: r.display?.scope })}`);
+          console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${r.display?.owner ?? machine}`)}  ${remoteLivenessNote(r.display)}`);
+        }
+      }
+      if (fleet && (fleet.discoveryFailed || fleet.skipped.length > 0)) fleetReachNote(fleet);
       console.log();
     });
 

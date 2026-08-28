@@ -33,6 +33,49 @@ describe('parseRemoteMonitors', () => {
     expect(out[0].monitor.name).toBe('land-2517');
   });
 
+  it('captures the peer display view (enabled/owner/scope/liveness) for `list`', () => {
+    // PHNX-2506 item 3: the fleet-aware list shows every peer's monitors with
+    // enough to render them — not just the fingerprint identity.
+    const row = watcher({
+      name: 'pr-merge-on-green',
+      enabled: false,
+      owner: 'mac-mini',
+      scope: 'system',
+      stalled: true,
+      checkCount: 42,
+      lastCheckedAt: '2026-08-28T00:00:00.000Z',
+      lastFiredAt: '2026-08-27T00:00:00.000Z',
+      lastActionFailed: true,
+    });
+    const [out] = parseRemoteMonitors(JSON.stringify([row]), 'mac-mini');
+    expect(out.display).toEqual({
+      enabled: false,
+      owner: 'mac-mini',
+      scope: 'system',
+      stalled: true,
+      checkCount: 42,
+      lastCheckedAt: '2026-08-28T00:00:00.000Z',
+      lastFiredAt: '2026-08-27T00:00:00.000Z',
+      lastActionFailed: true,
+    });
+  });
+
+  it('a version-skewed peer that omits the display fields degrades to undefined, not garbage', () => {
+    // Older CLI emits only identity — the display view must be all-undefined, and
+    // an invalid scope value is dropped rather than trusted.
+    const [out] = parseRemoteMonitors(JSON.stringify([watcher({ scope: 'bogus' })]), 'zion');
+    expect(out.display).toEqual({
+      enabled: undefined,
+      owner: undefined,
+      scope: undefined,
+      stalled: undefined,
+      checkCount: undefined,
+      lastCheckedAt: undefined,
+      lastFiredAt: undefined,
+      lastActionFailed: undefined,
+    });
+  });
+
   it('returns [] for non-JSON from a version-skewed peer instead of throwing', () => {
     expect(parseRemoteMonitors('error: unknown command', 'zion')).toEqual([]);
     expect(parseRemoteMonitors('', 'zion')).toEqual([]);
