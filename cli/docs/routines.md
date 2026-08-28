@@ -1297,7 +1297,14 @@ the reliability plan makes each its own terminal run so it shows up in
   untrusted Codex workspace, a missing anchor/cwd), so the body never ran. Distinct
   from `failed`, where the body ran and errored: a routine that never launched because
   its account was dead is a different problem from one that threw mid-run, and
-  collapsing them hides which one you have.
+  collapsing them hides which one you have. For the **signed-out** case specifically
+  (PHNX-3415), the daemon preflights the rotation-resolved account against the
+  auth-health cache and records `blocked`/`agent_auth_failed` — with the exact
+  `agents run <agent>@<v> -- login` repair — when it is `revoked` or `unconfigured`,
+  instead of spawning a run that 401s and lands as `failed`. The fire-time check is
+  cache-only (a live smoke on every fire would risk a 429 storm) and fails **open** on
+  any still-usable or indeterminate verdict, so a stale probe never wedges a routine
+  (RT-12).
 - **`skipped`** — the routine was **already running** when its next slot arrived
   (self-overlap). Rather than launch a second concurrent instance, the new occurrence
   records a `skipped` run linked to the still-active run.
