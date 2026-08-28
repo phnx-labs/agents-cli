@@ -214,20 +214,22 @@ export async function runSessionIndexWarmTick(): Promise<{ indexed: number; clai
 }
 
 /**
- * Deferred tool-index pass for non-claude/codex harnesses (PHNX-3411).
+ * Deferred tool-index pass for large-transcript harnesses (PHNX-3411).
  *
- * Harnesses whose warm-tick scanners produce no events (Kimi, Grok, OpenCode,
- * etc.) skip parseSession in upsertSessionsBatch to avoid wedging the daemon
- * event loop on large active transcripts. This pass fills the gap: it queries
- * recently-active non-claude/codex sessions and calls ensureToolIndex, which
- * uses tool_scan_ledger stamps to skip already-current sessions and applies
- * byte/file budget caps so no single large transcript can monopolise the tick.
+ * Kimi (wire.jsonl) and Grok (chat_history.jsonl) scanners produce only
+ * metadata — no events. Calling parseSession for those on the warm tick wedges
+ * the Node event loop when the transcript is large and active (observed: several
+ * seconds per tick on zion, causing browser IPC ECONNREFUSED). This pass fills
+ * the gap: it queries recently-active kimi/grok sessions and calls
+ * ensureToolIndex, which uses tool_scan_ledger stamps to skip already-current
+ * sessions and applies byte/file budget caps so no large transcript monopolises
+ * the tick.
  */
 export async function runDeferredToolIndex(): Promise<{ indexed: number }> {
   const { querySessionsForDeferredToolIndex } = await import('./session/db.js');
   const { ensureToolIndex } = await import('./session/tool-index.js');
-  // Feed the 200 most-recently-active sessions; ensureToolIndex skips any whose
-  // tool_scan_ledger stamp is current, so only genuinely stale ones pay parse cost.
+  // Feed the 200 most-recently-active kimi/grok sessions; ensureToolIndex skips
+  // any whose tool_scan_ledger stamp is current.
   const sessions = querySessionsForDeferredToolIndex(200);
   if (sessions.length === 0) return { indexed: 0 };
   const coverage = await ensureToolIndex(sessions, {
