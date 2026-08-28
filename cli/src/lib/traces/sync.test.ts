@@ -746,8 +746,11 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
 
 // PHNX-3457: the duration median/p90 run over ACTIVE time (span − idle gaps > 120s),
 // not raw span, so a session resumed after hours or left idle mid-turn doesn't
-// inflate them (real corpus max span: 345h). Raw span is kept as spanMedianMs/spanP90Ms.
+// inflate them (real corpus max span: 345h). Raw span stays per-session on
+// SessionDetail.meta.spanMs; the index stats keep the same medianMs/p90Ms keys.
 describe('active-time duration stats (PHNX-3457)', () => {
+  const IDS = ['dur-idle', 'dur-busy', 'dur-abandoned', 'dur-nocalls'];
+
   function durRow(rowId: string, durationMs: number, extra: Partial<SyncRow> = {}): SyncRow {
     return {
       id: rowId, short_id: rowId.slice(0, 8), agent: 'rush', origin: 'cli', routine_name: null,
@@ -762,63 +765,61 @@ describe('active-time duration stats (PHNX-3457)', () => {
     };
   }
 
+  function insertCall(sid: string, ordinal: number, ts: string, endTs: string | null) {
+    getDB().prepare(`
+      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, 'Bash', '{}', 'ok', 0, null, 0)
+    `).run(`${sid}-${ordinal}`, sid, ordinal, ts, endTs);
+  }
+
   beforeEach(() => {
     const db = getDB();
-    for (const rid of ['dur-idle', 'dur-busy']) {
+    for (const rid of IDS) {
       db.prepare('DELETE FROM tool_calls WHERE session_id = ?').run(rid);
       db.prepare('DELETE FROM session_topics WHERE session_id = ?').run(rid);
       db.prepare('DELETE FROM session_phenotypes WHERE session_id = ?').run(rid);
     }
   });
 
-  it('strips idle gaps from the duration median while keeping raw span alongside', () => {
-    const db = getDB();
-    const insertCall = db.prepare(`
-      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
-      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
-    `);
-    // One session with a 400s idle gap between two tool calls: active = span − 400s.
-    insertCall.run('idle-1', 'dur-idle', 1, '2026-08-25T00:00:00.000Z', null, 'Bash', 'ok', 0, null);
-    insertCall.run('idle-2', 'dur-idle', 2, '2026-08-25T00:06:40.000Z', null, 'Bash', 'ok', 0, null);
-
+  it('strips an idle gap between two tool calls from the duration median', () => {
+    // c1 at 00:00 (span start, no front idle); a 400s idle gap; c2 blocks 06:40→10:00
+    // so its end == span end and there is no trailing idle. active = 600000 − 400000.
+    insertCall('dur-idle', 1, '2026-08-25T00:00:00.000Z', null);
+    insertCall('dur-idle', 2, '2026-08-25T00:06:40.000Z', '2026-08-25T00:10:00.000Z');
     const shard = buildIndexShard([durRow('dur-idle', 600_000)], 'test-device', 'owner-1');
-    // span 600000 − idle 400000 = active 200000.
     expect(shard.stats.medianMs).toBe(200_000);
     expect(shard.stats.p90Ms).toBe(200_000);
-    // Raw span is preserved unchanged.
-    expect(shard.stats.spanMedianMs).toBe(600_000);
-    expect(shard.stats.spanP90Ms).toBe(600_000);
   });
 
-  it('leaves a busy session (no gap > 120s) with active == span', () => {
-    const db = getDB();
-    const insertCall = db.prepare(`
-      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
-      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
-    `);
-    // Two calls 30s apart — under the 120s idle threshold, so nothing is stripped.
-    insertCall.run('busy-1', 'dur-busy', 1, '2026-08-25T00:00:00.000Z', null, 'Bash', 'ok', 0, null);
-    insertCall.run('busy-2', 'dur-busy', 2, '2026-08-25T00:00:30.000Z', null, 'Bash', 'ok', 0, null);
-
+  it('leaves a busy session (no gap > 120s, last call ends at span end) with active == span', () => {
+    insertCall('dur-busy', 1, '2026-08-25T00:00:00.000Z', null);
+    insertCall('dur-busy', 2, '2026-08-25T00:00:30.000Z', '2026-08-25T00:03:20.000Z'); // ends at span end
     const shard = buildIndexShard([durRow('dur-busy', 200_000)], 'test-device', 'owner-1');
     expect(shard.stats.medianMs).toBe(200_000);
-    expect(shard.stats.spanMedianMs).toBe(200_000);
   });
 
-  it('measures the idle gap from a call END when end_timestamp is known', () => {
-    const db = getDB();
-    const insertCall = db.prepare(`
-      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
-      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
-    `);
-    // call 1 runs 00:00 → 00:05 (a 5m blocking call, not idle); the gap to call 2 at
-    // 00:08 is only 3m of idle measured from the END, not 8m from the START.
-    insertCall.run('end-1', 'dur-idle', 1, '2026-08-25T00:00:00.000Z', '2026-08-25T00:05:00.000Z', 'Bash', 'ok', 0, null);
-    insertCall.run('end-2', 'dur-idle', 2, '2026-08-25T00:08:00.000Z', null, 'Bash', 'ok', 0, null);
-
+  it('measures an idle gap from a call END, not its start, when end_timestamp is known', () => {
+    // c1 blocks 00:00→05:00 (work, not idle); idle to c2 at 08:00 is 3m from the END,
+    // not 8m from the start; c2 blocks 08:00→10:00 (= span end, no trailing idle).
+    insertCall('dur-idle', 1, '2026-08-25T00:00:00.000Z', '2026-08-25T00:05:00.000Z');
+    insertCall('dur-idle', 2, '2026-08-25T00:08:00.000Z', '2026-08-25T00:10:00.000Z');
     const shard = buildIndexShard([durRow('dur-idle', 600_000)], 'test-device', 'owner-1');
     // idle = 08:00 − 05:00 = 180000; active = 600000 − 180000 = 420000.
     expect(shard.stats.medianMs).toBe(420_000);
+  });
+
+  it('strips TRAILING idle: a lone call then a 10h abandonment (the case a between-calls-only measure missed)', () => {
+    // One 30s-in tool call, then the session sat open for 10h before its last event.
+    insertCall('dur-abandoned', 1, '2026-08-25T00:00:30.000Z', '2026-08-25T00:00:30.000Z');
+    const tenHours = 10 * 60 * 60_000;
+    const shard = buildIndexShard([durRow('dur-abandoned', tenHours)], 'test-device', 'owner-1');
+    // Everything after the lone call's end is idle → active is just the 30s before it.
+    expect(shard.stats.medianMs).toBe(30_000);
+  });
+
+  it('returns the full span for a session with NO tool calls (never a fabricated zero)', () => {
+    const shard = buildIndexShard([durRow('dur-nocalls', 600_000)], 'test-device', 'owner-1');
+    expect(shard.stats.medianMs).toBe(600_000);
   });
 });
 

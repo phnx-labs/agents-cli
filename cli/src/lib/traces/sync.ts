@@ -306,14 +306,16 @@ export interface TracesIndexShard {
   owner: string;
   stats: {
     sessionsImported: number;
-    /** Median ACTIVE duration (span − idle gaps > 120s), ms — the meaningful figure (PHNX-3457). */
+    /**
+     * Median ACTIVE duration (span − idle gaps > 120s), ms — the meaningful figure
+     * (PHNX-3457). Same key/shape as before this change, so the fleet-aggregate
+     * worker (`worker-template.ts`) keeps weighted-averaging it unchanged; only its
+     * VALUE moved from raw span to active time. The raw span stays available per
+     * session on `SessionDetail.meta.spanMs`.
+     */
     medianMs: number;
     /** p90 ACTIVE duration, ms. */
     p90Ms: number;
-    /** Median raw wall-clock span, ms — idle time included; kept alongside the active figure. */
-    spanMedianMs: number;
-    /** p90 raw wall-clock span, ms. */
-    spanP90Ms: number;
     needAttention: number;
     toolErrorRate: number;
   };
@@ -405,26 +407,50 @@ const TOPIC_SESSION_CAP = 30;
 
 /**
  * Active time for a session in the index shard: its recorded span minus every idle
- * gap between consecutive tool calls (PHNX-3457). The index build already holds the
- * ordered `tool_calls` rows for the whole corpus, so idle gaps are derived from
- * them here — no transcript re-parse — measuring each gap from a call's END (its
- * own `end_timestamp` when known, else its start) to the next call's start, so a
- * call's own duration is never mistaken for idle. Bounded to `[0, spanMs]`: calls
- * whose timestamps fall outside the recorded span can't drive active negative or
- * above the span.
+ * gap > 120s (PHNX-3457). The index build already holds the ordered `tool_calls`
+ * rows for the whole corpus, so idle is derived from them here — no transcript
+ * re-parse. A cursor sweeps the span from `sessionStartMs`: each stretch where the
+ * cursor sits idle for more than the threshold before the next call starts is
+ * subtracted, and idle is measured from a call's END (its own `end_timestamp` when
+ * known, else its start) so a call's own blocking duration is never mistaken for
+ * idle. Crucially the sweep also books the gaps at the two BOUNDARIES — before the
+ * first call and after the last call to the session end — so a session with a lone
+ * tool call that was then abandoned and resumed hours later (the case a
+ * between-calls-only measure missed entirely, leaving the whole 345h span counted
+ * as active) has that trailing idle stripped. A session end is `sessionStartMs +
+ * spanMs`, so the two agree by construction.
+ *
+ * Bounded to `[0, spanMs]`. A session with NO tool calls returns the full span
+ * unchanged rather than a fabricated zero: there is no tool-call evidence of idle
+ * either way, and treating a chat-only turn as 100% idle would be a worse error
+ * than leaving its span uncorrected. Where the full event stream IS available (a
+ * per-session `SessionDetail`), {@link activeMsFromTrajectory} is used instead —
+ * it sees message events this call-only approximation cannot, so the two are close
+ * but not identical by design (the corpus-scale index build cannot afford the
+ * per-session parse the detail view does).
  */
-export function sessionActiveMs(spanMs: number, sessionCalls: ToolCallRow[]): number {
+export function sessionActiveMs(
+  spanMs: number,
+  sessionCalls: ToolCallRow[],
+  sessionStartMs: number,
+): number {
   if (spanMs <= 0) return Math.max(0, spanMs);
-  const ordered = [...sessionCalls].sort((a, b) => a.ordinal - b.ordinal);
+  if (!Number.isFinite(sessionStartMs)) return spanMs; // can't place calls on the span
+  const spanEndMs = sessionStartMs + spanMs;
+  const ordered = sessionCalls
+    .map((c) => ({ startMs: Date.parse(c.timestamp), endMs: Date.parse(c.end_timestamp ?? c.timestamp) }))
+    .filter((c) => Number.isFinite(c.startMs))
+    .sort((a, b) => a.startMs - b.startMs);
+  if (ordered.length === 0) return spanMs; // no tool-call evidence of idle
   let idleMs = 0;
-  for (let i = 1; i < ordered.length; i++) {
-    const prev = ordered[i - 1];
-    const prevEndMs = Date.parse(prev.end_timestamp ?? prev.timestamp);
-    const nextStartMs = Date.parse(ordered[i].timestamp);
-    if (!Number.isFinite(prevEndMs) || !Number.isFinite(nextStartMs)) continue;
-    const gap = nextStartMs - prevEndMs;
-    if (gap > IDLE_GAP_THRESHOLD_MS) idleMs += gap;
+  let cursor = sessionStartMs;
+  for (const call of ordered) {
+    if (call.startMs > cursor + IDLE_GAP_THRESHOLD_MS) idleMs += call.startMs - cursor;
+    const endMs = Number.isFinite(call.endMs) ? Math.max(call.endMs, call.startMs) : call.startMs;
+    if (endMs > cursor) cursor = endMs;
   }
+  // Trailing idle: the stretch from the last call's end to the session's end.
+  if (spanEndMs > cursor + IDLE_GAP_THRESHOLD_MS) idleMs += spanEndMs - cursor;
   return Math.max(0, spanMs - Math.min(idleMs, spanMs));
 }
 
@@ -654,10 +680,11 @@ export function buildIndexShard(
   // gaps > 120s, derived per session from the tool_calls already loaded above. A
   // session resumed after hours, or left idle mid-turn, otherwise inflates the
   // median/p90 with wall-clock the agent did no work in (real corpus max span:
-  // 345h). Raw span is kept alongside as spanMedianMs/spanP90Ms.
-  const spans = rows.flatMap((row) => row.duration_ms == null ? [] : [row.duration_ms]);
+  // 345h). The raw span stays available per session on `SessionDetail.meta.spanMs`.
   const activeDurations = rows.flatMap((row) =>
-    row.duration_ms == null ? [] : [sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [])],
+    row.duration_ms == null
+      ? []
+      : [sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [], Date.parse(row.timestamp))],
   );
 
   // Build today's per-bucket stats for the rolling drift window.
@@ -692,8 +719,6 @@ export function buildIndexShard(
       sessionsImported: rows.length,
       medianMs: percentile(activeDurations, 0.5),
       p90Ms: percentile(activeDurations, 0.9),
-      spanMedianMs: percentile(spans, 0.5),
-      spanP90Ms: percentile(spans, 0.9),
       needAttention: needsAttention.length,
       toolErrorRate: calls.length === 0 ? 0 : failedCalls.length / calls.length,
     },

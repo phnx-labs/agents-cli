@@ -75,9 +75,10 @@ spanMs/**activeMs**/turns/tools/errorCount/tokens/cost/outcome/repo — plus a p
 `whereItWentWrong`, the shape the Phoenix Evals console consumes directly), and a
 rich per-device `index.json`. `activeMs` is `spanMs` minus every idle gap > 120s
 (PHNX-3457) so a session resumed after hours, or left idle mid-turn, reads as
-effort rather than calendar span. The index contains duration/error statistics —
-`medianMs`/`p90Ms` are the ACTIVE-time percentiles (the meaningful figure), with the
-raw wall-clock span kept alongside as `spanMedianMs`/`spanP90Ms`; every harness now
+effort rather than calendar span (the raw span stays available per session as
+`SessionDetail.meta.spanMs`). The index contains duration/error statistics —
+`medianMs`/`p90Ms` are now the ACTIVE-time percentiles (same keys, new value; the
+fleet-aggregate worker keeps weighted-averaging them unchanged); every harness now
 carries a non-null span (`resolveDurationMs` in `session/db.ts` derives it at upsert
 for rush/grok/kimi/cursor/muse/antigravity, which previously left `duration_ms` NULL) —
 ranked attention flags, metadata/tool-mix topic buckets — the human task taxonomy the
