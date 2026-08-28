@@ -41,8 +41,8 @@ surface on 2026-08-28:
 | `feedback` | keep as root leaf | ✅ | still a 0-child leaf, unchanged |
 | `harness` | drop `login`/`logout`, no `create` | ✅ | 7 verbs: `add edit fork list remove rename view`; no `create` added |
 
-Surface delta since this plan was written: **76 → 69 top-level groups** (570 commands);
-42 names now sit in `RETIRED_TOP_LEVEL_COMMANDS`. This plan rode on top of the larger
+Surface delta since this plan was written: **76 → 67 top-level groups** (548 commands);
+30 names now sit in `RETIRED_TOP_LEVEL_COMMANDS`. This plan rode on top of the larger
 `cli-surface-consolidate` wave (RUSH-2579/2580/2581/2692/2864/2932/2984/2989/3001/3079),
 all merged.
 

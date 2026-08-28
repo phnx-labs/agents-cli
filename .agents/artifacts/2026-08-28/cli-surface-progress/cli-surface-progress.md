@@ -41,19 +41,19 @@ command"* instead of silently auto-correcting `apply` → `add` — is the whole
 ## The surface, before and after
 
 <figure class="artifact-figure artifact-figure-wide">
-  <svg viewBox="0 0 900 220" role="img" aria-label="Top-level group count fell from 76 to 69 while total command count held flat">
+  <svg viewBox="0 0 900 220" role="img" aria-label="Top-level group count fell from 76 to 67 while total command count held roughly flat">
     <text x="20" y="28" fill="#c8c8c8" font-family="Inter, system-ui, sans-serif" font-size="14">Top-level groups shrank; behavior did not — retired verbs moved under their noun, they were not deleted.</text>
     <rect x="40" y="60" width="360" height="52" rx="6" fill="#16120a" stroke="#f59e0b" stroke-width="1.5"/>
     <text x="56" y="92" fill="#f59e0b" font-family="JetBrains Mono, monospace" font-size="16">76 groups · 564 commands</text>
     <text x="56" y="130" fill="#8a8a8a" font-family="Inter, system-ui, sans-serif" font-size="12">2026-08-20 — as measured in the leftovers plan</text>
     <text x="430" y="92" fill="#c8c8c8" font-family="JetBrains Mono, monospace" font-size="18">→</text>
     <rect x="470" y="60" width="360" height="52" rx="6" fill="#0e1a12" stroke="#22c55e" stroke-width="1.5"/>
-    <text x="486" y="92" fill="#22c55e" font-family="JetBrains Mono, monospace" font-size="16">69 groups · 570 commands</text>
+    <text x="486" y="92" fill="#22c55e" font-family="JetBrains Mono, monospace" font-size="16">67 groups · 548 commands</text>
     <text x="486" y="130" fill="#8a8a8a" font-family="Inter, system-ui, sans-serif" font-size="12">2026-08-28 — live in installed 1.22.54</text>
-    <text x="40" y="180" fill="#8a8a8a" font-family="Inter, system-ui, sans-serif" font-size="12">42 names now sit in RETIRED_TOP_LEVEL_COMMANDS. The command total is flat because a retired root</text>
+    <text x="40" y="180" fill="#8a8a8a" font-family="Inter, system-ui, sans-serif" font-size="12">30 names now sit in RETIRED_TOP_LEVEL_COMMANDS. The command total is roughly flat because a retired root</text>
     <text x="40" y="200" fill="#8a8a8a" font-family="Inter, system-ui, sans-serif" font-size="12">(e.g. `apply`) re-homes to a nested address (`devices apply`) — the sidebar shrinks, the capability stays.</text>
   </svg>
-  <figcaption><b>Figure 1.</b> 7 groups off the root since the leftovers plan was written; the growing <code>RETIRED_TOP_LEVEL_COMMANDS</code> set is the accumulated result of the whole arc.</figcaption>
+  <figcaption><b>Figure 1.</b> 9 groups off the root since the leftovers plan was written; the growing <code>RETIRED_TOP_LEVEL_COMMANDS</code> set is the accumulated result of the whole arc.</figcaption>
 </figure>
 
 ## RUSH-2981 leftovers plan — four verdicts, all shipped
@@ -137,14 +137,14 @@ plan text:
   login/logout` (RUSH-2981), authored 2026-08-21, touches `apply.ts`, `beta.ts`,
   `harness.ts`, `setup.ts`, `command-registry.ts`, docs, and tests.
 - **Retired set:** `RETIRED_TOP_LEVEL_COMMANDS` in
-  `cli/src/lib/startup/command-registry.ts` contains 42 names including `apply`,
+  `cli/src/lib/startup/command-registry.ts` contains 30 names including `apply`,
   `beta`, `usage`, `org`, `login`, `logout`, `set`, `share`, `timeline`,
   `status`, `tickets`, `alias`, `inbox`, `unshare`, `audit`, `trends`, `serve`.
 - **Live surface (installed 1.22.54):** `harness` = `add edit fork list remove
   rename view` (no login/logout); `setup` includes `beta` and `alias`;
   `feedback` is a 0-child leaf; `devices` includes `apply`. Top-level `apply` /
   `beta` resolve to unknown command.
-- **Counts:** `cli/docs/command-index.json` → 69 groups / 570 commands (was
+- **Counts:** `cli/docs/command-index.json` → 67 groups / 548 commands (was
   76 / 564 in the 2026-08-20 plan).
 - **Wave commits:** `9cb7eb25d` (RUSH-3079 usage), `0882c3644` (RUSH-2581
   org/auth), `c37348fa1` (RUSH-2580 share→artifacts), `06edef682` (RUSH-2579
