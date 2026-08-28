@@ -1,7 +1,7 @@
 ---
 kind: report
 title: CLI command-surface simplification — what landed, what's left
-summary: Two plans drove the "simplify the agents CLI surface" work. The RUSH-2981 leftovers plan (apply / beta / feedback / harness) is fully merged and verified in the live 1.22.54 surface; the broader cli-surface-consolidate wave that preceded it also landed. This report reconciles both against the shipped code.
+summary: Two plans drove the "simplify the agents CLI surface" work. The RUSH-2981 leftovers plan (apply / beta / feedback / harness) is fully merged and verified in the live surface; the broader cli-surface-consolidate wave that preceded it also landed. As of 2026-08-28 the two deferred follow-ups landed too (PHNX-3422 empty-roster hint; companion audit clean), so the arc is complete with nothing outstanding. This report reconciles both plans against the shipped code.
 status: final
 links:
   - https://linear.app/getrush/issue/RUSH-2981
@@ -15,10 +15,10 @@ Two plans drove the "simplify the `agents` CLI surface" work you remember. The
 **fully merged and live** in the `1.22.54` CLI you're running. It rode on top of
 a larger, also-landed **cli-surface-consolidate** wave (~12 tickets) that nested
 or removed the bulk of the non-noun root verbs. A third look-alike artifact is a
-*different* track (perf/analytics), not surface work. The only open items are two
-small follow-ups the leftovers plan itself flagged as out-of-scope. Below:
-what each plan was, what shipped (with commit evidence), and why the approach is
-sound.
+*different* track (perf/analytics), not surface work. The two follow-ups the
+leftovers plan flagged as out-of-scope have since landed as well, so **nothing on
+the arc is outstanding**. Below: what each plan was, what shipped (with commit
+evidence), and why the approach is sound.
 
 ## Findings
 
@@ -108,17 +108,22 @@ roots. These are all merged and reflected in the retired-set docblock:
 
 ## What's left
 
-The **leftovers plan itself is 100% complete** — nothing is outstanding on
-RUSH-2981. Two honest loose ends remain around it:
+**Nothing — the surface work is fully done.** As of 2026-08-28 the two loose ends
+this report originally flagged have *also* landed, so there is no outstanding
+follow-up on the arc:
 
-1. **The empty-`fleet.devices` no-op.** The plan explicitly deferred this as
-   "separate from surface work": `agents fleet apply` still prints a quiet *"No
-   target devices — nothing to apply"* when the roster is `{}`, rather than an
-   actionable *"fleet.devices is empty — set devices: all or name boxes."* That
-   is a UX follow-up, not part of the nesting.
-2. **Companion `.agents-system` audit.** The same RUSH-2965 pattern requires
-   checking that no hook/skill/rule in the companion repo still teaches
-   `agents apply` or `agents beta`. Worth a quick grep-and-fix pass.
+1. ~~**The empty-`fleet.devices` no-op.**~~ **Closed (PHNX-3422, commit
+   `3a6d59bb0`).** `agents fleet apply` on an empty roster no longer prints a
+   quiet *"No target devices — nothing to apply"*; `emptyTargetsMessage`
+   (`cli/src/lib/fleet/manifest.ts`) now returns a `hint`-styled, actionable
+   message — *"fleet.devices is empty — nothing to converge. Declare a roster in
+   agents.yaml: `fleet: { devices: all }` … then re-run."* — with a test pinning
+   the empty-roster vs already-surfaced-reason branches.
+2. ~~**Companion `.agents-system` audit.**~~ **Closed (recorded in commit
+   `13c1cb6f9`).** The companion repo's `origin/main` was audited for stale
+   `agents apply` / `agents beta` teaching — **clean, no consumer** — so no
+   companion PR was needed, recorded per the convention that a no-op audit is
+   stated explicitly rather than left implicit.
 
 Beyond RUSH-2981, the root still carries a handful of verb-shaped groups a future
 pass *could* revisit (`add`, `import`, `install`, `open`, `route`, `send`, `use`)
@@ -159,5 +164,7 @@ plan text:
   three agents" you recall were working the same arc across ~12 tickets.
 - The one look-alike (`plan-agents-cli-review`) is a **separate** perf/analytics
   review, not surface work.
-- The only genuinely open items are two small follow-ups the leftovers plan
-  itself flagged as out-of-scope, not unfinished surface work.
+- **There is nothing left to do on the surface arc.** The two follow-ups this
+  report first listed as out-of-scope have since landed too — the empty-roster
+  hint (PHNX-3422) and the companion-repo audit (clean) — so the whole
+  "simplify the `agents` CLI surface" effort is complete and verified live.
