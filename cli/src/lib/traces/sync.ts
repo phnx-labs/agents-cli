@@ -316,6 +316,22 @@ export interface TracesIndexShard {
     medianMs: number;
     /** p90 ACTIVE duration, ms. */
     p90Ms: number;
+    /**
+     * SEGMENTED active-time stats (PHNX-3472). The blended `medianMs`/`p90Ms`
+     * above conflate one-shot interactive queries (63% of the corpus, ~15s
+     * median) with substantial agent runs (~15min median), so they headline
+     * neither. A session is an AGENT run when it made any tool call OR has more
+     * than 8 messages; otherwise INTERACTIVE. These segment the same active-time
+     * figure so the console can headline agent runs on their own axis. Each is
+     * computed only over sessions with a non-null duration.
+     */
+    agentMedianMs: number;
+    /** p90 ACTIVE duration over AGENT sessions, ms. */
+    agentP90Ms: number;
+    /** Median ACTIVE duration over INTERACTIVE sessions, ms. */
+    interactiveMedianMs: number;
+    /** (sessions with a non-null duration) / (total sessions), 0..1 — coverage of the duration stats. */
+    measuredFraction: number;
     needAttention: number;
     toolErrorRate: number;
   };
@@ -687,6 +703,23 @@ export function buildIndexShard(
       : [sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [], Date.parse(row.timestamp))],
   );
 
+  // Segment the same active-time figure into AGENT vs INTERACTIVE runs (PHNX-3472).
+  // A session is an AGENT run when it made any tool call OR has more than 8
+  // messages; otherwise INTERACTIVE (a one-shot query). Only sessions with a
+  // non-null duration contribute to the medians; `measuredFraction` reports how
+  // much of the corpus that covers.
+  const agentActive: number[] = [];
+  const interactiveActive: number[] = [];
+  let measured = 0;
+  for (const row of rows) {
+    if (row.duration_ms == null) continue;
+    measured++;
+    const active = sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [], Date.parse(row.timestamp));
+    const isAgent = (callsBySession.get(row.id)?.length ?? 0) > 0 || (row.message_count ?? 0) > 8;
+    (isAgent ? agentActive : interactiveActive).push(active);
+  }
+  const measuredFraction = rows.length === 0 ? 0 : measured / rows.length;
+
   // Build today's per-bucket stats for the rolling drift window.
   const todayDate = new Date().toISOString().slice(0, 10);
   const todayStats: BucketStats[] = [...topicCounts.values()].map(({ key }) => {
@@ -719,6 +752,10 @@ export function buildIndexShard(
       sessionsImported: rows.length,
       medianMs: percentile(activeDurations, 0.5),
       p90Ms: percentile(activeDurations, 0.9),
+      agentMedianMs: percentile(agentActive, 0.5),
+      agentP90Ms: percentile(agentActive, 0.9),
+      interactiveMedianMs: percentile(interactiveActive, 0.5),
+      measuredFraction,
       needAttention: needsAttention.length,
       toolErrorRate: calls.length === 0 ? 0 : failedCalls.length / calls.length,
     },
