@@ -3504,25 +3504,39 @@ line per transcript file. Secrets are redacted by default. Dir-shaped sessions
 one encrypted object per transcript keyed by machine/agent/session. Bodies are
 sealed with the shared R2_SYNC_ENC_KEY when present. Restore on any box on the
 same bundle with &#39;agents sessions import --from-r2&#39;.</p></article>
-<article id="sessions-fork" data-search="fork sessions fork  branch a session into a new, independent copy you can continue separately. the original is untouched. session  --name &lt;label&gt; label for the fork (default: &quot;fork of &lt;original&gt;&quot;) -h, --help show help # fork a session by (partial) id, then continue the fork
+<article id="sessions-fork" data-search="fork sessions fork  branch a session into a new same-harness sibling, seeded with a recap so it continues the work. the original is untouched. session  --name &lt;label&gt; session label for the fork (default: &quot;fork of &lt;original&gt;&quot;) --device &lt;host&gt; place the sibling on a fleet device (name or &quot;auto&quot;); defaults to here --terminal [backend] open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place -h, --help show help # fork a session by (partial) id — launches a same-harness sibling seeded with a recap
     agents sessions fork 4f3a9c21
-    agents sessions resume &lt;new-id&gt;
 
-    # give the fork a name
-    agents sessions fork 4f3a9c21 --name &quot;try redis instead&quot; - &#39;resume&#39; continues the same conversation; &#39;fork&#39; copies it under a new id so the two diverge.
-    - the fork is a full copy of the conversation so far; continuing it never touches the original.
-    - resolve the session the same way as resume: an exact or prefix id fragment.
-    - native copy currently supports: claude. for other harnesses, branch by
-      starting a fresh agent and seeding it with &#39;/continue &lt;id&gt;&#39; — the source stays put."><div class="command-head"><h3><code>agents sessions fork &lt;session&gt;</code></h3></div><p>Branch a session into a new, independent copy you can continue separately. The original is untouched.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;session&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--name &lt;label&gt;</code></td><td>Label for the fork (default: &quot;fork of &lt;original&gt;&quot;)</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Fork a session by (partial) id, then continue the fork
+    # name the fork&#39;s session label
+    agents sessions fork 4f3a9c21 --name &quot;try redis instead&quot;
+
+    # place the sibling on a fleet worker instead of here
+    agents sessions fork 4f3a9c21 --device auto
+
+    # open the sibling in a fresh terminal tab where you work
+    agents sessions fork 4f3a9c21 --terminal - &#39;resume&#39; continues the same conversation; &#39;fork&#39; launches a new same-harness
+      session seeded with a recap of the source, so the two diverge.
+    - works cross-device and cross-harness: the source is resolved across the fleet
+      and the sibling gets a plain-text recap, so it never reaches the source transcript.
+    - the recap carries the source id — the sibling can run &#39;/continue &lt;id&gt;&#39; for the
+      full history if it needs more than the recap.
+    - resolve the source the same way as resume: an exact or prefix id fragment."><div class="command-head"><h3><code>agents sessions fork &lt;session&gt;</code></h3></div><p>Branch a session into a new same-harness sibling, seeded with a recap so it continues the work. The original is untouched.</p><h4>Arguments</h4><table><thead><tr><th>Argument</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>&lt;session&gt;</code></td><td>—</td><td></td><td></td></tr></tbody></table><h4>Options</h4><table><thead><tr><th>Flags</th><th>Description</th><th>Choices</th><th>Default</th></tr></thead><tbody><tr><td><code>--name &lt;label&gt;</code></td><td>Session label for the fork (default: &quot;fork of &lt;original&gt;&quot;)</td><td></td><td></td></tr><tr><td><code>--device &lt;host&gt;</code></td><td>Place the sibling on a fleet device (name or &quot;auto&quot;); defaults to here</td><td></td><td></td></tr><tr><td><code>--terminal [backend]</code></td><td>Open the sibling in a real terminal tab (iterm | ghostty | terminal | tmux | vscodium-agent) instead of in-place</td><td></td><td></td></tr><tr><td><code>-h, --help</code></td><td>Show help</td><td></td><td></td></tr></tbody></table><h4>Examples</h4><pre><code># Fork a session by (partial) id — launches a same-harness sibling seeded with a recap
     agents sessions fork 4f3a9c21
-    agents sessions resume &lt;new-id&gt;
 
-    # Give the fork a name
-    agents sessions fork 4f3a9c21 --name &quot;try redis instead&quot;</code></pre><h4>Notes</h4><p class="notes">- &#39;resume&#39; continues the SAME conversation; &#39;fork&#39; copies it under a new id so the two diverge.
-    - The fork is a full copy of the conversation so far; continuing it never touches the original.
-    - Resolve the session the same way as resume: an exact or prefix id fragment.
-    - Native copy currently supports: claude. For other harnesses, branch by
-      starting a fresh agent and seeding it with &#39;/continue &lt;id&gt;&#39; — the source stays put.</p></article>
+    # Name the fork&#39;s session label
+    agents sessions fork 4f3a9c21 --name &quot;try redis instead&quot;
+
+    # Place the sibling on a fleet worker instead of here
+    agents sessions fork 4f3a9c21 --device auto
+
+    # Open the sibling in a fresh terminal tab where you work
+    agents sessions fork 4f3a9c21 --terminal</code></pre><h4>Notes</h4><p class="notes">- &#39;resume&#39; continues the SAME conversation; &#39;fork&#39; launches a NEW same-harness
+      session seeded with a recap of the source, so the two diverge.
+    - Works cross-device and cross-harness: the source is resolved across the fleet
+      and the sibling gets a plain-text recap, so it never reaches the source transcript.
+    - The recap carries the source id — the sibling can run &#39;/continue &lt;id&gt;&#39; for the
+      full history if it needs more than the recap.
+    - Resolve the source the same way as resume: an exact or prefix id fragment.</p></article>
 <article id="sessions-import" data-search="import sessions import  restore an export bundle (file, - for stdin, or --from-host &lt;h&gt;) into the local session store, deduping against what you already have. bundle  --dry-run show what would be placed without writing anything --overwrite replace local files that differ from the bundle (default: keep local) --decrypt [key] decrypt an encrypted bundle (key optional if the r2.backups sync key is configured) --from-host &lt;target...&gt; pull sessions live from remote peer(s) over ssh instead of a file (repeatable) --from-r2 restore session backups from cloudflare r2 (requires the r2.backups bundle) -h, --help show help # preview what a bundle would restore
 agents sessions import week.bundle --dry-run
 

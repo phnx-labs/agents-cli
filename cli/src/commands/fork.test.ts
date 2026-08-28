@@ -1,31 +1,6 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 
-// Isolate the sessions DB + run-name sidecars under a temp HOME before
-// db.js/state.js capture the path at import time (same pattern as db.names.test).
-const TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-fork-'));
-process.env.HOME = TEST_HOME;
-process.env.USERPROFILE = TEST_HOME;
-
-const { upsertSession, findSessionsById } = await import('../lib/session/db.js');
-const { runFork } = await import('./fork.js');
-const { isForkableAgent } = await import('../lib/session/fork.js');
-type SessionMeta = import('../lib/session/types.js').SessionMeta;
-
-// Transcripts live in their own dir; a fork lands beside its source, so the id
-// captured from the command output — not a readdir — identifies each fork.
-const PROJ_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-fork-proj-'));
-
-function seedSession(id: string, agent: string, lines: object[]): SessionMeta {
-  const filePath = path.join(PROJ_DIR, `${id}.jsonl`);
-  const body = lines.map((l) => JSON.stringify(l)).join('\n') + (lines.length ? '\n' : '');
-  fs.writeFileSync(filePath, body);
-  const meta: SessionMeta = { id, shortId: id.slice(0, 8), agent, timestamp: new Date().toISOString(), filePath };
-  upsertSession(meta, body);
-  return meta;
-}
+import { runFork, type ForkDeps } from './fork.js';
 
 /** Capture a console channel's output as one joined string. */
 function capture(channel: 'log' | 'error') {
@@ -33,84 +8,101 @@ function capture(channel: 'log' | 'error') {
   const spy = vi.spyOn(console, channel).mockImplementation((...a: unknown[]) => {
     lines.push(a.map(String).join(' '));
   });
+  return { get text() { return lines.join('\n'); }, restore: () => spy.mockRestore() };
+}
+
+/** A preview --json payload as `renderSessionPreview` emits it. */
+function previewJson(session: object, preview: object | null): string {
+  return JSON.stringify({ schemaVersion: 1, session, active: null, preview, error: null });
+}
+
+/** Deps whose preview returns a canned payload and whose launch records the argv. */
+function fakeDeps(preview: { status?: number; stdout?: string }): { deps: ForkDeps; launched: string[][] } {
+  const launched: string[][] = [];
   return {
-    get text() {
-      return lines.join('\n');
+    launched,
+    deps: {
+      runPreview: () => ({ status: preview.status ?? 0, stdout: preview.stdout ?? '' }),
+      launch: (sub) => { launched.push(sub); return { status: 0 }; },
     },
-    restore: () => spy.mockRestore(),
   };
 }
 
-afterEach(() => {
-  process.exitCode = 0;
-});
+afterEach(() => { process.exitCode = 0; });
 
-describe('agents sessions fork (shared action)', () => {
-  it('copies a claude session under a new id, leaving the original untouched', async () => {
-    const srcId = '11111111-2222-3333-4444-555555555555';
-    const src = seedSession(srcId, 'claude', [
-      { sessionId: srcId, type: 'user', message: { role: 'user', content: 'hello world' } },
-    ]);
-    const before = fs.readFileSync(src.filePath, 'utf-8');
-
-    const out = capture('log');
-    await runFork(srcId, {});
-    out.restore();
-
-    // The command reports the new short id + how to continue it.
-    expect(out.text).toMatch(/Forked .* -> /);
-    expect(out.text).toContain('agents sessions resume');
-    const forkId = out.text.match(/-> (\S+)/)?.[1];
-    expect(forkId).toBeTruthy();
-
-    // Original transcript is byte-for-byte untouched.
-    expect(fs.readFileSync(src.filePath, 'utf-8')).toBe(before);
-
-    // The fork resolves in the index as its own, distinct session.
-    const forked = findSessionsById(forkId!, {})[0];
-    expect(forked).toBeTruthy();
-    expect(forked!.id).not.toBe(srcId);
-
-    // The copy carries the conversation and rewrote the embedded session id.
-    const forkBody = fs.readFileSync(forked!.filePath, 'utf-8');
-    expect(forkBody).toContain('hello world');
-    expect(forkBody).toContain(`"sessionId":"${forked!.id}"`);
-    expect(forkBody).not.toContain(srcId);
-  });
-
-  it('applies --name as the fork label', async () => {
-    const srcId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
-    seedSession(srcId, 'claude', [{ sessionId: srcId, type: 'user', message: { role: 'user', content: 'x' } }]);
-
-    const out = capture('log');
-    await runFork(srcId, { name: 'try redis instead' });
-    out.restore();
-
-    const forkId = out.text.match(/-> (\S+)/)?.[1];
-    expect(findSessionsById(forkId!, {})[0]?.label).toBe('try redis instead');
-  });
-
-  it('fails loud for a non-forkable harness and names the /continue manual path', async () => {
-    const srcId = '99999999-8888-7777-6666-555555555555';
-    // Only the DB meta's agent matters — the non-forkable branch returns before
-    // the transcript is read, so no real codex file format is needed.
-    seedSession(srcId, 'codex', []);
-    expect(isForkableAgent('codex')).toBe(false);
+describe('agents sessions fork (recap-seeded sibling)', () => {
+  it('resolves the source and launches a same-harness sibling seeded with a recap', async () => {
+    const src = {
+      id: '11111111-2222-3333-4444-555555555555', shortId: '11111111', agent: 'claude',
+      cwd: '/home/u/prix', ticketId: 'PHNX-3397', machine: 'yosemite-m1', label: 'Prix Evals',
+    };
+    const { deps, launched } = fakeDeps({
+      stdout: previewJson(src, { lastAssistant: 'insight widgets need gaps closed', changes: { created: 2, modified: 1, deleted: 0 } }),
+    });
 
     const err = capture('error');
-    await runFork(srcId, {});
+    await runFork(src.id, {}, deps);
     err.restore();
 
-    expect(process.exitCode).toBe(1);
-    expect(err.text).toContain('codex');
-    expect(err.text).toContain('/continue');
+    expect(launched).toHaveLength(1);
+    const [args] = launched;
+    // Same harness, interactive, load-balanced, seeded with the recap prompt.
+    expect(args[0]).toBe('run');
+    expect(args[1]).toBe('claude');
+    expect(args).toContain('-i');
+    expect(args.slice(args.indexOf('--strategy'))).toEqual(expect.arrayContaining(['--strategy', 'balanced']));
+    const recap = args[2];
+    expect(recap).toContain('Continue a prior claude session ("Prix Evals")');
+    expect(recap).toContain('insight widgets need gaps closed');
+    expect(recap).toContain('/continue 11111111-2222-3333-4444-555555555555');
+    // A default fork label rides through.
+    expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'fork of Prix Evals']));
   });
 
-  it('fails loud when no session matches the id', async () => {
-    const err = capture('error');
-    await runFork('does-not-exist-zzzz', {});
-    err.restore();
+  it('forks a CROSS-DEVICE, non-claude source where the old transcript copy threw "transcript not found"', async () => {
+    // A codex session owned by another box: old fork refused it twice over
+    // (non-claude gate + local-only transcript lookup). Now it launches.
+    const src = { id: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee', shortId: 'aaaaaaaa', agent: 'codex', cwd: '/w', machine: 'mark-1', label: 'remote codex' };
+    const { deps, launched } = fakeDeps({ stdout: previewJson(src, { lastAssistant: 'done step 1', changes: { created: 0, modified: 0, deleted: 0 } }) });
+
+    await runFork('aaaaaaaa', {}, deps);
+
+    expect(process.exitCode ?? 0).toBe(0);
+    expect(launched[0][1]).toBe('codex');
+    expect(launched[0][2]).toContain('Source session aaaaaaaa on mark-1');
+  });
+
+  it('honors --name and --device on the launched sibling', async () => {
+    const src = { id: 'cccccccc-1111-2222-3333-444444444444', shortId: 'cccccccc', agent: 'claude', label: 'x' };
+    const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
+
+    await runFork('cccccccc', { name: 'try redis instead', device: 'auto' }, deps);
+
+    const [args] = launched;
+    expect(args.slice(args.indexOf('--name'))).toEqual(expect.arrayContaining(['--name', 'try redis instead']));
+    expect(args.slice(args.indexOf('--device'))).toEqual(expect.arrayContaining(['--device', 'auto']));
+  });
+
+  it('forwards --terminal so the sibling opens in a fresh tab', async () => {
+    const src = { id: 'eeeeeeee-1111-2222-3333-444444444444', shortId: 'eeeeeeee', agent: 'claude', label: 'x' };
+    const { deps, launched } = fakeDeps({ stdout: previewJson(src, null) });
+
+    await runFork('eeeeeeee', { terminal: true }, deps);
+    expect(launched[0]).toContain('--terminal');
+
+    launched.length = 0;
+    await runFork('eeeeeeee', { terminal: 'ghostty' }, deps);
+    const [args] = launched;
+    expect(args.slice(args.indexOf('--terminal'))).toEqual(expect.arrayContaining(['--terminal', 'ghostty']));
+  });
+
+  it('propagates a preview resolution failure and never launches a context-less sibling', async () => {
+    // preview prints "No session matching…" to stderr (inherited) and exits 1.
+    const { deps, launched } = fakeDeps({ status: 1, stdout: '' });
+
+    await runFork('does-not-exist-zzzz', {}, deps);
+
     expect(process.exitCode).toBe(1);
-    expect(err.text).toContain('No session matching');
+    expect(launched).toHaveLength(0);
   });
 });
