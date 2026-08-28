@@ -48,6 +48,13 @@ describe('runFailureReason', () => {
     expect(r).toBe('the selected account failed a live auth check');
   });
 
+  it('falls back to the exit code for a plain nonzero failure (no errorMessage)', () => {
+    // The most common shape: a command body exits 2, cause is in stdout.
+    expect(runFailureReason(meta({ status: 'failed', errorMessage: undefined, exitCode: 2 }))).toBe('exit 2');
+    // ...but a failure with no exit code at all still yields no fabricated reason.
+    expect(runFailureReason(meta({ status: 'failed', errorMessage: undefined, exitCode: null }))).toBeNull();
+  });
+
   it('explains a missed fire', () => {
     expect(runFailureReason(meta({ status: 'missed', exitCode: null }))).toBe(
       'scheduler was not running when it came due',
