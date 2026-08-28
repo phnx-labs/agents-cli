@@ -670,14 +670,19 @@ function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
  * A run with zero tool errors `completed`. A run that hit tool errors is
  * `completed` ONLY when it *causally recovered* — a substantive, non-human-facing
  * tool step succeeded strictly after the last error ({@link recoveredAfterErrors},
- * the exact predicate the false-termination phenotype uses). A run that errored
- * and did NOT recover — it ended in error, punted to a human (`AskUserQuestion`),
- * or its last action was an incidental unrelated `ls` — stays `errored`.
+ * the exact predicate the false-termination phenotype uses). A run whose last
+ * substantive step is the error, or whose only post-error steps are human-facing
+ * (a punt to `AskUserQuestion` — the case the broken "last tool call ok" heuristic
+ * mislabeled `completed`), stays `errored`.
  *
  * This is what makes `surfacedToolFailures` on a `completed` run honest: those
  * are failures the run recovered from, not a green status hiding an unresolved
- * failure. It never flips a genuinely-unresolved run to `completed` (no
- * regression vs the old `errorCount > 0 ? errored : completed`).
+ * failure. It never flips a run that ended unresolved to `completed` (no
+ * regression vs the old `errorCount > 0 ? errored : completed`). Like the
+ * false-termination phenotype it reuses, it treats a substantive non-human
+ * success strictly after the last error as recovery — it cannot distinguish a
+ * meaningful fix from an incidental trailing success — which is the deliberate
+ * resolution boundary the review pointed `deriveRunOutcome` at, not a new one.
  */
 function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
   if (traj.errorCount === 0) return 'completed';

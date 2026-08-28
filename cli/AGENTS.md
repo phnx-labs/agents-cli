@@ -147,9 +147,9 @@ non-human-facing tool step succeeded strictly after the last error, the exact
 predicate the false-termination phenotype uses (`recoveredAfterErrors` in
 [`phenotype.ts`](src/lib/traces/phenotype.ts), shared with `deriveRunOutcome` in
 [`sync.ts`](src/lib/traces/sync.ts) so the console outcome and the phenotype can
-never disagree about whether a run finished). A run that errored and did NOT
-recover — it ended in error, punted to a human (`AskUserQuestion`), or its last
-action was an incidental unrelated call — stays `errored`. This is what makes
+never disagree about whether a run finished). A run whose last substantive step
+is the error, or whose only post-error steps are human-facing (a punt to
+`AskUserQuestion`), stays `errored`. This is what makes
 `surfacedToolFailures` on a `completed` run honest: those are failures the run
 recovered from, not a green status hiding an unresolved one. It never flips a
 genuinely-unresolved run to `completed` (no regression vs the old
