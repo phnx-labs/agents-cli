@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.22.56
+
+- **Scheduled routines claim a durable per-occurrence slot, so a duplicate delivery or a catch-up of the same slot can't double-launch (PHNX-3215).** The forward-timer path keyed its single-fire claim on croner's `currentRun()`, which is the jittered wall-clock fire instant, not the aligned schedule boundary — so two timer callbacks for one occurrence minted different run ids and both launched, and a live fire never collided with its catch-up twin. The scheduler now floors the fire to the aligned `(routine, scheduledFor)` boundary (`fireSlot`/`alignedSlotForFire`), the same derivation catch-up uses, making the atomic slot claim a structural guarantee (SING-15/16, self-overlap SING-13). Source: `cli/src/lib/scheduler.ts`, `cli/src/lib/scheduling/routines.ts`, `cli/src/lib/overdue.ts`.
+
+- **Managed-share Open Graph cards render in Cloudflare instead of failing on every new publish (PHNX-2835).** The Worker upload now carries Yoga and resvg as compiled WebAssembly modules alongside the bundled JavaScript and fonts. The previous single-file bundle decoded the WASM into byte arrays and compiled it at request time; Node accepted that in tests, but Cloudflare workerd forbids runtime WASM code generation, so a new share's lazy `<slug>.png` render failed. A real-workerd regression test now renders and validates the PNG, and a genuine renderer failure returns a diagnostic `500` instead of falling through as a missing cover. Source: `cli/src/lib/share/{worker-template,provision}.ts`.
+
 ## 1.22.55
 
 - **Managed shares generate their Open Graph cover server-side (PHNX-2835).** Publishing HTML to `share.agents-cli.sh` no longer launches local Chromium. The Worker lazily renders a deterministic 1200×630 AGI card with Satori and resvg-wasm, bundles Inter and JetBrains Mono, inherits the canonical page's visibility gate, and caches the PNG in R2. BYO endpoints keep their local screenshot fallback. An explicit missing `AGENTS_SHARE_BROWSER` or `PUPPETEER_EXECUTABLE_PATH` now fails loudly instead of silently falling through. Source: `cli/src/lib/share/{capture,publish,worker-template}.ts`.
