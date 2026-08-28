@@ -14,7 +14,10 @@ export const TOOL_CHANGED_MAX_CALLS = 10_000;
 export const TOOL_INDEX_LIMIT_ORDINAL = Number.MAX_SAFE_INTEGER;
 export const TOOL_TEXT_PROCESSING_MAX_BYTES = 64 * 1024;
 export const TOOL_SHELL_PARSE_MAX_BYTES = 64 * 1024;
-export const TOOL_INDEX_VERSION = 7;
+// Bumped to 8 for the per-call end timestamp (PHNX-3437): the extractor now
+// records when a call's result arrived, so a re-index re-derives it for rows
+// stored by an older extractor.
+export const TOOL_INDEX_VERSION = 8;
 
 const BASE64_BLOCK = /(?:[A-Za-z0-9+/]{256,}={0,2})/g;
 const SECRET_FIELD = /(?:token|secret|password|authorization|cookie|api[_-]?key|private[_-]?key)$/i;
@@ -26,6 +29,15 @@ export interface IndexedToolCall {
   ordinal: number;
   sourceCallId?: string;
   timestamp: string;
+  /**
+   * When the call's RESULT record arrived — the call's own end time, taken from
+   * the tool_result transcript record at `finish()` (PHNX-3437). `timestamp` is
+   * the start; `endTimestamp - timestamp` is the call's own blocking duration,
+   * which the traces insight engine attributes as a failed call's wasted time.
+   * Undefined for a call that never produced a result (still pending at scan end)
+   * and for rows produced by an older extractor.
+   */
+  endTimestamp?: string;
   tool: string;
   programs: string[];
   programOccurrences: ShellProgramOccurrence[];
@@ -350,7 +362,7 @@ function buildCall(
 
 export function toolCallEvidenceBytes(call: IndexedToolCall): number {
   return Buffer.byteLength([
-    call.sourceCallId, call.timestamp, call.tool, call.input, call.errorCode,
+    call.sourceCallId, call.timestamp, call.endTimestamp, call.tool, call.input, call.errorCode,
     call.output, call.error, call.parseError, ...call.programs,
     ...call.programOccurrences.map((occurrence) => `${occurrence.role}:${occurrence.program}`),
   ].filter((value): value is string => typeof value === 'string').join('\0'));
@@ -431,6 +443,9 @@ export class ToolCallCollector {
     const tool = typeof args.tool === 'string' ? args.tool : undefined;
     const call = this.takePending(args.sourceCallId, tool);
     if (!call) return undefined;
+    if (typeof args.timestamp === 'string' && args.timestamp.length > 0) {
+      call.endTimestamp = sanitizeToolEvidenceText(args.timestamp, 128);
+    }
     const outcome = args.outcome === 'ok' || args.outcome === 'error' || args.outcome === 'unknown'
       ? args.outcome
       : undefined;

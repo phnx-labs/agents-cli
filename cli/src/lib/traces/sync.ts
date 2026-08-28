@@ -342,6 +342,13 @@ export interface ToolCallRow {
   session_id: string;
   ordinal: number;
   timestamp: string;
+  /**
+   * When the call's result arrived — its own end time (PHNX-3437). Optional
+   * because rows an older extractor stored, and calls that never produced a
+   * result, carry NULL; `computeInsights` falls back to the bounded inter-call
+   * gap when it is absent.
+   */
+  end_timestamp?: string | null;
   tool: string;
   outcome: string;
   exit_code: number | null;
@@ -425,7 +432,7 @@ export function buildIndexShard(
   for (let i = 0; i < ids.length; i += 400) {
     const chunk = ids.slice(i, i + 400);
     calls.push(...db.prepare(`
-      SELECT session_id, ordinal, timestamp, tool, outcome, exit_code, status_code, error_code, error, parse_error
+      SELECT session_id, ordinal, timestamp, end_timestamp, tool, outcome, exit_code, status_code, error_code, error, parse_error
       FROM tool_calls
       WHERE session_id IN (${chunk.map(() => '?').join(',')})
     `).all(...chunk) as ToolCallRow[]);

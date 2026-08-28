@@ -91,12 +91,23 @@ the piece that turns flat per-tool error counts into ranked, time-weighted
 **failure patterns**: failed `tool_calls` rows are grouped by `(tool, cause,
 normalized-error)` — volatile tokens (ids, counts, countdowns) stripped so 47
 near-identical "rate limit exceeded for user N" errors fold into one pattern —
-and each pattern accumulates `wastedMs` from the inter-call gap in `tool_calls`
-(`ordinal`/`timestamp`, already indexed) whenever the next call repeats the same
-signature (a retry loop) or the gap itself is a stall (≥60s) — with each single
-gap bounded to `MAX_GAP_ATTRIBUTION_MS` (30m) so one huge gap (a chat re-ask
-hours later) can't be booked as failure-loop waste; a real active loop is many
-short gaps that still sum large. Patterns are
+and each pattern accumulates `wastedMs` from two sources that sum. **(1) The
+failed call's own blocking duration** — `end_timestamp - timestamp` in
+`tool_calls` (PHNX-3437) — booked whenever the end time is known, independent of
+whether another call follows: a call that hung for minutes and then failed wasted
+that whole time even as the last call in its session, the case the gap heuristic
+alone booked as ~0 (this is what makes a fail-fast fix like PHNX-3407 — a
+user_location stdin hang cut from ~5.5m to <1s — measurable, dropping from ~5.5m
+to ~0). **(2) The inter-call gap** (`ordinal`/`timestamp`, already indexed)
+whenever the next call repeats the same signature (a retry loop) or the gap
+itself is a stall (≥60s), measured from the call's END when known so (1) is never
+double-counted. Both are bounded per contribution to `MAX_GAP_ATTRIBUTION_MS`
+(30m) so one huge gap — or a corrupt/backwards end timestamp — can't be booked as
+failure-loop waste; a real active loop is many short gaps that still sum large.
+A NULL `end_timestamp` (rows an older extractor stored, before the paired
+`TOOL_INDEX_VERSION` bump re-derives them; or a call still pending at scan end)
+falls back to the original gap-from-START heuristic unchanged — no crash, no NaN.
+Patterns are
 **bounded top-K, ranked by wastedMs (impact) — never by raw occurrence count** —
 so a single rare multi-hour loop still outranks a frequent but cheap one.
 Cost stays proportional to this sync's row count (no transcript re-parsing), so

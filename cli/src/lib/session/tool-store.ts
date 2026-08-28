@@ -126,13 +126,14 @@ export function persistToolCalls(
   const sourcePath = toolEvidenceSourcePath(session.filePath, session.agent);
   const insertCall = db.prepare(`
     INSERT INTO tool_calls (
-      call_key, session_id, ordinal, source_call_id, timestamp, tool, input,
+      call_key, session_id, ordinal, source_call_id, timestamp, end_timestamp, tool, input,
       outcome, exit_code, status_code, error_code, output, error, parse_error
       , evidence_bytes
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_id, ordinal) DO UPDATE SET
       source_call_id = excluded.source_call_id,
       timestamp = excluded.timestamp,
+      end_timestamp = excluded.end_timestamp,
       tool = excluded.tool,
       input = excluded.input,
       outcome = excluded.outcome,
@@ -259,7 +260,7 @@ export function persistToolCalls(
       const key = toolCallKey(session.id, call.ordinal);
       insertCall.run(
         key, session.id, call.ordinal, call.sourceCallId ?? null, call.timestamp,
-        call.tool, call.input, call.outcome, call.exitCode ?? null,
+        call.endTimestamp ?? null, call.tool, call.input, call.outcome, call.exitCode ?? null,
         call.statusCode ?? null, call.errorCode ?? null, call.output ?? null,
         call.error ?? null, call.parseError ?? null, toolCallEvidenceBytes(call),
       );
