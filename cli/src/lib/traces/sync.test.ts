@@ -250,6 +250,57 @@ describe('rich traces index shard', () => {
       warn.mockRestore();
     }
   });
+
+  // PHNX-3401: the OTHER half — when the index PUT itself fails (here: the worker
+  // 500s), syncTraces must surface it as SyncResult.indexError instead of the old
+  // bare `catch {}`, while the per-session upload still counts as success.
+  it('surfaces SyncResult.indexError when the index upload fails, without failing the session upload', async () => {
+    const stat = fs.statSync(transcript);
+    const first = row(stat.mtimeMs, stat.size);
+    const db = getDB();
+    db.prepare(`
+      INSERT INTO sessions
+        (id, short_id, agent, timestamp, project, cwd, git_branch, label, duration_ms,
+         model, file_path, file_mtime_ms, file_size, machine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      first.id, first.short_id, first.agent, first.timestamp, first.project, first.cwd,
+      first.git_branch, first.label, first.duration_ms, first.model, first.file_path,
+      first.file_mtime_ms, first.file_size, first.machine,
+    );
+
+    // Worker that accepts session shards but 500s the index PUT.
+    const server = http.createServer((req, res) => {
+      if (req.method === 'PUT' && req.url?.endsWith('/index.json')) {
+        req.resume();
+        res.writeHead(500).end('boom');
+      } else {
+        req.resume();
+        res.writeHead(200).end('ok');
+      }
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const address = server.address();
+    if (!address || typeof address === 'string') throw new Error('test server has no TCP address');
+    process.env.AGENTS_TRACES_BASE_URL = `http://127.0.0.1:${address.port}`;
+    process.env.AGENTS_TRACES_WRITE_TOKEN = 'test-token';
+    process.env.AGENTS_SYNC_MACHINE_ID = 'test-device';
+    fs.rmSync(path.join(getRuntimeStateDir(), 'traces-sync.json'), { force: true });
+    try {
+      const result = await syncTraces();
+      // The session shard uploaded fine — the failure is isolated to the index.
+      expect(result.uploaded).toBe(1);
+      expect(result.errors).toBe(0);
+      // ...and the index failure is surfaced, not swallowed.
+      expect(result.indexError).toBeDefined();
+      expect(result.indexError).toContain('500');
+    } finally {
+      delete process.env.AGENTS_TRACES_BASE_URL;
+      delete process.env.AGENTS_TRACES_WRITE_TOKEN;
+      delete process.env.AGENTS_SYNC_MACHINE_ID;
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
 });
 
 describe('buildSessionDetail (per-session drill-down shape)', () => {
