@@ -21,9 +21,11 @@ import {
   commitAndPush,
   commitsBehindUpstream,
   displayHomePath,
+  isExpectedSystemRepoRemote,
   isSystemRepoOrigin,
   isSystemRepoRemote,
   parseSource,
+  tryAutoPullSystemRepo,
   pullRepo,
   pushOrigin,
   resolveGitHubUsername,
@@ -1204,5 +1206,137 @@ describe('pullRepo strict mode (default-branch-fast-forward)', () => {
     // The error names the current branch and the expected default branch.
     expect(res.error).toMatch(/feature\/x/i);
     expect(res.error).toMatch(/main/i);
+  });
+});
+
+// PHNX-2957: the system repo ships hooks that run as shell on tool events and
+// its checkout auto-fast-forwards from origin — so a pull from an unexpected /
+// repointed origin is remote code execution. isExpectedSystemRepoRemote is the
+// pinning predicate; tryAutoPullSystemRepo is the gated pull.
+describe('isExpectedSystemRepoRemote', () => {
+  const SAVED = process.env.AGENTS_SYSTEM_REPO;
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.AGENTS_SYSTEM_REPO;
+    else process.env.AGENTS_SYSTEM_REPO = SAVED;
+  });
+
+  it('accepts the canonical system repo and its rename target when no override is set', () => {
+    delete process.env.AGENTS_SYSTEM_REPO;
+    expect(isExpectedSystemRepoRemote('https://github.com/phnx-labs/.agents-system.git')).toBe(true);
+    expect(isExpectedSystemRepoRemote('git@github.com:phnx-labs/.agents-system.git')).toBe(true);
+    // The GitHub rename target folds onto the same repo.
+    expect(isExpectedSystemRepoRemote('https://github.com/phnx-labs/.agents.git')).toBe(true);
+  });
+
+  it('rejects an unexpected / repointed origin, and null', () => {
+    delete process.env.AGENTS_SYSTEM_REPO;
+    expect(isExpectedSystemRepoRemote('https://github.com/attacker/evil.git')).toBe(false);
+    expect(isExpectedSystemRepoRemote('git@github.com:someone/.agents-system-fork.git')).toBe(false);
+    expect(isExpectedSystemRepoRemote(null)).toBe(false);
+    expect(isExpectedSystemRepoRemote(undefined)).toBe(false);
+    expect(isExpectedSystemRepoRemote('')).toBe(false);
+  });
+
+  it('honours an AGENTS_SYSTEM_REPO override and then rejects the default', () => {
+    process.env.AGENTS_SYSTEM_REPO = 'gh:acme/dotagents';
+    expect(isExpectedSystemRepoRemote('https://github.com/acme/dotagents.git')).toBe(true);
+    expect(isExpectedSystemRepoRemote('git@github.com:acme/dotagents.git')).toBe(true);
+    // With the operator pointed elsewhere, the canonical default is no longer
+    // the expected origin.
+    expect(isExpectedSystemRepoRemote('https://github.com/phnx-labs/.agents-system.git')).toBe(false);
+  });
+});
+
+describe('tryAutoPullSystemRepo', () => {
+  let root: string;
+  let remote: string; // bare origin
+  let local: string; // the ~/.agents/.system checkout under test
+  let author: string; // a second clone that pushes upstream commits
+  const SAVED = process.env.AGENTS_SYSTEM_REPO;
+
+  async function configIdentity(dir: string): Promise<void> {
+    const g = simpleGit(dir);
+    await g.addConfig('user.email', 'test@example.com');
+    await g.addConfig('user.name', 'Test');
+    await g.addConfig('commit.gpgsign', 'false');
+    await g.addConfig('core.autocrlf', 'false');
+  }
+
+  beforeEach(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'sysrepo-pull-'));
+    remote = path.join(root, 'remote.git');
+    local = path.join(root, 'system');
+    author = path.join(root, 'author');
+
+    await simpleGit().raw(['init', '--bare', '-b', 'main', remote]);
+    await simpleGit().clone(remote, author);
+    await configIdentity(author);
+    fs.writeFileSync(path.join(author, '.gitattributes'), '* -text\n');
+    fs.writeFileSync(path.join(author, 'hooks.yaml'), 'v1\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('init');
+    await simpleGit(author).push('origin', 'main');
+
+    await simpleGit().clone(remote, local);
+    await configIdentity(local);
+  });
+
+  afterEach(() => {
+    if (SAVED === undefined) delete process.env.AGENTS_SYSTEM_REPO;
+    else process.env.AGENTS_SYSTEM_REPO = SAVED;
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('REFUSES a fast-forward when origin is not the expected system remote', async () => {
+    // No override: the local bare remote is not the canonical system repo.
+    delete process.env.AGENTS_SYSTEM_REPO;
+
+    // Upstream advances — a malicious hook change would ride this commit.
+    fs.writeFileSync(path.join(author, 'hooks.yaml'), 'v2-EVIL\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('upstream change');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await tryAutoPullSystemRepo(local);
+
+    expect(res.refused).toBe(true);
+    expect(res.pulled).toBe(false);
+    expect(res.actualRemote).toBe(remote);
+    // The unexpected upstream content was NOT applied.
+    expect(fs.readFileSync(path.join(local, 'hooks.yaml'), 'utf8')).toBe('v1\n');
+  });
+
+  it('fast-forwards cleanly when origin matches AGENTS_SYSTEM_REPO', async () => {
+    // Operator pointed the system repo at this remote — a legit trusted pull.
+    process.env.AGENTS_SYSTEM_REPO = remote;
+
+    fs.writeFileSync(path.join(author, 'hooks.yaml'), 'v2\n');
+    await simpleGit(author).add('-A');
+    await simpleGit(author).commit('upstream change');
+    await simpleGit(author).push('origin', 'main');
+
+    const res = await tryAutoPullSystemRepo(local);
+
+    expect(res.refused).toBeFalsy();
+    expect(res.pulled).toBe(true);
+    expect(fs.readFileSync(path.join(local, 'hooks.yaml'), 'utf8')).toBe('v2\n');
+  });
+
+  it('is a plain no-op (not a refusal) when the checkout has no origin', async () => {
+    delete process.env.AGENTS_SYSTEM_REPO;
+    await simpleGit(local).removeRemote('origin');
+
+    const res = await tryAutoPullSystemRepo(local);
+
+    expect(res.pulled).toBe(false);
+    expect(res.refused).toBeFalsy();
+  });
+
+  it('returns pulled:false for a non-git directory', async () => {
+    const plain = path.join(root, 'not-a-repo');
+    fs.mkdirSync(plain);
+    const res = await tryAutoPullSystemRepo(plain);
+    expect(res.pulled).toBe(false);
+    expect(res.refused).toBeFalsy();
   });
 });

@@ -622,6 +622,35 @@ export function isSystemRepoRemote(remote: string | null | undefined): boolean {
   return c === canonicalGitRemote(`https://github.com/${systemRepoSlug(DEFAULT_SYSTEM_REPO)}`);
 }
 
+/**
+ * True when `remote` is the origin the system repo is EXPECTED to track on this
+ * machine, honouring an operator's `AGENTS_SYSTEM_REPO` override.
+ *
+ * The system repo ships hooks that register as shell `command` strings run on
+ * every tool event, and its checkout auto-fast-forwards from origin — so a
+ * fast-forward from an origin the operator never chose is remote code execution
+ * on the next command that loads a system resource (PHNX-2957). This is the
+ * pinning predicate every auto-pull of the system repo gates on: pull only when
+ * origin is the canonical {@link isSystemRepoRemote} repo, or the exact
+ * `AGENTS_SYSTEM_REPO` the operator pointed at instead. Anything else — a
+ * repointed origin, a fork, an unset-then-swapped remote — is refused, not
+ * pulled. Pure string check; no git spawn.
+ */
+export function isExpectedSystemRepoRemote(remote: string | null | undefined): boolean {
+  if (!remote) return false;
+  const override = process.env.AGENTS_SYSTEM_REPO?.trim();
+  if (override) {
+    // The override is a source spec (`gh:owner/repo`) or a full clone URL. Match
+    // the GitHub-slug form the setup path clones, and the raw spec itself, so a
+    // non-GitHub override URL still verifies.
+    return (
+      sameGitRemote(remote, `https://github.com/${systemRepoSlug(override)}`) ||
+      sameGitRemote(remote, override.replace(/^gh:/, ''))
+    );
+  }
+  return isSystemRepoRemote(remote);
+}
+
 /** True when two git remote URLs point at the same repo across transport forms. */
 export function sameGitRemote(a: string | null | undefined, b: string | null | undefined): boolean {
   if (!a || !b) return false;
@@ -1935,6 +1964,50 @@ export async function tryAutoPull(dir: string): Promise<{ pulled: boolean; error
   } catch (err) {
     return { pulled: false, error: (err as Error).message };
   }
+}
+
+/** Result of {@link tryAutoPullSystemRepo}. `refused` is set only when the pull
+ *  was blocked because origin is not the expected system remote. */
+export interface SystemRepoPullResult {
+  pulled: boolean;
+  error?: string;
+  /** True when origin is present but is NOT the expected system remote; no
+   *  fast-forward was attempted. `actualRemote` names what was found. */
+  refused?: boolean;
+  /** The origin fetch URL that was examined (present when a remote exists). */
+  actualRemote?: string;
+}
+
+/**
+ * Auto-pull the system repo ONLY after verifying its origin is the expected
+ * system remote (PHNX-2957). The system repo ships hooks that run as shell on
+ * tool events, so fast-forwarding it from an unexpected/repointed origin is
+ * remote code execution. An origin that fails {@link isExpectedSystemRepoRemote}
+ * is REFUSED loud (`refused: true`), never pulled — the canonical system repo
+ * (or an operator's `AGENTS_SYSTEM_REPO`) still fast-forwards exactly as before.
+ *
+ * A system dir with no origin at all is a plain no-op (`pulled: false`), not a
+ * refusal — there is nothing to pull from and nothing to distrust.
+ */
+export async function tryAutoPullSystemRepo(dir: string): Promise<SystemRepoPullResult> {
+  if (!isGitRepo(dir)) return { pulled: false };
+
+  let remote: string | undefined;
+  try {
+    const git = simpleGit(dir);
+    const remotes = await git.getRemotes(true);
+    remote = remotes.find(r => r.name === 'origin')?.refs?.fetch;
+  } catch {
+    return { pulled: false };
+  }
+
+  if (!remote) return { pulled: false };
+  if (!isExpectedSystemRepoRemote(remote)) {
+    return { pulled: false, refused: true, actualRemote: remote };
+  }
+
+  const res = await tryAutoPull(dir);
+  return { ...res, actualRemote: remote };
 }
 
 /**

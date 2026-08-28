@@ -85,7 +85,7 @@ import {
   switchHomeFileSymlinks,
 } from '../lib/installations/shims.js';
 import { isInteractiveTerminal, isPromptCancelled, requireInteractiveSelection } from './utils.js';
-import { tryAutoPull } from '../lib/git.js';
+import { tryAutoPullSystemRepo } from '../lib/git.js';
 import { getAgentsDir, getTrashVersionsDir } from '../lib/state.js';
 import { setHelpSections } from '../lib/help.js';
 import { updateSessionFilePaths } from '../lib/session/db.js';
@@ -765,10 +765,25 @@ export function registerVersionsCommands(program: Command): void {
   useCmd.action(async (agentArg: string, versionArg: string | undefined, options) => {
       try {
         const skipPrompts = options.yes || !isInteractiveTerminal();
-        // Auto-pull ~/.agents/.system if it's a git repo with remote (silent on success)
+        // Auto-pull ~/.agents/.system if it's a git repo tracking the EXPECTED
+        // system remote (silent on success). The system repo ships hooks that run
+        // as shell on tool events, so pulling from a repointed origin would be
+        // remote code execution — tryAutoPullSystemRepo refuses that (PHNX-2957).
         const agentsDir = getAgentsDir();
-        const pullResult = await tryAutoPull(agentsDir);
-        if (pullResult.pulled) {
+        const pullResult = await tryAutoPullSystemRepo(agentsDir);
+        if (pullResult.refused) {
+          console.error(
+            chalk.red(
+              `Refusing to auto-sync ~/.agents/.system: its origin (${pullResult.actualRemote}) is not the expected system repo.`,
+            ),
+          );
+          console.error(
+            chalk.gray(
+              'The system repo ships hooks that run on tool events; a fast-forward from an unexpected origin is not applied. ' +
+                'Re-point it (git -C ~/.agents/.system remote set-url origin <expected>) or set AGENTS_SYSTEM_REPO, then re-run `agents setup --force`.',
+            ),
+          );
+        } else if (pullResult.pulled) {
           console.log(chalk.gray('Synced ~/.agents/.system from remote'));
         }
 
