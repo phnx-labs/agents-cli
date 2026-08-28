@@ -252,6 +252,50 @@ describe('computeInsights', () => {
     expect(result.latency.firstToolMs.max).toBe(15_000);
   });
 
+  it('splits an identical (tool,cause,key) signature by phenotype, and folds same-phenotype sessions together (PHNX-3327)', () => {
+    // Three sessions, all with the SAME failure signature (Bash / real / "command failed").
+    // Two share a phenotype (false-termination) and must fold into one cluster; the
+    // third has a different phenotype (premature-completion) and is a distinct cluster.
+    const rows = [makeRow('sess-ft-1', T0), makeRow('sess-ft-2', T0), makeRow('sess-pc', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-ft-1', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+      makeCall('sess-ft-2', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+      makeCall('sess-pc', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+    ];
+    const phenotypes = new Map<string, 'false-termination' | 'premature-completion' | null>([
+      ['sess-ft-1', 'false-termination'],
+      ['sess-ft-2', 'false-termination'],
+      ['sess-pc', 'premature-completion'],
+    ]);
+
+    const result = computeInsights(rows, calls, null, phenotypes);
+    // Two clusters for one signature — one per phenotype — not three.
+    expect(result.failurePatterns).toHaveLength(2);
+    const ft = result.failurePatterns.find((p) => p.phenotype === 'false-termination');
+    const pc = result.failurePatterns.find((p) => p.phenotype === 'premature-completion');
+    expect(ft?.sessions).toBe(2); // the two false-termination sessions folded together
+    expect(ft?.occurrences).toBe(2);
+    expect(pc?.sessions).toBe(1);
+    // Distinct, deep-linkable ids per phenotype even though (tool,cause,key) matches.
+    expect(ft?.id).not.toBe(pc?.id);
+    // The signature output itself is unchanged (no phenotype leaked into it).
+    expect(ft?.signature).toEqual({ tool: 'Bash', cause: 'real', key: 'command failed' });
+  });
+
+  it('with no phenotype map, grouping is exactly the prior (tool,cause,key) behavior', () => {
+    // A caller that passes no phenotypes map (the pre-PHNX-3327 shape) collapses the
+    // dimension to null, so two identically-signatured sessions stay one cluster.
+    const rows = [makeRow('sess-a', T0), makeRow('sess-b', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-a', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+      makeCall('sess-b', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+    ];
+    const result = computeInsights(rows, calls, null);
+    expect(result.failurePatterns).toHaveLength(1);
+    expect(result.failurePatterns[0].sessions).toBe(2);
+    expect(result.failurePatterns[0].phenotype).toBeNull();
+  });
+
   it('marks drift up/down/flat against the previous shard by pattern id', () => {
     const rows = [makeRow('sess-drift', T0)];
     const calls: ToolCallRow[] = [

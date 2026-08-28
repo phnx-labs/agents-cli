@@ -110,19 +110,27 @@ falls back to the original gap-from-START heuristic unchanged — no crash, no N
 Patterns are
 **bounded top-K, ranked by wastedMs (impact) — never by raw occurrence count** —
 so a single rare multi-hour loop still outranks a frequent but cheap one.
-Cost stays proportional to this sync's row count (no transcript re-parsing), so
-it stays incremental at 10k+ session scale. **Known scope gap:** patterns do not
-yet carry a `phenotype` (false-termination / out-of-order / …,
-[`phenotype.ts`](src/lib/traces/phenotype.ts)) — that classification needs the
-full derived trajectory, which is only ever materialized per-session during
-upload, not cached the way per-session insight facets are; folding it in is a
-real follow-up, not a silent omission.
+Cost stays proportional to this sync's row count (no transcript re-parsing of
+already-classified sessions), so it stays incremental at 10k+ session scale.
+Patterns also carry a **`phenotype`** dimension (false-termination /
+premature-completion / out-of-order / failure-to-act,
+[`phenotype.ts`](src/lib/traces/phenotype.ts)) folded into the group key
+alongside `(tool, cause, normalized-error)` (PHNX-3327). That classification
+needs the full derived trajectory, which flat `tool_calls` rows don't carry — so
+it is computed per-session ONCE (parse → trajectory → `classifyPhenotype`) and
+**persisted in the mtime+size-keyed `session_phenotypes` cache** (same shape as
+`session_topics` / `session_insights`, `readSessionPhenotypes` /
+`writeSessionPhenotypes` in [`db.ts`](src/lib/session/db.ts)), then read for the
+**whole corpus** on every sync. Reading the cache for all rows — never just this
+run's freshly-parsed batch — is what keeps two identically-signatured sessions in
+ONE cluster regardless of which incremental sync first saw each; the `signature`
+output itself (`{ tool, cause, key }`) is unchanged, phenotype rides alongside it.
 
 | Field | Type | Description |
 |---|---|---|
 | `bucketHistory` | `BucketStats[][]` | 14-day rolling window. Each inner array is one day's per-bucket stats (errorRate = tool errors / total calls; stallRate = sessions with ≥1 stall / total sessions). |
 | `driftSignals` | `DriftSignal[]` | Buckets whose error or stall rate crossed ±0.20 vs the 7-day average. `severity`: `degrading | stable | improving`. Sorted by errorDelta desc. Buckets with <3 historical days are skipped. |
-| `failurePatterns` | `FailurePattern[]` | Top-25 cross-session failure clusters from `computeInsights()`, ranked by `wastedMs` desc. Each carries `signature` (tool/cause/normalized key), `sessions`, `occurrences`, `wastedMs` (estimate — labeled, never presented as exact), `exampleSessionIds` (≤5), and `drift` vs the same pattern id in the previous shard. |
+| `failurePatterns` | `FailurePattern[]` | Top-25 cross-session failure clusters from `computeInsights()`, ranked by `wastedMs` desc. Each carries `signature` (tool/cause/normalized key), `phenotype` (the cluster's failure phenotype or `null`; folded into the group key + id so the same signature under two phenotypes is two clusters — PHNX-3327), `sessions`, `occurrences`, `wastedMs` (estimate — labeled, never presented as exact), `exampleSessionIds` (≤5), and `drift` vs the same pattern id in the previous shard. |
 | `wastedMsTotal` | `number` | Sum of `wastedMs` across every cluster found this sync — not just the top-25 rows in `failurePatterns` above. |
 | `latency` | `LatencyInsight` | `{ firstToolMs: { p50, p90, p99, max } }` — time-to-first-tool percentiles, reusing `segments.ts`'s `computeLatency()` over each session's earliest `tool_calls` row. |
 
@@ -132,6 +140,20 @@ session that ultimately succeeded (merged / tests-green) still shows the tool
 failures it hit along the way instead of hiding them behind a green run-level
 status (the failure this fixes: a coding-agent analogue of a monitoring tool
 reporting 0% error rate while a run burned hours in a failed-tool retry loop).
+
+`meta.outcome` is the **truthful** run outcome (PHNX-3387): a run with tool
+errors reads `completed` ONLY when it *causally recovered* — a substantive,
+non-human-facing tool step succeeded strictly after the last error, the exact
+predicate the false-termination phenotype uses (`recoveredAfterErrors` in
+[`phenotype.ts`](src/lib/traces/phenotype.ts), shared with `deriveRunOutcome` in
+[`sync.ts`](src/lib/traces/sync.ts) so the console outcome and the phenotype can
+never disagree about whether a run finished). A run that errored and did NOT
+recover — it ended in error, punted to a human (`AskUserQuestion`), or its last
+action was an incidental unrelated call — stays `errored`. This is what makes
+`surfacedToolFailures` on a `completed` run honest: those are failures the run
+recovered from, not a green status hiding an unresolved one. It never flips a
+genuinely-unresolved run to `completed` (no regression vs the old
+`errorCount > 0 ? errored : completed`).
 
 On live sync, the prior shard is fetched from R2 before the PUT to seed history; failures (404, parse error) fall back to empty history. `--dry-run --out <dir>` seeds from the previous `index.json` in the output directory. Topic classification is lazily
 cached in the self-healing `session_topics` table by transcript mtime + size;
