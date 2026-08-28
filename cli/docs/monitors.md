@@ -183,7 +183,7 @@ agents monitors remove <name>
 | Flag | Source | Observation |
 |---|---|---|
 | `--watch '<cmd>'` | command | the command's stdout |
-| `--watch-pid <pid>` | command | `running` / `exited`, polled by the engine — see below |
+| `--watch-pid <pid>` | command | `running` / `exited` / `notyetspawned`, polled by the engine — see below |
 | `--poll '<cmd>' <interval>` | poll | stdout, re-run every interval |
 | `--poll-http <url> <interval>` | poll-http | `<status>\n<body>` every interval |
 | `--watch-file <path>` | file | file content (or dir listing) + mtime |
@@ -205,6 +205,14 @@ still spawns a **new** headless agent conversation or sends a real
 notification; it does not resume the exact session that armed it (see `--run`
 below) — the fix is "you get reliably woken", not "the same conversation
 magically continues".
+
+`--force` arms a watch on a pid that isn't alive yet (the caller's own
+concurrent step is about to spawn it). The poll then reports `notyetspawned`,
+never `exited`, until it has observed the pid running at least once (a
+per-monitor marker file records that transition) — otherwise the very first
+poll would already read "not alive" as "exited", fire a false notification
+immediately, and permanently poison the on-change dedupe baseline so the real
+later exit never fires again.
 
 ### Conditions (how an observation becomes a fire)
 
