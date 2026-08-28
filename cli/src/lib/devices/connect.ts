@@ -132,7 +132,9 @@ export function markFleetRemote(
   provenanceEnv: Record<string, string> = actorEnv(resolveActor()),
 ): string[] {
   if (device.shell === 'powershell') {
-    if (cmd[0]?.startsWith(`$env:AGENTS_FLEET_REMOTE=`)) return cmd;
+    // Exact-match guard, symmetric with the POSIX branch below: the marker token
+    // is always this literal, so `startsWith` would only loosen it for no gain.
+    if (cmd[0] === `$env:AGENTS_FLEET_REMOTE='1';`) return cmd;
     const prelude = [
       `$env:AGENTS_FLEET_REMOTE='1';`,
       ...Object.entries(provenanceEnv).map(([k, v]) => `$env:${k}='${v.replace(/'/g, "''")}';`),
