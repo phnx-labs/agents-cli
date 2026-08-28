@@ -643,12 +643,35 @@ export function describePluginDrift(central: DiscoveredPlugin, mirrorDir: string
   if (mVer && cVer && compareVersions(cVer, mVer) > 0) parts.push(`${mVer}→${cVer}`);
   if (mManifest && repairableManifestFields(mManifest).length > 0) parts.push('invalid manifest');
 
+  const centralSkills = listPluginSkillDirs(central.root);
   const mirrorSkills = new Set(listPluginSkillDirs(mirrorDir));
-  const missSkills = listPluginSkillDirs(central.root).filter((s) => !mirrorSkills.has(s)).sort();
+  const missSkills = centralSkills.filter((s) => !mirrorSkills.has(s)).sort();
+  const centralCmds = listPluginCommandFiles(central.root);
   const mirrorCmds = new Set(listPluginCommandFiles(mirrorDir));
-  const missCmds = listPluginCommandFiles(central.root).filter((c) => !mirrorCmds.has(c)).sort();
+  const missCmds = centralCmds.filter((c) => !mirrorCmds.has(c)).sort();
   if (missSkills.length) parts.push(`missing skill${missSkills.length > 1 ? 's' : ''}: ${missSkills.join(', ')}`);
   if (missCmds.length) parts.push(`missing command${missCmds.length > 1 ? 's' : ''}: ${missCmds.join(', ')}`);
+
+  // Content drift of a skill/command that exists in BOTH — the mirror kept the
+  // dir/file but its bytes went stale (PHNX-2955: a skill edit landed on origin
+  // and was pulled into central, but the per-version marketplace copy was never
+  // refreshed, so agents kept executing the OLD skill text while `plugins list`
+  // and `doctor` reported it `everywhere`/`ok`). Presence alone missed this; a
+  // content compare is what turns a stale mirror into a reportable `diff`.
+  const staleSkills = centralSkills
+    .filter((s) => mirrorSkills.has(s))
+    .filter((s) => !dirsContentMatch(path.join(central.root, 'skills', s), path.join(mirrorDir, 'skills', s)))
+    .sort();
+  const staleCmds = centralCmds
+    .filter((c) => mirrorCmds.has(c))
+    .filter((c) => {
+      const a = readSafe(path.join(central.root, 'commands', `${c}.md`));
+      const b = readSafe(path.join(mirrorDir, 'commands', `${c}.md`));
+      return a == null || b == null || normalize(a) !== normalize(b);
+    })
+    .sort();
+  if (staleSkills.length) parts.push(`stale skill${staleSkills.length > 1 ? 's' : ''}: ${staleSkills.join(', ')}`);
+  if (staleCmds.length) parts.push(`stale command${staleCmds.length > 1 ? 's' : ''}: ${staleCmds.join(', ')}`);
 
   return parts.length ? parts.join(', ') : null;
 }
