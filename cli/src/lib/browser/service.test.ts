@@ -695,7 +695,19 @@ describe('browser recording frame pipe (PHNX-2600)', () => {
     // verification uses ffprobe to assert the exact frame count and duration.
     execFileSync(ffmpeg, ['-v', 'error', '-i', result.path, '-f', 'null', '-']);
     expect(result.bytes).toBeGreaterThan(1000);
-  });
+    // 120s ceiling (below): this test spawns several REAL ffmpeg processes end to
+    // end — resolveFfmpeg (a one-time `-version` probe, or an install), an
+    // execFileSync to synthesize the JPEG frame, the recording ffmpeg behind
+    // recordStart/recordStop, and a final execFileSync decode of the produced
+    // WebM. That is a few seconds on an idle box, but under concurrent CI load
+    // (several PRs running the ~18-min suite on one runner) process spawns balloon
+    // and the default 30s testTimeout was exceeded intermittently — red-CI'ing
+    // unrelated PRs (PHNX-3465). The 120s ceiling sits well above the true cost
+    // (like ChildProcess.doctorTimeout's 180s over a 136s command) so a load
+    // spike can't flake it, while still failing a genuinely hung spawn in bounded
+    // time. Do NOT globally raise testTimeout — only this real-multi-spawn test
+    // needs the headroom.
+  }, 120_000);
 });
 
 describe('BrowserService.stopProfile — composite-key cleanup (#559)', () => {
