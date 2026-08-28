@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawn } from 'child_process';
-import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
+import { activeRunSkipStreak, archiveRoutineTranscripts, assertRoutineAccountLocalForPlacement, buildHostDispatchOptions, buildJobCommand, buildRoutineSpawnEnv, dispatchPlacedJob, executeJob, executeJobDetached, launcherClaimPid, monitorRunningJobs, resolveRoutineLaunch, RoutineAlreadyRunningError, routineSpawnCwd, snapshotRoutineTranscriptBase } from './runner.js';
 import { getRunDir, readRunMeta, writeRunMeta } from '../scheduling/routines.js';
 import { getVersionHomePath } from '../installations/versions.js';
 import type { JobConfig, RunMeta } from '../scheduling/routines.js';
@@ -19,6 +19,16 @@ import { query, _resetForTest } from '../feed/events.js';
 // RUSH-2215: only process-group / real-spawn holder suites are POSIX-oriented.
 // Pure command construction and path helpers must still run on Windows.
 const describeSpawn = process.platform === 'win32' ? describe.skip : describe;
+
+describe('buildRoutineSpawnEnv (PHNX-3406)', () => {
+  it('keeps Claude on the selected authenticated version HOME/config', () => {
+    const overlay = path.join(os.tmpdir(), 'phnx3406-overlay');
+    const version = '99.0.0-phnx3406';
+    const env = buildRoutineSpawnEnv({ HOME: overlay, AGENTS_USER_DIR: state.getUserAgentsDir() }, 'claude', version, undefined, overlay);
+    expect(env.HOME).toBe(getVersionHomePath('claude', version));
+    expect(env.CLAUDE_CONFIG_DIR).toBe(path.join(getVersionHomePath('claude', version), '.claude'));
+  });
+});
 
 
 beforeEach(() => {
