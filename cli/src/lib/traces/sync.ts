@@ -81,6 +81,14 @@ export interface SyncResult {
   parseFailed: number;
   /** Parsed fine but the upload PUT failed (network/5xx) — retried on the next sync. */
   uploadFailed: number;
+  /**
+   * The index shard build or upload failed. Undefined on success. The per-session
+   * data still uploaded (that loop runs first), but the aggregated console shard —
+   * stats, needs-attention, failure clusters, latency — was NOT refreshed, so the
+   * console keeps serving the last good index. Surfaced (not swallowed) so a stale
+   * console is diagnosable instead of looking like a clean sync. See PHNX-3401.
+   */
+  indexError?: string;
 }
 
 /** Push derived, redacted trajectories for this device to the traces store. */
@@ -216,6 +224,7 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
     }
   }
 
+  let indexError: string | undefined;
   if (!opts.skipIndex) {
     try {
       const allRows = db
@@ -237,8 +246,13 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       } else {
         await putIndexShard(backend!, device, owner, shard);
       }
-    } catch {
-      // index PUT/write failure is not fatal — the per-session data is already written
+    } catch (err) {
+      // Not fatal to the per-session upload (that loop already ran), but it DOES
+      // mean the console shard is now stale. Record it so the caller can surface a
+      // warning instead of reporting a clean, green sync — a silent swallow here is
+      // exactly what let a 59h-stale, insight-less index hide in plain sight
+      // (PHNX-3401). Do NOT re-throw: the session data is durable and worth keeping.
+      indexError = err instanceof Error ? err.message : String(err);
     }
   }
 
@@ -274,6 +288,7 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
     transcriptUnavailable,
     parseFailed,
     uploadFailed,
+    indexError,
   };
 }
 
@@ -370,6 +385,32 @@ function attentionFlags(errorCount: number, facets: InsightFacets | undefined): 
   return flags;
 }
 
+/**
+ * Persist a derived-cache warm-up (topics / insights) without letting a
+ * contended DB take down the whole index build.
+ *
+ * These write-backs only speed up the NEXT sync — the shard about to be built
+ * reads from the in-memory `topics` / `insights` maps that were already
+ * populated above, never from what this write persists. So the write is
+ * genuinely optional to the shard's correctness.
+ *
+ * Yet it was the single point that broke the console: on an active machine the
+ * Rush app holds `sessions.db`, this `BEGIN IMMEDIATE` waits out the 30s
+ * `busy_timeout` and throws `SQLITE_BUSY`, the throw escaped `buildIndexShard`,
+ * and `syncTraces` swallowed it — so the index (with wasted-time / failure
+ * clusters / latency) never re-uploaded and the dashboard sat 59h stale
+ * (PHNX-3401). Isolating the failure here keeps the index building; the warning
+ * makes the degraded cache visible instead of silent.
+ */
+function persistDerivedCache(label: string, write: () => void): void {
+  try {
+    write();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`traces: ${label} cache warm-up skipped (${msg}) — index still built`);
+  }
+}
+
 /** Build the redacted rich console shard from indexed metadata and derived caches. */
 export function buildIndexShard(
   rows: SyncRow[],
@@ -412,7 +453,7 @@ export function buildIndexShard(
     topics.set(row.id, topic);
     return { id: row.id, fileMtimeMs: row.file_mtime_ms, fileSize: row.file_size, topic };
   });
-  writeSessionTopics(missingTopics);
+  persistDerivedCache('session-topics', () => writeSessionTopics(missingTopics));
 
   const insights = readSessionInsights<InsightFacets>(ids);
   const missingInsights: Array<{
@@ -436,7 +477,7 @@ export function buildIndexShard(
       continue;
     }
   }
-  writeSessionInsights(missingInsights);
+  persistDerivedCache('session-insights', () => writeSessionInsights(missingInsights));
 
   const needsAttention = rows.flatMap((row): IndexedSession[] => {
     const facets = insights.get(row.id);

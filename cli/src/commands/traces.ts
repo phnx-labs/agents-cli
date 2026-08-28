@@ -124,6 +124,16 @@ async function handleSync(opts: { limit?: string; dryRun?: boolean; out?: string
   }
 
   console.log(parts.join(chalk.dim('  ·  ')));
+
+  // The per-session data can upload cleanly while the aggregated console shard
+  // fails to refresh (e.g. the sessions DB is locked by a running app). That used
+  // to be silent, so the console sat stale with no signal here (PHNX-3401).
+  if (result.indexError) {
+    console.log(
+      chalk.yellow('  ⚠ console index not refreshed') +
+        chalk.dim(` (${result.indexError}) — dashboard may be stale; it will retry next sync`),
+    );
+  }
 }
 
 async function handleStatus(): Promise<void> {
