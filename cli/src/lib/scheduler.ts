@@ -9,6 +9,7 @@
 import { Cron } from 'croner';
 import type { JobConfig } from './scheduling/routines.js';
 import {
+  alignedSlotForFire,
   listJobs,
   deleteJob,
   isPastEndAt,
@@ -29,9 +30,31 @@ interface ScheduledJob {
 
 /** How a fire was triggered, carrying the scheduler's intended UTC slot time. */
 export interface TriggerContext {
-  /** The cron slot this callback fires for (croner `currentRun()`), for the
-   *  single-fire claim keyed on (routine, scheduledFor). */
+  /** The ALIGNED cron slot this callback fires for, for the single-fire claim
+   *  keyed on (routine, scheduledFor). Derived by {@link fireSlot} — NOT croner's
+   *  raw `currentRun()`, which carries wall-clock jitter. */
   scheduledFor?: Date;
+}
+
+/**
+ * The aligned occurrence boundary a fire callback belongs to — the value the
+ * single-fire `(routine, scheduledFor)` claim keys on.
+ *
+ * croner's `currentRun()` inside a fire callback is the JITTERED wall-clock
+ * trigger instant (it carries milliseconds — verified against croner 10.x), not
+ * the aligned schedule boundary. Keying `slotRunId` on it directly minted a
+ * distinct run id per delivery, so two callbacks for one occurrence each claimed
+ * a different run dir and both launched, and a live fire never collided with its
+ * catch-up twin (`missedRunId`, which keys on the aligned boundary). Flooring the
+ * fire to its schedule boundary via {@link alignedSlotForFire} makes the claim a
+ * structural claim on the occurrence identity (SING-15). Always returns a
+ * concrete Date — `currentRun()` falls back to now, and an unresolvable boundary
+ * falls back to the fire instant — so the forward path never dispatches without a
+ * durable slot key.
+ */
+export function fireSlot(cron: Cron): Date {
+  const fire = cron.currentRun() ?? new Date();
+  return alignedSlotForFire(cron, fire) ?? fire;
 }
 
 /** In-memory cron scheduler that triggers a callback when jobs fire. */
@@ -103,10 +126,13 @@ export class JobScheduler {
       }
 
       try {
-        // croner hands the callback its own Cron instance; `currentRun()` is the
-        // UTC time THIS invocation was scheduled for — the single-fire slot key.
-        // A duplicate delivery for the same slot resolves to one run downstream.
-        await this.onTrigger(config, { scheduledFor: self.currentRun() ?? undefined });
+        // scheduledFor is the ALIGNED occurrence boundary (fireSlot), not croner's
+        // jittered currentRun(): the single-fire claim keys on (routine,
+        // scheduledFor), so the key must be the occurrence identity or a live fire
+        // and its catch-up twin (missedRunId) won't collide and two deliveries of
+        // one slot each mint a distinct id. fireSlot always returns a Date, so the
+        // forward path always carries a durable claim (SING-15).
+        await this.onTrigger(config, { scheduledFor: fireSlot(self) });
       } catch (err) {
         console.error(`Job '${config.name}' failed:`, (err as Error).message);
       }

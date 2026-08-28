@@ -2064,6 +2064,52 @@ export function slotRunId(scheduledFor: Date | string): string {
 }
 
 /**
+ * Lookback windows for {@link alignedSlotForFire}, narrowest first. A fixed
+ * one-week window silently blinds the walk to any cron whose gap exceeds it
+ * (`0 9 1,13,25 * *` has 12-day gaps), so a wider window is tried only when the
+ * narrower one found nothing — a dense schedule never walks more than a week.
+ */
+const SLOT_LOOKBACK_WINDOWS_MS = [7, 32, 93, 400].map((d) => d * 24 * 60 * 60 * 1000);
+
+/**
+ * The aligned schedule boundary a fire belongs to: the most recent occurrence of
+ * `cron` at or before `at`.
+ *
+ * This is the occurrence IDENTITY that {@link slotRunId} (forward dispatch) and
+ * `missedRunId` (catchup.ts) must both key on. croner's `currentRun()` inside a
+ * fire callback is the JITTERED wall-clock trigger instant (it carries
+ * milliseconds — verified), not the aligned boundary, so keying `slotRunId`
+ * directly on it produced a distinct id per delivery: two callbacks for one
+ * occurrence each claimed a different run dir and both launched, and a live fire
+ * never collided with its catch-up twin (which keys on the aligned
+ * `previousExpectedFire`). Flooring both to this boundary is what makes the
+ * single-fire claim a structural claim on `(routine, scheduledFor)` (SING-15).
+ *
+ * croner's `previousRun()` takes no argument and returns null on a freshly
+ * constructed instance, so we walk `nextRun(cursor)` forward from a lookback
+ * window and keep the last fire still ≤ `at` — the same derivation catchup's
+ * overdue detection has always used.
+ */
+export function alignedSlotForFire(cron: Cron, at: Date): Date | null {
+  for (const window of SLOT_LOOKBACK_WINDOWS_MS) {
+    let cursor: Date = new Date(at.getTime() - window);
+    let last: Date | null = null;
+    // Cap iterations: an every-minute schedule yields ≤ 10080 steps over a week;
+    // 20k is a paranoia bound against pathological patterns. Only a schedule that
+    // found nothing in the narrower window reaches a wider one, and such a
+    // schedule is sparse, so the cap is never the binding constraint.
+    for (let i = 0; i < 20000; i++) {
+      const next = cron.nextRun(cursor);
+      if (!next || next.getTime() > at.getTime()) break;
+      last = next;
+      cursor = next;
+    }
+    if (last) return last;
+  }
+  return null;
+}
+
+/**
  * Atomically CLAIM a run directory. Returns true on a successful claim, false
  * when the directory already exists (another caller — even in a separate process
  * — owns this (routine, slot) pair). The non-recursive `mkdir` is a single
