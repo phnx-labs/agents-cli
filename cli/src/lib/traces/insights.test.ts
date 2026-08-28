@@ -64,6 +64,7 @@ describe('computeInsights', () => {
       tool: 'Bash',
       cause: 'real',
       key: 'api rate limit exceeded for user _ (try again in _s)',
+      phenotype: null,
     });
     expect(pattern.occurrences).toBe(2);
     expect(pattern.sessions).toBe(1);
@@ -151,6 +152,24 @@ describe('computeInsights', () => {
     );
     const result = computeInsights(rows, calls, null);
     expect(result.failurePatterns.length).toBeLessThanOrEqual(25);
+  });
+
+  it('splits the same (tool, cause, error) by phenotype when phenotypes are provided', () => {
+    const rows = [makeRow('sess-phen-a', T0), makeRow('sess-phen-b', T0)];
+    const calls: ToolCallRow[] = [
+      makeCall('sess-phen-a', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+      makeCall('sess-phen-b', 1, iso(0), 'Bash', 'error', { error: 'command failed' }),
+    ];
+    const phenotypes = new Map<string, 'false-termination' | 'premature-completion'>([
+      ['sess-phen-a', 'false-termination'],
+      ['sess-phen-b', 'premature-completion'],
+    ]);
+    const result = computeInsights(rows, calls, null, phenotypes);
+    expect(result.failurePatterns).toHaveLength(2);
+    expect(result.failurePatterns.map((p) => p.signature.phenotype).sort()).toEqual([
+      'false-termination',
+      'premature-completion',
+    ]);
   });
 
   it('does not attribute an ordinary gap between unrelated successful calls as wasted time', () => {

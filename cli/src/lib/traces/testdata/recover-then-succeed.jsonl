@@ -1,0 +1,5 @@
+{"type":"user","message":{"role":"user","content":"fix the flaky test"},"timestamp":"2026-08-28T10:00:00.000Z","cwd":"/home/u/repo","gitBranch":"main","sessionId":"recover-succeed-1"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"On it."},{"type":"tool_use","id":"t1","name":"Bash","input":{"command":"bun test src/lib/traces/sync.test.ts"}}]},"timestamp":"2026-08-28T10:00:05.000Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","is_error":true,"content":"error: test failed\n1 test failed"}]},"timestamp":"2026-08-28T10:00:10.000Z"}
+{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Let me check the file."},{"type":"tool_use","id":"t2","name":"Read","input":{"file_path":"src/lib/traces/sync.ts"}}]},"timestamp":"2026-08-28T10:00:15.000Z"}
+{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t2","content":"file contents ok"}]},"timestamp":"2026-08-28T10:00:16.000Z"}

@@ -42,7 +42,7 @@
     {
       "id": "b57b8150",
       "label": "exec_command: command failed",
-      "signature": { "tool": "exec_command", "cause": "real", "key": "command failed" },
+      "signature": { "tool": "exec_command", "cause": "real", "key": "command failed", "phenotype": null },
       "sessions": 1,
       "occurrences": 1,
       "wastedMs": 0,
@@ -52,7 +52,7 @@
     {
       "id": "f8afc153",
       "label": "exec_command: git guard denial",
-      "signature": { "tool": "exec_command", "cause": "guard", "key": "git-guard blocked" },
+      "signature": { "tool": "exec_command", "cause": "guard", "key": "git-guard blocked", "phenotype": null },
       "sessions": 1,
       "occurrences": 1,
       "wastedMs": 0,

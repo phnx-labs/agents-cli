@@ -100,12 +100,11 @@ short gaps that still sum large. Patterns are
 **bounded top-K, ranked by wastedMs (impact) — never by raw occurrence count** —
 so a single rare multi-hour loop still outranks a frequent but cheap one.
 Cost stays proportional to this sync's row count (no transcript re-parsing), so
-it stays incremental at 10k+ session scale. **Known scope gap:** patterns do not
-yet carry a `phenotype` (false-termination / out-of-order / …,
-[`phenotype.ts`](src/lib/traces/phenotype.ts)) — that classification needs the
-full derived trajectory, which is only ever materialized per-session during
-upload, not cached the way per-session insight facets are; folding it in is a
-real follow-up, not a silent omission.
+it stays incremental at 10k+ session scale. The fingerprint also folds in the
+session `phenotype` (false-termination / premature-completion / out-of-order /
+failure-to-act from [`phenotype.ts`](src/lib/traces/phenotype.ts)) when it is
+available, computed from the same `SessionDetail` built during per-session upload
+so the index shard does not re-parse transcripts at scale.
 
 | Field | Type | Description |
 |---|---|---|

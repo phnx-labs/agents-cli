@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { parseSession } from '../session/parse.js';
+import { buildTrajectory } from '../session/trajectory.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getDB, readSessionTopics, INSIGHTS_EXTRACTOR_VERSION } from '../session/db.js';
 import * as sessionDb from '../session/db.js';
@@ -308,8 +310,8 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     session: { id: 's1', agent: 'claude', model: 'opus-4-8', cwd: '/home/x/repo', costUsd: 1.5 },
     spanMs: 60_000,
     steps: [
-      { ordinal: 1, lane: 'Bash', tool: 'Bash', startMs: 0, durationMs: 100, outcome: 'error', label: 'git rebase' },
-      { ordinal: 2, lane: 'Read', tool: 'Read', startMs: 200, durationMs: 50, outcome: 'ok', label: 'read file' },
+      { ordinal: 1, kind: 'tool', lane: 'Bash', tool: 'Bash', startMs: 0, durationMs: 100, outcome: 'error', label: 'git rebase' },
+      { ordinal: 2, kind: 'tool', lane: 'Read', tool: 'Read', startMs: 200, durationMs: 50, outcome: 'ok', label: 'read file' },
     ],
     gaps: [{ startMs: 300, durationMs: 130_000, afterOrdinal: 2 }],
     programTimeShare: {},
@@ -330,7 +332,7 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     expect(d.meta.errorCount).toBe(1);
     expect(d.meta.tokens).toBe(1000);
     expect(d.meta.costUsd).toBe(1.5);
-    expect(d.meta.outcome).toBe('errored');
+    expect(d.meta.outcome).toBe('completed'); // recovered: last tool step succeeded
     expect(d.meta.repo).toBe('repo'); // cwd basename, not the full path (PII)
     expect(d.meta.agent).toBe('claude');
     expect(d.steps).toHaveLength(2);
@@ -354,12 +356,45 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     expect(clean.meta.outcome).toBe('completed');
   });
 
+  it('labels an unrecovered run as errored when the last tool step fails', () => {
+    const unrecovered = buildSessionDetail({
+      ...baseTraj,
+      steps: [
+        baseTraj.steps[1], // ok Read
+        { ordinal: 2, kind: 'tool', lane: 'Bash', tool: 'Bash', startMs: 200, durationMs: 100, outcome: 'error', label: 'git rebase' },
+      ],
+    });
+    expect(unrecovered.meta.outcome).toBe('errored');
+    expect(unrecovered.surfacedToolFailures).toHaveLength(1);
+  });
+
   it('surfaces every failed step so a run-level view never hides a tool failure', () => {
     const d = buildSessionDetail(baseTraj);
     expect(d.surfacedToolFailures).toEqual([{ tool: 'Bash', label: 'git rebase', detail: undefined }]);
 
     const clean = buildSessionDetail({ ...baseTraj, steps: [baseTraj.steps[1]], gaps: [], errorCount: 0 });
     expect(clean.surfacedToolFailures).toEqual([]);
+  });
+
+  it('labels a real recover-then-succeed transcript as completed with surfacedToolFailures', () => {
+    const fixture = path.join(import.meta.dirname, 'testdata/recover-then-succeed.jsonl');
+    const events = parseSession(fixture, 'claude');
+    const traj = buildTrajectory(events, {
+      id: 'recover-succeed-1',
+      agent: 'claude',
+      model: 'claude-opus-4-8',
+      timestamp: '2026-08-28T10:00:00.000Z',
+      cwd: '/home/u/repo',
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any, { redact: false });
+    const d = buildSessionDetail(traj);
+    expect(d.meta.errorCount).toBe(1);
+    expect(d.meta.outcome).toBe('completed');
+    expect(d.surfacedToolFailures).toEqual([{
+      tool: 'Bash',
+      label: 'bun test src/lib/traces/sync.test.ts',
+      detail: 'error: test failed',
+    }]);
   });
 });
 

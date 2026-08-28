@@ -49,6 +49,7 @@ import {
 } from './classify.js';
 import { computeInsights, type FailurePattern } from './insights.js';
 import type { LatencyInsight } from './segments.js';
+import { classifyPhenotype, type FailurePhenotype } from './phenotype.js';
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -183,6 +184,12 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
     fs.mkdirSync(path.join(outDir, 'sessions'), { recursive: true });
   }
 
+  // Per-session failure phenotypes, derived from the same SessionDetail we upload.
+  // computeInsights folds this into its signature so cross-session clusters keep
+  // the trajectory signal (false-termination / premature-completion / …) in their
+  // fingerprint without re-parsing every transcript at index-build time.
+  const phenotypes = new Map<string, FailurePhenotype | null>();
+
   for (const row of limited) {
     if (!row.file_path) {
       skipped++;
@@ -190,10 +197,12 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       continue;
     }
     let traj: SessionTrajectory;
+    let detail: SessionDetail;
     try {
       const session = rowToMeta(row);
       const events = parseSession(row.file_path, row.agent as SessionAgentId);
       traj = buildTrajectory(events, session, { redact: true, knownSecrets });
+      detail = buildSessionDetail(traj);
     } catch (err) {
       // A gone/unreadable transcript is expected history, not a retry-worthy error;
       // a file that IS present but failed to parse is a real problem to retry.
@@ -206,11 +215,12 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       }
       continue;
     }
+    phenotypes.set(row.id, classifyPhenotype(detail));
     try {
       if (dryRun && outDir) {
         fs.writeFileSync(
           path.join(outDir, 'sessions', `${row.id}.json`),
-          JSON.stringify(buildSessionDetail(traj)),
+          JSON.stringify(detail),
         );
       } else {
         await putSessionTrace(backend!, device, row.id, traj);
@@ -240,7 +250,7 @@ export async function syncTraces(opts: SyncOpts = {}): Promise<SyncResult> {
       } else if (backend) {
         prevShard = await getIndexShard(backend, device);
       }
-      const shard = buildIndexShard(allRows, device, owner, prevShard);
+      const shard = buildIndexShard(allRows, device, owner, prevShard, phenotypes);
       if (dryRun && outDir) {
         fs.writeFileSync(path.join(outDir, 'index.json'), JSON.stringify(shard, null, 2));
       } else {
@@ -417,6 +427,7 @@ export function buildIndexShard(
   device: string,
   owner: string,
   prevShard?: TracesIndexShard | null,
+  phenotypes?: ReadonlyMap<string, FailurePhenotype | null>,
 ): TracesIndexShard {
   const db = getDB();
   const knownSecrets = knownSecretValuesFromEnv();
@@ -543,7 +554,7 @@ export function buildIndexShard(
   const prevHistory = prevShard?.bucketHistory ?? [];
   const bucketHistory = [...prevHistory, todayStats].slice(-14);
   const driftSignals = computeDriftSignal(prevHistory, todayStats);
-  const patternInsights = computeInsights(rows, calls, prevShard);
+  const patternInsights = computeInsights(rows, calls, prevShard, phenotypes);
 
   return {
     schema: 1,
@@ -604,6 +615,16 @@ export interface SessionDetail {
   surfacedToolFailures: Array<{ tool?: string; label: string; detail?: string }>;
 }
 
+/** Determine whether a run that hit tool failures recovered and finished successfully. */
+function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
+  if (traj.errorCount === 0) return 'completed';
+  const toolSteps = traj.steps.filter((s) => s.kind === 'tool');
+  const lastTool = toolSteps[toolSteps.length - 1];
+  // A recovered run's final tool call returned ok despite earlier failures.
+  if (lastTool && lastTool.outcome === 'ok') return 'completed';
+  return 'errored';
+}
+
 /** Plain-language summary of the friction in a run, or null when it ran clean. */
 function buildWhereItWentWrong(traj: SessionTrajectory): string | null {
   const errorSteps = traj.steps.filter((s) => s.outcome === 'error');
@@ -654,7 +675,7 @@ export function buildSessionDetail(traj: SessionTrajectory): SessionDetail {
       errorCount: traj.errorCount,
       tokens: stats.outputTokens ?? 0,
       costUsd: s.costUsd ?? 0,
-      outcome: traj.errorCount > 0 ? 'errored' : 'completed',
+      outcome: deriveRunOutcome(traj),
       repo,
       agent: s.agent,
       model: s.model ?? 'unknown',
