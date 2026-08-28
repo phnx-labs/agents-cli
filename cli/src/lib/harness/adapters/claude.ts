@@ -1,6 +1,7 @@
 import * as path from 'path';
 import type { HarnessAdapter } from '../adapter.js';
 import { stripForeignConfigDir } from '../adapter.js';
+import { isHeadedDeviceRole } from '../../device-config.js';
 
 export const claudeAdapter: HarnessAdapter = {
   id: 'claude',
@@ -50,8 +51,8 @@ export const claudeAdapter: HarnessAdapter = {
     // path — agents.ts `isClaudeCredentialFileBlank`), so this path defers to
     // Claude Code, which reads its own ACL-trusted login item without a prompt and
     // asks a present human to log in only if the login is missing.
-    const personalDevice = ctx.deviceRole === 'personal';
-    if (ctx.interactive || personalDevice) {
+    const headedDevice = isHeadedDeviceRole(ctx.deviceRole);
+    if (ctx.interactive || headedDevice) {
       // Drop an INHERITED copy of OUR OWN setup-token: a launch from inside a
       // headless agent's shell inherits that agent's injected value via
       // sanitizeProcessEnv(process.env) and would keep authenticating as it,

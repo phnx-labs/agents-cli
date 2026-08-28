@@ -15,16 +15,24 @@
  * |---|---|
  * | no device marked | every online device (unchanged behavior) |
  * | some marked `worker` | ONLY those workers |
- * | marked `personal` | never, under either state |
+ * | marked `personal` / `desktop` | never, under either state |
  *
- * `auto.pool all` turns the allowlist off; `personal` stays excluded, because a
- * machine the user sits at is marked precisely so agents stay off it.
+ * `auto.pool all` turns the allowlist off; `personal` and `desktop` stay
+ * excluded, because a box the user sits at (personal) or a headed always-on
+ * release/credential box (desktop) is marked precisely so agents stay off it.
  */
 import { autoPoolMode, listConfiguredDeviceRoles, type AutoPoolMode, type ConfiguredDeviceRole } from '../device-config.js';
 import { normalizeHost } from '../machine-id.js';
 
-/** Roles that automatic placement never picks, whatever the pool mode. */
-const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal']);
+/**
+ * Roles that automatic placement never picks, whatever the pool mode.
+ *
+ * `personal` (a box you sit at) and `desktop` (a headed always-on box — the
+ * release/credential home, e.g. a Mac mini) are both off-limits to `--device
+ * auto`: neither is headless fan-out capacity, and landing agent work on them
+ * is the outcome the mark exists to prevent. Only `worker` is auto-eligible.
+ */
+const NEVER_AUTO: ReadonlySet<ConfiguredDeviceRole> = new Set<ConfiguredDeviceRole>(['personal', 'desktop']);
 
 export interface AutoPoolOptions {
   /** Pool mode; defaults to the configured `auto.pool`. */

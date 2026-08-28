@@ -568,16 +568,26 @@ device `worker` turns automatic placement into an allowlist: `--device auto` the
 picks only from the marked workers, in every caller (`run`, `teams`, `ssh auto`,
 the generic `--device auto` passthrough, and the AGI EXT launch commands, which
 resolve placement through the CLI rather than scoring devices themselves); a
-`personal` box is never picked automatically. The rule is one function —
+`personal` or `desktop` box is never picked automatically. The rule is one function —
 `filterAutoPool` in [`src/lib/devices/pool.ts`](src/lib/devices/pool.ts) — read by
 `listOnlineDeviceNames`, and `auto.pool` (`workers` by default, or `all`) turns
 the allowlist off. When roles leave the pool empty, **both** resolvers throw
 (`formatEmptyAutoPoolError`): a `null` host means "run locally", which on a
-`personal` box is the outcome the mark exists to prevent. Unlike the machine-local
+`personal`/`desktop` box is the outcome the mark exists to prevent. Unlike the machine-local
 keys, `role` is **shared**: it lives in that device's tracked
 `devices/<name>/agents.yaml` `config.role` and syncs with `agents repo
 push/pull`, because every box has to agree on where agents may land. The
-vocabulary is `worker | personal` only.
+vocabulary is `worker | personal | desktop`. `desktop` is a headed always-on box
+— the release/credential home, e.g. a Mac mini: it is NOT headless fan-out
+capacity, so like `personal` it is excluded from `--device auto` (both are in
+`NEVER_AUTO`), but it IS a headed box with a real interactive login, so for the
+Claude auth strategy it sits in the SAME "headed" bucket as `personal`
+(`isHeadedDeviceRole`, `device-config.ts`) — it authenticates from its own
+per-version login, never the worker setup-token. The one display consequence:
+because a `personal` box is by definition the interactive seat, `agents devices
+list` folds the `★ interactive` star INTO the `personal` role rather than
+printing both (the star still shows for a non-personal box pinned as
+`interactive.host`).
 
 `devices.<name>.description` (stored as `description`) is the free-text sibling
 of `role`: one line saying what the box is FOR — "gpu box — cuda 12.4", "release

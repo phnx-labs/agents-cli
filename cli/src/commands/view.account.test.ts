@@ -307,6 +307,11 @@ describe('allowInteractiveUsageLogin — the USAGE-READ-2 role + foreground gate
     expect(allowInteractiveUsageLogin('personal', false)).toBe(false);
   });
 
+  it('allows the interactive login for a desktop device at a human TTY (headed box with the login)', () => {
+    expect(allowInteractiveUsageLogin('desktop', true)).toBe(true);
+    expect(allowInteractiveUsageLogin('desktop', false)).toBe(false);
+  });
+
   it('rejects a worker device even at a TTY (RUSH-1822 guarantee: setup-token only)', () => {
     expect(allowInteractiveUsageLogin('worker', true)).toBe(false);
     expect(allowInteractiveUsageLogin('worker', false)).toBe(false);
