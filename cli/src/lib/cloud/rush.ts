@@ -48,6 +48,26 @@ interface Installation {
   repository_selection?: string;
 }
 
+/**
+ * Returns true when ~/.rush/user.yaml exists, carries an access_token, and
+ * the token has not passed its expires_at timestamp (Unix seconds). A missing
+ * expires_at is treated as non-expired so tokens written without an expiry
+ * still work. Pass yamlPath to override the default path in tests.
+ */
+export function isRushSessionValid(yamlPath: string = USER_YAML): boolean {
+  try {
+    if (!fs.existsSync(yamlPath)) return false;
+    const raw = fs.readFileSync(yamlPath, 'utf-8');
+    const data = yaml.parse(raw) as UserYaml;
+    if (!data?.session?.access_token) return false;
+    const expiresAt = data.session.expires_at;
+    if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Read the Rush session access token from ~/.rush/user.yaml. */
 function readToken(): string {
   if (!fs.existsSync(USER_YAML)) {
@@ -58,6 +78,11 @@ function readToken(): string {
   const token = data?.session?.access_token;
   if (!token) {
     throw new Error('No session token in ~/.rush/user.yaml. Run `rush login` first.');
+  }
+  const expiresAt = data.session?.expires_at;
+  if (typeof expiresAt === 'number' && expiresAt <= Date.now() / 1000) {
+    const expiredAt = new Date(expiresAt * 1000).toISOString();
+    throw new Error(`Rush session expired at ${expiredAt}. Run \`rush login\` to refresh.`);
   }
   return token;
 }
@@ -287,7 +312,7 @@ export class RushCloudProvider implements CloudProvider {
 
   capabilities(): ProviderCapabilities {
     return {
-      available: fs.existsSync(USER_YAML),
+      available: isRushSessionValid(),
       dispatch: true,
       status: true,
       list: true,
