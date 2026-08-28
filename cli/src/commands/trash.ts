@@ -200,9 +200,4 @@ export function registerTrashCommands(program: Command): void {
       console.log();
       console.log(chalk.gray('Restore with: agents restore <agent>@<version>'));
     });
-
-  trash
-    .command('restore <target>')
-    .description('Restore a soft-deleted version (e.g. "claude@2.1.110") back to ~/.agents/.history/versions/')
-    .action((target: string) => restoreVersion(target));
 }

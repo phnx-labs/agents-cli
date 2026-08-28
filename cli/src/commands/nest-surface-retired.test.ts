@@ -152,3 +152,31 @@ describe('PHNX-3391 moved `perf` under `agents insights perf`', () => {
     expect(r.stderr ?? '').toMatch(/unknown command/i);
   });
 });
+
+describe('PHNX-3391 removed `list` (duplicate of `view`) and `trash restore` (duplicate of `restore`)', () => {
+  it('list is gone from the root tree and marked retired; view remains', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
+    expect(names).not.toContain('list');
+    expect(names).toContain('view');
+    expect(isKnownTopLevelCommand('list')).toBe(false);
+    expect(RETIRED_TOP_LEVEL_COMMANDS.has('list')).toBe(true);
+  });
+
+  it('a bare `agents list` is an unknown command, not an auto-correct', () => {
+    const home = guardedHome();
+    const r = run(home, 'list');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr ?? '').toMatch(/unknown command/i);
+  });
+
+  it('top-level `restore` stays; `trash` keeps only `list` (no `trash restore`)', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
+    expect(names).toContain('restore');
+    const trash = program.commands.find((c) => c.name() === 'trash');
+    const trashSubs = trash?.commands.map((c) => c.name()) ?? [];
+    expect(trashSubs).toContain('list');
+    expect(trashSubs).not.toContain('restore');
+  });
+});

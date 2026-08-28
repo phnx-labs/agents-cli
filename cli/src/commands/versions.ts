@@ -35,7 +35,6 @@ import {
   getUsageLookupKey,
   isUsageHeadlessScopeError,
 } from '../lib/accounting/usage.js';
-import { viewAction } from './view.js';
 import { resolveConfiguredModel, formatAgentIdentity } from '../lib/models.js';
 import type { AgentId } from '../lib/types.js';
 import { readManifest, writeManifest, createDefaultManifest } from '../lib/manifest.js';
@@ -1088,11 +1087,4 @@ export function registerVersionsCommands(program: Command): void {
       }
     });
 
-  // Deprecated: use `agents view` instead
-  addHostOption(program.command('list [agent]'))
-    .description('List installed agent CLI versions')
-    .action(async (agentArg?: string) => {
-      console.log(chalk.red('Deprecated: "agents list" is now "agents view"\n'));
-      await viewAction(agentArg);
-    });
 }
