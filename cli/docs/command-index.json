@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "command": "agents",
-  "groups": 69,
+  "groups": 68,
   "commands": 550,
   "root": {
     "name": "agents",
@@ -11568,7 +11568,7 @@
             },
             {
               "flags": "--project <key>",
-              "description": "Scope to one project (see agents perf --help)",
+              "description": "Scope to one project (see agents insights perf --help)",
               "long": "--project",
               "required": true,
               "optional": false,
@@ -12088,7 +12088,7 @@
             }
           ],
           "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights mix harness-mix --json\n\n      # List baked recipe ids\n      agents insights mix --list\n\n      # Raw usage events\n      agents insights query --kind secret --days 7",
-          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board. Pass one recipe id\n      (`agents insights mix harness-mix`) for just that section; `--list` names them.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
+          "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board. Pass one recipe id\n      (`agents insights mix harness-mix`) for just that section; `--list` names them.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents insights perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
           "subcommands": []
         },
         {
@@ -12228,6 +12228,154 @@
             }
           ],
           "subcommands": []
+        },
+        {
+          "name": "perf",
+          "path": "insights perf",
+          "aliases": [],
+          "description": "Latency rollups from the disposable perf warehouse (hooks, commands, runs)",
+          "args": [],
+          "options": [
+            {
+              "flags": "--days <n>",
+              "description": "Days of samples to include",
+              "long": "--days",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "7"
+            },
+            {
+              "flags": "--warn-ms <n>",
+              "description": "p99 above this is highlighted",
+              "long": "--warn-ms",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--limit <n>",
+              "description": "Max rows in the table",
+              "long": "--limit",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false,
+              "defaultValue": "40"
+            },
+            {
+              "flags": "--project <key>",
+              "description": "Scope to one project (the repo directory name a sample's cwd resolves to — see project-key.ts)",
+              "long": "--project",
+              "required": true,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--json",
+              "description": "Emit JSON instead of a table",
+              "long": "--json",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "-h, --help",
+              "description": "Show help",
+              "short": "-h",
+              "long": "--help",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            }
+          ],
+          "subcommands": [
+            {
+              "name": "commands",
+              "path": "insights perf commands",
+              "aliases": [],
+              "description": "Slowest CLI command paths (command.end samples)",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "friction",
+              "path": "insights perf friction",
+              "aliases": [],
+              "description": "Sessions stuck repeatedly hitting the same guard block",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "hooks",
+              "path": "insights perf hooks",
+              "aliases": [],
+              "description": "Per-hook timing + cache stats",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            },
+            {
+              "name": "run",
+              "path": "insights perf run",
+              "aliases": [],
+              "description": "agent.run / perf.timing label rollups",
+              "args": [],
+              "options": [
+                {
+                  "flags": "-h, --help",
+                  "description": "Show help",
+                  "short": "-h",
+                  "long": "--help",
+                  "required": false,
+                  "optional": false,
+                  "variadic": false,
+                  "negate": false
+                }
+              ],
+              "subcommands": []
+            }
+          ]
         },
         {
           "name": "query",
@@ -14909,154 +15057,6 @@
           "path": "open unregister",
           "aliases": [],
           "description": "Remove the agents:// URL scheme handler.",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        }
-      ]
-    },
-    {
-      "name": "perf",
-      "path": "perf",
-      "aliases": [],
-      "description": "Latency rollups from the disposable perf warehouse (hooks, commands, runs)",
-      "args": [],
-      "options": [
-        {
-          "flags": "--days <n>",
-          "description": "Days of samples to include",
-          "long": "--days",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "7"
-        },
-        {
-          "flags": "--warn-ms <n>",
-          "description": "p99 above this is highlighted",
-          "long": "--warn-ms",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--limit <n>",
-          "description": "Max rows in the table",
-          "long": "--limit",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false,
-          "defaultValue": "40"
-        },
-        {
-          "flags": "--project <key>",
-          "description": "Scope to one project (the repo directory name a sample's cwd resolves to — see project-key.ts)",
-          "long": "--project",
-          "required": true,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "--json",
-          "description": "Emit JSON instead of a table",
-          "long": "--json",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        },
-        {
-          "flags": "-h, --help",
-          "description": "Show help",
-          "short": "-h",
-          "long": "--help",
-          "required": false,
-          "optional": false,
-          "variadic": false,
-          "negate": false
-        }
-      ],
-      "subcommands": [
-        {
-          "name": "commands",
-          "path": "perf commands",
-          "aliases": [],
-          "description": "Slowest CLI command paths (command.end samples)",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "friction",
-          "path": "perf friction",
-          "aliases": [],
-          "description": "Sessions stuck repeatedly hitting the same guard block",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "hooks",
-          "path": "perf hooks",
-          "aliases": [],
-          "description": "Per-hook timing + cache stats",
-          "args": [],
-          "options": [
-            {
-              "flags": "-h, --help",
-              "description": "Show help",
-              "short": "-h",
-              "long": "--help",
-              "required": false,
-              "optional": false,
-              "variadic": false,
-              "negate": false
-            }
-          ],
-          "subcommands": []
-        },
-        {
-          "name": "run",
-          "path": "perf run",
-          "aliases": [],
-          "description": "agent.run / perf.timing label rollups",
           "args": [],
           "options": [
             {
@@ -24071,7 +24071,7 @@
                 }
               ],
               "examples": "# Auto recipe board (7d)\n      agents insights mix\n\n      # Last 30 days\n      agents insights mix --days 30\n\n      # One recipe as JSON\n      agents insights mix harness-mix --json\n\n      # List baked recipe ids\n      agents insights mix --list\n\n      # Raw usage events\n      agents insights query --kind secret --days 7",
-              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board. Pass one recipe id\n      (`agents insights mix harness-mix`) for just that section; `--list` names them.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
+              "notes": "Session recipes read sessions.db; resource recipes read ~/.agents/.history/analytics/usage.db.\n      Empty recipes are skipped on the default mix board. Pass one recipe id\n      (`agents insights mix harness-mix`) for just that section; `--list` names them.\n      This is the cheap counter path. Behavioural report (transcript content, account split)\n      is bare `agents insights`. Latency is `agents insights perf`; quota is `agents view`.\n      Skill/slash-command popularity is `agents sessions stats`.",
               "subcommands": []
             },
             {

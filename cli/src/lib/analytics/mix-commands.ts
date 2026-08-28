@@ -5,7 +5,7 @@
  * peer of `agents insights` with overlapping "analytics" meaning, so agents and
  * humans kept picking the wrong verb. The cheap counter path (sessions index +
  * usage.db) still exists — it is now `agents insights mix`. Latency stays on
- * `agents perf`; quota on `agents view`.
+ * `agents insights perf`; quota on `agents view`.
  *
  * One surface, not five: the board is `agents insights mix`, one section is
  * `agents insights mix <recipe>`, and `--list` names the recipe ids. The former
@@ -157,7 +157,7 @@ export function registerMixCommands(parent: Command): void {
       Empty recipes are skipped on the default mix board. Pass one recipe id
       (\`agents insights mix harness-mix\`) for just that section; \`--list\` names them.
       This is the cheap counter path. Behavioural report (transcript content, account split)
-      is bare \`agents insights\`. Latency is \`agents perf\`; quota is \`agents view\`.
+      is bare \`agents insights\`. Latency is \`agents insights perf\`; quota is \`agents view\`.
       Skill/slash-command popularity is \`agents sessions stats\`.
     `,
   });

@@ -7,20 +7,21 @@
  *                                rhythm, edits) — split by Claude account by default
  *   agents insights mix          COUNTERS (sessions index + usage.db recipes:
  *                                harness/model mix, token ratios, secrets, browser)
- *   agents insights <recipe>     One baked mix recipe (harness-mix, tools-per-session, …)
+ *   agents insights mix <recipe> One baked mix recipe (harness-mix, tools-per-session, …)
  *   agents insights query        Raw usage.db rows
  *
- * Sibling observe verbs (stay separate — different questions):
+ * Sibling observe verbs under this same group (different questions):
  *
  *   agents insights cost    what you spent ($ and duration)
  *   agents insights output  what shipped (burn vs PRs and commits)
+ *   agents insights perf    latency (hooks, CLI commands, agent.run) — not popularity
  *   agents view             live quota headroom (per account, with auth state)
- *   agents perf             latency (hooks, CLI commands, agent.run) — not popularity
  *   agents sessions stats   which skills/slash-commands were explicitly invoked
  *
  * Why mix lives here (not a second top-level `trends`): two abstract "analytics"
  * nouns taught agents and humans to guess. One verb, two engines — cheap SQL mix
- * vs transcript facets. Latency stays on `perf` so it is never confused with mix.
+ * vs transcript facets. `perf` (latency) is also nested here now (PHNX-3391) —
+ * performance is an insight, kept a distinct sub-verb so it is never confused with mix.
  *
  * Modelled on Claude Code's `/insights`, with the difference that motivated it: that
  * command reads one account's directory, while `balanced` rotation sprays sessions
@@ -70,6 +71,7 @@ import { formatDuration } from '../lib/session/render.js';
 import { terminalWidth, truncateToWidth, stringWidth, padToWidth } from '../lib/session/width.js';
 import type { SessionMeta } from '../lib/session/types.js';
 import { registerMixCommands } from '../lib/analytics/mix-commands.js';
+import { registerPerfSubcommand } from './perf.js';
 import { registerCostCommand } from './cost.js';
 import { registerOutputCommand } from './output.js';
 
@@ -702,6 +704,10 @@ export function registerInsightsCommand(program: Command): void {
   configureInsightsCommand(cmd);
   registerCostCommand(cmd);
   registerOutputCommand(cmd);
+  // Latency rollups (former top-level `agents perf` → `agents insights perf`,
+  // PHNX-3391). A sibling observe verb of cost/output, so it lives on the
+  // top-level insights group beside them, not under `sessions insights`.
+  registerPerfSubcommand(cmd);
 }
 
 export function registerSessionsInsightsCommand(sessions: Command): void {

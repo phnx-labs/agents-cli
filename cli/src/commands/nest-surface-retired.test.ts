@@ -127,3 +127,28 @@ describe('RUSH-3079 removed `usage` command (duplicate of `agents view`)', () =>
     expect(r.stderr ?? '').toMatch(/unknown command/i);
   });
 });
+
+describe('PHNX-3391 moved `perf` under `agents insights perf`', () => {
+  it('perf is gone from the root tree, marked retired, and lives under insights', async () => {
+    const program = await buildFullCommandTree();
+    const names = program.commands.flatMap((c) => [c.name(), ...c.aliases()]);
+    expect(names).not.toContain('perf');
+    expect(isKnownTopLevelCommand('perf')).toBe(false);
+    expect(RETIRED_TOP_LEVEL_COMMANDS.has('perf')).toBe(true);
+
+    const insights = program.commands.find((c) => c.name() === 'insights');
+    const insightsSubs = insights?.commands.map((c) => c.name()) ?? [];
+    expect(insightsSubs).toContain('perf');
+    const perf = insights?.commands.find((c) => c.name() === 'perf');
+    expect(perf?.commands.map((c) => c.name())).toEqual(
+      expect.arrayContaining(['hooks', 'commands', 'run', 'friction']),
+    );
+  });
+
+  it('a bare `agents perf` is an unknown command, not an auto-correct', () => {
+    const home = guardedHome();
+    const r = run(home, 'perf');
+    expect(r.status).not.toBe(0);
+    expect(r.stderr ?? '').toMatch(/unknown command/i);
+  });
+});

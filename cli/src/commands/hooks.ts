@@ -700,22 +700,22 @@ Examples:
     .addHelpText('after', `
 Shows aggregated stats for every hook that fired through a generated shim.
 Primary source: disposable SQLite warehouse ~/.agents/.cache/perf/perf.db
-(same data as \`agents perf hooks\`). Falls back to the legacy daily JSONL under
+(same data as \`agents insights perf hooks\`). Falls back to the legacy daily JSONL under
 ~/.agents/.cache/logs/ when the warehouse is empty.
 
 Examples:
   agents hooks profile                # last 7 days, table form
   agents hooks profile --days 30      # roll up the full month
   agents hooks profile --json | jq    # pipe somewhere
-  agents perf hooks                   # same rollup under the perf surface
+  agents insights perf hooks                   # same rollup under the perf surface
 
 A hook whose p99 exceeds --warn-ms gets flagged in the cache column. Add
 'cache: 5m' or 'cache: 5m-bg' to its hooks.yaml entry to fix it.
 `)
-    .option('--project <key>', 'Scope to one project (see agents perf --help)')
+    .option('--project <key>', 'Scope to one project (see agents insights perf --help)')
     .action(async (options: { days: string; warnMs: string; json?: boolean; project?: string }) => {
       const { DEFAULT_SLOW_HOOK_WARN_MS } = await import('../lib/hooks/profile.js');
-      // Same rollup as `agents perf hooks` — this command predates the `perf`
+      // Same rollup as `agents insights perf hooks` — this command predates the `perf`
       // surface and is kept as a documented alias; delegate instead of
       // duplicating the SQLite-vs-legacy-JSONL fallback and table rendering.
       const { loadHookProfile, renderHookTable } = await import('./perf.js');

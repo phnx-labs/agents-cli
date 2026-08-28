@@ -5,7 +5,7 @@ const LOADED_COMMAND_NAMES = [
   'routines', 'monitors', 'projects', 'run', 'open', 'reconnect', 'fork', 'config',
   'models', 'modes', 'trash', 'restore', 'doctor',
   'route', 'harness', 'harnesses', 'secrets', 'menubar', 'sync',
-  'refresh-rules', 'factory', 'insights', 'trace', 'perf',
+  'refresh-rules', 'factory', 'insights', 'trace',
   'pty', 'tmux', 'watchdog', 'browser', 'computer', 'logs', 'events',
   'ssh', 'devices', 'fleet', 'repos', 'repo', 'setup', 'uninstall', 'upgrade', 'sessions',
   'teams', 'cloud', 'message', 'send', 'notify', 'feed',
@@ -49,7 +49,8 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * (linear-cli) (RUSH-2932). `alias` moved under `agents setup alias` (RUSH-2965).
  * `inbox` was a pure alias of `agents feed` (RUSH-2984). `unshare` nested under
  * `agents artifacts unshare` (RUSH-2989). `audit` nested under `agents events audit`.
- * `trends` nested under `agents insights mix` / `insights trends`. `serve` (the
+ * `trends` was removed with the insights recipe collapse — the one counter
+ * surface is `agents insights mix` (PHNX-3391). `serve` (the
  * read-only local web companion + `--control` anchor) was removed with the
  * unshipped iOS Fleet Cockpit it existed for (RUSH-3001). `apply` nested under
  * `agents fleet apply` / `agents devices apply`. `beta` nested under
@@ -57,7 +58,8 @@ export const KNOWN_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set<string>([
  * removed; `agents auth` returned against Phoenix ID with `auth space` as the
  * team surface (RUSH-2581). `usage` was removed as a duplicate surface of
  * `agents view`, which renders per-account usage with account, version, and
- * auth state beside it (RUSH-3079).
+ * auth state beside it (RUSH-3079). `perf` nested under `agents insights perf`
+ * — performance metrics are an insight, not a top-level noun (PHNX-3391).
  */
 export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'webhook',
@@ -88,6 +90,7 @@ export const RETIRED_TOP_LEVEL_COMMANDS: ReadonlySet<string> = new Set([
   'trends',
   'apply',
   'beta',
+  'perf',
 ]);
 
 export function isKnownTopLevelCommand(name: string): boolean {

@@ -190,7 +190,9 @@ program.hook('postAction', (_thisCommand, actionCommand) => {
       }).catch(() => { /* fail soft */ });
     }
     // Disposable perf warehouse — fail-soft spool append (no SQLite on this path).
-    if (durationMs !== undefined && parts[0] !== 'perf') {
+    // Skip the perf reader itself (now `agents insights perf`, PHNX-3391) so it
+    // never records its own latency into the board it prints.
+    if (durationMs !== undefined && !(parts[0] === 'insights' && parts[1] === 'perf')) {
       // sessionId/agent are resolvable here the same way emit() resolves them
       // for command.start/command.end above (the shared provenance floor,
       // event-provenance.ts) — without this, every command.end perf sample
