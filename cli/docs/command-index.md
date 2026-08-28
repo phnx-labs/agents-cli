@@ -460,10 +460,10 @@ agents monitors test [name]       DRY-RUN: evaluate the source once and print th
 agents monitors view [name]       Show a monitor’s full YAML config plus its current watched-state and recent fires.
 ```
 
-## notify — Deliver to the owner (alias of send --to owner). Channel + target default from notify.owner in agents.yaml.
+## notify — [DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.
 
 ```
-agents notify [text]  Deliver to the owner (alias of send --to owner). Channel + target default from notify.owner in agents.yaml.
+agents notify [text]  [DEPRECATED] Deliver to the owner (alias of send --to owner). Use "agents feed post" for new code.
 ```
 
 ## open — Resume a session from an agents:// deep link, or register/unregister/status the OS URL-scheme handler.
