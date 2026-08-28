@@ -25,7 +25,7 @@
  * The planner is pure so tests cover every skip/push branch with no SSH.
  */
 import { sshExec } from '../ssh-exec.js';
-import { buildRemoteAgentsInvocation, buildWindowsStdinAgentsCommand, remoteShellFor } from '../hosts/remote-cmd.js';
+import { buildRemoteAgentsInvocation, buildWindowsStdinAgentsCommand, remoteShellFor, stripClixml } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { sshTargetFor } from '../devices/connect.js';
@@ -215,7 +215,13 @@ export function pullUsageFromPrimary(deps: UsagePullDeps = {}): UsagePullResult 
 
   let payload: UsageSyncPayload;
   try {
-    payload = JSON.parse(outcome.stdout ?? '') as UsageSyncPayload;
+    // A Windows usage primary's `agents.ps1` shim prepends a PowerShell CLIXML
+    // progress banner to stdout, exactly as every other remote-JSON boundary
+    // strips (remote-cmd.ts:325). Without this, a headed Windows box (win-mini
+    // is a live fleet device) makes every pull fail as "malformed JSON", the
+    // worker's cache stays null, and the PHNX-3392 capacity floor silently
+    // becomes the only thing standing between a blind pool and an exhausted pick.
+    payload = JSON.parse(stripClixml(outcome.stdout ?? '')) as UsageSyncPayload;
   } catch {
     result.error = 'primary returned malformed JSON';
     return result;
