@@ -7,6 +7,7 @@ import {
   filterAgentHitBySubsetAndExpiry,
   assertRemoteBundleFlagsUnsupported,
   canCacheResolvedEnv,
+  inspectReservedAuthBundle,
   isHeadlessSecretsContext,
   listBundles,
   readAndResolveBundleEnv,
@@ -738,5 +739,32 @@ describe('disabled secrets broker fails loud before keychain fallback', () => {
     writeBundle(b);
     const { env } = readAndResolveBundleEnv(name);
     expect(env).toEqual({ TOKEN: 'secret-value' });
+  });
+});
+
+// PHNX-3385: `inspectReservedAuthBundle` backs a read-only status probe
+// (`agents doctor`, `agents fleet apply`), not a destructive-write guard —
+// unlike `bundleExists()`/`hasKeychainToken()`, which document themselves as
+// failing loud on purpose, an unreachable keychain here must degrade to "no
+// reserved bundle" rather than crash the whole command. Reproduces the real
+// macOS regression where `agents doctor --json` exited with an uncaught
+// exception ("Source Agents CLI.app not found") instead of a JSON report.
+describe('inspectReservedAuthBundle — degrades when the keychain is unreachable', () => {
+  let prev: KeychainBackend | null = null;
+
+  afterEach(() => {
+    setKeychainBackendForTest(prev);
+  });
+
+  it('reports absent/ok instead of throwing when the backend cannot answer `has`', () => {
+    prev = setKeychainBackendForTest({
+      has: () => { throw new Error('Source Agents CLI.app not found.'); },
+      get: () => { throw new Error('Source Agents CLI.app not found.'); },
+      set: () => {},
+      delete: () => false,
+      list: () => [],
+    });
+
+    expect(inspectReservedAuthBundle()).toEqual({ exists: false, backend: null, ok: true });
   });
 });

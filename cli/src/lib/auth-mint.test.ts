@@ -281,6 +281,25 @@ describe('seed + mintAndSeed — real file-backed auth bundle and named account'
     expect(hasMintedSetupToken().ready).toBe(true);
   });
 
+  it('reports not-ready instead of crashing when the keychain cannot be reached (PHNX-3385)', () => {
+    // Reproduces the real macOS regression: `agents doctor` / `agents setup`
+    // crashed outright when the Keychain helper source bundle was unavailable
+    // (a source checkout, or a fresh npm install before the async download —
+    // RUSH-3100 dropped the bundle from the tarball). hasKeychainToken()
+    // documents itself as failing loud for destructive-write guards; a
+    // read-only status probe must degrade instead of propagating that throw.
+    setKeychainBackendForTest({
+      has: () => { throw new Error('Source Agents CLI.app not found.'); },
+      get: () => { throw new Error('Source Agents CLI.app not found.'); },
+      set: () => {},
+      delete: () => false,
+      list: () => [],
+    });
+    const status = hasMintedSetupToken();
+    expect(status.ready).toBe(false);
+    expect(status.detail).toContain('could not check the reserved auth bundle');
+  });
+
   it('refuses to seed the #1767 TTY blob into the reserved bundle', () => {
     const blob = '\x1b[?2004hWelcome to Claude Code\n  sk-ant-oat01-abcdefghijklmnopqrstuvwxyz012345\n';
     expect(() => seedReservedAuthToken(EMAIL, blob)).toThrow(/Not a Claude setup-token/);
