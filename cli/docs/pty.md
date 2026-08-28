@@ -1,3 +1,4 @@
+<!-- guide -->
 # PTY
 
 Drive interactive terminal programs from AI agents — REPLs, TUI wizards, anything that needs a real pseudoterminal.

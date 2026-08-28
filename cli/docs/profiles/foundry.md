@@ -1,3 +1,4 @@
+<!-- guide -->
 # Microsoft Azure AI Foundry
 
 Anthropic models served through Microsoft Azure AI Foundry (formerly Azure AI Studio).

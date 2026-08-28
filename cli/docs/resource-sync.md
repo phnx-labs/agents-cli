@@ -1,3 +1,4 @@
+<!-- guide -->
 # Resource Sync
 
 How agents-cli syncs resources (commands, skills, hooks, memory, MCP, permissions) between central storage, project workspaces, and version homes.

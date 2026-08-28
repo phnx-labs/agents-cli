@@ -1,3 +1,4 @@
+<!-- guide -->
 # Computer
 
 Drive native macOS apps from AI agents via the Accessibility API.

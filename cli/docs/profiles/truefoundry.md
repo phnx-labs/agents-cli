@@ -1,3 +1,4 @@
+<!-- guide -->
 # TrueFoundry
 
 TrueFoundry LLM Gateway — a corporate gateway that forwards Anthropic-shaped requests to upstream providers (most commonly AWS Bedrock-hosted Claude).

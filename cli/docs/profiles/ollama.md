@@ -1,3 +1,4 @@
+<!-- guide -->
 # Ollama
 
 Local models served by Ollama on `127.0.0.1:11434`. **Recommended host: `codex`**, not Claude Code.

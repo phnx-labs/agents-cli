@@ -1,3 +1,4 @@
+<!-- guide -->
 # Per-provider profile guides
 
 | Provider | Host | Caveats | Doc |

@@ -1,3 +1,4 @@
+<!-- guide -->
 # DeepInfra
 
 DeepInfra exposes an OpenAI-compatible API. The built-in `deepinfra` profile runs it through Codex and reads its API key from a durable account bundle with secrets policy `never`, so headless runs do not request Touch ID.

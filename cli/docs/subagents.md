@@ -1,3 +1,4 @@
+<!-- guide -->
 # Subagents
 
 Lightweight named agent definitions that parent agents can spawn for focused subtasks.
@@ -162,6 +163,6 @@ agents subagents remove code-reviewer --yes
 ## See Also
 
 - [resource-sync.md](resource-sync.md) — resource resolution and sync to version homes
-- [docs/workflows.md](workflows.md) — workflows that declare `allowedAgents` to orchestrate subagents
+- docs/workflows.md — workflows that declare `allowedAgents` to orchestrate subagents
 - [docs/plugins.md](plugins.md) — plugins that bundle subagent definitions alongside skills and hooks
 - [docs/hooks.md](hooks.md) — hooks that fire on subagent lifecycle events

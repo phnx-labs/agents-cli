@@ -1,3 +1,4 @@
+<!-- guide -->
 # Terminal Launch Engine
 
 Open an *interactive* command — as a **tab** or a **split pane** — in iTerm,

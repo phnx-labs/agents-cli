@@ -1,3 +1,4 @@
+<!-- guide -->
 # Hooks
 
 Shell scripts that run automatically in response to agent lifecycle events — session start, tool calls, task completion, and more.
@@ -418,5 +419,5 @@ agents hooks remove post-edit --agents claude
 
 - [resource-sync.md](resource-sync.md) — hooks participate in the same layered resource sync as commands, skills, and rules
 - [docs/plugins.md](plugins.md) — plugins can bundle hooks alongside skills and MCP servers
-- [docs/workflows.md](workflows.md) — workflow lifecycle events that hooks can observe
+- docs/workflows.md — workflow lifecycle events that hooks can observe
 - [docs/subagents.md](subagents.md) — subagent definitions that parent agents dispatch to

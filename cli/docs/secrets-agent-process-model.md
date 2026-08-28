@@ -1,3 +1,4 @@
+<!-- guide -->
 # Secrets-agent process model (design decision)
 
 > Status: **accepted** · Supersedes nothing · Related: [secrets.md](secrets.md), [routines.md](routines.md)

@@ -1,3 +1,4 @@
+<!-- guide -->
 # Watchdog
 
 The watchdog keeps AI coding agents moving. Agents are expected to drive their task

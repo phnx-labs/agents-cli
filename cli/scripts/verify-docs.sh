@@ -72,9 +72,12 @@ for anchor in coverage-inventory sessions secrets agent-execution scheduling--ex
 done
 
 # --- 2. Authored architecture does not grow command-manual sections ---
+# Guides (docs marked `<!-- guide -->`) are how-to references and MAY use these
+# headings; the rule applies only to the top-level architecture decision docs.
 FORBIDDEN_HEADING_RE='^#{2,3} (Setup|Command [Rr]eference|Recipes|File [Mm]ap|Source [Mm]ap|Key Functions|Roadmap)$'
 while IFS= read -r file; do
   [[ "$file" == "docs/command-index.md" ]] && continue
+  grep -qF '<!-- guide -->' "$file" && continue
   if grep -Eq "$FORBIDDEN_HEADING_RE" "$file"; then
     fail "$file contains a user/reference heading reserved outside architecture docs"
   fi

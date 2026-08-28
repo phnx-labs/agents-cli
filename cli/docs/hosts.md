@@ -1,3 +1,4 @@
+<!-- guide -->
 # Hosts — dispatch agents to your own machines
 
 > **Status:** Implemented. `agents hosts` and the `-D, --device` flag

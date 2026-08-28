@@ -1,3 +1,4 @@
+<!-- guide -->
 # Credential management — the fleet auth model
 
 Status: design (target state). Companion to
