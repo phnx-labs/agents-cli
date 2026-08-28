@@ -22,6 +22,7 @@ export { formatBytes };
 import * as path from 'path';
 
 import { getBrowserRuntimeDir, getProfileRuntimeDir } from './profiles.js';
+import { listProfileCacheDirs } from './runtime-state.js';
 import { formatRelativeTime } from '../session/relative-time.js';
 import type { SessionMeta } from '../session/types.js';
 import { getSessionById, listBrowserSessionRecords, pruneToolSessions } from '../session/db.js';
@@ -107,7 +108,15 @@ export function listProfileArtifacts(profile: string): BrowserArtifact[] {
 export function listBrowserSessions(only?: string): ProfileArtifacts[] {
   let profiles: string[];
   if (only) {
-    profiles = [only];
+    // A profile's live tasks/captures may live under a composite runtime dir
+    // (`<name>@<device>`, `<name>@endpoint-N`, forks) — NOT the bare `<name>`
+    // dir. Resolve `only` to every cache dir that belongs to it, the same rule
+    // status()/findTask use (keyBelongsToProfile), so `--profile comet-local`
+    // surfaces the real `comet-local@zion` store instead of the empty legacy
+    // dir. Keep the requested name when nothing exists on disk yet so a fresh
+    // profile still returns its (empty) entry rather than vanishing.
+    const dirs = listProfileCacheDirs(only).map((d) => path.basename(d));
+    profiles = dirs.length > 0 ? dirs : [only];
   } else {
     try {
       profiles = fs.readdirSync(getBrowserRuntimeDir(), { withFileTypes: true })

@@ -226,6 +226,7 @@ describe('resolveLaunchSession', () => {
 describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
   let profile: string;
   let root: string;
+  const extraDirs: string[] = [];
 
   beforeEach(() => {
     profile = `tst-rush2407-${crypto.randomBytes(6).toString('hex')}`;
@@ -234,6 +235,8 @@ describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
 
   afterEach(() => {
     fs.rmSync(root, { recursive: true, force: true });
+    for (const d of extraDirs) fs.rmSync(d, { recursive: true, force: true });
+    extraDirs.length = 0;
   });
 
   it('reads owner/launchId for a live task and ignores fields it does not know', () => {
@@ -277,5 +280,35 @@ describe('loadTaskIdentities + buildBrowserSessionRows (real files)', () => {
     // but no linked session) rather than silently claiming a link.
     expect(rows[0].linkStatus).toBe('unresolved');
     expect(rows[0].owner).toBe('muqsit@zion');
+  });
+
+  it('surfaces tasks stored under the composite `<profile>@<device>` dir when queried by the bare profile name (PHNX-3317)', () => {
+    // The split-identity bug: a browser launched under the bare legacy dir, but
+    // the daemon persists its tasks to the composite `<profile>@<device>` dir.
+    // A `--profile <bare>` listing used to read the empty bare store and report
+    // "no captures" while the real tasks lived one dir over. The reader must
+    // resolve the bare name to its cache dirs (keyBelongsToProfile), like
+    // status()/findTask do.
+    const compositeDir = getProfileRuntimeDir(`${profile}@zion`);
+    extraDirs.push(compositeDir);
+
+    // Bare dir exists but is empty — exactly the stranded legacy layout.
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(path.join(root, 'tasks.json'), '{}');
+
+    // Real task + capture live under the composite dir.
+    const sessionsDir = path.join(compositeDir, 'sessions', 'prix-demo');
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(path.join(sessionsDir, 'shot.png'), 'fake-png');
+    fs.writeFileSync(
+      path.join(compositeDir, 'tasks.json'),
+      JSON.stringify({ 'prix-demo': { id: 'abc', name: 'prix-demo', profile: `${profile}@zion`, owner: 'claude@yosemite-m3', launchId: `no-such-launch-${profile}`, pid: 0, tabs: {} } }),
+    );
+
+    const rows = buildBrowserSessionRows(profile);
+    const taskRow = rows.find((r) => r.task === 'prix-demo');
+    expect(taskRow).toBeDefined();
+    expect(taskRow!.artifacts).toHaveLength(1);
+    expect(taskRow!.owner).toBe('claude@yosemite-m3');
   });
 });
