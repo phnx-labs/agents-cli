@@ -85,6 +85,13 @@ if ProcessInfo.processInfo.environment["MENUBAR_ROUTINE_TEST"] == "1" {
     RoutineSelfTest.run()
 }
 
+// Device-favorites self-test (PHNX-2376): decode the `preferred` flag off a real
+// `menubar snapshot --json` devices payload and exercise the pure DEVICES-block
+// ordering (this Mac → ★ favorites → divider → rest). See DeviceSelfTest.swift.
+if ProcessInfo.processInfo.environment["MENUBAR_DEVICE_TEST"] == "1" {
+    DeviceSelfTest.run()
+}
+
 // Doctor overview self-test (RUSH-2382): decode the additive fleet findings
 // contract and exercise the bounded, doctor-ordered health presentation without
 // constructing an AppKit menu. See DoctorSelfTest.swift.

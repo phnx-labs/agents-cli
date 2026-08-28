@@ -760,25 +760,53 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         menu.update()
     }
 
-    /// One row per device: this Mac first, then alphabetical. Load% is shown only
+    /// One ordered menu entry in the DEVICES block — a device row or a divider.
+    /// Pure data so `planDeviceRows` is testable without AppKit (MENUBAR_DEVICE_TEST).
+    enum DeviceRowEntry: Equatable {
+        case device(Device)
+        case divider
+    }
+
+    /// The DEVICES-block order, as pure data: **this Mac first** (the "you are
+    /// here" anchor, whatever its own preferred flag), then **favorited
+    /// (auto-launch.preferred) devices**, then the rest — each block alphabetical.
+    /// A single divider sets the favorites off from the rest, emitted ONLY when
+    /// there is both a favorites block and a rest block (no dangling separator; a
+    /// list with no non-local favorites is ordered exactly as before).
+    static func planDeviceRows(_ devices: [Device]) -> [DeviceRowEntry] {
+        let local = devices.filter { $0.isLocal }.sorted { $0.name < $1.name }
+        let favorites = devices.filter { !$0.isLocal && $0.isPreferred }.sorted { $0.name < $1.name }
+        let rest = devices.filter { !$0.isLocal && !$0.isPreferred }.sorted { $0.name < $1.name }
+        var entries: [DeviceRowEntry] = (local + favorites).map { .device($0) }
+        if !favorites.isEmpty, !rest.isEmpty { entries.append(.divider) }
+        entries += rest.map { .device($0) }
+        return entries
+    }
+
+    /// One row per device, rendered from `planDeviceRows`. Load% is shown only
     /// where the warm fleet cache has a fresh reading — its absence is never
     /// rendered as "offline" (the roster carries no probed online/offline state).
     private func deviceRows(_ devices: [Device]) -> [NSMenuItem] {
         let loads = LocalState.deviceLoads()
-        let ordered = devices.sorted { a, b in
-            if a.isLocal != b.isLocal { return a.isLocal }
-            return a.name < b.name
-        }
-        return ordered.map { d in
+        let makeRow: (Device) -> NSMenuItem = { d in
             let load = loads[ActiveDisplay.normalizeHost(d.name)]
             var line = d.isLocal ? "\(d.name) (this Mac)" : d.name
             line += " · \(d.platform)"
             if let l = load { line += " · \(Int(l.load.rounded()))%" }
-            // ◉ marks the configured interactive host, ○ otherwise. Deliberately no
-            // color-coded status dot — the roster does not know online/offline.
-            let row = statusRow(d.interactive ? "◉" : "○", idleC, line)
-            row.submenu = deviceSubmenu(d, load: load)
+            // ★ prefixes a favorited (auto-launch.preferred) device; the ◉/○ glyph
+            // stays the interactive-host marker (◉ = configured interactive host).
+            // Deliberately no color-coded status dot — the roster does not know
+            // online/offline.
+            if d.isPreferred { line = "★ \(line)" }
+            let row = self.statusRow(d.interactive ? "◉" : "○", self.idleC, line)
+            row.submenu = self.deviceSubmenu(d, load: load)
             return row
+        }
+        return Self.planDeviceRows(devices).map { entry in
+            switch entry {
+            case .device(let d): return makeRow(d)
+            case .divider: return .separator()
+            }
         }
     }
 
@@ -791,6 +819,20 @@ final class StatusItemController: NSObject, NSMenuDelegate {
         }
         if d.interactive { sub.addItem(disabled("interactive host")) }
         if !sub.items.isEmpty { sub.addItem(.separator()) }
+        // Favorite toggle — writes the SAME per-device `auto-launch.preferred`
+        // config the auto-launch ranker already honors (no separate favorites
+        // store). The next snapshot poll reflects the ★ and the re-sort; TS owns
+        // the truth (see AgentsCLI.devicePrefer / deviceUnprefer).
+        let fav: NSMenuItem
+        if d.isPreferred {
+            fav = NSMenuItem(title: "Unfavorite", action: #selector(onUnfavoriteDevice(_:)), keyEquivalent: "")
+        } else {
+            fav = NSMenuItem(title: "★  Favorite", action: #selector(onFavoriteDevice(_:)), keyEquivalent: "")
+        }
+        fav.target = self
+        fav.representedObject = d.name
+        sub.addItem(fav)
+        sub.addItem(.separator())
         let ssh = "agents ssh \(d.name)"
         let copy = NSMenuItem(title: "⧉  Copy  \(ssh)", action: #selector(onCopyText(_:)), keyEquivalent: "")
         copy.target = self
@@ -1734,6 +1776,33 @@ final class StatusItemController: NSObject, NSMenuDelegate {
             refreshBadge()
         }
     }
+    // Favorite / unfavorite a device — toggles its `auto-launch.preferred` config
+    // through the CLI (TS owns the truth). Optimistically flip the cached flag so a
+    // reopened menu re-sorts and re-stars immediately, and clear the snapshot
+    // freshness stamp so the next poll reconciles against real config.
+    @objc private func onFavoriteDevice(_ sender: NSMenuItem) {
+        withName(sender) { name in
+            AgentsCLI.devicePrefer(name)
+            setCachedDevicePreferred(name, true)
+        }
+    }
+    @objc private func onUnfavoriteDevice(_ sender: NSMenuItem) {
+        withName(sender) { name in
+            AgentsCLI.deviceUnprefer(name)
+            setCachedDevicePreferred(name, false)
+        }
+    }
+
+    private func setCachedDevicePreferred(_ name: String, _ preferred: Bool) {
+        cachedDevices = cachedDevices.map { d in
+            d.name == name
+                ? Device(name: d.name, platform: d.platform, interactive: d.interactive,
+                         isLocal: d.isLocal, preferred: preferred)
+                : d
+        }
+        snapshotFetchedAt = nil // let the next poll re-read the real config
+    }
+
     @objc private func onStopScheduler() { AgentsCLI.stopDaemon() }
     @objc private func onQuit() { AgentsCLI.menubarDisable(); NSApp.terminate(nil) }
 
