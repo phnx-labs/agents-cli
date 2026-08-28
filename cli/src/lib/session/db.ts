@@ -38,7 +38,7 @@ const DB_PATH = getSessionsDbPath();
 /** Current schema version; bumped when migrations are added. Exported so tests
  * assert against the constant instead of hardcoding a number that every bump
  * then has to chase (docs/sessions.md calls the constant the source of truth). */
-export const SCHEMA_VERSION = 43;
+export const SCHEMA_VERSION = 44;
 
 /**
  * Bump to force the content extractor (assistant-answer text, alongside the
@@ -1364,6 +1364,35 @@ function migrateSchema(db: Database.Database, fromVersion: number): void {
     if (!cols.has('end_timestamp')) db.exec(`ALTER TABLE tool_calls ADD COLUMN end_timestamp TEXT`);
   }
 
+  if (fromVersion < 44) {
+    // v43 -> v44: backfill duration_ms for sessions whose harness scan extractor
+    // never derived it (PHNX-3457). rush/grok/kimi/cursor/muse/antigravity/hermes/
+    // openclaw left duration_ms NULL — 52% of the corpus, 100% of rush — so the
+    // console median was computed over only the ~48% that carried it, skewing it
+    // short. Going forward resolveDurationMs() populates it at every upsert; this
+    // repairs already-indexed rows in place from the timestamps they already store
+    // (last_activity, itself resolved from the last-message time else file mtime,
+    // minus the creation timestamp), so no transcript is re-parsed. julianday is
+    // avoided because it does not accept a trailing 'Z'; the arithmetic is done in
+    // JS with the exact Date.parse resolveDurationMs uses, keeping the backfill and
+    // the live path consistent. Only rows with a positive span are touched; a NULL
+    // that cannot be resolved stays NULL rather than becoming a fabricated 0.
+    const nullDurationRows = db.prepare(
+      `SELECT id, timestamp, last_activity FROM sessions
+       WHERE duration_ms IS NULL AND last_activity IS NOT NULL`,
+    ).all() as Array<{ id: string; timestamp: string; last_activity: string }>;
+    // Runs inside migrateSchema's own transaction (db.ts:1468), so no nested
+    // db.transaction() here — that would raise "transaction within a transaction".
+    const update = db.prepare(`UPDATE sessions SET duration_ms = ? WHERE id = ?`);
+    for (const row of nullDurationRows) {
+      const startMs = Date.parse(row.timestamp);
+      const lastMs = Date.parse(row.last_activity);
+      if (Number.isFinite(startMs) && Number.isFinite(lastMs) && lastMs > startMs) {
+        update.run(lastMs - startMs, row.id);
+      }
+    }
+  }
+
 }
 
 /**
@@ -2354,7 +2383,7 @@ export function upsertSession(meta: SessionMeta, content: string, scan?: ScanSta
     cache_write_tokens: meta.cacheWriteTokens ?? null,
     cost_usd: meta.costUsd ?? null,
     cost_usd_nocache: meta.costUsdNoCache ?? null,
-    duration_ms: meta.durationMs ?? null,
+    duration_ms: resolveDurationMs(meta, scan),
     model: meta.model ?? null,
     tool_call_count: meta.toolCallCount ?? null,
     file_path: meta.filePath,
@@ -2633,7 +2662,7 @@ export function upsertSessionsBatch(
         cache_write_tokens: meta.cacheWriteTokens ?? null,
         cost_usd: meta.costUsd ?? null,
         cost_usd_nocache: meta.costUsdNoCache ?? null,
-        duration_ms: meta.durationMs ?? null,
+        duration_ms: resolveDurationMs(meta, scan),
         model: meta.model ?? null,
         tool_call_count: meta.toolCallCount ?? null,
         file_path: meta.filePath,
@@ -2941,6 +2970,36 @@ function resolveLastActivity(meta: SessionMeta, scan?: ScanStamp): string {
   if (meta.lastActivity) return meta.lastActivity;
   if (scan?.fileMtimeMs && meta.filePath) return new Date(scan.fileMtimeMs).toISOString();
   return meta.timestamp;
+}
+
+/**
+ * The persisted wall-clock span for a session (PHNX-3457).
+ *
+ * `durationMs` is canonically `lastTs − firstTs`. Some harness scan extractors
+ * derive it themselves from per-event timestamps (claude/codex/droid/gemini/
+ * opencode set `meta.durationMs`); the rest (rush/grok/kimi/cursor/muse/
+ * antigravity/hermes/openclaw) never did, so `duration_ms` landed NULL for them —
+ * 52% of the corpus, including 100% of the dominant `rush` usage — and the
+ * console median was computed over only the ~48% that happened to carry it,
+ * skewing it short and misleading.
+ *
+ * This closes the gap at the single write boundary every harness funnels
+ * through, so parity is automatic rather than per-extractor: when the extractor
+ * already computed a precise span, keep it; otherwise derive it from the same
+ * `timestamp` (creation) and `resolveLastActivity` (last event, itself resolved
+ * from the harness's last-message time, else file mtime) that the row already
+ * stores. Returns null only when no positive span can be established (a single
+ * timestamped event, or a clock that runs backwards), which reads as NULL rather
+ * than a fabricated 0.
+ */
+function resolveDurationMs(meta: SessionMeta, scan?: ScanStamp): number | null {
+  if (meta.durationMs != null) return meta.durationMs;
+  const startMs = Date.parse(meta.timestamp);
+  const lastMs = Date.parse(resolveLastActivity(meta, scan));
+  if (Number.isFinite(startMs) && Number.isFinite(lastMs) && lastMs > startMs) {
+    return lastMs - startMs;
+  }
+  return null;
 }
 
 export function isSessionActivityFresh(

@@ -7,6 +7,8 @@
     "sessionsImported": 1,
     "medianMs": 9000,
     "p90Ms": 9000,
+    "spanMedianMs": 9000,
+    "spanP90Ms": 9000,
     "needAttention": 1,
     "toolErrorRate": 0.6666666666666666
   },
@@ -23,7 +25,7 @@
     }
   ],
   "topics": [
-    { "key": "bugfix", "label": "Bug fixes", "count": 1, "group": "code" }
+    { "key": "bugfix", "label": "Bug fixes", "count": 1, "group": "code", "sessions": [{ "id": "trace-rich-fixture", "title": "Fix trace sync" }] }
   ],
   "failures": {
     "byToolError": [

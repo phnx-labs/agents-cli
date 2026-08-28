@@ -325,6 +325,8 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     expect(d.schema).toBe(1);
     expect(d.id).toBe('s1');
     expect(d.meta.spanMs).toBe(60_000);
+    // activeMs strips the 130s idle gap; here the whole span is idle → 0 (PHNX-3457).
+    expect(d.meta.activeMs).toBe(0);
     expect(d.meta.turns).toBe(7); // userTurns + assistantTurns
     expect(d.meta.tools).toBe(2);
     expect(d.meta.errorCount).toBe(1);
@@ -739,5 +741,142 @@ describe('traces sync failure retry ledger (PHNX-3267)', () => {
     } finally {
       await new Promise<void>((resolve, reject) => server.close((e) => (e ? reject(e) : resolve())));
     }
+  });
+});
+
+// PHNX-3457: the duration median/p90 run over ACTIVE time (span − idle gaps > 120s),
+// not raw span, so a session resumed after hours or left idle mid-turn doesn't
+// inflate them (real corpus max span: 345h). Raw span is kept as spanMedianMs/spanP90Ms.
+describe('active-time duration stats (PHNX-3457)', () => {
+  function durRow(rowId: string, durationMs: number, extra: Partial<SyncRow> = {}): SyncRow {
+    return {
+      id: rowId, short_id: rowId.slice(0, 8), agent: 'rush', origin: 'cli', routine_name: null,
+      routine_run_id: null, version: null, account: null, account_key: null, account_org: null,
+      mode: 'auto', timestamp: '2026-08-25T00:00:00.000Z', last_activity: '2026-08-25T00:10:00.000Z',
+      project: 'agents-cli', cwd: '/redacted/agents-cli', git_branch: 'main', topic: 'fix a bug',
+      label: null, message_count: null, token_count: null, output_tokens: null, input_tokens: null,
+      cache_read_tokens: null, cache_write_tokens: null, cost_usd: null, cost_usd_nocache: null,
+      duration_ms: durationMs, model: 'rush-test', tool_call_count: 2,
+      file_path: '/nonexistent/no-transcript.jsonl', file_mtime_ms: 1, file_size: 1,
+      machine: 'test-device', ...extra,
+    };
+  }
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const rid of ['dur-idle', 'dur-busy']) {
+      db.prepare('DELETE FROM tool_calls WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_topics WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_phenotypes WHERE session_id = ?').run(rid);
+    }
+  });
+
+  it('strips idle gaps from the duration median while keeping raw span alongside', () => {
+    const db = getDB();
+    const insertCall = db.prepare(`
+      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `);
+    // One session with a 400s idle gap between two tool calls: active = span − 400s.
+    insertCall.run('idle-1', 'dur-idle', 1, '2026-08-25T00:00:00.000Z', null, 'Bash', 'ok', 0, null);
+    insertCall.run('idle-2', 'dur-idle', 2, '2026-08-25T00:06:40.000Z', null, 'Bash', 'ok', 0, null);
+
+    const shard = buildIndexShard([durRow('dur-idle', 600_000)], 'test-device', 'owner-1');
+    // span 600000 − idle 400000 = active 200000.
+    expect(shard.stats.medianMs).toBe(200_000);
+    expect(shard.stats.p90Ms).toBe(200_000);
+    // Raw span is preserved unchanged.
+    expect(shard.stats.spanMedianMs).toBe(600_000);
+    expect(shard.stats.spanP90Ms).toBe(600_000);
+  });
+
+  it('leaves a busy session (no gap > 120s) with active == span', () => {
+    const db = getDB();
+    const insertCall = db.prepare(`
+      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `);
+    // Two calls 30s apart — under the 120s idle threshold, so nothing is stripped.
+    insertCall.run('busy-1', 'dur-busy', 1, '2026-08-25T00:00:00.000Z', null, 'Bash', 'ok', 0, null);
+    insertCall.run('busy-2', 'dur-busy', 2, '2026-08-25T00:00:30.000Z', null, 'Bash', 'ok', 0, null);
+
+    const shard = buildIndexShard([durRow('dur-busy', 200_000)], 'test-device', 'owner-1');
+    expect(shard.stats.medianMs).toBe(200_000);
+    expect(shard.stats.spanMedianMs).toBe(200_000);
+  });
+
+  it('measures the idle gap from a call END when end_timestamp is known', () => {
+    const db = getDB();
+    const insertCall = db.prepare(`
+      INSERT INTO tool_calls (call_key, session_id, ordinal, timestamp, end_timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `);
+    // call 1 runs 00:00 → 00:05 (a 5m blocking call, not idle); the gap to call 2 at
+    // 00:08 is only 3m of idle measured from the END, not 8m from the START.
+    insertCall.run('end-1', 'dur-idle', 1, '2026-08-25T00:00:00.000Z', '2026-08-25T00:05:00.000Z', 'Bash', 'ok', 0, null);
+    insertCall.run('end-2', 'dur-idle', 2, '2026-08-25T00:08:00.000Z', null, 'Bash', 'ok', 0, null);
+
+    const shard = buildIndexShard([durRow('dur-idle', 600_000)], 'test-device', 'owner-1');
+    // idle = 08:00 − 05:00 = 180000; active = 600000 − 180000 = 420000.
+    expect(shard.stats.medianMs).toBe(420_000);
+  });
+});
+
+// PHNX-3408: each topic tile carries up to 30 example session refs so the console
+// can drill from the treemap into a category's session list. Without them every
+// tile renders display-only (the consumer gates the click on topic.sessions).
+describe('topic session refs for treemap drill-down (PHNX-3408)', () => {
+  function topicRow(rowId: string, label: string, recency: string): SyncRow {
+    return {
+      id: rowId, short_id: rowId.slice(0, 8), agent: 'rush', origin: 'cli', routine_name: null,
+      routine_run_id: null, version: null, account: null, account_key: null, account_org: null,
+      mode: 'auto', timestamp: '2026-08-25T00:00:00.000Z', last_activity: recency,
+      project: 'agents-cli', cwd: '/redacted/agents-cli', git_branch: 'fix/bug', topic: 'fix the bug',
+      label, message_count: null, token_count: null, output_tokens: null, input_tokens: null,
+      cache_read_tokens: null, cache_write_tokens: null, cost_usd: null, cost_usd_nocache: null,
+      duration_ms: 1000, model: 'rush-test', tool_call_count: null,
+      file_path: '/nonexistent/no-transcript.jsonl', file_mtime_ms: 1, file_size: 1,
+      machine: 'test-device',
+    };
+  }
+
+  beforeEach(() => {
+    const db = getDB();
+    for (const rid of ['topic-a', 'topic-b']) {
+      db.prepare('DELETE FROM session_topics WHERE session_id = ?').run(rid);
+      db.prepare('DELETE FROM session_phenotypes WHERE session_id = ?').run(rid);
+    }
+  });
+
+  it('emits {id,title} refs per topic, most-recent first, titled by label', () => {
+    const shard = buildIndexShard([
+      topicRow('topic-a', 'Older fix', '2026-08-25T00:01:00.000Z'),
+      topicRow('topic-b', 'Newer fix', '2026-08-25T00:09:00.000Z'),
+    ], 'test-device', 'owner-1');
+
+    // Both rows classify into one bucket (same cwd/branch/topic).
+    const withRefs = shard.topics.find((t) => t.sessions.length > 0);
+    expect(withRefs).toBeDefined();
+    expect(withRefs!.count).toBe(2);
+    expect(withRefs!.sessions).toEqual([
+      { id: 'topic-b', title: 'Newer fix' }, // most-recent first
+      { id: 'topic-a', title: 'Older fix' },
+    ]);
+  });
+
+  it('caps the ref list at 30 while keeping the true count', () => {
+    const rows: SyncRow[] = [];
+    for (let i = 0; i < 45; i++) {
+      const mm = String(i).padStart(2, '0');
+      rows.push(topicRow(`topic-${i}`, `fix ${i}`, `2026-08-25T00:${mm}:00.000Z`));
+    }
+    const db = getDB();
+    for (let i = 0; i < 45; i++) db.prepare('DELETE FROM session_topics WHERE session_id = ?').run(`topic-${i}`);
+
+    const shard = buildIndexShard(rows, 'test-device', 'owner-1');
+    const bucket = shard.topics.find((t) => t.sessions.length > 0)!;
+    expect(bucket.count).toBe(45);          // true total unchanged
+    expect(bucket.sessions).toHaveLength(30); // capped
+    expect(bucket.sessions[0].id).toBe('topic-44'); // most recent kept
   });
 });
