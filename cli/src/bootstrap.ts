@@ -37,6 +37,7 @@ import {
   NPM_PACKAGE_NAME,
   deriveGlobalPrefix,
   detectPackageManager,
+  ensureGlobalBinLinks,
   installPackageIntoPrefix,
   installPackageWithBun,
   verifyInstalledVersion,
@@ -409,6 +410,38 @@ async function installResolvedPackage(metadata: NpmPackageMetadata): Promise<voi
   }
   verifyInstalledVersion(packageRoot, metadata.version);
   refreshAliasShims(packageRoot);
+  // PHNX-2768: the npm install above can leave the package at the new version
+  // but the global bin links GONE — the state that stranded zion (package at
+  // 1.22.40, `/opt/homebrew/bin/{agents,ag,browser,computer}` missing, every
+  // `agents` invocation "command not found"). The upgrade OWNS those links, so
+  // it restores any that npm dropped and fails LOUD when one cannot be made to
+  // resolve — never returning a box the package upgraded but cannot run. Only
+  // the npm-prefix POSIX layout has these symlinks; bun and Windows use their
+  // own bin shims and are out of scope.
+  if (detectPackageManager(packageRoot) !== 'bun' && process.platform !== 'win32') {
+    const prefix = deriveGlobalPrefix(packageRoot);
+    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+    const repaired = repairs.filter((r) => r.action === 'repaired');
+    const failed = repairs.filter((r) => r.action === 'failed');
+    if (repaired.length > 0) {
+      console.error(
+        chalk.yellow(
+          `Relinked ${repaired.map((r) => r.name).join(', ')} in ${path.join(prefix, 'bin')} — the install left them missing.`,
+        ),
+      );
+    }
+    if (failed.length > 0) {
+      const relink = failed
+        .map((r) => `ln -sf ${path.relative(path.dirname(r.linkPath), r.target)} ${r.linkPath}`)
+        .join(' && ');
+      throw new Error(
+        `upgraded to ${metadata.version} but could not restore the ` +
+          `${failed.map((r) => r.name).join(', ')} command link${failed.length === 1 ? '' : 's'} in ` +
+          `${path.join(prefix, 'bin')} (${failed.map((r) => r.error).join('; ')}). ` +
+          `The box has the new package but no working \`agents\` — relink manually: ${relink}`,
+      );
+    }
+  }
   // The npm install above runs with --ignore-scripts, so the postinstall that
   // installs the macOS Keychain helper never fires on upgrade. Force-refresh the
   // helper here so a user upgrading FROM a broken build (e.g. the entitlement-less
@@ -812,6 +845,11 @@ async function runUpgrade(version: string | undefined, options: UpgradeOptions):
         if (isPromptCancelled(err)) return;
         spinner.fail(`Upgrade failed: ${err instanceof Error ? err.message : String(err)}`);
         console.log(chalk.gray(`Run manually: agents upgrade ${version ? version + ' ' : ''}--yes`));
+        // A failed upgrade MUST exit non-zero (PHNX-2768). The fleet rollout
+        // keys a box `ok` on `agents upgrade` exiting 0 alone; exiting 0 on
+        // failure is what let a stranded box (package upgraded, bin links gone)
+        // be reported merely `unverified` instead of `failed`.
+        process.exitCode = 1;
       }
 }
 

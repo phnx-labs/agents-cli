@@ -12,6 +12,7 @@ import {
   classifyRemovableAgentsCliInstalls,
   deriveGlobalPrefix,
   detectPackageManager,
+  ensureGlobalBinLinks,
   dismissUpdateVersion,
   downloadVerifiedTarball,
   findAgentsCliInstalls,
@@ -1062,5 +1063,122 @@ describe('sweepStaleInstallStaging', () => {
   it('returns an empty list when the scope dir does not exist', () => {
     const missing = path.join(os.tmpdir(), `agents-self-update-missing-${Date.now()}`, 'agents-cli');
     expect(sweepStaleInstallStaging(missing)).toEqual([]);
+  });
+});
+
+describe('ensureGlobalBinLinks (PHNX-2768)', () => {
+  const BIN = {
+    agents: 'dist/index.js',
+    ag: 'dist/index.js',
+    browser: 'dist/browser.js',
+    computer: 'dist/computer.js',
+  };
+
+  /**
+   * A real npm-global-shaped POSIX install: `<prefix>/lib/node_modules/...`
+   * with the four shipped bin targets on disk. Returns the prefix + package
+   * root; the caller decides which (if any) `<prefix>/bin/*` links to create,
+   * so a test can model the healthy box or the stranded one.
+   */
+  function makeInstall(label: string): { prefix: string; packageRoot: string; binDir: string } {
+    const prefix = fs.realpathSync(makeTempDir(label));
+    const packageRoot = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(path.join(packageRoot, 'dist'), { recursive: true });
+    fs.writeFileSync(
+      path.join(packageRoot, 'package.json'),
+      JSON.stringify({ name: '@phnx-labs/agents-cli', version: '1.22.40', bin: BIN }),
+    );
+    for (const rel of new Set(Object.values(BIN))) {
+      fs.writeFileSync(path.join(packageRoot, rel), '#!/usr/bin/env node\n');
+    }
+    fs.mkdirSync(path.join(prefix, 'bin'), { recursive: true });
+    return { prefix, packageRoot, binDir: path.join(prefix, 'bin') };
+  }
+
+  function linkResolvesTo(binDir: string, name: string, packageRoot: string): boolean {
+    return (
+      fs.realpathSync(path.join(binDir, name)) ===
+      fs.realpathSync(path.join(packageRoot, BIN[name as keyof typeof BIN]))
+    );
+  }
+
+  it('restores every bin link the upgrade left missing — the zion strand', () => {
+    // Reproduce the bug: package upgraded in place, but `<prefix>/bin/*` gone,
+    // so `command -v agents` finds nothing on the box.
+    const { prefix, packageRoot, binDir } = makeInstall('strand');
+    for (const name of Object.keys(BIN)) {
+      expect(fs.existsSync(path.join(binDir, name))).toBe(false);
+    }
+
+    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+
+    // All four siblings restored, not just `agents`.
+    expect(repairs.map((r) => r.name).sort()).toEqual(['ag', 'agents', 'browser', 'computer']);
+    expect(repairs.every((r) => r.action === 'repaired')).toBe(true);
+    for (const name of Object.keys(BIN)) {
+      expect(linkResolvesTo(binDir, name, packageRoot)).toBe(true);
+      // Relative link, mirroring npm's own bin links and the by-hand repair.
+      expect(fs.readlinkSync(path.join(binDir, name)).startsWith('..')).toBe(true);
+    }
+  });
+
+  it('leaves already-correct links untouched — the healthy path still works', () => {
+    const { prefix, packageRoot, binDir } = makeInstall('healthy');
+    for (const [name, rel] of Object.entries(BIN)) {
+      const linkPath = path.join(binDir, name);
+      fs.symlinkSync(path.relative(binDir, path.join(packageRoot, rel)), linkPath);
+    }
+    const before = Object.fromEntries(
+      Object.keys(BIN).map((name) => [name, fs.readlinkSync(path.join(binDir, name))]),
+    );
+
+    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+
+    expect(repairs.every((r) => r.action === 'ok')).toBe(true);
+    // Untouched: same link content, still resolving.
+    for (const name of Object.keys(BIN)) {
+      expect(fs.readlinkSync(path.join(binDir, name))).toBe(before[name]);
+      expect(linkResolvesTo(binDir, name, packageRoot)).toBe(true);
+    }
+  });
+
+  it('repairs a dangling or stale link pointing at a foreign path', () => {
+    const { prefix, packageRoot, binDir } = makeInstall('stale');
+    // `agents` points at a since-removed old install; the others are missing.
+    fs.symlinkSync('/nonexistent/old-install/dist/index.js', path.join(binDir, 'agents'));
+
+    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+
+    expect(repairs.every((r) => r.action === 'repaired')).toBe(true);
+    for (const name of Object.keys(BIN)) {
+      expect(linkResolvesTo(binDir, name, packageRoot)).toBe(true);
+    }
+  });
+
+  it('reports a link it cannot make resolve as failed — never a silent pass', () => {
+    const { prefix, packageRoot, binDir } = makeInstall('unrepairable');
+    // The upgrade landed the package.json but not the `agents` entry target,
+    // so the link can be created but can never resolve.
+    fs.rmSync(path.join(packageRoot, 'dist', 'index.js'));
+
+    const repairs = ensureGlobalBinLinks(packageRoot, prefix);
+
+    const failed = repairs.filter((r) => r.action === 'failed');
+    // agents + ag both target the missing dist/index.js.
+    expect(failed.map((r) => r.name).sort()).toEqual(['ag', 'agents']);
+    expect(failed[0].error).toBeTruthy();
+    // browser + computer still repaired — one bad target does not abort the rest.
+    expect(repairs.filter((r) => r.action === 'repaired').map((r) => r.name).sort()).toEqual([
+      'browser',
+      'computer',
+    ]);
+    expect(linkResolvesTo(binDir, 'browser', packageRoot)).toBe(true);
+  });
+
+  it('fails loud when package.json cannot be read', () => {
+    const prefix = fs.realpathSync(makeTempDir('nopkg'));
+    const packageRoot = path.join(prefix, 'lib', 'node_modules', '@phnx-labs', 'agents-cli');
+    fs.mkdirSync(packageRoot, { recursive: true });
+    expect(() => ensureGlobalBinLinks(packageRoot, prefix)).toThrow(/could not read bin entries/);
   });
 });
