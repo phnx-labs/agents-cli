@@ -46,8 +46,12 @@ default**, like every other system-layer resource (rules, hooks, commands,
 skills): it runs on every install unless you shadow it with `enabled: false`
 (via `agents monitors pause`, which materializes a user copy — pause/edit/delete
 always write the user dir; the system mirror is pull-only, and there is no
-`enable`/`disable` verb). A shared-input built-in still carries its own `device:`
-owner pin in the shipped YAML so exactly one box fires it (SING-9). Each monitor
+`enable`/`disable` verb). Enabled-by-default is **not** permission to fire on
+every daemon: an unpinned system built-in is placed on a single owner **in code**
+(`requiresSingleOwner` / `monitorRunsOnThisDevice`) — treated as shared-input
+unless it sets `sharedInput: false`, so a built-in that polls a fleet-shared queue
+can never fan out across the fleet and double-fire, even if its shipped YAML
+forgot a `device:` pin (SING-9a). Each monitor
 carries its read-time `scope` (`user`/`system`), so `agents monitors list` tags a
 built-in `(built-in)` and `--json` emits `scope` + `builtin`. The same background
 daemon that runs routines
@@ -61,8 +65,13 @@ fires use.
 On by default. Polls every 5 minutes for **this user's** open PRs that are
 CI-green and non-author-approved, then dispatches `claude` to rebase-merge them.
 Because it polls a fleet-shared queue (`--author @me` is identical on every box),
-the shipped YAML must pin a single owner `device:` so exactly one daemon fires it
-(SING-9) — otherwise every box's daemon would race to merge the same PR.
+exactly one daemon must fire it or every box would race to merge the same PR
+(SING-9). This is enforced **in code**, not just by the shipped YAML: an unpinned
+`scope: system` built-in is treated as shared-input and fires only on the resolved
+owner (`interactive.host`, else the sole box on a single-device fleet, else
+nowhere), so it stays single-executor even if the YAML omits the pin (SING-9a).
+The shipped YAML SHOULD still pin a `device:` owner (or set `sharedInput: true`)
+to document the intent and choose the specific owner box.
 
 The **built-in YAML** lives in `gh:phnx-labs/.agents-system` (`monitors/pr-merge-on-green.yml`)
 and polls `monitors/pr-merge-on-green.sh` — `gh search prs` plus `gh pr view --repo`,

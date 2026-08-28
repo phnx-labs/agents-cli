@@ -30,6 +30,8 @@ import {
   getMonitorPath,
   validateMonitor,
   monitorRunsOnThisDevice,
+  requiresSingleOwner,
+  monitorSharedInputOwner,
   parseInterval,
   type MonitorConfig,
   type MonitorSource,
@@ -125,6 +127,13 @@ function actionLabel(action: ActionConfig): string {
 function ownerLabel(monitor: MonitorConfig): string {
   if (monitor.device) return monitor.device;
   if (monitor.devices && monitor.devices.length > 0) return monitor.devices.join(',');
+  // An unpinned shared-input monitor (a system built-in by default) is NOT
+  // fleet-wide — it fires only on the single resolved owner (SING-9). Show that
+  // owner, not a misleading "all"; surface the unresolved case loudly.
+  if (requiresSingleOwner(monitor)) {
+    const owner = monitorSharedInputOwner();
+    return owner ? `${owner} (owner)` : 'unowned — set interactive.host';
+  }
   return 'all';
 }
 

@@ -3315,6 +3315,19 @@ is not two daemons existing — it is two daemons consuming the **same** input.
   MUST be part of the implementation, not a comment — shared-queue consumers
   without an owner pin ship with a test that two concurrent fires cannot process
   the same item.
+- **SING-9a (MUST).** A **system built-in monitor** ships enabled on every install
+  (PHNX-2506), so enabled-by-default MUST NOT itself grant fleet-wide firing for a
+  shared-input built-in. An UNPINNED built-in (no `device` / `devices`) is placed
+  on a single owner **in code** — `requiresSingleOwner` / `monitorRunsOnThisDevice`
+  (`lib/monitors/config.ts`) treat a `scope: 'system'` monitor as shared-input
+  unless it sets `sharedInput: false`, and fire it only on `monitorSharedInputOwner()`
+  (the configured `interactive.host`, else the sole box on a single-device fleet,
+  else NOWHERE). This is defense-in-depth: even a built-in whose shipped YAML forgot
+  a `device:` pin cannot fan out across the fleet and double-fire on a shared queue
+  (`pr-merge-on-green` is the canonical case). A device-local built-in (input = the
+  firing box's own state) opts back into fleet-wide firing with `sharedInput: false`;
+  a user monitor keeps its fleet-wide default and opts INTO owner-only with
+  `sharedInput: true`.
 
 #### 3.2 One daemon per state dir — last-wins takeover, not first-wins refusal
 

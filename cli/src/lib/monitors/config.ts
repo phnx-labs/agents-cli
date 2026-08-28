@@ -13,10 +13,11 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'yaml';
-import { getMonitorsDir, getSystemMonitorsDir, ensureAgentsDir } from '../state.js';
+import { getMonitorsDir, getSystemMonitorsDir, ensureAgentsDir, readMeta } from '../state.js';
 import { safeJoin, isSafeSegmentName } from '../paths.js';
 import { atomicWriteFileSync } from '../fs-atomic.js';
 import { machineId, normalizeHost } from '../machine-id.js';
+import { loadDevicesSync } from '../devices/registry.js';
 import type { AgentId } from '../types.js';
 import { ALL_AGENT_IDS } from '../agents.js';
 import { isCustomHarnessName } from '../profiles.js';
@@ -139,6 +140,30 @@ export interface MonitorConfig {
    * independently, like routines' `devices`. Mutually exclusive with `device`.
    */
   devices?: string[];
+  /**
+   * Does this monitor's SOURCE poll a fleet-shared queue (a PR list, a ticket
+   * tracker, the feed, a sync bucket) rather than the firing box's own state
+   * (its repos, sessions, caches)?
+   *
+   * This is the SING-9 placement switch for an UNPINNED monitor (no `device` /
+   * `devices`). A shared-input source has no per-box input, so every daemon
+   * firing it independently is a multi-executor race on shared state — the exact
+   * double-fire bug class. So an unpinned shared-input monitor fires only on the
+   * single owner (`interactive.host`, else the sole box on a one-device fleet),
+   * never on every daemon.
+   *
+   * Defaults differ by layer so the SAFE side is the default for each:
+   * - a **system built-in** (`scope: 'system'`) is treated as shared-input
+   *   unless it sets `sharedInput: false`, so a built-in shipped with no pin
+   *   can never fan out across the fleet — a device-local built-in opts back
+   *   into fleet-wide firing with `sharedInput: false`;
+   * - a **user monitor** keeps its historical fleet-wide default and only
+   *   becomes owner-restricted when it explicitly sets `sharedInput: true`.
+   *
+   * An explicit `device` / `devices` pin always wins and makes this moot — the
+   * author has already chosen the executor(s).
+   */
+  sharedInput?: boolean;
   /** Execute the ACTION on this machine over SSH (placement), distinct from the owner that fires it. */
   runOn?: string;
   /**
@@ -217,18 +242,93 @@ export function parseInterval(interval: string): number | null {
 }
 
 /**
+ * True when an UNPINNED monitor must be placed on a single owner rather than
+ * fired by every daemon — the SING-9 guard against a shared-queue double-fire.
+ *
+ * A `device` / `devices` pin is an explicit executor choice, so it is never
+ * owner-overridden (returns false here). For an unpinned monitor the default is
+ * layer-specific, SAFE side first: a **system built-in** is treated as
+ * shared-input unless it opts out with `sharedInput: false`; a **user monitor**
+ * keeps its fleet-wide default and only opts IN with `sharedInput: true`.
+ */
+export function requiresSingleOwner(
+  config: Pick<MonitorConfig, 'device' | 'devices' | 'scope' | 'sharedInput'>,
+): boolean {
+  if (config.device || (config.devices && config.devices.length > 0)) return false;
+  if (config.scope === 'system') return config.sharedInput !== false;
+  return config.sharedInput === true;
+}
+
+/**
+ * The single fleet box that owns unpinned shared-input monitors — PURE, so the
+ * placement rule is unit-testable without a live tailnet. Priority:
+ *
+ * 1. the configured `interactive.host` (the box the operator sits at);
+ * 2. else, on a fleet with no OTHER registered device, this box — a single-box
+ *    install has no peer to race, so the built-in still fires here;
+ * 3. else `undefined` — a multi-box fleet with no interactive host has no safe
+ *    single owner, so an unpinned shared-input monitor fires NOWHERE (fail safe:
+ *    a silent no-op beats a fleet-wide double-fire) until one is pinned.
+ *
+ * `deviceNames` is the registered fleet (registry keys); `self` is `machineId()`.
+ */
+export function resolveSharedInputOwner(
+  interactiveHost: string | undefined,
+  deviceNames: string[],
+  self: string,
+): string | undefined {
+  if (typeof interactiveHost === 'string' && interactiveHost.trim()) {
+    return normalizeHost(interactiveHost);
+  }
+  const others = deviceNames.map((d) => normalizeHost(d)).filter((d) => d && d !== self);
+  if (others.length === 0) return self; // single-box fleet: no peer, no race
+  return undefined; // multi-box, no interactive host pinned → no safe owner
+}
+
+/** Resolve {@link resolveSharedInputOwner} from live config + the device registry. */
+export function monitorSharedInputOwner(): string | undefined {
+  const self = machineId();
+  const interactiveHost = readMeta().config?.interactiveHost;
+  let deviceNames: string[] = [];
+  try {
+    deviceNames = Object.keys(loadDevicesSync());
+  } catch {
+    deviceNames = [];
+  }
+  return resolveSharedInputOwner(
+    typeof interactiveHost === 'string' ? interactiveHost : undefined,
+    deviceNames,
+    self,
+  );
+}
+
+/**
  * True when the monitor may evaluate + fire on this machine. Owner semantics:
  * `device` (single owner, exactly-once) → only that machine; else `devices`
- * (allowlist) → any listed machine; else unrestricted. Both sides normalize so
- * `Yosemite-S0` and `yosemite-s0.tailnet.ts.net` agree with `yosemite-s0`.
+ * (allowlist) → any listed machine; else placement depends on shared-input: an
+ * unpinned SHARED-INPUT monitor (a system built-in by default, or a user monitor
+ * that set `sharedInput: true`) fires only on the resolved owner
+ * ({@link monitorSharedInputOwner}), so a built-in that polls a fleet-shared
+ * queue can never fan out across every daemon (SING-9); anything else is
+ * unrestricted. Both sides normalize so `Yosemite-S0` and
+ * `yosemite-s0.tailnet.ts.net` agree with `yosemite-s0`.
+ *
+ * `ownerHost` overrides the resolved owner for tests/callers that already know
+ * it; omit it in production to resolve from config + the device registry.
  */
 export function monitorRunsOnThisDevice(
-  config: Pick<MonitorConfig, 'device' | 'devices'>,
+  config: Pick<MonitorConfig, 'device' | 'devices' | 'scope' | 'sharedInput'>,
+  ownerHost?: string,
 ): boolean {
   const self = machineId();
   if (config.device) return normalizeHost(config.device) === self;
   if (config.devices && config.devices.length > 0) {
     return config.devices.some((d) => normalizeHost(d) === self);
+  }
+  if (requiresSingleOwner(config)) {
+    const resolved = ownerHost !== undefined ? ownerHost : monitorSharedInputOwner();
+    const owner = resolved && resolved.trim() ? normalizeHost(resolved) : undefined;
+    return owner !== undefined && owner === self;
   }
   return true;
 }
@@ -436,6 +536,9 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
       }
     }
   }
+  if (config.sharedInput !== undefined && typeof config.sharedInput !== 'boolean') {
+    errors.push('sharedInput must be a boolean (true = source polls a fleet-shared queue)');
+  }
   if (config.runOn !== undefined && (typeof config.runOn !== 'string' || config.runOn.trim() === '')) {
     errors.push('runOn must be a non-empty machine name (a registered host, device, capability tag, or user@host)');
   }
@@ -467,10 +570,15 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
  * disabled+invisible (PHNX-2506). `scope` no longer changes the enabled default;
  * it is retained on the config so `list`/`view` can tag a built-in.
  *
- * A shared-input built-in (one whose source polls a fleet-shared queue such as
- * `gh pr list --author @me`) MUST carry its own `device:` owner pin in the
- * shipped YAML so exactly one box fires it (SING-9) — being enabled-by-default is
- * not, on its own, permission to fire on every daemon.
+ * Enabled-by-default is NOT, on its own, permission to fire on every daemon. A
+ * shared-input built-in (one whose source polls a fleet-shared queue such as `gh
+ * pr list --author @me`) is placed on a single owner by `monitorRunsOnThisDevice`
+ * / `requiresSingleOwner` even when the shipped YAML carries no `device:` pin: a
+ * system built-in is treated as shared-input unless it sets `sharedInput: false`,
+ * so it can never fan out across the fleet and double-fire on a shared queue
+ * (SING-9). A device-local built-in opts back into fleet-wide firing with
+ * `sharedInput: false`; a genuinely-shared one should still ship a `device:` pin
+ * (or `sharedInput: true`) to document the intent.
  */
 function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): MonitorConfig | null {
   try {
