@@ -1,3 +1,4 @@
+<!-- guide -->
 # Profiles
 
 > **Surface note:** the top-level `agents profiles` command was removed.

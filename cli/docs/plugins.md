@@ -1,3 +1,4 @@
+<!-- guide -->
 # Plugins
 
 Distributable bundles that package skills, commands, hooks, MCP servers, and permissions under a single versioned manifest.
@@ -192,4 +193,4 @@ agents plugins remove rush-toolkit --keep-source
 - [resource-sync.md](resource-sync.md) — how plugins participate in the layered resource sync model
 - [docs/subagents.md](subagents.md) — subagent definitions that plugins can bundle
 - [docs/hooks.md](hooks.md) — hook manifests that plugins can ship
-- [docs/workflows.md](workflows.md) — workflow bundles that can reference plugins
+- docs/workflows.md — workflow bundles that can reference plugins

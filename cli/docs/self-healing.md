@@ -1,3 +1,4 @@
+<!-- guide -->
 # Self-Healing Installs
 
 How agents-cli keeps a managed agent runnable when its install goes bad — detecting, surfacing, and repairing a broken binary instead of dying with a cryptic error.

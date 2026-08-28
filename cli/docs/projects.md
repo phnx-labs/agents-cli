@@ -1,3 +1,4 @@
+<!-- guide -->
 # Projects (Named Multi-Repo Projects + Progress Rollup)
 
 A **project** names a body of work, binds it to one or more repos, and rolls live

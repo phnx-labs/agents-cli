@@ -1,3 +1,4 @@
+<!-- guide -->
 # Secrets: trust boundaries & what the agent sees (design)
 
 > Status: **accepted** · Related: [secrets.md](secrets.md) (reference),

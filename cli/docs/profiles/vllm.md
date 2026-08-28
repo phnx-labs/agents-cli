@@ -1,3 +1,4 @@
+<!-- guide -->
 # Self-hosted vLLM
 
 Run an open-weight model on your own GPUs and point Claude Code at it via vLLM's **native Anthropic endpoint**.

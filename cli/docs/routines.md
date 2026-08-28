@@ -1,3 +1,4 @@
+<!-- guide -->
 # Routines (Scheduled Jobs)
 
 Scheduled agent execution with sandboxed permissions and scheduler-driven cron execution.

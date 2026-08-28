@@ -1,3 +1,4 @@
+<!-- guide -->
 # OpenRouter
 
 Single API key, many open-weight models. `agents-cli` ships built-in OpenRouter presets so adding the second profile never re-prompts for a key.

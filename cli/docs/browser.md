@@ -1,3 +1,4 @@
+<!-- guide -->
 # Browser
 
 Drive Chromium-family browsers from AI agents via the Chrome DevTools Protocol.

@@ -1,3 +1,4 @@
+<!-- guide -->
 # LiteLLM Proxy
 
 Generic LLM gateway that fronts 100+ providers behind a single OpenAI-style API, with an Anthropic-shaped pass-through for Claude Code clients.

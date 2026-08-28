@@ -1,3 +1,4 @@
+<!-- guide -->
 # Menu bar
 
 A macOS status-bar item that surfaces live agent activity on the machine.

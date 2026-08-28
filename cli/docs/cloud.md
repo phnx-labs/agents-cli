@@ -1,3 +1,4 @@
+<!-- guide -->
 # Cloud Dispatch
 
 Run agent tasks on remote infrastructure across multiple cloud backends, with unified status tracking and live log streaming.

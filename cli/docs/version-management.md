@@ -1,3 +1,4 @@
+<!-- guide -->
 # Version Management
 
 How agents-cli installs, switches, and isolates multiple versions of agent CLIs.

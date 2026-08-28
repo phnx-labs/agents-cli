@@ -1,3 +1,4 @@
+<!-- guide -->
 # Monitors (Event-Triggered Watchers)
 
 A **monitor** watches a SOURCE, detects a CONDITION change, and fires an ACTION.

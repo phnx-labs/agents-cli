@@ -1,3 +1,4 @@
+<!-- guide -->
 # Google Vertex AI
 
 Anthropic models served from Google Cloud Vertex AI.

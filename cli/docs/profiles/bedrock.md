@@ -1,3 +1,4 @@
+<!-- guide -->
 # AWS Bedrock
 
 Direct AWS Bedrock — Claude Code talks to Bedrock's Anthropic endpoint without a gateway in front of it. For Bedrock fronted by TrueFoundry, see [truefoundry.md](truefoundry.md) instead.
