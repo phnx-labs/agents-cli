@@ -12,6 +12,8 @@ import * as os from 'os';
 import * as path from 'path';
 import * as yaml from 'yaml';
 import { fileURLToPath } from 'url';
+import { formatFleetMonitorLines } from './monitors.js';
+import { parseRemoteMonitors } from '../lib/monitors/remote.js';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
@@ -150,6 +152,51 @@ describe('monitors inspection JSON and stderr', () => {
     const payload = JSON.parse(run(home, ['list', '--json']).stdout);
     expect(payload[0].lastActionStatus).toBe('failed');
     expect(payload[0].lastActionFailed).toBe(true);
+  });
+
+  it('list --json reports scope and a system built-in lists enabled by default (PHNX-2506)', () => {
+    const home = makeHome();
+    // A built-in with no explicit `enabled:` field.
+    writeSystemMonitor(home, {
+      name: 'ci-built-in',
+      source: { type: 'poll', command: 'echo hi', interval: '30s' },
+      condition: { mode: 'on-change' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+    writeMonitor(home, {
+      name: 'mine',
+      enabled: true,
+      source: { type: 'poll', command: 'echo fail', interval: '30s' },
+      condition: { mode: 'match', match: 'fail' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+
+    // AGENTS_MONITORS_LOCAL keeps the run from fanning out to a real fleet.
+    const res = run(home, ['list', '--json'], { AGENTS_MONITORS_LOCAL: '1' });
+    expect(res.status).toBe(0);
+    expect(res.stderr).toBe('');
+    const payload = JSON.parse(res.stdout);
+    const builtin = payload.find((m: any) => m.name === 'ci-built-in');
+    const mine = payload.find((m: any) => m.name === 'mine');
+    expect(builtin.scope).toBe('system');
+    // No explicit `enabled:` on the built-in now defaults ON, like a user monitor.
+    expect(builtin.enabled).toBe(true);
+    expect(mine.scope).toBe('user');
+  });
+
+  it('list marks a system built-in as (built-in) in the text view (PHNX-2506)', () => {
+    const home = makeHome();
+    writeSystemMonitor(home, {
+      name: 'ci-built-in',
+      source: { type: 'poll', command: 'echo hi', interval: '30s' },
+      condition: { mode: 'on-change' },
+      action: { type: 'notify', notifyChannel: 'telegram' },
+    });
+
+    const res = run(home, ['list'], { AGENTS_MONITORS_LOCAL: '1' });
+    expect(res.status).toBe(0);
+    expect(res.stdout).toContain('ci-built-in');
+    expect(res.stdout).toContain('(built-in)');
   });
 
   it('test --json evaluates once, prints the dry-run decision as JSON, and writes no state', () => {
@@ -325,6 +372,39 @@ describe('monitors inspection JSON and stderr', () => {
       expect(fs.readFileSync(sysFile, 'utf-8')).toBe(sysBefore);
     },
   );
+});
+
+/**
+ * PHNX-2506: `monitors list` fans out fleet-wide and tags each peer's monitors
+ * with the box they live on. `formatFleetMonitorLines` is the pure renderer, so
+ * the tagging is exercised against the real `parseRemoteMonitors` projection —
+ * the same helper the add duplicate-guard consumes — without an SSH fleet.
+ */
+describe('formatFleetMonitorLines (fleet-wide list, PHNX-2506)', () => {
+  it("tags a remote box's monitors with its box name", () => {
+    const remote = parseRemoteMonitors(
+      JSON.stringify([
+        {
+          name: 'land-2517',
+          enabled: true,
+          scope: 'user',
+          source: { type: 'poll', command: 'gh pr view 2517', interval: '2m' },
+          condition: { mode: 'on-change' },
+          action: { type: 'run', agent: 'claude', prompt: 'merge it' },
+        },
+      ]),
+      'zion',
+    );
+    const rendered = formatFleetMonitorLines(remote).join('\n');
+    expect(rendered).toContain('Elsewhere on the fleet');
+    expect(rendered).toContain('land-2517');
+    // Tagged with the owning box.
+    expect(rendered).toContain('zion');
+  });
+
+  it('renders nothing when no peer reported a monitor', () => {
+    expect(formatFleetMonitorLines([])).toEqual([]);
+  });
 });
 
 /**

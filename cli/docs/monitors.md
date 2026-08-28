@@ -42,9 +42,12 @@ built-in shipped with the CLI, `~/.agents/.system/monitors/` (the system layer,
 from `gh:phnx-labs/.agents-system`). `listMonitors()`/`readMonitor()` union the
 two — the user layer shadows a system built-in of the same name, exactly like
 routines' project/user/system resolution. A system built-in with no `enabled:`
-field is **opt-in**: it stays disabled until you enable it, which materializes a
-user copy (enable/edit/delete always write the user dir; the system mirror is
-pull-only). The same background daemon that runs routines
+field defaults to **enabled**, exactly like a user monitor: a shipped built-in is
+visible and active by default so the operator sees what the daemon is watching
+(edit/delete still write the user dir — the system mirror is pull-only). Each
+monitor carries a read-time `scope` (`user` or `system`) — `monitors list` marks a
+system built-in with `(built-in)` and reports `scope` in `--json`. The same
+background daemon that runs routines
 (`agents routines start`) hosts a **monitor engine** beside the cron scheduler. On each tick it evaluates every enabled, device-owned monitor that
 is due, applies the condition through the native state-diff store, and on a fire
 dispatches the action through the exact `executeJobDetached` path cron and webhook
@@ -167,7 +170,7 @@ agents monitors add cert-issued \
   --poll-http 'https://secure.ssl.com/team/.../co-ec1l5dgjofa' 8h \
   --match issued --notify telegram --device zion
 
-agents monitors list                  # all monitors, source, action, owner, liveness (checked Nx / never polled / STALLED / fired)
+agents monitors list                  # every monitor fleet-wide (local + peers, each tagged with its box), source, action, owner, liveness (checked Nx / never polled / STALLED / fired)
 agents monitors view <name>           # full config + liveness + current watched-state + recent fires
 agents monitors test <name>           # DRY-RUN: evaluate once, print event + would-fire (no action)
 agents monitors edit <name>           # $EDITOR on the YAML

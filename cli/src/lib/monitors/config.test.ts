@@ -271,20 +271,28 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
     expect(getMonitorPath('dupe')).toBe(path.join(userDir, 'dupe.yml'));
   });
 
-  it('(c) a system built-in with no enabled: field is opt-in (disabled until toggled)', () => {
-    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\n'));
+  it('(c) a system built-in with no enabled: field defaults to enabled, like a user monitor (PHNX-2506)', () => {
+    fs.writeFileSync(path.join(sysDir, 'builtin.yml'), monitorYaml('name: builtin\n'));
 
-    // Read straight from the system layer — opt-in, so disabled.
-    expect(readMonitor('optin')?.enabled).toBe(false);
-    expect(listMonitors().find((m) => m.name === 'optin')?.enabled).toBe(false);
+    // Read straight from the system layer — no explicit enabled:, so ON, and
+    // tagged with its resolving layer.
+    const fromSystem = readMonitor('builtin');
+    expect(fromSystem?.enabled).toBe(true);
+    expect(fromSystem?.scope).toBe('system');
+    expect(listMonitors().find((m) => m.name === 'builtin')?.enabled).toBe(true);
 
-    // A user monitor with no enabled: field, by contrast, defaults to enabled.
+    // A user monitor with no enabled: field also defaults to enabled, and is
+    // tagged `user`.
     fs.writeFileSync(path.join(userDir, 'userdefault.yml'), monitorYaml('name: userdefault\n'));
-    expect(readMonitor('userdefault')?.enabled).toBe(true);
+    const fromUser = readMonitor('userdefault');
+    expect(fromUser?.enabled).toBe(true);
+    expect(fromUser?.scope).toBe('user');
   });
 
-  it('(d) enabling a system built-in writes into the USER dir, never the system dir', () => {
-    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\n'));
+  it('(d) toggling a system built-in writes into the USER dir, never the system dir', () => {
+    // Explicitly disabled in the mirror so there is a state to flip; the write
+    // must land a user copy rather than rewriting the pull-only system file.
+    fs.writeFileSync(path.join(sysDir, 'optin.yml'), monitorYaml('name: optin\nenabled: false\n'));
     expect(readMonitor('optin')?.enabled).toBe(false);
 
     setMonitorEnabled('optin', true);
@@ -293,6 +301,8 @@ describe('system-layer monitors (built-ins from ~/.agents/.system/monitors/)', (
     expect(fs.existsSync(path.join(userDir, 'optin.yml'))).toBe(true);
     const sysBody = fs.readFileSync(path.join(sysDir, 'optin.yml'), 'utf-8');
     expect(sysBody).not.toContain('enabled: true');
+    // The read-time `scope` annotation is never persisted into the user copy.
+    expect(fs.readFileSync(path.join(userDir, 'optin.yml'), 'utf-8')).not.toContain('scope:');
     // The user copy now wins and reads enabled.
     expect(readMonitor('optin')?.enabled).toBe(true);
     expect(getMonitorPath('optin')).toBe(path.join(userDir, 'optin.yml'));

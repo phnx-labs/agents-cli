@@ -159,6 +159,14 @@ export interface MonitorConfig {
   variables?: Record<string, string>;
   /** Pin the agent version for `run` actions (omit to use the run strategy). */
   version?: string;
+  /**
+   * Which layer this monitor was resolved from — `user` (~/.agents/monitors/)
+   * or `system` (the npm-shipped built-in mirror). Computed at read time by
+   * {@link readMonitorFile}, never persisted to the YAML (writeMonitor strips
+   * it). Lets `monitors list` mark a built-in and keep the `--json` payload
+   * honest about a monitor's origin.
+   */
+  scope?: 'user' | 'system';
 }
 
 /**
@@ -449,11 +457,11 @@ export function validateMonitor(config: Partial<MonitorConfig>): string[] {
 }
 
 /**
- * Read and normalize a monitor file. `scope` decides the enabled default when
- * the YAML has no explicit `enabled:` field: a `user` monitor defaults to
- * enabled (MONITOR_DEFAULTS), while a `system` built-in stays opt-in (disabled)
- * until the user enables it — mirroring how routines treat a fresh built-in
- * (lib/routines.ts readJobFile).
+ * Read and normalize a monitor file. A monitor with no explicit `enabled:`
+ * field defaults to enabled (MONITOR_DEFAULTS) regardless of `scope`: a system
+ * built-in is visible and active like any user monitor, so the operator sees
+ * what the daemon is watching. `scope` is stamped onto the returned config so
+ * `monitors list` can mark a built-in and report the origin in `--json`.
  */
 function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): MonitorConfig | null {
   try {
@@ -465,9 +473,10 @@ function readMonitorFile(filePath: string, scope: 'user' | 'system' = 'user'): M
       ...MONITOR_DEFAULTS,
       ...parsed,
       name: parsed.name || path.basename(filePath).replace(/\.ya?ml$/, ''),
-      // A system built-in with no explicit `enabled:` is opt-in until enabled;
-      // a user monitor keeps the enabled-by-default behavior.
-      enabled: hasEnabled ? parsed.enabled !== false : scope === 'system' ? false : (MONITOR_DEFAULTS.enabled ?? true),
+      // No explicit `enabled:` → enabled by default for both scopes. A system
+      // built-in is not opt-in; it defaults on like a user monitor.
+      enabled: hasEnabled ? parsed.enabled !== false : (MONITOR_DEFAULTS.enabled ?? true),
+      scope,
     } as MonitorConfig;
   } catch {
     return null;
@@ -551,6 +560,9 @@ export function writeMonitor(config: MonitorConfig): void {
 
   const output: Record<string, unknown> = { ...config };
   if (output.enabled === true) delete output.enabled;
+  // `scope` is a read-time annotation (user vs system layer), not config —
+  // persisting it would write a meaningless field into the user's YAML.
+  delete output.scope;
   const devArr = output.devices as string[] | undefined;
   if (!devArr || devArr.length === 0) delete output.devices;
 

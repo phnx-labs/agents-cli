@@ -20,7 +20,7 @@ import {
   startDaemon,
 } from '../lib/daemon/daemon.js';
 import { findDuplicateMonitor, monitorFingerprint } from '../lib/monitors/fingerprint.js';
-import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV } from '../lib/monitors/remote.js';
+import { gatherFleetMonitors, NO_MONITOR_FANOUT_ENV, type RemoteMonitor } from '../lib/monitors/remote.js';
 import {
   listMonitors,
   readMonitor,
@@ -126,6 +126,23 @@ function ownerLabel(monitor: MonitorConfig): string {
   if (monitor.device) return monitor.device;
   if (monitor.devices && monitor.devices.length > 0) return monitor.devices.join(',');
   return 'all';
+}
+
+/**
+ * Render the fleet-wide section of `monitors list`: every monitor a peer
+ * reported, each tagged with the box it lives on. Pure so the tagging is
+ * unit-testable against real `parseRemoteMonitors` output without an SSH fleet.
+ * Returns [] when no peer reported a monitor, so the caller prints nothing.
+ */
+export function formatFleetMonitorLines(remote: RemoteMonitor[]): string[] {
+  if (remote.length === 0) return [];
+  const lines = [chalk.bold('Elsewhere on the fleet')];
+  for (const r of remote) {
+    lines.push(
+      `  ${chalk.cyan(r.monitor.name.padEnd(22))} ${sourceLabel(r.monitor.source)} → ${actionLabel(r.monitor.action)}  ${chalk.gray(`on ${r.machine}`)}`,
+    );
+  }
+  return lines;
 }
 
 /** A monitor's evaluation cadence in ms (falls back to the engine default). */
@@ -690,7 +707,7 @@ export function registerMonitorsCommands(program: Command): void {
     .command('list')
     .description('See all monitors: source, condition, action, owner, and last fire.')
     .option('--json', 'Emit machine-readable JSON')
-    .action((options: { json?: boolean }) => {
+    .action(async (options: { json?: boolean }) => {
       const monitors = listMonitors();
       if (options.json) {
         const payload = monitors.map((m) => {
@@ -701,6 +718,9 @@ export function registerMonitorsCommands(program: Command): void {
           return {
             name: m.name,
             enabled: m.enabled,
+            // `user` or `system` (a shipped built-in) — the layer this monitor
+            // resolved from, so a machine consumer can tell a built-in apart.
+            scope: m.scope ?? 'user',
             source: m.source,
             condition: m.condition,
             // Full action, not just `type`: the cross-machine duplicate guard
@@ -726,7 +746,15 @@ export function registerMonitorsCommands(program: Command): void {
         stdoutJson(payload);
         return;
       }
-      if (monitors.length === 0) {
+      // Fan out to peers so `monitors list` shows every monitor fleet-wide,
+      // each tagged with its owning box — the same cross-machine fan-out the
+      // add duplicate-guard uses. Skipped when this process is itself a peer
+      // answering the fan-out (recursion guard), so a peer only reports local.
+      const fleet = process.env[NO_MONITOR_FANOUT_ENV]
+        ? { monitors: [] as RemoteMonitor[], skipped: [] as string[], discoveryFailed: false }
+        : await gatherFleetMonitors();
+
+      if (monitors.length === 0 && fleet.monitors.length === 0) {
         console.log(chalk.gray('No monitors configured'));
         console.log(chalk.gray('  Add one: agents monitors add <name> --poll "<cmd>" 30s --match fail --run claude --prompt "..."'));
         return;
@@ -738,10 +766,25 @@ export function registerMonitorsCommands(program: Command): void {
         const enabled = m.enabled ? chalk.green('on') : chalk.gray('off');
         const here = monitorRunsOnThisDevice(m);
         const owner = here ? ownerLabel(m) : chalk.gray(ownerLabel(m));
-        console.log(`  ${chalk.cyan(m.name.padEnd(22))} ${enabled.padEnd(3)} ${sourceLabel(m.source)}`);
+        // A shipped system built-in is marked so the operator can tell it from
+        // one they authored; a user monitor gets no tag.
+        const builtIn = m.scope === 'system' ? ` ${chalk.gray('(built-in)')}` : '';
+        console.log(`  ${chalk.cyan(m.name.padEnd(22))} ${enabled.padEnd(3)} ${sourceLabel(m.source)}${builtIn}`);
         console.log(`  ${' '.repeat(22)}     ${chalk.gray(`[${m.condition.mode}]`)} → ${actionLabel(m.action)}  ${chalk.gray(`owner: ${owner}`)}  ${livenessLabel(m, state, liveness)}`);
       }
       console.log();
+
+      const fleetLines = formatFleetMonitorLines(fleet.monitors);
+      if (fleetLines.length > 0) {
+        for (const line of fleetLines) console.log(line);
+        console.log();
+      }
+      // Never let "we couldn't ask the fleet" read as "nothing runs elsewhere".
+      if (fleet.discoveryFailed) {
+        console.log(chalk.yellow('  Note: could not reach the device registry — the fleet was not listed.'));
+      } else if (fleet.skipped.length > 0) {
+        console.log(chalk.yellow(`  Note: could not reach ${fleet.skipped.join(', ')} — their monitors are not shown.`));
+      }
     });
 
   // ─── view ──────────────────────────────────────────────────────────────────
