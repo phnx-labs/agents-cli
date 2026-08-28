@@ -57,7 +57,8 @@ function pluginSupportsAgent(manifest: PluginManifest, agent?: AgentId): boolean
   return !manifest.agents || manifest.agents.length === 0 || manifest.agents.includes(agent);
 }
 
-function pluginSkillDirs(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
+/** Every `plugins/<plugin>/skills` dir across trusted source bases, filtered to an optional plugin/agent scope. */
+export function pluginSkillDirs(options: { agent?: AgentId; plugins?: Set<string> } = {}): string[] {
   const dirs: string[] = [];
   for (const base of trustedSourceBases()) {
     const pluginsDir = path.join(base.dir, 'plugins');

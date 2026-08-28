@@ -41,31 +41,35 @@ function makeVersionHome(): string {
 }
 
 describe('unmanagedHookNames', () => {
-  it('flags installed hooks whose name matches no manifest script basename', () => {
+  it('flags installed hooks whose name matches no source script basename (PHNX-2693)', () => {
     const installed = [
-      '00-agent-verify-work-complete', // system script, no manifest entry → dead
-      '02-expand-prompt-bang-commands', // dead
-      '03-linear-inject-tasks-context', // manifest-declared → registered
-      'git-guard', // manifest-declared → registered
+      'permission-handler', // helper present in source → NOT an orphan
+      'dead-hook', // absent from every source → orphan
+      '03-linear-inject-tasks-context', // source-present → NOT an orphan
+      'git-guard', // source-present → NOT an orphan
     ];
-    const manifestScripts = ['03-linear-inject-tasks-context.sh', 'git-guard.sh', 'rm-guard.sh'];
-    expect(unmanagedHookNames(installed, manifestScripts)).toEqual([
-      '00-agent-verify-work-complete',
-      '02-expand-prompt-bang-commands',
-    ]);
+    // The resolved SOURCE set (not the registered manifest): helper scripts sync
+    // copies into a version home appear here too, so they are not orphans.
+    const sourceScripts = [
+      'permission-handler.sh',
+      '03-linear-inject-tasks-context.sh',
+      'git-guard.sh',
+      'rm-guard.sh',
+    ];
+    expect(unmanagedHookNames(installed, sourceScripts)).toEqual(['dead-hook']);
   });
 
   it('matches on script basename regardless of extension (.sh, .py)', () => {
-    // Manifest scripts can carry any extension; the installed name is ext-stripped.
+    // Source scripts can carry any extension; the installed name is ext-stripped.
     expect(unmanagedHookNames(['guard'], ['guard.py'])).toEqual([]);
     expect(unmanagedHookNames(['guard'], ['guard.sh'])).toEqual([]);
   });
 
-  it('returns nothing when every installed hook is declared', () => {
+  it('returns nothing when every installed hook is present in source', () => {
     expect(unmanagedHookNames(['a', 'b'], ['a.sh', 'b.sh'])).toEqual([]);
   });
 
-  it('returns all installed hooks when the manifest is empty', () => {
+  it('returns all installed hooks when no source is present', () => {
     expect(unmanagedHookNames(['a', 'b'], [])).toEqual(['a', 'b']);
   });
 });

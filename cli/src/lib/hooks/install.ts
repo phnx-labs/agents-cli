@@ -1850,33 +1850,58 @@ export function selectHookManifest(
 }
 
 /**
- * Hook script files present on disk that no manifest entry declares — "dead"
- * hooks. The registrar only wires manifest-declared hooks into an agent's
- * native config (settings.json / config.toml), matching the installed file to a
- * manifest entry by script basename. So a file whose basename matches no
- * manifest `script:` is never registered: it occupies the hooks dir and shows
- * up in listings, but no lifecycle event ever fires it.
+ * Hook files present in a version home but absent from every configured
+ * SOURCE — genuine orphans left behind by a removed/renamed source hook.
+ *
+ * The definition is deliberately source-based, not manifest-based (PHNX-2693).
+ * Sync copies EVERY source hook file into a version home — registered hooks AND
+ * the helper / test / benchmark scripts that sit alongside them — but only the
+ * registered ones appear in `parseHookManifest`. Diffing installed names against
+ * the manifest therefore flagged every source-present-but-unregistered file
+ * (e.g. `permission-handler`, `verify-work-state`, `*_test`, `benchmark_*`) as
+ * an orphan, so `agents prune cleanup` offered to trash ~1000 in-use files. An
+ * installed hook is only truly orphaned when NO configured source still carries
+ * a file of that name — which is exactly what the `prune`/`doctor` help already
+ * promised ("present in a version home but missing from every configured
+ * source").
  *
  * Pure on purpose (no disk reads) so it is trivially testable; callers pass the
- * installed hook names and the manifest's script paths.
+ * installed hook names and the source hook script paths.
  */
-export function unmanagedHookNames(installedHookNames: string[], manifestScripts: string[]): string[] {
-  const managed = new Set(manifestScripts.map((s) => path.basename(s).replace(/\.[^.]+$/, '')));
-  return installedHookNames.filter((name) => !managed.has(name)).sort();
+export function unmanagedHookNames(installedHookNames: string[], sourceHookScripts: string[]): string[] {
+  const inSource = new Set(sourceHookScripts.map((s) => path.basename(s).replace(/\.[^.]+$/, '')));
+  return installedHookNames.filter((name) => !inSource.has(name)).sort();
 }
 
 /**
- * The dead hooks (see {@link unmanagedHookNames}) sitting in one version home.
- * Reads the merged hook manifest silently — a diagnostic must not emit the
- * shadow/override warnings the registrar path prints.
+ * Every hook script path across the resolved SOURCE roots — user
+ * (`~/.agents/hooks`), system (`~/.agents/.system/hooks`), and each enabled
+ * extra repo's `hooks/` — grouped the same way sync materializes them
+ * ({@link listHookEntriesFromDir}, which also descends one-level event-group
+ * dirs). This is the set an installed hook must be absent from to count as an
+ * orphan.
+ */
+export function listResolvedSourceHookScripts(): string[] {
+  const roots = [
+    getUserHooksDir(),
+    getSystemHooksDir(),
+    ...getEnabledExtraRepos().map((e) => path.join(e.dir, 'hooks')),
+  ];
+  const scripts: string[] = [];
+  for (const root of roots) {
+    for (const entry of listHookEntriesFromDir(root)) scripts.push(entry.scriptPath);
+  }
+  return scripts;
+}
+
+/**
+ * The orphan hooks (see {@link unmanagedHookNames}) sitting in one version home:
+ * installed hook files whose name matches no file in any configured source root.
  */
 export function listUnmanagedHooksInVersionHome(agent: AgentId, version: string): string[] {
   if (!AGENTS[agent].supportsHooks) return [];
-  const scripts = Object.values(parseHookManifest({ warn: false }))
-    .map((h) => h.script)
-    .filter((s): s is string => typeof s === 'string');
   const installed = listHooksInVersionHome(agent, version).map((e) => e.name);
-  return unmanagedHookNames(installed, scripts);
+  return unmanagedHookNames(installed, listResolvedSourceHookScripts());
 }
 
 // Codex events that support a matcher field (matches tool name or session type).

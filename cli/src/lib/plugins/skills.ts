@@ -18,6 +18,7 @@ import { capableAgents, isCapable } from '../capabilities.js';
 import { getAgentsDir, getUserSkillsDir, getSkillsDir as getSystemSkillsDir, getProjectAgentsDir, getEnabledExtraRepos, getTrashSkillsDir } from '../state.js';
 import { getEffectiveHome, getVersionHomePath, listInstalledVersions } from '../installations/store.js';
 import { listCommandSkillsInVersion } from '../command-skills.js';
+import { pluginSkillDirs, listPluginSkillNames } from '../staleness/writers/sources.js';
 import { emit } from '../feed/events.js';
 
 const HOME = os.homedir();
@@ -423,7 +424,14 @@ export function listCentralSkills(): string[] {
 
 /**
  * Resolve a skill name to its source directory. Searches user dir first,
- * then system dir, then extra repos. Returns null if no source has a SKILL.md.
+ * then system dir, then extra repos, then plugin-bundled skills
+ * (`plugins/<plugin>/skills/<name>` under any trusted base). Returns null if no
+ * source has a SKILL.md.
+ *
+ * Crediting plugins here is load-bearing (PHNX-3185): a skill materialized from
+ * `plugins/design/skills/design` has a real source, so it must resolve — else
+ * `versionSkillMatches` finds no source and the skill reads as drifted, and
+ * {@link diffVersionSkills} classes it an orphan `prune cleanup` would delete.
  */
 export function resolveSkillSourcePath(skillName: string): string | null {
   for (const dir of [getUserSkillsDir(), getSystemSkillsDir()]) {
@@ -432,6 +440,10 @@ export function resolveSkillSourcePath(skillName: string): string | null {
   }
   for (const extra of getEnabledExtraRepos()) {
     const candidate = path.join(extra.dir, 'skills', skillName);
+    if (fs.existsSync(path.join(candidate, 'SKILL.md'))) return candidate;
+  }
+  for (const skillsDir of pluginSkillDirs()) {
+    const candidate = path.join(skillsDir, skillName);
     if (fs.existsSync(path.join(candidate, 'SKILL.md'))) return candidate;
   }
   return null;
@@ -524,7 +536,10 @@ export interface VersionSkillDiff {
  * Compare a version home's skills against central. Returns the reconciliation diff.
  */
 export function diffVersionSkills(agent: AgentId, version: string): VersionSkillDiff {
-  const available = new Set(listAllSkills());
+  // Plugin-provided skills (`plugins/<plugin>/skills`) are legitimate sources too, so a
+  // skill materialized from a plugin is NOT an orphan (PHNX-3185). Without this
+  // the detector offered to delete the entire plugin-installed skill library.
+  const available = new Set([...listAllSkills(), ...listPluginSkillNames({ agent })]);
 
   // Goose and other native ~/.agents/skills consumers read central storage
   // directly. They intentionally have no per-version copy to diff, so every
