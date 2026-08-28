@@ -42,6 +42,7 @@ import { DeviceProbeService } from './device-probe-service.js';
 import { SelfHealService } from './self-heal-service.js';
 import { KeychainReapService } from './keychain-reap-service.js';
 import { AuthSyncService } from './auth-sync-service.js';
+import { UsageSyncService } from './usage-sync-service.js';
 import { StateDirCheckService } from './state-dir-check-service.js';
 import { SessionStateService } from './session-state-service.js';
 import { WebhookReceiverService } from './webhook-receiver-service.js';
@@ -861,6 +862,7 @@ export async function runDaemon(): Promise<void> {
   else log('INFO', 'Keychain-reap service disabled');
 
   if (isEnabled('auth-sync')) supervisor.register(new AuthSyncService());
+  if (isEnabled('usage-sync')) supervisor.register(new UsageSyncService());
   else log('INFO', 'Auth-sync service disabled');
 
   if (isEnabled('webhook-receiver')) supervisor.register(new WebhookReceiverService());

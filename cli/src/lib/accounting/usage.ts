@@ -503,7 +503,7 @@ interface CachedUsageWindow {
 }
 
 /** Serialized usage snapshot for the on-disk cache. */
-interface CachedUsageSnapshot {
+export interface CachedUsageSnapshot {
   capturedAt: string | null;
   windows: CachedUsageWindow[];
   plan?: string | null;
@@ -2285,6 +2285,72 @@ export function mergeClaudeUsageCacheWindows(
   } catch {
     /* best-effort cache write — lock busy or disk full */
   }
+}
+
+/**
+ * Export the local usage cache rows worth publishing to fleet peers (PHNX-3392
+ * usage-sync). Returns the raw serialized rows keyed by usage identity, filtered
+ * to those carrying at least one window — an empty row has nothing to teach a
+ * worker. The transport is the on-disk cache form, so there is no Date round-trip.
+ */
+export function exportClaudeUsageCacheRows(
+  cachePath = getClaudeUsageCachePath(),
+): Record<string, CachedUsageSnapshot> {
+  const cache = readClaudeUsageCacheFile(cachePath);
+  const out: Record<string, CachedUsageSnapshot> = {};
+  for (const [key, row] of Object.entries(cache)) {
+    if (row && Array.isArray(row.windows) && row.windows.length > 0) out[key] = row;
+  }
+  return out;
+}
+
+function parseCapturedAtMs(capturedAt: string | null | undefined): number | null {
+  if (!capturedAt) return null;
+  const ms = Date.parse(capturedAt);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/**
+ * Merge usage rows received from a fleet peer into the local cache, NEWEST-WINS
+ * per identity by `capturedAt` (PHNX-3392 usage-sync). A worker has no local
+ * usage writer, so an incoming row is almost always the freshest it will get; the
+ * timestamp guard exists so a stale push from one headed peer can never overwrite
+ * a fresher row another peer (or, on a headed receiver, the local status-line)
+ * already wrote. An incoming row with no `capturedAt` cannot prove it is newer, so
+ * it never displaces an existing timestamped row. Returns the count updated.
+ * Locked + atomic like every other cache writer.
+ */
+export function ingestPeerClaudeUsageRows(
+  rows: Record<string, CachedUsageSnapshot>,
+  cachePath = getClaudeUsageCachePath(),
+): number {
+  const incoming = Object.entries(rows).filter(
+    ([, row]) => row && Array.isArray(row.windows) && row.windows.length > 0,
+  );
+  if (incoming.length === 0) return 0;
+  let merged = 0;
+  try {
+    ensureLockTarget(cachePath, '{}');
+    withFileLock(cachePath, () => {
+      const cache = readClaudeUsageCacheFile(cachePath);
+      for (const [key, row] of incoming) {
+        const prior = cache[key];
+        if (prior) {
+          const priorMs = parseCapturedAtMs(prior.capturedAt);
+          const incomingMs = parseCapturedAtMs(row.capturedAt);
+          // Keep local unless the incoming row PROVES it is strictly newer.
+          if (incomingMs === null) continue;
+          if (priorMs !== null && priorMs >= incomingMs) continue;
+        }
+        cache[key] = row;
+        merged += 1;
+      }
+      if (merged > 0) writeClaudeUsageCacheFile(cache, cachePath);
+    });
+  } catch {
+    /* best-effort cache write — lock busy or disk full */
+  }
+  return merged;
 }
 
 /** Read the entire usage cache file from disk. */

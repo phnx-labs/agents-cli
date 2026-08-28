@@ -28,6 +28,7 @@ export type DaemonServiceId =
   | 'state-dir-check'
   | 'session-index'
   | 'auth-sync'
+  | 'usage-sync'
   | 'daemon-heartbeat'
   | 'tmux-reap'
   | 'browser-task-reap'
@@ -125,6 +126,11 @@ export const DAEMON_SERVICES: DaemonServiceDef[] = [
     id: 'auth-sync',
     title: 'Auth bundle sync',
     description: 'Pushes the reserved file-backed auth bundle (setup-tokens) to pinned fleet devices that do not yet have it.',
+  },
+  {
+    id: 'usage-sync',
+    title: 'Usage snapshot sync',
+    description: 'From a personal/desktop box, pushes the per-account usage snapshot to worker peers that cannot read it themselves.',
   },
 ];
 
