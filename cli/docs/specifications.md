@@ -529,6 +529,18 @@ SSH access (§7); rendering sessions that no harness produced.
     under a per-host banner. A **bare interactive** one-host listing instead folds
     the peer's `--json` rows into the local merged browser (`gatherRemoteList`),
     which renders and selects locally. Both keep transcripts on the origin.
+  - **The `all`/`fleet` sentinel MUST reach the fleet on a historical query too
+    (PHNX-2673).** `--device all` / `--device fleet` (and the `--devices` alias)
+    is not a device name — it means "sweep every registered online peer." On
+    `--active` and the interactive listing this is already the default, so the
+    sentinel resolves to an empty host set. On the **historical `--json`** listing,
+    which stays local-only by default (a deterministic slice for scripts), the
+    empty host set MUST NOT silently drop the request: the sentinel MUST trigger
+    the same `gatherRemoteList` peer sweep (whole-index per peer), merged
+    machine-first into the local rows (`commands/sessions.ts`, guarded on the
+    remembered sentinel; test `commands/sessions.fleet-json.test.ts`). A bare
+    `--json` with no `--device` MUST stay local-only, and `--local` MUST still pin
+    to this machine.
 - **SES-23 (MUST).** Remote fan-out MUST degrade, never throw or blank: an
   unreachable host (ssh 255) falls back to offline cache, a slow host is killed
   to `[]`, and overall `process.exitCode=1` signals partial failure
