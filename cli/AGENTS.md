@@ -39,7 +39,12 @@ font bytes live in the main bundle, while Yoga and resvg are uploaded as compile
 WASM modules (`renderWorkerBundle` → `deployWorker`). Do not inline WASM with
 esbuild's `binary` loader: Node permits the resulting runtime compilation but
 workerd rejects it. The real-workerd render in `worker-template.integration.test.ts`
-is the contract test for this boundary.
+is the contract test for this boundary. The card's fonts are a Latin subset and
+satori throws on the first glyph they lack, so `renderOgCard` runs the
+title/description through `sanitizeCardText` first (typographic punctuation → ASCII,
+uncovered glyphs dropped) and the cover route only derives meta from `text/html`
+bodies — otherwise an em-dash title or a published image failed the whole `.png`
+into a 500 (PHNX-3386).
 
 `agents artifacts share list` mirrors the public gallery by default. Use
 `--scope unlisted|me|org` or `--all` (alias for `--scope all`) to list the

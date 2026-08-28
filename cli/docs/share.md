@@ -69,9 +69,15 @@ so `me`/`org` metadata cannot leak. No browser is launched on the publishing
 machine. `agents artifacts share update` uploads Yoga and resvg as compiled WASM
 modules beside the Worker's JavaScript; workerd forbids compiling inlined WASM
 bytes at request time. A renderer initialization failure returns a diagnostic
-`500` and does not cache a missing/broken cover. BYO endpoints retain the local
-Chromium screenshot fallback because their independently hosted Worker may
-predate the renderer.
+`500` and does not cache a missing/broken cover. The renderer's fonts are a
+Latin subset, so the title/description are sanitized first — common typographic
+punctuation (em/en-dash, curly quotes, the ellipsis a truncated summary ends
+with) is mapped to ASCII and any still-uncovered glyph (emoji, CJK) is dropped —
+because satori throws on the first glyph its fonts lack, which would otherwise
+fail the whole card into a `500` (PHNX-3386). A cover is only generated for an
+HTML page: a non-HTML artifact (e.g. a published image) is never scanned for a
+title/description. BYO endpoints retain the local Chromium screenshot fallback
+because their independently hosted Worker may predate the renderer.
 
 - **`unlisted` is a capability URL, not a secret.** GET still returns 200; it is
   only hidden from the gallery/listing and marked `noindex`

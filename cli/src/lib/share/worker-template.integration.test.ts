@@ -39,9 +39,11 @@ describe('managed OG renderer in the real workerd runtime (PHNX-2835)', () => {
     mf = undefined;
   });
 
-  it('loads uploaded WASM modules and renders a branded 1200x630 PNG', async () => {
+  const PNG_MAGIC = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+  async function bootWorker(): Promise<Miniflare> {
     const bundle = renderWorkerBundle();
-    mf = new Miniflare({
+    const instance = new Miniflare({
       modules: [
         { type: 'ESModule', path: 'worker.js', contents: bundle.script },
         ...bundle.modules.map((module) => ({
@@ -53,8 +55,13 @@ describe('managed OG renderer in the real workerd runtime (PHNX-2835)', () => {
       r2Buckets: ['BUCKET'],
       bindings: { WRITE_TOKEN: 'secret' },
     });
+    mf = instance;
+    return instance;
+  }
 
-    const bucket = await mf.getR2Bucket('BUCKET');
+  it('loads uploaded WASM modules and renders a branded 1200x630 PNG', async () => {
+    const worker = await bootWorker();
+    const bucket = await worker.getR2Bucket('BUCKET');
     await bucket.put('octocat/plan', '<!doctype html><title>Launch plan</title>', {
       httpMetadata: { contentType: 'text/html; charset=utf-8' },
       customMetadata: {
@@ -64,13 +71,61 @@ describe('managed OG renderer in the real workerd runtime (PHNX-2835)', () => {
       },
     });
 
-    const cover = await mf.dispatchFetch('https://share.test/octocat/plan.png', {
+    const cover = await worker.dispatchFetch('https://share.test/octocat/plan.png', {
       headers: { accept: 'image/png' },
     });
     const png = new Uint8Array(await cover.arrayBuffer());
     expect(cover.status).toBe(200);
     expect(cover.headers.get('content-type')).toBe('image/png');
-    expect(png.subarray(0, 8)).toEqual(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+    expect(png.subarray(0, 8)).toEqual(PNG_MAGIC);
+    expect(png.byteLength).toBeGreaterThan(10_000);
+  });
+
+  // PHNX-3386: a title whose only non-ASCII is an em-dash (or emoji, curly quotes,
+  // the ellipsis deriveMeta appends) used to crash satori — the bundled Latin-subset
+  // fonts lack those glyphs — turning the whole cover into a 500. sanitizeCardText
+  // maps/drops them so the render still succeeds.
+  it('renders a cover for a title with an em-dash, ellipsis, and emoji (no 500)', async () => {
+    const worker = await bootWorker();
+    const bucket = await worker.getR2Bucket('BUCKET');
+    await bucket.put('octocat/mockup', '<!doctype html><title>irrelevant</title>', {
+      httpMetadata: { contentType: 'text/html; charset=utf-8' },
+      customMetadata: {
+        visibility: 'public',
+        'og-title': 'Share attribution header — mockup (me / org / public) 🚀',
+        'og-description': 'A summary that got truncated…',
+      },
+    });
+
+    const cover = await worker.dispatchFetch('https://share.test/octocat/mockup.png', {
+      headers: { accept: 'image/png' },
+    });
+    const png = new Uint8Array(await cover.arrayBuffer());
+    expect(cover.status).toBe(200);
+    expect(cover.headers.get('content-type')).toBe('image/png');
+    expect(png.subarray(0, 8)).toEqual(PNG_MAGIC);
+    expect(png.byteLength).toBeGreaterThan(10_000);
+  });
+
+  // PHNX-3386: a published non-HTML artifact (e.g. an image) must not have its raw
+  // bytes regex-scanned into a garbage "description" and fed to satori. The cover
+  // route only derives meta from text/html bodies; the title falls back to the slug.
+  it('renders a cover for a non-HTML artifact without scanning its bytes (no 500)', async () => {
+    const worker = await bootWorker();
+    const bucket = await worker.getR2Bucket('BUCKET');
+    // A tiny PNG body stored as the artifact itself (contentType image/png).
+    await bucket.put('octocat/pic', PNG_MAGIC, {
+      httpMetadata: { contentType: 'image/png' },
+      customMetadata: { visibility: 'public' },
+    });
+
+    const cover = await worker.dispatchFetch('https://share.test/octocat/pic.png', {
+      headers: { accept: 'image/png' },
+    });
+    const png = new Uint8Array(await cover.arrayBuffer());
+    expect(cover.status).toBe(200);
+    expect(cover.headers.get('content-type')).toBe('image/png');
+    expect(png.subarray(0, 8)).toEqual(PNG_MAGIC);
     expect(png.byteLength).toBeGreaterThan(10_000);
   });
 });

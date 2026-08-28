@@ -543,8 +543,12 @@ export default {
               });
             }
 
-            const pageHtml = await page.text();
             const meta = page.customMetadata || {};
+            // Only derive title/description from the body when it is actually HTML.
+            // A published image (or other non-HTML artifact) would otherwise have its
+            // raw bytes regex-scanned into a garbage "description" (PHNX-3386).
+            const isHtml = ((page.httpMetadata && page.httpMetadata.contentType) || '').indexOf('text/html') !== -1;
+            const pageHtml = isHtml ? await page.text() : '';
             let png;
             try {
               png = await hooks.renderOgCard({
@@ -1619,6 +1623,29 @@ function extractHtmlMeta(html, field) {
   return match ? match[1].replace(/<[^>]*>/g, '').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').trim() : '';
 }
 
+// Make text safe for the OG card's bundled Latin-subset fonts (Inter + JetBrains
+// Mono). Satori THROWS on the first glyph its fonts lack, and the latin woff covers
+// Basic Latin + Latin-1 (U+0020-00FF) but not General Punctuation — so a common
+// em-dash, curly quote, or the ellipsis deriveMeta() appends on truncation crashed
+// the whole cover render into a 500 (PHNX-3386). Map the frequent typographic
+// characters to ASCII, then drop anything still outside the covered range (emoji,
+// CJK, rare symbols) rather than let one uncovered glyph fail the render.
+function sanitizeCardText(text) {
+  if (!text) return '';
+  const mapped = String(text)
+    .replace(/[\\u2010-\\u2015]/g, '-')
+    .replace(/[\\u2018\\u2019\\u201A\\u201B]/g, "'")
+    .replace(/[\\u201C\\u201D\\u201E\\u201F]/g, '"')
+    .replace(/\\u2026/g, '...')
+    .replace(/[\\u00A0\\u2007\\u202F]/g, ' ');
+  let safe = '';
+  for (let i = 0; i < mapped.length; i += 1) {
+    const code = mapped.charCodeAt(i);
+    if (code >= 0x20 && code <= 0xff) safe += mapped[i];
+  }
+  return safe.replace(/\\s+/g, ' ').trim();
+}
+
 let rendererReady;
 async function renderOgCard(input) {
   if (!rendererReady) {
@@ -1628,6 +1655,8 @@ async function renderOgCard(input) {
     ]);
   }
   await rendererReady;
+  const safeTitle = sanitizeCardText(input.title) || 'Shared artifact';
+  const safeDescription = sanitizeCardText(input.description);
   const visibilityLabels = {
     public: 'PUBLIC',
     unlisted: 'UNLISTED',
@@ -1641,8 +1670,8 @@ async function renderOgCard(input) {
       children: [
         { type: 'div', props: { style: { display: 'flex', color: '#a3e635', fontFamily: 'JetBrains Mono', fontSize: 25, fontWeight: 600, letterSpacing: '-0.5px' }, children: 'AGI · agents-cli.sh' } },
         { type: 'div', props: { style: { display: 'flex', flexDirection: 'column', flexGrow: 1, justifyContent: 'center', maxWidth: 1050 }, children: [
-          { type: 'div', props: { style: { display: 'flex', fontSize: 66, lineHeight: 1.06, fontWeight: 700, letterSpacing: '-2.8px', maxHeight: 218, overflow: 'hidden' }, children: input.title || 'Shared artifact' } },
-          input.description ? { type: 'div', props: { style: { display: 'flex', marginTop: 24, color: '#a3a3a3', fontSize: 27, lineHeight: 1.35, maxHeight: 74, overflow: 'hidden' }, children: input.description } } : null,
+          { type: 'div', props: { style: { display: 'flex', fontSize: 66, lineHeight: 1.06, fontWeight: 700, letterSpacing: '-2.8px', maxHeight: 218, overflow: 'hidden' }, children: safeTitle } },
+          safeDescription ? { type: 'div', props: { style: { display: 'flex', marginTop: 24, color: '#a3a3a3', fontSize: 27, lineHeight: 1.35, maxHeight: 74, overflow: 'hidden' }, children: safeDescription } } : null,
         ].filter(Boolean) } },
         { type: 'div', props: { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', borderTop: '1px solid #262626', paddingTop: 25, fontSize: 21, color: '#a3a3a3' }, children: [
           { type: 'div', props: { style: { display: 'flex' }, children: [
