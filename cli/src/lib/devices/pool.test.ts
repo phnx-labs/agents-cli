@@ -26,9 +26,14 @@ describe('filterAutoPool (the allowlist rule)', () => {
     expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
   });
 
-  it('auto.pool=all drops the worker allowlist but keeps a personal box out', () => {
-    const roles = { 'yosemite-s0': 'worker', zion: 'personal' } as const;
-    expect(filterAutoPool(FLEET, { mode: 'all', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'mac-mini', 'iphone']);
+  it('never picks a desktop device — the headed release/credential box is off-limits too', () => {
+    const roles = { 'mac-mini': 'desktop' } as const;
+    expect(filterAutoPool(FLEET, { mode: 'workers', roles })).toEqual(['zion', 'yosemite-s0', 'yosemite-s1', 'iphone']);
+  });
+
+  it('auto.pool=all drops the worker allowlist but keeps personal AND desktop out', () => {
+    const roles = { 'yosemite-s0': 'worker', zion: 'personal', 'mac-mini': 'desktop' } as const;
+    expect(filterAutoPool(FLEET, { mode: 'all', roles })).toEqual(['yosemite-s0', 'yosemite-s1', 'iphone']);
   });
 
   it('returns empty rather than widening back to the fleet when no worker is a candidate', () => {
@@ -163,9 +168,17 @@ describe('roles read from the per-device docs', () => {
     expect(() => mod.setConfigValue('role', 'buildbox', { device: 'yosemite-s0' })).toThrow(/worker \| personal/);
   });
 
-  it('refuses control — this shared config key only ever accepts worker | personal', async () => {
+  it('refuses control — this shared config key only accepts worker | personal | desktop', async () => {
     const mod = await freshPool();
-    expect(() => mod.setConfigValue('role', 'control', { device: 'iphone' })).toThrow(/worker \| personal/);
+    expect(() => mod.setConfigValue('role', 'control', { device: 'iphone' })).toThrow(/worker \| personal \| desktop/);
+  });
+
+  it('accepts desktop and keeps it out of the auto pool', async () => {
+    const mod = await freshPool();
+    mod.setConfiguredDeviceRole('mac-mini', 'desktop');
+    expect(mod.configuredDeviceRole('mac-mini')).toBe('desktop');
+    // A desktop box is never an auto-placement candidate, like personal.
+    expect(mod.filterAutoPool(FLEET)).toEqual(['zion', 'yosemite-s0', 'yosemite-s1', 'iphone']);
   });
 
   it('rejects an auto.pool mode outside the vocabulary', async () => {

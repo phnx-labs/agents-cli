@@ -2266,9 +2266,12 @@ schema (`--json` passes through each agent's native stream format).
     watchdog's rotate-relaunch resolves interactive and is deliberately NOT given
     the setup-token.
 
-  So the setup-token is injected ONLY on a **headless run on a non-personal
-  device** (worker / dispatched / provisioned; `ctx.deviceRole !== 'personal' &&
-  ctx.interactive === false`). On that path it replaces any ambient inherited
+  So the setup-token is injected ONLY on a **headless run on a non-headed
+  device** (worker / dispatched / provisioned; `!isHeadedDeviceRole(ctx.deviceRole)
+  && ctx.interactive === false`). A device is "headed" when its role is `personal`
+  OR `desktop` (both hold a real interactive login — `isHeadedDeviceRole`,
+  `device-config.ts`); only `worker` and unmarked boxes take the setup-token. On
+  that path it replaces any ambient inherited
   value, and when NO per-account token resolves it STRIPS the ambient
   `CLAUDE_CODE_OAUTH_TOKEN` (RUSH-2360 / RUSH-1822 fleet-logout hazard). On the
   login-deferring path (personal OR interactive) `buildExecEnv` MUST additionally
@@ -2277,8 +2280,8 @@ schema (`--json` passes through each agent's native stream format).
   keep authenticating as it; a value the caller set itself MUST survive, and
   `options.env` still overrides last (EXEC-5). The routines path
   (`buildRoutineSpawnEnv`, `lib/daemon/runner.ts`) applies the SAME role gate: a
-  routine on a personal device defers to the login, a worker routine keeps the
-  setup-token. `undefined`/unmarked role is treated as non-personal
+  routine on a headed device (personal or desktop) defers to the login, a worker
+  routine keeps the setup-token. `undefined`/unmarked role is treated as non-headed
   (worker-equivalent) — an unmarked box has no login to defer to.
   Note this MUST NOT be read as "a login-deferring run never carries a token": no
   requirement yet strips an ambient value on that path when NO per-account token

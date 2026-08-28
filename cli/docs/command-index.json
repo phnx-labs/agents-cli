@@ -9479,7 +9479,7 @@
           "name": "role",
           "path": "devices role",
           "aliases": [],
-          "description": "Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). Marking any device worker makes `--device auto` an allowlist over the marked workers.",
+          "description": "Show or set what a device is for: worker (agents run here), personal (you sit here), or desktop (a headed always-on box — the release/credential home). Personal and desktop are never picked automatically. Marking any device worker makes `--device auto` an allowlist over the marked workers.",
           "args": [
             {
               "name": "name",
@@ -9524,8 +9524,8 @@
               "negate": false
             }
           ],
-          "examples": "agents devices role                          # who is marked what, and what --device auto would pick\n      agents devices role yosemite-s0 worker       # agents spin up here\n      agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only\n      agents devices role zion personal            # your laptop — keep automatic placement off it\n      agents devices role yosemite-s0 --clear      # unmark\n      agents devices role --json                   # machine-readable",
-          "notes": "Roles live in that device's tracked per-device doc\n      (devices/<name>/agents.yaml config.role) and travel with\n      'agents repo push/pull', so a mark set on one box is the whole fleet's\n      answer.\n\n      Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI\n      EXT launch commands, which all resolve placement through the CLI):\n        no device marked  -> every online device, as before\n        any worker marked -> ONLY the marked workers\n        personal          -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; a personal\n      box stays excluded, since that is what the mark is for.",
+          "examples": "agents devices role                          # who is marked what, and what --device auto would pick\n      agents devices role yosemite-s0 worker       # agents spin up here\n      agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only\n      agents devices role zion personal            # your laptop — keep automatic placement off it\n      agents devices role mac-mini desktop         # headed always-on box — also kept out of auto placement\n      agents devices role yosemite-s0 --clear      # unmark\n      agents devices role --json                   # machine-readable",
+          "notes": "Roles live in that device's tracked per-device doc\n      (devices/<name>/agents.yaml config.role) and travel with\n      'agents repo push/pull', so a mark set on one box is the whole fleet's\n      answer.\n\n      Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI\n      EXT launch commands, which all resolve placement through the CLI):\n        no device marked   -> every online device, as before\n        any worker marked  -> ONLY the marked workers\n        personal / desktop -> never picked, under either state\n\n      Turn the allowlist off with 'agents config set auto.pool all'; personal and\n      desktop boxes stay excluded, since that is what the mark is for.",
           "subcommands": []
         },
         {

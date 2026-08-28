@@ -102,6 +102,13 @@ describe('claudeAdapter.applyExecConfigEnv — role-aware CLAUDE_CODE_OAUTH_TOKE
       expect(resolvedToken({ interactive: true, deviceRole: 'personal', setupToken: OWN_TOKEN }))
         .toBeUndefined();
     });
+
+    it('a desktop box is in the same headed bucket — a headless run defers to the login too', () => {
+      // desktop (a headed always-on Mac) holds a real per-version login just like
+      // personal, so it must never fall back to the worker setup-token.
+      expect(resolvedToken({ interactive: false, deviceRole: 'desktop', setupToken: OWN_TOKEN }))
+        .toBeUndefined();
+    });
   });
 
   describe('interactive runs defer to the login regardless of role', () => {

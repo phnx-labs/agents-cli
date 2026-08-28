@@ -549,12 +549,30 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     expect(rows['mac-mini']).toContain('worker');
     expect(rows['mac-mini']).toContain('signing + notarize box');
 
-    // The markers survive: this-machine caret + arrow, interactive star, relay.
+    // The markers survive: this-machine caret + arrow, relay. The interactive
+    // star is FOLDED into the `personal` role — a personal box is the interactive
+    // seat by definition, so the star would just repeat it (it is suppressed here
+    // and only shows for a non-personal pinned interactive host).
     expect(rows['zion']).toContain('▸');
     expect(rows['zion']).toContain('← this machine');
-    expect(rows['zion']).toContain('★ interactive');
+    expect(rows['zion']).not.toContain('★ interactive');
     expect(rows['zion']).toContain('personal');
     expect(rows['mark-1']).toContain('relay');
+  });
+
+  it('keeps the interactive star when the pinned interactive host is NOT personal', () => {
+    // mac-mini is role=worker in the fixture. Pinning it as the interactive host
+    // (an unusual but valid config) still shows the star, because `worker` does
+    // not itself convey "the box you see things on" the way `personal` does.
+    const { reg, names, statsMap } = fleet();
+    const rows = rowsFrom(
+      renderDeviceTable(reg, names, 'zion', statsMap, false, 'mac-mini', { width: 200, ignoredCount: 0 }).map(stripAnsi),
+      names,
+    );
+    expect(rows['mac-mini']).toContain('★ interactive');
+    expect(rows['mac-mini']).toContain('worker');
+    // zion is no longer the interactive host here, so it shows neither.
+    expect(rows['zion']).not.toContain('★ interactive');
   });
 
   it('keeps the offline row behavior, now carrying role and description', () => {
@@ -617,10 +635,13 @@ describe('renderDeviceTable — spec/disk/description columns (RUSH-3062)', () =
     expect(rows['ci-runner']).not.toContain('12c');
   });
 
-  it('truncates the description first at 120 columns; role and numerics intact', () => {
-    const { rows } = render(120);
-    // zion's row is the longest (self + interactive markers): its description
-    // is the first thing to give.
+  it('truncates the description first at 105 columns; role and numerics intact', () => {
+    const { rows } = render(105);
+    // zion's row is among the longest (self marker + role + description): its
+    // description is the first thing to give. (Width is 105, not 120 — folding
+    // the interactive star into the `personal` role freed ~15 columns, so the
+    // full row now fits at 120 and only a tighter width forces the truncation
+    // this test pins.)
     expect(rows['zion']).not.toContain('my laptop - never auto-place');
     expect(rows['zion']).toContain('…');
     expect(rows['zion']).toContain('personal'); // role survives

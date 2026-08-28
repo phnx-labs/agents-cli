@@ -182,10 +182,14 @@ function deviceSummary(
   const marker = isSelf ? chalk.cyan('▸ ') : '  ';
   const name = isSelf ? chalk.bold.cyan(d.name.padEnd(16)) : chalk.bold(d.name.padEnd(16));
   const here = isSelf ? chalk.cyan('  ← this machine') : '';
-  const interactive = isInteractive ? chalk.yellow('  ★ interactive') : '';
   // `roles` defaults to a single-device roster so a fleet-wide `role` default
   // still reaches this device even when it has no per-device doc of its own.
-  const role = roleTag(d.name, roles ?? listConfiguredDeviceRoles([d.name]));
+  const roleMap = roles ?? listConfiguredDeviceRoles([d.name]);
+  // `personal` already means "the interactive box you sit at", so the star would
+  // just repeat it — show it only when the interactive host is NOT a personal box
+  // (e.g. an unmarked or worker box deliberately pinned as the artifact target).
+  const interactive = isInteractive && roleMap[d.name] !== 'personal' ? chalk.yellow('  ★ interactive') : '';
+  const role = roleTag(d.name, roleMap);
   return `${marker}${name} ${String(d.platform).padEnd(8)} ${(d.user ? d.user + '@' : '') + addr}  ${online}${reach}${here}${interactive}${role}`;
 }
 
@@ -196,7 +200,8 @@ function roleTag(name: string, roles: Record<string, ConfiguredDeviceRole>): str
   if (!role) return '';
   if (role === 'worker') return chalk.green('  worker');
   if (role === 'personal') return chalk.yellow('  personal');
-  return chalk.gray('  control');
+  if (role === 'desktop') return chalk.cyan('  desktop');
+  return '';
 }
 
 const HEADROOM_BADGE: Record<Headroom, string> = {
@@ -379,7 +384,9 @@ export function renderDeviceTable(
       : '';
     const badge = HEADROOM_BADGE[headroom(stats)];
     const here = isSelf ? chalk.cyan('  ← this machine') : '';
-    const interactive = name === interactiveHost ? chalk.yellow('  ★ interactive') : '';
+    // A `personal` role already conveys "your interactive seat"; don't double-
+    // render the star on it. Keep it for a non-personal pinned interactive host.
+    const interactive = name === interactiveHost && deviceRoles[name] !== 'personal' ? chalk.yellow('  ★ interactive') : '';
     lines.push(
       fitDeviceRow(
         `${marker}${label}${plat} ${specCell(stats, specWidth)}${load}${mem}${disk}${freeTotal}  ${badge}${relay}${here}${interactive}`,
@@ -1639,7 +1646,7 @@ function registerDevicesCommands(program: Command): void {
    *
    * A role written here lands in that device's tracked per-device doc
    * (`devices/<name>/agents.yaml` `config.role`) and syncs with repo
-   * push/pull. The vocabulary is deliberately `worker | personal` only.
+   * push/pull. The vocabulary is `worker | personal | desktop`.
    */
   const runDevicesRole = async (
     name: string | undefined,
@@ -1647,7 +1654,7 @@ function registerDevicesCommands(program: Command): void {
     opts: { clear?: boolean; json?: boolean },
   ): Promise<void> => {
     if (!name) {
-      if (role) throw new Error('Name a device: agents devices role <name> <worker|personal>');
+      if (role) throw new Error('Name a device: agents devices role <name> <worker|personal|desktop>');
       const reg = await loadDevices();
       // The full registered roster, not just online — a fleet-wide `role`
       // default must reach a registered device even when it has no per-device
@@ -1667,13 +1674,13 @@ function registerDevicesCommands(program: Command): void {
         console.log(chalk.gray('No device is marked. `--device auto` considers every online device.'));
       } else {
         for (const [device, r] of marked) {
-          const tint = r === 'worker' ? chalk.green : r === 'personal' ? chalk.yellow : chalk.gray;
+          const tint = r === 'worker' ? chalk.green : r === 'personal' ? chalk.yellow : r === 'desktop' ? chalk.cyan : chalk.gray;
           console.log(`  ${device.padEnd(20)} ${tint(r)}`);
         }
       }
       console.log();
       console.log(chalk.bold('--device auto picks from: ') + (pool.length > 0 ? pool.join(', ') : chalk.red('nothing — no eligible device')));
-      if (mode === 'all') console.log(chalk.gray('auto.pool=all — worker marks are ignored (a personal device is still excluded).'));
+      if (mode === 'all') console.log(chalk.gray('auto.pool=all — worker marks are ignored (personal and desktop devices are still excluded).'));
       return;
     }
 
@@ -1861,7 +1868,8 @@ function registerDevicesCommands(program: Command): void {
   const roleCmd = devicesCmd
     .command('role [name] [role]')
     .description(
-      'Show or set what a device is for: worker (agents run here) or personal (you sit here — never picked automatically). ' +
+      'Show or set what a device is for: worker (agents run here), personal (you sit here), or desktop (a headed ' +
+        'always-on box — the release/credential home). Personal and desktop are never picked automatically. ' +
         'Marking any device worker makes `--device auto` an allowlist over the marked workers.',
     )
     .option('--clear', 'remove the mark, returning the device to unmarked')
@@ -1880,6 +1888,7 @@ function registerDevicesCommands(program: Command): void {
       agents devices role yosemite-s0 worker       # agents spin up here
       agents devices role yosemite-s1 worker       # …and here; auto now rotates over these two only
       agents devices role zion personal            # your laptop — keep automatic placement off it
+      agents devices role mac-mini desktop         # headed always-on box — also kept out of auto placement
       agents devices role yosemite-s0 --clear      # unmark
       agents devices role --json                   # machine-readable
     `,
@@ -1891,12 +1900,12 @@ function registerDevicesCommands(program: Command): void {
 
       Effect on '--device auto' (agents run, teams, agents ssh auto, and the AGI
       EXT launch commands, which all resolve placement through the CLI):
-        no device marked  -> every online device, as before
-        any worker marked -> ONLY the marked workers
-        personal          -> never picked, under either state
+        no device marked   -> every online device, as before
+        any worker marked  -> ONLY the marked workers
+        personal / desktop -> never picked, under either state
 
-      Turn the allowlist off with 'agents config set auto.pool all'; a personal
-      box stays excluded, since that is what the mark is for.
+      Turn the allowlist off with 'agents config set auto.pool all'; personal and
+      desktop boxes stay excluded, since that is what the mark is for.
     `,
   });
 

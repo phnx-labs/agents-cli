@@ -104,7 +104,7 @@ export interface ConfigTarget {
 const DEVICE_PLATFORMS = ['windows', 'linux', 'macos', 'unknown'] as const;
 const SSH_AUTH_METHODS = ['key', 'password'] as const;
 /** Roles a device can be marked with — see the `role` key below. */
-const DEVICE_ROLES = ['worker', 'personal'] as const;
+const DEVICE_ROLES = ['worker', 'personal', 'desktop'] as const;
 /** Which devices automatic placement may pick — see the `auto.pool` key below. */
 const AUTO_POOL_MODES = ['workers', 'all'] as const;
 
@@ -132,8 +132,8 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     type: 'string',
     description:
       "Which devices automatic placement (`--device auto`) may pick: 'workers' (default — only devices marked role=worker, " +
-      "once at least one is marked) or 'all' (every online device, ignoring worker marks). A device marked personal is " +
-      'never picked automatically under either mode.',
+      "once at least one is marked) or 'all' (every online device, ignoring worker marks). A device marked personal or " +
+      'desktop is never picked automatically under either mode.',
     defaultValue: 'workers',
     validate: (v) =>
       (AUTO_POOL_MODES as readonly string[]).includes(v as string)
@@ -357,9 +357,10 @@ export const CONFIG_KEYS: readonly ConfigKeySpec[] = [
     visibility: 'shared',
     type: 'string',
     description:
-      "What this device is for, fleet-wide: 'worker' (a box agents run on) or 'personal' (a machine you sit at — never " +
-      'picked automatically). Marking ANY device worker turns automatic placement into an allowlist: `--device auto` then ' +
-      'picks only from the marked workers.',
+      "What this device is for, fleet-wide: 'worker' (a box agents run on), 'personal' (a machine you sit at — your " +
+      "interactive seat), or 'desktop' (a headed always-on box like a Mac mini — the release/credential home). Personal " +
+      'and desktop are never picked automatically. Marking ANY device worker turns automatic placement into an allowlist: ' +
+      '`--device auto` then picks only from the marked workers.',
     validate: (v) =>
       (DEVICE_ROLES as readonly string[]).includes(v as string)
         ? null
@@ -728,14 +729,28 @@ export function configuredDeviceRole(name: string): ConfiguredDeviceRole | undef
  * it was never marked. Keyed off {@link machineId} (overridable via
  * AGENTS_SYNC_MACHINE_ID), so it matches the device's own config-folder key.
  *
- * The auth strategy reads this: a `personal` device (the user's own interactive
- * box) holds a real per-version login and MUST authenticate from it for EVERY
- * run, interactive or headless; only a `worker` uses the file-based setup-token
- * (RUSH-2395). `undefined` is treated as non-personal (worker-equivalent) by
- * that gate — an unmarked box has no login to defer to.
+ * The auth strategy reads this: a headed device (`personal` or `desktop`, see
+ * {@link isHeadedDeviceRole}) holds a real per-version login and MUST
+ * authenticate from it for EVERY run, interactive or headless; only a `worker`
+ * uses the file-based setup-token (RUSH-2395). `undefined` is treated as
+ * non-headed (worker-equivalent) by that gate — an unmarked box has no login to
+ * defer to.
  */
 export function selfConfiguredDeviceRole(): ConfiguredDeviceRole | undefined {
   return configuredDeviceRole(machineId());
+}
+
+/**
+ * A "headed" device — one with an interactive desktop login, so it authenticates
+ * from its own per-version Claude login (which carries the `user:profile` scope
+ * the usage endpoint needs) rather than the headless file setup-token. Both
+ * `personal` (the box you sit at) and `desktop` (a headed always-on box like a
+ * Mac mini) qualify; a `worker` and an unmarked box do NOT. This is the single
+ * predicate the auth-bucket sites read, so `personal` and `desktop` never drift
+ * apart (claude adapter, routine spawn env, `agents view` usage login).
+ */
+export function isHeadedDeviceRole(role: ConfiguredDeviceRole | undefined): boolean {
+  return role === 'personal' || role === 'desktop';
 }
 
 /** Mark a device's role fleet-wide; `undefined` clears the mark. */
