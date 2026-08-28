@@ -27,7 +27,9 @@ import { getAccountInfo } from '../agents.js';
 import { selectBalancedVersion } from '../accounting/rotate.js';
 
 const PROXY_BASE = process.env.RUSH_PROXY_BASE ?? 'https://api.prix.dev';
-const USER_YAML = path.join(os.homedir(), '.rush', 'user.yaml');
+function userYamlPath(): string {
+  return path.join(os.homedir(), '.rush', 'user.yaml');
+}
 
 // Native OAuth/session credentials never cross the cloud boundary. A server
 // token request fails loud rather than materializing a harness login (see dispatch()).
@@ -48,12 +50,24 @@ interface Installation {
   repository_selection?: string;
 }
 
+/** Read the Rush session from ~/.rush/user.yaml, if it is parseable. */
+function readSession(): UserYaml['session'] | undefined {
+  try {
+    const raw = fs.readFileSync(userYamlPath(), 'utf-8');
+    const data = yaml.parse(raw) as UserYaml;
+    return data?.session;
+  } catch {
+    return undefined;
+  }
+}
+
 /** Read the Rush session access token from ~/.rush/user.yaml. */
 function readToken(): string {
-  if (!fs.existsSync(USER_YAML)) {
+  const file = userYamlPath();
+  if (!fs.existsSync(file)) {
     throw new Error('Not logged in to Rush. Run `rush login` first.');
   }
-  const raw = fs.readFileSync(USER_YAML, 'utf-8');
+  const raw = fs.readFileSync(file, 'utf-8');
   const data = yaml.parse(raw) as UserYaml;
   const token = data?.session?.access_token;
   if (!token) {
@@ -64,13 +78,7 @@ function readToken(): string {
 
 /** Read the user's email from the Rush session config, if available. */
 function readEmail(): string | undefined {
-  try {
-    const raw = fs.readFileSync(USER_YAML, 'utf-8');
-    const data = yaml.parse(raw) as UserYaml;
-    return data?.session?.email;
-  } catch {
-    return undefined;
-  }
+  return readSession()?.email;
 }
 
 /** Make an authenticated request to the Rush API proxy. */
@@ -286,8 +294,13 @@ export class RushCloudProvider implements CloudProvider {
   name = 'Rush Cloud';
 
   capabilities(): ProviderCapabilities {
+    const session = readSession();
     return {
-      available: fs.existsSync(USER_YAML),
+      available: Boolean(
+        session?.access_token
+        && typeof session.expires_at === 'number'
+        && session.expires_at > Date.now()
+      ),
       dispatch: true,
       status: true,
       list: true,

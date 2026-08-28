@@ -7,20 +7,58 @@ import { MAX_IMAGES_PER_DISPATCH, normalizeProviderStatus } from './types.js';
 import type { ImageAttachment, SkillRef } from './types.js';
 
 let tmpDir: string;
+const originalHome = process.env.HOME;
+const originalUserProfile = process.env.USERPROFILE;
 
 beforeEach(() => {
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rush-cloud-test-'));
+  process.env.HOME = tmpDir;
+  process.env.USERPROFILE = tmpDir;
 });
 
 afterEach(() => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
+  if (originalHome === undefined) delete process.env.HOME;
+  else process.env.HOME = originalHome;
+  if (originalUserProfile === undefined) delete process.env.USERPROFILE;
+  else process.env.USERPROFILE = originalUserProfile;
 });
+
+function writeRushSession(expiresAt?: number): void {
+  const rushDir = path.join(tmpDir, '.rush');
+  fs.mkdirSync(rushDir, { recursive: true });
+  const expiry = expiresAt === undefined ? '' : `  expires_at: ${expiresAt}\n`;
+  fs.writeFileSync(
+    path.join(rushDir, 'user.yaml'),
+    `session:\n  access_token: test-token\n${expiry}`,
+  );
+}
 
 describe('Rush status normalization', () => {
   it('maps stopped-but-resumable Factory Floor states to idle', () => {
     expect(normalizeProviderStatus('rush', 'idle')).toBe('idle');
     expect(normalizeProviderStatus('rush', 'paused')).toBe('idle');
     expect(normalizeProviderStatus('rush', 'needs_review')).toBe('idle');
+  });
+});
+
+describe('Rush capabilities', () => {
+  it('is unavailable when the session has expired', () => {
+    writeRushSession(Date.now() - 60_000);
+
+    expect(new RushCloudProvider().capabilities().available).toBe(false);
+  });
+
+  it('is unavailable when the session has no expiry', () => {
+    writeRushSession();
+
+    expect(new RushCloudProvider().capabilities().available).toBe(false);
+  });
+
+  it('is available when the session expiry is in the future', () => {
+    writeRushSession(Date.now() + 60_000);
+
+    expect(new RushCloudProvider().capabilities().available).toBe(true);
   });
 });
 
