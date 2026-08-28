@@ -1805,7 +1805,7 @@ export async function reconcileStaleLatestDir(
  * re-install) without collision and gives a chronological audit trail.
  *
  * The whole versionDir moves — including `home/` (transcripts, sessions). The
- * user can recover everything via `agents trash restore <agent>@<version>`.
+ * user can recover everything via `agents restore <agent>@<version>`.
  * Nothing is ever hard-deleted.
  */
 export function softDeleteVersionDir(agent: AgentId, version: string): string | null {
@@ -1838,7 +1838,7 @@ export function softDeleteVersionDir(agent: AgentId, version: string): string | 
  * Remove a specific version of an agent.
  *
  * Soft-delete only: moves the entire version directory (including `home/`)
- * to ~/.agents/.system/trash/versions/. Recoverable via `agents trash restore`.
+ * to ~/.agents/.system/trash/versions/. Recoverable via `agents restore`.
  * Nothing is hard-deleted.
  */
 export function removeVersion(agent: AgentId, version: string): boolean {
