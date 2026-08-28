@@ -3641,7 +3641,7 @@ readiness/context fields RT-1..RT-8 describe.
   because its account was dead is a different operational state from one whose body
   ran and threw. Status: **Current** (PHNX-3215). The full union — including `blocked`
   and `skipped` (with `skipReason` ∈ `duplicate_slot`/`active_run`/`wrong_owner` and
-  `activeRunId`) — is on `RunMeta` (`lib/scheduling/routines.ts:694`) and written by
+  `activeRunId`) — is on `RunMeta` (`lib/scheduling/routines.ts:782`) and written by
   `allocateRoutineAttempt`/`writeTerminalRecord` (`lib/daemon/runner.ts`).
 - **RT-8 (MUST).** `repo` on a routine is an **external identity** — the GitHub
   `owner/repo` a webhook trigger filters on (`JobConfig.repo`, `lib/routines.ts:174`)
@@ -3697,7 +3697,7 @@ readiness/context fields RT-1..RT-8 describe.
   (`lib/routines.ts:238`); there is no singular `project` anchor, `--project-anchor`,
   `routines doctor`, readiness code, or `cwd` field. The `RunMeta.status` union is
   complete (PHNX-3215 landed the `blocked`/`skipped` statuses and their pre-session run
-  records, RT-7 Current, `lib/scheduling/routines.ts:694`). The landed guarantees this
+  records, RT-7 Current, `lib/scheduling/routines.ts:782`). The landed guarantees this
   section already pins are RT-1, RT-6 (run-first history), RT-7, RT-8, and RT-11. A
   change that lands any [Intended] requirement MUST flip its `Status:` to **Current** in
   the same PR and MUST NOT widen this gap.
