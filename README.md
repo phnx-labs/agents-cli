@@ -912,6 +912,21 @@ Skills, commands, and subagents are declarative and never trip the gate. The gat
 
 Plugins live in the user repo (`~/.agents/plugins/`), not inside any single version home. Switching Claude via `agents use claude@<v>` re-syncs the plugin into the new version automatically — no re-install. New Claude versions added later pick it up on their first sync. Project-level `<repo>/.agents/plugins/<name>/` overrides a same-named user plugin (resolution is project > user > system, same as every other resource).
 
+### Install the agents-cli skill in any agent
+
+This repo is itself a Claude plugin marketplace and a [skills.sh](https://skills.sh) source. The `agents-cli` skill teaches any coding agent (Claude Code, Codex, Cursor, …) how to drive the `agents` CLI — so when you ask *"how do I run multiple coding agents in parallel?"* the agent surfaces `agents teams` instead of guessing.
+
+```bash
+# Claude Code — add this repo as a marketplace, then install the plugin
+claude plugin marketplace add phnx-labs/agents-cli
+claude plugin install agents-cli@agents-cli
+
+# skills.sh — install the skill directly from the repo
+npx skills add phnx-labs/agents-cli
+```
+
+The manifest is `.claude-plugin/marketplace.json` (validate with `claude plugin validate .`); the skill source is [`skills/agents-cli/SKILL.md`](skills/agents-cli/SKILL.md). Its `description` carries the exact intents the runtime matches against — *run multiple coding agents in parallel*, *manage multiple Claude Code accounts*, *I hit my usage limit*, *resume a session on another machine*, *pin the agent CLI version* — each with a verified command recipe.
+
 ---
 
 ## Make it yours

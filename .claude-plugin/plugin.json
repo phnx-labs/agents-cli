@@ -1,0 +1,9 @@
+{
+  "name": "agents-cli",
+  "description": "Run and manage many AI coding agents (Claude Code, Codex, Cursor, Antigravity, Grok, Kimi, OpenCode, Droid, …) from one CLI. Run agents in parallel, manage multiple accounts, survive usage limits, resume sessions across machines, pin versions.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Phoenix Labs",
+    "url": "https://github.com/phnx-labs/agents-cli"
+  }
+}

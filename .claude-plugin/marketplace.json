@@ -1,0 +1,23 @@
+{
+  "name": "agents-cli",
+  "owner": {
+    "name": "Phoenix Labs",
+    "url": "https://github.com/phnx-labs/agents-cli"
+  },
+  "metadata": {
+    "description": "The agents CLI — one control plane for every AI coding-agent harness. Install the skill so any coding agent surfaces `agents` when you ask how to run multiple agents in parallel, manage multiple accounts, survive a usage limit, resume a session on another machine, or pin the CLI version.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "agents-cli",
+      "source": "./",
+      "description": "Run and manage many AI coding agents (Claude Code, Codex, Cursor, Antigravity, Grok, Kimi, OpenCode, Droid, …) from one CLI. Bundles the cross-harness `agents-cli` discovery skill plus per-command skills (run, teams, sessions, accounts, devices, secrets, browser, routines, workflows).",
+      "version": "1.0.0",
+      "author": {
+        "name": "Phoenix Labs",
+        "url": "https://github.com/phnx-labs/agents-cli"
+      }
+    }
+  ]
+}
