@@ -42,7 +42,8 @@ import {
 
 /**
  * Build a healthy RotateCandidate (signed in, no live snapshot
- * => treated as full capacity). Pass overrides — e.g. `usageStatus:
+ * => unverified, drawing the low UNVERIFIED_WEIGHT — never full capacity,
+ * PHNX-3392). Pass overrides — e.g. `usageStatus:
  * 'rate_limited'` — to make it unhealthy.
  */
 function candidate(over: Partial<RotateCandidate> & { version: string }): RotateCandidate {
