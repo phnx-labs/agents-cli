@@ -42,7 +42,7 @@ describe('agents sessions stats (real CLI parse)', () => {
     const res = run(['sessions', 'stats', '--json']);
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { schemaVersion: number; kind: string; ranked: unknown[] };
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
     expect(parsed.kind).toBe('sessions-stats');
     expect(Array.isArray(parsed.ranked)).toBe(true);
   });
@@ -70,7 +70,7 @@ describe('agents sessions stats (real CLI parse)', () => {
     const res = run(['sessions', 'backfill', 'resources', '--json']);
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout) as { schemaVersion: number; kind: string; updated: number };
-    expect(parsed.schemaVersion).toBe(1);
+    expect(parsed.schemaVersion).toBe(2);
     expect(parsed.kind).toBe('resources-backfill');
     expect(typeof parsed.updated).toBe('number');
   });
