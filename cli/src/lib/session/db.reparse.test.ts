@@ -60,4 +60,38 @@ describe('upsertSessionsBatch scanner event reuse', () => {
       'SELECT count(*) AS count FROM tool_calls WHERE session_id = ?',
     ).get(meta.id) as { count: number }).count).toBe(1);
   });
+
+  it('skips parseSession for non-claude/codex entries with no events (PHNX-3411)', () => {
+    // Kimi/Grok/OpenCode scanners produce only metadata, no events. The warm
+    // tick must NOT open the transcript file — tool indexing is deferred to
+    // runDeferredToolIndex. Verify by pointing filePath at a non-existent file:
+    // if parseSession were called it would throw and the upsert would fail.
+    const noEventAgents: Array<SessionMeta['agent']> = ['kimi', 'grok', 'opencode'];
+    for (const agent of noEventAgents) {
+      const missingTranscript = path.join(testHome, `.${agent}`, 'no-events.jsonl');
+      const meta: SessionMeta = {
+        id: `${agent}-no-events`,
+        shortId: `${agent}-ne`,
+        agent,
+        timestamp: '2026-08-05T00:00:00.000Z',
+        cwd: '/tmp/project',
+        filePath: missingTranscript,
+        messageCount: 5,
+      };
+      // No events — scanner produced only metadata.
+      db.upsertSessionsBatch([{
+        meta,
+        content: 'no events',
+        scan: { fileMtimeMs: 1, fileSize: 1 },
+      }]);
+      // Transcript file must not have been created or opened.
+      expect(fs.existsSync(missingTranscript)).toBe(false);
+      // Session row inserted with metadata intact.
+      expect(db.getSessionById(meta.id)?.agent).toBe(agent);
+      // No tool_calls written — deferred to runDeferredToolIndex.
+      expect((db.getDB().prepare(
+        'SELECT count(*) AS count FROM tool_calls WHERE session_id = ?',
+      ).get(meta.id) as { count: number }).count).toBe(0);
+    }
+  });
 });

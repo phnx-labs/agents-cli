@@ -212,3 +212,27 @@ export async function runSessionIndexWarmTick(): Promise<{ indexed: number; clai
   if (!claimed) return { indexed: 0, claimed: false };
   return { indexed: scanned, claimed: true };
 }
+
+/**
+ * Deferred tool-index pass for non-claude/codex harnesses (PHNX-3411).
+ *
+ * Harnesses whose warm-tick scanners produce no events (Kimi, Grok, OpenCode,
+ * etc.) skip parseSession in upsertSessionsBatch to avoid wedging the daemon
+ * event loop on large active transcripts. This pass fills the gap: it queries
+ * recently-active non-claude/codex sessions and calls ensureToolIndex, which
+ * uses tool_scan_ledger stamps to skip already-current sessions and applies
+ * byte/file budget caps so no single large transcript can monopolise the tick.
+ */
+export async function runDeferredToolIndex(): Promise<{ indexed: number }> {
+  const { querySessionsForDeferredToolIndex } = await import('./session/db.js');
+  const { ensureToolIndex } = await import('./session/tool-index.js');
+  // Feed the 200 most-recently-active sessions; ensureToolIndex skips any whose
+  // tool_scan_ledger stamp is current, so only genuinely stale ones pay parse cost.
+  const sessions = querySessionsForDeferredToolIndex(200);
+  if (sessions.length === 0) return { indexed: 0 };
+  const coverage = await ensureToolIndex(sessions, {
+    maxFiles: 20,
+    maxBytes: 20 * 1024 * 1024, // 20 MB — bounds one tick even on large transcripts
+  });
+  return { indexed: coverage.indexedFiles };
+}

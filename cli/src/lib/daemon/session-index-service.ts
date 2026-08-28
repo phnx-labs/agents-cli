@@ -13,7 +13,7 @@
 
 import { BasePeriodicService, type DaemonContext } from './service.js';
 import type { DaemonServiceId } from '../daemon-services.js';
-import { runSessionIndexWarmTick } from '../daemon-ticks.js';
+import { runDeferredToolIndex, runSessionIndexWarmTick } from '../daemon-ticks.js';
 
 /** Matches the historical inline interval (daemon.ts SESSION_INDEX_WARM_TICK_MS). */
 const SESSION_INDEX_WARM_TICK_MS = 20_000;
@@ -41,5 +41,12 @@ export class SessionIndexService extends BasePeriodicService {
     // stays quiet and both interesting outcomes are visible.
     if (!claimed) ctx.log('INFO', 'session-index warm: skipped, another process holds the scan claim');
     else if (indexed > 0) ctx.log('INFO', `session-index warm: indexed ${indexed} transcript(s)`);
+    // Deferred tool-index pass (PHNX-3411): fill tool_scan_ledger rows for
+    // harnesses whose scanner produces no events. Runs only when the warm tick
+    // claimed the scan lock (i.e. we are the active indexer this tick).
+    if (claimed) {
+      const { indexed: toolIndexed } = await runDeferredToolIndex();
+      if (toolIndexed > 0) ctx.log('INFO', `session-index deferred: tool-indexed ${toolIndexed} transcript(s)`);
+    }
   }
 }
