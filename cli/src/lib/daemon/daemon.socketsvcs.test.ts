@@ -41,9 +41,15 @@ import type { DaemonServiceId } from '../daemon-services.js';
 // ---------------------------------------------------------------------------
 
 // Unix-domain sockets have a short platform path limit (104 bytes on macOS).
-// Keep this fixture prefix compact so the real BrowserIPCServer can bind under
-// macOS's already-long per-user os.tmpdir().
-const BROWSER_HELPER_DIR = path.join(os.tmpdir(), `a-sv-${process.pid}`);
+// macOS's per-user os.tmpdir() (/var/folders/…/T) is itself long enough that
+// appending `browser/browser.sock` overflows that limit, which parks the real
+// BrowserIPCServer's onStart() — so bind under a short root, the same POSIX-`/tmp`
+// convention the sibling socket tests use (ipc.test.ts, daemon.registry.test.ts,
+// daemon.supervisor-wiring.test.ts). Windows uses a named pipe, no path limit.
+const BROWSER_HELPER_DIR = path.join(
+  process.platform === 'win32' ? os.tmpdir() : '/tmp',
+  `a-sv-${process.pid}`,
+);
 
 vi.mock('../state.js', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../state.js')>()),
