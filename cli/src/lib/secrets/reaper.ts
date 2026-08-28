@@ -1,25 +1,19 @@
 /**
  * Reaper for orphaned / wedged keychain-helper processes.
  *
- * macOS keychain-helper calls are synchronous spawnSync invocations. When
- * coreauthd / LocalAuthentication hangs, the helper process (and sometimes its
- * parent `agents` process) can pile up forever. This module detects two classes
- * of stale process and kills them.
- *
- * The design splits cleanly into:
- *   - a pure planner ({@link planKeychainReap}) that is unit-testable without a
- *     real `ps` shell, and
- *   - an impure driver ({@link reapOrphanedKeychainProcesses}) that shells `ps`
- *     once per tick and executes kills through {@link killTree}.
+ * coreauthd / LocalAuthentication hangs can leave helper (and parent `agents`)
+ * processes pile up. The pure planner ({@link planKeychainReap}) is unit-testable
+ * without a real `ps`; the driver ({@link reapOrphanedKeychainProcesses}) shells
+ * `ps` once per tick and kills through {@link killTree}.
  */
 
 import { execFileSync } from 'child_process';
 import { killTree, captureProcessStartTime } from '../platform/process.js';
 import { getKeychainHelperPath } from './install-helper.js';
 
-/** Elapsed grace before a helper whose parent exited is considered an orphan. */
+/** Grace before a helper whose parent exited is considered an orphan. */
 export const ORPHAN_GRACE_SEC = 30;
-/** Elapsed grace before a helper with a live parent is considered stuck. */
+/** Grace before a helper with a live parent is considered stuck. */
 export const STUCK_GRACE_SEC = 90;
 
 /** Snapshot of one process row from `ps`, fed into the pure planner. */
@@ -28,33 +22,20 @@ export interface KeychainProcessSnapshot {
   ppid: number;
   /** Elapsed seconds since the process started. */
   elapsedSec: number;
-  /**
-   * Stable start-time fingerprint from {@link captureProcessStartTime}.
-   * `null` means "could not capture" — the planner must fail closed.
-   */
+  /** Stable start-time fingerprint from {@link captureProcessStartTime}; null fails closed. */
   startTime: string | null;
-  /**
-   * True when this process is a REAP-ELIGIBLE helper invocation — the installed
-   * helper binary running a short-lived keychain verb. False for a non-helper
-   * process AND for the long-lived `watch-lock` watcher (see
-   * {@link isReapableHelperCommand}).
-   */
+  /** True for a reap-eligible helper invocation (short-lived keychain verb). */
   isHelper: boolean;
   /**
-   * True when this process is the deliberately long-lived `watch-lock` watcher
-   * (auto-lock-on-sleep). Mutually exclusive with {@link isHelper}:
-   * {@link isReapableHelperCommand} keeps live-parent watch-locks out of the
-   * stuck-helper path, and a SEPARATE orphan path in {@link planKeychainReap}
-   * reaps them only once the owning daemon is provably dead (RUSH-2419).
+   * True for the deliberately long-lived `watch-lock` watcher
+   * (auto-lock-on-sleep). Mutually exclusive with {@link isHelper}; killing it
+   * silently disables auto-lock-on-sleep, so it is reaped only once the owning
+   * daemon is provably dead (RUSH-2419).
    */
   isWatchLock?: boolean;
 }
 
-/**
- * Tracked state for a stuck `agents` parent that has a live helper child.
- * Keyed by parent PID. The two-sweep debounce avoids acting on a racy `ps`
- * snapshot; the `stage` field drives child-first kill then parent escalation.
- */
+/** Tracked state for a stuck parent across two-sweep debounce. */
 export interface StuckParentCandidate {
   pid: number;
   startTime: string | null;
@@ -66,7 +47,7 @@ export interface StuckParentCandidate {
 
 /** Result of one planning pass. */
 export interface ReapPlan {
-  /** PIDs that should be killed this tick. */
+  /** PIDs to kill this tick. */
   kill: number[];
   /** Candidates to carry forward to the next sweep. */
   nextCandidates: Map<number, StuckParentCandidate>;
@@ -75,25 +56,13 @@ export interface ReapPlan {
 /**
  * Pure predicate: decide which processes to kill given a `ps`-like snapshot.
  *
- * Mirrors the shape of {@link isExpiredPoolStray} in `lib/crabbox/lease.ts`:
- * a side-effect-free classifier that the impure driver shells `ps` for. Three
- * conservative reap classes:
+ * Three conservative classes:
+ *   1. Orphaned helper: PPID == 1, helper path, alive longer than grace.
+ *   2. Stuck `agents` parent: helper child alive longer than stuck grace,
+ *      recorded on first sight, child killed on second sweep, parent on third.
+ *   3. Orphaned `watch-lock`: long-lived watcher whose owning daemon is gone.
  *
- *   1. Orphaned helper: PPID == 1, path-matches the helper, alive longer than
- *      {@link ORPHAN_GRACE_SEC}.
- *   2. Stuck `agents` parent: helper child alive longer than
- *      {@link STUCK_GRACE_SEC}. Recorded on first sight, child killed on the
- *      second consecutive sweep with the same PID + startTime, parent killed on
- *      the third sweep if the helper child is still present.
- *   3. Orphaned `watch-lock` watcher (RUSH-2419): the long-lived auto-lock
- *      child whose owning daemon is provably dead. {@link isReapableHelperCommand}
- *      still excludes live-parent watch-locks from class 1/2; this path only
- *      reaps when the parent is gone from the snapshot (Unix reparents to init
- *      after daemon death) and the watcher itself has a start-time fingerprint.
- *
- * Never reaps a process whose start time could not be captured, whose path does
- * not match the helper, or (for stuck parents) whose parent is no longer in the
- * snapshot. A watch-lock whose parent IS still in the snapshot is never touched.
+ * Fails closed when start time can't be captured.
  */
 export function planKeychainReap(
   snapshots: KeychainProcessSnapshot[],
@@ -108,16 +77,14 @@ export function planKeychainReap(
     if (!s.isHelper) continue;
 
     if (s.ppid === 1) {
-      // Orphaned helper: parent is init/launchd. Fail closed if we can't prove
-      // the process identity with a start-time fingerprint.
+      // Orphaned helper: fail closed without a start-time fingerprint.
       if (s.elapsedSec <= ORPHAN_GRACE_SEC) continue;
       if (s.startTime == null) continue;
       kill.push(s.pid);
       continue;
     }
 
-    // Stuck agents: a helper with a live parent that has been wedged for longer
-    // than the interactive timeout. The parent must still exist in the snapshot.
+    // Stuck agents: helper with a live parent wedged longer than the timeout.
     if (s.elapsedSec <= STUCK_GRACE_SEC) continue;
     const parent = pidMap.get(s.ppid);
     if (!parent) continue;
@@ -131,13 +98,12 @@ export function planKeychainReap(
       prev.startTime === parent.startTime
     ) {
       if (prev.stage === 'watch') {
-        // Second sweep: kill the child first so the parent's spawnSync returns.
-        // Keep the parent candidate at stage 'escalate' for the next sweep.
+        // Second sweep: kill the child first so spawnSync returns; escalate next.
         kill.push(s.pid);
         nextCandidates.set(parent.pid, { ...prev, stage: 'escalate' });
         continue;
       }
-      // Third sweep: child did not free the parent, so the parent itself is wedged.
+      // Third sweep: child did not free the parent, so the parent is wedged.
       kill.push(parent.pid);
       continue;
     }
@@ -153,29 +119,18 @@ export function planKeychainReap(
     });
   }
 
-  // Separate path for orphaned watch-lock watchers (RUSH-2419). Does NOT
-  // weaken {@link isReapableHelperCommand}: a watch-lock with a live parent
-  // stays isHelper=false and is skipped above. Here we only kill when the
-  // owning daemon is provably absent from the process table.
+  // Separate path for orphaned watch-lock watchers: only reap when the owning
+  // daemon is provably absent from the process table.
   for (const s of snapshots) {
     if (!s.isWatchLock) continue;
-    // Fail closed: no start-time fingerprint → refuse to kill (pid-reuse guard
-    // for the process we are about to target, same as orphan helpers).
     if (s.startTime == null) continue;
     if (s.elapsedSec <= ORPHAN_GRACE_SEC) continue;
 
-    // Live parent in this snapshot → owning daemon is still up. Leave it alone
-    // (this is the property isReapableHelperCommand protects for stuck-helper
-    // reaping; re-assert it here so a mis-tagged row cannot be killed either).
     if (s.ppid !== 1) {
       const parent = pidMap.get(s.ppid);
       if (parent) continue;
-      // Parent pid not listed: the process occupying that slot is gone. On Unix
-      // a dead parent reparents the child to init; a missing parent with a
-      // non-1 ppid is the race window before reparenting. Either way the owner
-      // is dead — safe to reap after grace + fingerprint.
+      // Parent missing means the owner is dead (or reparenting race); safe to reap.
     }
-    // ppid===1 (reparented to init/launchd) or parent missing → orphaned.
     kill.push(s.pid);
   }
 
@@ -185,11 +140,8 @@ export function planKeychainReap(
 /**
  * Parse macOS `ps -o etime=` elapsed time into whole seconds.
  *
- * BSD `etime` renders as `[[dd-]hh:]mm:ss` (e.g. `05:03`, `01:02:03`,
- * `14-04:10:52`). This is the portable keyword: `etimes` (raw seconds) is a
- * GNU/Linux procps extension that macOS `ps` rejects with a non-zero exit, so
- * the reaper — which only ever runs on darwin — must read `etime`.
- * Returns null for an unparseable value so the caller drops the row.
+ * BSD `etime` renders as `[[dd-]hh:]mm:ss`. `etimes` (raw seconds) is a GNU
+ * extension that macOS `ps` rejects, so darwin uses `etime`.
  */
 export function parseEtimeToSeconds(raw: string): number | null {
   const m = raw.match(/^(?:(\d+)-)?(?:(\d+):)?(\d+):(\d+)$/);
@@ -207,8 +159,6 @@ export function parseEtimeToSeconds(raw: string): number | null {
  *
  * Expected format from `ps -ax -o pid=,ppid=,etime=,command=`:
  *   "<pid> <ppid> <etime> <command...>"
- * where `<etime>` is BSD elapsed time (`[[dd-]hh:]mm:ss`). The command field is
- * the remainder of the line and may contain spaces.
  */
 function parsePsLine(line: string): {
   pid: number;
@@ -228,23 +178,13 @@ function parsePsLine(line: string): {
   return { pid, ppid, elapsedSec, command };
 }
 
-/**
- * The one helper verb that is DELIBERATELY long-lived: the broker's auto-lock
- * sleep/lock watcher (`spawn(getKeychainHelperPath(), ['watch-lock'], …)` in
- * `agent.ts`). It lives for the broker's whole hold — potentially days — as a
- * healthy child of the live broker/daemon, emitting LOCK/SLEEP lines that wipe
- * the in-memory secret store on sleep. It is NOT a stuck keychain read, so the
- * reaper must never target it: killing it silently disables auto-lock-on-sleep.
- */
+/** The one helper verb that is deliberately long-lived: the auto-lock watcher. */
 const HELPER_WATCH_LOCK_VERB = 'watch-lock';
 
 /**
- * Whether a `ps` command line is a REAP-ELIGIBLE helper invocation: the installed
- * helper binary running a short-lived keychain verb (get/has/list/set/delete/
- * migrate-*) that a wedged `coreauthd` can hang. Returns false for a non-helper
- * command AND for the deliberately long-lived `watch-lock` watcher — matching by
- * the full argv (`ps … command=`), so a live-parent `watch-lock` child is never
- * mistaken for a stuck read and killed. Pure; unit-tested.
+ * Whether a `ps` command line is a reap-eligible helper invocation: the installed
+ * helper binary running a short-lived keychain verb. Returns false for the
+ * long-lived `watch-lock` watcher, which must never be mistaken for a stuck read.
  */
 export function isReapableHelperCommand(command: string, helperPath: string): boolean {
   if (command === helperPath) return true; // bare exec, no verb — never watch-lock
@@ -255,9 +195,7 @@ export function isReapableHelperCommand(command: string, helperPath: string): bo
 
 /**
  * Whether a `ps` command line is the deliberately long-lived `watch-lock`
- * watcher (auto-lock-on-sleep). Inverse of {@link isReapableHelperCommand} for
- * the watch-lock verb only — used by the orphaned-watch-lock reaper path
- * (RUSH-2419). Pure; unit-tested.
+ * watcher. Inverse of {@link isReapableHelperCommand} for the watch-lock verb.
  */
 export function isWatchLockHelperCommand(command: string, helperPath: string): boolean {
   if (!command.startsWith(`${helperPath} `)) return false;
@@ -277,11 +215,8 @@ export function resetKeychainReaperCandidatesForTest(): void {
  * Impure driver: snapshot all processes once with `ps`, plan the reap, then
  * execute kills through {@link killTree}.
  *
- * Path-matching uses the full helper path (proc_pidpath-style), not just the
- * executable name, so an unrelated binary named "Agents CLI" is never targeted.
- *
- * Returns on non-darwin platforms without shelling anything — the helper only
- * exists on macOS.
+ * Path-matches the full helper path so an unrelated binary named "Agents CLI" is
+ * never targeted. Returns on non-darwin without shelling anything.
  */
 export function reapOrphanedKeychainProcesses(): {
   reaped: number;
@@ -310,11 +245,8 @@ export function reapOrphanedKeychainProcesses(): {
     return { reaped: 0, details: [`ps failed: ${(err as Error).message}`], plan: { kill: [], nextCandidates: new Map() } };
   }
 
-  // Parse the snapshot cheaply, then capture start-time fingerprints ONLY for
-  // helper processes, orphan-candidate watch-locks, and (for stuck helpers)
-  // their parents. captureProcessStartTime shells `ps` per unseen pid; doing
-  // it for every process on the machine would create the very pileup the
-  // reaper exists to prevent.
+  // Capture start-time fingerprints only for helper processes, orphan-candidate
+  // watch-locks, and (for stuck helpers) their parents.
   type PrelimRow = {
     pid: number;
     ppid: number;
@@ -328,11 +260,8 @@ export function reapOrphanedKeychainProcesses(): {
     const parsed = parsePsLine(line);
     if (!parsed) continue;
     const { pid, ppid, elapsedSec, command } = parsed;
-    // Reap-eligible = the helper binary running a short-lived keychain verb. The
-    // full-argv match excludes the deliberately long-lived `watch-lock` watcher,
-    // whose live-parent child would otherwise be killed as if it were stuck
-    // (RUSH-2232 — that silently disabled auto-lock-on-sleep). Orphaned
-    // watch-locks are tracked separately via isWatchLock (RUSH-2419).
+    // Match the full argv so the long-lived `watch-lock` watcher is never
+    // mistaken for a stuck read. Orphaned watch-locks are tracked separately.
     const isHelper = isReapableHelperCommand(command, helperPath);
     const isWatchLock = isWatchLockHelperCommand(command, helperPath);
     rows.push({ pid, ppid, elapsedSec, isHelper, isWatchLock, startTime: null });

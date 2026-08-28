@@ -1,12 +1,5 @@
 /**
- * Shim generation and config symlink management for agent version switching.
- *
- * Shims are small shell scripts placed in ~/.agents/shims/ that resolve the
- * active agent version (project-level or user-default), then exec the real
- * binary. Config isolation is achieved by symlinking ~/.{agent} into the
- * per-version home directory. This module also handles versioned aliases
- * (e.g., claude@2.0.65), PATH setup, conflict detection during migration,
- * and resource diffing between versions.
+ * Shim generation, config symlink management, and versioned aliases for agent version switching.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -21,10 +14,7 @@ import { AGENTS, agentConfigDirName, readAuthAccountIdentity } from '../agents.j
 import { codexHomeShimBash } from '../codex-home.js';
 import { resolveHarnessAdapter } from '../harness/index.js';
 
-/**
- * Files and directories to always skip during conflict detection and migration.
- * These are never user config that should be migrated.
- */
+/** Files and directories to always skip during conflict detection and migration. */
 const MIGRATION_IGNORE_LIST = new Set([
   'node_modules',
   '.git',
@@ -37,33 +27,21 @@ const MIGRATION_IGNORE_LIST = new Set([
   'Thumbs.db',
 ]);
 
-/**
- * Check if a file/directory should be ignored during migration.
- */
 function shouldIgnore(name: string): boolean {
   if (MIGRATION_IGNORE_LIST.has(name)) return true;
   if (name.endsWith('.backup')) return true;
   return false;
 }
 
-/**
- * Strategy for handling file conflicts during config migration.
- */
 export type ConflictStrategy = 'keep-dest' | 'overwrite' | 'ask-per-file';
 
-/**
- * Information about conflicts found during config migration.
- */
 export interface ConflictInfo {
   agent: AgentId;
   version: string;
-  conflicts: string[]; // filenames that exist in both src and dest
+  conflicts: string[];
 }
 
-/**
- * Detect conflicting files between source and destination directories.
- * Returns list of filenames that exist in both locations (excluding symlinks in dest).
- */
+/** Detect filenames that exist in both `src` and `dest`, excluding symlinks in `dest`. */
 function detectConflicts(src: string, dest: string, prefix = ''): string[] {
   const conflicts: string[] = [];
 
@@ -115,9 +93,6 @@ function detectConflicts(src: string, dest: string, prefix = ''): string[] {
   return conflicts;
 }
 
-/**
- * Prompt user for conflict resolution strategy.
- */
 async function promptConflictStrategy(
   conflictInfos: ConflictInfo[]
 ): Promise<ConflictStrategy | null> {
@@ -169,18 +144,7 @@ async function promptConflictStrategy(
   return strategy;
 }
 
-/**
- * Generate the shim script content for an agent.
- *
- * The shim resolves the version in order:
- * 1. agents.yaml in project root (walk up from $PWD, skip ~/.agents/agents.yaml)
- * 2. ~/.agents/agents.yaml default
- *
- * If version is specified but not installed, auto-installs it.
- *
- * Config isolation is handled via symlinks:
- * ~/.{agent} -> ~/.agents/versions/{agent}/{version}/home/.{agent}/
- */
+/** Generate the shim script content for an agent. Resolves project/default version, auto-installs if missing, and execs the binary. */
 /**
  * Current shim schema version. Bump whenever `generateShimScript` changes
  * in a way that requires existing on-disk shims to be regenerated (new
@@ -782,9 +746,7 @@ export function shimTargetsFor(platform: NodeJS.Platform): { bash: boolean; cmd:
   return { bash: true, cmd: false };
 }
 
-/**
- * Create a shim for an agent.
- */
+/** Create the shim(s) for an agent. */
 export function createShim(agent: AgentId): string {
   // A bare shim puts agents-cli first on PATH for this agent — the opposite of what
   // an isolated-only install promises.
@@ -908,9 +870,7 @@ function writeWindowsCmdShim(cmdPath: string, spec: string, extraMarkerLines: st
   fs.writeFileSync(cmdPath, content);
 }
 
-/**
- * Remove the shim for an agent.
- */
+/** Remove the shim(s) for an agent. */
 export function removeShim(agent: AgentId): boolean {
   const shimsDir = getShimsDir();
   const agentConfig = AGENTS[agent];
@@ -1346,10 +1306,7 @@ export function versionedAliasExists(agent: AgentId, version: string): boolean {
   return fs.existsSync(versionedAliasOnDiskPath(agent, version));
 }
 
-/**
- * Get the path to the agent's config directory in HOME.
- * e.g., ~/.claude for claude, ~/.codex for codex
- */
+/** Get the agent's config directory path in HOME (e.g. ~/.claude). */
 export function getAgentConfigPath(agent: AgentId): string {
   const agentConfig = AGENTS[agent];
   const home = process.env.AGENTS_REAL_HOME || os.homedir();
@@ -1385,26 +1342,16 @@ export function readCodexConfiguredModel(): string | undefined {
   }
 }
 
-/**
- * Get the path to the version's config directory.
- * e.g., ~/.agents/versions/claude/2.0.65/home/.claude/
- */
+/** Get the version-home config directory path. */
 function getVersionConfigPath(agent: AgentId, version: string): string {
   const agentConfig = AGENTS[agent];
   const versionsDir = getVersionsDir();
-  // Carry the agent's full configDir subpath so nested layouts work.
-  // e.g., antigravity → `.gemini/antigravity-cli`, claude → `.claude`.
+  // Use the agent's full configDir subpath so nested layouts (e.g. antigravity) work.
   const configDirName = path.relative(os.homedir(), agentConfig.configDir);
   return path.join(versionsDir, agent, version, 'home', configDirName);
 }
 
-/**
- * Detect conflicts that would occur when switching config symlink for an agent/version.
- * This allows collecting conflicts upfront before prompting for a strategy.
- *
- * Returns null if no migration is needed (already symlink or doesn't exist),
- * or ConflictInfo with the list of conflicting files.
- */
+/** Detect conflicts between the current config directory and the target version home. */
 function detectMigrationConflicts(agent: AgentId, version: string): ConflictInfo | null {
   const configPath = getAgentConfigPath(agent);
   const versionConfigPath = getVersionConfigPath(agent, version);
@@ -1436,43 +1383,12 @@ function detectMigrationConflicts(agent: AgentId, version: string): ConflictInfo
   }
 }
 
-/**
- * Switch the agent's config symlink to point to a specific version.
- * e.g., ~/.claude -> ~/.agents/versions/claude/2.0.65/home/.claude/
- *
- * If a real directory exists at the config path, it will be backed up
- * to ~/.agents/backups/{agent}/{timestamp}/ and replaced with a symlink.
- *
- * @param agent - The agent ID
- * @param version - The version to switch to
- *
- * Returns: { success: boolean, backupPath?: string, error?: string }
- */
-/**
- * Seed a version's config home with the account credential so switching versions
- * doesn't log the CLI out. Droid/antigravity/kimi (registry `authFiles`) store
- * login as files inside the per-version config dir; sign-in is account-global,
- * so we copy the FRESHEST existing copy (by mtime, across all installed version
- * homes) into `toConfigDir` when its copy is missing or older. mtime is
- * preserved so the "freshest" comparison stays stable and switches don't
- * ping-pong. Best-effort: a failed copy just means the user re-logs in.
- */
-/**
- * Best-effort account identity for the credential *directory* of a file-auth
- * agent (droid / kimi / antigravity), or null when the directory holds no
- * decodable account claim. Delegates to readAuthAccountIdentity, which decrypts
- * / decodes each agent's REAL on-disk format (droid AES-256-GCM + WorkOS JWT,
- * kimi access-token JWT, antigravity refresh-token) — the earlier plaintext
- * top-level-key scan matched NO real credential file, so the guard below never
- * engaged. Two dirs for the SAME account compare equal; DIFFERENT accounts
- * compare distinct. Used by carryForwardAuthFiles to refuse overwriting one
- * account's login with a credential that belongs to a DIFFERENT account
- * (RUSH-1764).
- */
+/** Best-effort account identity for a file-auth agent's credential directory; null when no decodable account claim exists. */
 export function readAuthFileIdentity(agent: AgentId, configDir: string): string | null {
   return readAuthAccountIdentity(agent, configDir);
 }
 
+/** Carry the freshest existing account credential into `toConfigDir` so version switches don't log out file-auth agents. */
 export function carryForwardAuthFiles(agent: AgentId, toConfigDir: string): void {
   const authFiles = AGENTS[agent].authFiles;
   if (!authFiles || authFiles.length === 0) return;
@@ -1543,6 +1459,7 @@ export function carryForwardAuthFiles(agent: AgentId, toConfigDir: string): void
   }
 }
 
+/** Switch the agent's config symlink to point at a specific version, backing up any real directory first. */
 export async function switchConfigSymlink(
   agent: AgentId,
   version: string
@@ -2010,37 +1927,22 @@ async function copyDirContents(
   }
 }
 
-/**
- * Check if shim exists for an agent.
- */
-/**
- * The on-disk shim FILENAME for a platform — derived from `shimTargetsFor` (the
- * write-side source of truth) so the exists/remove/version checks can never
- * drift from what `createShim` actually writes: `<cmd>.cmd` on Windows (the only
- * file written there), the bare `<cmd>` script on POSIX. Pure — testable on any
- * host.
- */
+/** The on-disk shim filename for a platform: `<cmd>.cmd` on Windows, bare `<cmd>` on POSIX. */
 export function onDiskShimFile(cliCommand: string, platform: NodeJS.Platform): string {
   return shimTargetsFor(platform).cmd ? `${cliCommand}.cmd` : cliCommand;
 }
 
-/**
- * The actual on-disk shim path for the current platform. This is what
- * exists/version checks must stat — `getShimPath` returns the logical
- * (extensionless) launch path, which is not always a real file on Windows.
- */
+/** The actual on-disk shim path for the current platform. */
 function onDiskShimPath(agent: AgentId): string {
   return path.join(getShimsDir(), onDiskShimFile(AGENTS[agent].cliCommand, process.platform));
 }
 
+/** Check whether the on-disk shim exists for an agent. */
 export function shimExists(agent: AgentId): boolean {
   return fs.existsSync(onDiskShimPath(agent));
 }
 
-/**
- * Read the schema version embedded in an existing on-disk shim. Returns
- * `null` if the shim doesn't exist or has no version marker (pre-v2 shim).
- */
+/** Read the schema version from the on-disk shim header, or null if missing/unreadable. */
 function readShimSchemaVersion(agent: AgentId): number | null {
   if (!shimExists(agent)) return null;
   try {
@@ -2055,11 +1957,7 @@ function readShimSchemaVersion(agent: AgentId): number | null {
   }
 }
 
-/**
- * True if the on-disk shim's schema version matches `SHIM_SCHEMA_VERSION`.
- * False means either the shim is missing, is pre-v2 (no marker), or is an
- * older version that needs regeneration.
- */
+/** True when the on-disk shim's schema version matches the current schema. */
 export function isShimCurrent(agent: AgentId): boolean {
   const version = readShimSchemaVersion(agent);
   return version === SHIM_SCHEMA_VERSION;
@@ -2139,22 +2037,13 @@ export function pruneOrphanedCommandShim(fileName: string): boolean {
   }
 }
 
-/**
- * Regenerate the shim if it's missing or outdated. Returns a status describing
- * what happened — callers can surface a one-line notice to the user ("Updated
- * shim for codex") when appropriate.
- */
+/** Regenerate the shim if missing or older than the current schema; never downgrade a newer on-disk shim. */
 export function ensureShimCurrent(agent: AgentId): 'created' | 'updated' | 'current' {
   if (!shimExists(agent)) {
     createShim(agent);
     return 'created';
   }
-  // Upgrade-only (newest-wins): regenerate only when the on-disk shim is
-  // unversioned/unreadable (null) or OLDER than this binary. Never downgrade a
-  // shim stamped by a NEWER agents-cli install. Two installs at different
-  // SHIM_SCHEMA_VERSION sharing ~/.agents/.cache/shims/ (e.g. a dev build on
-  // PATH alongside a Hermes-bundled published copy) otherwise ping-pong —
-  // rewriting every shim on each alternating launch and adding boot latency.
+  // Upgrade-only: avoid ping-pong between two installs sharing the shims dir.
   const onDisk = readShimSchemaVersion(agent);
   if (onDisk === null || onDisk < SHIM_SCHEMA_VERSION) {
     createShim(agent);
@@ -2163,26 +2052,14 @@ export function ensureShimCurrent(agent: AgentId): 'created' | 'updated' | 'curr
   return 'current';
 }
 
-/**
- * Get the path to the shim for an agent.
- */
+/** Get the logical (extensionless) shim path for an agent. */
 export function getShimPath(agent: AgentId): string {
   const shimsDir = getShimsDir();
   const agentConfig = AGENTS[agent];
   return path.join(shimsDir, agentConfig.cliCommand);
 }
 
-/**
- * Return the first executable path that would be launched for this agent when
- * resolving against PATH, excluding the managed shim itself.
- *
- * Legacy ~/.agents/shims/<cli> (from the pre-split single-root layout) is NOT
- * treated as a shadow when a current managed shim exists at getShimPath() —
- * that file is dead weight from the old layout and the repair flow removes it
- * separately. Treating it as "shadowing" caused an infinite repair-prompt
- * loop because addShimsToPath() only edits the rc file, never the legacy
- * shim file itself.
- */
+/** Return the first executable on PATH that would shadow the managed shim, excluding the shim itself and legacy pre-split files. */
 export function getPathShadowingExecutable(
   agent: AgentId,
   overrides?: { pathDirs?: string[]; shimPath?: string },

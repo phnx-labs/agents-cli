@@ -1,27 +1,11 @@
 /**
- * The secrets-agent: a local broker that holds resolved bundle env in memory
- * after a single Touch ID unlock, so concurrent agent processes don't each pop
- * their own prompt.
+ * The secrets-agent: an in-memory broker that holds resolved bundle env after one
+ * Touch ID unlock, so concurrent agents don't each prompt.
  *
- * Why this exists: every secret item carries a biometry access control, and
- * macOS refuses to cache that across processes — N concurrent `agents run`
- * spawns = N Touch ID prompts (see src/lib/secrets/bundles.ts). The Swift
- * helper's LAContext only deduplicates reads *within one process*. This broker
- * is the ssh-agent answer: `agents secrets unlock <bundle>` decrypts the bundle
- * once (one prompt), ships the resolved env here, and every later read returns
- * from memory over a user-only Unix socket — no prompt.
- *
- * Security model (deliberate): while a bundle is unlocked, any same-user
- * process that can reach the socket reads it silently. That's strictly the same
- * trust boundary the keychain already concedes (docs/secrets.md: the ACL is
- * user-presence, not code-identity — any same-user process can pop the prompt
- * and read), minus the visible prompt. We bound it with: explicit per-bundle
- * opt-in (nothing is held unless you `unlock` it), an absolute TTL (~7d), an
- * auto-wipe on sleep / logout, and `agents secrets lock`. A bare screen-lock is
- * NOT a wipe (the login password already gates it). Nothing ever touches disk.
- *
- * macOS only: Linux libsecret has no biometry prompt, so there's nothing to
- * deduplicate — every entry point here no-ops off darwin.
+ * Security model: while unlocked, any same-user process reaching the socket can
+ * read it silently — the same trust boundary the keychain already concedes. We
+ * bound it with per-bundle opt-in, a TTL (~7d), auto-wipe on sleep/logout, and
+ * explicit lock. Nothing touches disk. Off-darwin the broker is unused.
  */
 
 import * as net from 'net';
@@ -45,10 +29,7 @@ import { selectLeasedEnv, type SecretLease } from './lease.js';
 import { emitSecretAudit } from './audit.js';
 import { isDaemonServiceEnabled } from '../daemon-services.js';
 
-// Re-exported so callers already reaching for agent.js keep one obvious home for
-// the scope vocabulary; the definitions live in the leaf module scope.ts because
-// agent.ts and session-store.ts import each other and a cyclic `const` read can
-// hit the ESM temporal dead zone at runtime.
+// Re-exported from scope.ts to break the agent.ts ↔ session-store.ts import cycle.
 export { GLOBAL_HARNESS, bundleScopeChain };
 
 /** Bumped when the wire protocol changes; a client that pings a mismatched
@@ -59,9 +40,7 @@ const PROTOCOL_VERSION = 3;
 export const DEFAULT_TTL_MS = 7 * 24 * 60 * 60 * 1000; // 7d
 
 /**
- * Whether the secrets broker service is enabled in the daemon service config.
- * Off-darwin this is irrelevant (the broker is never used), but the helper is
- * kept synchronous and safe everywhere so callers can fail loud without a prompt.
+ * Whether the secrets broker service is enabled in daemon service config.
  */
 export function isSecretsBrokerEnabled(): boolean {
   return isDaemonServiceEnabled('secrets-broker');
@@ -69,15 +48,9 @@ export function isSecretsBrokerEnabled(): boolean {
 
 /**
  * Reserved store-key prefix for the `secrets list` metadata snapshot cache.
- * The broker holds the resolved bundle-metadata array (names/policy/timestamps,
- * NO resolved secret values beyond the literals already in metadata) keyed by a
- * hash of the current keychain bundle name-set, so the second and later
- * `secrets list` within the hold window read metadata without a Touch ID
- * prompt. Keyed by the name-set hash so adding/removing/renaming a bundle
- * changes the key and misses the cache automatically — no active invalidation.
- * The '!' sentinel can never collide with a real bundle name
- * (BUNDLE_NAME_PATTERN requires an alphanumeric first char) and is safe as
- * spawnSync argv (unlike a NUL byte); `status` hides these entries.
+ * Keyed by a hash of the keychain name-set; adding/removing/renaming a bundle
+ * changes the key and invalidates passively. The '!' sentinel cannot collide
+ * with a real bundle name and is safe as argv.
  */
 export const META_CACHE_PREFIX = '!meta:';
 
@@ -104,21 +77,9 @@ function delay(ms: number): Promise<void> {
 }
 
 /**
- * Timeouts for the three synchronous broker clients, split across the process
- * boundary they now straddle.
- *
- * `SOCKET_*` bound the socket round-trip inside the spawned `__secrets-*`
- * child, and carry over unchanged from the inline `node -e` programs these
- * replaced. `SYNC_*` bound the parent's `spawnSync` and must additionally cover
- * the child's boot, so each is its socket budget plus ~2s of headroom. A parent
- * timeout that fired before the child's own timer would report "broker down"
- * for a broker that is merely slow, which costs a Touch ID prompt — so the
- * parent budget is deliberately the looser of the two.
- *
- * Boot cost, measured on the bun-compiled binary on an M-series Mac (median of
- * 15, against a live broker): ~96ms via the index.ts intercept, ~165ms if the
- * intercept is moved below the startup statements, ~44ms for the `node -e` this
- * replaces. The intercept is what keeps the regression modest; see index.ts.
+ * Timeouts for the synchronous broker clients. Parent `spawnSync` budgets are
+ * looser than socket budgets so a slow child boot isn't misreported as "broker
+ * down" (which costs a Touch ID prompt).
  */
 const SOCKET_GET_TIMEOUT_MS = 2000;
 const SOCKET_PING_TIMEOUT_MS = 700;
@@ -127,21 +88,15 @@ const SYNC_GET_TIMEOUT_MS = 4000;
 const SYNC_PING_TIMEOUT_MS = 2500;
 const SYNC_LOCK_TIMEOUT_MS = 4000;
 
-// The argv tokens live in a leaf module so index.ts can bind the SAME values
-// without importing this one. Re-exported here for callers already reaching for
-// agent.js. See sync-commands.ts for why a shared binding rather than matching
-// literals: the drift it prevents is silent and costs a Touch ID prompt per read.
+// Re-exported from sync-commands.ts so index.ts can share the same argv tokens
+// without importing this module (would create a cycle/startup cost).
 export { SYNC_GET_CMD, SYNC_PING_CMD, SYNC_LOCK_CMD } from './sync-commands.js';
 
 /**
- * Decide whether a persistent broker should self-heal onto freshly-installed
- * code (exit so launchd relaunches it). Only when the store is EMPTY: exiting
- * with bundles still unlocked wipes them from memory, so the next reader falls
- * back to a direct keychain read and re-prompts for Touch ID. Deferring the
- * restart until the cache is idle (TTL-expired / slept) means an
- * in-place `npm i -g` never wipes a hot cache — the new code is adopted at the
- * next quiet moment instead. See #435: rapid repeated upgrades wiped a hot
- * cache on every bump and produced a recurring Touch ID storm.
+ * Decide whether a persistent broker should exit so launchd relaunches it on
+ * freshly-installed code. Only when the store is empty: exiting with held
+ * bundles would force a re-prompt. Deferring protects against rapid upgrades
+ * wiping the hot cache (#435).
  */
 export function shouldSelfHealForUpgrade(
   persistent: boolean,
@@ -156,35 +111,17 @@ export function shouldSelfHealForUpgrade(
 }
 
 /**
- * Client-side twin of shouldSelfHealForUpgrade: whether ensureAgentRunning may
- * tear down a reachable broker whose running version differs from the client's
- * on-disk version. Only while it holds NO real unlocks — tearing down a hot
- * broker wipes every held bundle, so the next read of each one re-prompts for
- * Touch ID. On a machine where installed versions churn (dev builds stamp a
- * fresh 0.0.0-dev.<sha> on every install; an npm copy and a dev copy invoke in
- * turn), an unguarded teardown produced a rolling Touch ID storm — the exact
- * failure #435 fixed on the server side. A hot, protocol-compatible broker
- * keeps serving; its own sweep adopts the new code at the next quiet moment.
+ * Client-side twin: may only tear down a version-skewed broker when it holds
+ * no real unlocks, otherwise every held bundle re-prompts (#435).
  */
 export function shouldTeardownVersionSkewedBroker(realHeldBundles: number): boolean {
   return realHeldBundles === 0;
 }
 
 /**
- * Whether a version-skewed client may evict the reachable broker at all. The
- * held-bundle gate above is necessary but not sufficient: a broker the always-on
- * daemon is hosting must NEVER be client-evicted, even when it holds zero
- * unlocks. teardownStaleBroker() recognizes only the standalone broker's
- * pidPath() O_EXCL claim (the daemon writes ownerPath(), never pidPath()), so
- * evicting a daemon-hosted broker unlinks its socket WITHOUT stopping the daemon;
- * the daemon then keeps hostedBroker != null and shouldTakeOverBroker() refuses
- * to re-host, orphaning its broker until the daemon restarts while every reader
- * falls onto cold one-off brokers that re-prompt Touch ID — the storm. Deferring
- * is safe: daemon code-version upgrades are handled by postinstall.js restarting
- * it, and agentPing() already gated on PROTOCOL_VERSION, so a code-skewed daemon
- * broker is still wire-compatible. Only when NO daemon owns the broker (churning
- * dev installs with a dead/absent daemon — the case #435's client twin was built
- * for) does the zero-held-bundles teardown apply, exactly as before.
+ * Whether a client may evict a version-skewed broker. A daemon-hosted broker
+ * must never be client-evicted: the daemon owns the socket via ownerPath(), so
+ * unlinking it would orphan the broker until daemon restart (#435).
  */
 export function shouldClientEvictSkewedBroker(
   daemonRunning: boolean,
@@ -218,11 +155,8 @@ function onDarwin(): boolean {
 }
 
 /**
- * Build the broker's in-memory store, REHYDRATED from the durable session store
- * (session-store.ts) so an unlock survives a daemon restart / agents-cli upgrade.
- * Expired sessions are dropped; `--durable` and default entries alike come back
- * (SLEEP already pruned the non-durable ones from the keychain while the broker
- * was alive). Empty off darwin or when nothing was held.
+ * Build the broker's in-memory store from durable sessions so unlocks survive
+ * restart/upgrade. Empty off darwin or when nothing was held.
  */
 function rehydrateStore(now: number = Date.now()): Map<string, StoredBundle> {
   const store = new Map<string, StoredBundle>();
@@ -233,9 +167,7 @@ function rehydrateStore(now: number = Date.now()): Map<string, StoredBundle> {
   return store;
 }
 
-/** Broker runtime dir under the regenerable cache, locked to the user (0700).
- * AGENTS_SECRETS_AGENT_DIR overrides the location — a test seam so the suite can
- * run a real broker on a temp socket without touching the user's real dir. */
+/** Broker runtime dir (0700). Override with AGENTS_SECRETS_AGENT_DIR for tests. */
 function agentDir(): string {
   const dir = process.env.AGENTS_SECRETS_AGENT_DIR || path.join(getHelpersDir(), 'secrets-agent');
   fs.mkdirSync(dir, { recursive: true });
@@ -257,34 +189,25 @@ function pidPath(): string {
 }
 
 /**
- * Path of the per-broker capability token. It lives in the 0700 agent dir and is
- * written 0600, so only the same UID that owns the broker can read it — the file
- * permission IS the authorization boundary. See isRequestAuthorized.
+ * Per-broker capability token path (0600 inside the 0700 agent dir). The file
+ * permission is the authorization boundary.
  */
 function tokenPath(): string {
   return path.join(agentDir(), 'agent.token');
 }
 
 /**
- * Path of the CURRENT SOCKET OWNER's pid.
- *
- * Deliberately NOT `agent.pid`: that file is the standalone service's O_EXCL
- * single-instance claim, and a standalone that loses the socket race stays alive
- * and quiescent while holding it (so launchd's KeepAlive doesn't restart-loop
- * it), ready to take over if the hosted broker stops. Overloading it as the
- * socket-ownership record made the standalone see a live holder and exit
- * immediately — the exact restart loop that guard exists to prevent. This file
- * answers a different question: which pid is serving the socket right now.
+ * Path of the current socket owner's pid. NOT `agent.pid`, which is the
+ * standalone service's O_EXCL single-instance claim. Separating them prevents a
+ * standby standalone from seeing a live holder and exiting in a restart loop.
  */
 function ownerPath(): string {
   return path.join(agentDir(), 'agent.owner');
 }
 
 /**
- * Read the current broker capability token, or null if none is present. Clients
- * read it fresh per request and attach it to every non-ping command; a broker
- * restart mints a new token, so a stale read simply fails authorization and the
- * caller falls back to a direct keychain read (soft, never a hard error).
+ * Read the current broker capability token. A restart mints a new token, so a
+ * stale read fails soft and the caller falls back to a direct keychain read.
  */
 export function readAgentToken(): string | null {
   try {
@@ -295,9 +218,7 @@ export function readAgentToken(): string | null {
   }
 }
 
-/** Mint + persist a fresh capability token (0600) at socket-bind time. Only the
- * process that actually binds the socket calls this, so a losing starter never
- * clobbers the live owner's token. Returns the token for in-memory comparison. */
+/** Mint and persist a fresh capability token (0600) at socket-bind time. */
 function writeAgentToken(): string {
   const token = randomBytes(32).toString('hex');
   const fp = tokenPath();
@@ -307,15 +228,9 @@ function writeAgentToken(): string {
 }
 
 /**
- * Argv for re-invoking THIS cli with a hidden subcommand, so a side-by-side dev
- * build spawns its own helpers rather than the registry-installed one. Routed
- * through the shared getCliLaunch so it handles both install shapes — a JS entry
- * (`node dist/index.js …`) and a Bun standalone binary (run directly). The old
- * hand-rolled `[process.execPath, process.argv[1], …]` broke on standalone builds:
- * process.argv[1] is the bun virtual entry `/$bunfs/root/agents` (fs.existsSync
- * reports it as present), so it was passed as an argv element and the broker died
- * with `unknown command '/$bunfs/root/agents'` — the daemon-hosted broker never
- * bound its socket and every unlock reported "Could not start the secrets broker".
+ * Argv for re-invoking this CLI with a hidden subcommand. Uses getCliLaunch so
+ * both JS-entry and Bun-standalone installs work; the old `process.argv[1]`
+ * approach broke on standalone builds with a virtual `/$bunfs/root/agents` path.
  */
 function cliSpawn(sub: string[]): { cmd: string; args: string[] } {
   const { command, args } = getCliLaunch(sub);
@@ -326,21 +241,14 @@ function brokerSpawn(): { cmd: string; args: string[] } {
   return cliSpawn(['secrets', '_agent-run']);
 }
 
-// ─── Legacy standalone launchd service (retired, #416 step 2) ────────────────
-// Earlier versions ran the broker as its own launchd user service
-// (com.phnx-labs.agents-secrets-agent, shipped in 1.20.20) so a heavily-loaded
-// machine couldn't starve an on-demand cold start. That role now belongs to the
-// always-on daemon, which hosts the broker socket-first (#416 step 1) — one
-// supervised backbone instead of a second service. The functions below no
-// longer INSTALL the standalone service; they only DETECT and RETIRE a plist
-// left by an older version so the daemon can take over the socket. The upgrade
-// migration (postinstall) and `ensureAgentRunning` both drive the retire path.
+// ─── Legacy standalone launchd service (retired, #416) ───────────────────────
+// The broker is now hosted by the always-on daemon. The functions below only
+// detect and retire a plist left by older versions so the daemon owns the socket.
 
 const SERVICE_LABEL = 'com.phnx-labs.agents-secrets-agent';
 
-// LaunchAgents dir is relocatable for tests via AGENTS_SECRETS_LAUNCHAGENTS_DIR.
-// A relocated dir is NOT launchd-managed (launchd only bootstraps plists from
-// the real ~/Library/LaunchAgents), so retirement there is a pure file removal.
+// LaunchAgents dir. A relocated test dir is not launchd-managed, so retirement
+// there is pure file removal.
 function launchAgentsDir(): string {
   return process.env.AGENTS_SECRETS_LAUNCHAGENTS_DIR || path.join(os.homedir(), 'Library', 'LaunchAgents');
 }
@@ -355,11 +263,8 @@ export function secretsAgentServiceInstalled(): boolean {
 }
 
 /**
- * Retire the legacy standalone secrets-agent launchd service: bootout the job
- * (falling back to the legacy `unload`) and remove its plist so the always-on
- * daemon owns the broker socket. Idempotent and best-effort — a no-op when no
- * legacy plist is present. Does NOT wipe held bundles: the booted-out process's
- * memory is gone anyway, and the daemon-hosted broker starts fresh.
+ * Retire the legacy standalone launchd service so the daemon owns the socket.
+ * Idempotent; does not wipe held bundles.
  */
 export function retireLegacySecretsAgentService(): void {
   if (!onDarwin() || !secretsAgentServiceInstalled()) return;
@@ -381,11 +286,9 @@ export function retireLegacySecretsAgentService(): void {
 }
 
 /**
- * Stop the persistent broker for `agents secrets stop`: wipe whatever the broker
- * holds (forces Touch ID again on the next read), then retire any legacy
- * standalone service. The daemon-hosted broker itself is left running — it is
- * the always-on backbone, and stopping it would take down unrelated background
- * work (routines, browser IPC, session-sync).
+ * Stop the persistent broker for `agents secrets stop`: wipe held bundles, then
+ * retire any legacy standalone service. The daemon-hosted broker itself is left
+ * running because it backs unrelated background work.
  */
 export async function uninstallSecretsAgentService(): Promise<void> {
   if (!onDarwin()) return;
@@ -417,17 +320,9 @@ export type Response =
 // ─── Broker server (runs in the detached `secrets _agent-run` process) ───────
 
 /**
- * Pure request handler over the in-memory store. Extracted so the store
- * semantics (lazy expiry on get/status, lock-one vs lock-all, load TTL) are
- * unit-testable with a controlled `now`, without a socket or a spawned process.
- * Mutates `store` in place; returns the wire response.
- */
-/**
- * Count of real unlocked bundles in the store, excluding the internal
- * `secrets list` metadata cache. Used to decide broker "warmth" for self-heal
- * and idle-exit: a metadata-only store must read as empty so a disposable list
- * cache never blocks an upgrade restart (#435) or an idle one-off broker from
- * exiting. Pure + exported for unit testing.
+ * Count of real unlocked bundles, excluding the internal `secrets list` metadata
+ * cache. A metadata-only store must read as empty so it doesn't block upgrade
+ * self-heal or idle-exit (#435). Exported for tests.
  */
 export function realBundleCount(store: Map<string, StoredBundle>): number {
   let n = 0;
@@ -439,26 +334,21 @@ export function scopedBundleKey(name: string, harness: string): string {
   return `${harness}:${name}`;
 }
 
+/** Pure request handler over the in-memory store. Exported for tests. */
 export function handleAgentRequest(
   store: Map<string, StoredBundle>,
   req: Request,
   now: number = Date.now(),
-  // Eviction tombstones: `lock` records when each bundle was wiped so a load
-  // whose snapshot predates the eviction (a detached auto-load that raced a
-  // mutating write) is rejected instead of re-populating the store with a
-  // pre-mutation copy. Broker-lifetime state, owned by the caller like `store`.
+  // Eviction tombstones: reject loads whose snapshot predates the eviction so a
+  // detached auto-load can't re-populate stale state.
   evictedAt: Map<string, number> = new Map(),
 ): Response {
   switch (req.cmd) {
     case 'ping':
-      // Report the version of the code this broker is RUNNING (getCliVersion
-      // caches the value from the broker's startup), not the on-disk version.
-      // A client compares this to its own fresh on-disk read; a mismatch means
-      // the broker is running pre-upgrade code and should be restarted.
+      // Report the running version, not on-disk, so clients detect pre-upgrade brokers.
       return { ok: true, cmd: 'ping', version: PROTOCOL_VERSION, cliVersion: getCliVersion() };
     case 'get': {
-      // Walk own-harness → global so an `--agent` grant wins over a global one and
-      // an unscoped unlock serves every harness (bundleScopeChain).
+      // own-harness → global: scoped grants win, unscoped unlocks serve all.
       for (const scope of bundleScopeChain(req.harness)) {
         const key = scopedBundleKey(req.name, scope);
         const e = store.get(key);
@@ -478,9 +368,7 @@ export function handleAgentRequest(
     case 'load': {
       const evictedTs = evictedAt.get(req.name);
       if (evictedTs !== undefined && req.snapshotAt !== undefined && req.snapshotAt <= evictedTs) {
-        // The loader captured its bundle/env before a mutating write evicted
-        // this name; accepting it would serve (and later re-persist) stale
-        // state. A load with no snapshotAt (older client) is accepted as before.
+        // Reject loads captured before a mutating write evicted this name.
         return { ok: false, error: `stale load for '${req.name}': snapshot predates an eviction` };
       }
       const harness = req.harness || GLOBAL_HARNESS;
@@ -522,29 +410,19 @@ export function handleAgentRequest(
 }
 
 /**
- * Decide whether a `watch-lock` helper line should wipe the in-memory store.
- * The helper emits `LOCK` on screen-lock / screensaver and `SLEEP` on system
- * sleep. We wipe on SLEEP only: a bare screen-lock is already gated by the login
- * password, and with the ~7d hold, re-authing after every lock would defeat the
- * point. Logout needs no line — it tears down the launchd session and kills the
- * broker outright. Pure + exported so the LOCK-survives / SLEEP-wipes contract
- * has direct regression coverage (the inline stdout handler isn't unit-testable).
+ * Wipe the in-memory store only on SLEEP, not screen-lock (already gated by the
+ * login password). Exported for regression coverage of the LOCK-survives /
+ * SLEEP-wipes contract.
  */
 export function shouldWipeOnWatchEvent(chunk: string): boolean {
   return /\bSLEEP\b/.test(chunk);
 }
 
 /**
- * Authorization gate applied to every request BEFORE handleAgentRequest touches
- * the store (RUSH-1760). A bare same-UID socket connection is no longer trusted
- * to load/get arbitrary bundle env: each command except the liveness `ping` must
- * carry the per-broker capability token, which lives in a 0600 file inside the
- * 0700 agent dir and so is readable only by the UID that owns the broker.
- *
- * Fail closed: a missing/empty expected token (no token file) rejects every
- * command but ping. `ping` stays unauthenticated — it exposes only the protocol
- * and cli version, and clients need it to detect a reachable broker before they
- * have any reason to read the token. Pure + exported for direct unit testing.
+ * Authorization gate: every request except `ping` must carry the per-broker
+ * capability token from the 0600 token file. `ping` stays unauthenticated so
+ * clients can probe reachability before reading the token. Fail closed. Exported
+ * for tests.
  */
 export function isRequestAuthorized(req: Request, expectedToken: string | null): boolean {
   if (req.cmd === 'ping') return true;
@@ -555,11 +433,9 @@ export function isRequestAuthorized(req: Request, expectedToken: string | null):
 type BrokerConnectionHandler = (conn: net.Socket) => void;
 
 /**
- * Build the socket `connection` handler shared by both brokers (standalone and
- * daemon-hosted): newline-framed JSON in, one response line out, with the
- * authorization gate (isRequestAuthorized) applied before `handle`. `token`
- * resolves the currently-expected capability token per request so a token
- * rotation on broker restart is picked up without rebuilding the handler.
+ * Build the socket `connection` handler shared by standalone and daemon-hosted
+ * brokers. Newline-framed JSON in, one response line out, with per-request token
+ * lookup so rotation on restart is picked up.
  */
 export function makeConnectionHandler(
   handle: (req: Request) => Response,
@@ -592,19 +468,12 @@ export function makeConnectionHandler(
 }
 
 /**
- * Whether a live process still owns the broker pid file.
- *
- * A single missed `agentPing` is NOT proof the owner is dead — the broker is
- * single-threaded, so a big `get` or the rehydrate at startup can blow the
- * 700ms ping budget while the process is perfectly healthy. Treating that as
- * death let a starting broker unlink a live socket and rebind, leaving the old
- * process alive holding every unlocked bundle in RAM that no client could reach
- * any more (observed live: two brokers, one socket path, two kernel sockets).
- * The pid file is the second, independent liveness signal that makes the reclaim
+ * Whether a live process still owns the broker pid file. A single missed ping
+ * isn't proof of death: the single-threaded broker can blow the ping budget
+ * while healthy. The pid file is the second liveness signal that makes reclaim
  * safe.
  */
-/** Drop our ownership record, but only if it is still ours — never clobber a
- *  successor that already claimed the socket. */
+/** Drop our ownership record only if it is still ours. */
 export function releaseBrokerPid(): void {
   try {
     if (parseInt(fs.readFileSync(ownerPath(), 'utf-8').trim(), 10) === process.pid) {
@@ -623,13 +492,8 @@ export function brokerPidAlive(): boolean {
 }
 
 /**
- * Bind the shared broker socket without stealing it from another live owner.
- * Both the standalone service and daemon-hosted broker use this single path so
- * either startup order is safe: a reachable owner wins, while an unreachable
- * stale socket is reclaimed once.
- *
- * "Unreachable" is established with retries plus a pid-file liveness check, never
- * a single ping — see {@link brokerPidAlive}.
+ * Bind the shared broker socket without stealing it from a live owner. Uses
+ * retries plus pid-file liveness, not a single ping, to decide "unreachable".
  */
 async function bindBrokerSocket(
   sock: string,
@@ -645,17 +509,8 @@ async function bindBrokerSocket(
       server.once('error', onError);
       server.listen(sock, () => {
         try { fs.chmodSync(sock, 0o600); } catch { /* dir 0700 already gates it */ }
-        // Mint the capability token here — the one moment this process is the
-        // confirmed socket owner — so a losing starter never clobbers the live
-        // owner's token (RUSH-1760).
+        // Mint the token and record ownership only once we are the confirmed owner.
         try { writeAgentToken(); } catch { /* dir 0700 gates the socket regardless */ }
-        // Record ownership at the same moment, for the same reason. The
-        // daemon-hosted broker deliberately skips the O_EXCL pid-file GUARD (the
-        // daemon owns its instance), but without an ownership RECORD
-        // brokerPidAlive() has nothing to read — so a later starter saw an
-        // ownerless socket and reclaimed the live hosted broker anyway, which is
-        // the primary configuration and the one that actually orphaned here.
-        // Writing it from the confirmed owner covers both broker flavours.
         try { fs.writeFileSync(ownerPath(), String(process.pid)); } catch { /* dir 0700 gates it */ }
         resolve(server);
       });
@@ -664,15 +519,12 @@ async function bindBrokerSocket(
   let bound = await listenOnce();
   if (bound !== 'inuse') return bound;
 
-  // Give a busy owner several chances before concluding it is gone. One slow
-  // ping used to be enough to evict a healthy broker and orphan its RAM.
+  // Give a busy owner several chances before concluding it is gone.
   for (let attempt = 0; attempt < BIND_PROBE_ATTEMPTS; attempt++) {
     if ((await agentPing()).reachable) return null;
     if (attempt < BIND_PROBE_ATTEMPTS - 1) await delay(BIND_PROBE_INTERVAL_MS);
   }
-  // Silent but alive is still alive: refuse to steal the socket from a process
-  // that still owns the pid file, and let the caller surface the wedge instead
-  // of quietly starting a second broker on the same path.
+  // Refuse to steal from a process that still owns the pid file.
   if (brokerPidAlive()) {
     throw new Error(
       `Secrets broker socket is held by a live process that is not answering: ${sock}. ` +
@@ -688,21 +540,18 @@ async function bindBrokerSocket(
 }
 
 /**
- * Run the broker in the foreground. Spawned detached by ensureAgentRunning via
- * `agents secrets _agent-run`. Holds the store in memory, serves the socket,
- * sweeps expired entries, wipes on sleep, and self-exits when idle.
+ * Run the standalone broker in the foreground. Spawned by ensureAgentRunning via
+ * `agents secrets _agent-run`. Serves the socket, sweeps expired entries, wipes
+ * on sleep, and self-exits when idle.
  */
 export async function runSecretsAgent(
   opts: { service?: boolean } = {},
 ): Promise<{ close(): void | Promise<void> } | null> {
   if (!onDarwin()) return null; // nothing to broker without biometry prompts
-  // When launchd keeps us alive as a persistent service, never idle-exit:
-  // exiting would just make launchd cold-start us again, reintroducing the
-  // startup-under-load fragility the service exists to avoid.
+  // Persistent launchd service must never idle-exit; launchd would cold-start again.
   const persistent = opts.service === true;
 
-  // Single-instance guard: O_EXCL pid file. If a live broker already holds it,
-  // exit quietly — the existing one keeps serving.
+  // O_EXCL single-instance guard.
   const pidFile = pidPath();
   try {
     const fd = fs.openSync(pidFile, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY);
@@ -721,8 +570,7 @@ export async function runSecretsAgent(
   }
 
   const store = rehydrateStore();
-  // emptySince tracks the last moment the store held something; the sweep exits
-  // the process once it's been empty for IDLE_EXIT_MS so no idle broker lingers.
+  // Track when the store last held something so idle brokers exit.
   let emptySince = Date.now();
   const sock = socketPath();
 
@@ -734,9 +582,8 @@ export async function runSecretsAgent(
     } catch { /* gone or no longer ours */ }
   };
 
-  // Register lifecycle handlers before socket arbitration. A persistent
-  // launchd service may spend its whole lifetime as the standby loser, and a
-  // kickstart/bootout during that wait must still release its pid-file lease.
+  // Register lifecycle handlers before socket arbitration so a standby service
+  // still releases its pid-file lease on kickstart/bootout.
   let standbyTimer: NodeJS.Timeout | null = null;
   let cleanupActive: (() => void) | null = null;
   let shuttingDown = false;
@@ -760,9 +607,7 @@ export async function runSecretsAgent(
   process.on('SIGTERM', onSigterm);
   process.on('SIGINT', onSigint);
 
-  // Capture the version of the code we're running so the sweep can detect when
-  // an in-place upgrade has landed and self-heal onto it. getCliVersion caches
-  // this value for the process lifetime; getCliVersionFresh re-reads on disk.
+  // Capture the running version so the sweep can self-heal onto upgraded code.
   const runningVersion = getCliVersion();
 
   // "Warmth" for self-heal / idle-exit counts only real unlocked bundles, NOT
@@ -782,12 +627,10 @@ export async function runSecretsAgent(
       }
     }
     const live = realBundleCount(store);
-    // Self-heal onto a newer in-place install — but ONLY while no real unlocks
-    // are held, so we never wipe live unlocks and force a re-prompt (#435). A
-    // metadata-only store still self-heals (the list cache is disposable).
+    // Self-heal only while no real unlocks are held (#435).
     if (live === 0 &&
         shouldSelfHealForUpgrade(persistent, live, runningVersion, getCliVersionFresh())) {
-      shutdown(0); // KeepAlive relaunches on the new code
+      shutdown(0);
       return;
     }
     if (live === 0) {
@@ -816,10 +659,7 @@ export async function runSecretsAgent(
       throw err;
     }
     if (!server && persistent) {
-      // launchd KeepAlive would immediately relaunch a persistent loser if it
-      // returned here. Stay quiescent instead, then claim the socket if the
-      // daemon-hosted owner goes away. The pid file keeps launchd/manual starts
-      // from creating additional waiters while this process is standing by.
+      // Stay quiescent rather than returning, or launchd KeepAlive would restart-loop.
       do {
         await new Promise<void>((resolve) => {
           standbyTimer = setTimeout(() => {
@@ -838,9 +678,7 @@ export async function runSecretsAgent(
 
   let watcher: ChildProcess | null = null;
   let sweepTimer: NodeJS.Timeout | null = null;
-  // Sync cleanup for SIGTERM/SIGINT → process.exit: we cannot await the
-  // server's 'close' event before exit, so fire-and-forget close + unlink.
-  // The public close() path below awaits with a bounded timeout (RUSH-2421).
+  // Sync cleanup for signal-driven exit: can't await 'close', so fire-and-forget.
   cleanupActive = () => {
     store.clear();
     if (sweepTimer) clearInterval(sweepTimer);
@@ -853,14 +691,8 @@ export async function runSecretsAgent(
 
   sweepTimer = setInterval(sweep, SWEEP_INTERVAL_MS);
 
-  // Auto-lock on sleep. The signed helper emits LOCK / SLEEP lines; we wipe
-  // everything on SLEEP (and, implicitly, logout — that tears down the launchd
-  // session and kills this in-memory broker). A bare screen-lock is deliberately
-  // NOT a wipe: with the ~7d hold, re-prompting after every lock would defeat the
-  // point, and a locked screen is already gated by the login password. If the
-  // installed helper predates watch-lock (exits non-zero immediately), we fall
-  // back to TTL-only and log nothing — the unlock already warned when
-  // lock_on_sleep couldn't be armed.
+  // Auto-lock on sleep. Wipe on SLEEP; screen-lock alone survives. If the helper
+  // predates watch-lock, fall back to TTL-only.
   try {
     watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
     watcher.stdout?.setEncoding('utf-8');
@@ -868,8 +700,7 @@ export async function runSecretsAgent(
       if (shouldWipeOnWatchEvent(chunk)) {
         store.clear();
         emptySince = Date.now();
-        // Split default: delete non-`--durable` durable sessions too, so a default
-        // unlock re-locks on sleep; `--durable` ones survive (session-store.ts).
+        // Default (non-durable) sessions re-lock on sleep; durable ones survive.
         pruneSessionsOnSleep();
       }
     });
@@ -895,28 +726,16 @@ export async function runSecretsAgent(
 }
 
 /**
- * Host the secrets broker inside the always-on daemon (#416).
- *
- * Serves the SAME socket and wire protocol as the standalone `runSecretsAgent`
- * — so every existing client (`agentGetSync`, `agentPing`, `agentAutoLoadSync`)
- * keeps working through the versioned protocol — but it is daemon-safe:
- *
- *   - no pid-file single-instance guard (the daemon owns the instance);
- *   - no `process.exit`, no SIGTERM/SIGINT handlers, no self-heal/idle-exit
- *     (those would kill the daemon — the daemon is the always-on backbone and
- *     manages its own version/lifecycle). The sweep only TTL-evicts.
- *
- * The caller (`runDaemon`) normally invokes this only when no broker answers
- * its initial ping. Binding still arbitrates ownership through the same shared
- * path as the standalone service: a live owner wins, while only an unreachable
- * stale socket is reclaimed. Returns a handle the daemon closes on shutdown,
- * or null off-darwin (nothing to broker without biometry).
+ * Host the secrets broker inside the always-on daemon (#416). Serves the same
+ * socket/protocol as the standalone broker, but daemon-safe: no pid-file guard,
+ * no process.exit/SIG handlers, no self-heal/idle-exit (the daemon owns the
+ * lifecycle). Returns null off-darwin.
  */
 export async function startHostedBroker(): Promise<{ close(): void | Promise<void> } | null> {
-  if (!onDarwin()) return null;
+  if (!onDarwin()) return null; // nothing to broker without biometry prompts
 
   const store = rehydrateStore();
-  const sock = socketPath(); // agentDir() creates the 0700 dir as a side effect
+  const sock = socketPath();
 
   const evictedAt = new Map<string, number>();
   const handle = (req: Request): Response => handleAgentRequest(store, req, Date.now(), evictedAt);
@@ -925,10 +744,7 @@ export async function startHostedBroker(): Promise<{ close(): void | Promise<voi
   const server = await bindBrokerSocket(sock, onConn);
   if (!server) return null;
 
-  // TTL eviction ONLY. Unlike the standalone broker's sweep, there is no
-  // self-heal-exit or idle-exit here — the daemon is always-on and owns the
-  // upgrade/lifecycle path; a broker that called process.exit() would take the
-  // whole daemon down with it.
+  // TTL eviction only. The daemon is always-on and owns its own lifecycle.
   const sweepTimer = setInterval(() => {
     const now = Date.now();
     for (const [name, e] of store) {
@@ -941,8 +757,7 @@ export async function startHostedBroker(): Promise<{ close(): void | Promise<voi
     }
   }, SWEEP_INTERVAL_MS);
 
-  // Auto-lock on sleep, same as the standalone broker: the signed helper emits
-  // LOCK/SLEEP lines; wipe the in-memory store on a wipe-worthy event.
+  // Auto-lock on sleep, same as the standalone broker.
   let watcher: ChildProcess | null = null;
   try {
     watcher = spawn(getKeychainHelperPath(), ['watch-lock'], { stdio: ['ignore', 'pipe', 'ignore'] });
@@ -950,7 +765,7 @@ export async function startHostedBroker(): Promise<{ close(): void | Promise<voi
     watcher.stdout?.on('data', (chunk: string) => {
       if (shouldWipeOnWatchEvent(chunk)) {
         store.clear();
-        pruneSessionsOnSleep(); // split default — see runSecretsAgent's handler
+        pruneSessionsOnSleep();
       }
     });
     watcher.on('error', () => { watcher = null; });
@@ -959,10 +774,6 @@ export async function startHostedBroker(): Promise<{ close(): void | Promise<voi
   }
 
   return {
-    // RUSH-2421: await net.Server's 'close' (bounded) so a caller relying on
-    // close() cannot proceed past a socket that is not actually released yet.
-    // The daemon may fire-and-forget this promise; tests and any awaiter get
-    // the real release boundary.
     async close() {
       store.clear();
       clearInterval(sweepTimer);
@@ -978,10 +789,8 @@ export async function startHostedBroker(): Promise<{ close(): void | Promise<voi
 const SERVER_CLOSE_TIMEOUT_MS = 2_000;
 
 /**
- * Call Node's net.Server.close() and wait for the 'close' event (or a bounded
- * timeout). Without this, close() returned while the listen socket could still
- * be held — a successor bind could race EADDRINUSE against a half-closed server
- * (RUSH-2421). Pure side-effect helper; never throws.
+ * Wait for net.Server.close()'s 'close' event (or a bounded timeout) so a
+ * successor bind doesn't race a half-closed socket (RUSH-2421).
  */
 export function closeServerBounded(
   server: net.Server,
@@ -1007,11 +816,9 @@ export function closeServerBounded(
 
 // ─── Client ──────────────────────────────────────────────────────────────────
 
-/** Open the socket, send one request, resolve the one response. Async path —
- * used by the unlock/lock/status commands, which already run in async actions. */
+/** Open the socket, send one request, resolve the one response. Async path. */
 function request(req: Request, timeoutMs = 2000): Promise<Response | null> {
-  // Attach the capability token to every command except ping (the auth gate;
-  // RUSH-1760). ping stays tokenless so a client can probe reachability first.
+  // Attach the capability token to every command except ping.
   const authedReq: Request = req.cmd === 'ping' ? req : { ...req, token: readAgentToken() ?? undefined };
   return new Promise((resolve) => {
     const conn = net.createConnection(socketPath());
@@ -1038,52 +845,26 @@ function request(req: Request, timeoutMs = 2000): Promise<Response | null> {
   });
 }
 
-/** True if a broker socket exists at all. Cheap; gates the sync read so the
- * never-unlocked path stays a single stat. */
+/** Cheap socket-existence check so the never-unlocked path stays a single stat. */
 export function agentSocketExists(): boolean {
   return onDarwin() && fs.existsSync(socketPath());
 }
 
 /**
- * Spawn one of the `__secrets-*` sync clients and return its result.
- *
- * These three call sites used to hand-roll `spawnSync(process.execPath, ['-e',
- * <inline node program>, …])`. That is correct only for a JS install, where
- * `process.execPath` is `node`. Since 1.20.53 the shipped macOS `agents` is a
- * **bun-compiled Mach-O**, where `process.execPath` is the CLI binary itself —
- * so the spawn became `agents -e <program> …`, which commander rejects with
- * `error: unknown option '-e'` and a non-zero exit. Every sync client then took
- * its own failure path (`agentGetSync` → null, `agentReachableSync` → false,
- * `agentEvictSync` → no-op), which reads as "broker down" and falls through to
- * a real keychain read. Net effect on the standalone binary: the broker cache
- * was never hit, so the `daily` policy's one-prompt-per-7d never applied and
- * every bundle read re-popped Touch ID.
- *
- * Same defect class as the broker-launch bug fixed in 1.20.56 (see cliSpawn's
- * doc comment); these three sites were simply never converted. Routing them
- * through `getCliLaunch` fixes both install shapes at once and keeps a single
- * code path.
- *
- * The subcommands are top-level `__secrets-*` tokens intercepted in index.ts
- * BEFORE commander and before the CLI's startup work, exactly like
- * `__daemon-run` and `__vault-age-helper`. That is load-bearing, not cosmetic:
- * a normal command path runs `checkForUpdates()` and `spawnDetachedSync()` on
- * every invocation (index.ts), so registering these as ordinary hidden
- * subcommands would fire an update check and spawn a detached background sync
- * on every cache hit — turning the hot read path into a process fork storm.
+ * Spawn one of the `__secrets-*` sync clients via `getCliLaunch`. The old
+ * `process.execPath -e` pattern broke on the bun-compiled Mach-O binary
+ * (1.20.53); routing through getCliLaunch fixes both install shapes. The
+ * subcommands are intercepted in index.ts before commander/startup so a cache
+ * hit doesn't fork detached syncs or run update checks.
  */
 export function syncClientLaunch(sub: string[], agentsBin?: string): { command: string; args: string[] } {
   return agentsBin ? getCliLaunch(sub, agentsBin) : getCliLaunch(sub);
 }
 
 function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | null {
-  // Soft on every failure: bundles.ts's fast path promises "any failure falls
-  // through to the real keychain read below". spawnSync reports most failures
-  // via r.error rather than throwing, but getCliLaunch/getAgentsBinPath DO
-  // throw on a broken install — a bunfs entry whose execPath is gone, or a
-  // browser/computer shim with no sibling index.js. Without this catch those
-  // turn a graceful fallback into a crash, and only on already-degraded
-  // installs, which is the worst time for it.
+  // Soft on every failure: the fast path must fall through to the real keychain
+  // read. getCliLaunch can throw on broken installs; crashing there turns a
+  // graceful fallback into a failure at the worst time.
   try {
     const { command, args } = syncClientLaunch(sub);
     return spawnSync(command, args, { encoding: 'utf-8', timeout });
@@ -1093,9 +874,8 @@ function syncClient(sub: string[], timeout: number): SpawnSyncReturns<string> | 
 }
 
 /**
- * Synchronous read for the hot path. Returns the cached resolved bundle, or
- * null if the agent isn't running / doesn't hold this bundle / anything fails
- * (soft — caller falls through to the real keychain). macOS only.
+ * Synchronous read for the hot path. Returns null on any failure so the caller
+ * falls through to the real keychain. macOS only.
  */
 export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { bundle: SecretsBundle; env: Record<string, string>; lease?: SecretLease } | null {
   if (!isSecretsBrokerEnabled()) return null;
@@ -1112,17 +892,9 @@ export function agentGetSync(name: string, harness: string = GLOBAL_HARNESS): { 
 }
 
 /**
- * Last non-empty line of a child's stdout — the payload line.
- *
- * The inline `node -e` client this replaced was a bare node process that could
- * only ever emit its own JSON. The replacement boots the real CLI, so anything
- * the CLI prints on the way up shares that stream. Today the known chatter (the
- * `~/.agents/ is N commits behind` notice) correctly goes to stderr, but a
- * single future stdout write anywhere in startup would make `JSON.parse` throw
- * and turn every cache hit back into a silent miss — i.e. quietly reintroduce
- * the Touch-ID-on-every-read bug this fix closes, with no failing test to catch
- * it. Anchoring on the last line makes the payload the terminator of the
- * stream rather than the whole of it, so preceding chatter is inert.
+ * Last non-empty line of a child's stdout — the payload line. Anchors on the
+ * terminator so any future CLI startup chatter on stdout doesn't break JSON.parse
+ * and silently turn cache hits into misses.
  */
 export function lastLine(stdout: string): string {
   const lines = stdout.split('\n');
@@ -1134,12 +906,9 @@ export function lastLine(stdout: string): string {
 }
 
 /**
- * Synchronous liveness check: is a broker actually LISTENING and answering (not
- * just a lingering socket file)? Used to decide whether the auto-cache may take
- * the synchronous warm path — a dead broker whose socket outlived it (crash,
- * OOM, version-skew teardown) must NOT drag a foreground read through the
- * worker's 20s cold-start budget. A stale socket refuses instantly, so this is
- * fast in both the alive and dead cases. macOS only.
+ * Synchronous liveness check: is a broker actually listening? Gates the
+ * synchronous warm path so a stale socket doesn't drag a foreground read
+ * through a cold-start. macOS only.
  */
 export function agentReachableSync(): boolean {
   if (!onDarwin()) return false;
@@ -1149,12 +918,8 @@ export function agentReachableSync(): boolean {
 }
 
 /**
- * Synchronously evict one bundle from the broker. Called after a mutating
- * keychain write (add / rotate / remove / rename / delete) so the broker never
- * keeps serving the pre-write snapshot for up to the ~7d hold — the next read
- * re-resolves from the keychain (one prompt) and re-caches fresh values.
- * Best-effort: no broker, no socket, or any failure is a silent no-op.
- * macOS only.
+ * Synchronously evict one bundle after a mutating write so the broker doesn't
+ * serve a stale snapshot for the hold window. Best-effort silent no-op. macOS only.
  */
 export function agentEvictSync(name: string): void {
   if (!onDarwin()) return;
@@ -1164,28 +929,14 @@ export function agentEvictSync(name: string): void {
 }
 
 // ─── Top-level `__secrets-*` sync-client entrypoints ────────────────────────
-// The bodies behind the three spawns above. Each does one socket round-trip and
-// signals the parent through its exit code, mirroring the inline `node -e`
-// programs these replaced: 0 = hit/alive, 3 = miss/down. Lock deviates twice:
-// it reports 0 even when no broker answers, and 3 for an empty name, which it
-// refuses rather than forwarding as a lock-ALL (see runAgentLockSync).
-// Dispatched from index.ts BEFORE commander and before the startup statements,
-// so a cache hit never runs checkForUpdates() or forks a detached sync.
+// Dispatched from index.ts before commander/startup so cache hits stay cheap.
 
-/** Body of `__secrets-get <name>`. Prints `{bundle, env}` as JSON on a
- * cache hit. Exit 0 = hit, 3 = miss or broker down. */
+/** Body of `__secrets-get <name>`. Exit 0 = hit, 3 = miss/down. */
 export async function runAgentGetSync(name: string, harness: string = GLOBAL_HARNESS): Promise<number> {
   const r = await request({ cmd: 'get', name, harness }, SOCKET_GET_TIMEOUT_MS);
   if (r?.ok === true && r.cmd === 'get' && r.hit) {
-    // Trailing newline: the parent reads the LAST line (see lastLine), so the
-    // payload must terminate the stream even if anything ever precedes it.
-    //
-    // Awaited on the write callback, not fire-and-forget: stdout is a pipe here
-    // (the parent captures it), pipe writes are asynchronous, and the caller
-    // exits the process the moment this resolves. An unflushed write would be
-    // truncated on exit — the parent would see a partial or empty payload, treat
-    // it as a miss, and fall through to a keychain read, silently costing the
-    // Touch ID prompt this whole path exists to avoid.
+    // Terminate with a newline and await the write callback; an unflushed pipe
+    // write would be truncated on exit and cost a Touch ID prompt.
     const payload = JSON.stringify({ bundle: r.bundle, env: r.env, lease: r.lease }) + '\n';
     await new Promise<void>((resolve) => { process.stdout.write(payload, () => resolve()); });
     return 0;
@@ -1193,25 +944,16 @@ export async function runAgentGetSync(name: string, harness: string = GLOBAL_HAR
   return 3;
 }
 
-/** Body of `__secrets-ping`. Exit 0 = a broker is listening and speaking
- * our protocol, 3 = nothing there. Deliberately does NOT gate on
- * PROTOCOL_VERSION: this only decides whether the auto-cache may take the
- * synchronous warm path, and a version-skewed broker still answers reads. That
- * matches the inline program this replaced. */
+/** Body of `__secrets-ping`. Exit 0 = listening broker, 3 = nothing there.
+ * Does not gate on PROTOCOL_VERSION so version-skewed brokers still answer reads. */
 export async function runAgentPingSync(): Promise<number> {
   const r = await request({ cmd: 'ping' }, SOCKET_PING_TIMEOUT_MS);
   return r?.ok === true && r.cmd === 'ping' ? 0 : 3;
 }
 
 /** Body of `__secrets-lock <name>`. Best-effort evict; exit 0 even when no
- * broker answers, so a missing broker never fails the mutating write that
- * triggered it (agentEvictSync discards this either way).
- *
- * An empty name is refused rather than forwarded: the broker treats a nameless
- * lock as lock-ALL (handleAgentRequest), so a bare `__secrets-lock` would wipe
- * every held bundle and re-prompt Touch ID for each. That was unreachable while
- * this was an inline `node -e` string; as a top-level argv token it is one typo
- * away, and agentEvictSync only ever locks by name. */
+ * broker answers. An empty name is refused to avoid accidentally locking ALL
+ * bundles. */
 export async function runAgentLockSync(name: string): Promise<number> {
   if (!name) return 3;
   await request({ cmd: 'lock', name }, SOCKET_LOCK_TIMEOUT_MS);
@@ -1222,11 +964,9 @@ export async function runAgentLockSync(name: string): Promise<number> {
 const META_SNAPSHOT_KEY = '__snapshot__';
 
 /**
- * Read the cached `secrets list` metadata snapshot for the given keychain
- * name-set hash, or null on miss / no broker / off-darwin. Reuses the value
- * fast-path socket read (agentGetSync) — no prompt, no wire change. The hash is
- * the cache key: a changed name-set (bundle added/removed/renamed) yields a
- * different key and therefore a clean miss, so the stale set is never served.
+ * Read the cached `secrets list` metadata snapshot for a keychain name-set hash.
+ * Reuses agentGetSync. The name-set hash is the cache key, so add/remove/rename
+ * yields a clean miss.
  */
 export function agentGetMetaSync(nameSetHash: string): SecretsBundle[] | null {
   if (!onDarwin()) return null;
@@ -1242,11 +982,9 @@ export function agentGetMetaSync(nameSetHash: string): SecretsBundle[] | null {
 }
 
 /**
- * Fire-and-forget: populate the broker with a freshly-read metadata snapshot so
- * the next `secrets list` within the hold window renders without a prompt.
- * Stored as an ordinary entry (placeholder bundle, snapshot in env) under the
- * reserved META_CACHE_PREFIX key; the snapshot travels over stdin to the
- * detached worker (never argv/disk), same as value caching. macOS only.
+ * Fire-and-forget: populate the broker with a metadata snapshot so the next
+ * `secrets list` within the hold window is prompt-free. Stored under a reserved
+ * META_CACHE_PREFIX key; snapshot travels over stdin. macOS only.
  */
 export function agentAutoLoadMetaSync(nameSetHash: string, bundles: SecretsBundle[], ttlMs: number): void {
   if (!onDarwin()) return;

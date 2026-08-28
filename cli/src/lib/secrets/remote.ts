@@ -1,19 +1,9 @@
 /**
  * Remote secrets — read and use `agents secrets` bundles that live on another
- * host, over the same hardened SSH path that `agents secrets export --device`
- * (the write inverse) already uses.
+ * host over the same SSH path that `agents secrets export --device` uses.
  *
- * This is the READ / USE direction:
- *   - browse:  drive the remote `agents secrets list|view` and stream its
- *              stdout back verbatim (lossless, no parsing).
- *   - use:     resolve a remote bundle to an env map (JSON over ssh stdout) and
- *              inject it ephemerally — never written to this machine's keychain.
- *
- * Trust model: relies on the operator's existing SSH access to the host (same
- * boundary as `export --device` / `run --device`). Bundle names are shell-quoted
- * into the remote command; resolved VALUES return over ssh stdout. File-backend
- * import never forwards AGENTS_SECRETS_PASSPHRASE (PHNX-2371). Nothing is
- * persisted locally.
+ * Browse streams remote stdout verbatim; use resolves a bundle to an env map
+ * and injects it ephemerally without persisting it locally.
  */
 
 import { sshExec, sshStream, assertValidSshTarget, shellQuote, type SshExecResult } from '../ssh-exec.js';
@@ -33,21 +23,8 @@ function hostKeyLookupName(target: string): string {
 }
 
 /**
- * SSH options for a SECRET-carrying transport (RUSH-2527). Every `agents secrets
- * --host` operation moves credential bytes — over ssh stdin (push) or ssh stdout
- * (resolve/read-back) — so it MUST NOT ride the shared `accept-new` baseline
- * against the user's own `~/.ssh/known_hosts` with a reusable control socket.
- * Two hardenings over that baseline, matching the posture the `--copy-creds`
- * dispatch already uses (`hosts/dispatch.ts` -> `hostKeyCheckingOpts`):
- *
- *   - **Managed pinned host keys.** Verify against the CLI-owned known_hosts
- *     store (`known-hosts.ts`), not `~/.ssh/known_hosts`. A CHANGED key on a
- *     known host is refused (`StrictHostKeyChecking` `yes` once pinned,
- *     `accept-new` before that). Callers that copy durable provider credentials
- *     must separately require an existing pin before invoking this transport.
- *   - **No multiplex reuse.** `multiplex: false` — a credential channel never
- *     leaves a persistent `ControlMaster` socket lingering (60s `ControlPersist`)
- *     that any other `agents` invocation to that host would silently reuse.
+ * SSH options for secret-carrying transport. Pins the managed host key and
+ * disables multiplex so no reusable control socket lingers for other invocations.
  */
 export function credentialTransportSshOpts(target: string): { hostKeyOpts: string[]; multiplex: false } {
   return { hostKeyOpts: hostKeyCheckingOpts(isHostPinned(hostKeyLookupName(target))), multiplex: false };
@@ -63,45 +40,32 @@ export function assertCredentialTransportHostPinned(target: string, pinned = isH
 }
 
 /**
- * Trust boundary for a remote-resolved env map. A peer's `secrets export` output
- * is untrusted input: a compromised or misconfigured host could return keys that
- * silently reshape THIS process's behavior once merged into the agent env
- * (bundles.ts:251 `sanitizeProcessEnv` only strips loader vars from process.env,
- * never the remote bundle). Block the dangerous-override classes here — at the
- * source — so every consumer (`run --secrets b@host`, `secrets exec --host`) is
- * protected, not just one call site:
- *   - LD_* / DYLD_* / NODE_OPTIONS and the other loader/interpreter injections
- *     (reuses the canonical bundles.ts predicate);
- *   - GIT_*        — GIT_SSH_COMMAND et al. hijack every git subprocess;
- *   - *_PROXY      — HTTP(S)_PROXY / ALL_PROXY reroute outbound traffic (MITM);
- *   - *_BASE_URL   — ANTHROPIC_BASE_URL / OPENAI_BASE_URL redirect the model API.
- * These keys are already rejected on the ADD side (validateEnvKey for loaders),
- * so a legitimate bundle never carries them — only a hostile peer would.
+ * Trust boundary for a remote-resolved env map. A peer's export output is
+ * untrusted input that could reshape this process once merged into the env, so
+ * block dangerous override classes here for every consumer:
+ * loader/interpreter vars, GIT_*, *_PROXY, and *_BASE_URL.
  */
 export function isDangerousRemoteEnvKey(name: string): boolean {
   const upper = name.toUpperCase();
   if (isLoaderOrInterpreterEnv(upper)) return true;
-  if (upper.startsWith('GIT_')) return true;
-  if (upper.endsWith('_PROXY')) return true;
-  if (upper.endsWith('_BASE_URL')) return true;
+  if (upper.startsWith('GIT_')) return true; // GIT_SSH_COMMAND hijacks git subprocesses
+  if (upper.endsWith('_PROXY')) return true; // *_PROXY = MITM
+  if (upper.endsWith('_BASE_URL')) return true; // *_BASE_URL = model API redirect
   return false;
 }
 
 /** Remote OS for a host name or target string. Prefer the original host name
- * because enrolled inline hosts resolve to `user@address`, while the OS
- * registry is keyed by the host name. */
+ *  because enrolled inline hosts resolve to `user@address`, while the OS
+ *  registry is keyed by the host name. */
 function osForTarget(target: string, lookupName?: string): string | undefined {
   const byName = lookupName ? resolveRemoteOsSync(lookupName) : undefined;
   return byName ?? resolveRemoteOsSync(target.split('@').pop() ?? target);
 }
 
 /**
- * Resolve a `--device` value to an ssh target STRING for the remote-secrets path.
- * Delegates to the single host/device resolver (`resolveHost`, RUSH-1967) so a
- * name here dials the exact same box `run --device` does; on a miss, treats the
- * value as a raw ssh target and validates it against injection. Named distinctly
- * from `../devices/resolve-target.ts` (which returns richer shapes) so importing
- * the wrong one can't silently change which machine you dial.
+ * Resolve a `--device` value to an ssh target string for the remote-secrets
+ * path. Delegates to the same resolver `run --device` uses; on a miss, treats
+ * the value as a raw ssh target and validates it.
  */
 export async function resolveHostSshTarget(nameOrAlias: string): Promise<string> {
   const host = await resolveHost(nameOrAlias);
@@ -111,11 +75,8 @@ export async function resolveHostSshTarget(nameOrAlias: string): Promise<string>
 }
 
 /**
- * Merge `--host <single>` / `--hosts <a,b,c>` (and their `--device` / `--devices`
- * aliases) into an ordered, de-duplicated list. All four flags compose; any alone
- * works. `--device`/`--devices` resolve identically to `--device`/`--hosts` so the
- * fleet-wide `--device` vocabulary (see `agents run --device`, `agents feed --host`)
- * works on the secrets remote commands too. Empty when none is set.
+ * Merge `--host` / `--hosts` (and their `--device` / `--devices` aliases) into
+ * an ordered, de-duplicated list. Empty when none is set.
  */
 export function parseHostsOption(opts: {
   host?: string;
@@ -140,11 +101,9 @@ export function parseHostsOption(opts: {
 }
 
 /**
- * Split a `bundle@host` reference. No `@` → a local bundle (host undefined).
- * Bundle names can't contain `@` (BUNDLE_NAME_PATTERN), so the FIRST `@`
- * separates the bundle from the ssh target — and the target itself may be a
- * `user@host` (e.g. `r2.backups@muqsit@box` → bundle `r2.backups`, host
- * `muqsit@box`).
+ * Split a `bundle@host` reference. No `@` → a local bundle. Bundle names can't
+ * contain `@`, so the FIRST `@` separates bundle from ssh target; the target
+ * itself may be `user@host` (e.g. `r2.backups@muqsit@box`).
  */
 export function splitBundleRef(ref: string): { bundle: string; host?: string } {
   const at = ref.indexOf('@');
@@ -159,9 +118,8 @@ export function splitBundleRef(ref: string): { bundle: string; host?: string } {
 
 /**
  * Run `agents secrets <args>` on a remote host over ssh and return the raw
- * result. Used by the browse commands — the remote's human-readable stdout is
- * streamed back unchanged. `tty` forces an interactive ssh session (`-tt`) so a
- * remote Touch-ID / passphrase prompt can surface (e.g. `view --reveal`).
+ * result. Used by browse commands; `tty` forces `-tt` so remote passphrase
+ * prompts can surface.
  */
 export function remoteSecretsRaw(
   target: string,
@@ -169,13 +127,8 @@ export function remoteSecretsRaw(
   opts: { tty?: boolean; input?: string; osLookupName?: string; secret?: boolean } = {},
 ): SshExecResult {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
-  // A secret-bearing call (`secret: true`) pins the managed host key and refuses
-  // to multiplex — see `credentialTransportSshOpts` (RUSH-2527). A `-tt` session
-  // (a remote reveal/passphrase prompt) additionally allocates a PTY and never
-  // multiplexes, and it COMPOSES with the secret posture: a `view --reveal` over
-  // `--device` both prompts AND streams the plaintext value back over ssh stdout,
-  // so it needs the managed host-key pin too — `tty` must not short-circuit past
-  // `secret`. A plain browse `list` passes neither and keeps the shared baseline.
+  // `secret: true` pins the managed host key and refuses multiplex; `-tt`
+  // additionally allocates a PTY and never multiplexes. The two compose.
   const posture = opts.secret ? credentialTransportSshOpts(target) : {};
   const conn = opts.tty
     ? { ...posture, extraSshArgs: ['-tt'], multiplex: false as const }
@@ -188,38 +141,23 @@ export function remoteSecretsRaw(
 }
 
 /**
- * Run a remote `agents secrets <args>` FOREGROUND, with the local stdio wired
- * straight through (`stdio: 'inherit'` + `-tt`), and return its exit code.
- *
- * Unlike `remoteSecretsRaw` — which pipes stdin, so even with `-tt` the remote
- * process's `process.stdin.isTTY` is false and a passphrase prompt refuses to
- * appear (the macOS file-store guard then hard-errors "needs
- * AGENTS_SECRETS_PASSPHRASE") — this inherits the caller's real terminal, so the
- * remote sees a genuine TTY and its hidden passphrase prompt surfaces and reads
- * the keystrokes. This is the transport for `unlock --device`: you type the remote
- * bundle's passphrase at your own terminal. Output is NOT captured (it streams
- * to the terminal); only the exit code is returned.
+ * Run a remote `agents secrets <args>` foreground with local stdio inherited,
+ * so the remote sees a real TTY and its passphrase prompt surfaces and reads
+ * keystrokes. Output streams to the terminal; only the exit code is returned.
  */
 export function remoteSecretsStream(target: string, args: string[], opts: { osLookupName?: string } = {}): number {
   const remoteCmd = buildRemoteAgentsInvocation(['secrets', ...args], undefined, osForTarget(target, opts.osLookupName));
-  // `unlock --device` carries the remote bundle's passphrase to the destination over
-  // this interactive channel, so it is secret-bearing: pin the managed host key
-  // (a changed key is refused) and never multiplex (RUSH-2527).
   return sshStream(target, remoteCmd, { tty: true, ...credentialTransportSshOpts(target) });
 }
 
 /**
  * Resolve a remote bundle to a plaintext env map by driving the remote's
  * `agents secrets export <bundle> --plaintext --format json`. Values cross over
- * ssh stdout (encrypted in transit), parsed in memory, never persisted.
+ * ssh stdout, parsed in memory, never persisted.
  *
- * The remote unlocks the bundle with ITS OWN credentials — the owner host's
- * keychain/secrets-agent, or its own `AGENTS_SECRETS_PASSPHRASE` (in the login
- * env) for a file-backed bundle. We deliberately do NOT forward this machine's
- * passphrase: the remote bundle is encrypted with the remote's passphrase, so
- * overriding it would break the read. (A macOS remote under non-interactive
- * SSH will block on Touch-ID — use `view`/`exec` with a remote `file` bundle,
- * an already-unlocked remote secrets-agent, or an interactive `-tt` session.)
+ * The remote unlocks the bundle with its own credentials; this machine does NOT
+ * forward its passphrase because the remote bundle is encrypted with the
+ * remote's passphrase.
  */
 export async function remoteResolveEnv(
   target: string,
@@ -227,20 +165,14 @@ export async function remoteResolveEnv(
   opts: { osLookupName?: string } = {},
 ): Promise<Record<string, string>> {
   assertValidSshTarget(target);
-  // AGENTS_SECRETS_REMOTE_TRANSPORT is the marker that lets the remote's
-  // `export --plaintext --format json` emit at all — the public shell-eval
-  // export mode was removed (RUSH-2774), and this machine-to-machine resolve is
-  // the only surviving caller of the JSON emitter. Riding the legacy argv keeps
-  // a new driver compatible with an old remote during a fleet rollout.
+  // AGENTS_SECRETS_REMOTE_TRANSPORT marks this as the machine-to-machine JSON
+  // resolve path (the public shell-eval export mode was removed).
   const remoteCmd = buildRemoteAgentsInvocation(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
     undefined,
     osForTarget(target, opts.osLookupName),
     { AGENTS_SECRETS_REMOTE_TRANSPORT: '1' },
   );
-  // Resolving a remote bundle streams its plaintext values back over ssh stdout,
-  // so this read is secret-bearing: pin the managed host key and never leave a
-  // reusable control master to the source (RUSH-2527, `credentialTransportSshOpts`).
   const res: SshExecResult = sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
     ...credentialTransportSshOpts(target),
@@ -272,8 +204,7 @@ export async function remoteResolveEnv(
   const env: Record<string, string> = {};
   const blocked: string[] = [];
   for (const [k, v] of Object.entries(parsed as Record<string, unknown>)) {
-    // Drop dangerous-override keys returned by the (untrusted) peer before they
-    // can reshape this process — see isDangerousRemoteEnvKey.
+    // Drop dangerous-override keys returned by the (untrusted) peer.
     if (isDangerousRemoteEnvKey(k)) {
       blocked.push(k);
       continue;
@@ -286,10 +217,7 @@ export async function remoteResolveEnv(
         `(remote override blocked): ${blocked.join(', ')}\n`,
     );
   }
-  // The remote host audits its own `secrets export` read; this emit records the
-  // event on the INITIATING host too (values were pulled into this process and
-  // injected locally). Covers `secrets exec --host` and `run --secrets b@host`.
-  // Values never enter the payload — only the bundle, target host, and count.
+  // Audit the event on the initiating host too; values never enter the payload.
   emitSecretAudit({
     event: 'secrets.get',
     bundle,
@@ -303,17 +231,10 @@ export async function remoteResolveEnv(
 }
 
 /**
- * Outcome of a post-push read-back verification (see verifyRemoteKeychainPush).
- *   - `ok`               — the pushed keys materialized readably on the remote.
- *   - `locked-keychain`  — the read-back gave the SPECIFIC signal of a keychain
- *                          that didn't persist (the remote's headless "not unlocked
- *                          in the secrets agent" guard, or a "stored item … not
- *                          found" on read-back, or pushed keys simply absent). Only
- *                          this verdict earns the locked-login-keychain diagnosis +
- *                          `--remote-backend file` steer.
- *   - `error`            — a DIFFERENT failure (flaky SSH, timeout, unparseable
- *                          payload). The raw error is re-surfaced verbatim, never
- *                          mislabeled as a locked keychain.
+ * Outcome of a post-push read-back verification.
+ *   - `ok`              — the pushed keys materialized readably.
+ *   - `locked-keychain` — read-back gave the specific locked-keychain signal.
+ *   - `error`           — a different failure (SSH, timeout, etc.).
  */
 export type RemoteKeychainWriteVerification =
   | { ok: true }
@@ -321,42 +242,24 @@ export type RemoteKeychainWriteVerification =
   | { ok: false; kind: 'error'; reason: string };
 
 /**
- * The remote's headless read-back raises one of these when a keychain-backed bundle
- * has metadata but no readable value items — the exact locked-login-keychain
- * signature. Anything else (connection refused, timeout, host key error) is a
- * transient/unrelated failure and must NOT be mislabeled as a locked keychain.
+ * True when the remote's headless read-back raised the locked-login-keychain
+ * signature. Anything else must NOT be mislabeled as a locked keychain.
  */
 function isLockedKeychainReadBackError(stderr: string): boolean {
   const s = stderr.toLowerCase();
   return (
-    // bundles.ts agentOnly guard: "…is not unlocked in the secrets agent…"
     s.includes('not unlocked') ||
     s.includes('secrets agent') ||
-    // resolveBundleEnv: "Bundle '<b>' key '<k>': stored item '<item>' not found."
     s.includes('stored item') ||
     s.includes('not found')
   );
 }
 
 /**
- * Decide whether a keychain-backed push to a remote actually PERSISTED its secret
- * value items, given the read-back of that bundle from the remote's own store.
- *
- * The silent-failure this guards: pushing `--remote-backend keychain` (default) to
- * a macOS host over headless SSH lands the bundle METADATA but not readable value
- * items — the remote login keychain is locked in the non-interactive SSH context,
- * so Security accepts the item WRITE at the DB level but the biometry-ACL'd item is
- * unreadable, and the remote `import` still reports success (values written first,
- * metadata `noAcl` last — bundles.ts writeBundleWithItems). The metadata-only bundle
- * then fails every later read with the confusing `Bundle '<b>' key '<k>': stored
- * item '<item>' not found` (bundles.ts resolveBundleEnv). We catch it by reading
- * the bundle back the same way a later `secrets exec`/resolve will (the marker-gated
- * json transport, driven headlessly on the remote so its `agentOnly` guard FAILS FAST
- * before any keychain read — no Touch ID prompt) and confirming every pushed key
- * returned.
- *
- * Pure so both branches are unit-testable without a real locked keychain: inject the
- * "read-back failed / key absent" condition through `readBack`.
+ * Decide whether a keychain-backed push to a remote actually persisted its
+ * secret value items by reading the bundle back the same way a later resolve
+ * will. Catches the silent failure where headless SSH writes metadata but not
+ * readable value items to a locked macOS login keychain.
  */
 export function evaluateKeychainWriteVerification(
   pushedKeys: string[],
@@ -367,17 +270,12 @@ export function evaluateKeychainWriteVerification(
   if (!readBack.ok) {
     const stderr = readBack.stderr.trim();
     if (isLockedKeychainReadBackError(stderr)) {
-      // The remote's own headless read raised the not-unlocked / not-found signal —
-      // exactly the confusing error the user hits later. Surface it now, at push
-      // time, with the fix.
       return {
         ok: false,
         kind: 'locked-keychain',
         reason: `the remote could not read it back${stderr ? ` (${stderr})` : ''}`,
       };
     }
-    // A transient / unrelated failure (flaky SSH, timeout, bad payload). Re-surface
-    // verbatim — do NOT diagnose a locked keychain from a connection error.
     return {
       ok: false,
       kind: 'error',
@@ -387,8 +285,6 @@ export function evaluateKeychainWriteVerification(
   const present = new Set(readBack.keys);
   const missing = pushedKeys.filter((k) => !present.has(k));
   if (missing.length > 0) {
-    // Read-back succeeded but some pushed keys are absent — the value items didn't
-    // persist. Same locked-keychain cause and fix.
     return {
       ok: false,
       kind: 'locked-keychain',
@@ -401,10 +297,8 @@ export function evaluateKeychainWriteVerification(
 }
 
 /**
- * The actionable error message for a failed keychain-over-SSH push verification.
- * Names the cause (locked remote login keychain) and steers to the two real fixes:
- * re-run with the headless-readable file backend, or unlock the remote keychain.
- * Pure + exported so the exact guidance is asserted in tests.
+ * Actionable error message for a failed keychain-over-SSH push. Names the cause
+ * (locked remote login keychain) and steers to the two real fixes.
  */
 export function keychainWriteFailureMessage(
   host: string,
@@ -423,13 +317,9 @@ export function keychainWriteFailureMessage(
 }
 
 /**
- * Read a bundle back from a remote over SSH (headlessly, so it fails fast rather
- * than prompting Touch ID) and confirm the pushed keys materialized. Drives the
- * remote's marker-gated json transport (`secrets export <bundle> --plaintext
- * --format json` under AGENTS_SECRETS_REMOTE_TRANSPORT) but keeps only the KEY
- * NAMES; the plaintext values are dropped immediately and never retained or
- * logged. Returns a verification verdict; the caller renders
- * `keychainWriteFailureMessage` on failure.
+ * Read a bundle back from a remote over SSH and confirm the pushed keys
+ * materialized. Drives the marker-gated json transport but keeps only KEY NAMES;
+ * plaintext values are discarded immediately. Returns a verification verdict.
  */
 export function verifyRemoteKeychainPush(
   target: string,
@@ -441,13 +331,8 @@ export function verifyRemoteKeychainPush(
     ['secrets', 'export', bundle, '--plaintext', '--format', 'json'],
     undefined,
     osForTarget(target, opts.osLookupName),
-    // Same transport marker as remoteResolveEnv — see the comment there (RUSH-2774).
     { AGENTS_SECRETS_REMOTE_TRANSPORT: '1' },
   );
-  // This read-back streams the just-pushed plaintext over ssh stdout, so it is
-  // as secret-bearing as the push itself — the push path passes `secret: true`
-  // so it too pins the managed host key and leaves no reusable control master to
-  // the destination (RUSH-2527).
   const res: SshExecResult = sshExec(target, remoteCmd, {
     timeoutMs: REMOTE_TIMEOUT_MS,
     ...(opts.secret ? credentialTransportSshOpts(target) : {}),
@@ -457,8 +342,7 @@ export function verifyRemoteKeychainPush(
     const stderr = `${why}${(res.stderr || res.stdout || '').trim() ? `: ${(res.stderr || res.stdout).trim()}` : ''}`;
     return evaluateKeychainWriteVerification(pushedKeys, { ok: false, stderr });
   }
-  // Take the outer { … } object (tolerate login-shell banner noise), read the key
-  // names, and immediately discard the values — we only need presence here.
+  // Tolerate login-shell banner noise; keep only key names and discard values.
   const raw = res.stdout;
   const start = raw.indexOf('{');
   const end = raw.lastIndexOf('}');
@@ -483,18 +367,12 @@ export function verifyRemoteKeychainPush(
 }
 
 /**
- * The `bash -lc` command + stdin payload that drives a **file-backed** remote
- * import for `secrets export --device … --remote-backend file`.
+ * `bash -lc` command + stdin payload for a file-backed remote import.
  *
- * The file store is passphrase-free: the remote `agents secrets import --backend
- * file` auto-provisions the remote's own machine-local key (0600 under
- * `~/.agents/.secrets-key/`), so its reads are HEADLESS — no passphrase, no
- * Touch ID. AGENTS_SECRETS_PASSPHRASE is a deprecated override and MUST NOT be
+ * The file store is passphrase-free: the remote auto-provisions its own machine-
+ * local key, so reads are headless. AGENTS_SECRETS_PASSPHRASE must NOT be
  * forwarded (PHNX-2371): a remote keyed to a secret its daemon does not hold
  * reports "Imported N key(s)" then fails every later decrypt.
- *
- * Pure — no I/O — so the exact command string and stdin ordering are unit-testable
- * against the SSH boundary the same way `remoteSecretsRaw` is.
  */
 export function buildRemoteFileImportCommand(
   bundle: string,
@@ -504,7 +382,6 @@ export function buildRemoteFileImportCommand(
   const force = opts.force ? ' --force' : '';
   const policy = opts.policyNever ? ' --policy never --i-understand' : '';
   const importCmd = `agents secrets import ${shellQuote(bundle)} --from - --backend file${force}${policy}`;
-  // No prologue — AGENTS_SECRETS_PASSPHRASE stays unset on the remote, so the
-  // file store falls back to its machine-local key (headless).
+  // No prologue — AGENTS_SECRETS_PASSPHRASE stays unset on the remote.
   return { remoteCmd: `bash -lc ${shellQuote(importCmd)}`, input: dotenv };
 }
