@@ -64,12 +64,32 @@ export function buildModelChoices(models: ModelInfo[], current?: string): Wizard
 }
 
 /**
+ * Prompt over an already-resolved catalog: a `select` of the models plus the
+ * keep-current / custom-id rows, mapping the sentinel choices back to a concrete
+ * model id. Split from the catalog probe so the KEEP / CUSTOM / pick branches are
+ * unit-tested with a scripted IO and no installed agent.
+ */
+export async function chooseModelFromCatalog(
+  io: WizardIO,
+  models: ModelInfo[],
+  current: string | undefined,
+): Promise<string> {
+  const choice = await io.select<string>({
+    message: 'Model',
+    choices: buildModelChoices(models, current),
+  });
+  if (choice === KEEP_MODEL) return current ?? '';
+  if (choice === CUSTOM_MODEL) return io.input({ message: 'Model id', default: current });
+  return choice;
+}
+
+/**
  * The catalog-backed model pick (RUSH-2220). Returns the chosen model id, or
  * `null` to fall through to the engine's free-text prompt when the host exposes
  * no probeable catalog — so a host we can't enumerate degrades to today's
  * free-text behaviour rather than blocking.
  */
-async function pickModel(
+export async function pickModel(
   io: WizardIO,
   host: AgentId | undefined,
   version: string | undefined,
@@ -80,14 +100,7 @@ async function pickModel(
   if (!resolvedVersion) return null;
   const catalog = getModelCatalog(host, resolvedVersion);
   if (!catalog || catalog.models.length === 0) return null;
-
-  const choice = await io.select<string>({
-    message: 'Model',
-    choices: buildModelChoices(catalog.models, current),
-  });
-  if (choice === KEEP_MODEL) return current ?? null;
-  if (choice === CUSTOM_MODEL) return io.input({ message: 'Model id', default: current });
-  return choice;
+  return chooseModelFromCatalog(io, catalog.models, current);
 }
 
 /**

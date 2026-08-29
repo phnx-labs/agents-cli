@@ -4,7 +4,7 @@ import * as os from 'os';
 import * as path from 'path';
 import * as state from '../lib/state.js';
 import { addProfile, applyFromSecrets } from './profiles.js';
-import { buildFork, buildEdit, hasEditFlags, forkNeedsWizard, addNeedsWizard } from './harness.js';
+import { buildFork, buildEdit, hasEditFlags, forkNeedsWizard, addNeedsWizard, connectionTestGate } from './harness.js';
 import { profileExists, readProfile, writeProfile, type Profile } from '../lib/profiles.js';
 import { setKeychainBackendForTest, secretsKeychainItem, getKeychainToken, type KeychainBackend } from '../lib/secrets/index.js';
 import { keychainItemName } from '../lib/secrets/profiles.js';
@@ -341,5 +341,22 @@ describe('applyFromSecrets — copy a value out of an agents secrets bundle', ()
   it('throws a clear error when the host has no known auth env var to attach', async () => {
     const profile: Profile = { name: 'spark', host: { agent: 'cursor' }, env: {} };
     await expect(applyFromSecrets(profile, 'prod')).rejects.toThrow(/no known auth env var/i);
+  });
+});
+
+describe('connectionTestGate — the tri-state pre-save connection-test gate (RUSH-2221)', () => {
+  it('--test forces the test on, on a TTY or not', () => {
+    expect(connectionTestGate(true, true)).toBe('on');
+    expect(connectionTestGate(true, false)).toBe('on');
+  });
+
+  it('--no-test forces the test off, on a TTY or not', () => {
+    expect(connectionTestGate(false, true)).toBe('off');
+    expect(connectionTestGate(false, false)).toBe('off');
+  });
+
+  it('with neither flag, asks on a TTY and skips non-interactively (scripting stays quiet)', () => {
+    expect(connectionTestGate(undefined, true)).toBe('ask');
+    expect(connectionTestGate(undefined, false)).toBe('off');
   });
 });

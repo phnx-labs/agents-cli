@@ -259,23 +259,36 @@ export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions
   return !getPreset(name);
 }
 
+/** Whether the pre-save connection test runs, or must be asked for on a TTY. */
+export type ConnectionTestGate = 'on' | 'off' | 'ask';
+
+/**
+ * Resolve the tri-state connection-test gate (RUSH-2221), pure so the branching
+ * is unit-tested with no prompt or spawn. `--test` forces it on, `--no-test`
+ * forces it off, and with neither flag a TTY is asked (default yes) while a
+ * non-interactive caller (`--key-stdin`, piped, CI) skips it — so scripting stays
+ * non-interactive unless it opts in with `--test`.
+ */
+export function connectionTestGate(testFlag: boolean | undefined, interactive: boolean): ConnectionTestGate {
+  if (testFlag === true) return 'on';
+  if (testFlag === false) return 'off';
+  return interactive ? 'ask' : 'off';
+}
+
 /**
  * Pre-save connection test (RUSH-2221). The harness is already on disk (the test
  * drives the real `agents run <name>` path, so it must be), so this runs a
  * classified smoke test and — on a TTY, when it fails — offers to keep it, edit
  * it, or delete-and-cancel. A test is never blocking on its own: a save is only
- * discarded when the user explicitly chooses to.
- *
- * Gating is tri-state: `--test` forces it, `--no-test` skips it, and otherwise a
- * TTY is asked (default yes) while a non-interactive caller skips it. Deleting on
- * failure throws so the calling action reports the cancel and exits non-zero.
+ * discarded when the user explicitly chooses to, so a `--test` failure in a
+ * non-interactive shell warns and keeps rather than exiting non-zero.
  */
 async function preSaveConnectionTest(name: string, testFlag: boolean | undefined): Promise<void> {
   const interactive = isInteractiveTerminal();
+  const gate = connectionTestGate(testFlag, interactive);
   let shouldTest: boolean;
-  if (testFlag === true) shouldTest = true;
-  else if (testFlag === false) shouldTest = false;
-  else if (!interactive) shouldTest = false;
+  if (gate === 'on') shouldTest = true;
+  else if (gate === 'off') shouldTest = false;
   else {
     const { confirm } = await import('@inquirer/prompts');
     shouldTest = await confirm({ message: `Test the connection for '${name}' now?`, default: true });
