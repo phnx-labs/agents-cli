@@ -29,6 +29,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { isRateLimited, noteRateLimited, parseRateLimitReset, readCached, writeCached, resolveLinearApiKey } from './linear-cache.js';
+import { reserveLinearRequest } from './linear-rate-limit.js';
 
 const LINEAR_API = 'https://api.linear.app/graphql';
 /** Overall budget across all pages — the card must never hang on Linear. */
@@ -300,6 +301,12 @@ async function fetchLinearIssuesPage(
 ): Promise<LinearIssuesResponse | undefined> {
   const apiKey = resolveApiKey();
   if (!apiKey) return undefined;
+  // Proactive shared budget (PHNX-2310): every agent on this key spends from one
+  // hourly pool, so N concurrent drains can't collectively blow Linear's 2500/hr
+  // limit. When the pool is spent, skip the request — the accumulator serves the
+  // last good (stale) snapshot instead, exactly as it does on any other failure.
+  // This is the proactive complement to the reactive 429 backoff below.
+  if (!reserveLinearRequest(apiKey)) return undefined;
   // The declared-milestone list rides along on the FIRST page only — it does
   // not paginate, and re-requesting it per page would spend up to MAX_PAGES
   // copies of the same answer.
