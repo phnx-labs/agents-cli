@@ -168,6 +168,15 @@ function renderLabelTable(title: string, rows: PerfAggregateRow[], warnMs: numbe
     ]),
     sliced.map((r) => r.p99Ms > warnMs),
   );
+  // Sub-phase break-out (agent.run's `startup` = spawn overhead before the child
+  // runs, PHNX-3468). Indented under the row so a slow boot is visible next to
+  // the total without adding columns that are empty for phaseless labels.
+  for (const r of sliced) {
+    if (!r.phases) continue;
+    for (const [name, ph] of Object.entries(r.phases)) {
+      console.log(chalk.gray(`  └ ${name}: p50 ${formatMs(ph.p50Ms)}  p90 ${formatMs(ph.p90Ms)}  (n=${ph.n})`));
+    }
+  }
 }
 
 /**

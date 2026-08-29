@@ -185,4 +185,39 @@ describe('perf/db', () => {
       fs.rmSync(repoB, { recursive: true, force: true });
     }
   });
+
+  it('aggregates a startup sub-phase from meta_json into row.phases (PHNX-3468)', () => {
+    const base = Date.now();
+    // agent.run persists { phases: { startup } } in meta_json; totals still ride durationMs.
+    for (const [startup, total] of [[40, 900], [60, 1200], [80, 1500], [100, 3000]]) {
+      recordSample({
+        tsMs: base,
+        kind: 'perf.timing',
+        label: 'agent.run',
+        durationMs: total,
+        agent: 'claude',
+        metaJson: JSON.stringify({ phases: { startup } }),
+      });
+    }
+    // A sample with no meta_json contributes to the total but not to the phase.
+    recordSample({ tsMs: base, kind: 'perf.timing', label: 'agent.run', durationMs: 500, agent: 'claude' });
+
+    const rows = aggregateSamples({ days: 1, kinds: ['perf.timing'] });
+    const run = rows.find((r) => r.label === 'agent.run');
+    expect(run).toBeDefined();
+    expect(run!.n).toBe(5); // all five count toward the total
+    expect(run!.phases?.startup).toBeDefined();
+    expect(run!.phases!.startup.n).toBe(4); // only the four with a phase
+    expect(run!.phases!.startup.p50Ms).toBe(percentile([40, 60, 80, 100], 50));
+    expect(run!.phases!.startup.p90Ms).toBe(percentile([40, 60, 80, 100], 90));
+  });
+
+  it('a malformed meta_json phase is skipped, not thrown (PHNX-3468)', () => {
+    recordSample({ kind: 'perf.timing', label: 'agent.run', durationMs: 900, metaJson: 'not json' });
+    recordSample({ kind: 'perf.timing', label: 'agent.run', durationMs: 900, metaJson: JSON.stringify({ phases: { startup: 'x' } }) });
+    const rows = aggregateSamples({ days: 1, kinds: ['perf.timing'] });
+    const run = rows.find((r) => r.label === 'agent.run');
+    expect(run).toBeDefined();
+    expect(run!.phases).toBeUndefined(); // neither row yielded a numeric phase
+  });
 });
