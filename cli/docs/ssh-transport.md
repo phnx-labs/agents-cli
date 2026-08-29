@@ -85,11 +85,15 @@ even from a *separate* `agents` invocation — rides it, skipping the TCP+auth
 handshake. This is now the **default** (`opts.multiplex === false ? [] :
 controlOpts()`); a caller opts *out* only for a genuine one-shot where a lingering
 master is pure overhead. The persist window is **10 minutes**
-(`SSH_CONTROL_PERSIST_SECONDS`), deliberately above the daemon's dominant
-5-minute service cadence so a periodic fleet poll lands on a still-warm master
-instead of paying a cold handshake every time — with the old 60 s window every
-5-minute poll was cold, so 100 % of its cost was connection setup (PHNX-2582).
-Flipping this one default is what fixes P1's poll,
+(`SSH_CONTROL_PERSIST_SECONDS`), sized to span the gap between repeated ad-hoc
+`--device` / fan-out touches of the same box (`sessions --active`, `fleet ping`,
+`doctor`, `teams`, a `--device` command run a few times while working), which
+arrive in bursts over minutes rather than on a fixed clock — at the old 60 s
+window any two more than a minute apart were both cold, so a burst paid a fresh
+handshake almost every time (PHNX-2582). It stays bounded at 10 min because a
+master reused after a host sleeps costs a ~45 s ServerAlive teardown; the daemon's
+15-minute SSH services (`usage-sync`/`auth-sync`) sit outside the window on
+purpose. Flipping this one default is what fixes P1's poll,
 P2's probes, and P4's fan-out at once — they already routed through the engine and
 simply started reusing sockets. It degrades safely: if the socket can't be opened
 ssh falls back to a fresh connection, and on Windows (no `ControlMaster`) the
