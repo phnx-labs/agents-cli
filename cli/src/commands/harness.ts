@@ -48,8 +48,11 @@ import {
   createSteps,
   editSteps,
   defaultWizardIO,
+  runConnectionTest,
   type HarnessDraft,
 } from './harness-wizard.js';
+import { harnessHooks } from './harness-hooks.js';
+import { CONNECTION_TEST_PROMPT } from '../lib/harness-connection-test.js';
 
 /** Short capability summary for a native harness — its supported run modes. */
 function nativeModes(id: (typeof ALL_AGENT_IDS)[number]): string {
@@ -91,6 +94,8 @@ export interface ForkOptions {
   fromSecrets?: string;
   keyStdin?: boolean;
   force?: boolean;
+  /** Tri-state pre-save connection test: true = force, false = skip, undefined = ask on a TTY. */
+  test?: boolean;
 }
 
 /** Options accepted by `agents harness edit`. */
@@ -107,6 +112,8 @@ export interface EditOptions {
   /** `<bundle>` or `<bundle>:<key>` — see {@link applyFromSecrets} in ./profiles.js. */
   fromSecrets?: string;
   keyStdin?: boolean;
+  /** Tri-state pre-save connection test: true = force, false = skip, undefined = ask on a TTY. */
+  test?: boolean;
 }
 
 /**
@@ -253,6 +260,60 @@ export function addNeedsWizard(name: string | undefined, opts: AddProfileOptions
 }
 
 /**
+ * Pre-save connection test (RUSH-2221). The harness is already on disk (the test
+ * drives the real `agents run <name>` path, so it must be), so this runs a
+ * classified smoke test and — on a TTY, when it fails — offers to keep it, edit
+ * it, or delete-and-cancel. A test is never blocking on its own: a save is only
+ * discarded when the user explicitly chooses to.
+ *
+ * Gating is tri-state: `--test` forces it, `--no-test` skips it, and otherwise a
+ * TTY is asked (default yes) while a non-interactive caller skips it. Deleting on
+ * failure throws so the calling action reports the cancel and exits non-zero.
+ */
+async function preSaveConnectionTest(name: string, testFlag: boolean | undefined): Promise<void> {
+  const interactive = isInteractiveTerminal();
+  let shouldTest: boolean;
+  if (testFlag === true) shouldTest = true;
+  else if (testFlag === false) shouldTest = false;
+  else if (!interactive) shouldTest = false;
+  else {
+    const { confirm } = await import('@inquirer/prompts');
+    shouldTest = await confirm({ message: `Test the connection for '${name}' now?`, default: true });
+  }
+  if (!shouldTest) return;
+
+  console.log(chalk.gray(`Testing '${name}' — sending "${CONNECTION_TEST_PROMPT}" through agents run…`));
+  const result = await runConnectionTest({ mode: 'create', name }, harnessHooks());
+  if (!result) return;
+  if (result.ok) {
+    console.log(chalk.green(`✓ ${result.message}`));
+    return;
+  }
+  console.log(chalk.yellow(`✗ ${result.message}`));
+  if (!interactive) {
+    console.log(chalk.gray(`Kept anyway. Fix and retest with: agents harness edit ${name}`));
+    return;
+  }
+  const { select } = await import('@inquirer/prompts');
+  const action = await select<string>({
+    message: 'The connection test failed. What would you like to do?',
+    choices: [
+      { name: 'Keep it (the endpoint may just be down right now)', value: 'keep' },
+      { name: 'Edit it now', value: 'edit' },
+      { name: 'Delete it and cancel', value: 'delete' },
+    ],
+  });
+  if (action === 'edit') {
+    await runEditWizard(name, {});
+    return;
+  }
+  if (action === 'delete') {
+    deleteProfile(name);
+    throw new Error(`Harness '${name}' deleted after a failed connection test.`);
+  }
+}
+
+/**
  * Shared build+persist flow for a fork — used by `agents harness fork`'s
  * flag-driven path AND by the wizard (both for `fork` and, when it falls back
  * to the wizard, `add`), so a wizard run and a hand-written `fork` call build an
@@ -278,6 +339,7 @@ async function runForkFlow(source: string, name: string, opts: ForkOptions): Pro
   writeProfile(forked);
   console.log(chalk.green(`Harness '${name}' forked from ${source}.`));
   console.log(chalk.gray(`Try: agents run ${name} "hello"`));
+  await preSaveConnectionTest(name, opts.test);
 }
 
 /**
@@ -290,7 +352,7 @@ async function runForkFlow(source: string, name: string, opts: ForkOptions): Pro
  */
 async function runCreateWizard(): Promise<{ source: string; name: string; opts: ForkOptions }> {
   const io = await defaultWizardIO();
-  const draft = await runWizardSteps(createSteps(), { mode: 'create' }, io);
+  const draft = await runWizardSteps(createSteps(), { mode: 'create' }, io, harnessHooks());
   return {
     source: draft.source!,
     name: draft.name!,
@@ -349,6 +411,7 @@ async function runEditWizard(name: string, cliOpts: EditOptions): Promise<void> 
     editSteps(original),
     { mode: 'edit', original, host: original.host.agent, name },
     io,
+    harnessHooks(),
   );
   const opts: EditOptions = { ...draftToEditOptions(draft, original), keyStdin: cliOpts.keyStdin };
   if (!hasEditFlags(opts)) {
@@ -364,6 +427,9 @@ async function runEditWizard(name: string, cliOpts: EditOptions): Promise<void> 
   writeProfile(edited);
   console.log(chalk.green(`Harness '${name}' updated.`));
   console.log(chalk.gray(`Model:  ${profileModelLabel(edited)}`));
+  // An edit that touched host/model/endpoint/auth is exactly what can break the
+  // harness, so re-test after saving (RUSH-2221). cliOpts carries the --test flag.
+  await preSaveConnectionTest(name, cliOpts.test);
 }
 
 export function registerHarnessCommands(program: Command): void {
@@ -423,6 +489,8 @@ Examples:
     .option('--from-secrets <bundle>[:<key>]', 'Removed: import the value with agents accounts add, then use --account')
     .option('--key-stdin', 'Read API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
+    .option('--test', 'Run a connection test before saving (default: ask on a terminal)')
+    .option('--no-test', 'Skip the pre-save connection test')
     .action(async (name: string | undefined, opts: AddProfileOptions & ForkOptions) => {
       try {
         if (opts.authProvider || opts.fromSecrets) throw new Error("Harnesses no longer own credentials. Add one with 'agents accounts add <name> --provider <provider> --auth <type>', then pass --account <name>.");
@@ -433,10 +501,11 @@ Examples:
             );
           }
           const wiz = await runCreateWizard();
-          await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin });
+          await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin, test: opts.test });
           return;
         }
         await addProfile(name!, opts, 'Harness');
+        await preSaveConnectionTest(name!, opts.test);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
@@ -455,6 +524,8 @@ Examples:
     .option('--from-secrets <bundle>[:<key>]', 'Removed: import the value with agents accounts add, then use --account')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
     .option('--force', 'Overwrite an existing harness with the same name')
+    .option('--test', 'Run a connection test before saving (default: ask on a terminal)')
+    .option('--no-test', 'Skip the pre-save connection test')
     .addHelpText(
       'after',
       `
@@ -482,7 +553,7 @@ Examples:
             throw new Error("'agents harness fork' needs <source> and <name> (or an interactive terminal for the wizard).");
           }
           const wiz = await runCreateWizard();
-          await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin });
+          await runForkFlow(wiz.source, wiz.name, { ...wiz.opts, force: opts.force, keyStdin: opts.keyStdin, test: opts.test });
           return;
         }
         await runForkFlow(source!, name!, opts);
@@ -504,6 +575,8 @@ Examples:
     .option('--fallback-model <id>', 'Secondary model retried on the same host on a rate limit (pass an empty string to clear it)')
     .option('--from-secrets <bundle>[:<key>]', 'Removed: import the value with agents accounts add, then use --account')
     .option('--key-stdin', 'Read the API key from stdin instead of prompting (for scripts/CI)')
+    .option('--test', 'Run a connection test after saving (default: ask on a terminal)')
+    .option('--no-test', 'Skip the connection test')
     .addHelpText(
       'after',
       `
@@ -546,6 +619,7 @@ Examples:
         writeProfile(edited);
         console.log(chalk.green(`Harness '${name}' updated.`));
         console.log(chalk.gray(`Model:  ${profileModelLabel(edited)}`));
+        await preSaveConnectionTest(name, opts.test);
       } catch (err) {
         console.error(chalk.red((err as Error).message));
         process.exit(1);
