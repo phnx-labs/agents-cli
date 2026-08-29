@@ -14,7 +14,6 @@ import type { DeviceProfile } from '../devices/registry.js';
 import {
   exportClaudeUsageCacheRows,
   ingestPeerClaudeUsageRows,
-  readClaudeUsageCache,
   writeClaudeUsageCache,
   type CachedUsageSnapshot,
 } from './usage.js';
@@ -157,7 +156,6 @@ describe('pullUsageFromPrimary', () => {
       listRoles: () => ({ zion: 'personal' }),
       isPinned: () => true,
       exportRows: () => exportClaudeUsageCacheRows(workerCache),
-      readRow: (key) => readClaudeUsageCache(key, workerCache),
       pull: () => ({
         ok: true,
         stdout: JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows(primaryCache) }),
@@ -172,7 +170,7 @@ describe('pullUsageFromPrimary', () => {
     });
   });
 
-  it('does not cross the ssh boundary when the worker cache is fresh', () => {
+  it('does not cross the ssh boundary when every local row is recent', () => {
     const rows: Record<string, CachedUsageSnapshot> = {
       'claude:org=alpha': {
         capturedAt: new Date().toISOString(),
@@ -183,11 +181,39 @@ describe('pullUsageFromPrimary', () => {
     const result = pullUsageFromPrimary({
       selfRole: () => 'worker',
       exportRows: () => rows,
-      readRow: () => ({ windows: [{} as any] }),
       pull: () => { pulled = true; return { ok: true, stdout: '' }; },
     });
     expect(result.skipped).toBe('local usage cache is fresh');
     expect(pulled).toBe(false);
+  });
+
+  it('pulls when a local row is stale even though its window count is unchanged', () => {
+    // Regression for the dead freshness gate: the old check compared the cache
+    // to itself on window COUNT, so a non-empty worker cache skipped the pull
+    // forever and served a days-old snapshot. Now a row older than
+    // USAGE_SYNC_MAX_AGE_MS must trigger a pull regardless of its shape.
+    const now = Date.UTC(2026, 7, 29, 12, 0, 0);
+    const staleAt = new Date(now - 4 * 24 * 60 * 60_000).toISOString(); // 4 days old
+    const rows: Record<string, CachedUsageSnapshot> = {
+      'claude:org=alpha': {
+        capturedAt: staleAt,
+        windows: [{ key: 'week' as any, label: 'Weekly', shortLabel: 'W', usedPercent: 45, resetsAt: null, windowMinutes: 7 * 24 * 60 }],
+      },
+    };
+    let pulled = false;
+    const result = pullUsageFromPrimary({
+      selfRole: () => 'worker',
+      now: () => now,
+      exportRows: () => rows,
+      listDevices: () => [{ name: 'zion', tailscale: { online: true } } as DeviceProfile],
+      listRoles: () => ({ zion: 'personal' }),
+      isPinned: () => true,
+      pull: () => { pulled = true; return { ok: true, stdout: JSON.stringify({ v: 1, rows: {} }) }; },
+      ingestRows: () => 0,
+    });
+    expect(result.skipped).toBeNull();
+    expect(pulled).toBe(true);
+    expect(result.pulledFrom).toBe('zion');
   });
 
   it('parses a Windows primary payload carrying a CLIXML progress banner', () => {
@@ -232,7 +258,6 @@ describe('pullUsageFromPrimary', () => {
       listRoles: () => ({ 'win-mini': 'personal' }),
       isPinned: () => true,
       exportRows: () => exportClaudeUsageCacheRows(workerCache),
-      readRow: (key) => readClaudeUsageCache(key, workerCache),
       pull: () => ({
         ok: true,
         stdout: clixmlBanner + JSON.stringify({ v: 1, rows: exportClaudeUsageCacheRows(primaryCache) }),

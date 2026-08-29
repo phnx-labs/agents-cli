@@ -610,6 +610,28 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     expect(picks.size).toBeGreaterThan(1);
   });
 
+  it('in the 429-throttled regime, the one verified account wins the draw over emptier-looking stale ones (PHNX-3479)', () => {
+    // A verified MINORITY (1 of 8) does not narrow the pool, so the stale
+    // accounts still compete — but an unverified snapshot must weight as the
+    // floor, not by its frozen "0% used". Before this fix, seven stale-0%
+    // accounts (weight 100 each) outweighed the one fresh-40% account
+    // (weight 60) ~92% to 8%, so balanced kept launching into stale accounts
+    // that were really at their weekly cap on a worker whose refresh had
+    // stalled. Now the verified account wins the vast majority of draws.
+    const freshHealthy = candidate({ version: '2.1.219', usageSnapshot: fresh(40) });
+    const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.220', '2.1.221', '2.1.222']
+      .map((version) => candidate({ version, usageSnapshot: dayOld(0) }));
+
+    let freshPicks = 0;
+    const ROLLS = 2000;
+    for (let i = 0; i < ROLLS; i++) {
+      if (pickBalancedCandidate([freshHealthy, ...stale], NOW)!.picked.version === '2.1.219') freshPicks++;
+    }
+    // weights: fresh(40) → 60; each unverified stale → UNVERIFIED_WEIGHT (1);
+    // 7 stale → 7. Fresh share ≈ 60/67 ≈ 0.90 — assert a robust floor.
+    expect(freshPicks / ROLLS).toBeGreaterThan(0.8);
+  });
+
   it('verified coverage of half the pool still narrows to the verified set', () => {
     // ceil(4/2) = 2 verified of 4: representative — stale candidates must not
     // dilute a majority-confirmed picture.

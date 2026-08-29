@@ -432,7 +432,7 @@ export function pickBalancedCandidate(
   const { picked, usageUnverified } = preferVerified(
     sorted,
     nowMs,
-    weightedRandomByCapacity,
+    (from) => weightedRandomByCapacity(from, nowMs),
     'representative',
   );
   return { picked, healthy: sorted, excluded, usageUnverified };
@@ -506,9 +506,22 @@ export { PROJECTION_HORIZON_MIN, capacityWeight };
  * routing capacity (see {@link capacityWeight}). Floor each weight at 1 so a
  * near-exhausted-but-still-eligible candidate can still be picked occasionally.
  */
-function weightedRandomByCapacity(sorted: RotateCandidate[]): RotateCandidate {
+function weightedRandomByCapacity(
+  sorted: RotateCandidate[],
+  nowMs: number = Date.now(),
+): RotateCandidate {
   const weights = sorted.map((c) =>
-    capacityWeight(getRoutingUsedPercent(c.usageSnapshot), c.usageMinutesToLimit),
+    capacityWeight(
+      // An unverified (stale or absent) snapshot carries no trustworthy number,
+      // so it weights as UNVERIFIED_WEIGHT (the floor) instead of by its frozen
+      // usedPercent. Otherwise a day-old "45% used" competes as if it were live
+      // headroom and can win the draw over a verified-healthy account — which is
+      // exactly how balanced launched into an account already at its weekly cap
+      // on a worker whose usage refresh had stalled (PHNX-3479). A verified
+      // snapshot keeps its real remaining-headroom weight.
+      isUsageVerified(c, nowMs) ? getRoutingUsedPercent(c.usageSnapshot) : null,
+      c.usageMinutesToLimit,
+    ),
   );
   const total = weights.reduce((sum, w) => sum + w, 0);
   if (total <= 0) return sorted[0];
@@ -655,7 +668,7 @@ export function pickHarnessWeighted(
   const healthy = summaries.filter((s) => s.best !== null);
   const excluded = summaries.filter((s) => s.best === null);
   if (healthy.length === 0) return null;
-  const pickedBest = weightedRandomByCapacity(healthy.map((s) => s.best!));
+  const pickedBest = weightedRandomByCapacity(healthy.map((s) => s.best!), nowMs);
   const picked = healthy.find((s) => s.best === pickedBest)!;
   return { picked, healthy, excluded };
 }
