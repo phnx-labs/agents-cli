@@ -98,6 +98,18 @@ groups:
     tests:
       - cli/scripts/gen-changelog.test.ts
 
+  # The repo-root Claude plugin marketplace manifest and the agents-cli discovery
+  # skill (PHNX-3337) are declarative, but their parse/validate/trigger-intent
+  # contract IS executable — agents-cli-plugin.test.ts reads marketplace.json,
+  # plugin.json and SKILL.md directly. Select that test from the files it guards
+  # so a manifest/skill edit is caught on the PR, not at release time.
+  - id: agents-cli-plugin
+    when:
+      - .claude-plugin/**
+      - skills/agents-cli/**
+    tests:
+      - cli/src/lib/plugins/agents-cli-plugin.test.ts
+
   # 180s, not the default 85s. Any edit to sessions.ts — a two-line subcommand
   # registration included — selects the whole sessions* suite: 24 files, 92s of
   # vitest inside a 122s run (PR #2771, run 32032566960), before the group's own
@@ -299,10 +311,6 @@ testless:
   - assets/**
   - demo/**
   - skills/**
-  # Repo-root Claude plugin marketplace manifest (PHNX-3337): declarative JSON
-  # consumed by `claude plugin marketplace add`, not executable source. Its
-  # parse/validate contract is covered by cli/src/lib/plugins/agents-cli-plugin.test.ts.
-  - .claude-plugin/**
   - openspec/**
   - native/**
   - apps/ios/**
