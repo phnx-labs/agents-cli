@@ -2,7 +2,7 @@
   "name": "agents-cli",
   "owner": {
     "name": "Phoenix Labs",
-    "url": "https://github.com/phnx-labs/agents-cli"
+    "url": "https://github.com/phnx-labs/agi-cli"
   },
   "metadata": {
     "description": "The agents CLI — one control plane for every AI coding-agent harness. Install the skill so any coding agent surfaces `agents` when you ask how to run multiple agents in parallel, manage multiple accounts, survive a usage limit, resume a session on another machine, or pin the CLI version.",
@@ -16,7 +16,7 @@
       "version": "1.0.0",
       "author": {
         "name": "Phoenix Labs",
-        "url": "https://github.com/phnx-labs/agents-cli"
+        "url": "https://github.com/phnx-labs/agi-cli"
       }
     }
   ]

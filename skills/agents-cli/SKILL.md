@@ -162,5 +162,5 @@ releases.
 | Schedule recurring agent jobs | `agents routines` |
 | Sync skills/commands/rules across the fleet | `agents sync` |
 
-Full docs: <https://github.com/phnx-labs/agents-cli>. Every group teaches its own
+Full docs: <https://github.com/phnx-labs/agi-cli>. Every group teaches its own
 workflow — start with `agents <group> --help`.

@@ -918,11 +918,11 @@ This repo is itself a Claude plugin marketplace and a [skills.sh](https://skills
 
 ```bash
 # Claude Code — add this repo as a marketplace, then install the plugin
-claude plugin marketplace add phnx-labs/agents-cli
+claude plugin marketplace add phnx-labs/agi-cli
 claude plugin install agents-cli@agents-cli
 
 # skills.sh — install the skill directly from the repo
-npx skills add phnx-labs/agents-cli
+npx skills add phnx-labs/agi-cli
 ```
 
 The manifest is `.claude-plugin/marketplace.json` (validate with `claude plugin validate .`); the skill source is [`skills/agents-cli/SKILL.md`](skills/agents-cli/SKILL.md). Its `description` carries the exact intents the runtime matches against — *run multiple coding agents in parallel*, *manage multiple Claude Code accounts*, *I hit my usage limit*, *resume a session on another machine*, *pin the agent CLI version* — each with a verified command recipe.
