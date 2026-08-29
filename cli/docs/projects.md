@@ -235,7 +235,11 @@ rush  ·  23 live
   `agents projects link <name> --linear`. Best-effort: no credential, offline, or a
   slow API (>8s) just omits the line, and `--no-remote` skips it too. `total`
   includes canceled issues; the fetch caps at 2,500 issues and a capped count
-  renders as a lower bound (`2500+ done`), never as the complete total.
+  renders as a lower bound (`2500+ done`), never as the complete total. Answers
+  are cached per project (10-min TTL), and every process on a Linear key spends
+  from one shared hourly request budget so a fleet of agents can't collectively
+  blow Linear's 2,500 requests/hour limit — when the budget is spent the card
+  serves the last cached snapshot (marked stale) rather than forcing a throttle.
 - **`next`** is the project's next unfinished Linear milestone — the earliest
   `targetDate` that is not yet complete — rendered `name · done/total · due …`.
   A percentage says how far along a project is; the milestone says what it is due
