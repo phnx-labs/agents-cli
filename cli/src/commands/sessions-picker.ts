@@ -37,19 +37,29 @@ import {
   isSubAgentTool,
 } from '../lib/session/highlights.js';
 import { getSessionPlugins, readSessionPreviewCache, writeSessionPreviewCache, readSessionContent, readArchivedSessionPreview } from '../lib/session/db.js';
-/** A session whose transcript FILE is on another machine (folded in over the
- * live cross-machine fan-out): its `filePath` is on that peer's disk, so the
- * preview can't parse it locally — it fetches the peer's digest over SSH and
- * shows metadata + a "resume there" note until that lands. Keys off `_remote`,
- * not the machine tag, so locally-readable synced mirrors still parse their
- * file normally.
+import { machineId } from '../lib/session/sync/config.js';
+/** A session whose transcript FILE is on another machine: its `filePath` is on
+ * that peer's disk, so the preview can't parse it locally — it fetches the
+ * peer's digest over SSH and shows metadata + a "resume there" note until that
+ * lands. `_remote` is an explicit signal; a peer `machine` plus no readable
+ * local file covers host-dispatch index rows and live-registry rows that were
+ * synthesized outside the fan-out. A locally-readable synced mirror stays
+ * local even when its recorded owner is another machine.
  *
  * This is the READ rule and only the read rule. Whether a session may be
  * RESUMED here is a different question with a different answer — a mirror is
  * readable but not resumable — and `sessionOwnerDevice`
  * (lib/session/resume-owner.ts) is the single place that answers it (RUSH-2022). */
-function transcriptOnPeerOf(session: SessionMeta): string | undefined {
-  return session._remote ? session.machine : undefined;
+export function transcriptOnPeerOf(session: SessionMeta): string | undefined {
+  if (session._remote) return session.machine;
+  if (
+    session.machine
+    && session.machine !== machineId()
+    && (!session.filePath || !fs.existsSync(session.filePath))
+  ) {
+    return session.machine;
+  }
+  return undefined;
 }
 
 /**
@@ -147,8 +157,8 @@ const previewCache = createMemoryCache<string, string>({
 });
 
 /**
- * Peer preview digests for `_remote` rows. A remote row's transcript is on the
- * peer's disk, so the pane fetches its already-computed digest over SSH (the
+ * Peer preview digests for rows whose transcript is remote. The pane fetches
+ * its already-computed digest over SSH (the
  * peer's `sessions preview <id> --local --json`) the first time the row is
  * previewed, and renders the full compact preview once it lands. `pending`
  * marks an in-flight fetch; `failed` marks a peer that couldn't answer, retried
