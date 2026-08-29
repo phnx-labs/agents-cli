@@ -963,10 +963,10 @@ describe('BrowserService.start — the startup about:blank is a task tab (RUSH-2
   });
 });
 
-describe('BrowserService — Arc is not CDP-drivable (never Target.createTarget)', () => {
-  // Arc answers Browser.getVersion (so the connection succeeds) but exposes zero
-  // page targets and CRASHES on Target.createTarget (verified, PR #2778). Every
-  // tab-creating path must refuse with a clear error instead of crashing Arc.
+describe('BrowserService — Arc refuses NEW-tab creation, the one CDP-only op (never Target.createTarget)', () => {
+  // Arc answers Browser.getVersion and DOES expose page targets it honors
+  // Page.navigate on, but CRASHES on Target.createTarget (verified, PR #2778).
+  // Every tab-creating path must refuse with a clear error instead of crashing Arc.
   it('start with a url throws the clear error and never creates a target', async () => {
     writeProfile('arcp', ['cdp://localhost:9222']);
     const service = new BrowserService();
@@ -974,7 +974,7 @@ describe('BrowserService — Arc is not CDP-drivable (never Target.createTarget)
     attach(service, 'arcp', conn);
 
     await expect(service.start('arcp', { url: 'https://example.com' })).rejects.toThrow(
-      /not drivable/,
+      /cannot open a NEW tab/,
     );
     // The whole point: not one Target.createTarget reached Arc.
     expect(createTargetCount(calls)).toBe(0);
@@ -986,7 +986,7 @@ describe('BrowserService — Arc is not CDP-drivable (never Target.createTarget)
     const { conn, calls } = makeTargetedConn('arcp2@endpoint-0', { browser: 'arc' });
     attach(service, 'arcp2', conn);
 
-    await expect(service.start('arcp2')).rejects.toThrow(/Comet, Chrome, Chromium, or Brave/);
+    await expect(service.start('arcp2')).rejects.toThrow(/Chromium-family browser/);
     expect(createTargetCount(calls)).toBe(0);
   });
 
@@ -1186,7 +1186,7 @@ describe('BrowserService.navigate — Arc reuses a tab rather than refusing (#27
     attach(service, 'arcsafe', conn);
 
     await expect(service.navigate('arctask', 'file:///tmp/plan.html', 'arcsafe')).rejects.toThrow(
-      /Comet, Chrome, Chromium, or Brave/,
+      /Chromium-family browser/,
     );
     expect(createTargetCount(calls)).toBe(0);
     expect(calls.filter((c) => c.method === 'Page.navigate')).toHaveLength(0);

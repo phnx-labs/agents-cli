@@ -1,8 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as net from 'net';
 
-import { connectLocal } from './local.js';
-import type { BrowserProfile } from '../types.js';
+import { connectLocal, arcAttachRequiredError } from './local.js';
+import type { BrowserProfile, ConnectionKey } from '../types.js';
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -56,5 +56,58 @@ describe('connectLocal — TCP probe fallback for #43', () => {
     } finally {
       blocker.close();
     }
+  });
+});
+
+describe('connectLocal — Arc attaches to a running instance, never launches a duplicate (PHNX-2399)', () => {
+  const key = 'my-arc@endpoint-0' as ConnectionKey;
+
+  it('fails loud with the relaunch instruction when the Arc port serves no CDP endpoint', async () => {
+    // Nothing is listening on this port. For a Chromium-family browser this is
+    // the "fine to launch fresh" case — but Arc is single-instance and cannot be
+    // spawned as an isolated debug instance, so it must fail loud rather than
+    // spawn the stray window PHNX-2399 exists to end.
+    const port = await freePort();
+    const profile: BrowserProfile = {
+      name: 'my-arc',
+      browser: 'arc',
+      endpoints: [`cdp://127.0.0.1:${port}`],
+    };
+
+    // Names the profile, names the port, and gives the one relaunch that fixes
+    // it — and never reaches launchBrowser.
+    await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(/my-arc/);
+    await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(
+      new RegExp(`--remote-debugging-port=${port}`),
+    );
+    await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(
+      /single-instance/,
+    );
+  });
+
+  it('still fails loud (never launches) when the Arc port is held by a non-CDP listener', async () => {
+    const port = await freePort();
+    const blocker = await listenOn(port);
+    const profile: BrowserProfile = {
+      name: 'held-arc',
+      browser: 'arc',
+      endpoints: [`cdp://127.0.0.1:${port}`],
+    };
+    try {
+      await expect(connectLocal(`cdp://127.0.0.1:${port}`, profile, key)).rejects.toThrow(
+        /held-arc/,
+      );
+    } finally {
+      blocker.close();
+    }
+  });
+});
+
+describe('arcAttachRequiredError', () => {
+  it('names the profile, the port, and the exact relaunch', () => {
+    const msg = arcAttachRequiredError('work', 9222).message;
+    expect(msg).toContain('work');
+    expect(msg).toContain('open -a Arc --args --remote-debugging-port=9222');
+    expect(msg).toContain('single-instance');
   });
 });

@@ -739,7 +739,7 @@ function registerProfilesCommands(browser: Command): void {
     )
     .option(
       '--target-filter <expr>',
-      'Pick the visible CDP page target when the app exposes more than one. Format: url:<substring> or title:<substring>'
+      'Pick the existing CDP page target to drive (Electron apps, and Arc — which reuses an open tab / Space rather than creating one). Format: url:<substring> or title:<substring>'
     )
     .action(async (name: string, opts) => {
       try {
@@ -769,8 +769,13 @@ function registerProfilesCommands(browser: Command): void {
           console.error('--target-filter must be url:<substring> or title:<substring> (non-empty value, no leading whitespace)');
           process.exit(1);
         }
-        if (!opts.electron) {
-          console.error('--target-filter requires --electron (the filter is only consulted on Electron profiles)');
+        // The filter picks WHICH existing page target to drive without ever
+        // calling Target.createTarget — the two profiles that do that are
+        // Electron apps and Arc (which crashes on tab creation, so it drives an
+        // existing tab / Space, PHNX-2399). Any other browser opens its own tab
+        // and never consults the filter, so requiring it there would be a lie.
+        if (!opts.electron && opts.browser !== 'arc') {
+          console.error('--target-filter requires --electron or --browser arc (the filter is only consulted on profiles that reuse an existing tab)');
           process.exit(1);
         }
       }
@@ -853,7 +858,7 @@ function registerProfilesCommands(browser: Command): void {
     .option('--binary <path>', 'Absolute path to the browser/app binary')
     .option('--electron', 'Treat this profile as an Electron desktop app')
     .option('--no-electron', 'Stop treating it as an Electron app')
-    .option('--target-filter <expr>', "url:<substring> or title:<substring>; requires --electron (pass '' to clear)")
+    .option('--target-filter <expr>', "url:<substring> or title:<substring>; consulted on Electron and Arc profiles (pass '' to clear)")
     .option('--json', 'Output machine-readable JSON')
     .action(async (name: string, opts) => {
       // The browser type and the name are identity, not settings: both key the

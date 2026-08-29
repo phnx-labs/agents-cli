@@ -156,9 +156,11 @@ export async function resolveViewer(opts: ShowOptions = {}): Promise<'os' | { pr
     return 'os';
   }
   if (profile.browser === 'arc') {
-    // Arc exposes no CDP page targets and crashes on tab creation, so it can be
-    // a configured profile but never a drivable viewer.
-    console.error(`[viewer] "${resolved}" is Arc, which cannot be driven — using the OS browser.`);
+    // agents browser can drive an attached Arc's existing tabs, but showing the
+    // user a page needs its OWN fresh tab, and Arc crashes on tab creation over
+    // CDP (Target.createTarget). So Arc is a fine automation profile but never a
+    // viewer — fall back to the OS browser for anything a human is meant to read.
+    console.error(`[viewer] "${resolved}" is Arc, which cannot open a new viewer tab — using the OS browser.`);
     return 'os';
   }
   if (!isProfileLaunchableHere(profile)) {

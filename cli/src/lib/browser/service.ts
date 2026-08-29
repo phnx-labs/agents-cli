@@ -344,19 +344,24 @@ export function actionable(...lines: string[]): string {
 }
 
 /**
- * Arc answers `Browser.getVersion` (so a connection succeeds) but exposes zero
- * CDP page targets via every discovery method and CRASHES when a new tab is
- * requested via `Target.createTarget` (verified live, PR #2778). It is therefore
- * not drivable. This is the single clear, actionable error every tab-creating
- * path throws instead of crashing the user's Arc window.
+ * Arc DOES expose CDP page targets and honors `Page.navigate` on the ones the
+ * user already has open (measured live against Arc: 33 targets, PR #2786), so
+ * agents browser drives an attached Arc by reusing existing tabs. What it CANNOT
+ * survive is `Target.createTarget` — opening a brand-new tab crashes the user's
+ * Arc window (verified live, PR #2778). Tab creation is the one CDP-only op that
+ * fails clearly here (PHNX-2399): every tab-creating path throws this actionable
+ * error instead of crashing Arc, and steers the caller to reuse an existing
+ * tab/Space (via `--target-filter`) or to a Chromium-family browser for new tabs.
  */
 export function arcNotDrivableError(profileName?: string): Error {
   const scope = profileName ? ` (profile "${profileName}")` : '';
   return new Error(
     actionable(
-      `Browser "arc"${scope} is not drivable: Arc exposes no CDP page targets and`,
-      'crashes when a new tab is requested, so `agents browser` cannot control it.',
-      'Use a Chromium-family browser instead — Comet, Chrome, Chromium, or Brave:',
+      `Browser "arc"${scope} cannot open a NEW tab: Arc crashes when a tab is created`,
+      'over CDP (Target.createTarget). agents browser drives Arc by attaching to your',
+      'running window and reusing an EXISTING tab — bind the profile to the tab/Space you',
+      'want with --target-filter (url:<substring> or title:<substring>), or navigate to a',
+      'URL that is already open. To open brand-new tabs, use a Chromium-family browser:',
       '  agents browser profiles create <name> --browser comet',
     ),
   );
