@@ -12,7 +12,11 @@ function usage(usedPercent: number): UsageSnapshot {
   return {
     source: 'live',
     sourceLabel: 'test',
-    capturedAt: new Date('2026-04-20T00:00:00Z'),
+    // Fresh so the snapshot passes isUsageVerified at pick time — these tests
+    // exercise capacity WEIGHTING, which only applies to a verified snapshot
+    // (an unverified one weights as the UNVERIFIED_WEIGHT floor). Freshness-vs-
+    // staleness routing is covered in accounting/rotate.test.ts.
+    capturedAt: new Date(),
     windows: [
       {
         key: 'session',
@@ -30,7 +34,11 @@ function claudeUsage(sessionUsedPercent: number, weekUsedPercent: number, sonnet
   return {
     source: 'live',
     sourceLabel: 'test',
-    capturedAt: new Date('2026-04-20T00:00:00Z'),
+    // Fresh so the snapshot passes isUsageVerified at pick time — these tests
+    // exercise capacity WEIGHTING, which only applies to a verified snapshot
+    // (an unverified one weights as the UNVERIFIED_WEIGHT floor). Freshness-vs-
+    // staleness routing is covered in accounting/rotate.test.ts.
+    capturedAt: new Date(),
     windows: [
       {
         key: 'session',
