@@ -863,7 +863,16 @@ export type GrokRule = { action: 'allow' | 'deny'; tool: string; pattern?: strin
 
 function canonicalToGrokRule(perm: string, action: 'allow' | 'deny'): GrokRule | null {
   if (BLANKET_BASH_FORMS.has(perm)) {
-    return { action, tool: 'bash', pattern: '*' };
+    // Grok's `*` is a SINGLE-LEVEL wildcard, so a `pattern: '*'` bash rule does
+    // NOT auto-approve a multi-token command like `ssh host cmd` or `scp a b`
+    // (PHNX-3294 — verified: two boxes carrying the identical `pattern="*"` rule
+    // differed only by `[ui].permission_mode`, and only the always-approve box
+    // ran ssh without prompting). Grok's documented "bare prefix matches all
+    // invocations" idiom is a rule with NO `pattern` key — the true allow-all
+    // shell form, matching how kimi (bare `Bash`), droid (`*`) and claude
+    // express a blanket Bash grant. This reads back as `Bash(*)` via the
+    // registry's pattern-less path, so the round-trip is unchanged.
+    return { action, tool: 'bash' };
   }
   const parsed = parseCanonicalPattern(perm);
   if (!parsed) return null;
