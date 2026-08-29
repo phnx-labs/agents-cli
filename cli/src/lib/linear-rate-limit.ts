@@ -40,6 +40,14 @@
  *
  * State is per KEY (hashed, so the raw key never lands on disk), because the
  * 2500/hr quota is per key: two different keys spend independently.
+ *
+ * Scope is per MACHINE. The state lives under `getCacheDir()`
+ * (`~/.agents/.cache/`), which is machine-local and NOT fleet-synced — so this
+ * budgets the many concurrent agent processes on one box against each other, the
+ * case that actually exhausted the key (~13 sessions on one machine). Two
+ * different boxes sharing the same key each keep their own budget, so their
+ * aggregate can still exceed 2500/hr; coordinating the budget across devices
+ * (a synced or served counter) is a known limitation, not yet built.
  */
 import * as crypto from 'crypto';
 import * as fs from 'fs';

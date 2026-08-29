@@ -86,6 +86,19 @@ describe('linear shared request budget', () => {
     expect(linearRequestsInWindow(KEY, T0)).toBe(2);
   });
 
+  it('fails OPEN when the cache dir cannot be written — the request still goes out', () => {
+    // Point the state root at a path whose parent is a FILE, so mkdirSync throws
+    // ENOTDIR deterministically (no reliance on chmod, which root ignores). The
+    // reservation cannot be recorded, but the request must not be blocked on a
+    // broken cache dir — the reactive 429 backoff remains the backstop.
+    const asFile = path.join(root, 'not-a-dir');
+    fs.writeFileSync(asFile, '');
+    setLinearRateLimitDirForTest(path.join(asFile, 'under-a-file'));
+    expect(reserveLinearRequest(KEY, T0)).toBe(true);
+    // And the read side treats the unreadable dir as simply empty, never throws.
+    expect(linearRequestsInWindow(KEY, T0)).toBe(0);
+  });
+
   it('never writes the raw API key into the on-disk path', () => {
     reserveLinearRequest(KEY, T0);
     const walk = (dir: string): string[] =>

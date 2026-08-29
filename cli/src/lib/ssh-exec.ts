@@ -104,21 +104,30 @@ export class RemoteUtf8Accumulator {
  * How long OpenSSH keeps a multiplex master alive after its last client exits
  * (`ControlPersist`, in seconds).
  *
- * The master only survives while it stays IDLE under this window, so the value
- * has to exceed the interval of the most frequent thing that touches a host —
- * otherwise the master dies between touches and every one pays the cold
- * TCP+auth handshake again (~100-300ms direct, up to ~500ms relayed; measured on
- * the live fleet 2026-08-10, PHNX-2582). The dominant repeating fleet touch is
- * the daemon's 5-minute service loop (`CATCHUP_TICK_MS` and the reap/sync
- * services in `lib/daemon/*`, all `5 * 60_000`); with the old 60s persist every
- * one of those was cold, so 100% of a 5-minute poll's cost was connection setup.
+ * The master only survives while it stays IDLE under this window, so it helps
+ * exactly a *repeated* touch of the same host that arrives within the window; a
+ * touch that arrives after the master has expired pays the full cold TCP+auth
+ * handshake again (~100-300ms direct, up to ~500ms relayed; measured on the live
+ * fleet 2026-08-10, PHNX-2582).
  *
- * 10 minutes clears that 5-minute cadence with margin, so the poll lands on a
- * warm master (3-5ms) instead of a fresh handshake, while still bounding how long
- * an idle master lingers — an important limit, because a reused master to a box
- * that has since slept costs a ~45s ServerAlive teardown on first touch, and a
- * wider window would only widen the chance of hitting that. Fan-outs stay bounded
- * regardless by their own per-peer `timeoutMs`.
+ * The repeated same-host touches are the ad-hoc `--device` and fleet fan-out
+ * calls — `sessions --active`, `fleet ping`/`status`, `doctor`, `teams`, a
+ * `--device <box>` command run a few times while working — which arrive in
+ * BURSTS spread over minutes, not on a fixed clock. (The one truly high-frequency
+ * caller, `followHostTask`'s ~1.5s follow poll, was already warm even at 60s and
+ * is not the target here.) At the old 60s window any two touches of the same box
+ * more than a minute apart were both cold, so a burst paid a fresh handshake
+ * almost every time.
+ *
+ * 10 minutes keeps a multi-minute burst warm (3-5ms per reuse) while still
+ * bounding how long an idle master lingers — an important limit, because a reused
+ * master to a box that has since slept costs a ~45s ServerAlive teardown on the
+ * first touch (`ServerAliveInterval=15 × ServerAliveCountMax=3`), and a wider
+ * window would only widen the chance of hitting that. The daemon's periodic
+ * SSH-touching services (`usage-sync`/`auth-sync`) tick every 15 minutes, longer
+ * than this window ON PURPOSE: warming them would need a wider window for a
+ * handshake that is negligible at that cadence. Fan-outs stay bounded regardless
+ * by their own per-peer `timeoutMs`.
  */
 export const SSH_CONTROL_PERSIST_SECONDS = 10 * 60;
 

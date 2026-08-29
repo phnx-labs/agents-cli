@@ -111,13 +111,15 @@ describe('controlOpts (connection multiplexing)', () => {
     expect(fs.existsSync(dir)).toBe(true);
   });
 
-  it('persists the master past the dominant 5-minute fleet poll so it lands warm (PHNX-2582)', () => {
-    // The master only survives while idle < ControlPersist, so the value has to
-    // exceed the interval of the most frequent thing touching a host — the
-    // daemon's 5-minute service loop. Below that, every 5-minute poll pays a
-    // fresh handshake, which was 100% of its cost at the old 60s persist.
-    const DOMINANT_FLEET_POLL_SECONDS = 5 * 60;
-    expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThan(DOMINANT_FLEET_POLL_SECONDS);
+  it('keeps a multi-minute burst of same-host touches warm — well above the old 60s (PHNX-2582)', () => {
+    // The master only survives while idle < ControlPersist, so the window has to
+    // span the gap between repeated ad-hoc --device / fan-out touches of one box,
+    // which arrive in bursts over minutes. At the old 60s any two more than a
+    // minute apart were both cold. Guard that the window stays several minutes so
+    // a future edit can't silently drop it back toward that cold-every-touch 60s.
+    const OLD_COLD_WINDOW_SECONDS = 60;
+    expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThanOrEqual(5 * 60);
+    expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThan(OLD_COLD_WINDOW_SECONDS);
   });
 });
 
