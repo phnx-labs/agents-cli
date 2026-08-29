@@ -41,6 +41,9 @@ import { listPresets, getPreset, type Preset } from '../lib/profiles-presets.js'
 import { listBundles } from '../lib/secrets/bundles.js';
 import { AGENTS, ALL_AGENT_IDS, isSelfUpdatingAgent, resolveAgentName } from '../lib/agents.js';
 import { readAccountRegistry } from '../lib/account-registry.js';
+import type { ConnectionTestResult } from '../lib/harness-connection-test.js';
+
+export type { ConnectionTestResult } from '../lib/harness-connection-test.js';
 
 /** Whether the wizard is creating a new harness or editing an existing one. */
 export type WizardMode = 'create' | 'edit';
@@ -137,31 +140,68 @@ export interface HarnessEditable {
   fallback: boolean;
 }
 
+/** One field's editability plus, when disabled, the one-line reason to surface. */
+export interface EditableField {
+  enabled: boolean;
+  /** Set only when `enabled` is false — the greyed field's stated reason. */
+  reason?: string;
+}
+
+/** Per-host editability with a reason attached to every disabled field. */
+export interface HarnessEditability {
+  model: EditableField;
+  baseUrl: EditableField;
+  auth: EditableField;
+  version: EditableField;
+  fallback: EditableField;
+}
+
 /**
- * Resolver-sourced editability, the scaffold default behind the RUSH-2222 seam.
- * Every field is read from the same maps the run-time resolver uses
- * (`baseUrlEnvKeyForHost` / `authEnvKeyForHost` / `isSelfUpdatingAgent`), never a
- * table hardcoded alongside them — so the wizard's enable/disable can never drift
- * from what a run actually honors (repo rule: the capability table stays truthful,
- * in lockstep with the code). RUSH-2222 may replace this via {@link WizardHooks.editable}
- * to add per-param reasons; it must stay sourced from the resolver.
+ * The per-harness editability matrix (RUSH-2222). Which of a harness's params
+ * this host's API format actually lets you change, each disabled field carrying
+ * the reason the wizard greys it with.
+ *
+ * Sourced ENTIRELY from the same maps the run-time resolver reads —
+ * `baseUrlEnvKeyForHost` (endpoint slot), `authEnvKeyForHost` (auth env), and
+ * `isSelfUpdatingAgent` (pinnable version) — never a table hardcoded alongside
+ * them, so the wizard's enable/disable can never drift from what a run actually
+ * honors (repo rule: the capability table stays truthful, in lockstep with the
+ * code). A disabled param is never a silent no-op — the wizard shows its reason
+ * and the flag path fails loud (`forkProfile`'s base-URL throw is the precedent).
  */
-export function defaultEditable(host: AgentId): HarnessEditable {
+export function harnessEditable(host: AgentId): HarnessEditability {
+  const hasEndpoint = baseUrlEnvKeyForHost(host) !== null;
+  const hasAuth = authEnvKeyForHost(host) !== null;
+  const selfUpdating = isSelfUpdatingAgent(host);
   return {
-    model: true,
-    baseUrl: baseUrlEnvKeyForHost(host) !== null,
-    auth: authEnvKeyForHost(host) !== null,
-    version: !isSelfUpdatingAgent(host),
-    fallback: true,
+    model: { enabled: true },
+    baseUrl: hasEndpoint
+      ? { enabled: true }
+      : { enabled: false, reason: `host '${host}' has no custom-endpoint slot — base URL not applicable` },
+    auth: hasAuth
+      ? { enabled: true }
+      : { enabled: false, reason: `host '${host}' manages its own login — no auth to edit` },
+    version: selfUpdating
+      ? { enabled: false, reason: `host '${host}' self-updates — its version can't be pinned` }
+      : { enabled: true },
+    fallback: { enabled: true },
   };
 }
 
-/** Outcome of a connection test (RUSH-2221 fills the real classifier). */
-export interface ConnectionTestResult {
-  ok: boolean;
-  /** Machine-readable class when it failed (auth / endpoint / model / unknown). */
-  reason?: 'auth' | 'endpoint' | 'model' | 'unknown';
-  message?: string;
+/**
+ * The boolean projection of {@link harnessEditable} — the scaffold default behind
+ * the RUSH-2222 {@link WizardHooks.editable} seam. Derived from the reason-carrying
+ * matrix so the two can never disagree.
+ */
+export function defaultEditable(host: AgentId): HarnessEditable {
+  const e = harnessEditable(host);
+  return {
+    model: e.model.enabled,
+    baseUrl: e.baseUrl.enabled,
+    auth: e.auth.enabled,
+    version: e.version.enabled,
+    fallback: e.fallback.enabled,
+  };
 }
 
 /**
@@ -371,8 +411,9 @@ export function createSteps(): WizardStep[] {
         // rest replaces the old silent-drop (`profileFromHostModel` discards a
         // base URL the host can't honor) with an explicit reason.
         const host = d.host ?? hostForSource(d.source);
-        if (host && baseUrlEnvKeyForHost(host) === null) {
-          return { disabled: `host '${host}' has no custom-endpoint slot — base URL not applicable` };
+        if (host) {
+          const cap = harnessEditable(host).baseUrl;
+          if (!cap.enabled) return { disabled: cap.reason! };
         }
         return 'run';
       },
@@ -440,14 +481,14 @@ function currentBaseUrl(p: Profile): string | undefined {
 export function editSteps(original: Profile): WizardStep[] {
   const host = original.host.agent;
   const editableFor = (hooks: WizardHooks) => (hooks.editable ?? defaultEditable)(host);
-  // decide() has no access to hooks, so gate on the resolver default; a hook that
-  // narrows editability further is applied inside run(). The scaffold's default is
-  // the resolver truth, which is what the matrix subtask builds on.
-  const cap = defaultEditable(host);
+  // decide() has no access to hooks, so gate on the resolver-sourced matrix; a
+  // hook that narrows editability further is applied inside run(). The matrix is
+  // the resolver truth (RUSH-2222), reasons and all.
+  const cap = harnessEditable(host);
   return [
     {
       id: 'model',
-      decide: () => (cap.model ? 'run' : { disabled: `host '${host}' does not support a pinned model` }),
+      decide: () => (cap.model.enabled ? 'run' : { disabled: cap.model.reason! }),
       async run(io, d, hooks) {
         if (!editableFor(hooks).model) return;
         d.model = await askModel(io, d, hooks, currentModel(original));
@@ -455,7 +496,7 @@ export function editSteps(original: Profile): WizardStep[] {
     },
     {
       id: 'baseUrl',
-      decide: () => (cap.baseUrl ? 'run' : { disabled: `host '${host}' has no custom-endpoint slot` }),
+      decide: () => (cap.baseUrl.enabled ? 'run' : { disabled: cap.baseUrl.reason! }),
       async run(io, d, hooks) {
         if (!editableFor(hooks).baseUrl) return;
         const url = await io.input({ message: 'Base URL', default: currentBaseUrl(original) ?? '' });
@@ -464,7 +505,7 @@ export function editSteps(original: Profile): WizardStep[] {
     },
     {
       id: 'account',
-      decide: () => (cap.auth ? 'run' : { disabled: `host '${host}' manages its own login — no auth to edit` }),
+      decide: () => (cap.auth.enabled ? 'run' : { disabled: cap.auth.reason! }),
       async run(io, d, hooks) {
         if (!editableFor(hooks).auth) return;
         const accounts = Object.values(readAccountRegistry().accounts);
@@ -478,8 +519,7 @@ export function editSteps(original: Profile): WizardStep[] {
     },
     {
       id: 'version',
-      decide: () =>
-        cap.version ? 'run' : { disabled: `host '${host}' self-updates — its version can't be pinned` },
+      decide: () => (cap.version.enabled ? 'run' : { disabled: cap.version.reason! }),
       async run(io, d, hooks) {
         if (!editableFor(hooks).version) return;
         d.version = await io.input({
@@ -490,7 +530,7 @@ export function editSteps(original: Profile): WizardStep[] {
     },
     {
       id: 'fallback',
-      decide: () => (cap.fallback ? 'run' : 'skip'),
+      decide: () => (cap.fallback.enabled ? 'run' : 'skip'),
       async run(io, d) {
         d.fallbackModel = await io.input({
           message: 'Fallback model (same-host rate-limit retry; blank for none)',

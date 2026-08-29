@@ -7,6 +7,7 @@ import {
   createSteps,
   editSteps,
   defaultEditable,
+  harnessEditable,
   runWizardSteps,
   hostForSource,
   type WizardIO,
@@ -224,6 +225,55 @@ describe('defaultEditable — never drifts from the resolver maps (no hardcoded 
       expect(e.baseUrl).toBe(baseUrlEnvKeyForHost(host) !== null);
       expect(e.auth).toBe(authEnvKeyForHost(host) !== null);
       expect(e.version).toBe(!isSelfUpdatingAgent(host));
+    }
+  });
+});
+
+describe('harnessEditable — the RUSH-2222 matrix, sourced from the resolver with reasons', () => {
+  it('every managed host tracks the resolver maps, disabled fields carrying a reason', () => {
+    for (const host of MANAGED_AGENT_IDS) {
+      const e = harnessEditable(host);
+      // model + fallback are always editable (a same-host model swap).
+      expect(e.model.enabled).toBe(true);
+      expect(e.fallback.enabled).toBe(true);
+      // endpoint / auth / version enablement mirrors the resolver, never a table.
+      expect(e.baseUrl.enabled).toBe(baseUrlEnvKeyForHost(host) !== null);
+      expect(e.auth.enabled).toBe(authEnvKeyForHost(host) !== null);
+      expect(e.version.enabled).toBe(!isSelfUpdatingAgent(host));
+      // A disabled field always states why; an enabled one never carries a stale reason.
+      for (const field of [e.baseUrl, e.auth, e.version] as const) {
+        if (field.enabled) expect(field.reason).toBeUndefined();
+        else expect(field.reason && field.reason.length).toBeTruthy();
+      }
+    }
+  });
+
+  it('names the host in each disabled reason (claude fully editable; grok has no endpoint or version pin)', () => {
+    const claude = harnessEditable('claude');
+    expect(claude.baseUrl.enabled).toBe(true);
+    expect(claude.version.enabled).toBe(true);
+
+    const grok = harnessEditable('grok');
+    expect(grok.baseUrl.reason).toMatch(/grok.*custom-endpoint/);
+    expect(grok.version.reason).toMatch(/self-updates/);
+    expect(grok.auth.enabled).toBe(true); // grok reads XAI_API_KEY
+
+    const opencode = harnessEditable('opencode');
+    expect(opencode.baseUrl.reason).toMatch(/endpoint/);
+    expect(opencode.version.enabled).toBe(true);
+  });
+
+  it('is the single source defaultEditable projects to booleans (they never disagree)', () => {
+    for (const host of MANAGED_AGENT_IDS) {
+      const full = harnessEditable(host);
+      const bool = defaultEditable(host);
+      expect(bool).toEqual({
+        model: full.model.enabled,
+        baseUrl: full.baseUrl.enabled,
+        auth: full.auth.enabled,
+        version: full.version.enabled,
+        fallback: full.fallback.enabled,
+      });
     }
   });
 });
