@@ -13,6 +13,8 @@ import {
   formatHarnessPickBanner,
   formatNoHealthyAccountError,
   formatNoHealthyHarnessError,
+  formatNoVerifiedUsageError,
+  hasStaleUsage,
   earliestResetAcross,
   readinessFromCandidate,
   isSignInRecoverable,
@@ -585,6 +587,60 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     expect(['2.1.181', '2.1.207']).toContain(result.picked.version);
   });
 
+  it('flags noVerifiedUsage when EVERY account is stale-but-present (PHNX-2526)', () => {
+    // The all-stale pool the initial route must refuse: a real number on each
+    // account, all of it too old to trust. `picked`/`healthy` stay populated
+    // (for failover); the flag is what tells resolveRunVersion not to launch it.
+    const a = candidate({ version: '2.1.181', usageSnapshot: dayOld(48) });
+    const b = candidate({ version: '2.1.207', usageSnapshot: dayOld(70) });
+
+    const result = pickBalancedCandidate([a, b], NOW)!;
+
+    expect(result.noVerifiedUsage).toBe(true);
+    expect(result.healthy.length).toBe(2);
+    expect(result.picked.version).toBeDefined();
+  });
+
+  it('does NOT flag noVerifiedUsage when a verified account exists', () => {
+    const stale = candidate({ version: '2.1.181', usageSnapshot: dayOld(48) });
+    const verified = candidate({ version: '2.1.219', usageSnapshot: fresh(90) });
+
+    const result = pickBalancedCandidate([stale, verified], NOW)!;
+
+    expect(result.noVerifiedUsage).toBe(false);
+    expect(result.picked.version).toBe('2.1.219');
+  });
+
+  it('does NOT flag noVerifiedUsage for a BLIND pool with no snapshots — the worker-box case still draws a pick', () => {
+    // A worker whose usage endpoint 403s carries NO snapshot at all (RUSH-2392).
+    // That is not a misleading number, so it must not fail loud — it still picks.
+    const a = candidate({ version: '2.1.181' });
+    const b = candidate({ version: '2.1.207' });
+
+    const result = pickBalancedCandidate([a, b], NOW)!;
+
+    expect(result.noVerifiedUsage).toBe(false);
+    expect(['2.1.181', '2.1.207']).toContain(result.picked.version);
+  });
+
+  it('does NOT flag noVerifiedUsage for a meterless plan-only pool (grok has no windows to be stale)', () => {
+    const planOnly = snapshotAt(new Date(NOW - 3 * 24 * 3600 * 1000), []);
+    planOnly.plan = 'SuperGrok Heavy';
+    const a = candidate({ version: '0.2.118', usageSnapshot: planOnly });
+
+    const result = pickBalancedCandidate([a], NOW)!;
+
+    expect(result.noVerifiedUsage).toBe(false);
+  });
+
+  it('hasStaleUsage distinguishes a stale-present snapshot from a blind/meterless one', () => {
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: dayOld(10) }), NOW)).toBe(true);
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: fresh(10) }), NOW)).toBe(false);
+    expect(hasStaleUsage(candidate({ version: '1.0.0' }), NOW)).toBe(false);
+    const meterless = snapshotAt(new Date(NOW - 26 * 3600 * 1000), []);
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: meterless }), NOW)).toBe(false);
+  });
+
   it('a verified MINORITY does not capture every launch — the 429-throttled regime', () => {
     // The 2026-08-20 incident: the usage endpoint 429-throttles a machine, so
     // each refresh cycle confirms exactly one account. Narrowing to verified
@@ -1034,6 +1090,89 @@ describe('resolveRunVersion — fail-loud signal on zero healthy (RUSH-2132)', (
     expect(resolved.rotation).toBeNull();
     expect(resolved.exhausted).toBeUndefined();
     fs.rmSync(cwd, { recursive: true, force: true });
+  });
+});
+
+describe('resolveRunVersion — never auto-pick from entirely stale usage (PHNX-2526)', () => {
+  // Snapshots are dated relative to the real clock because resolveRunVersion
+  // reads Date.now() internally (pickBalancedCandidate default nowMs).
+  const freshSnap = (usedPercent: number) =>
+    snapshotAt(new Date(Date.now() - 60_000), [{ key: 'week', usedPercent }]);
+  const staleSnap = (usedPercent: number) =>
+    snapshotAt(new Date(Date.now() - 26 * 3600 * 1000), [{ key: 'week', usedPercent }]);
+
+  it('balanced: all-stale pool → version null, noVerifiedUsage set, NOT a silent stale launch', async () => {
+    const a = candidate({ version: '2.1.181', usageSnapshot: staleSnap(48) });
+    const b = candidate({ version: '2.1.207', usageSnapshot: staleSnap(70) });
+    const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [a, b]);
+    expect(resolved.noVerifiedUsage).toBe(true);
+    expect(resolved.version).toBeNull();
+    expect(resolved.exhausted).toBeUndefined();
+    // The stale candidates survive in `healthy` for bounded post-rejection failover.
+    expect(resolved.rotation?.healthy.map((c) => c.version).sort()).toEqual(['2.1.181', '2.1.207']);
+  });
+
+  it('available: all-stale pool → version null, noVerifiedUsage set', async () => {
+    const a = candidate({ version: '2.1.181', usageSnapshot: staleSnap(48) });
+    const b = candidate({ version: '2.1.207', usageSnapshot: staleSnap(70) });
+    const resolved = await resolveRunVersion('claude', 'available', process.cwd(), async () => [a, b]);
+    expect(resolved.noVerifiedUsage).toBe(true);
+    expect(resolved.version).toBeNull();
+  });
+
+  it('a single verified account in the pool routes normally — noVerifiedUsage stays unset', async () => {
+    const stale = candidate({ version: '2.1.181', usageSnapshot: staleSnap(48) });
+    const verified = candidate({ version: '2.1.219', usageSnapshot: freshSnap(20) });
+    const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [stale, verified]);
+    expect(resolved.noVerifiedUsage).toBeFalsy();
+    expect(resolved.version).toBe('2.1.219');
+  });
+
+  it('a BLIND pool (no snapshots) still routes — the worker-box case is not "stale" (PHNX-3392)', async () => {
+    const a = candidate({ version: '2.1.181' });
+    const b = candidate({ version: '2.1.207' });
+    const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => [a, b]);
+    expect(resolved.noVerifiedUsage).toBeFalsy();
+    expect(['2.1.181', '2.1.207']).toContain(resolved.version);
+  });
+
+  it('bounded post-rejection failover still cascades across the preserved stale accounts', async () => {
+    // The refused stale pool is still the failover net once a primary has hit a
+    // 429 — by then the alternative is not launching at all, so a stale account
+    // is better than nothing. The chain is bounded (DEFAULT_ROTATION_FAILOVER_LIMIT).
+    const stale = ['2.1.181', '2.1.207', '2.1.217', '2.1.218', '2.1.219'].map((version) =>
+      candidate({ version, usageSnapshot: staleSnap(30) }),
+    );
+    const resolved = await resolveRunVersion('claude', 'balanced', process.cwd(), async () => stale);
+    expect(resolved.noVerifiedUsage).toBe(true);
+
+    // Simulate the interactive picker having chosen the first account as primary.
+    const primary = resolved.rotation!.healthy[0].version;
+    const chain = rotationFailoverChain(resolved.rotation, primary);
+    expect(chain.length).toBe(DEFAULT_ROTATION_FAILOVER_LIMIT);
+    expect(chain.every((entry) => entry.agent === 'claude')).toBe(true);
+    expect(chain.map((entry) => entry.version)).not.toContain(primary);
+  });
+});
+
+describe('formatNoVerifiedUsageError (PHNX-2526 — the unattended fail-loud contract)', () => {
+  const staleSnap = (usedPercent: number, ageMs: number) =>
+    snapshotAt(new Date(Date.now() - ageMs), [{ key: 'week', usedPercent }]);
+
+  it('carries the literal NO_VERIFIED_USAGE token and names each account with its staleness', () => {
+    const a = candidate({ version: '2.1.181', usageSnapshot: staleSnap(48, 26 * 3600 * 1000) });
+    const b = candidate({ version: '2.1.207' }); // blind — no snapshot
+    const msg = formatNoVerifiedUsageError('claude', 'balanced', [a, b]);
+    expect(msg).toContain('NO_VERIFIED_USAGE');
+    expect(msg).toContain('2.1.181');
+    expect(msg).toContain('2.1.207 (no usage snapshot)');
+    expect(msg).toContain("strategy 'balanced'");
+  });
+
+  it('names the accounts even with an empty candidate list', () => {
+    const msg = formatNoVerifiedUsageError('claude', 'available', []);
+    expect(msg).toContain('NO_VERIFIED_USAGE');
+    expect(msg).toContain('no signed-in accounts');
   });
 });
 

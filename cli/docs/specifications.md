@@ -3057,7 +3057,8 @@ Given a `balanced` pool on a worker box where no account can read
 unknown MUST NOT be scored as full-capacity (`capacityWeight`'s null arm is
 `UNVERIFIED_WEIGHT`, floored at 1 — `lib/accounting/capacity.ts:24,38-46`), so
 an unverifiable account MUST NOT outrank a verified-healthy one in a mixed pool,
-yet an all-unverified pool still draws a pick. The missing signal MUST be
+yet an all-*blind* pool (no snapshots at all) still draws a pick. An all-*stale*
+pool is the exception — see GWT-E5d. The missing signal MUST be
 supplied by the daemon (a sanctioned SING-1a collector) — the worker daemon
 pulling from a headed peer, and/or the shipped headed→worker push
 (`usage-sync`) — NOT by a fetch on the launch path, which MUST stay cache-only
@@ -3065,6 +3066,23 @@ pulling from a headed peer, and/or the shipped headed→worker push
 `week` window (`lib/claude-statusline.ts:91`) so the next
 `collectRunCandidates` sees it and `hasUsageAvailable` excludes the account
 (`lib/accounting/rotate.ts:226-247`).
+
+**GWT-E5d — Entirely stale usage is never auto-picked (PHNX-2526).**
+Given a `balanced`/`available` pool where EVERY eligible account carries a usage
+snapshot older than `USAGE_DECISION_MAX_AGE_MS` (5 min) and none is verified
+(the yosemite-s1 failing-refresh incident); When `resolveRunVersion` resolves a
+version; Then it MUST NOT auto-pick on the stale number — it returns
+`version: null` with `noVerifiedUsage: true` (`lib/accounting/rotate.ts`,
+`preferVerified` computing `verified.length === 0 && pool.some(hasStaleUsage)`).
+An INTERACTIVE run (TTY, not `--json`/`--headless`) MUST then show the account
+picker; an UNATTENDED run MUST fail loud with an error containing the literal
+`NO_VERIFIED_USAGE` (`formatNoVerifiedUsageError`), for both `agents run`
+(`commands/exec.ts`) and a daemon routine (`lib/daemon/runner.ts`). The stale
+candidates MUST remain in `rotation.healthy` so bounded post-rejection failover
+(`rotationFailoverChain`) still cascades across them — refusing to PICK a stale
+account and refusing to FAIL OVER to it after a real 429 are different calls.
+A pool that is merely BLIND (no snapshot at all — GWT-E5c) is NOT stale and
+still draws a pick; `hasStaleUsage` requires a present, dated, windowed snapshot.
 
 **GWT-E6 — `--device` forwards actor env, refuses `--secrets`.**
 Given `agents run claude "..." --device workbox --secrets prod`; When the

@@ -75,6 +75,7 @@ import {
   rotationFailoverChain,
   readinessFromCandidate,
   formatNoHealthyAccountError,
+  formatNoVerifiedUsageError,
   type RotateCandidate,
   type RotateResult,
 } from '../accounting/rotate.js';
@@ -1088,12 +1089,22 @@ export async function resolveRoutineLaunch(
   let version: string | undefined;
   let rotation: RotateResult | null = null;
   let exhausted: RotateCandidate[] | undefined;
+  let noVerifiedUsage = false;
   try {
     const resolved = await (deps.resolveRunVersion ?? resolveRunVersion)(agent, strategy, cwd);
     version = resolved.version ?? undefined;
     rotation = resolved.rotation;
     exhausted = resolved.exhausted;
-    if (rotation) {
+    noVerifiedUsage = resolved.noVerifiedUsage ?? false;
+    if (noVerifiedUsage) {
+      // Entirely stale usage (PHNX-2526): a routine is unattended, so there is
+      // no picker to divert to — it fails loud below rather than launch on a
+      // stale number. Do NOT log `rotation.picked` as a pick; it is the refused
+      // stale candidate, kept only for the failover chain.
+      process.stderr.write(
+        `[agents] routine ${config.name}: ${strategy} found no ${agent} account with fresh usage — refusing to route on stale data\n`,
+      );
+    } else if (rotation) {
       const label = rotation.picked.email
         ? `${rotation.picked.email} · ${agent}@${rotation.picked.version}`
         : `${agent}@${rotation.picked.version}`;
@@ -1131,6 +1142,13 @@ export async function resolveRoutineLaunch(
   // message text is the contract the Factory watchdog tail-detects.
   if (exhausted) {
     throw new Error(formatNoHealthyAccountError(agent, strategy, exhausted));
+  }
+
+  // Entirely stale usage is also NOT a "fall back to the default pin" case — the
+  // default is exactly the account whose stale number can't be trusted. Fail the
+  // run loud (NO_VERIFIED_USAGE) rather than hammer it every tick (PHNX-2526).
+  if (noVerifiedUsage) {
+    throw new Error(formatNoVerifiedUsageError(agent, strategy, rotation?.healthy ?? []));
   }
 
   if (!version) {

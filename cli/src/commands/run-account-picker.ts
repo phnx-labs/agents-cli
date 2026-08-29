@@ -267,6 +267,22 @@ export function signInLaunchDecision(
 }
 
 /**
+ * How a `balanced`/`available` run reacts when every account's usage is stale and
+ * none is verified (PHNX-2526). A human present at a real terminal gets the
+ * account `picker` — they can choose knowing the numbers are stale — while every
+ * unattended shape (`--headless`, `--json`, or no TTY) `fail-loud`s with
+ * NO_VERIFIED_USAGE rather than silently guess on a stale snapshot. `headless`
+ * joins the gate because a routine/machine dispatch can carry a TTY yet have no
+ * human to answer a picker; the split mirrors `signInLaunchDecision`.
+ */
+export function noVerifiedUsageDecision(
+  input: { tty: boolean; json: boolean; headless: boolean },
+): 'picker' | 'fail-loud' {
+  const humanPresent = input.tty && !input.json && !input.headless;
+  return humanPresent ? 'picker' : 'fail-loud';
+}
+
+/**
  * Choose which installed version to launch so the user can authenticate, when a
  * strategy found zero healthy accounts but at least one is merely signed out
  * (RUSH-2334). Returns the version to launch, or null if the user cancelled.

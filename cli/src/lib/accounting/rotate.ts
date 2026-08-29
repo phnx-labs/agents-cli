@@ -104,6 +104,21 @@ export interface RotateResult {
    * was silently reported as verified.)
    */
   usageUnverified?: boolean;
+  /**
+   * True when NO candidate carries a fresh usage snapshot AND at least one
+   * carries a STALE-but-present one — the "entirely stale usage" case
+   * (PHNX-2526). The INITIAL route MUST NOT be decided on a stale number that
+   * looks plausible but is wrong (the yosemite-s1 incident: 26h–2.7d-old
+   * snapshots read 48% while the account was at its weekly cap). `picked` is
+   * still populated (a stale candidate) so `healthy` stays intact for BOUNDED
+   * post-rejection failover, but a caller doing the initial selection MUST NOT
+   * launch it — it diverts to the account picker (interactive) or fails loud
+   * with NO_VERIFIED_USAGE (unattended). Distinct from a BLIND pool with no
+   * snapshot at all (a worker box whose usage endpoint 403s, RUSH-2392): that
+   * carries no misleading number, so it still draws a pick and this stays
+   * false.
+   */
+  noVerifiedUsage?: boolean;
 }
 
 export const RUN_STRATEGIES: RunStrategy[] = ['pinned', 'available', 'balanced'];
@@ -221,6 +236,26 @@ export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date
   const capturedAt = snapshot?.capturedAt;
   if (!capturedAt || !snapshot?.windows.length) return false;
   return nowMs - capturedAt.getTime() <= USAGE_DECISION_MAX_AGE_MS;
+}
+
+/**
+ * Whether this candidate carries a STALE-but-present usage number: a snapshot
+ * with windows whose capture time is older than {@link USAGE_DECISION_MAX_AGE_MS}.
+ *
+ * This is the misleading case the initial route must refuse — the number reads
+ * "48% used" with the same confidence whether captured a minute or three days
+ * ago, and a box whose refresh is failing stays wrong indefinitely. It is
+ * deliberately NARROWER than "not verified": a BLIND candidate with no snapshot
+ * (or a plan-only meterless one with no windows) carries no number to be misled
+ * by — a worker box whose usage endpoint 403s (RUSH-2392), or a meterless Grok
+ * login — so it is not "stale", and an entirely-blind pool still draws a pick
+ * (PHNX-3392) rather than fail loud with NO_VERIFIED_USAGE.
+ */
+export function hasStaleUsage(candidate: RotateCandidate, nowMs: number = Date.now()): boolean {
+  const snapshot = candidate.usageSnapshot;
+  const capturedAt = snapshot?.capturedAt;
+  if (!capturedAt || !snapshot?.windows.length) return false;
+  return nowMs - capturedAt.getTime() > USAGE_DECISION_MAX_AGE_MS;
 }
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
@@ -429,13 +464,13 @@ export function pickBalancedCandidate(
     if (!deduped.has(c)) excluded.push(c);
   }
 
-  const { picked, usageUnverified } = preferVerified(
+  const { picked, usageUnverified, noVerifiedUsage } = preferVerified(
     sorted,
     nowMs,
     (from) => weightedRandomByCapacity(from, nowMs),
     'representative',
   );
-  return { picked, healthy: sorted, excluded, usageUnverified };
+  return { picked, healthy: sorted, excluded, usageUnverified, noVerifiedUsage };
 }
 
 /**
@@ -483,15 +518,23 @@ function preferVerified(
   nowMs: number,
   choose: (from: RotateCandidate[]) => RotateCandidate,
   narrowing: 'any-verified' | 'representative' = 'any-verified',
-): { picked: RotateCandidate; usageUnverified: boolean } {
+): { picked: RotateCandidate; usageUnverified: boolean; noVerifiedUsage: boolean } {
   const verified = pool.filter((c) => isUsageVerified(c, nowMs));
   const narrow =
     verified.length > 0 &&
     (narrowing === 'any-verified' || verified.length >= Math.ceil(pool.length / 2));
   const picked = choose(narrow ? verified : pool);
+  // Entirely-stale = zero verified AND at least one stale-but-present number. A
+  // BLIND pool (no snapshots at all) does NOT trip this — it carries no
+  // misleading figure, so it still draws a pick (see {@link hasStaleUsage}). The
+  // chosen `picked` is still returned so `healthy` (which includes it) stays
+  // whole for bounded post-rejection failover; the INITIAL selection acts on
+  // this flag instead of launching that stale pick.
+  const noVerifiedUsage = verified.length === 0 && pool.some((c) => hasStaleUsage(c, nowMs));
   return {
     picked,
     usageUnverified: !isUsageVerified(picked, nowMs),
+    noVerifiedUsage,
   };
 }
 
@@ -565,13 +608,19 @@ export function pickAvailableCandidate(
   // unconfirmed "48% used" outranks an accurate "90% used" — the same inversion
   // that put a launch on an exhausted account under `balanced`. It routes on the
   // same cache, so it gets the same rule: confirmed headroom first.
-  const { picked: bestVerified, usageUnverified } = preferVerified(sorted, nowMs, (from) => from[0]);
+  const { picked: bestVerified, usageUnverified, noVerifiedUsage } = preferVerified(sorted, nowMs, (from) => from[0]);
   // An explicit version preference is an instruction, not a ranking signal, so it
   // still wins — but only while that version is actually eligible.
   const preferred = preferredVersion
     ? sorted.find((candidate) => candidate.version === preferredVersion)
     : undefined;
-  return { picked: preferred ?? bestVerified, healthy: sorted, excluded, usageUnverified };
+  // `noVerifiedUsage` rides along even when a `preferred` default resolves: an
+  // all-stale pool can only make `preferred` a stale pick too (a verified
+  // preferred would make verified.length > 0), and auto-selecting the default
+  // pin on a stale number is the very thing PHNX-2526 refuses. The initial
+  // route (resolveRunVersion) acts on the flag; the failover chain keeps
+  // `healthy` regardless.
+  return { picked: preferred ?? bestVerified, healthy: sorted, excluded, usageUnverified, noVerifiedUsage };
 }
 
 /**
@@ -730,6 +779,43 @@ export function formatNoHealthyAccountError(
       }).join(', ');
   const resetSummary = formatResetSummary(earliestResetAcross(excluded, nowMs));
   return `agents: no healthy ${agent} account under strategy '${strategy}' — excluded: ${excludedStr}; earliest window resets ${resetSummary}. Use --strategy pinned to force the default.`;
+}
+
+/**
+ * How old this candidate's usage snapshot is, in whole minutes, or null when it
+ * carries no dated snapshot (a blind account). Used only to explain WHY a route
+ * was refused as unverified — never to route on.
+ */
+function snapshotAgeMinutes(candidate: RotateCandidate, nowMs: number): number | null {
+  const capturedAt = candidate.usageSnapshot?.capturedAt;
+  if (!capturedAt || !candidate.usageSnapshot?.windows.length) return null;
+  return Math.max(0, Math.round((nowMs - capturedAt.getTime()) / 60_000));
+}
+
+/**
+ * The all-stale-usage error (PHNX-2526) an UNATTENDED `balanced`/`available`
+ * run fails loud with when no account's usage is fresh enough to route on. EXACT
+ * contract — it MUST contain the literal `NO_VERIFIED_USAGE` so a machine caller
+ * (and the Factory watchdog) can tail-detect it distinctly from the
+ * `no healthy` throttle error, which is a different condition (throttled vs
+ * merely stale). Names each candidate with how stale its snapshot is, so the
+ * operator can see the failing-refresh box rather than guess.
+ */
+export function formatNoVerifiedUsageError(
+  agent: AgentId,
+  strategy: RunStrategy,
+  candidates: RotateCandidate[],
+  nowMs: number = Date.now(),
+): string {
+  const detail = candidates.length === 0
+    ? 'no signed-in accounts'
+    : candidates.map((c) => {
+        const age = snapshotAgeMinutes(c, nowMs);
+        const staleness = age === null ? 'no usage snapshot' : `usage ${age}m old`;
+        return `${c.version} (${staleness})`;
+      }).join(', ');
+  const maxAgeMin = Math.round(USAGE_DECISION_MAX_AGE_MS / 60_000);
+  return `agents: NO_VERIFIED_USAGE — no signed-in ${agent} account has usage newer than ${maxAgeMin}m under strategy '${strategy}', so routing refuses to guess on a stale number: ${detail}. Refresh usage (agents view ${agent}) or pin the default with --strategy pinned.`;
 }
 
 /**
@@ -968,6 +1054,19 @@ export async function resolveRunVersion(
    * path — there is no account to be "unhealthy").
    */
   exhausted?: RotateCandidate[];
+  /**
+   * Set (with `version: null`) for a `balanced`/`available` route when EVERY
+   * eligible account's usage is stale and none is verified (PHNX-2526). The
+   * initial selection MUST NOT auto-launch on a stale number: an interactive
+   * caller diverts to the account picker, an unattended one fails loud with
+   * NO_VERIFIED_USAGE (`formatNoVerifiedUsageError`). `rotation` is still
+   * returned — its `healthy` set (the stale candidates) is preserved ONLY for
+   * bounded post-rejection failover, never the initial pick. Undefined when a
+   * verified account exists, when the pool is entirely blind (no snapshots —
+   * the worker-box case still draws a pick), for `pinned`, and for the
+   * zero-healthy `exhausted` case.
+   */
+  noVerifiedUsage?: boolean;
 }> {
   const fallback = resolveVersion(agent, cwd);
   const candidates = await collect(agent);
@@ -1003,6 +1102,25 @@ export async function resolveRunVersion(
   const rotation = strategy === 'available'
     ? pickAvailableCandidate(candidates, fallback)
     : pickBalancedCandidate(candidates);
+
+  if (rotation && rotation.noVerifiedUsage) {
+    // Entirely stale usage (PHNX-2526): every eligible account carries a
+    // stale-but-present number and none is verified. Refuse to auto-pick on a
+    // number that looks plausible but is wrong. `rotation` is returned so its
+    // `healthy` set survives for BOUNDED post-rejection failover, but
+    // `version` is null so the caller diverts — interactive to the account
+    // picker, unattended to a loud NO_VERIFIED_USAGE exit.
+    emit('rotation.unresolved', {
+      module: 'rotate',
+      agent,
+      strategy,
+      reason: 'no_verified_usage',
+      candidates: rotation.healthy.length + rotation.excluded.length,
+      healthy: rotation.healthy.length,
+      excluded: rotation.excluded.length,
+    });
+    return { version: null, rotation, noVerifiedUsage: true };
+  }
 
   if (rotation) {
     // `available` is sticky to the pinned default when healthy. Use the 60s

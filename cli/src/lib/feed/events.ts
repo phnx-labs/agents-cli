@@ -207,8 +207,11 @@ export type EventType =
   | 'mcp.register'
   // Resources
   | 'resource.sync'
-  // Rotation (account/credential)
+  // Rotation (account/credential). `rotation.resolved` = a version was picked;
+  // `rotation.unresolved` = the route was refused (e.g. entirely stale usage,
+  // PHNX-2526) and the caller diverted to a picker or a loud exit.
   | 'rotation.resolved'
+  | 'rotation.unresolved'
   // Commands (CLI entry points)
   | 'command.start'
   | 'command.end'
@@ -284,6 +287,7 @@ const EVENT_TYPE_TABLE: Record<EventType, true> = {
   'mcp.add': true, 'mcp.remove': true, 'mcp.register': true,
   'resource.sync': true,
   'rotation.resolved': true,
+  'rotation.unresolved': true,
   'command.start': true, 'command.end': true,
   'perf.timing': true,
   'session.start': true, 'session.end': true,
@@ -317,7 +321,7 @@ const AUDIT_EVENTS: ReadonlySet<string> = new Set([
   'version.install', 'version.switch', 'version.remove',
   'skill.install', 'skill.remove',
   'mcp.add', 'mcp.remove', 'mcp.register',
-  'rotation.resolved',
+  'rotation.resolved', 'rotation.unresolved',
   'session.start', 'session.end',
   // Daemon lifecycle (always-on process start/stop/error is audit-relevant).
   // browser.* / computer.action stay info — they are already on the event stream;
