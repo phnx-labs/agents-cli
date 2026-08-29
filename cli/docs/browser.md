@@ -230,7 +230,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 
 | Flag | Description |
 |------|-------------|
-| `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, `custom`. `arc` is recognized but NOT drivable — Arc exposes no CDP page targets and crashes on tab creation, so `agents browser` refuses it with a clear error; pick a Chromium-family browser to automate |
+| `-b, --browser <type>` | Required. One of: `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, `custom`. `arc` **attaches to your running Arc** — it never launches its own (Arc is single-instance); see [Arc](#arc-attach-to-your-running-window) below. Opening a brand-new tab is the one thing Arc can't do over CDP (`Target.createTarget` crashes it), so tab-creating verbs fail clearly there |
 | `-e, --endpoint <url>` | CDP endpoint URL (repeatable). Auto-assigned if omitted |
 | `-s, --secrets <bundle>` | Secrets bundle for this profile: injected as env vars at launch, AND the credential store for `browser type --secret` (keys `<PREFIX>_USERNAME`/`<PREFIX>_PASSWORD`). Warns if the bundle doesn't exist yet |
 | `-d, --description <text>` | Human-readable description |
@@ -239,7 +239,7 @@ the same device-local `browser remote-control` consent gate as the ordinary
 | `--position <X,Y>` | Window position on screen |
 | `--binary <path>` | Absolute path to browser binary (required for `--browser custom`) |
 | `--electron` | Treat as an Electron desktop app; never creates new targets |
-| `--target-filter <expr>` | Pick the visible CDP page target. Format: `url:<substring>` or `title:<substring>`. Requires `--electron` |
+| `--target-filter <expr>` | Pick the existing CDP page target to drive. Format: `url:<substring>` or `title:<substring>`. Requires `--electron` **or** `--browser arc` (both reuse an open tab rather than creating one) |
 
 ### Which browser shows YOU a page (`browser.viewer`)
 
@@ -274,9 +274,10 @@ a downgrade. And the viewer tab is bound to **no task**, so the abandoned-task
 reaper never closes a page you are reading; `stop`/`done` leave it alone too,
 because it is your tab now.
 
-If the viewer cannot be reached — profile missing, Arc (which exposes no CDP page
-targets), not launchable here — the call falls back to the OS handler and prints
-one line saying why. It never silently ignores your configuration.
+If the viewer cannot be reached — profile missing, Arc (which can't open a fresh
+viewer tab; see [Arc](#arc-attach-to-your-running-window)), not launchable here —
+the call falls back to the OS handler and prints one line saying why. It never
+silently ignores your configuration.
 
 ### Identity-bearing names vs loopback endpoints
 
@@ -320,6 +321,57 @@ agents browser start --task post --device zion --url https://x.com/
 agents browser type --task post --ref @e3 "hello"
 agents browser screenshot --task post
 ```
+
+### Arc — attach to your running window
+
+Arc is different from every other supported browser, and the difference is
+structural, not cosmetic: **Arc is single-instance.** Relaunching the Arc binary
+with a fresh `--user-data-dir` does not start a second debuggable process —
+macOS routes the launch to the Arc you already have open (which was started with
+no debug port), so you get a stray window and no CDP endpoint. So `agents
+browser` **never launches Arc**. It attaches to the Arc you are already running,
+or it fails loud — it never silently opens a duplicate (PHNX-2399).
+
+Two consequences shape how you use it:
+
+1. **You launch Arc with remote debugging; agents attaches.** Point the profile's
+   endpoint at the port you started Arc's remote debugging on, and start Arc
+   yourself with that port:
+
+   ```bash
+   # 1. quit Arc, then relaunch it with a debug port
+   open -a Arc --args --remote-debugging-port=9222
+
+   # 2. bind a profile to that exact port
+   agents browser profiles create arc --browser arc --endpoint cdp://127.0.0.1:9222
+
+   # 3. drive it — agents attaches to the running Arc, no new window
+   agents browser navigate --profile arc --url https://example.com
+   ```
+
+   If the running Arc is **not** serving CDP on that port, the command fails with
+   the one relaunch that fixes it (the `open -a Arc …` line above) rather than
+   spawning a duplicate. The port must match the profile's endpoint.
+
+2. **Select a Space by binding the profile to its tab.** Arc does not expose
+   Spaces as separate CDP contexts, so you target a Space by pointing at a tab
+   that lives in it with `--target-filter` (accepted for `--browser arc`, not just
+   `--electron`):
+
+   ```bash
+   agents browser profiles edit arc --target-filter 'url:notion.so'
+   # or by tab title
+   agents browser profiles edit arc --target-filter 'title:Roadmap'
+   ```
+
+   `navigate` then reuses the matched tab in place (it will not hijack an
+   unrelated page you are reading).
+
+**The one thing Arc can't do: open a new tab.** `Target.createTarget` crashes the
+user's Arc window, so any tab-creating verb fails clearly and points you at
+reusing an existing tab or at a Chromium-family browser (Comet, Chrome, Chromium,
+Brave) for brand-new tabs. This is why Arc is never used as the [viewer](#which-browser-shows-you-a-page-browserviewer)
+(showing a human a page needs its own fresh tab).
 
 ### Cleaning up dead profiles (`prune`)
 
@@ -604,7 +656,7 @@ The fields map to:
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | Lowercase alphanumeric with hyphens |
-| `browser` | string | `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, or `custom` (`arc` is recognized but not drivable — see the `--browser` flag note above) |
+| `browser` | string | `chrome`, `comet`, `chromium`, `brave`, `edge`, `arc`, or `custom` (`arc` attaches to your running Arc — see [Arc](#arc-attach-to-your-running-window)) |
 | `endpoints` | string[] or map | CDP URLs: `cdp://host:port`, `ssh://host?port=N`, or `wss://...` |
 | `defaultEndpoint` | string | Key into `endpoints` map to use by default |
 | `binary` | string | Absolute path; required for `browser: custom` |

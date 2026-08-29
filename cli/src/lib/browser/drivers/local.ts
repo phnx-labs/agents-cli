@@ -43,6 +43,27 @@ function isTunnelProcess(command: string): boolean {
   return TUNNEL_PROCESS_NAMES.has(command.toLowerCase());
 }
 
+/**
+ * Arc is single-instance: relaunching the Arc binary with a fresh
+ * `--user-data-dir` does not create a second debuggable process — macOS routes
+ * the launch to the running Arc, which was started with no debug port, so the
+ * spawn produces a stray window and no CDP endpoint (issue #2779). agents
+ * browser therefore ATTACHES to the user's running Arc and never launches its
+ * own. When the running Arc exposes no CDP endpoint on the profile's port, we
+ * fail loud with the one relaunch that fixes it rather than silently spawning a
+ * duplicate. Exported so the contract is unit-testable without a real Arc.
+ */
+export function arcAttachRequiredError(profileName: string, port: number): Error {
+  return new Error(
+    `Arc is not exposing a CDP endpoint on cdp://127.0.0.1:${port} for profile ` +
+      `"${profileName}". Arc is single-instance — agents browser attaches to your ` +
+      `RUNNING Arc and never launches a second one, so it will not start an isolated ` +
+      `Arc for you. Quit Arc, then relaunch it with remote debugging on this port:\n` +
+      `  open -a Arc --args --remote-debugging-port=${port}\n` +
+      `and retry. The port must match the profile's endpoint (\`agents browser profiles list\`).`
+  );
+}
+
 export async function connectLocal(
   endpoint: string,
   profile: BrowserProfile,
@@ -91,6 +112,15 @@ export async function connectLocal(
   } catch (err) {
     if (err instanceof Error && err.message.startsWith('Browser identity mismatch')) {
       throw err;
+    }
+
+    // Arc reached the catch, so the attach above failed: the running Arc is not
+    // serving CDP on this port. Never fall through to launchBrowser — that would
+    // spawn the duplicate/stray-window this ticket set out to end (#2779,
+    // PHNX-2399). Fail loud with the relaunch that makes the user's Arc
+    // attachable.
+    if (profile.browser === 'arc') {
+      throw arcAttachRequiredError(profile.name, port);
     }
 
     // Distinguish "nothing listening on this port" (fine to launch fresh) from
