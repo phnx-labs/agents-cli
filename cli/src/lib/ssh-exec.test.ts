@@ -7,6 +7,7 @@ import {
   SSH_TARGET_RE,
   shellQuote,
   controlOpts,
+  SSH_CONTROL_PERSIST_SECONDS,
   SSH_OPTS,
   sshConnectOpts,
   sshExec,
@@ -101,13 +102,22 @@ describe('controlOpts (connection multiplexing)', () => {
     if (process.platform === 'win32') return; // multiplexing skipped on Windows
     const opts = controlOpts();
     expect(opts).toContain('ControlMaster=auto');
-    expect(opts).toContain('ControlPersist=60s');
+    expect(opts).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`);
     const cp = opts.find((o) => o.startsWith('ControlPath='));
     expect(cp).toBeDefined();
     // %C keeps the socket path short (macOS sun_path limit) and the dir must exist.
     expect(cp).toContain('%C');
     const dir = path.dirname(cp!.replace('ControlPath=', ''));
     expect(fs.existsSync(dir)).toBe(true);
+  });
+
+  it('persists the master past the dominant 5-minute fleet poll so it lands warm (PHNX-2582)', () => {
+    // The master only survives while idle < ControlPersist, so the value has to
+    // exceed the interval of the most frequent thing touching a host — the
+    // daemon's 5-minute service loop. Below that, every 5-minute poll pays a
+    // fresh handshake, which was 100% of its cost at the old 60s persist.
+    const DOMINANT_FLEET_POLL_SECONDS = 5 * 60;
+    expect(SSH_CONTROL_PERSIST_SECONDS).toBeGreaterThan(DOMINANT_FLEET_POLL_SECONDS);
   });
 });
 

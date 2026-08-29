@@ -8,7 +8,7 @@ import {
   parseComputerList,
   FactoryCloudProvider,
 } from './factory.js';
-import { SSH_OPTS } from '../ssh-exec.js';
+import { SSH_OPTS, SSH_CONTROL_PERSIST_SECONDS } from '../ssh-exec.js';
 
 describe('resolveAutonomy', () => {
   it('passes through valid levels', () => {
@@ -57,7 +57,7 @@ describe('buildSshArgs', () => {
     for (const opt of SSH_OPTS) expect(args).toContain(opt);
     if (process.platform !== 'win32') {
       expect(args).toContain('ControlMaster=auto');
-      expect(args).toContain('ControlPersist=60s');
+      expect(args).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`);
     }
     const targetIdx = args.indexOf('droid@cloud-vm-1');
     expect(args.indexOf('ProxyCommand=/usr/bin/droid computer ssh cloud-vm-1 --proxy --port %p')).toBeLessThan(targetIdx);

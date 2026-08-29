@@ -40,6 +40,7 @@ import {
   persistRemoteLifecycle,
 } from './ssh.js';
 import { getPortOccupant } from '../chrome.js';
+import { SSH_CONTROL_PERSIST_SECONDS } from '../../ssh-exec.js';
 
 const mockedOccupant = vi.mocked(getPortOccupant);
 
@@ -303,7 +304,7 @@ describe('raw-ssh spawns reuse SSH_OPTS so unreachable hosts fail fast (#746)', 
     expect(args).toContain('BatchMode=yes');
     if (process.platform !== 'win32') {
       expect(args).toContain('ControlMaster=auto');
-      expect(args).toContain('ControlPersist=60s');
+      expect(args).toContain(`ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`);
     }
     // Every hardened option (an `-o` and its value) precedes the target — on
     // BSD getopt (macOS) an option after the target is swallowed into the
