@@ -1042,7 +1042,10 @@ describe('applyPermissionsToVersion', () => {
     const config = TOML.parse(readFileSync(configPath, 'utf-8')) as any;
     const rules = config.permission.rules as Array<{ action: string; tool: string; pattern?: string }>;
     expect(rules).toContainEqual({ action: 'allow', tool: 'bash', pattern: 'git *' });
-    expect(rules).toContainEqual({ action: 'allow', tool: 'bash', pattern: '*' });
+    // Blanket Bash(*) -> a pattern-LESS bash rule (grok's allow-all-shell idiom;
+    // its `*` is only a single-level wildcard). PHNX-3294.
+    expect(rules).toContainEqual({ action: 'allow', tool: 'bash' });
+    expect(rules).not.toContainEqual({ action: 'allow', tool: 'bash', pattern: '*' });
     expect(rules).toContainEqual({ action: 'allow', tool: 'read', pattern: '/Users/me' });
     expect(rules).toContainEqual({ action: 'allow', tool: 'edit', pattern: 'src/' });
     expect(rules).toContainEqual({ action: 'allow', tool: 'webfetch', pattern: 'example.com' });
