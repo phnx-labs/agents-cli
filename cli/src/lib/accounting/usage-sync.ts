@@ -40,14 +40,29 @@ import {
 import {
   exportClaudeUsageCacheRows,
   ingestPeerClaudeUsageRows,
-  readClaudeUsageCache,
   type CachedUsageSnapshot,
-  type UsageSnapshot,
 } from './usage.js';
 
 /** How long a single peer push may take before it is abandoned for this tick. */
 export const USAGE_PUSH_DEADLINE_MS = 20_000;
 export const USAGE_PULL_DEADLINE_MS = 20_000;
+
+/**
+ * A worker's newest local usage row older than this triggers a pull from the
+ * primary. A worker cannot self-read usage (setup-token lacks `user:profile`,
+ * RUSH-2392), so its only source of a fresh row is the daemon push every
+ * `USAGE_SYNC_TICK_MS` (15m); this cutoff is 2× that tick, so one missed push
+ * cycle is tolerated before the worker actively pulls. Bounds worker staleness
+ * to ~30m instead of the days-old caches this replaces.
+ */
+export const USAGE_SYNC_MAX_AGE_MS = 30 * 60_000;
+
+/** Epoch ms of a cache row's capture time, or null when unparseable/absent. */
+function capturedAtMs(capturedAt: string | null | undefined): number | null {
+  if (!capturedAt) return null;
+  const ms = Date.parse(capturedAt);
+  return Number.isFinite(ms) ? ms : null;
+}
 
 /** The stdin envelope the `__usage-ingest` verb reads. `v` guards the shape. */
 export interface UsageSyncPayload {
@@ -136,8 +151,9 @@ export interface UsagePullDeps {
   listRoles?: () => Record<string, ConfiguredDeviceRole>;
   isPinned?: (name: string) => boolean;
   exportRows?: () => Record<string, CachedUsageSnapshot>;
-  readRow?: (usageKey: string) => Pick<UsageSnapshot, 'windows'> | null;
   ingestRows?: (rows: Record<string, CachedUsageSnapshot>) => number;
+  /** Injectable clock for the staleness gate; defaults to `Date.now`. */
+  now?: () => number;
   /** Read the versioned payload from the primary. Default: ssh `__usage-export`. */
   pull?: (device: DeviceProfile) => { ok: boolean; stdout?: string; message?: string };
 }
@@ -183,12 +199,25 @@ export function pullUsageFromPrimary(deps: UsagePullDeps = {}): UsagePullResult 
   }
 
   const localRows = (deps.exportRows ?? exportClaudeUsageCacheRows)();
-  const readRow = deps.readRow ?? readClaudeUsageCache;
   const localEntries = Object.entries(localRows);
-  if (localEntries.length > 0 && localEntries.every(([key, row]) => {
-    const fresh = readRow(key);
-    return fresh !== null && fresh.windows.length === row.windows.length;
-  })) {
+  // Fresh means RECENT, not "the cache equals itself". The prior check read the
+  // SAME on-disk cache twice (exportRows() and readRow()) and compared window
+  // COUNT, so `fresh.windows.length === row.windows.length` was always true and
+  // any non-empty worker cache skipped the pull forever — which is how a worker
+  // served a days-old snapshot indefinitely and balanced launched into an
+  // account already at its weekly cap. A worker cannot self-read usage, so any
+  // row older than the sync cadence is stale and must trigger a pull; the merge
+  // is newest-wins + idempotent, so pulling when the primary is no fresher is a
+  // harmless no-op.
+  const now = (deps.now ?? Date.now)();
+  const staleCutoff = now - USAGE_SYNC_MAX_AGE_MS;
+  const allFresh =
+    localEntries.length > 0 &&
+    localEntries.every(([, row]) => {
+      const ms = capturedAtMs(row.capturedAt);
+      return ms !== null && ms >= staleCutoff;
+    });
+  if (allFresh) {
     result.skipped = 'local usage cache is fresh';
     return result;
   }
