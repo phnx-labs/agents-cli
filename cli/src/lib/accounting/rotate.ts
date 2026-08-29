@@ -1071,6 +1071,30 @@ export async function resolveRunVersion(
   const fallback = resolveVersion(agent, cwd);
   const candidates = await collect(agent);
 
+  // Entirely stale usage (PHNX-2526): every eligible account carries a
+  // stale-but-present number and none is verified. Refuse to auto-pick on a
+  // number that looks plausible but is wrong. `rotation` is returned so its
+  // `healthy` set survives for BOUNDED post-rejection failover, but `version`
+  // is null so the caller diverts — interactive to the account picker,
+  // unattended to a loud NO_VERIFIED_USAGE exit. Shared across BOTH rotating
+  // paths (the pinned auth-blocked-pin fallback AND balanced/available), since
+  // both reuse `pickAvailableCandidate`/`pickBalancedCandidate` and neither may
+  // launch a stale pick.
+  const refuseStaleUsage = (
+    rotation: RotateResult,
+  ): { version: string | null; rotation: RotateResult; noVerifiedUsage: true } => {
+    emit('rotation.unresolved', {
+      module: 'rotate',
+      agent,
+      strategy,
+      reason: 'no_verified_usage',
+      candidates: rotation.healthy.length + rotation.excluded.length,
+      healthy: rotation.healthy.length,
+      excluded: rotation.excluded.length,
+    });
+    return { version: null, rotation, noVerifiedUsage: true };
+  };
+
   if (strategy === 'pinned') {
     const pinnedCandidate = fallback
       ? candidates.find((c) => c.version === fallback)
@@ -1079,6 +1103,11 @@ export async function resolveRunVersion(
     // guaranteed miss. Prefer a signed-in sibling on this device.
     if (pinnedCandidate && isSignInRecoverable(readinessFromCandidate(pinnedCandidate))) {
       const rotation = pickAvailableCandidate(candidates, fallback);
+      // The auth-blocked pin rotates to a sibling — an initial selection, so it
+      // gets the same verified-only gate as balanced/available. Without this, a
+      // revoked pin with only stale siblings launched one blind (the yosemite-s1
+      // trap through the pinned path — PR #3295 review).
+      if (rotation && rotation.noVerifiedUsage) return refuseStaleUsage(rotation);
       if (rotation) {
         emit('rotation.resolved', {
           module: 'rotate',
@@ -1103,24 +1132,7 @@ export async function resolveRunVersion(
     ? pickAvailableCandidate(candidates, fallback)
     : pickBalancedCandidate(candidates);
 
-  if (rotation && rotation.noVerifiedUsage) {
-    // Entirely stale usage (PHNX-2526): every eligible account carries a
-    // stale-but-present number and none is verified. Refuse to auto-pick on a
-    // number that looks plausible but is wrong. `rotation` is returned so its
-    // `healthy` set survives for BOUNDED post-rejection failover, but
-    // `version` is null so the caller diverts — interactive to the account
-    // picker, unattended to a loud NO_VERIFIED_USAGE exit.
-    emit('rotation.unresolved', {
-      module: 'rotate',
-      agent,
-      strategy,
-      reason: 'no_verified_usage',
-      candidates: rotation.healthy.length + rotation.excluded.length,
-      healthy: rotation.healthy.length,
-      excluded: rotation.excluded.length,
-    });
-    return { version: null, rotation, noVerifiedUsage: true };
-  }
+  if (rotation && rotation.noVerifiedUsage) return refuseStaleUsage(rotation);
 
   if (rotation) {
     // `available` is sticky to the pinned default when healthy. Use the 60s
