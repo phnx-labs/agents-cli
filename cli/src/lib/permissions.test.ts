@@ -17,6 +17,7 @@ import {
   convertToHermesFormat,
   convertToOpenClawFormat,
   convertToKiroFormat,
+  convertToGrokFormat,
   formatComputerPermissionGrantHint,
   listInstalledPermissions,
   installPermissionSet,
@@ -24,6 +25,8 @@ import {
   saveDefaultPermissionSet,
   removePermissionSet,
 } from './permissions.js';
+import { readCanonicalPermissions } from './permissions-registry.js';
+import type { AgentId } from './types.js';
 
 const tempDirs: string[] = [];
 
@@ -649,5 +652,163 @@ describe('permission-set storage (groups/ contract)', () => {
     expect(result.success).toBe(true);
 
     expect(listInstalledPermissions().map((s) => s.name)).not.toContain('my-set');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// PHNX-3294: safe cross-machine ops must resolve to ALLOW on every harness.
+//
+// Fleet agents were punting on `ssh` / `scp` / `agents ssh` / compound
+// `scp … && open …` / `git -C <config-repo>` because the blanket `Bash` grant
+// (user 30-paths.yaml) translated to a form some harnesses do not honour as
+// allow-all — most sharply Grok, whose `pattern:'*'` is only a SINGLE-level
+// wildcard, so it never auto-approved a multi-token `ssh host cmd`.
+//
+// These tests hit the REAL translation path (no mocking): the canonical set is
+// converted to each harness's native config on disk via applyPermissionsToVersion,
+// then read back with the registry's reverse projection, and a reference
+// (Claude-semantics) matcher checks each safe command resolves to allow.
+// ---------------------------------------------------------------------------
+describe('safe cross-machine ops resolve to allow (PHNX-3294)', () => {
+  // The prefix a canonical Bash rule grants, or '*' for a blanket grant, or
+  // null when the rule is not a Bash allow. Mirrors Claude's token-prefix match:
+  // `Bash(ssh:*)` grants a command that is `ssh` or starts with `ssh `.
+  function bashPrefix(rule: string): string | '*' | null {
+    if (rule === 'Bash' || rule === 'Bash(*)' || rule === 'Bash(**)') return '*';
+    const m = rule.match(/^Bash\((.+)\)$/);
+    if (!m) return null;
+    return m[1].replace(/:\*$/, '');
+  }
+
+  // A single shell atom is granted when some allow rule is blanket, matches it
+  // exactly, or is a token-prefix of it.
+  function atomGranted(allow: string[], atom: string): boolean {
+    const cmd = atom.trim();
+    for (const rule of allow) {
+      const p = bashPrefix(rule);
+      if (p === null) continue;
+      if (p === '*') return true;
+      if (cmd === p || cmd.startsWith(p + ' ')) return true;
+    }
+    return false;
+  }
+
+  // A compound command is only as strong as its weakest atom, so every atom
+  // between shell operators must be independently granted.
+  function grants(allow: string[], command: string): boolean {
+    const atoms = command.split(/\s*(?:&&|\|\||;)\s*/).filter((a) => a.trim().length > 0);
+    return atoms.every((atom) => atomGranted(allow, atom));
+  }
+
+  const SAFE_COMMANDS = [
+    "ssh yosemite-m5 'ls -la'",
+    'scp report.html yosemite-m5:/tmp/report.html',
+    "agents ssh yosemite-m5 'agents sessions'",
+    'scp yosemite-m5:/tmp/plan.html /tmp/plan.html && open /tmp/plan.html',
+    'git -C ~/.agents status',
+  ];
+
+  // The fleet-realistic allow set after the fix: blanket Bash (30-paths) plus the
+  // explicit system allowlists that back each safe shape (10-security ssh/scp,
+  // 02-dotdirs agents/open, cross-repo git -C, 09-git git status).
+  const FLEET_ALLOW = [
+    'Bash',
+    'Bash(ssh:*)',
+    'Bash(scp:*)',
+    'Bash(rsync:*)',
+    'Bash(agents:*)',
+    'Bash(open:*)',
+    'Bash(git -C ~/.agents:*)',
+    'Bash(git status:*)',
+  ];
+
+  // Every allowlist-capable harness whose native config we can round-trip through
+  // a version home. (openclaw/copilot/cursor/antigravity/kiro are covered by the
+  // dedicated per-format suites above; these five are the ones the ticket names.)
+  const HARNESSES: AgentId[] = ['claude', 'grok', 'codex', 'kimi', 'droid'];
+
+  it.each(HARNESSES)(
+    'blanket-Bash fleet config allows every safe cross-machine command on %s',
+    (agent) => {
+      const home = makeTempHome();
+      const res = applyPermissionsToVersion(agent, { name: 'fleet', allow: FLEET_ALLOW, deny: [] }, home, false);
+      expect(res.success).toBe(true);
+
+      const readBack = readCanonicalPermissions(agent, 'user', undefined, home);
+      expect(readBack, `${agent} wrote no readable permissions`).not.toBeNull();
+
+      for (const command of SAFE_COMMANDS) {
+        expect(
+          grants(readBack!.allow, command),
+          `${agent} should allow: ${command}\nallow=${JSON.stringify(readBack!.allow)}`,
+        ).toBe(true);
+      }
+    },
+  );
+
+  it('THE FIX: blanket Bash becomes a pattern-LESS grok rule, not a single-level wildcard', () => {
+    // Grok's `*` is single-level, so the pre-fix `pattern:'*'` never auto-approved
+    // `ssh host cmd`; a rule with NO pattern is grok's "bare prefix matches all
+    // invocations" allow-all-shell idiom. Assert every blanket form emits it.
+    for (const blanket of ['Bash', 'Bash(*)', 'Bash(**)']) {
+      const { permission } = convertToGrokFormat({ name: 'b', allow: [blanket], deny: [] });
+      expect(permission.rules).toEqual([{ action: 'allow', tool: 'bash' }]);
+      expect(permission.rules[0]).not.toHaveProperty('pattern');
+    }
+    // A blanket DENY is symmetric — it must deny ALL bash, not one level.
+    const denySet = convertToGrokFormat({ name: 'b', allow: [], deny: ['Bash'] });
+    expect(denySet.permission.rules).toEqual([{ action: 'deny', tool: 'bash' }]);
+    // An explicit per-command grant still carries its prefix pattern.
+    const sshSet = convertToGrokFormat({ name: 's', allow: ['Bash(ssh:*)'], deny: [] });
+    expect(sshSet.permission.rules).toEqual([{ action: 'allow', tool: 'bash', pattern: 'ssh *' }]);
+  });
+
+  it('grok round-trips the blanket-Bash grant back as Bash(*) (allow-all preserved)', () => {
+    const home = makeTempHome();
+    applyPermissionsToVersion('grok', { name: 'b', allow: ['Bash'], deny: [] }, home, false);
+    const written = TOML.parse(fs.readFileSync(path.join(home, '.grok', 'config.toml'), 'utf-8')) as {
+      permission: { rules: Array<Record<string, unknown>> };
+    };
+    // The on-disk rule is pattern-less — the shape grok honours as allow-all.
+    expect(written.permission.rules).toEqual([{ action: 'allow', tool: 'bash' }]);
+
+    const readBack = readCanonicalPermissions('grok', 'user', undefined, home);
+    expect(readBack!.allow).toContain('Bash(*)');
+  });
+
+  // The explicit allowlist (no blanket Bash) must still grant the safe shapes on
+  // the harnesses that keep per-command rules. Grok is excluded here on purpose:
+  // its config `pattern` glob is single-level, so an explicit `Bash(ssh:*)` alone
+  // is NOT a reliable multi-token match — the pattern-less blanket grant above is
+  // grok's reliable fleet mechanism. Codex has no per-command allowlist, so any
+  // allow widens its sandbox to workspace-write and reads back as Bash(*).
+  const EXPLICIT_ONLY = FLEET_ALLOW.filter((r) => r !== 'Bash');
+  it.each(['claude', 'kimi', 'droid', 'codex'] as AgentId[])(
+    'explicit ssh/scp/git-C allowlist (no blanket) still allows the safe commands on %s',
+    (agent) => {
+      const home = makeTempHome();
+      const res = applyPermissionsToVersion(agent, { name: 'explicit', allow: EXPLICIT_ONLY, deny: [] }, home, false);
+      expect(res.success).toBe(true);
+
+      const readBack = readCanonicalPermissions(agent, 'user', undefined, home);
+      expect(readBack).not.toBeNull();
+      for (const command of SAFE_COMMANDS) {
+        expect(
+          grants(readBack!.allow, command),
+          `${agent} should allow: ${command}\nallow=${JSON.stringify(readBack!.allow)}`,
+        ).toBe(true);
+      }
+    },
+  );
+
+  it('the matcher rejects an unsafe atom in a compound (weakest-atom rule holds)', () => {
+    // Sanity guard on the matcher itself: with only ssh allowed, a compound that
+    // also runs an un-granted command is NOT allowed — so a green result above is
+    // real coverage, not a matcher that says yes to everything.
+    expect(grants(['Bash(ssh:*)'], "ssh host 'ls'")).toBe(true);
+    expect(grants(['Bash(ssh:*)'], "ssh host 'ls' && rm -rf /")).toBe(false);
+    // git -C <config-repo> is NOT covered by a token-anchored Bash(git status:*).
+    expect(grants(['Bash(git status:*)'], 'git -C ~/.agents status')).toBe(false);
+    expect(grants(['Bash(git -C ~/.agents:*)'], 'git -C ~/.agents status')).toBe(true);
   });
 });
