@@ -136,11 +136,11 @@ export const SSH_CONTROL_PERSIST_SECONDS = 10 * 60;
  * a control socket; subsequent connections (even from a *separate* `agents`
  * invocation) reuse it, skipping the TCP+auth handshake — so repeated
  * `--device <name>` calls to the same box feel local instead of paying ~100-300ms
- * each. `ControlPersist` (see {@link SSH_CONTROL_PERSIST_SECONDS}) keeps the
- * master alive after the last client exits, tuned to outlast the dominant
- * 5-minute fleet poll so that poll lands warm. `%C` (a short fixed-length hash of
- * local-host/remote/port/user) keeps the socket path well under macOS's 104-char
- * `sun_path` limit.
+ * each. `ControlPersist` keeps the master alive after the last client exits, sized
+ * to span a multi-minute burst of repeated touches — see
+ * {@link SSH_CONTROL_PERSIST_SECONDS} for the value and the rationale. `%C` (a
+ * short fixed-length hash of local-host/remote/port/user) keeps the socket path
+ * well under macOS's 104-char `sun_path` limit.
  *
  * This is **on by default** for every `sshExec`/`sshStream` call: the poll loops
  * (`followHostTask`), readiness probes, and per-host fan-outs are exactly the

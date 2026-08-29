@@ -276,7 +276,8 @@ Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
 
 - **A 10-minute master lingers after each call.** `ControlPersist=600s`
   (`SSH_CONTROL_PERSIST_SECONDS`) keeps an idle master alive so later commands —
-  including the next cycle of the daemon's 5-minute fleet poll — reuse it instead
+  the rest of a multi-minute burst of `--device`/fan-out touches of the same box —
+  reuse it instead
   of re-handshaking. The cost is bounded (one idle unix socket + a small ssh
   master process per recently-touched host, reaped after 10 minutes) and is the
   entire point. The window is capped at 10 minutes rather than longer because a
