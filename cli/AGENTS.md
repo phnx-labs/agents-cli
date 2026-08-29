@@ -579,8 +579,16 @@ weekly limit persists a `rate_limited` `week` window
 the account; and a MISSING snapshot is treated as unknown, never as headroom —
 `capacityWeight(null, …)` draws `UNVERIFIED_WEIGHT` (1), not full capacity, so
 a blind account on a worker box (usage 403s, RUSH-2392) can't outrank a
-verified-healthy one, while an all-unverified pool still draws a pick. The
-fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
+verified-healthy one, while an all-*blind* pool (no snapshots at all) still
+draws a pick. An all-*stale* pool does NOT (PHNX-2526): when every account
+carries a snapshot older than `USAGE_DECISION_MAX_AGE_MS` and none is verified,
+`balanced`/`available` refuse to auto-pick on a plausible-but-wrong number —
+`resolveRunVersion` returns `noVerifiedUsage`, an interactive run shows the
+account picker and an unattended one fails loud with `NO_VERIFIED_USAGE`
+(`formatNoVerifiedUsageError`); the stale candidates survive only in
+`rotation.healthy` for bounded post-rejection failover. The distinction is
+`hasStaleUsage` (a present-but-old number) vs blind (no number to be misled by).
+The fan-out mirrors `fleet ping` (probe self in process, SSH each peer's
 `devices harnesses --local --json` worker, same per-device + overall deadlines).
 Everything but the collector is pure and unit-tested
 ([`harness-inventory.test.ts`](src/lib/devices/harness-inventory.test.ts)). Agent

@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { RotateCandidate } from '../lib/accounting/rotate.js';
 import type { UsageSnapshot, UsageWindowKey } from '../lib/accounting/usage.js';
-import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
+import { buildRunAccountChoices, buildSwitchAccountChoices, formatAccountLimits, noVerifiedUsageDecision, pickSignInLaunchVersion, signInLaunchDecision } from './run-account-picker.js';
 
 function snapshot(windows: Array<[UsageWindowKey, number]>, plan: string | null = null): UsageSnapshot {
   return {
@@ -255,5 +255,25 @@ describe('signInLaunchDecision (RUSH-2334)', () => {
 
   it('an all-throttled exhausted set fails loud even for a present human (RUSH-2132)', () => {
     expect(signInLaunchDecision({ ...base, recoverable: 0 })).toBe('fail-loud');
+  });
+});
+
+describe('noVerifiedUsageDecision (PHNX-2526 — entirely-stale usage divert)', () => {
+  const base = { tty: true, json: false, headless: false };
+
+  it('shows the account picker when a human is present at a real terminal', () => {
+    expect(noVerifiedUsageDecision(base)).toBe('picker');
+  });
+
+  it('off a TTY it fails loud with NO_VERIFIED_USAGE — no human to answer a picker', () => {
+    expect(noVerifiedUsageDecision({ ...base, tty: false })).toBe('fail-loud');
+  });
+
+  it('--json NEVER opens a picker — a machine consumer gets the parseable error', () => {
+    expect(noVerifiedUsageDecision({ ...base, json: true })).toBe('fail-loud');
+  });
+
+  it('--headless fails loud even on a TTY — an unattended dispatch has no one to choose', () => {
+    expect(noVerifiedUsageDecision({ ...base, headless: true })).toBe('fail-loud');
   });
 });

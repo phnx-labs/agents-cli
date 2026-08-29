@@ -2104,7 +2104,7 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
         { profileExists, readProfile, resolveProfileForRun },
         { readAndResolveBundleEnv, describeBundle, assertRemoteBundleFlagsUnsupported },
         { splitBundleRef, resolveHostSshTarget, remoteResolveEnv },
-        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, signInRecoverableCandidates },
+        { getConfiguredRunStrategy, normalizeRunStrategy, resolveRunVersion, rotationFailoverChain, shouldArmRotationFailover, RUN_STRATEGIES, collectHarnessCandidates, pickHarnessWeighted, classifyHarnessCandidates, formatHarnessPickBanner, formatNoHealthyHarnessError, formatNoHealthyAccountError, formatNoVerifiedUsageError, signInRecoverableCandidates },
         { getGlobalDefault, getVersionHomePath, resolveVersion, resolveVersionAlias, ensureAgentRunnable },
         { buildDiscoveredPlugin, loadPluginManifest, syncPluginToVersion },
         { parseWorkflowFrontmatter, resolveWorkflowRef, resolveAllowedSubagents, pruneStaleWorkflowSubagents, ensureSubagentDispatchTool },
@@ -2785,6 +2785,41 @@ agents run auto --device yosemite-s0 "fix the flaky test"   # pin the device
                     `To sign in: ${loginHint(agent)} — or run \`agents run ${agent}\` from a terminal.`,
                   ));
                 }
+                process.exit(1);
+              }
+            } else if (resolved.noVerifiedUsage) {
+              // Entirely stale usage (PHNX-2526): every eligible account carries
+              // a stale-but-present usage number and none is verified, so the
+              // route would be a guess. NEVER auto-pick it. Interactive: show the
+              // account picker so a human chooses with the (stale) numbers in
+              // view. Unattended: fail loud with NO_VERIFIED_USAGE. The stale
+              // pool survives ONLY as `resolved.rotation.healthy` for bounded
+              // post-rejection failover, never as the initial pick.
+              const { noVerifiedUsageDecision, pickRunAccountCandidate } = await import('./run-account-picker.js');
+              const decision = noVerifiedUsageDecision({
+                tty: isInteractiveTerminal(),
+                json: options.json === true,
+                headless: options.headless === true,
+              });
+              if (decision === 'picker') {
+                const selected = await pickRunAccountCandidate(agent);
+                // A cancelled picker launches nothing — same contract as the
+                // trailing-@ account picker and the sign-in launch above.
+                if (!selected) return;
+                version = selected.version;
+                // Keep the rotation so mid-run failover can still cascade across
+                // the other (stale) healthy accounts after a real rejection.
+                rotationResult = resolved.rotation;
+                if (!options.quiet) {
+                  const identity = selected.accountLabel || 'signed-in account';
+                  process.stderr.write(chalk.gray(
+                    `[agents] no fresh usage for any ${agent} account — you picked ${identity} · ${agent}@${selected.version}\n`,
+                  ));
+                }
+              } else {
+                console.error(chalk.red(
+                  formatNoVerifiedUsageError(agent, strategy, resolved.rotation?.healthy ?? []),
+                ));
                 process.exit(1);
               }
             } else if (resolved.version) {

@@ -1023,6 +1023,19 @@ describeSpawn('resolveRoutineLaunch — zero-healthy accounts fail the routine l
     expect(err!.message).toContain('Use --strategy pinned to force the default.');
   });
 
+  it('an unattended routine fails loud with NO_VERIFIED_USAGE when every account is stale (PHNX-2526)', async () => {
+    // No picker exists for a routine, so entirely-stale usage is a hard fail —
+    // never a silent launch on the stale default that would hammer it each tick.
+    const stale = { ...acct('2.1.219'), usageStatus: 'available' as const };
+    const rotation: RotateResult = { picked: stale, healthy: [stale], excluded: [] };
+    const err = await resolveRoutineLaunch(baseConfig(), process.cwd(), {
+      resolveRunVersion: async () => ({ version: null, rotation, noVerifiedUsage: true }),
+    }).then(() => null, (e: unknown) => e as Error);
+    expect(err).not.toBeNull();
+    expect(err!.message).toContain('NO_VERIFIED_USAGE');
+    expect(err!.message).toMatch(/strategy '\w+'/);
+  });
+
   it('a healthy pick proceeds with the rotated version (no throw)', async () => {
     const healthy = { ...acct('2.1.219'), usageStatus: 'available' as const };
     const rotation: RotateResult = { picked: healthy, healthy: [healthy], excluded: [] };
