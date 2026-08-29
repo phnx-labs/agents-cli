@@ -55,6 +55,7 @@ describe('activeSessionToSessionMeta', () => {
     expect(meta!.label).toBe('do the thing');
     expect(meta!.version).toBe('2.1.226');
     expect(meta!.machine).toBe(self);
+    expect(meta!._remote).toBe(false);
     expect(meta!.ticketId).toBe('RUSH-2682');
     expect(meta!.prUrl).toBe('https://github.com/o/r/pull/9');
     expect(meta!.prNumber).toBe(9);
@@ -94,6 +95,7 @@ describe('activeSessionToSessionMeta', () => {
       now,
     );
     expect(meta!.machine).toBe('peer-box');
+    expect(meta!._remote).toBe(true);
   });
 
   it('drops a row with no session id — nothing durable to resolve', () => {

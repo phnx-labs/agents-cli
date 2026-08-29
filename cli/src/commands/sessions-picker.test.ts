@@ -25,11 +25,15 @@ import {
   sanitizeRemoteDigest,
   setPeerDigestFetcherForTest,
   setRemotePreviewRepaint,
+  transcriptOnPeerOf,
 } from './sessions-picker.js';
 import { stringWidth } from '../lib/session/width.js';
 import { limitPreviewHeight, pickerPageSize, PREVIEW_MIN_ROWS } from '../lib/picker.js';
 import { _resetLinearWorkspaceCache } from '../lib/session/linear.js';
+import { machineId } from '../lib/session/sync/config.js';
 import type { SessionEvent, SessionMeta, TodoProgress } from '../lib/session/types.js';
+import { hostSessionMeta } from '../lib/hosts/session-index.js';
+import type { HostTask } from '../lib/hosts/tasks.js';
 
 function mk(overrides: Partial<SessionMeta>): SessionMeta {
   return {
@@ -41,6 +45,61 @@ function mk(overrides: Partial<SessionMeta>): SessionMeta {
     ...overrides,
   } as SessionMeta;
 }
+
+function hostDispatchedMeta(): SessionMeta {
+  const task = {
+    id: 'phnx3481-host-task',
+    host: 'peer-box',
+    target: 'user@peer-box',
+    agent: 'claude',
+    prompt: 'Pull the peer transcript digest',
+    sessionId: '34810000-1111-2222-3333-444444444444',
+    remoteLog: '/remote/session.log',
+    remoteExit: '/remote/session.exit',
+    status: 'running',
+    createdAt: '2026-08-29T00:00:00.000Z',
+  } as HostTask;
+  const meta = hostSessionMeta(task, { cwd: '/home/me/project', prompt: task.prompt });
+  if (!meta) throw new Error('host-dispatch fixture did not produce session metadata');
+  return meta;
+}
+
+describe('transcriptOnPeerOf (PHNX-3481)', () => {
+  it('routes a host-dispatch index row to the peer even without _remote', () => {
+    const session = hostDispatchedMeta();
+    expect(session.filePath).toBe('');
+    expect(session._remote).toBeUndefined();
+    expect(transcriptOnPeerOf(session)).toBe('peer-box');
+  });
+
+  it('keeps a genuinely local unindexed live row local', () => {
+    expect(transcriptOnPeerOf(mk({ filePath: '', machine: machineId() }))).toBeUndefined();
+  });
+
+  it('keeps a synced local transcript local even when machine names a peer', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-preview-peer-predicate-'));
+    try {
+      const filePath = path.join(dir, 'session.jsonl');
+      fs.writeFileSync(filePath, '{}\n');
+      expect(transcriptOnPeerOf(mk({ filePath, machine: 'peer-box' }))).toBeUndefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('makes the host-dispatch picker preview fetch from the peer, not show the local live-note dead end', () => {
+    setPeerDigestFetcherForTest(async () => undefined);
+    try {
+      const preview = stripVTControlCharacters(buildPreview(hostDispatchedMeta()));
+      expect(preview).toContain('peer-box');
+      expect(preview).not.toContain('full transcript not indexed here');
+    } finally {
+      setPeerDigestFetcherForTest(undefined);
+      clearRemoteDigestCacheForTest();
+      clearPreviewMemoryCacheForTest();
+    }
+  });
+});
 
 describe('formatTodoCompact (RUSH-2045)', () => {
   it('renders ✓done/total · activeForm', () => {

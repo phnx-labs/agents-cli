@@ -72,6 +72,7 @@ import {
   sessionPicker,
   buildPreview,
   loadSessionPreviewDigest,
+  transcriptOnPeerOf,
   formatTodoCompact,
   githubRepoUrlFromCwd,
   type PickedSession,
@@ -2333,12 +2334,13 @@ export async function renderSessionPreview(
   }
 
   const session = outcome.session;
-  if (session._remote && session.machine && session.machine !== machineId()) {
+  const transcriptPeer = transcriptOnPeerOf(session);
+  if (transcriptPeer) {
     const args = ['sessions', 'preview', session.id, '--local'];
     if (scope.json) args.push('--json');
-    const rendered = await runOnPeer(args, session.machine);
+    const rendered = await runOnPeer(args, transcriptPeer);
     if (rendered === 'no-target') {
-      console.error(chalk.red(`Session ${session.id} is on ${session.machine}, but that device is not reachable.`));
+      console.error(chalk.red(`Session ${session.id} is on ${transcriptPeer}, but that device is not reachable.`));
       process.exitCode = 1;
     }
     return;
@@ -4431,11 +4433,11 @@ export async function handlePickedSession(picked: PickedSession): Promise<void> 
   }
   // Reading and resuming are on DIFFERENT machines' terms, and conflating them
   // is what RUSH-2022 was. Reading follows the FILE: a synced mirror sits on
-  // this disk, so only a live fan-out row (`_remote`) has to be read on the
-  // peer. Resuming follows the HARNESS STATE, which is on the owning machine
-  // whatever the transcript's location — a mirror included.
+  // this disk, so a peer-owned row with no readable local transcript has to be
+  // read on the peer. Resuming follows the HARNESS STATE, which is on the
+  // owning machine whatever the transcript's location — a mirror included.
   if (picked.action === 'view') {
-    const readFrom = picked.session._remote ? picked.session.machine : undefined;
+    const readFrom = transcriptOnPeerOf(picked.session);
     if (readFrom) {
       const rc = await runOnPeer(['sessions', picked.session.shortId, '--markdown'], readFrom);
       if (rc === 'no-target') warnNoPeerTarget(readFrom, picked.session);
@@ -5146,20 +5148,21 @@ async function renderOneSession(
 
     if (outcome.kind === 'resolved') {
       const resolved = outcome.session;
-      if (resolved._remote && resolved.machine && resolved.machine !== machineId()) {
-      const args = ['sessions', resolved.id, '--local'];
-      const flag = modeFlag(mode);
-      if (flag) args.push(flag);
-      if (scope.filter.include?.length) args.push('--include', scope.filter.include.join(','));
-      if (scope.filter.exclude?.length) args.push('--exclude', scope.filter.exclude.join(','));
-      if (scope.filter.first !== undefined) args.push('--first', String(scope.filter.first));
-      if (scope.filter.last !== undefined) args.push('--last', String(scope.filter.last));
-      if (scope.redact === false) args.push('--no-redact');
-      const rendered = await runOnPeer(args, resolved.machine);
-      if (rendered === 'no-target') {
-        console.error(chalk.red(`Session ${resolved.id} is on ${resolved.machine}, but that device is not reachable.`));
-        process.exit(1);
-      }
+      const transcriptPeer = transcriptOnPeerOf(resolved);
+      if (transcriptPeer) {
+        const args = ['sessions', resolved.id, '--local'];
+        const flag = modeFlag(mode);
+        if (flag) args.push(flag);
+        if (scope.filter.include?.length) args.push('--include', scope.filter.include.join(','));
+        if (scope.filter.exclude?.length) args.push('--exclude', scope.filter.exclude.join(','));
+        if (scope.filter.first !== undefined) args.push('--first', String(scope.filter.first));
+        if (scope.filter.last !== undefined) args.push('--last', String(scope.filter.last));
+        if (scope.redact === false) args.push('--no-redact');
+        const rendered = await runOnPeer(args, transcriptPeer);
+        if (rendered === 'no-target') {
+          console.error(chalk.red(`Session ${resolved.id} is on ${transcriptPeer}, but that device is not reachable.`));
+          process.exit(1);
+        }
         return;
       }
 

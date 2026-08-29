@@ -15,7 +15,8 @@
 // exist. It parses no transcript and renders nothing — it only reshapes process
 // state the live registry already computed. When the transcript IS on disk, the
 // synthesized row carries its path, so the downstream `buildPreview` renders the
-// real digest; otherwise it renders the header + a "not indexed here" note.
+// real digest. Without a path, a peer-owned row fetches its digest from that peer;
+// a genuinely local row renders the header + a "not indexed here" note.
 
 import { deriveShortId } from '../text/short-id.js';
 import { isSessionTrackedAgent, type SessionMeta } from './types.js';
@@ -57,9 +58,8 @@ export function activeSessionToSessionMeta(
     topic: active.topic,
     version: active.version,
     messageCount: undefined,
-    // The row runs HERE — the local live registry is machine-local, so a match
-    // resolves without an SSH hop back to a peer.
     machine: active.machine ?? self,
+    _remote: (active.machine ?? self) !== self,
     ticketId: active.ticket?.id,
     prUrl: active.pr?.url,
     prNumber: active.pr?.number,

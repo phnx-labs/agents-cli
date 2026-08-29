@@ -936,13 +936,17 @@ for the non-empty-preview invariant (SES-8).
 ### Resume is machine-bound — check the owner before you start a harness
 
 **Reading and resuming follow different machines, and conflating them is the bug.**
-Reading follows the FILE — a synced mirror is on this disk, so only a live fan-out
-row (`_remote`) must be read on the peer (`transcriptOnPeerOf` in
-`sessions-picker.ts`). Resuming follows the HARNESS STATE, which is on the owning
-machine whatever the transcript's location. A mirror is therefore readable and NOT
-resumable, and that is the trap: nothing fails until the agent is asked to continue
-a conversation it has never seen, and `sessions-resume.ts`'s `fs.existsSync(cwd)`
-fallback then quietly resumed in `process.cwd()` (RUSH-2022).
+Reading follows the FILE — a synced mirror with a readable `filePath` is on this
+disk and previews locally, even when `machine` names its owner. Otherwise, a row
+whose `machine` names another box must be read on that peer. `_remote` is one
+explicit signal, not the gate: host-dispatch index rows and live-registry rows can
+name a peer without carrying it. `transcriptOnPeerOf` in `sessions-picker.ts` is
+the one predicate used by picker previews, direct `preview <id>`, and `sessions
+<id>`. Resuming follows the HARNESS STATE, which is on the owning machine whatever
+the transcript's location. A mirror is therefore readable and NOT resumable, and
+that is the trap: nothing fails until the agent is asked to continue a conversation
+it has never seen, and `sessions-resume.ts`'s `fs.existsSync(cwd)` fallback then
+quietly resumed in `process.cwd()` (RUSH-2022, PHNX-3481).
 
 `sessionOwnerDevice`
 ([`src/lib/session/resume-owner.ts`](src/lib/session/resume-owner.ts)) is the one

@@ -574,9 +574,16 @@ SSH access (§7); rendering sessions that no harness produced.
     boundary (`lib/session/remote-active.ts`), where an `offloadedFrom` row keeps
     its own `machine` and every other row takes the dialed device name; the guard
     in `foldExecutionMachine` is the same rule stated locally.
-  - Consequence for SES-8: an offloaded row is then `_remote`, so
-    `liveSessionToMeta` → `buildPreview` renders the "on `<peer>`" affordance
-    instead of the empty "full transcript not indexed here" branch.
+  - **Transcript reads follow the file (PHNX-3481).** `_remote` is sufficient but
+    not required to read from a peer. `transcriptOnPeerOf` MUST also return
+    `machine` when it names another box and `filePath` is empty or absent on this
+    disk. This covers the synthetic empty-file row from `registerHostSession` and
+    the live-registry bridge used by full-UUID `preview <id>` without making a
+    genuinely local unindexed live row remote. A synced mirror whose `filePath`
+    exists MUST still preview locally even when `machine` names the owner.
+    `buildPreview`, direct `preview <id>`, and `sessions <id>` MUST all use this
+    predicate, so they fetch/hop to the peer rather than render "full transcript
+    not indexed here". An unreachable owner MUST remain a loud `no-target` error.
   - **`machine` is not "where the process is".** For an offloaded run the shim
     process, its tmux pane, and its terminal window remain on the dispatcher.
     Any caller reaching for a LOCAL pid/pane/window MUST ask
