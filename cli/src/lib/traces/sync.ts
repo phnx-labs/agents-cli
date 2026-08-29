@@ -641,14 +641,26 @@ export interface SessionDetail {
   surfacedToolFailures: Array<{ tool?: string; label: string; detail?: string }>;
 }
 
-/** Determine whether a run that hit tool failures recovered and finished successfully. */
+// Matches the HUMAN_FACING_TOOLS set in phenotype.ts — keep in sync.
+const HUMAN_FACING_OUTCOME_TOOLS = new Set(['AskUserQuestion', 'SendMessage', 'wait']);
+
+/**
+ * Determine whether a run that hit tool failures recovered and finished.
+ *
+ * `completed` only when a substantive, non-human-facing tool step succeeded
+ * STRICTLY AFTER the last error — matching the `recoveredAfterErrors` predicate
+ * in `phenotype.ts` so the console outcome and the failure phenotype can never
+ * disagree about whether a run actually finished.
+ */
 function deriveRunOutcome(traj: SessionTrajectory): 'completed' | 'errored' {
   if (traj.errorCount === 0) return 'completed';
   const toolSteps = traj.steps.filter((s) => s.kind === 'tool');
-  const lastTool = toolSteps[toolSteps.length - 1];
-  // A recovered run's final tool call returned ok despite earlier failures.
-  if (lastTool && lastTool.outcome === 'ok') return 'completed';
-  return 'errored';
+  const lastErrorIdx = toolSteps.findLastIndex((s) => s.outcome === 'error');
+  if (lastErrorIdx === -1) return 'completed';
+  const recovered = toolSteps
+    .slice(lastErrorIdx + 1)
+    .some((s) => s.outcome === 'ok' && !HUMAN_FACING_OUTCOME_TOOLS.has(s.tool ?? s.lane));
+  return recovered ? 'completed' : 'errored';
 }
 
 /** Plain-language summary of the friction in a run, or null when it ran clean. */

@@ -266,19 +266,22 @@ function reasonFalseTermination(session: SessionDetail): string {
 }
 
 /**
- * Premature-completion: declared done while tests were failing or no verification
- * step ran for an engineering task.
+ * Premature-completion: declared done without a verification step for an
+ * engineering task.
  *
  * Rubric:
  * - meta outcome is `completed`, and
  * - the session performed write/edit work, and
- * - either errors were present or no test/build/lint verification step ran.
+ * - no test/build/lint verification step ran.
+ *
+ * NOTE: `outcome === 'completed'` already guarantees that errors, if any, were
+ * causally recovered from (see `deriveRunOutcome`). Keying prematurity off
+ * `errorCount > 0` would mislabel every such recovery as premature.
  */
 function isPrematureCompletion(session: SessionDetail): boolean {
   if (session.meta.outcome !== 'completed') return false;
   const didWriteEdit = session.steps.some((s) => WRITE_EDIT_TOOLS.has(s.tool ?? s.lane));
   if (!didWriteEdit) return false;
-  if (session.meta.errorCount > 0) return true;
   const verified = session.steps.some((s) => {
     if (!SHELL_TOOLS.has(s.tool ?? s.lane)) return false;
     const text = stepText(s);
@@ -287,10 +290,7 @@ function isPrematureCompletion(session: SessionDetail): boolean {
   return !verified;
 }
 
-function reasonPrematureCompletion(session: SessionDetail): string {
-  if (session.meta.errorCount > 0) {
-    return `declared completed with ${session.meta.errorCount} unresolved error(s)`;
-  }
+function reasonPrematureCompletion(_session: SessionDetail): string {
   return 'engineering work completed without a test/build/lint verification step';
 }
 
