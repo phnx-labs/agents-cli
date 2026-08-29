@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { classifyHostLink, HOST_HEARTBEAT_STALE_MS } from './host-link.js';
+import { classifyHostLink, hostWindowLost, HOST_HEARTBEAT_STALE_MS } from './host-link.js';
 
 const NOW = 1_700_000_000_000;
 const fresh = NOW - 30_000;
@@ -78,5 +78,43 @@ describe('classifyHostLink', () => {
     const atBoundary = NOW - HOST_HEARTBEAT_STALE_MS;
     expect(classifyHostLink({ pidAlive: true, windowHeartbeatMs: atBoundary, nowMs: NOW })).toBe('no-client');
     expect(classifyHostLink({ pidAlive: true, windowHeartbeatMs: atBoundary + 1, nowMs: NOW })).toBe('connected');
+  });
+});
+
+/**
+ * `hostWindowLost` is the NARROW promotion signal (PHNX-3183): it is true only
+ * when a running agent's owning window went stale, never on mere client absence.
+ * This is what lets a running orphan be flagged without re-adding the reverted
+ * zero-clients false positive.
+ */
+describe('hostWindowLost', () => {
+  it('is true only when a live agent lost a window that WAS republishing', () => {
+    expect(hostWindowLost({ pidAlive: true, windowHeartbeatMs: stale, nowMs: NOW })).toBe(true);
+  });
+
+  it('is false while the window is still fresh', () => {
+    expect(hostWindowLost({ pidAlive: true, windowHeartbeatMs: fresh, nowMs: NOW })).toBe(false);
+  });
+
+  it('is false on client ABSENCE — zero tmux clients is a detached pane, not a lost window', () => {
+    expect(hostWindowLost({ pidAlive: true, tmuxClients: 0, nowMs: NOW })).toBe(false);
+    // No window and no client count at all: blind, not lost.
+    expect(hostWindowLost({ pidAlive: true, nowMs: NOW })).toBe(false);
+  });
+
+  it('is false for a dead agent — that is host-gone/crashed, not a running orphan', () => {
+    expect(hostWindowLost({ pidAlive: false, windowHeartbeatMs: stale, nowMs: NOW })).toBe(false);
+  });
+
+  it('is false for a deliberately detached session — no window is the point of detaching', () => {
+    expect(
+      hostWindowLost({ pidAlive: true, windowHeartbeatMs: stale, deliberatelyDetached: true, nowMs: NOW }),
+    ).toBe(false);
+  });
+
+  it('holds at the exact staleness boundary', () => {
+    const atBoundary = NOW - HOST_HEARTBEAT_STALE_MS;
+    expect(hostWindowLost({ pidAlive: true, windowHeartbeatMs: atBoundary, nowMs: NOW })).toBe(true);
+    expect(hostWindowLost({ pidAlive: true, windowHeartbeatMs: atBoundary + 1, nowMs: NOW })).toBe(false);
   });
 });

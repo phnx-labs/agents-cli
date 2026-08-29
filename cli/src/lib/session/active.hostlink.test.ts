@@ -44,17 +44,57 @@ describe('foldHostLink status precedence', () => {
     expect(rows[0].status).toBe('orphaned');
   });
 
-  it('leaves a WORKING session alone even with no client — that is a normal headless run', () => {
-    // SES-18a: `no-client` replaces ONLY idle/input_required. Promoting a
-    // `running` row was tried and reverted — since RUSH-3125 wraps every remote
-    // interactive run in a detached pane, running-with-zero-clients is the
-    // normal steady state between check-ins, so promoting it would relabel every
-    // remote agent as orphaned whenever nobody is attached.
+  it('leaves a WORKING session alone with zero tmux clients — a detached remote pane is normal', () => {
+    // SES-18a: a running row is NOT promoted on client absence alone. Since
+    // RUSH-3125 wraps every remote interactive run in a detached pane,
+    // running-with-zero-clients is the normal steady state between check-ins, so
+    // promoting it would relabel every remote agent as orphaned whenever nobody
+    // is attached (the false positive reverted in 6d973b823). Only a lost WINDOW
+    // promotes a running agent — see the next test.
     const rows = [row({ status: 'running', tmuxClients: 0 })];
     foldHostLink(rows);
     expect(rows[0].status).toBe('running');
     // The link is still recorded, so a consumer can see it; only the status is untouched.
     expect(rows[0].hostLink).toBe('no-client');
+  });
+
+  it('promotes a WORKING session to `orphaned` when its owning window was LOST', () => {
+    // PHNX-3183: the genuinely-stranded case. An IDE window that WAS republishing
+    // its heartbeat went stale — the host died uncleanly (crash / reboot / SSH
+    // drop) and the agent outlived it in tmux. Unlike zero-clients above, this is
+    // a positive "a client was expected and is now gone", so it IS flagged.
+    const rows = [row({ status: 'running', windowHeartbeatMs: staleWindow })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('orphaned');
+    expect(rows[0].hostLink).toBe('no-client');
+  });
+
+  it('leaves a WORKING session alone while its owning window is still fresh', () => {
+    // A live window republishing its slice is positive evidence of a client —
+    // `connected`, never orphaned, even with no tmux count.
+    const rows = [row({ status: 'running', windowHeartbeatMs: freshWindow })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('running');
+    expect(rows[0].hostLink).toBe('connected');
+  });
+
+  it('leaves a blind WORKING session as `running` — no signal is not a loss', () => {
+    // No window heartbeat and no tmux count -> `unknown`. A running agent with no
+    // observer (a bare terminal, a --device pane on another box) must stay
+    // running, never orphaned by default.
+    const rows = [row({ status: 'running' })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('running');
+    expect(rows[0].hostLink).toBe('unknown');
+  });
+
+  it('does not orphan a deliberately-detached running session even when its window is stale', () => {
+    // A backgrounded session is supposed to have no window driving it; a stale
+    // heartbeat there is expected, not a loss. `hostWindowLost` excludes it.
+    const rows = [row({ status: 'running', windowHeartbeatMs: staleWindow, presence: 'background' })];
+    foldHostLink(rows);
+    expect(rows[0].status).toBe('running');
+    expect(rows[0].hostLink).toBe('connected');
   });
 
   it('does not promote anything when the link is merely unknown', () => {

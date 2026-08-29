@@ -437,9 +437,17 @@ SSH access (§7); rendering sessions that no harness produced.
   session whose `presence` is `background`/`parked` MUST NOT be classified as
   either — no client is the point of detaching. On the status column, `abandoned`
   MUST win outright, `host-gone` MUST replace `closed` with `crashed`, and
-  `no-client` MUST replace ONLY `idle`/`input_required` with `orphaned` — a
-  session still `running` MUST keep that status, so an ordinary headless run is
-  never reported as orphaned (test `active.hostlink.test.ts`,
+  `no-client` MUST replace `idle`/`input_required` with `orphaned`. A session
+  still `running` MUST be promoted to `orphaned` ONLY when its owning IDE window
+  was LOST — the window's registry slice went stale past `HOST_HEARTBEAT_STALE_MS`
+  after having republished it, so the host died uncleanly and the agent outlived
+  it (`hostWindowLost`, `lib/session/host-link.ts`). A `running` session that is
+  merely clientless — a tmux attached-client count of zero with its window still
+  fresh or absent — MUST keep `running`: since RUSH-3125 a detached remote pane
+  (`agents run --device`) is the normal steady state between check-ins, so
+  promoting it would relabel every unattended remote agent as orphaned (the
+  over-report reverted in `6d973b823`). Mere client ABSENCE is never a running
+  orphan; only a lost WINDOW is (test `active.hostlink.test.ts`,
   `host-link.test.ts`). A dead-pid registry entry whose window has gone stale MUST
   be RETAINED by `readLiveTerminals` so the session reaches the listing at all —
   dropping it made a crashed session indistinguishable from one that never ran

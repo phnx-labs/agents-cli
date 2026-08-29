@@ -49,7 +49,7 @@ import { detectProvenance, type SessionProvenance } from './provenance.js';
 import { loadDevices, type DeviceRegistry } from '../devices/registry.js';
 import { machineId, normalizeHost } from '../machine-id.js';
 import { presenceFromStore, type Presence } from './detached.js';
-import { classifyHostLink, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
+import { classifyHostLink, hostWindowLost, HOST_HEARTBEAT_STALE_MS, type HostLink } from './host-link.js';
 import { mapBounded } from '../concurrency.js';
 import { linearIssueUrl } from './linear.js';
 import { viewingInLabel } from './viewing-in.js';
@@ -2363,10 +2363,15 @@ export async function foldTmuxClients(rows: ActiveSession[]): Promise<void> {
  *   - `crashed` REPLACES `closed`. Both mean the process is gone, but `closed`
  *     reads as a normal exit; `crashed` says the host window went down with it
  *     and never cleaned up.
- *   - `orphaned` replaces only `idle` / `input_required`. A session still WORKING
- *     with nobody watching is a normal headless run, and flagging every one would
- *     bury the real signal. A session sitting idle — or worse, waiting on a
- *     question — with no client attached is the stranded case: nobody is coming.
+ *   - `orphaned` replaces `idle` / `input_required` on ANY `no-client`, and
+ *     `running` ONLY when the owning WINDOW was lost (`hostWindowLost`). A
+ *     session still working with merely zero tmux clients is a normal headless
+ *     run — since RUSH-3125 a detached remote pane is the steady state — so
+ *     flagging every one would bury the real signal (the false positive reverted
+ *     in 6d973b823). But a running agent whose IDE window stopped republishing
+ *     its heartbeat outlived an unclean host death and is genuinely stranded, so
+ *     it IS promoted. A session sitting idle — or worse, waiting on a question —
+ *     with no client attached is the same stranded case: nobody is coming.
  */
 /**
  * Attribute each live row to the machine the session actually EXECUTES on.
@@ -2476,12 +2481,13 @@ export function foldHostLink(rows: ActiveSession[]): void {
     if (s.status === 'abandoned') continue;
     // `closed` IS the dead-pid status — `lifecycleStatus` assigns it from
     // `!pidAlive` and nothing else — so the status is the pid answer here.
-    const link = classifyHostLink({
+    const signals = {
       pidAlive: s.status !== 'closed',
       windowHeartbeatMs: s.windowHeartbeatMs,
       tmuxClients: s.tmuxClients,
       deliberatelyDetached: s.presence === 'background' || s.presence === 'parked',
-    });
+    };
+    const link = classifyHostLink(signals);
     s.hostLink = link;
     // `foldPresence` gives every terminal row a DERIVED `attached` — "a live
     // interactive TUI you're watching" — which is exactly the claim a lost host
@@ -2498,6 +2504,14 @@ export function foldHostLink(rows: ActiveSession[]): void {
     if (link === 'host-gone' && s.status === 'closed') s.status = 'crashed';
     // A clientless running remote pane is normal; only stopped work can be called orphaned.
     else if (link === 'no-client' && (s.status === 'idle' || s.status === 'input_required')) {
+      s.status = 'orphaned';
+    }
+    // A still-`running` agent is normally a healthy headless run, so 0 tmux
+    // clients (a detached remote pane) MUST NOT flag it — that false positive was
+    // reverted once already (6d973b823). The ONE exception is a lost WINDOW: its
+    // owning IDE window stopped republishing, so it died uncleanly and the agent
+    // outlived it — genuinely stranded (PHNX-3183, `hostWindowLost`, SES-18a).
+    else if (s.status === 'running' && hostWindowLost(signals)) {
       s.status = 'orphaned';
     }
   }

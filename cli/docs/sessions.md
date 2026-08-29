@@ -69,6 +69,18 @@ The live registry contributes liveness, while transcript tails, execution record
 explicit completion markers contribute progress. A reader that lacks one signal reports
 degraded or unknown rather than manufacturing certainty.
 
+Orphaned work — a live agent nobody is driving — is derived, not asserted, and centrally
+folded (`foldHostLink` over the pure classifier in `host-link.ts`). An idle or
+input-waiting session with no client attached becomes `orphaned` on any client loss. A
+still-`running` agent is treated more conservatively: zero tmux clients is the normal
+steady state for a detached remote pane (`agents run --device` wraps every remote
+interactive run in a detached tmux session), so that alone never flags it. The one signal
+that promotes a running agent is a LOST WINDOW — its owning IDE window stopped
+republishing its heartbeat, so the host died uncleanly and the agent outlived it. That is
+the genuinely-stranded case (a remote agent still alive after its laptop rebooted), and
+`hostWindowLost` is the predicate that names it. Mere absence of a client is not a running
+orphan; only a window that was there and is now gone.
+
 ## Cross-device history
 
 Each transcript has an origin device. Fleet search unions indexed metadata without
