@@ -79,23 +79,33 @@ export interface HostLinkInput {
 }
 
 /**
+ * Did the session's owning IDE window stop republishing its registry slice? A
+ * window republishes every 4 minutes (`HOST_HEARTBEAT_STALE_MS` is 10), so a
+ * slice this old means the window is gone, not merely quiet. Shared by
+ * {@link classifyHostLink} and {@link hostWindowLost} so the staleness rule has
+ * exactly one definition.
+ */
+function windowGone(input: HostLinkInput): boolean {
+  const now = input.nowMs ?? Date.now();
+  return input.windowHeartbeatMs !== undefined && now - input.windowHeartbeatMs >= HOST_HEARTBEAT_STALE_MS;
+}
+
+/**
  * Classify a live row's host link. Pure — every signal is passed in, so the
  * whole decision table is unit-testable without a process table, a tmux server,
  * or a running editor.
  */
 export function classifyHostLink(input: HostLinkInput): HostLink {
-  const now = input.nowMs ?? Date.now();
   // A session detached on purpose has no client BY DESIGN. It is the one case
   // that looks identical to an orphan from the outside, so it is excluded first —
   // otherwise every `agents sessions detach` would raise a false alarm.
   if (input.deliberatelyDetached) return 'connected';
 
-  const windowGone =
-    input.windowHeartbeatMs !== undefined && now - input.windowHeartbeatMs >= HOST_HEARTBEAT_STALE_MS;
+  const stale = windowGone(input);
 
   // The host window stopped keeping its registry slice alive AND the agent it
   // owned is dead: the pair went down together without teardown.
-  if (windowGone && !input.pidAlive) return 'host-gone';
+  if (stale && !input.pidAlive) return 'host-gone';
 
   if (!input.pidAlive) return 'connected'; // a plain dead pid is `closed`, not an orphan
 
@@ -105,7 +115,7 @@ export function classifyHostLink(input: HostLinkInput): HostLink {
 
   // Alive, not tmux-hosted (or tmux says someone is attached), but the window
   // that owned it is gone. The agent outlived its editor.
-  if (windowGone) return 'no-client';
+  if (stale) return 'no-client';
 
   // Positive evidence of a client: tmux counted at least one attached client, or
   // a window is refreshing its registry slice. Either is a real observation.
@@ -114,4 +124,30 @@ export function classifyHostLink(input: HostLinkInput): HostLink {
   // Neither input exists, so nothing here observed anything. Say so rather than
   // reporting the healthy answer by default — see {@link HostLink}'s `unknown`.
   return 'unknown';
+}
+
+/**
+ * Did the owning IDE window die while the agent kept RUNNING? This is the ONE
+ * host-link loss that promotes a still-`running` session to `orphaned`
+ * (PHNX-3183): a window that WAS republishing its heartbeat every 4 min went
+ * stale for {@link HOST_HEARTBEAT_STALE_MS}, so it died uncleanly (a crash,
+ * reboot, or dropped SSH) and the agent it hosted outlived it — genuinely
+ * stranded, the "my remote agent is still alive after the laptop rebooted" case.
+ *
+ * Deliberately NARROWER than `no-client`. A tmux attached-client count of zero
+ * is also `no-client`, but for a detached remote pane (`agents run --device`,
+ * which RUSH-3125 wraps in a detached tmux session) that is the NORMAL steady
+ * state between check-ins — launch, detach, return with `agents focus` — not a
+ * loss. Promoting on it would relabel every unattended remote agent as
+ * `orphaned`, the over-reporting that makes the word worthless. Only a lost
+ * WINDOW is a positive "a client was expected and is now gone" for a running
+ * agent; mere absence is not.
+ *
+ * A deliberately-backgrounded session is excluded exactly as
+ * {@link classifyHostLink} excludes it: no client is the point of detaching.
+ * Pure — same injected signals as the classifier.
+ */
+export function hostWindowLost(input: HostLinkInput): boolean {
+  if (input.deliberatelyDetached) return false;
+  return input.pidAlive && windowGone(input);
 }
