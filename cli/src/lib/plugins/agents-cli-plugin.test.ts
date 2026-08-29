@@ -1,8 +1,8 @@
 /**
  * PHNX-3337 — the cross-harness `agents-cli` discovery skill + the repo-root
  * Claude plugin marketplace are a distribution contract: an outside agent runs
- * `claude plugin marketplace add phnx-labs/agents-cli` (reads
- * `.claude-plugin/marketplace.json`) or `npx skills add phnx-labs/agents-cli`
+ * `claude plugin marketplace add phnx-labs/agi-cli` (reads
+ * `.claude-plugin/marketplace.json`) or `npx skills add phnx-labs/agi-cli`
  * (reads `skills/**\/SKILL.md`). Both break silently if the committed files drift
  * from the schema Claude Code / skills.sh parse, or if the SKILL.md description
  * loses a trigger intent — the string the runtime matches an operator's question

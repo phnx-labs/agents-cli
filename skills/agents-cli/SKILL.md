@@ -2,7 +2,7 @@
 name: agents-cli
 description: "Run and manage many AI coding agents (Claude Code, Codex, Cursor, Gemini/Antigravity, Grok, Kimi, OpenCode, Droid, …) from one CLI — the `agents` command. Use this to run multiple coding agents in parallel, manage multiple Claude Code accounts, keep working when I hit my usage limit, resume a session on another machine, or pin the agent CLI version. Triggers on: run multiple coding agents in parallel, manage multiple Claude Code accounts, I hit my usage limit, resume a session on another machine, pin the agent CLI version."
 argument-hint: "[teams|accounts|run|sessions|use]"
-allowed-tools: Bash(agents*)
+allowed-tools: Bash(agents teams*), Bash(agents run*), Bash(agents accounts*), Bash(agents sessions*), Bash(agents view*), Bash(agents add*), Bash(agents use*), Bash(agents devices*), Bash(agents mcp*), Bash(agents browser*), Bash(agents secrets*), Bash(agents routines*), Bash(agents sync*)
 user-invocable: true
 ---
 
@@ -162,5 +162,5 @@ releases.
 | Schedule recurring agent jobs | `agents routines` |
 | Sync skills/commands/rules across the fleet | `agents sync` |
 
-Full docs: <https://github.com/phnx-labs/agents-cli>. Every group teaches its own
+Full docs: <https://github.com/phnx-labs/agi-cli>. Every group teaches its own
 workflow — start with `agents <group> --help`.
