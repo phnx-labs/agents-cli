@@ -77,14 +77,19 @@ laptop. Long-lived `-N` tunnels inherit it by composing the same baseline.
 ### 2. One multiplex helper: `controlOpts()`, default-on
 
 ```
-ControlMaster=auto   ControlPath=~/.agents/.cache/ssh/cm-%C   ControlPersist=60s
+ControlMaster=auto   ControlPath=~/.agents/.cache/ssh/cm-%C   ControlPersist=600s
 ```
 
 The first connection to a host opens a control socket; every later connection —
 even from a *separate* `agents` invocation — rides it, skipping the TCP+auth
 handshake. This is now the **default** (`opts.multiplex === false ? [] :
 controlOpts()`); a caller opts *out* only for a genuine one-shot where a lingering
-60 s master is pure overhead. Flipping this one default is what fixes P1's poll,
+master is pure overhead. The persist window is **10 minutes**
+(`SSH_CONTROL_PERSIST_SECONDS`), deliberately above the daemon's dominant
+5-minute service cadence so a periodic fleet poll lands on a still-warm master
+instead of paying a cold handshake every time — with the old 60 s window every
+5-minute poll was cold, so 100 % of its cost was connection setup (PHNX-2582).
+Flipping this one default is what fixes P1's poll,
 P2's probes, and P4's fan-out at once — they already routed through the engine and
 simply started reusing sockets. It degrades safely: if the socket can't be opened
 ssh falls back to a fresh connection, and on Windows (no `ControlMaster`) the
@@ -265,11 +270,16 @@ Reproduce: `bun run build && node scripts/bench-ssh.mjs <host>`.
 
 ## Trade-offs and risks
 
-- **A 60 s master lingers after each call.** `ControlPersist=60s` keeps an idle
-  master briefly so back-to-back commands reuse it. The cost is bounded (one idle
-  unix socket per recently-touched host, reaped after 60 s) and is the entire
-  point. An interactive one-shot that must not leave a master can pass
-  `multiplex: false`.
+- **A 10-minute master lingers after each call.** `ControlPersist=600s`
+  (`SSH_CONTROL_PERSIST_SECONDS`) keeps an idle master alive so later commands —
+  including the next cycle of the daemon's 5-minute fleet poll — reuse it instead
+  of re-handshaking. The cost is bounded (one idle unix socket + a small ssh
+  master process per recently-touched host, reaped after 10 minutes) and is the
+  entire point. The window is capped at 10 minutes rather than longer because a
+  master reused after a host has slept costs a ~45 s ServerAlive teardown on the
+  first touch, and a wider window only widens the chance of hitting that; fan-outs
+  stay bounded regardless by their own per-peer `timeoutMs`. An interactive
+  one-shot that must not leave a master can pass `multiplex: false`.
 - **Keepalive terminates a live-but-silent connection after ~45 s.** Intended: a
   genuinely idle-but-healthy link is re-established on the next call for near-zero
   cost via the control socket; a dead one no longer hangs.

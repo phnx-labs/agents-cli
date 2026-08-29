@@ -101,19 +101,43 @@ export class RemoteUtf8Accumulator {
 }
 
 /**
+ * How long OpenSSH keeps a multiplex master alive after its last client exits
+ * (`ControlPersist`, in seconds).
+ *
+ * The master only survives while it stays IDLE under this window, so the value
+ * has to exceed the interval of the most frequent thing that touches a host —
+ * otherwise the master dies between touches and every one pays the cold
+ * TCP+auth handshake again (~100-300ms direct, up to ~500ms relayed; measured on
+ * the live fleet 2026-08-10, PHNX-2582). The dominant repeating fleet touch is
+ * the daemon's 5-minute service loop (`CATCHUP_TICK_MS` and the reap/sync
+ * services in `lib/daemon/*`, all `5 * 60_000`); with the old 60s persist every
+ * one of those was cold, so 100% of a 5-minute poll's cost was connection setup.
+ *
+ * 10 minutes clears that 5-minute cadence with margin, so the poll lands on a
+ * warm master (3-5ms) instead of a fresh handshake, while still bounding how long
+ * an idle master lingers — an important limit, because a reused master to a box
+ * that has since slept costs a ~45s ServerAlive teardown on first touch, and a
+ * wider window would only widen the chance of hitting that. Fan-outs stay bounded
+ * regardless by their own per-peer `timeoutMs`.
+ */
+export const SSH_CONTROL_PERSIST_SECONDS = 10 * 60;
+
+/**
  * OpenSSH connection-multiplexing options. The first connection to a host opens
  * a control socket; subsequent connections (even from a *separate* `agents`
  * invocation) reuse it, skipping the TCP+auth handshake — so repeated
  * `--device <name>` calls to the same box feel local instead of paying ~100-300ms
- * each. `ControlPersist=60s` keeps the master alive briefly after the last
- * client exits. `%C` (a short fixed-length hash of local-host/remote/port/user)
- * keeps the socket path well under macOS's 104-char `sun_path` limit.
+ * each. `ControlPersist` (see {@link SSH_CONTROL_PERSIST_SECONDS}) keeps the
+ * master alive after the last client exits, tuned to outlast the dominant
+ * 5-minute fleet poll so that poll lands warm. `%C` (a short fixed-length hash of
+ * local-host/remote/port/user) keeps the socket path well under macOS's 104-char
+ * `sun_path` limit.
  *
  * This is **on by default** for every `sshExec`/`sshStream` call: the poll loops
  * (`followHostTask`), readiness probes, and per-host fan-outs are exactly the
  * high-frequency callers that benefit most from socket reuse, and they should
  * never have to remember to opt in. A caller passes `multiplex: false` only for
- * a genuine one-shot where a lingering 60s master is pure overhead.
+ * a genuine one-shot where a lingering master is pure overhead.
  *
  * The socket directory is created lazily; if ssh can't open the control socket
  * it falls back to a normal connection (multiplexing is an optimisation, never a
@@ -137,7 +161,7 @@ export function controlOpts(): string[] {
   return [
     '-o', 'ControlMaster=auto',
     '-o', `ControlPath=${path.join(dir, 'cm-%C')}`,
-    '-o', 'ControlPersist=60s',
+    '-o', `ControlPersist=${SSH_CONTROL_PERSIST_SECONDS}s`,
   ];
 }
 
