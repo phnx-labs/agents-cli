@@ -1,5 +1,241 @@
 # Changelog
 
+## 1.22.59
+
+- **`agents devices disable/prefer` now actually change `--device auto` placement (PHNX-2092).**
+  The per-device `auto-launch.enabled` / `auto-launch.preferred` flags (written by
+  `agents devices disable/enable` and `prefer/unprefer`, and by `agents devices config
+  <name> auto-launch.*`) were stored and synced but never consulted by the CLI's one
+  placement path, so a disabled box was still picked and a preferred box got no boost.
+  They now feed the single automatic-placement rule: `filterAutoPool` drops any device
+  with `auto-launch.enabled` = false from EVERY auto path (`run`, `teams`, `ssh auto`,
+  the AGI EXT launch commands, which resolve placement through the CLI) exactly as a
+  `personal`/`desktop` role does, and `pickBestDevice` ranks an `auto-launch.preferred`
+  device ahead of its load-equal peers — after the signed-in tier, before load, so an
+  operator boost overrides load-based ordering without overriding hard health. A
+  fleet-wide default (`--fleet`) reaches doc-less devices via the candidate roster. No
+  second placement path was added — the existing `filterAutoPool`/`pickBestDevice`
+  rule was extended. Source: `cli/src/lib/devices/pool.ts`,
+  `cli/src/lib/teams/scheduler.ts`, `cli/src/lib/smart-launch.ts`.
+
+- **`agents sessions stats` coverage now reports scan coverage, not with-usage,
+  so a completed backfill clears the "run the backfill" hint (PHNX-2301).** The
+  coverage line read `sessionsWithUsage / sessionsIndexed` — a ratio that stays
+  near-zero (~1.2% on a real fleet) even after `agents sessions backfill
+  resources` has fully run, because most sessions genuinely invoke no
+  skill/slash-command and a non-recording harness contributes none by
+  construction. The nag therefore never cleared and the low number read as a
+  coverage bug when it was not. `resourceUsageCoverage()` now also returns
+  `scanned` — the count of sessions carrying a `resource_scan_ledger` row at the
+  current `RESOURCE_INDEX_VERSION`, the honest "has the backfill folded in
+  history?" signal (the ledger is stamped for EVERY scanned session, including
+  ones that invoked nothing). The human line shows both — `N/T sessions scanned ·
+  M carry an explicit invocation` — and the backfill hint keys on
+  `scanned/total`, so it appears only when history really is un-scanned. The
+  `--json` `coverage` object gains `sessionsScanned` alongside the unchanged
+  `sessionsWithUsage`/`sessionsIndexed` (SES-IF-4b envelope preserved;
+  `schemaVersion` bumped to 2), and `signal.recording` now names the recorded set
+  (`skills: claude+kimi`, `commands: claude`) so a machine consumer can tell a
+  zero from a non-recording harness apart from genuine non-use. The zero-invoked
+  heading reads "never explicitly invoked" to match. Recording coverage itself is
+  unchanged — extending the `Skill`-tool set to another harness needs a verified
+  transcript tool-name, not a blind capability-table edit. Source:
+  `cli/src/lib/session/db.ts` (`resourceUsageCoverage`),
+  `cli/src/commands/sessions-stats.ts`.
+
+- **Menu bar: favorite (pin) devices below the current Mac (PHNX-2376).** Each
+  device's submenu in the menu bar's DEVICES section now has a **★ Favorite /
+  Unfavorite** toggle. A favorited device renders with a ★ and sorts immediately
+  below the current machine (`<name> (this Mac)`), above all other devices, with a
+  divider between the favorites and the rest. "Favorite" reuses the EXISTING
+  per-device `auto-launch.preferred` config that automatic placement already
+  honors (PHNX-2092) — the toggle writes `agents devices config <name>
+  auto-launch.preferred on|off`, not a new store — so a box favorited from the
+  menu bar is also boosted in `--device auto` placement, and vice-versa. Source:
+  `cli/menubar/Sources/MenubarHelper/StatusItemController.swift`,
+  `cli/menubar/Sources/MenubarHelper/AgentsCLI.swift`.
+
+- **Built-in monitors ship visible + enabled, `monitors list` is fleet-aware, and built-ins are tagged `(built-in)` (PHNX-2506).** A monitor shipped in the system mirror (`~/.agents/.system/monitors/`) used to be the lone system-layer resource that shipped **disabled and untagged** — `readMonitorFile` special-cased system scope to `enabled: false`, so a shipped built-in read `off` on every install and nobody could tell it came from the system layer. It now defaults to enabled like every other system resource (rules, hooks, commands, skills), on for every install unless the user shadows it with `enabled: false` (via `agents monitors pause`, which materializes a user copy — the system mirror stays pull-only; there is deliberately no `enable`/`disable` verb). Each monitor now carries its read-time `scope` (`user`/`system`), so `agents monitors list` tags a built-in `(built-in)` and `--json` emits `scope` + `builtin`, mirroring routines. And `agents monitors list` now **fans out across the fleet** (the same `gatherRemoteAgentsJson` sweep `sessions --active` and the add-time duplicate guard use), so every monitor on every device is visible with the box it lives on — the original "monitors shouldn't be device-local" complaint was a **visibility** gap, not a git-sync one (monitors are per-work-item watchers and are deliberately NOT synced through the DotAgents repo). `--local` pins the listing to this device; a peer answering the fan-out reports itself only, so the duplicate guard's bare-array contract is unchanged. **Enabled-by-default is not, on its own, permission to fire on every daemon (SING-9a).** A shared-input built-in — one whose source polls a fleet-shared queue such as `gh pr list --author @me`, `pr-merge-on-green` being the canonical case — is placed on a single owner **in code**, not just by a `device:` pin in the shipped YAML: an unpinned `scope: system` monitor is treated as shared-input unless it sets `sharedInput: false`, and fires only on the resolved owner (`interactive.host`, else the sole box on a single-device fleet, else nowhere) via `requiresSingleOwner` / `monitorRunsOnThisDevice`. So even a built-in whose YAML forgot the pin can never fan out across the fleet and race to merge the same PR. A device-local built-in (input = the firing box's own state) opts back into fleet-wide firing with `sharedInput: false`; a user monitor keeps its fleet-wide default and opts into owner-only with `sharedInput: true`. Source: `cli/src/lib/monitors/config.ts`, `cli/src/lib/monitors/remote.ts`, `cli/src/commands/monitors.ts`, `cli/src/lib/state.ts`.
+
+- **A version-home plugin left behind by a marketplace move is now reconciled
+  away instead of shadowing the current copy (PHNX-2618).** Plugin orphan
+  detection keyed on plugin **name** alone, but a version home installs plugins
+  per **marketplace** (`marketplaces/<name>/plugins/<plugin>`). When a plugin
+  moved marketplaces — e.g. `code` once shipped from the user repo (the
+  `agents-cli` marketplace) and later from the system repo (`agents-system`) —
+  the stale `agents-cli` copy was never cleaned, because the name `code` was
+  still active via `agents-system`. Fleet boxes then carried **two** `code`
+  plugins: the current one, plus a shadow serving skills the repo deleted on
+  purpose (`code:quality` / `code:ship` / `code:verify`), and resolution order
+  decided which `code:review` an agent got. `cleanOrphanedPluginSkills` /
+  `diffVersionPlugins` now key on the `(marketplace, name)` pair: an installed
+  copy whose marketplace source repo is present but no longer ships that plugin
+  is trashed (soft-deleted to `~/.agents/.trash/plugins/`), even when another
+  marketplace still ships the same name — so a plain `agents sync` reconciles the
+  shadow away. When a marketplace's source repo is **absent** (a project we're
+  not in, a removed extra repo) the original name-only test is kept, so an
+  unrelated sync from another cwd never trashes a plugin whose source simply is
+  not reachable right now. Source: `cli/src/lib/plugins/plugins.ts`
+  (`cleanOrphanedPluginSkills`, `diffVersionPlugins`, `isOrphanMarketplacePlugin`),
+  `cli/src/lib/staleness/writers/plugins.ts`,
+  `cli/src/lib/installations/versions.ts`.
+
+- **`agents sessions --device all/fleet --json` now actually searches the whole fleet (PHNX-2673).** The documented "search the whole fleet" sentinel was filtered to an empty host set — correct for `--active` and the interactive listing, which fan out by default — but the HISTORICAL `--json` listing does not fan out by default (it stays a deterministic local slice for scripts), so the sentinel was silently dropped and a fleet-wide historical query returned local rows only. Naming devices explicitly (`--device box-a --device box-b`) reached the fleet; `--device all` did not. The `--json` listing path now remembers the sentinel and runs the SAME peer SSH sweep the interactive listing uses (`gatherRemoteList` over the registered online devices, whole-index per peer), merging peer rows in machine-first. A bare `--json` (no `--device`) stays local-only, `--local` still pins to this machine, and dead peers are skipped, never fatal. Source: `cli/src/commands/sessions.ts`.
+
+- **`agents pty` now works on macOS/arm64 and Node 25/26 (PHNX-2740).** The pinned
+  `@homebridge/node-pty-prebuilt-multiarch@0.13.1` shipped no darwin-arm64 prebuild
+  above Node 24 (ABI 137), so on a Mac running Node 25 (ABI 141) or 26 (ABI 147) the
+  native binding never resolved and every pty command died with a bare
+  `Cannot find module '.../pty.node'` MODULE_NOT_FOUND. Bumped to `0.14.1`, which
+  publishes darwin-arm64 (and darwin-x64) prebuilds through ABI 147, covering current
+  Node. The PTY sidecar now also **fails loud** when the binding genuinely can't load:
+  instead of a raw MODULE_NOT_FOUND it prints the platform, the running Node ABI, and a
+  concrete remediation (`npm rebuild @homebridge/node-pty-prebuilt-multiarch` / reinstall
+  the CLI), preserving the underlying error. Source: `cli/package.json`,
+  `cli/src/lib/pty-server.ts`.
+
+- **An upgrade can no longer strand a box with the package installed but no working `agents` command (PHNX-2768).** `agents upgrade` (and every `agents fleet update` box, which runs it) now **owns the global bin links**: after installing and verifying the new version, it checks that `<prefix>/bin/{agents,ag,browser,computer}` resolve to the freshly-installed copy and **restores any the package manager dropped**. This closes the failure that left zion upgraded to 1.22.40 with `/opt/homebrew/bin/{agents,ag,browser,computer}` gone — every `agents` invocation "command not found" until the links were relinked by hand. It covers the sibling entrypoints (`ag`/`browser`/`computer`), not just `agents`. A link it cannot make resolve fails the upgrade **loud** (non-zero exit), so a genuinely-broken box is reported `failed` by the rollout instead of a stranded `ok`/`unverified`. Scope: the npm-prefix POSIX layout — bun and Windows use their own bin shims. Source: `cli/src/lib/self-update.ts` (`ensureGlobalBinLinks`), `cli/src/bootstrap.ts`, `cli/src/commands/ssh.ts`.
+
+- **The auto-pulled system repo is verified against its expected origin before a
+  fast-forward — a repointed origin is refused, not executed (PHNX-2957).** The
+  system repo (`~/.agents/.system/`) ships **hooks** that register as shell
+  `command` strings run on every tool event, and its checkout auto-fast-forwards
+  from `origin` (on `agents use`, and on the opt-in `AGENTS_AUTO_PULL=1`
+  background worker). Neither path verified that `origin` was the repo the
+  operator actually chose — so an `origin` repointed to an attacker's fork (or a
+  clone seeded from one) would silently fast-forward arbitrary hook code that then
+  ran as shell on the next command. Both pull sites now route through
+  `tryAutoPullSystemRepo`, which pulls only when `origin` is the canonical system
+  repo (`isSystemRepoRemote`) or the exact `AGENTS_SYSTEM_REPO` the operator
+  pointed at; an unexpected origin is **refused loud** (`agents use` prints the
+  offending remote and the re-point/`AGENTS_SYSTEM_REPO` fix), never pulled. The
+  canonical system repo and a legitimate `AGENTS_SYSTEM_REPO` override still sync
+  exactly as before — no regression to trusted pulls. Source:
+  `cli/src/lib/git.ts` (`isExpectedSystemRepoRemote`, `tryAutoPullSystemRepo`),
+  `cli/src/commands/versions.ts`, `cli/src/lib/auto-pull-worker.ts`.
+
+- **`agents monitors add --watch-pid <pid>` (PHNX-3023).** A reliable, daemon-polled
+  watcher for a backgrounded process — the fix for "will re-invoke me" watchers that
+  never fire because a harness's exit hook only wakes the agent when the watched
+  process dies, and a watch loop (`gh pr checks --watch`, a long sleep, a tick poll)
+  never itself exits. `--watch-pid` has the monitor engine's own poll loop check the
+  pid's liveness independent of the arming session, defaults its condition to fire on
+  exit, and fails loud at creation time when the pid is already dead instead of
+  silently arming a watcher that can never fire. Source: `cli/src/lib/monitors/pid-watch.ts`,
+  `cli/src/commands/monitors.ts`.
+
+- **`agents doctor --fix` now reconciles hooks / permissions / subagents / rule
+  aliases on Windows instead of an unactionable "hold" (PHNX-3187).** On win-mini
+  `--fix` healed commands/skills/rules/plugins but reported hooks, permissions,
+  subagents, and the `CLAUDE`/`GEMINI` rule aliases as "couldn't reconcile" and
+  left the box permanently red — with real guards (`git-guard`, `rm-guard`,
+  `secrets-guard`, `ask-user-question-guard`, `public-artifact-guard`)
+  uninstalled. Four Windows-specific defects, each fixed at its source: (1)
+  **subagents** — `parseSubagentFrontmatter`/`getSubagentBody` split on `'\n'`
+  and compared the fence with `=== '---'`, so a git-CRLF-checked-out `AGENT.md`
+  (`'---\r'`) was rejected and the subagent silently dropped from discovery, so
+  it could never be installed; now CRLF-robust (`/\r?\n/`). (2) **permissions** —
+  `buildPermissionsFromGroups` extracted rules with a line regex anchored on the
+  closing quote (`"$`), which a trailing `\r` broke, extracting zero rules and
+  writing an empty permission set; now CRLF-robust. (3) **rule aliases** — git
+  checks the `rules/CLAUDE.md` and `rules/GEMINI.md` symlinks out as plain text
+  files on Windows, so `lstat().isSymbolicLink()` was false and the diff treated
+  them as independent rule sources no sync could ever produce; a new
+  `isCheckedOutSymlink` detector skips them on every platform. (4) **hooks** —
+  the heal pass fed the resource diff's extensionless hook names
+  (`git-guard`) back to the sync writer, whose `available.hooks` set carries the
+  source filename **with** its extension (`git-guard.sh`), so the exact-set match
+  found nothing and no flagged hook could be written; a new basename-tolerant
+  `resolveHookSelection` maps them, and the orphan sweep still prunes any stale
+  extensionless hook copy left in a version home (one would be invisible on
+  Windows, lacking both an extension and an exec bit). The subagents writer also now
+  surfaces a per-item write failure with its reason instead of swallowing it in a
+  bare `catch`, so a genuine failure fails loud rather than reading as a silent
+  "hold". Source: `cli/src/lib/subagents.ts`, `cli/src/lib/permissions.ts`,
+  `cli/src/lib/doctor-diff.ts`, `cli/src/lib/installations/versions.ts`,
+  `cli/src/lib/staleness/writers/subagents.ts`.
+
+- Fix the `agents-cli` discovery skill/plugin install commands to use the real GitHub
+  repo path `phnx-labs/agi-cli` (they pointed at `phnx-labs/agents-cli`, which only
+  resolved via GitHub's rename redirect). The npm package stays `@phnx-labs/agents-cli`.
+  Also maps the plugin manifests + skill to `agents-cli-plugin.test.ts` in CI impact
+  analysis so a manifest/skill edit runs its test on the PR. (PHNX-3337 review follow-up)
+
+- **Ship a cross-harness `agents-cli` discovery skill + Claude plugin marketplace (PHNX-3337).**
+  New `skills/agents-cli/SKILL.md` is an authoritative skill whose `description`
+  carries the exact intents a developer types — *run multiple coding agents in
+  parallel*, *manage multiple Claude Code accounts*, *I hit my usage limit*,
+  *resume a session on another machine*, *pin the agent CLI version* — each with a
+  verified `agents` command recipe (`teams`, `accounts`, `run --fallback`/`-b`/`auto`,
+  `sessions resume`, `add`/`use`). A repo-root `.claude-plugin/marketplace.json` +
+  `.claude-plugin/plugin.json` make the repo installable via
+  `claude plugin marketplace add phnx-labs/agents-cli` and `npx skills add
+  phnx-labs/agents-cli`; the plugin's `source: "./"` bundles the discovery skill
+  plus the existing per-command skills. Harness parity is registry-driven, not
+  per-harness copies: the one SKILL.md is authored once and the existing
+  capability-gated skill sync (`supports(agent, 'skills', …)`) fans it into every
+  skill-capable harness home. `claude plugin validate .` passes on the committed
+  manifest, and a real (no-mock) test reads the repo-root files and runs the CLI's
+  own `validateClaudePluginManifest`. Source:
+  `skills/agents-cli/SKILL.md`, `.claude-plugin/marketplace.json`,
+  `.claude-plugin/plugin.json`, `cli/src/lib/plugins/agents-cli-plugin.test.ts`,
+  `README.md`.
+
+- **`agents cloud providers` no longer reports Rush as `ready` when the session token is expired (PHNX-3382).** `capabilities().available` checked only that `~/.rush/user.yaml` existed — it returned `true` even for an expired session, so the provider appeared ready but every dispatch failed with a cryptic HTTP 401. `readToken()` also silently returned an expired token, giving the same bad error on every cloud call (`dispatch`, `status`, `list`, `stream`, `cancel`, `message`). Both paths now check `expires_at` (Unix seconds): `capabilities()` returns `available: false` for a missing file, missing token, or expired session; `readToken()` throws `Rush session expired at <ISO>. Run 'rush login' to refresh.` — an actionable message instead of a 401. The exported `isRushSessionValid(yamlPath?)` helper is testable in isolation. Source: `cli/src/lib/cloud/rush.ts`.
+
+- **Traces: session duration is populated for every harness, and the console duration median is active-time, not calendar span (PHNX-3457).** Only claude/codex/droid/gemini/opencode ever derived a `duration_ms` at scan; rush/grok/kimi/cursor/muse/antigravity left it NULL — 52% of sessions, 100% of the dominant `rush` usage — so the Evals console median was computed over only the ~48% that carried it and skewed misleadingly short. `resolveDurationMs` now fills the span at the single upsert boundary from the timestamps the row already stores (a v43→v44 migration backfills existing rows in place, no re-parse), so every harness gets a span. The `agents traces sync` index shard's `medianMs`/`p90Ms` now run over **active time** — span minus every idle gap > 120s (before the first tool call, between calls measured from each call's end, and after the last call to the session end), derived from the ordered `tool_calls` already loaded — so a session resumed after hours or left idle mid-turn no longer inflates them (it killed a 345h calendar-span outlier). The stat keys are unchanged, so the fleet-aggregate worker keeps averaging them; the raw span stays available per session as `SessionDetail.meta.spanMs`, which also gains `activeMs`. Source: `cli/src/lib/session/db.ts`, `cli/src/lib/traces/sync.ts`.
+- **Traces: treemap tiles are drillable — each topic bucket carries example session refs (PHNX-3408).** The `agents traces sync` index shard now emits up to 30 most-recent `sessions` (`{id,title}`) per topic bucket, so the Evals console can drill from a treemap tile into that category's session list instead of rendering every tile display-only. The tile's `count` stays the true total. Source: `cli/src/lib/traces/sync.ts`.
+
+- **`agents run --device auto` no longer lands a launch on a fleet box that is logged out for the target harness (PHNX-3466).**
+  The `--device auto` placement gate already excluded a device whose harness reads
+  signed-out — but it judged a REMOTE candidate by `agents view --json`'s display
+  `signedIn`, which is true whenever the box's active/global HOME carries a login even
+  if the per-version home the isolated run actually launches has no credential of its
+  own. The LOCAL candidate, by contrast, used the strict per-version launch truth
+  (`collectRunCandidates` → `isLaunchableSignedIn`). So a worker whose selected harness
+  version home was not launchable passed the remote gate, got picked, and the launch
+  died at spawn — from AGI EXT the dispatched tab exited 1 and vanished. `agents view
+  --json` now emits a per-version `launchable` field (the same `isLaunchableSignedIn`
+  signal the local path uses), and remote placement (`viewAgentAccountEligibility`)
+  gates on it, so both paths agree. A device with no launchable account for the harness
+  is excluded from the `--device auto` candidate set; when that empties the pool the
+  existing fail-loud `no healthy device` error fires instead of a silently-lost launch.
+  An older remote CLI that omits `launchable` falls back to `signedIn`, so a rolling
+  fleet does not regress. No second placement path was added — the single CLI gate is
+  hardened, so both the CLI and AGI EXT (which delegates placement to it) benefit.
+  Source: `cli/src/commands/view.ts`, `cli/src/lib/view-types.ts`,
+  `cli/src/lib/hosts/ready.ts`.
+
+- **`agents traces sync` now emits SEGMENTED active-time medians so the console can
+  headline agent runs, not the corpus blend (PHNX-3472).** 63% of sessions are
+  one-shot queries (≤2 messages, ~15s active), so the blended `medianMs`/`p90Ms` sat
+  at ~15s while substantial agent runs have a ~15-minute median — the blend headlined
+  neither. The index-shard `stats` now classify each session as an AGENT run (any tool
+  call OR more than 8 messages) or INTERACTIVE, and carry `agentMedianMs`/`agentP90Ms`
+  (active-time median/p90 over agent sessions), `interactiveMedianMs`, and
+  `measuredFraction` (share of sessions with a non-null duration) alongside the
+  unchanged blended `medianMs`/`p90Ms`. Reuses the PHNX-3457 active-time computation
+  (span minus idle gaps > 120s); no calendar span reintroduced. Source:
+  `cli/src/lib/traces/sync.ts`.
+
+- **`agents traces sync` classifies session kind and EXCLUDES internal utility calls
+  from the Evals corpus (PHNX-3474).** ~68% of the raw corpus is machine plumbing —
+  single-shot calls (no tool call AND ≤2 messages) plus known internal-prompt
+  signatures (title generation, watchdog ticks, commit-message writes, factory
+  workers), all spawned under the `claude` harness by the Rush app — and it poisoned
+  every console statistic (count, median, need-attention, tool-error-rate). Each
+  session now carries a `kind` (`utility` vs `agent`, `classifySessionKind` in
+  `traces/sync.ts`) and every index statistic is computed over the AGENT set ONLY:
+  `sessionsImported` is the real agent count (not the raw row count), and the
+  medians / `needAttention` / `toolErrorRate` / topic-bucket counts all exclude
+  utility. A new top-level `utilityCount` reports how many were dropped. Each session
+  ref (topic-tile `sessions[]` and `needsAttention`) also emits `kind` and `harness`
+  so the console can filter by both. Pure reclassification — utility rows are tagged
+  and excluded at shard-build time, never deleted from `sessions.db`. Source:
+  `cli/src/lib/traces/sync.ts`.
+</content>
+</invoke>
+
 ## 1.22.58
 
 - **`agents notify` is deprecated in favor of `agents feed post` (PHNX-3323).** The command still works for existing callers, but it now prints a stderr deprecation notice naming `agents feed post` as the replacement, and `agents notify --help` carries a `[DEPRECATED]` label and examples that use `agents feed post`. Source: `cli/src/commands/send.ts`.
