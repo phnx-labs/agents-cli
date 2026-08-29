@@ -1136,6 +1136,34 @@ describe('resolveRunVersion — never auto-pick from entirely stale usage (PHNX-
     expect(['2.1.181', '2.1.207']).toContain(resolved.version);
   });
 
+  it('pinned: an auth-blocked default rotating to only-stale siblings ALSO refuses (PR #3295 review)', async () => {
+    // The pinned strategy's auth-blocked-pin fallback rotates via
+    // pickAvailableCandidate — an initial selection, so it must honor the same
+    // verified-only gate. A revoked pin whose only siblings are stale must NOT
+    // launch one blind; it diverts exactly like balanced/available.
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-2526-pin-stale-'));
+    fs.writeFileSync(path.join(cwd, 'agents.yaml'), 'agents:\n  claude: "2.1.219"\n');
+    const revokedPin = candidate({ version: '2.1.219', authVerdict: 'revoked' });
+    const staleSibling = candidate({ version: '2.1.187', usageSnapshot: staleSnap(40) });
+    const resolved = await resolveRunVersion('claude', 'pinned', cwd, async () => [revokedPin, staleSibling]);
+    expect(resolved.noVerifiedUsage).toBe(true);
+    expect(resolved.version).toBeNull();
+    // The stale sibling is still in healthy for bounded failover.
+    expect(resolved.rotation?.healthy.map((c) => c.version)).toContain('2.1.187');
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
+  it('pinned: an auth-blocked default rotating to a VERIFIED sibling still routes normally', async () => {
+    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'phnx-2526-pin-verified-'));
+    fs.writeFileSync(path.join(cwd, 'agents.yaml'), 'agents:\n  claude: "2.1.219"\n');
+    const revokedPin = candidate({ version: '2.1.219', authVerdict: 'revoked' });
+    const verifiedSibling = candidate({ version: '2.1.187', usageSnapshot: freshSnap(20) });
+    const resolved = await resolveRunVersion('claude', 'pinned', cwd, async () => [revokedPin, verifiedSibling]);
+    expect(resolved.noVerifiedUsage).toBeFalsy();
+    expect(resolved.version).toBe('2.1.187');
+    fs.rmSync(cwd, { recursive: true, force: true });
+  });
+
   it('bounded post-rejection failover still cascades across the preserved stale accounts', async () => {
     // The refused stale pool is still the failover net once a primary has hit a
     // 429 — by then the alternative is not launching at all, so a stale account
