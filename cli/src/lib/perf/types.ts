@@ -24,6 +24,14 @@ export interface PerfSample {
   metaJson?: string;
 }
 
+/** Percentiles for one sub-phase (e.g. agent.run's `startup`) across a bucket. */
+export interface PerfPhaseStat {
+  /** Samples that carried this phase (may be < the row's `n`). */
+  n: number;
+  p50Ms: number;
+  p90Ms: number;
+}
+
 export interface PerfAggregateRow {
   kind: string;
   label: string;
@@ -34,6 +42,13 @@ export interface PerfAggregateRow {
   meanMs: number;
   maxMs: number;
   minMs: number;
+  /**
+   * Per-sub-phase percentiles parsed from each sample's meta_json `phases`.
+   * Present only when at least one sample in the bucket recorded a phase
+   * (agent.run records `startup` — time from spawnAgent entry to child spawn —
+   * so boot cost is trackable independently of the total run, PHNX-3468).
+   */
+  phases?: Record<string, PerfPhaseStat>;
   cacheHitPct?: number;
   cacheStalePct?: number;
   cacheMissPct?: number;

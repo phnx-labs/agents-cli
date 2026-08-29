@@ -13,9 +13,27 @@ import { localMachineId } from '../origin-machine.js';
 import { resolveProjectKey } from '../project-key.js';
 import { percentile } from '../percentile.js';
 import { resolveSpoolPath, shortSessionId, _resetPerfSpoolForTest } from './spool.js';
-import type { AggregateOptions, PerfAggregateRow } from './types.js';
+import type { AggregateOptions, PerfAggregateRow, PerfPhaseStat } from './types.js';
 
-export type { AggregateOptions, PerfAggregateRow, PerfSample } from './types.js';
+export type { AggregateOptions, PerfAggregateRow, PerfPhaseStat, PerfSample } from './types.js';
+
+/**
+ * Parse the `phases` map from a sample's meta_json. Fail-soft: a row with no
+ * meta_json, malformed JSON, or a non-numeric phase value contributes nothing
+ * rather than throwing (the warehouse must survive any writer's shape).
+ */
+function parsePhases(metaJson: string | null): Record<string, number> | undefined {
+  if (!metaJson) return undefined;
+  let parsed: unknown;
+  try { parsed = JSON.parse(metaJson); } catch { return undefined; }
+  const phases = (parsed as { phases?: unknown } | null)?.phases;
+  if (!phases || typeof phases !== 'object') return undefined;
+  const out: Record<string, number> = {};
+  for (const [name, val] of Object.entries(phases as Record<string, unknown>)) {
+    if (typeof val === 'number' && Number.isFinite(val)) out[name] = val;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
 export { recordSample, shortSessionId, resolveSpoolPath } from './spool.js';
 export { percentile } from '../percentile.js';
 
@@ -230,7 +248,7 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
   }
 
   const rows = db.prepare(
-    `SELECT kind, label, duration_ms, cache, exit_code, status, cwd
+    `SELECT kind, label, duration_ms, cache, exit_code, status, cwd, meta_json
      FROM samples WHERE ${clauses.join(' AND ')}`
   ).all(...params) as Array<{
     kind: string;
@@ -240,6 +258,7 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     exit_code: number | null;
     status: string | null;
     cwd: string | null;
+    meta_json: string | null;
   }>;
 
   // Memoize cwd -> project key: resolveProjectKey walks the filesystem for
@@ -265,6 +284,8 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     errors: number;
     blocks: number;
     timeouts: number;
+    /** phase name -> durations across samples that carried it. */
+    phases: Map<string, number[]>;
   };
   const map = new Map<string, Bucket>();
   for (const r of rows) {
@@ -272,10 +293,18 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
     const key = `${r.kind}\0${r.label}`;
     let b = map.get(key);
     if (!b) {
-      b = { kind: r.kind, label: r.label, durations: [], hits: 0, stale: 0, misses: 0, errors: 0, blocks: 0, timeouts: 0 };
+      b = { kind: r.kind, label: r.label, durations: [], hits: 0, stale: 0, misses: 0, errors: 0, blocks: 0, timeouts: 0, phases: new Map() };
       map.set(key, b);
     }
     b.durations.push(Number(r.duration_ms));
+    const phases = parsePhases(r.meta_json);
+    if (phases) {
+      for (const [name, ms] of Object.entries(phases)) {
+        let arr = b.phases.get(name);
+        if (!arr) { arr = []; b.phases.set(name, arr); }
+        arr.push(ms);
+      }
+    }
     if (r.cache === 'hit') b.hits++;
     else if (r.cache === 'stale-prefetch') b.stale++;
     else if (r.cache === 'miss' || r.cache === 'none') b.misses++;
@@ -322,6 +351,19 @@ export function aggregateSamples(opts: AggregateOptions = {}): PerfAggregateRow[
       row.blockRate = Math.round((b.blocks / n) * 1000) / 1000;
     }
     if (b.timeouts > 0) row.timeoutRate = Math.round((b.timeouts / n) * 1000) / 1000;
+    if (b.phases.size > 0) {
+      const phases: Record<string, PerfPhaseStat> = {};
+      for (const [name, durs] of b.phases) {
+        if (durs.length === 0) continue;
+        const ps = durs.slice().sort((a, c) => a - c);
+        phases[name] = {
+          n: ps.length,
+          p50Ms: Math.round(percentile(ps, 50)),
+          p90Ms: Math.round(percentile(ps, 90)),
+        };
+      }
+      if (Object.keys(phases).length > 0) row.phases = phases;
+    }
     if (opts.project) row.project = opts.project;
     out.push(row);
   }

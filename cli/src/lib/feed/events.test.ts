@@ -10,7 +10,7 @@ import {
   redactPrompt, redactArgs, truncate,
   detectCaller,
   levelFor, isEventType, EVENT_TYPES,
-  getLogsPath, _resetForTest,
+  getLogsPath, _resetForTest, createTimer,
 } from './events.js';
 import { resetActorCache } from '../actor.js';
 
@@ -44,6 +44,39 @@ function setupLogsDir(): string {
 }
 
 describeEventsIo('events', () => {
+  describe('createTimer perf persistence (PHNX-3468)', () => {
+    it('end() persists sub-phase marks into the spool meta_json', async () => {
+      const dir = makeTempDir();
+      const spool = path.join(dir, 'perf-spool.jsonl');
+      process.env.AGENTS_PERF_SPOOL = spool;
+      delete process.env.AGENTS_DISABLE_PERF;
+      try {
+        const timer = createTimer('agent.run', { agent: 'claude', version: '2.1.0' });
+        timer.mark('startup');
+        timer.end({ exitCode: 0, status: 'success' });
+
+        // recordPerfTiming writes via a dynamic import('../perf/spool.js'), so the
+        // spool append lands on a later microtask — poll (bounded) for the line.
+        let line: string | undefined;
+        for (let i = 0; i < 50 && !line; i++) {
+          await new Promise((r) => setTimeout(r, 20));
+          if (fs.existsSync(spool)) {
+            line = fs.readFileSync(spool, 'utf-8').trim().split('\n').filter(Boolean).pop();
+          }
+        }
+        expect(line).toBeDefined();
+        const rec = JSON.parse(line!);
+        expect(rec.kind).toBe('perf.timing');
+        expect(rec.label).toBe('agent.run');
+        expect(rec.meta_json).toBeDefined();
+        const meta = JSON.parse(rec.meta_json);
+        expect(typeof meta.phases.startup).toBe('number');
+      } finally {
+        delete process.env.AGENTS_PERF_SPOOL;
+      }
+    });
+  });
+
   describe('emit', () => {
     it('writes a JSONL record with level and caller fields', () => {
       const logsDir = setupLogsDir();

@@ -19,6 +19,29 @@ block clears, preventing stale session reads from resurrecting answered asks. Th
 publishes one versioned stream; thin clients replace state on reset and apply monotonic
 increments.
 
+## Performance latency warehouse
+
+Performance is a disposable SQLite warehouse at `~/.agents/.cache/perf/perf.db`
+(safe to delete). Timers emit a `perf.timing` sample carrying the total duration
+plus a `phases` map of named sub-phase marks; `agent.run` records a `startup`
+phase — wall time from entering `spawnAgent` to the child actually spawning, i.e.
+the boot cost — so a slow launch is attributable independently of the total run.
+The phases ride each sample's `meta_json`, and `aggregateSamples` folds them into
+a per-label `phases` break-out (p50/p90 over the samples that carried each phase).
+
+`agents insights perf run` shows the rollup and renders each phase as an indented
+sub-line under its label:
+
+```
+agent.run    412   1.3s   2.9s   3.1s   1.6s   3.2s
+  └ startup: p50 63ms  p90 105ms  (n=412)
+```
+
+This is the tracked signal for boot performance (PHNX-3468): the total run is
+dominated by the agent's own work, so the `startup` percentiles are what a boot
+regression moves. A sample with no phase mark still counts toward the label total;
+only samples carrying the phase contribute to its `n`.
+
 ## Account and usage projections
 
 Authentication health and quota are separate signals with separate freshness. Provider

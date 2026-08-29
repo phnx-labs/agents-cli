@@ -31,8 +31,14 @@ function recordPerfTiming(payload: {
   version?: string;
   sessionId?: string;
   cwd?: string;
+  /** Sub-phase timings (e.g. { startup: 42 } from createTimer marks). Persisted
+   *  in the sample's meta_json so a break-out like agent.run's `startup` cost is
+   *  trackable across the fleet, not just the total durationMs (PHNX-3468). */
+  phases?: Record<string, number>;
 }): void {
   try {
+    const phases = payload.phases && Object.keys(payload.phases).length > 0 ? payload.phases : undefined;
+    const metaJson = phases ? JSON.stringify({ phases }) : undefined;
     // Dynamic import keeps events.ts free of a load-time dependency on perf/db.
     void import('../perf/spool.js').then(({ recordSample }) => {
       recordSample({
@@ -44,6 +50,7 @@ function recordPerfTiming(payload: {
         agentVersion: payload.version,
         sessionId: payload.sessionId,
         cwd: payload.cwd,
+        metaJson,
       });
     }).catch(() => { /* fail soft */ });
   } catch {
@@ -965,6 +972,7 @@ export function createTimer(label: string, payload: EventPayload = {}): {
         version: merged.version,
         sessionId: merged.sessionId,
         cwd: merged.cwd,
+        phases: marks,
       });
     },
   };
