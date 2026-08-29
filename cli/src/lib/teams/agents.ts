@@ -322,6 +322,31 @@ const CLAUDE_PLAN_MODE_PREFIX = `You are running in HEADLESS PLAN MODE. This mod
 
 `;
 
+// PHNX-3236: the teammate self-merge boundary, injected as a DISPATCH DEFAULT.
+// A write-capable teammate has `gh pr merge` and authenticates as the repo owner,
+// so it can merge its OWN PR past the required non-author-review gate — which is
+// exactly what happened in the RUSH-2988 wave-1 dispatch (PR #1817, #1820). The
+// root cause was that the boundary lived in per-brief wording: one teammate in the
+// batch was told "open the PR, don't merge" and held off; the others weren't and
+// self-merged. Making it a default the runner appends to every non-plan teammate
+// closes that gap uniformly, across every harness, instead of relying on each
+// dispatch prompt remembering to say it. The HARD enforcement is still
+// merge-guard.sh — a PreToolUse hook the teammate inherits from the shared version
+// home, whose self-authored-verdict exclusion was closed in the same ticket
+// (.agents-system #395) so a verdict a teammate posts on its own PR no longer
+// clears the gate — this is the harness-independent layer plus the operator
+// hand-off contract, not a replacement for it.
+const TEAMMATE_PR_POLICY = `
+
+Teammate PR policy (agents teams): when your work opens a pull request, open it and
+hand it off — do NOT merge your OWN PR unless a NON-AUTHOR review verdict has been
+posted on that same PR. You authenticate as the repo owner and share that one
+GitHub identity with every other teammate, so an APPROVE you post on your own PR
+does not count as a non-author review. \`gh pr merge\` on your own PR is blocked by
+merge-guard until a genuine non-author verdict exists on it; never pass --admin or
+otherwise route around that guard. Report the PR as open and let the orchestrator
+or a separate reviewer take it to merge.`;
+
 // Canonical modes plus the historical `full` alias (rewritten to `skip` by
 // normalizeModeValue). Keep `full` listed so user-typed CLI flags and stored
 // metadata that pre-date the rename continue to parse.
@@ -2922,6 +2947,14 @@ export class AgentManager {
       if (agentType === 'claude' && mode === 'plan') {
         fullPrompt = CLAUDE_PLAN_MODE_PREFIX + fullPrompt;
       }
+    }
+    // PHNX-3236: append the self-merge boundary to every WRITE-capable teammate,
+    // fresh or resumed. A plan-mode teammate produces no PR (read-only), so it is
+    // skipped to keep its prompt clean; every other mode can open — and could
+    // self-merge — a PR, so the policy rides along regardless of harness. The
+    // hard block is still merge-guard.sh (inherited hook); see TEAMMATE_PR_POLICY.
+    if (mode !== 'plan') {
+      fullPrompt += TEAMMATE_PR_POLICY;
     }
 
     // Profile target takes precedence — `agents run <profile>` resolves the

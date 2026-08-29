@@ -307,6 +307,33 @@ DAG-style, boundary contracts, `--watch` supervisor, `--worktree` isolation, opt
 `--cloud` dispatch. The old `mcp__Swarm__*` surface was folded into teams
 (`migrateLegacySwarmToTeams()` in `src/lib/installations/migrate.ts`). Don't reach for Swarm — gone.
 
+**A teammate opens PRs but MUST NOT merge its OWN PR without a posted non-author
+verdict (PHNX-3236).** A write-capable teammate has `gh pr merge` and authenticates
+as the repo owner, so nothing about being a teammate stops it from merging its own
+PR straight past the required non-author review — which is exactly what happened in
+the RUSH-2988 wave-1 dispatch (PRs #1817, #1820 self-merged with `reviews: []`). The
+boundary is enforced in two layers, and neither is per-brief prompt wording (the
+failure mode: only one teammate in that batch was *told* not to merge, and its
+siblings weren't):
+
+- **Hard enforcement — `merge-guard.sh`.** The PreToolUse Bash guard the teammate
+  inherits from the shared version home blocks `gh pr merge` on a PR that has no
+  non-author verdict on it. Its verdict check (`pr-verdict.py`) **excludes any
+  review/comment authored by the PR's own author** (landed in the same ticket,
+  `phnx-labs/.agents` #395), so a teammate posting `VERDICT: APPROVE` on its own PR
+  — every fleet agent shares one GitHub identity — no longer clears the gate.
+- **Dispatch default — `TEAMMATE_PR_POLICY`.** `buildRunArgv`
+  ([`src/lib/teams/agents.ts`](src/lib/teams/agents.ts)) appends the boundary to the
+  prompt of every **write-capable** (non-plan) teammate, fresh or resumed, so the
+  rule is uniform across every harness — including the hook-incapable ones that
+  can't run `merge-guard.sh` — rather than depending on each dispatch remembering
+  to say it. Pinned by
+  [`agents.pr-policy.test.ts`](src/lib/teams/agents.pr-policy.test.ts).
+
+agents-cli itself never merges a teammate's PR (`pr-watch` only opens follow-up
+fixers or escalates to a human — there is no merge action); the teammate's own
+`gh pr merge` is the only merge path, which is why both layers target that call.
+
 ### 7. Every agent conversation is a session; execution ledgers link to it
 
 **An agent conversation from a session-capable harness MUST remain a session,
