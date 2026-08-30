@@ -7,7 +7,7 @@ import { getDB, readSessionTopics, INSIGHTS_EXTRACTOR_VERSION } from '../session
 import * as sessionDb from '../session/db.js';
 import { getRuntimeStateDir } from '../state.js';
 import type { ClassifiedTopic } from './classify.js';
-import { buildIndexShard, buildSessionDetail, classifySessionKind, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
+import { buildIndexShard, buildSessionDetail, buildSessionShard, classifySessionKind, readSyncLedger, syncTraces, type SyncRow } from './sync.js';
 
 const id = 'trace-rich-fixture';
 const transcript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
@@ -319,6 +319,17 @@ describe('buildSessionDetail (per-session drill-down shape)', () => {
     truncatedSteps: 0,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } as any;
+
+  it('buildSessionShard emits schema 2 by default — no env var, no operator knob', () => {
+    // The console reads both schemas (live), so schema 2 is backward-compatible
+    // by construction; the producer runs across the fleet and must not depend on
+    // AGENTS_TRACES_SCHEMA2 (or any env var) being set. An empty trajectory keeps
+    // the assertion about the shard's schema, not its step contents.
+    const emptyTraj = { ...baseTraj, steps: [], gaps: [], errorCount: 0 };
+    delete process.env['AGENTS_TRACES_SCHEMA2'];
+    const shard = buildSessionShard(emptyTraj, [], undefined);
+    expect(shard.schema).toBe(2);
+  });
 
   it('emits the console meta summary from real trajectory fields', () => {
     const d = buildSessionDetail(baseTraj);
@@ -801,9 +812,10 @@ describe('traces sync --dry-run local export', () => {
       expect(index.owner).toBe('local');
       expect(index.stats.sessionsImported).toBeGreaterThan(0);
 
-      // sessions/<id>.json — the console's SessionDetail shape.
+      // sessions/<id>.json — the console's SessionDetail shape. The per-session
+      // detail now emits schema 2 by default (the console reads both).
       const detail = JSON.parse(fs.readFileSync(path.join(outDir, 'sessions', `${dryId}.json`), 'utf8'));
-      expect(detail.schema).toBe(1);
+      expect(detail.schema).toBe(2);
       expect(detail.meta).toHaveProperty('spanMs');
       expect(detail).toHaveProperty('whereItWentWrong');
       expect(detail.meta.repo).toBe('agents-cli');
