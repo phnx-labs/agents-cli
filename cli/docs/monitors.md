@@ -266,9 +266,10 @@ later exit never fires again.
   balanced version's `CLAUDE_CONFIG_DIR` as an ordinary `agents run`, so the
   native login and portable `~/...` hooks resolve through the same paths.
 - `--routine <name>` — fire an existing routine (attach a monitor to a routine).
-- `--notify [channel]` — notify the owner through the one channel seam
-  (`lookupTransport` → provider). The recipient and normal channel come from
-  `humans.yaml`; `[channel]` overrides that channel for this dispatch.
+- `--notify [channel]` — notify the owner through the canonical owner-delivery
+  seam. Without an override, every addressable channel in
+  `humans.yaml`'s `owner.policy.normal` is attempted; `[channel]` selects one
+  channel for this dispatch.
   A channel with no registered provider fails that one dispatch (`ok: false`, the
   reason logged) and leaves the daemon evaluating every other monitor — the daemon
   never exits on a bad channel name.

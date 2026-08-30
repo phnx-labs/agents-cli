@@ -461,6 +461,12 @@ agents feed answer <key> --choice 0 # first answer wins; route over the recorded
 agents feed post --title "Halfway done" "CI green, watching merge"  # title + body
 ```
 
+Important posts can reach every owner channel named in
+`~/.agents/humans.yaml` under `owner.policy.normal` (for example iMessage and
+Slack). Owner delivery attempts every selected channel, reports partial
+failures, and safely forwards Rush-backed channels from headless workers to a
+capable Mac; ordinary milestone posts remain record-only unless configured.
+
 Top-level questions and waiting notifications publish one atomic open-block record per session, including the mailbox id, host, runtime, and every answer option. The default view collapses agents under the **outcome** they serve (Linear ticket, PR, worktree slug, or Unassigned) so a 1,100-agent fleet reads as dozens of deliverables. Answered, resumed, and stopped blocks clear automatically; Task subagents are excluded. The rendered reply command uses the same mailbox id with `agents message`, so the decision routes back to the agent that asked it.
 
 ### Auto-nudge stalls

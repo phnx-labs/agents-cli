@@ -35,6 +35,8 @@ export interface SendResult {
   attachments?: string[];
   /** Mailbox provider returns the enqueued message id. */
   msgId?: string;
+  /** Per-destination results when the owner policy selects multiple channels. */
+  deliveries?: SendResult[];
 }
 
 export interface ChannelProvider {

@@ -82,6 +82,17 @@ composes the existing session watcher with feed attention and activity, while
 Answers go through `agents feed answer <attention-key>` so the CLI atomically
 claims the first reply and routes it over the recorded session reply rail.
 
+Owner-addressed delivery is policy fan-out, not primary/fallback selection.
+`agents send --to owner`, deprecated `agents notify`, and an important feed's
+`channel: owner` sink resolve every addressable id in
+`humans.yaml`'s `owner.policy.normal`, in policy order. Each destination is
+attempted independently; a partial failure is reported alongside successful
+deliveries. Rush-backed destinations that cannot deliver on the originating
+worker forward their explicit channel and target to a capable macOS peer, so
+the peer never re-expands the owner policy and duplicates another channel.
+Legacy `notify.owner` and a humans file without `policy.normal` retain the
+historical single-destination behavior.
+
 **`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
 GraphQL rate limit (PHNX-3501).** The whole fleet shares one GitHub token, and
 `gh pr checks/view/list` are all GraphQL-backed, so the fleet drains GitHub's

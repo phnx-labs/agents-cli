@@ -93,6 +93,7 @@ async function runSend(
   const suffix = result.msgId ? chalk.dim(` (${result.msgId})`) : '';
   const dry = envelope.dryRun ? chalk.dim(' [dry-run]') : '';
   console.log(chalk.green(`Sent via ${result.channel} → ${result.id}`) + suffix + dry);
+  if (result.error) console.error(chalk.yellow(`Partial delivery failure: ${result.error}`));
 }
 
 const SHARED_NOTES = `
@@ -181,7 +182,8 @@ export function registerSendCommand(program: Command): void {
     notes: `
       DEPRECATED. notify ≡ send --to owner and still works, but new callers
       should use "agents feed post" (record + optional broadcast) instead.
-      Set notify.owner.{channel,to} in agents.yaml once per machine/fleet.
+      Set owner.channels + owner.policy.normal in humans.yaml once per fleet.
+      Every channel listed in the normal policy receives an owner-addressed send.
 
       ${SHARED_NOTES}
     `,

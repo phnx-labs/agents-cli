@@ -2072,7 +2072,8 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
 
       agents notify --text &quot;probe&quot; --dry-run --json deprecated. notify ≡ send --to owner and still works, but new callers
       should use &quot;agents feed post&quot; (record + optional broadcast) instead.
-      set notify.owner.{channel,to} in agents.yaml once per machine/fleet.
+      set owner.channels + owner.policy.normal in humans.yaml once per fleet.
+      every channel listed in the normal policy receives an owner-addressed send.
 
       
   planes (do not mix them up):
@@ -2092,7 +2093,8 @@ agents feed watch --json --local</code></pre><h4>Notes</h4><p class="notes">Orde
 
       agents notify --text &quot;probe&quot; --dry-run --json</code></pre><h4>Notes</h4><p class="notes">DEPRECATED. notify ≡ send --to owner and still works, but new callers
       should use &quot;agents feed post&quot; (record + optional broadcast) instead.
-      Set notify.owner.{channel,to} in agents.yaml once per machine/fleet.
+      Set owner.channels + owner.policy.normal in humans.yaml once per fleet.
+      Every channel listed in the normal policy receives an owner-addressed send.
 
       
   Planes (do not mix them up):

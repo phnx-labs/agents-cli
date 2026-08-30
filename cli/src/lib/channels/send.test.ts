@@ -8,6 +8,7 @@ import {
   isOwnerAlias,
   readOwnerDest,
   resolveSendEnvelope,
+  sendMessage,
 } from './send.js';
 
 const metaWithOwner = {
@@ -279,5 +280,19 @@ describe('owner destination from humans.yaml', () => {
     if (!r.ok) return;
     expect(r.envelope.channel).toBe('slack');
     expect(r.envelope.to).toBe('U123');
+  });
+
+  it('send --to owner fans out every normal-policy destination', async () => {
+    fs.writeFileSync(
+      humansFile,
+      `version: 1\nowner:\n  channels:\n    - id: desktop-a\n      transport: desktop\n      to: local\n    - id: desktop-b\n      transport: desktop\n      to: local\n  policy:\n    normal: [desktop-a, desktop-b]\n`,
+    );
+    const meta = { notify: { transports: { 'desktop-a': 'desktop', 'desktop-b': 'desktop' } } } as Meta;
+    const out = await sendMessage({ text: 'policy probe', to: 'owner', dryRun: true }, meta);
+    expect('error' in out).toBe(false);
+    if ('error' in out) return;
+    expect(out.result.ok).toBe(true);
+    expect(out.result.deliveries).toHaveLength(2);
+    expect(out.result.deliveries?.map((delivery) => delivery.id)).toEqual(['local', 'local']);
   });
 });

@@ -118,7 +118,7 @@ describe('forwardOwnerNotifyToPeer', () => {
     delete process.env[OWNER_FORWARD_GUARD_ENV];
     const tried: string[] = [];
     const meta = rushOwnerMeta({ config: { interactiveHost: 'studio' } });
-    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', meta, {
+    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', '+18055551234', meta, {
       self: 'yosemite-m3',
       devices,
       send: async (machine) => {
@@ -134,7 +134,7 @@ describe('forwardOwnerNotifyToPeer', () => {
   it('skips a peer that reports its own failure and tries the next', async () => {
     delete process.env[OWNER_FORWARD_GUARD_ENV];
     const tried: string[] = [];
-    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', rushOwnerMeta(), {
+    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', '+18055551234', rushOwnerMeta(), {
       self: 'yosemite-m3',
       devices,
       send: async (machine) => {
@@ -150,7 +150,7 @@ describe('forwardOwnerNotifyToPeer', () => {
   it('returns undefined when every capable peer fails — caller keeps its local error', async () => {
     delete process.env[OWNER_FORWARD_GUARD_ENV];
     const tried: string[] = [];
-    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', rushOwnerMeta(), {
+    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', '+18055551234', rushOwnerMeta(), {
       self: 'yosemite-m3',
       devices,
       send: async (machine) => {
@@ -165,7 +165,7 @@ describe('forwardOwnerNotifyToPeer', () => {
   it('returns undefined (never forwards) when no capable peer exists', async () => {
     delete process.env[OWNER_FORWARD_GUARD_ENV];
     let called = false;
-    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', rushOwnerMeta(), {
+    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', '+18055551234', rushOwnerMeta(), {
       self: 'yosemite-m3',
       devices: [device('yosemite-m3', 'linux'), device('win-mini', 'windows')],
       send: async () => {
@@ -180,7 +180,7 @@ describe('forwardOwnerNotifyToPeer', () => {
   it('does not forward onward from a box that already received a forward (loop guard)', async () => {
     process.env[OWNER_FORWARD_GUARD_ENV] = '1';
     let called = false;
-    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', rushOwnerMeta(), {
+    const result = await forwardOwnerNotifyToPeer('ping', 'imessage', '+18055551234', rushOwnerMeta(), {
       self: 'yosemite-m3',
       devices,
       send: async () => {

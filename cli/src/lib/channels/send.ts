@@ -13,6 +13,7 @@ import { getOwnerNotifyFromHumans } from '../humans.js';
 import { registerBuiltinProviders } from './providers/index.js';
 import { resolveTransport } from './resolve.js';
 import type { SendResult } from './registry.js';
+import { sendToOwner } from '../notify.js';
 
 /** Normalized delivery request after CLI/config resolution. */
 export interface SendEnvelope {
@@ -180,6 +181,11 @@ export async function sendMessage(
 ): Promise<{ result: SendResult; envelope: SendEnvelope } | { error: string }> {
   const resolved = resolveSendEnvelope(input, meta);
   if (!resolved.ok) return { error: resolved.error };
-  const result = await deliverEnvelope(resolved.envelope, meta);
+  const ownerPolicyRequest = resolved.envelope.ownerScoped === true
+    && !input.channel?.trim()
+    && (!input.to?.trim() || isOwnerAlias(input.to));
+  const result = ownerPolicyRequest
+    ? await sendToOwner(resolved.envelope.text, { meta, dryRun: resolved.envelope.dryRun })
+    : await deliverEnvelope(resolved.envelope, meta);
   return { result, envelope: resolved.envelope };
 }
