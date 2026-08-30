@@ -21,6 +21,10 @@ links:
 assets: []
 ---
 
+<div class="artifact-callout">
+<p><strong>Superseded 2026-08-30</strong> by <code>.agents/artifacts/2026-08-30/plan-identity-front-doors.md</code>. Phases A-D all shipped; the checklist below was never ticked past Phase A. The one open item from this document is the deferred Phoenix ID consolidation, which the successor plan reopens as a decision now that third-party users are arriving.</p>
+</div>
+
 ## Focus for review
 
 - **The sequencing call**: own agents-cli backend now + Phoenix-ID consolidation later — approved by Muqsit 2026-08-22; this document is the execution shape.
@@ -170,10 +174,10 @@ Phase D: end-to-end on an installed release, not a dev build
 ## Checklist
 
 - [x] Phase A: detach the Prix surface (this PR) → release 1.22.44 → fleet verify
-- [ ] Phase B: `lib/identity/` seam
-- [ ] Phase C: `agents-id` backend (awaits repo-name/hosting pick)
-- [ ] Phase D: re-land `agents auth` against it
-- [ ] Re-scope RUSH-2581; file the Phoenix-ID consolidation successor ticket
+- [x] Phase B: `lib/identity/` seam — shipped as `cli/src/lib/identity/client.ts`
+- [x] Phase C: backend shipped and live at `phoenix-id.muqsitnawaz.workers.dev`, browser page `id.byphoenix.com/device`
+- [x] Phase D: `agents auth login/whoami/logout` + `agents auth space` re-landed against it
+- [ ] Re-scope RUSH-2581; file the Phoenix-ID consolidation successor ticket — **still open**, see the 2026-08-30 successor plan
 
 ## Tracking
 
