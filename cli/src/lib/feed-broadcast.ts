@@ -39,6 +39,7 @@ import { isOwnerAlias, readOwnerDest, resolveSendEnvelope, deliverEnvelope } fro
 import { lookupTransport } from './channels/resolve.js';
 import { registerBuiltinProviders } from './channels/providers/index.js';
 import { sendToOwner } from './notify.js';
+import { forwardOwnerNotifyToPeer } from './channels/owner-forward.js';
 
 /** How loudly a post asks to be heard. Ordered — `important` implies milestone. */
 export type FeedPostLevel = 'milestone' | 'important';
@@ -618,6 +619,19 @@ async function runChannelSink(sink: PlannedSink, meta: Meta): Promise<SinkOutcom
 
   const result = await deliverEnvelope(resolved.envelope, meta);
   if (result.ok) return { name, ok: true };
+
+  // Explicit rush-backed channel sinks need the same cross-device handoff as
+  // the owner alias. Linux workers do not carry the macOS Keychain-bound Rush
+  // transport, but feed posts originate on those workers routinely. Keep the
+  // destination explicit so the peer delivers exactly this sink once instead
+  // of expanding the owner's multi-channel policy.
+  const forwarded = await forwardOwnerNotifyToPeer(
+    resolved.envelope.text,
+    resolved.envelope.channel,
+    resolved.envelope.to,
+    meta,
+  );
+  if (forwarded?.ok) return { name, ok: true };
 
   return { name, ok: false, error: result.error };
 }
