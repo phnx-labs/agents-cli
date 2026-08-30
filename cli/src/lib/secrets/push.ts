@@ -19,12 +19,14 @@
  *   reading a bundle can prompt (Touch ID); doing it per host would prompt per
  *   host. `export --device a,b,c` resolves once and pushes three times.
  */
-import { sshExec, type SshExecResult } from '../ssh-exec.js';
+import { sshExec, sshExecAsync, type SshExecResult } from '../ssh-exec.js';
 import { remoteShellFor, buildWindowsStdinImportCommand } from '../hosts/remote-cmd.js';
 import { resolveRemoteOsSync } from '../hosts/remote-os.js';
 import {
   remoteSecretsRaw,
+  remoteSecretsRawAsync,
   verifyRemoteKeychainPush,
+  verifyRemoteKeychainPushAsync,
   keychainWriteFailureMessage,
   buildRemoteFileImportCommand,
   credentialTransportSshOpts,
@@ -82,6 +84,8 @@ export interface PushBundleOptions {
   agentOnly?: boolean;
   /** Non-secret literals whose bundle value kind must survive the dotenv transport. */
   literalValues?: Record<string, string>;
+  /** Per-SSH-operation deadline. Async daemon callers must set this explicitly. */
+  timeoutMs?: number;
 }
 
 export interface PushBundleResult {
@@ -240,8 +244,8 @@ export function pushResolvedBundleToHost(
   // the raw-`ssh` branch's half of that; the `remote-secrets` branch and the
   // read-back/policy/literal follow-ups pass `secret: true` for the same posture.
   const res: SshExecResult = plan.kind === 'ssh'
-    ? sshExec(host, plan.remoteCmd, { input: plan.input, hostKeyOpts: credentialTransportSshOpts(host).hostKeyOpts, multiplex: plan.multiplex })
-    : remoteSecretsRaw(host, plan.args, { input: plan.input, osLookupName: host, secret: true });
+    ? sshExec(host, plan.remoteCmd, { input: plan.input, timeoutMs: opts.timeoutMs, hostKeyOpts: credentialTransportSshOpts(host).hostKeyOpts, multiplex: plan.multiplex })
+    : remoteSecretsRaw(host, plan.args, { input: plan.input, timeoutMs: opts.timeoutMs, osLookupName: host, secret: true });
 
   if (res.code === null) {
     return fail(res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed'));
@@ -258,7 +262,7 @@ export function pushResolvedBundleToHost(
   //   - file: a forwarded AGENTS_SECRETS_PASSPHRASE keys ciphertext to a secret
   //     the destination daemon does not hold (PHNX-2371).
   // Read the bundle back the way a later resolve will and FAIL LOUDLY.
-  const verdict = verifyRemoteKeychainPush(host, bundle, Object.keys(resolved.env), { osLookupName: host, secret: true });
+  const verdict = verifyRemoteKeychainPush(host, bundle, Object.keys(resolved.env), { osLookupName: host, secret: true, timeoutMs: opts.timeoutMs });
   if (!verdict.ok) {
     if (opts.remoteBackend === 'keychain' && verdict.kind === 'locked-keychain') {
       return fail(keychainWriteFailureMessage(host, bundle, verdict.reason));
@@ -275,12 +279,12 @@ export function pushResolvedBundleToHost(
   }
 
   for (const step of planLiteralRestoration(bundle, opts.literalValues)) {
-    const removed = remoteSecretsRaw(host, step.removeArgs, { osLookupName: host, secret: true });
+    const removed = remoteSecretsRaw(host, step.removeArgs, { osLookupName: host, secret: true, timeoutMs: opts.timeoutMs });
     if (removed.code !== 0) {
       const msg = (removed.stderr || removed.stdout || '').trim();
       return fail(`pushed '${bundle}' but could not replace transported ${step.key}${msg ? `: ${msg}` : ''}`);
     }
-    const literal = remoteSecretsRaw(host, step.addArgs, { osLookupName: host, secret: true });
+    const literal = remoteSecretsRaw(host, step.addArgs, { osLookupName: host, secret: true, timeoutMs: opts.timeoutMs });
     if (literal.code !== 0) {
       const msg = (literal.stderr || literal.stdout || '').trim();
       return fail(`pushed '${bundle}' but could not preserve literal ${step.key}${msg ? `: ${msg}` : ''}`);
@@ -304,4 +308,105 @@ export function pushBundleToHost(
   opts: PushBundleOptions,
 ): PushBundleResult {
   return pushResolvedBundleToHost(resolveBundleForPush(bundle, opts.operation, { agentOnly: opts.agentOnly }), bundle, host, opts);
+}
+
+/**
+ * Async, kill-bounded push for daemon services. It preserves the foreground
+ * primitive's transport, read-back verification, and literal restoration; only
+ * the SSH execution strategy differs.
+ */
+export async function pushResolvedBundleToHostAsync(
+  resolved: ResolvedBundleForPush,
+  bundle: string,
+  host: string,
+  opts: PushBundleOptions,
+): Promise<PushBundleResult> {
+  const fail = (message: string): PushBundleResult =>
+    ({ ok: false, host, bundle, keyCount: resolved.keyCount, message });
+
+  const plan = planPushTransport(resolved, bundle, host, opts);
+  if (plan.kind === 'refuse') return fail(plan.message);
+  const res = plan.kind === 'ssh'
+    ? await sshExecAsync(host, plan.remoteCmd, {
+        input: plan.input,
+        timeoutMs: opts.timeoutMs,
+        hostKeyOpts: credentialTransportSshOpts(host).hostKeyOpts,
+        multiplex: plan.multiplex,
+      })
+    : await remoteSecretsRawAsync(host, plan.args, {
+        input: plan.input,
+        timeoutMs: opts.timeoutMs,
+        osLookupName: host,
+        secret: true,
+      });
+
+  if (res.code === null) return fail(res.stderr.trim() || (res.timedOut ? 'ssh timed out' : 'ssh failed'));
+  if (res.code !== 0) {
+    const msg = (res.stderr || res.stdout || '').trim();
+    return fail(`remote import failed (exit ${res.code})${msg ? `: ${msg}` : ''}`);
+  }
+
+  const verdict = await verifyRemoteKeychainPushAsync(host, bundle, Object.keys(resolved.env), {
+    osLookupName: host,
+    secret: true,
+    timeoutMs: opts.timeoutMs,
+  });
+  if (!verdict.ok) {
+    if (opts.remoteBackend === 'keychain' && verdict.kind === 'locked-keychain') {
+      return fail(keychainWriteFailureMessage(host, bundle, verdict.reason));
+    }
+    if (opts.remoteBackend === 'file') {
+      return fail(
+        `${host}: pushed '${bundle}' but the remote could not decrypt it (${verdict.reason}). ` +
+        `File-backend export never forwards AGENTS_SECRETS_PASSPHRASE — the remote keys ` +
+        `the bundle under its own machine-local key. If the destination still cannot read, ` +
+        `unset a stale AGENTS_SECRETS_PASSPHRASE there (\`agents doctor\`).`,
+      );
+    }
+    return fail(`pushed '${bundle}' but could not verify it on the remote: ${verdict.reason}`);
+  }
+
+  for (const step of planLiteralRestoration(bundle, opts.literalValues)) {
+    const removed = await remoteSecretsRawAsync(host, step.removeArgs, {
+      osLookupName: host,
+      secret: true,
+      timeoutMs: opts.timeoutMs,
+    });
+    if (removed.code !== 0) {
+      const msg = (removed.stderr || removed.stdout || '').trim();
+      return fail(`pushed '${bundle}' but could not replace transported ${step.key}${msg ? `: ${msg}` : ''}`);
+    }
+    const literal = await remoteSecretsRawAsync(host, step.addArgs, {
+      osLookupName: host,
+      secret: true,
+      timeoutMs: opts.timeoutMs,
+    });
+    if (literal.code !== 0) {
+      const msg = (literal.stderr || literal.stdout || '').trim();
+      return fail(`pushed '${bundle}' but could not preserve literal ${step.key}${msg ? `: ${msg}` : ''}`);
+    }
+  }
+
+  const remoteMsg = (res.stdout || '').trim().split('\n').map((line) => line.trim()).filter(Boolean).pop();
+  return {
+    ok: true,
+    host,
+    bundle,
+    keyCount: resolved.keyCount,
+    message: remoteMsg || `${resolved.keyCount} key(s) exported`,
+  };
+}
+
+/** Resolve locally once, then run the daemon-safe async push. */
+export function pushBundleToHostAsync(
+  bundle: string,
+  host: string,
+  opts: PushBundleOptions,
+): Promise<PushBundleResult> {
+  return pushResolvedBundleToHostAsync(
+    resolveBundleForPush(bundle, opts.operation, { agentOnly: opts.agentOnly }),
+    bundle,
+    host,
+    opts,
+  );
 }

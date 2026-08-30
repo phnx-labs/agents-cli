@@ -12,6 +12,7 @@ import {
   sshConnectOpts,
   sshExec,
   sshExecAsync,
+  SSH_TIMEOUT_KILL_GRACE_MS,
   sshExecRawStream,
   TERMINAL_MODE_RESET, restoreLocalTerminal, saveLocalTerminal,
 } from './ssh-exec.js';
@@ -201,6 +202,26 @@ describe.skipIf(process.platform === 'win32')('sshExecAsync (real spawn via a PA
     );
     expect(res.timedOut).toBe(true);
     expect(res.code).toBeNull(); // SIGTERM-terminated child closes with a null exit code
+  });
+
+  it('hard-kills an ssh child that ignores SIGTERM without freezing the event loop', async () => {
+    let heartbeats = 0;
+    const interval = setInterval(() => { heartbeats += 1; }, 20);
+    const startedAt = Date.now();
+    try {
+      const res = await withStubSsh(
+        // A real child process that deliberately ignores the soft timeout. The
+        // busy loop avoids an orphaned grandchild holding stdout/stderr open.
+        '#!/bin/sh\ntrap "" TERM\nwhile :; do :; done\n',
+        () => sshExecAsync('testhost', 'wedged', { multiplex: false, timeoutMs: 100 }),
+      );
+      expect(res.timedOut).toBe(true);
+      expect(res.code).toBeNull();
+      expect(Date.now() - startedAt).toBeLessThan(100 + SSH_TIMEOUT_KILL_GRACE_MS + 1_500);
+      expect(heartbeats).toBeGreaterThanOrEqual(3);
+    } finally {
+      clearInterval(interval);
+    }
   });
 
   it('uses a fresh connection (no ControlMaster) when a timeout is set, even if multiplexing is requested', async () => {
