@@ -23,13 +23,13 @@ import { getRuntimeStateDir } from '../state.js';
 /**
  * Where the account backend lives. Config, never a literal at a call site.
  *
- * The default is the deployed Phoenix ID Worker. It is a `workers.dev` URL
- * rather than a vanity hostname because no custom domain is attached yet — and
- * a default naming an unregistered domain is worse than an ugly one: every
- * `agents auth login` would fail DNS with nothing to point at.
+ * The default is Phoenix ID's branded custom domain. The legacy workers.dev
+ * hostname remains live for already-released clients, but new clients and
+ * managed Workers must share this canonical base so token verification cannot
+ * drift across the release boundary.
  */
-export const PHOENIX_ID_BASE =
-  process.env.PHOENIX_ID_BASE ?? 'https://phoenix-id.muqsitnawaz.workers.dev';
+export const DEFAULT_PHOENIX_ID_BASE = 'https://id.byphoenix.com';
+export const PHOENIX_ID_BASE = process.env.PHOENIX_ID_BASE ?? DEFAULT_PHOENIX_ID_BASE;
 
 /** Our own session file. agents-cli never reads another product's credentials. */
 export function sessionFilePath(): string {
