@@ -251,6 +251,7 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     latency: { firstToolMs: { p50: 100, p90: 900, p99: 5000, max: 9000 } },
     bucketHistory: [],
     driftSignals: [],
+    sessions: [{ id: `sess-${device}`, title: 't', harness: 'claude', model: 'm', repo: 'r', mode: 'headless', projectType: 'code', startedAt: 1, durationMs: 100, toolCount: 5, errorCount: 0, needsAttention: false }],
     ...over,
   });
 
@@ -269,6 +270,9 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     expect(body.wastedMsTotal).toBe(120000);
     expect(body.failurePatterns).toHaveLength(1);
     expect(body.latency.firstToolMs.p50).toBe(100);
+    // Roster passes through so the single-device "all" view can filter/re-aggregate.
+    expect(body.sessions).toHaveLength(1);
+    expect(body.sessions[0].id).toBe('sess-zion');
   });
 
   it('two devices → summed counts, concatenated lists, summed wasted time', async () => {
@@ -298,6 +302,13 @@ describe('traces worker — /all cross-device aggregation (PHNX-3397)', () => {
     expect(p.sessions).toBe(6);
     expect(p.occurrences).toBe(10);
     expect(p.exampleSessionIds).toEqual(expect.arrayContaining(['ex-zion', 'ex-mac']));
+    // Rosters concat across devices so the "all" view sees every session's raw row
+    // (PHNX-3483). Without this the merged shard drops `sessions` and the console
+    // degrades to the pre-rolled stats with no filtering.
+    expect(body.sessions).toHaveLength(2);
+    expect(body.sessions.map((s: { id: string }) => s.id)).toEqual(
+      expect.arrayContaining(['sess-zion', 'sess-mac']),
+    );
   });
 
   it('all/sessions/<id> → served from whichever device owns it', async () => {
