@@ -333,24 +333,73 @@ export default {
       // segments deep (an unsupported shape outside the CLI) landing on the same
       // literal revision key.
       const noRevision = !!request.headers.get('x-share-no-revision');
-      if (!noRevision) {
-        const existing = await env.BUCKET.get(path);
-        if (existing) {
-          const existingHeaders = new Headers();
-          if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(existingHeaders);
-          const existingContentType = existingHeaders.get('content-type');
-          const revKey = path + '/rev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
-          await env.BUCKET.put(revKey, existing.body, {
-            httpMetadata: existingContentType ? { contentType: existingContentType } : undefined,
-            customMetadata: existing.customMetadata || {},
-          });
+      // PHNX-3542: per-user storage quota + object count + per-file size cap +
+      // publish rate limit, enforced ONLY for a managed Phoenix identity. A BYO
+      // WRITE_TOKEN publish writes to the operator's OWN bucket at their own
+      // cost, so it skips all four — a deliberate, documented policy, NOT a
+      // silent no-op. The current object is needed for BOTH the revision copy and
+      // the charge math, so read it once here; a BYO no-revision publish still
+      // skips the read entirely (nothing consumes it).
+      const needExisting = !noRevision || auth.kind === 'phoenix';
+      const existing = needExisting ? await env.BUCKET.get(path) : null;
+      let declared = 0;
+      let charge = 0;
+      let quotaLimits = null;
+      if (auth.kind === 'phoenix') {
+        // content-length is the authoritative declared size; x-share-bytes is the
+        // CLI's belt-and-suspenders header for a proxy that strips content-length.
+        declared = parseInt(request.headers.get('content-length') || request.headers.get('x-share-bytes') || '', 10);
+        if (!Number.isFinite(declared) || declared < 0) {
+          return json({ error: 'content-length required' }, 411);
         }
+        const existingSize = existing && typeof existing.size === 'number' ? existing.size : 0;
+        const newCanonical = !existing;
+        // Keeping a revision retains the old canonical bytes AND adds the new
+        // ones, so storage grows by the full declared size. A no-revision or first
+        // publish grows by declared minus the bytes it replaces (may be negative
+        // on a shrink; the ledger clamps at >= 0).
+        charge = (!noRevision && existing) ? declared : declared - existingSize;
+        const charged = await chargeShareWrite(env, auth, {
+          charge: charge,
+          newCanonical: newCanonical,
+          fileBytes: declared,
+          countRate: true,
+        });
+        if (charged.error) return charged.error;
+        quotaLimits = charged.limits;
       }
 
-      await env.BUCKET.put(path, request.body, {
+      if (!noRevision && existing) {
+        const existingHeaders = new Headers();
+        if (typeof existing.writeHttpMetadata === 'function') existing.writeHttpMetadata(existingHeaders);
+        const existingContentType = existingHeaders.get('content-type');
+        const revKey = path + '/rev-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8);
+        await env.BUCKET.put(revKey, existing.body, {
+          httpMetadata: existingContentType ? { contentType: existingContentType } : undefined,
+          customMetadata: existing.customMetadata || {},
+        });
+      }
+
+      const putRes = await env.BUCKET.put(path, request.body, {
         httpMetadata: { contentType },
         customMetadata,
       });
+      // Spoof backstop (managed only): R2 reports the stored object's real byte
+      // size. Reconcile the ledger against it, and if a hand-crafted client lied
+      // low on content-length to slip past the per-file cap, undo the write and
+      // refund. For legit CLI traffic (a materialized Buffer) declared === real,
+      // so this is a no-op on the happy path.
+      if (auth.kind === 'phoenix' && quotaLimits && putRes && typeof putRes.size === 'number') {
+        const realSize = putRes.size;
+        if (realSize > quotaLimits.maxFileBytes) {
+          await env.BUCKET.delete(path);
+          await refundShareWrite(env, auth.owner, { refund: charge, freeCanonical: !existing });
+          return json({ error: 'file too large', maxBytes: quotaLimits.maxFileBytes, gotBytes: realSize }, 413);
+        }
+        if (realSize !== declared) {
+          await adjustUsageBytes(env, auth.owner, realSize - declared);
+        }
+      }
       // A managed republish may change the title/description. Invalidate only
       // its generated sibling so the next crawler receives a fresh card; BYO
       // publishes send no OG metadata and keep their explicitly uploaded cover.
@@ -590,6 +639,22 @@ export default {
       const expiresAt = obj.customMetadata && obj.customMetadata['expires-at'];
       if (expiresAt && Date.now() > Date.parse(expiresAt)) {
         await env.BUCKET.delete(path);
+        // PHNX-3542: expiry is a lazy delete with no auth context. Refund the
+        // stamped owner's quota (bytes + object count) best-effort — a refund
+        // failure must never break serving the 410. A canonical page is 2
+        // segments; covers are excluded (never charged) so refund is safe here
+        // because only canonical pages ever carry an expires-at.
+        const expiredOwner = obj.customMetadata && obj.customMetadata['owner'];
+        if (expiredOwner && !path.endsWith('.png')) {
+          try {
+            await refundShareWrite(env, expiredOwner, {
+              refund: typeof obj.size === 'number' ? obj.size : 0,
+              freeCanonical: path.split('/').filter(Boolean).length === 2,
+            });
+          } catch (e) {
+            // best-effort: serving the expiry 410 must never depend on the refund
+          }
+        }
         return new Response('gone — this link has expired', { status: 410, headers: { 'content-type': 'text/plain' } });
       }
       // Resolve the viewer ONCE — needed both to gate me/org reads AND to decide
@@ -697,7 +762,24 @@ export default {
           return json({ error: 'namespace mismatch', owner: handle || uid }, 403);
         }
       }
+      // PHNX-3542: capture the object's size BEFORE deleting so a managed
+      // Phoenix owner's quota can be refunded. A canonical page (2 segments, not
+      // a .png cover) refunds both bytes and the object count; a retained
+      // revision (3+ segments) refunds bytes only; a server-generated .png cover
+      // was never charged, so it is skipped entirely.
+      let doomed = null;
+      const isCover = path.endsWith('.png');
+      if (auth.kind === 'phoenix' && !isCover && !firstSeg.startsWith('__')) {
+        doomed = typeof env.BUCKET.head === 'function' ? await env.BUCKET.head(path) : await env.BUCKET.get(path);
+      }
       await env.BUCKET.delete(path);
+      if (doomed) {
+        const delSegs = path.split('/').filter(Boolean);
+        await refundShareWrite(env, auth.owner, {
+          refund: typeof doomed.size === 'number' ? doomed.size : 0,
+          freeCanonical: delSegs.length === 2,
+        });
+      }
       return json({ ok: true, deleted: path }, 200);
     }
 
@@ -900,6 +982,23 @@ var RESERVED_METADATA_KEYS = ['expires-at', 'published-at', 'visibility', 'owner
 var PUBLIC_INBOX_DOMAINS = ['gmail.com', 'googlemail.com', 'outlook.com', 'hotmail.com', 'live.com', 'icloud.com', 'me.com'];
 var SHARE_COOKIE = '__Host-phoenix_share';
 var SHARE_COOKIE_MAX_AGE = 604800;
+
+// PHNX-3542 — per-user storage limits for the MANAGED share endpoint. The plan
+// map is the seam for future paid tiers: only 'free' is defined today, and a
+// ledger with no plan (or an unknown one) resolves to it via planLimits(). Paid
+// tiers and the write path that sets a user's plan arrive with billing (follow-up
+// PHNX-3569); this is a legitimately-deferred seam, not a stub — 'free' IS
+// enforced. Covers/views are server-generated overhead and excluded from the
+// quota, which counts canonical pages + their retained revisions only.
+var MiB = 1024 * 1024;
+var SHARE_PLANS = {
+  free: { maxBytes: 200 * MiB, maxObjects: 150, maxFileBytes: 20 * MiB, ratePerHour: 60 },
+};
+var DEFAULT_SHARE_PLAN = 'free';
+var RATE_WINDOW_MS = 3600 * 1000; // fixed 1h publish-rate window
+function planLimits(plan) { return SHARE_PLANS[plan] || SHARE_PLANS[DEFAULT_SHARE_PLAN]; }
+function freshUsage() { return { bytes: 0, count: 0, plan: DEFAULT_SHARE_PLAN, rlStart: 0, rlUsed: 0 }; }
+function usageNumber(v, fallback) { return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : fallback; }
 
 // Everything in customMetadata that ISN'T one of the reserved provenance/label
 // keys above — i.e. the caller's own \`--meta key=value\` entries. Surfaced on
@@ -1392,6 +1491,140 @@ async function writeViews(env, path, count) {
     });
   } catch {
     // best-effort: a failed counter write must never surface to the visitor
+  }
+}
+
+// --- PHNX-3542 per-user usage ledger (R2 conditional-put CAS) ---------------
+// The ledger is a single R2 object at __usage/<owner> holding the running
+// { bytes, count, plan, rlStart, rlUsed } for one user. It mirrors the __views /
+// __handles precedent: a __-prefixed key, GET-blocked and outside every gallery/
+// listing/revision prefix. R2 has no atomic increment, so mutations use a
+// read → mutate → conditional-put loop (onlyIf.etagMatches), the same primitive
+// the PATCH metadata-edit path already relies on.
+function usageKey(owner) { return '__usage/' + sanitizeNamespace(owner); }
+
+async function readUsage(env, owner) {
+  const obj = await env.BUCKET.get(usageKey(owner));
+  if (!obj) return { etag: null, usage: freshUsage() };
+  let usage = freshUsage();
+  try {
+    const raw = typeof obj.text === 'function' ? await obj.text() : '';
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object') {
+      usage = {
+        bytes: usageNumber(parsed.bytes, 0),
+        count: usageNumber(parsed.count, 0),
+        plan: typeof parsed.plan === 'string' ? parsed.plan : DEFAULT_SHARE_PLAN,
+        rlStart: usageNumber(parsed.rlStart, 0),
+        rlUsed: usageNumber(parsed.rlUsed, 0),
+      };
+    }
+  } catch (e) {
+    // Malformed ledger — treat as fresh zero but KEEP the etag so the next CAS
+    // put overwrites the corrupt object rather than looping against it forever.
+  }
+  return { etag: obj.etag || null, usage: usage };
+}
+
+async function writeUsageCas(env, owner, prevEtag, usage) {
+  const body = JSON.stringify(usage);
+  const opts = { httpMetadata: { contentType: 'application/json' } };
+  if (prevEtag) {
+    // Existing object: conditional put. R2 returns null when the etag no longer
+    // matches (a concurrent writer won the race) → report failure so the caller
+    // re-reads and retries.
+    opts.onlyIf = { etagMatches: prevEtag };
+    const res = await env.BUCKET.put(usageKey(owner), body, opts);
+    return res !== null;
+  }
+  // Fresh key: plain create. Neither R2 nor the test harness exposes a
+  // conditional-create predicate, so the only race is two simultaneous
+  // first-creates of the same owner's ledger — a benign, one-time bounded loss.
+  await env.BUCKET.put(usageKey(owner), body, opts);
+  return true;
+}
+
+// CAS retry loop. fn(usage) returns { reject: Response } to fail loud without
+// committing, or { commit: usage, result } to persist and return result. On CAS
+// contention it re-reads and retries; exhausting the retries fails loud with 503.
+async function withUsage(env, owner, fn) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const state = await readUsage(env, owner);
+    const outcome = fn(state.usage);
+    if (outcome.reject) return outcome.reject;
+    const ok = await writeUsageCas(env, owner, state.etag, outcome.commit);
+    if (ok) return outcome.result;
+  }
+  return json({ error: 'usage ledger contended, retry' }, 503);
+}
+
+function rateLimited(retryAfterSec, ratePerHour) {
+  return new Response(
+    JSON.stringify({ error: 'rate limit: too many publishes, retry later', retryAfterSec: retryAfterSec, ratePerHour: ratePerHour }),
+    { status: 429, headers: { 'content-type': 'application/json', 'retry-after': String(retryAfterSec) } },
+  );
+}
+
+// Charge one authed PUT against the owner's ledger. Rate → per-file cap → object
+// count → byte quota, each failing loud (429 / 413) before anything is written.
+// Returns { error: Response } on any rejection, else { limits } (the resolved
+// plan limits, reused by the post-write real-size reconcile). Managed only: the
+// caller guards on auth.kind === 'phoenix'.
+async function chargeShareWrite(env, auth, params) {
+  const now = Date.now();
+  const out = await withUsage(env, auth.owner, function (usage) {
+    const limits = planLimits(usage.plan);
+    // Rate limit — only a user-initiated page PUT counts (countRate). A fixed 1h
+    // window: reset when the window has rolled over, otherwise reject at the cap.
+    if (params.countRate) {
+      if (now - usage.rlStart >= RATE_WINDOW_MS) { usage.rlStart = now; usage.rlUsed = 0; }
+      if (usage.rlUsed >= limits.ratePerHour) {
+        const retryAfterSec = Math.max(1, Math.ceil((usage.rlStart + RATE_WINDOW_MS - now) / 1000));
+        return { reject: rateLimited(retryAfterSec, limits.ratePerHour) };
+      }
+      usage.rlUsed += 1;
+    }
+    // Per-file size cap.
+    if (typeof params.fileBytes === 'number' && params.fileBytes > limits.maxFileBytes) {
+      return { reject: json({ error: 'file too large', maxBytes: limits.maxFileBytes, gotBytes: params.fileBytes }, 413) };
+    }
+    // Object (canonical page) count.
+    if (params.newCanonical) {
+      if (usage.count + 1 > limits.maxObjects) {
+        return { reject: json({ error: 'artifact limit reached', maxObjects: limits.maxObjects }, 413) };
+      }
+      usage.count += 1;
+    }
+    // Total byte quota. charge may be negative on a shrink — clamp at >= 0.
+    if (usage.bytes + params.charge > limits.maxBytes) {
+      return { reject: json({ error: 'storage limit reached', maxBytes: limits.maxBytes, usedBytes: usage.bytes }, 413) };
+    }
+    usage.bytes = Math.max(0, usage.bytes + params.charge);
+    return { commit: usage, result: { limits: limits } };
+  });
+  if (out instanceof Response) return { error: out };
+  return { limits: out.limits };
+}
+
+// Post-write bytes-only reconcile: correct the ledger by (realSize - declared)
+// after R2 reports the true stored size. Never rejects.
+async function adjustUsageBytes(env, owner, delta) {
+  if (!delta) return;
+  await withUsage(env, owner, function (usage) {
+    usage.bytes = Math.max(0, usage.bytes + delta);
+    return { commit: usage };
+  });
+}
+
+// Refund on DELETE / expiry. Never rejects, never creates a ledger: if the owner
+// was never charged (no __usage object) it is a pure no-op.
+async function refundShareWrite(env, owner, params) {
+  for (let attempt = 0; attempt < 6; attempt++) {
+    const state = await readUsage(env, owner);
+    if (!state.etag) return; // no ledger — owner never charged, nothing to refund
+    state.usage.bytes = Math.max(0, state.usage.bytes - (params.refund || 0));
+    if (params.freeCanonical) state.usage.count = Math.max(0, state.usage.count - 1);
+    if (await writeUsageCas(env, owner, state.etag, state.usage)) return;
   }
 }
 

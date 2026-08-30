@@ -766,8 +766,12 @@ export async function publishToEndpoint(
   if (avatarUrl) metadataPreview.avatar = avatarUrl;
   assertMetadataSize(metadataPreview);
 
-  const authHeaders = (contentType: string): Record<string, string> => {
+  const authHeaders = (contentType: string, byteLength?: number): Record<string, string> => {
     const h: Record<string, string> = { authorization: `Bearer ${endpoint.token}`, 'content-type': contentType };
+    // PHNX-3542: declare the body's byte length so the managed Worker can charge
+    // it against the per-user storage quota even when a proxy strips
+    // content-length. Belt-and-suspenders — the Worker prefers content-length.
+    if (byteLength != null) h['x-share-bytes'] = String(byteLength);
     if (expiresAt) h['x-share-expires-at'] = expiresAt;
     h['x-share-visibility'] = visibility;
     // Two headers per free-text field, backward-compatible by construction
@@ -839,7 +843,7 @@ export async function publishToEndpoint(
     coverUrl = res.coverUrl;
   }
 
-  const r = await put(pageUrl, body, authHeaders(opts.contentType ?? guessContentType(filePath)));
+  const r = await put(pageUrl, body, authHeaders(opts.contentType ?? guessContentType(filePath), body.length));
   if (!r.ok) {
     if (r.status === 409) {
       throw new Error(
