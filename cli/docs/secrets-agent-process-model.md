@@ -160,7 +160,10 @@ Both signals are now required before a socket is reclaimed:
    stop serving before clearing the pid file (`waitForExit` in `daemon.ts`), and
    escalates to a tree-kill only when it genuinely did not exit. A **zombie counts
    as exited** — it holds no socket — so a daemon that is the caller's own child
-   is never hard-killed after it has already gone.
+   is never hard-killed after it has already gone. Start/claim/stop serialize on
+   `daemon.lock`; stop accepts only a live process whose command ends in
+   `__daemon-run`, then compare-deletes the captured pid/socket ownership so it
+   cannot erase a successor that appeared during teardown.
 2. **A live socket owner is never evicted.** Whichever broker wins the bind records
    its pid in `agent.owner` at the moment it is the confirmed owner (the same
    instant it mints the capability token), and releases it on close.

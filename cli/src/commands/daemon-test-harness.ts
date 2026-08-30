@@ -59,7 +59,7 @@ export function run(home: string, args: string[]): ReturnType<typeof spawnSync> 
 
 /**
  * Spawn a real, long-lived process whose command line ends in `__daemon-run`
- * (so `isDaemonRunProcess`'s `ps` check accepts it — see
+ * (so `isLiveDaemon`'s process-command check accepts it — see
  * `lib/daemon.test.ts`'s "reaps a live __daemon-run registrant" test, same
  * technique) and register it in `home`'s OWN instance registry, exactly the
  * marker `registerDaemonInstance` would write. A real live process, not a
@@ -72,7 +72,7 @@ export async function spawnFakeRegisteredDaemon(home: string): Promise<ChildProc
     stdio: 'ignore',
   });
   // Give the exec a moment to land before `ps` (read by the status command's
-  // isDaemonRunProcess check) is asked to see its real argv — mirrors
+  // isLiveDaemon check) is asked to see its real argv — mirrors
   // lib/daemon.test.ts's identical fake-daemon technique.
   await new Promise((r) => setTimeout(r, 150));
   const instancesDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon', 'instances');
@@ -91,4 +91,3 @@ export function registerInstance(home: string, pid: number): void {
 export function killFakeDaemon(child: ChildProcess): void {
   try { if (child.pid) process.kill(child.pid, 'SIGKILL'); } catch { /* already gone */ }
 }
-

@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { rmSync, mkdirSync, writeFileSync } from 'fs';
+import { rmSync, mkdirSync, writeFileSync, lstatSync } from 'fs';
 import * as net from 'net';
 import * as path from 'path';
 import {
@@ -122,6 +122,36 @@ describe('BrowserIPCServer.stop (releases the binding, promptly)', () => {
       probe.on('connect', () => { probe.destroy(); resolve('connected'); });
       probe.on('error', reject);
     })).rejects.toThrow();
+  }, 20_000);
+
+  it.skipIf(process.platform === 'win32')('never unlinks a successor that replaced its socket path', async () => {
+    const { BrowserIPCServer } = await import('./ipc.js');
+    const { BrowserService } = await import('./service.js');
+    const server = new BrowserIPCServer(new BrowserService());
+    await server.start();
+    const socketPath = getSocketPath();
+    const originalIno = lstatSync(socketPath).ino;
+
+    // Unix keeps the original listening inode alive after unlink. Bind a second
+    // real server at the path, exactly the replacement stop must not erase.
+    rmSync(socketPath, { force: true });
+    const successor = net.createServer(() => {});
+    await new Promise<void>((resolve, reject) => {
+      successor.listen(socketPath, resolve);
+      successor.on('error', reject);
+    });
+    expect(lstatSync(socketPath).ino).not.toBe(originalIno);
+
+    try {
+      await server.stop();
+      await new Promise<void>((resolve, reject) => {
+        const probe = net.createConnection(ipcEndpoint(socketPath));
+        probe.on('connect', () => { probe.destroy(); resolve(); });
+        probe.on('error', reject);
+      });
+    } finally {
+      await new Promise<void>((resolve) => successor.close(() => resolve()));
+    }
   }, 20_000);
 });
 

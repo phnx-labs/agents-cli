@@ -109,9 +109,9 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     delete env.AGENTS_DAEMON_DIR; // let it derive from HOME
     return env;
   };
-  const runStop = (home: string) => {
+  const runStop = (home: string, extraEnv: NodeJS.ProcessEnv = {}) => {
     const r = spawnSync(process.execPath, [DIST_ENTRY, 'daemon', 'stop', '--json'], {
-      env: envFor(home), encoding: 'utf-8',
+      env: { ...envFor(home), ...extraEnv }, encoding: 'utf-8',
     });
     // The --json action prints only the result object to stdout; be tolerant of
     // any leading banner by slicing to the JSON braces.
@@ -121,12 +121,156 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     const parsed = first >= 0 && last > first ? JSON.parse(out.slice(first, last + 1)) : null;
     return { status: r.status, result: parsed, stdout: out, stderr: r.stderr || '' };
   };
+  const parseStopResult = (out: string) => {
+    const first = out.indexOf('{');
+    const last = out.lastIndexOf('}');
+    return first >= 0 && last > first ? JSON.parse(out.slice(first, last + 1)) : null;
+  };
   const rmHome = async (home: string) => {
     for (let attempt = 0; ; attempt++) {
       try { fs.rmSync(home, { recursive: true, force: true }); break; }
       catch (err) { if (attempt >= 10) throw err; await new Promise((r) => setTimeout(r, 100)); }
     }
   };
+
+  it.skipIf(process.platform === 'win32')(
+    'never signals an unrelated live process from a reused/stale daemon pid',
+    async () => {
+      const home = mkHome();
+      // The literal token appears inside the code argument, so the former
+      // /__daemon-run/ substring probe would misidentify and kill this process.
+      // A real daemon has the token as its final argv entry; this one does not.
+      const innocent = spawn(process.execPath, ['-e', '/* __daemon-run */ setInterval(() => {}, 1e9)'], { stdio: 'ignore' });
+      try {
+        expect(innocent.pid).toBeTruthy();
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(daemonDir, { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(innocent.pid));
+
+        const { status, result } = runStop(home);
+
+        expect(status).toBe(0);
+        expect(result.stoppedPid).toBeNull();
+        expect(alive(innocent.pid!)).toBe(true);
+      } finally {
+        try { innocent.kill('SIGKILL'); } catch { /* already gone */ }
+        if (innocent.pid) await waitFor(() => !alive(innocent.pid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'fails closed without deleting state when a live pid command cannot be inspected',
+    async () => {
+      const home = mkHome();
+      const daemon = spawn(
+        process.execPath,
+        ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'],
+        { stdio: 'ignore' },
+      );
+      try {
+        expect(daemon.pid).toBeTruthy();
+        const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+        fs.mkdirSync(daemonDir, { recursive: true });
+        fs.writeFileSync(daemonPidFile(home), String(daemon.pid));
+
+        // The subprocess still drives the real stop command, but an empty PATH
+        // makes its real `ps` identity inspection unavailable. That uncertainty
+        // must preserve the owner record and process rather than becoming
+        // permission to signal or clean up either one.
+        const emptyPath = path.join(home, 'empty-path');
+        fs.mkdirSync(emptyPath);
+        const { status, result } = runStop(home, { PATH: emptyPath });
+
+        expect(status).toBe(1);
+        expect(result.ok).toBe(false);
+        expect(result.stoppedPid).toBeNull();
+        expect(result.surviving).toContain(
+          `daemon pid ${daemon.pid} is live but its __daemon-run identity could not be verified`,
+        );
+        expect(readDaemonPidOf(home)).toBe(daemon.pid);
+        expect(alive(daemon.pid!)).toBe(true);
+      } finally {
+        try { daemon.kill('SIGKILL'); } catch { /* already gone */ }
+        if (daemon.pid) await waitFor(() => !alive(daemon.pid!), 5_000);
+        await rmHome(home);
+      }
+    },
+    30_000,
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'holds daemon.lock through teardown and never deletes a successor pid/socket inode',
+    async () => {
+      const home = mkHome();
+      const daemonDir = path.join(home, '.agents', '.cache', 'helpers', 'daemon');
+      const instancesDir = path.join(daemonDir, 'instances');
+      const browserSock = path.join(home, '.agents', '.cache', 'helpers', 'browser', 'browser.sock');
+      fs.mkdirSync(instancesDir, { recursive: true });
+      fs.mkdirSync(path.dirname(browserSock), { recursive: true });
+
+      const socketDaemonScript = [
+        "const fs = require('fs');",
+        "const net = require('net');",
+        "const sock = process.argv[1];",
+        "try { fs.unlinkSync(sock); } catch {}",
+        "net.createServer(() => {}).listen(sock);",
+        "process.on('SIGTERM', () => {});",
+        "setInterval(() => {}, 1000);",
+      ].join(' ');
+      const incumbent = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '__daemon-run'], { stdio: 'ignore' });
+      let successor: ReturnType<typeof spawn> | null = null;
+      let stopper: ReturnType<typeof spawn> | null = null;
+      try {
+        expect(incumbent.pid).toBeTruthy();
+        expect(await waitFor(() => fs.existsSync(browserSock), 5_000)).toBe(true);
+        const incumbentSocket = fs.lstatSync(browserSock);
+        fs.writeFileSync(daemonPidFile(home), String(incumbent.pid));
+        fs.writeFileSync(path.join(instancesDir, String(incumbent.pid)), '__daemon-run');
+
+        stopper = spawn(process.execPath, [DIST_ENTRY, 'daemon', 'stop', '--json'], {
+          env: envFor(home), stdio: ['ignore', 'pipe', 'pipe'],
+        });
+        let stdout = '';
+        let stderr = '';
+        stopper.stdout!.on('data', (chunk) => { stdout += chunk.toString(); });
+        stopper.stderr!.on('data', (chunk) => { stderr += chunk.toString(); });
+        expect(await waitFor(() => fs.existsSync(path.join(daemonDir, 'daemon.lock')), 5_000)).toBe(true);
+
+        // A non-cooperating fresh daemon replaces both shared artifacts while
+        // stop is inside its real SIGTERM grace window. The lock excludes every
+        // production start; the replacement also proves cleanup is ownership-
+        // checked rather than merely relying on cooperation.
+        successor = spawn(process.execPath, ['-e', socketDaemonScript, browserSock, '__daemon-run'], { stdio: 'ignore' });
+        expect(successor.pid).toBeTruthy();
+        expect(await waitFor(() => {
+          try { return fs.lstatSync(browserSock).ino !== incumbentSocket.ino; } catch { return false; }
+        }, 5_000)).toBe(true);
+        fs.writeFileSync(daemonPidFile(home), String(successor.pid));
+        fs.writeFileSync(path.join(instancesDir, String(successor.pid)), '__daemon-run');
+
+        const exitCode = await new Promise<number | null>((resolve) => stopper!.once('close', resolve));
+        const result = parseStopResult(stdout);
+        expect(result, `stop output was not JSON: ${stdout}\n${stderr}`).toBeTruthy();
+        expect(exitCode === 0 || exitCode === 1).toBe(true); // successor may be reported as a survivor
+        expect(readDaemonPidOf(home)).toBe(successor.pid);
+        expect(fs.existsSync(browserSock)).toBe(true);
+        expect(fs.lstatSync(browserSock).ino).not.toBe(incumbentSocket.ino);
+        expect(alive(successor.pid!)).toBe(true);
+      } finally {
+        for (const child of [stopper, incumbent, successor]) {
+          try { if (child?.pid) child.kill('SIGKILL'); } catch { /* already gone */ }
+        }
+        for (const child of [stopper, incumbent, successor]) {
+          if (child?.pid) await waitFor(() => !alive(child.pid!), 5_000);
+        }
+        await rmHome(home);
+      }
+    },
+    45_000,
+  );
 
   it.skipIf(process.platform === 'win32')(
     'clean stop: releases the daemon, exits 0, and REPORTS an in-flight detached child rather than killing it',
@@ -179,7 +323,7 @@ describe('agents daemon stop — asserts its postcondition (RUSH-2355)', () => {
     async () => {
       const home = mkHome();
       // A real process that IGNORES SIGTERM and reads as a `__daemon-run` (its
-      // argv carries the token, so isDaemonRunProcess matches it) — the wedge the
+      // argv carries the token, so isLiveDaemon matches it) — the wedge the
       // grace→killTree escalation exists for.
       const wedge = spawn(
         process.execPath,
