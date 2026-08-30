@@ -202,6 +202,6 @@ describe('runUsageRefreshTick — every host is its own publisher (RUSH-3193 #15
     // local refresh, never a cross-host import.
     expect(line).not.toMatch(/imported \d+ account\(s\) from primary host/);
     expect(line).not.toMatch(/published \d+ account\(s\)/);
-    expect(line).toMatch(/refreshed, .* failed, .* not-due, .* backed-off, .* capped; BYOK/);
+    expect(line).toMatch(/refreshed, .* failed, .* not-due, .* backed-off, .* capped, .* over-budget, .* statusline-fresh; BYOK/);
   });
 });
