@@ -71,6 +71,13 @@ export interface FeedSinkConfig {
   channel?: string;
   /** Recipient for a `channel` sink. Required unless `channel` is the `owner` alias. */
   to?: string;
+  /**
+   * Optional channel body template. Uses the same placeholders as `command`
+   * argv (`{message}`, `{ticket}`, `{project}`, ...). Defaults to `{message}`.
+   * A missing placeholder skips the sink, which lets a `{ticket}` template
+   * declare that only ticket-backed posts belong in that destination.
+   */
+  message?: string;
   /** Lowest post level that reaches this sink. Defaults to `milestone` (all posts). */
   minLevel?: FeedPostLevel;
 }
@@ -425,6 +432,26 @@ export function renderSinkArgv(
   return argv.length > 0 ? argv : undefined;
 }
 
+/** Render one channel-message template with the same fail-closed placeholder contract as argv. */
+export function renderSinkMessage(
+  template: string,
+  ctx: FeedBroadcastContext,
+): string | undefined {
+  const vars = templateVars(ctx);
+  let missing = false;
+  const rendered = template.replace(PLACEHOLDER, (whole, key: string) => {
+    const value = vars[key];
+    if (value === undefined || value === '') {
+      missing = true;
+      return whole;
+    }
+    return value;
+  });
+  if (missing) return undefined;
+  const text = rendered.trim();
+  return text || undefined;
+}
+
 /**
  * Which sinks this post reaches, in config order. Pure — the dry-run listing and
  * the real fan-out plan through here, so what `--dry-run` shows is what runs.
@@ -451,11 +478,13 @@ export function planFeedBroadcast(
       // sink can never fire with a hole in it (same contract as a missing argv
       // placeholder below).
       if (!isOwnerAlias(channel) && !sink.to?.trim()) continue;
+      const text = renderSinkMessage(sink.message ?? '{message}', ctx);
+      if (!text) continue;
       planned.push({
         name,
         channel,
         to: isOwnerAlias(channel) ? undefined : sink.to!.trim(),
-        text: composeBroadcastMessage(ctx),
+        text,
       });
       continue;
     }

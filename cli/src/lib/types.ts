@@ -994,7 +994,9 @@ export interface Meta {
   /**
    * `agents feed post` fan-out. `broadcast` maps a sink name to either an argv
    * template (`command:`, run for each post) or an in-process channel delivery
-   * (`channel:`, the same registry `agents send`/`agents notify` use), so
+   * (`channel:`, the same registry `agents send`/`agents notify` use). Channel
+   * sinks may set `message:` with feed placeholders; a missing placeholder
+   * skips that sink, so `{ticket}` cleanly gates a tracker-specific channel. Thus
    * mirroring to a tracker, a messaging CLI, or a channel provider is the
    * operator's config rather than an integration compiled into this CLI. When
    * this is unset/empty, an important-level post falls back to `notify.owner`

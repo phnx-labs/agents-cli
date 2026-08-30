@@ -97,6 +97,14 @@ the peer never re-expands the owner policy and duplicates another channel.
 Legacy `notify.owner` and a humans file without `policy.normal` retain the
 historical single-destination behavior.
 
+Feed channel sinks may override their outbound body with a `message:` template
+using the same placeholders as command sinks (`{message}`, `{ticket}`, `{project}`,
+and the rest in `feed-broadcast.ts`). Placeholder resolution is fail-closed: if
+the post lacks a referenced value, that sink is skipped. This is the semantic
+routing primitive for destinations such as an engineering Slack channel: a
+template that includes `{ticket}` receives ticket-backed posts without leaking
+unrelated owner alerts into the team channel.
+
 **`gh` is overloaded so the fleet's trained `gh pr checks` escapes the shared
 GraphQL rate limit (PHNX-3501).** The whole fleet shares one GitHub token, and
 `gh pr checks/view/list` are all GraphQL-backed, so the fleet drains GitHub's
