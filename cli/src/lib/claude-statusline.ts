@@ -154,7 +154,7 @@ export function renderClaudeStatusLine(
  * configured. A malformed reminders file is swallowed here on purpose — a broken
  * prompt is worse than a missing reminder — while `agents reminders` surfaces it.
  */
-function resolveReminderPart(sessionId?: string): string {
+export function resolveReminderPart(sessionId?: string): string {
   try {
     return formatReminderPart(pickReminderForSession(loadReminders(), sessionId)?.short);
   } catch {

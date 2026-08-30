@@ -11,7 +11,9 @@ import {
   isStatusLineSelfReference,
   renderClaudeStatusLine,
   renderDelegate,
+  resolveReminderPart,
 } from './claude-statusline.js';
+import { setRemindersFilePathForTest } from './reminders.js';
 import {
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
@@ -61,6 +63,29 @@ describe('Claude native status line', () => {
     expect(renderClaudeStatusLine({ model: { display_name: 'Opus 5' } }, 'zion', '', '')).toBe(
       'zion · Opus 5',
     );
+  });
+
+  it('resolveReminderPart returns a reminder from the real path, and swallows a malformed file', () => {
+    const remDir = fs.mkdtempSync(path.join(os.tmpdir(), 'rem-'));
+    dirs.push(remDir);
+    const remFile = path.join(remDir, 'reminders.yaml');
+    const prior = setRemindersFilePathForTest(remFile);
+    try {
+      // Valid file → a dimmed reminder part on the real (default-path) code path.
+      fs.writeFileSync(remFile, ['reminders:', '  - short: "Only one"'].join('\n'));
+      expect(resolveReminderPart('sess-x')).toBe('\x1b[2m◆ Only one\x1b[22m');
+
+      // Malformed file → swallowed to '' so the prompt is never broken (the
+      // feature's central safety claim, exercised on the real path).
+      fs.writeFileSync(remFile, 'not-a-reminders-doc: true');
+      expect(resolveReminderPart('sess-x')).toBe('');
+
+      // Missing file → not opted in → ''.
+      fs.rmSync(remFile);
+      expect(resolveReminderPart('sess-x')).toBe('');
+    } finally {
+      setRemindersFilePathForTest(prior);
+    }
   });
 
   it('writes a native response snapshot under the version home organization identity', () => {
