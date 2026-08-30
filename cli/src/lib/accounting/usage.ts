@@ -734,7 +734,21 @@ export async function getUsageInfoForIdentity(
   // stale snapshot here is safe, and an absent one reports
   // {@link USAGE_NOT_COLLECTED_MARKER}.
   if (readOnly) {
-    if (cached) return { snapshot: cached, error: null };
+    // A row carries a CONFIRMED reading when it has a fresh window, a
+    // subscription plan (meterless-healthy, e.g. Grok's tier), or a live refusal
+    // (out_of_credits / session_limit). Those report `usageError: null`.
+    if (cached && (cached.windows.length > 0 || cached.plan || cached.unavailable)) {
+      return { snapshot: cached, error: null };
+    }
+    // A row whose ONLY content is last-known stale readings — the all-expired
+    // Claude case, its windows moved to `staleWindows` (view-only) so the
+    // TERMINAL view still renders the number with its age — must NOT read as a
+    // healthy account. `staleWindows` is deliberately excluded from `--json`
+    // (which projects only `windows`), so keep `usageError` non-null: a consumer
+    // polling `agents view --json` must still see the staleness signal, the exact
+    // RUSH-2858 weeks-stale case this marker exists for. The snapshot is still
+    // returned, so the human view is unaffected.
+    if (cached) return { snapshot: cached, error: USAGE_NOT_COLLECTED_MARKER };
     return { snapshot: null, error: USAGE_NOT_COLLECTED_MARKER };
   }
 

@@ -439,6 +439,57 @@ describe('readOnly — the `agents run` routing hot path never blocks on the net
     expect(usage.snapshot).toBeNull();
     expect(usage.error).toBe('stale');
   });
+
+  it('flags an all-expired row as not-collected for --json while still returning the snapshot for the view', async () => {
+    // The row from the freeze: a session + week both captured long enough ago
+    // that BOTH have expired. deserialize now returns a snapshot (windows empty,
+    // last-known on staleWindows) so the TERMINAL view renders the number with
+    // its age — but `agents view --json` projects only `windows`, so usageError
+    // MUST stay non-null or the row reads as a healthy meterless account and a
+    // monitoring consumer loses the staleness signal (the RUSH-2858 case).
+    const longAgo = new Date(Date.now() - 8 * 24 * 60 * 60 * 1000);
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: longAgo,
+      windows: [
+        { key: 'session', label: 'Session', shortLabel: 'S', usedPercent: 30, resetsAt: new Date(longAgo.getTime() + 5 * 60 * 60 * 1000), windowMinutes: 300 },
+        { key: 'week', label: 'Current week', shortLabel: 'W', usedPercent: 91, resetsAt: new Date(longAgo.getTime() + 2 * 24 * 60 * 60 * 1000), windowMinutes: 10080 },
+      ],
+    });
+
+    const usage = await getUsageInfoForIdentity(claudeInput());
+
+    // --json contract restored: non-null error, empty `windows`.
+    expect(usage.error).toBe(USAGE_NOT_COLLECTED_MARKER);
+    expect(usage.snapshot?.windows).toEqual([]);
+    // ...but the view still has the last-known readings to render with an age.
+    expect(usage.snapshot?.staleWindows?.map((w) => w.key)).toEqual(['session', 'week']);
+  });
+
+  it('keeps usageError null for a meterless plan-only row (healthy, not stale)', async () => {
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: new Date(Date.now() - 60 * 60 * 1000),
+      plan: 'SuperGrok Heavy',
+      windows: [],
+    });
+
+    const usage = await getUsageInfoForIdentity(claudeInput());
+
+    expect(usage.error).toBeNull();
+    expect(usage.snapshot?.plan).toBe('SuperGrok Heavy');
+  });
+
+  it('keeps usageError null for an out-of-credits refusal row (a confirmed state, not "not collected")', async () => {
+    noteClaudeOutOfCredits(usageKey);
+
+    const usage = await getUsageInfoForIdentity(claudeInput());
+
+    expect(usage.error).toBeNull();
+    expect(usage.snapshot?.unavailable).toEqual({ reason: 'out_of_credits' });
+  });
 });
 
 describe('expired cached windows are unknown, not 0%', () => {
