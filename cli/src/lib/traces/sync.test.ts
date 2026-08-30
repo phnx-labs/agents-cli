@@ -545,6 +545,180 @@ describe('phenotype grouping across the incremental boundary (PHNX-3327)', () =>
   });
 });
 
+describe('index.sessions roster (PHNX-3483)', () => {
+  // percentile(): replicated from sync.ts so the mode-split reproduction below is
+  // checked against the EXACT nearest-rank rule the stats use, not an approximation.
+  const percentile = (values: number[], ratio: number): number => {
+    if (values.length === 0) return 0;
+    const sorted = [...values].sort((a, b) => a - b);
+    return sorted[Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1)];
+  };
+
+  // Each fixture row: a synthetic SyncRow plus the DB state buildIndexShard reads
+  // (a sessions row for the insights-cache JOIN, tool_calls for the call/error
+  // counts, and an EMPTY insights cache so needs-attention is driven only by tool
+  // errors — never by friction a parsed transcript might surface).
+  type Fixture = {
+    id: string;
+    durationMs: number;
+    messageCount: number;
+    okCalls: number;
+    errorCalls: number;
+    label?: string;
+    project?: string;
+    cwd?: string;
+    agent?: string;
+    model?: string;
+  };
+
+  const FIX_MTIME = 4242;
+  const FIX_SIZE = 424;
+
+  function seed(fx: Fixture): SyncRow {
+    const db = getDB();
+    const agent = fx.agent ?? 'codex';
+    const project = fx.project ?? 'agents-cli';
+    const cwd = fx.cwd ?? '/redacted/agents-cli';
+    const label = fx.label ?? `Session ${fx.id}`;
+    const model = fx.model ?? 'gpt-test';
+    const ts = '2026-08-25T00:00:00.000Z';
+    db.prepare(`
+      INSERT INTO sessions
+        (id, short_id, agent, timestamp, project, cwd, git_branch, label, duration_ms,
+         model, file_path, file_mtime_ms, file_size, machine)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      fx.id, fx.id.slice(0, 8), agent, ts, project, cwd, 'main', label, fx.durationMs,
+      model, '/nonexistent/roster.jsonl', FIX_MTIME, FIX_SIZE, 'test-device',
+    );
+    const insertCall = db.prepare(`
+      INSERT INTO tool_calls
+        (call_key, session_id, ordinal, timestamp, tool, input, outcome, exit_code, error, evidence_bytes)
+      VALUES (?, ?, ?, ?, ?, '{}', ?, ?, ?, 0)
+    `);
+    let ordinal = 0;
+    for (let i = 0; i < fx.okCalls; i++) {
+      ordinal++;
+      insertCall.run(`${fx.id}-ok-${i}`, fx.id, ordinal, ts, 'Read', 'ok', null, null);
+    }
+    for (let i = 0; i < fx.errorCalls; i++) {
+      ordinal++;
+      insertCall.run(`${fx.id}-err-${i}`, fx.id, ordinal, ts, 'exec_command', 'error', 1, 'command failed');
+    }
+    // Empty facets, stamped at the current mtime/size/version so the cache is a HIT
+    // and buildIndexShard never parses the (nonexistent) transcript for insights.
+    db.prepare(`
+      INSERT INTO session_insights
+        (session_id, file_mtime_ms, file_size, extractor_version, computed_at, facets)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(fx.id, FIX_MTIME, FIX_SIZE, INSIGHTS_EXTRACTOR_VERSION, Date.now(),
+      JSON.stringify({ frictionSignals: {}, correctionSignals: {} }));
+    return {
+      id: fx.id, short_id: fx.id.slice(0, 8), agent, origin: 'cli', routine_name: null,
+      routine_run_id: null, version: null, account: null, account_key: null,
+      account_org: null, mode: 'auto', timestamp: ts, last_activity: null,
+      project, cwd, git_branch: 'main', topic: null, label,
+      message_count: fx.messageCount, token_count: null, output_tokens: null,
+      input_tokens: null, cache_read_tokens: null, cache_write_tokens: null,
+      cost_usd: null, cost_usd_nocache: null, duration_ms: fx.durationMs, model,
+      tool_call_count: fx.okCalls + fx.errorCalls, file_path: '/nonexistent/roster.jsonl',
+      file_mtime_ms: FIX_MTIME, file_size: FIX_SIZE, machine: 'test-device',
+    };
+  }
+
+  // headless = agent run (has tool calls OR >8 msgs); interactive = one-shot query.
+  // Spans are all < IDLE_GAP_THRESHOLD (120s) with calls at the session start, so
+  // sessionActiveMs returns the full span → each roster durationMs == duration_ms.
+  const FIXTURES: Fixture[] = [
+    { id: 'roster-h1', durationMs: 10_000, messageCount: 3, okCalls: 1, errorCalls: 0 },
+    { id: 'roster-h2', durationMs: 30_000, messageCount: 3, okCalls: 0, errorCalls: 1 },
+    { id: 'roster-h3', durationMs: 20_000, messageCount: 3, okCalls: 2, errorCalls: 0 },
+    { id: 'roster-i1', durationMs: 4_000, messageCount: 5, okCalls: 0, errorCalls: 0 },
+    { id: 'roster-i2', durationMs: 8_000, messageCount: 5, okCalls: 0, errorCalls: 0 },
+  ];
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-08-25T00:00:00.000Z'));
+    const db = getDB();
+    for (const fx of FIXTURES) {
+      for (const table of ['tool_calls', 'session_topics', 'session_insights', 'session_phenotypes']) {
+        db.prepare(`DELETE FROM ${table} WHERE session_id = ?`).run(fx.id);
+      }
+      db.prepare('DELETE FROM sessions WHERE id = ?').run(fx.id);
+    }
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('emits one flat scalar row per agent session with the contracted fields', () => {
+    const rows = FIXTURES.map(seed);
+    const shard = buildIndexShard(rows, 'test-device', 'owner-1');
+
+    // (a) present, and length === agent-row count (all fixtures are agent kind).
+    expect(shard.sessions).toBeDefined();
+    expect(shard.sessions).toHaveLength(rows.length);
+    expect(shard.sessions).toHaveLength(shard.stats.sessionsImported);
+
+    // (b) every row carries the required fields at the right types.
+    for (const s of shard.sessions!) {
+      expect(typeof s.id).toBe('string');
+      expect(typeof s.title).toBe('string');
+      expect(typeof s.harness).toBe('string');
+      expect(typeof s.model).toBe('string');
+      expect(typeof s.repo).toBe('string');
+      expect(['interactive', 'headless']).toContain(s.mode);
+      expect(['code', 'research', 'review', 'content', 'ops']).toContain(s.projectType);
+      expect(typeof s.startedAt).toBe('number');
+      expect(typeof s.durationMs).toBe('number');
+      expect(typeof s.toolCount).toBe('number');
+      expect(typeof s.errorCount).toBe('number');
+      expect(typeof s.needsAttention).toBe('boolean');
+    }
+
+    // Field values map straight off the row: harness/model/repo/tool/error counts.
+    const h2 = shard.sessions!.find((s) => s.id === 'roster-h2')!;
+    expect(h2.harness).toBe('codex');
+    expect(h2.model).toBe('gpt-test');
+    expect(h2.repo).toBe('agents-cli');
+    expect(h2.mode).toBe('headless');
+    expect(h2.errorCount).toBe(1);
+    expect(h2.toolCount).toBe(1);
+  });
+
+  it('mode-split medians of the roster reproduce agentMedianMs (headless) and interactiveMedianMs', () => {
+    const rows = FIXTURES.map(seed);
+    const shard = buildIndexShard(rows, 'test-device', 'owner-1');
+
+    const headless = shard.sessions!.filter((s) => s.mode === 'headless').map((s) => s.durationMs);
+    const interactive = shard.sessions!.filter((s) => s.mode === 'interactive').map((s) => s.durationMs);
+
+    // The roster's own segmentation must partition the corpus the same way the
+    // segmented stats do — a headless bucket of the 3 agent runs, interactive of 2.
+    expect(headless).toHaveLength(3);
+    expect(interactive).toHaveLength(2);
+
+    expect(percentile(headless, 0.5)).toBe(shard.stats.agentMedianMs);
+    expect(percentile(interactive, 0.5)).toBe(shard.stats.interactiveMedianMs);
+  });
+
+  it('needsAttention booleans match the ids in the shard needsAttention set', () => {
+    const rows = FIXTURES.map(seed);
+    const shard = buildIndexShard(rows, 'test-device', 'owner-1');
+
+    const flagged = new Set(shard.needsAttention.map((s) => s.id));
+    for (const s of shard.sessions!) {
+      expect(s.needsAttention).toBe(flagged.has(s.id));
+    }
+    // The error-call session is flagged; a clean run is not — so the boolean carries
+    // real signal, not a constant.
+    expect(shard.sessions!.find((s) => s.id === 'roster-h2')!.needsAttention).toBe(true);
+    expect(shard.sessions!.find((s) => s.id === 'roster-h1')!.needsAttention).toBe(false);
+  });
+});
+
 describe('traces sync --dry-run local export', () => {
   const dryId = 'trace-dryrun-fixture';
   const dryTranscript = path.join(import.meta.dirname, '../session/testdata/codex-fixture.jsonl');
