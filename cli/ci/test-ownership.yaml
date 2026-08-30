@@ -276,6 +276,7 @@ testless:
   # their coverage status is unchanged from main. Listed per-file (not a glob)
   # so a genuinely NEW script here still trips the gate.
   - cli/scripts/backfill-changelog.ts
+  - cli/scripts/bench-boot.sh
   - cli/scripts/bench-browser-loop.sh
   - cli/scripts/bench-ssh.mjs
   - cli/scripts/bench-staleness.ts
