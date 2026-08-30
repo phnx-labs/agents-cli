@@ -17,7 +17,7 @@ import { AUTH_BUNDLE_NAME, inspectReservedAuthBundle } from './bundles.js';
 import { pushBundleToHost, type PushBundleResult } from './push.js';
 import { loadDevicesSync, type DeviceProfile } from '../devices/registry.js';
 import { sshTargetFor } from '../devices/connect.js';
-import { isHostPinned, managedKnownHostsPath } from '../devices/known-hosts.js';
+import { isHostPinned, isDevicePinned, managedKnownHostsPath } from '../devices/known-hosts.js';
 import { machineId, normalizeHost } from '../session/sync/config.js';
 import { probeDevice } from '../fleet/apply.js';
 import type { DeviceProbe } from '../fleet/types.js';
@@ -130,9 +130,9 @@ export function syncReservedAuthBundle(deps: AuthSyncDeps = {}): AuthSyncResult 
       // No live probe until we know a push is even possible: missing local auth
       // skips every device, and an unpinned host is refused before we SSH.
       if (!localOk) {
-        return { name: d.name, reachable: true, pinned: pinned(d.name), remoteHasAuth: false };
+        return { name: d.name, reachable: true, pinned: isDevicePinned(d, pinned), remoteHasAuth: false };
       }
-      const isPinnedDev = pinned(d.name);
+      const isPinnedDev = isDevicePinned(d, pinned);
       if (!isPinnedDev) {
         return { name: d.name, reachable: true, pinned: false, remoteHasAuth: false };
       }
