@@ -21,6 +21,7 @@ import {
   signInRecoverableCandidates,
   matchAccountVersion,
   isUsageVerified,
+  buildRotationDecisionEvent,
   isLaunchableSignedIn,
   capacityWeight,
   PROJECTION_HORIZON_MIN,
@@ -1300,4 +1301,79 @@ describe('resolveRunVersion — skip a logged-out default (PHNX-2685)', () => {
       }
     },
   );
+});
+
+describe('buildRotationDecisionEvent (the observability contract for a bad pick)', () => {
+  // The whole point: when routing lands on a maxed/logged-out account, the
+  // emitted rotation event must carry enough to say WHY from `agents events`
+  // alone — the per-org identity, each candidate's freshness tier, its staleness,
+  // and the pick reason. The old payload (version + counts) could not.
+  type EventCandidate = {
+    usageKey: string | null; email: string | null; tier: string;
+    source: string | null; ageMs: number | null; capturedAt: string | null;
+    eligible: boolean; excludedReason: string | null;
+    windows: Array<{ key: string; usedPercent: number }>;
+  };
+  const byKey = (ev: ReturnType<typeof buildRotationDecisionEvent>, key: string) =>
+    (ev.candidates as EventCandidate[]).find((c) => c.usageKey === key)!;
+
+  it('records the pick identity, per-candidate tier/staleness, and a freshness tally', () => {
+    const now = Date.now();
+    const verified = candidate({ version: '2.1.219', usageKey: 'claude:org=verified',
+      usageSnapshot: snapshotAt(new Date(now - 60_000), [{ key: 'week', usedPercent: 30 }]) });
+    const stale = candidate({ version: '2.1.181', usageKey: 'claude:org=stale',
+      usageSnapshot: snapshotAt(new Date(now - 26 * 3600_000), [{ key: 'week', usedPercent: 48 }]) });
+    const blind = candidate({ version: '2.1.207', usageKey: 'claude:org=blind', usageSnapshot: null });
+    const limited = candidate({ version: '2.1.170', usageKey: 'claude:org=limited',
+      usageStatus: 'rate_limited' });
+
+    const result: RotateResult = {
+      picked: verified, healthy: [verified, stale, blind], excluded: [limited],
+      usageUnverified: false,
+    };
+    const ev = buildRotationDecisionEvent(result, 'claude', 'balanced');
+
+    // A verified-weighted pick, named by its per-ORG key (not the device-local version).
+    expect(ev.pickReason).toBe('verified-weighted');
+    expect((ev.picked as { usageKey: string; tier: string }).usageKey).toBe('claude:org=verified');
+    expect((ev.picked as { tier: string }).tier).toBe('verified');
+    // The freshness tally over the healthy pool disambiguates blind-vs-verified fleets.
+    expect(ev.freshness).toEqual({ verified: 1, stale: 1, blind: 1 });
+    expect(ev.candidatesTotal).toBe(4);
+
+    // The stale row: past the 5-min window, so its number is NOT to be trusted —
+    // a large ageMs next to `tier: stale` is exactly the post-mortem signal.
+    const s = byKey(ev, 'claude:org=stale');
+    expect(s.tier).toBe('stale');
+    expect(s.ageMs!).toBeGreaterThan(5 * 60_000);
+    expect(s.source).toBe('live');
+    expect(s.windows).toEqual([{ key: 'week', usedPercent: 48 }]);
+
+    // The blind row: no snapshot at all (a 403'd worker or never-synced harness).
+    const b = byKey(ev, 'claude:org=blind');
+    expect(b.tier).toBe('blind');
+    expect(b.ageMs).toBeNull();
+    expect(b.capturedAt).toBeNull();
+
+    // The excluded row carries WHY it was excluded, next to the eligible ones.
+    const l = byKey(ev, 'claude:org=limited');
+    expect(l.eligible).toBe(false);
+    expect(l.excludedReason).toBe('rate_limited');
+    expect(byKey(ev, 'claude:org=verified').eligible).toBe(true);
+  });
+
+  it('names the fallback the router was forced into (blind draw / refused)', () => {
+    const blind = candidate({ version: '2.1.207', usageKey: 'claude:org=blind', usageSnapshot: null });
+    const blindDraw = buildRotationDecisionEvent(
+      { picked: blind, healthy: [blind], excluded: [], usageUnverified: true },
+      'claude', 'balanced',
+    );
+    expect(blindDraw.pickReason).toBe('unverified-blind-draw');
+
+    const refused = buildRotationDecisionEvent(
+      { picked: blind, healthy: [blind], excluded: [], usageUnverified: true, noVerifiedUsage: true },
+      'claude', 'balanced',
+    );
+    expect(refused.pickReason).toBe('refused-no-verified');
+  });
 });

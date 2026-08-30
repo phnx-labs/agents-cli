@@ -21,7 +21,7 @@ import {
 import { readMeta, writeMeta, getHelpersDir } from '../state.js';
 import { listInstalledVersions, getVersionHomePath, resolveVersion } from '../installations/versions.js';
 import { getProjectRunConfigs } from '../run-config.js';
-import { emit } from '../feed/events.js';
+import { emit, type EventPayload } from '../feed/events.js';
 import {
   getUsageInfoByIdentity,
   getUsageLookupKey,
@@ -1023,6 +1023,110 @@ function readRotationStamp(agent: AgentId): string | null {
   return null;
 }
 
+/** Cap on candidates serialized into a rotation decision event — bounds the
+ *  log line while still covering a full fleet's account pool (~19 today). */
+const ROTATION_EVENT_CANDIDATE_CAP = 32;
+
+/**
+ * Compact, queryable descriptor of ONE candidate exactly as the router saw it,
+ * for the `rotation.resolved`/`rotation.unresolved` event. These are the fields
+ * that disambiguate WHY a route landed on a bad account, so a post-mortem reads
+ * them from `agents events` instead of guessing:
+ *
+ * - `usageKey` is the per-org quota key — the ONLY identity that joins the same
+ *   account across devices (version numbers are device-local and meaningless
+ *   across the fleet).
+ * - `tier` is the freshness class the weighting actually used: `verified`
+ *   (fresh windowed → routed at real headroom), `stale` (windowed but past the
+ *   {@link USAGE_DECISION_MAX_AGE_MS} decision window → floored weight), `blind`
+ *   (no snapshot at all — a worker whose usage endpoint 403s, or a never-synced
+ *   network:false harness → still drawn at floor weight).
+ * - `source`/`ageMs`/`capturedAt` expose staleness and provenance: a `last_seen`
+ *   snapshot showing `tier: verified` with a large `ageMs` is the cross-host
+ *   clock-skew failure (capturedAt is stamped by the reading host's clock, this
+ *   `ageMs` by the routing host's — they disagree under skew).
+ */
+function describeRotationCandidate(c: RotateCandidate, nowMs: number): Record<string, unknown> {
+  const snap = c.usageSnapshot;
+  const capturedAtMs = snap?.capturedAt ? snap.capturedAt.getTime() : null;
+  const tier = isUsageVerified(c, nowMs) ? 'verified' : hasStaleUsage(c, nowMs) ? 'stale' : 'blind';
+  const readiness = readinessFromCandidate(c);
+  return {
+    usageKey: c.usageKey,
+    email: c.email,
+    version: c.version,
+    signedIn: c.signedIn,
+    authVerdict: c.authVerdict,
+    usageStatus: c.usageStatus,
+    tier,
+    source: snap?.source ?? null,
+    sourceLabel: snap?.sourceLabel ?? null,
+    capturedAt: snap?.capturedAt ? snap.capturedAt.toISOString() : null,
+    ageMs: capturedAtMs === null ? null : nowMs - capturedAtMs,
+    windows: (snap?.windows ?? []).map((w) => ({ key: w.key, usedPercent: Math.round(w.usedPercent) })),
+    unavailable: snap?.unavailable?.reason ?? null,
+    eligible: readiness.ready,
+    excludedReason: readiness.ready ? null : readiness.reason,
+  };
+}
+
+/**
+ * Build the enriched `rotation.resolved`/`rotation.unresolved` event payload:
+ * the full candidate pool as the router saw it, the pick and WHY, and a
+ * freshness tally. Replaces the old `{ version, healthy: <n>, excluded: <n> }`
+ * shape, which recorded only counts and a device-local version and so could not
+ * tell a blind-pool draw from a skewed-verified pick from a refused-stale route
+ * — the exact ambiguity that keeps a bad pick undebuggable from the log. All
+ * candidates share ONE `nowMs` so their `tier`/`ageMs` are mutually consistent.
+ */
+export function buildRotationDecisionEvent(
+  rotation: RotateResult,
+  agent: AgentId,
+  strategy: RunStrategy,
+): EventPayload {
+  const nowMs = Date.now();
+  const tally = { verified: 0, stale: 0, blind: 0 };
+  for (const c of rotation.healthy) {
+    const t = isUsageVerified(c, nowMs) ? 'verified' : hasStaleUsage(c, nowMs) ? 'stale' : 'blind';
+    tally[t] += 1;
+  }
+  const pickedTier = isUsageVerified(rotation.picked, nowMs)
+    ? 'verified'
+    : hasStaleUsage(rotation.picked, nowMs)
+      ? 'stale'
+      : 'blind';
+  // WHY the pick: a verified-weighted draw is the healthy path; an
+  // `unverified-*-draw` names the fallback the router was forced into (a blind
+  // worker pool, or a stale-but-plausible number); `refused-no-verified` is the
+  // fail-closed exit where no version launches. Read straight from the result's
+  // own `usageUnverified`/`noVerifiedUsage`, so the event can never disagree
+  // with what rotation actually did.
+  const pickReason = rotation.noVerifiedUsage
+    ? 'refused-no-verified'
+    : rotation.usageUnverified
+      ? `unverified-${pickedTier}-draw`
+      : 'verified-weighted';
+  const pool = [...rotation.healthy, ...rotation.excluded];
+  return {
+    module: 'rotate',
+    agent,
+    strategy,
+    version: rotation.picked.version,
+    picked: {
+      usageKey: rotation.picked.usageKey,
+      email: rotation.picked.email,
+      version: rotation.picked.version,
+      tier: pickedTier,
+    },
+    pickReason,
+    healthy: rotation.healthy.length,
+    excluded: rotation.excluded.length,
+    freshness: tally,
+    candidates: pool.slice(0, ROTATION_EVENT_CANDIDATE_CAP).map((c) => describeRotationCandidate(c, nowMs)),
+    candidatesTotal: pool.length,
+  };
+}
+
 /**
  * Resolve the version `agents run` should use when the caller did not pin
  * one with `@version`. The caller supplies the effective strategy.
@@ -1084,13 +1188,8 @@ export async function resolveRunVersion(
     rotation: RotateResult,
   ): { version: string | null; rotation: RotateResult; noVerifiedUsage: true } => {
     emit('rotation.unresolved', {
-      module: 'rotate',
-      agent,
-      strategy,
+      ...buildRotationDecisionEvent(rotation, agent, strategy),
       reason: 'no_verified_usage',
-      candidates: rotation.healthy.length + rotation.excluded.length,
-      healthy: rotation.healthy.length,
-      excluded: rotation.excluded.length,
     });
     return { version: null, rotation, noVerifiedUsage: true };
   };
@@ -1109,14 +1208,7 @@ export async function resolveRunVersion(
       // trap through the pinned path — PR #3295 review).
       if (rotation && rotation.noVerifiedUsage) return refuseStaleUsage(rotation);
       if (rotation) {
-        emit('rotation.resolved', {
-          module: 'rotate',
-          agent,
-          version: rotation.picked.version,
-          strategy,
-          healthy: rotation.healthy.length,
-          excluded: rotation.excluded.length,
-        });
+        emit('rotation.resolved', buildRotationDecisionEvent(rotation, agent, strategy));
         return { version: rotation.picked.version, rotation };
       }
       return {
@@ -1147,7 +1239,7 @@ export async function resolveRunVersion(
       }
       recordRotationPick(agent, rotation.picked.version);
     }
-    emit('rotation.resolved', { module: 'rotate', agent, version: rotation.picked.version, strategy, healthy: rotation.healthy.length, excluded: rotation.excluded.length });
+    emit('rotation.resolved', buildRotationDecisionEvent(rotation, agent, strategy));
     return { version: rotation.picked.version, rotation };
   }
 
