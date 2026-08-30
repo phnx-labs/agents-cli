@@ -144,6 +144,23 @@ describe('checkPii', () => {
     expect(checkPii('escalation email muqsit@getrush.ai: reach out on call')).toMatch(/email/);
     // ssh mentioned, then a separate clause with a real email
     expect(checkPii('run the ssh setup, then email someone@gmail.com about it')).toMatch(/email/);
+    // a real ssh host arg AND a real personal email on the same line: the personal
+    // one must still flag (the denylist keys on the domain, not proximity to ssh).
+    expect(checkPii('ssh deploy@build-host.io then tell muqsit@getrush.ai it is done')).toMatch(/email/);
+  });
+
+  test('domain denylist: personal/company domains flag; hostnames and unlisted domains pass', () => {
+    // personal + company mailboxes flag regardless of context
+    for (const d of ['gmail.com', 'outlook.com', 'icloud.com', 'proton.me', 'getrush.ai']) {
+      expect(checkPii(`reach a.person@${d} for details`)).toMatch(/email/);
+    }
+    // raw hostnames used as ssh/scp/git targets are never on the denylist -> pass
+    for (const h of ['build-host.io', 'github.com', 'ec2-1-2-3-4.compute.amazonaws.com']) {
+      expect(checkPii(`deploy@${h} is the target`)).toBeNull();
+    }
+    // deliberate conservative miss: an email at an unlisted custom domain passes
+    // (better a rare miss than the false-positive churn of scanning every @host).
+    expect(checkPii('mail admin@some-random-startup.io about it')).toBeNull();
   });
 
   test('flags an absolute home path with a real username', () => {
