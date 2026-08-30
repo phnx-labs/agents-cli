@@ -13,8 +13,10 @@ import {
   classifyWorktree,
   collectWorktrees,
   countUnmergedCommits,
+  isInside,
   parseWorktreePorcelain,
   reclaimWorktree,
+  refreshFacts,
   resolveDefaultRef,
   type WorktreeFacts,
 } from './reclaim.js';
@@ -57,6 +59,19 @@ describe('classifyWorktree', () => {
     expect(classifyWorktree(facts({ unmergedCommits: 2 }), 3).blockers).toContain('unmerged-commits');
   });
 
+  it('fails CLOSED when the working tree status could not be read', () => {
+    // A `git status` that threw (index.lock held by a live agent) must never
+    // read as "clean" — that is the tree most likely to be holding work.
+    const v = classifyWorktree(facts({ dirtyFiles: -1 }), 3);
+    expect(v.reclaimable).toBe(false);
+    expect(v.blockers).toContain('indeterminate');
+  });
+
+  it('does not double-report indeterminate when both probes fail', () => {
+    const v = classifyWorktree(facts({ dirtyFiles: -1, unmergedCommits: -1 }), 3);
+    expect(v.blockers.filter((b) => b === 'indeterminate')).toHaveLength(1);
+  });
+
   it('fails CLOSED when merge state is undeterminable', () => {
     const v = classifyWorktree(facts({ unmergedCommits: -1 }), 3);
     expect(v.reclaimable).toBe(false);
@@ -77,6 +92,25 @@ describe('classifyWorktree', () => {
     expect(v.blockers).toEqual(
       expect.arrayContaining(['uncommitted-changes', 'unmerged-commits', 'within-grace']),
     );
+  });
+});
+
+describe('isInside', () => {
+  it('matches the directory itself and real descendants', () => {
+    expect(isInside('/r/.agents/worktrees/fix-110', '/r/.agents/worktrees/fix-110')).toBe(true);
+    expect(isInside('/r/.agents/worktrees/fix-110/cli/src', '/r/.agents/worktrees/fix-110')).toBe(true);
+  });
+
+  it('does NOT treat a sibling sharing a name prefix as inside', () => {
+    // The `done` bug: startsWith() made fix-1103 look like it lived in fix-110,
+    // so `done` from one worktree reclaimed its neighbour.
+    expect(isInside('/r/.agents/worktrees/fix-1103', '/r/.agents/worktrees/fix-110')).toBe(false);
+    expect(isInside('/r/.agents/worktrees/fix-110-old', '/r/.agents/worktrees/fix-110')).toBe(false);
+  });
+
+  it('does not treat a parent or an unrelated path as inside', () => {
+    expect(isInside('/r/.agents/worktrees', '/r/.agents/worktrees/fix-110')).toBe(false);
+    expect(isInside('/elsewhere', '/r/.agents/worktrees/fix-110')).toBe(false);
   });
 });
 
@@ -197,7 +231,7 @@ describe('against real repositories', () => {
   it('REFUSES to reclaim a worktree holding unpushed work', async () => {
     const all = await collectWorktrees(repo);
     const target = all.find((w) => w.name === 'wt-unpushed')!;
-    const res = await reclaimWorktree(repo, { ...target, ageDays: 99 }, 3);
+    const res = await reclaimWorktree(repo, target, 0);
     expect(res.removed).toBe(false);
     expect(res.reason).toMatch(/not upstream/);
     await fs.access(target.path); // still on disk
@@ -210,7 +244,7 @@ describe('against real repositories', () => {
     const all = await collectWorktrees(repo);
     const target = all.find((w) => w.name === 'wt-dirty')!;
     expect(target.dirtyFiles).toBeGreaterThan(0);
-    const res = await reclaimWorktree(repo, { ...target, ageDays: 99 }, 3);
+    const res = await reclaimWorktree(repo, target, 0);
     expect(res.removed).toBe(false);
     expect(res.reason).toMatch(/uncommitted/);
     await fs.access(wt);
@@ -221,7 +255,7 @@ describe('against real repositories', () => {
     const target = all.find((w) => w.name === 'wt-rebased')!;
     expect(target.unmergedCommits).toBe(0);
 
-    const res = await reclaimWorktree(repo, { ...target, ageDays: 99 }, 3);
+    const res = await reclaimWorktree(repo, target, 0);
     expect(res.removed).toBe(true);
     // The -D fallback must fire: `-d` alone refuses a rebase-merged branch.
     expect(res.branchDeleted).toBe(true);
@@ -229,6 +263,46 @@ describe('against real repositories', () => {
     await expect(fs.access(target.path)).rejects.toThrow();
     const branches = await git(repo, ['branch', '--list', 'feat/rebased']);
     expect(branches).toBe('');
+  });
+
+  it('REFUSES a worktree that gained a commit AFTER the facts were collected', async () => {
+    // The mid-sweep race. `sweep` snapshots every worktree, then removes them
+    // one at a time — minutes of wall-clock on a box with 136 of them. An agent
+    // that COMMITS into a worktree in that gap leaves the tree clean, so
+    // `git worktree remove` has no objection, and the stale unmergedCommits===0
+    // would then authorise `branch -D` and destroy the commit outright.
+    const wt = path.join(base, 'wt-race');
+    await git(repo, ['worktree', 'add', '-b', 'feat/race', wt, 'origin/main']);
+
+    // Snapshot while it is genuinely clean and fully merged.
+    const stale = (await collectWorktrees(repo)).find((w) => w.name === 'wt-race')!;
+    expect(stale.dirtyFiles).toBe(0);
+    expect(stale.unmergedCommits).toBe(0);
+
+    // ...then work lands, and is committed, exactly as an agent would.
+    await fs.writeFile(path.join(wt, 'race.txt'), 'landed mid-sweep\n');
+    await git(wt, ['add', '.']);
+    await git(wt, ['commit', '-m', 'work committed during the sweep']);
+
+    const res = await reclaimWorktree(repo, stale, 0);
+    expect(res.removed).toBe(false);
+    expect(res.reason).toMatch(/not upstream/);
+    await fs.access(wt); // checkout survived
+    // and critically, the branch and its commit survived
+    expect(await git(repo, ['branch', '--list', 'feat/race'])).toContain('feat/race');
+    expect(await git(wt, ['log', '-1', '--pretty=%s'])).toBe('work committed during the sweep');
+  });
+
+  it('refreshFacts returns null once a worktree is deregistered', async () => {
+    const wt = path.join(base, 'wt-gone');
+    await git(repo, ['worktree', 'add', '-b', 'feat/gone', wt, 'origin/main']);
+    const snap = (await collectWorktrees(repo)).find((w) => w.name === 'wt-gone')!;
+    await git(repo, ['worktree', 'remove', wt]);
+    expect(await refreshFacts(repo, snap)).toBeNull();
+    // and reclaiming from that stale snapshot refuses rather than acting
+    const res = await reclaimWorktree(repo, snap, 0);
+    expect(res.removed).toBe(false);
+    expect(res.reason).toMatch(/no longer a registered worktree/);
   });
 
   it('refuses a worktree inside the grace window even when merged', async () => {

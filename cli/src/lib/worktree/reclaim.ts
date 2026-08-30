@@ -41,7 +41,11 @@ export interface WorktreeFacts {
   branch: string | null;
   isPrimary: boolean;
   locked: boolean;
-  /** `git status --porcelain` line count. */
+  /**
+   * `git status --porcelain` line count (untracked included, since porcelain
+   * lists them as `??`). Negative means "could not be determined", which is a
+   * blocker — never read as clean.
+   */
   dirtyFiles: number;
   /**
    * Commits on this worktree with NO patch-equivalent upstream, via
@@ -77,9 +81,14 @@ export function classifyWorktree(facts: WorktreeFacts, graceDays: number): Recla
   const blockers: ReclaimBlocker[] = [];
   if (facts.isPrimary) blockers.push('primary-checkout');
   if (facts.locked) blockers.push('locked');
-  if (facts.dirtyFiles > 0) blockers.push('uncommitted-changes');
-  if (facts.unmergedCommits < 0) blockers.push('indeterminate');
-  else if (facts.unmergedCommits > 0) blockers.push('unmerged-commits');
+  // Negative means "could not be read". A status we failed to read is NOT a
+  // clean status: an index.lock held by a live agent lands here, and that is
+  // precisely when the tree is most likely to be holding work.
+  if (facts.dirtyFiles < 0) blockers.push('indeterminate');
+  else if (facts.dirtyFiles > 0) blockers.push('uncommitted-changes');
+  if (facts.unmergedCommits < 0) {
+    if (!blockers.includes('indeterminate')) blockers.push('indeterminate');
+  } else if (facts.unmergedCommits > 0) blockers.push('unmerged-commits');
   if (facts.ageDays < graceDays) blockers.push('within-grace');
   return { reclaimable: blockers.length === 0, blockers };
 }
@@ -149,6 +158,16 @@ export async function countUnmergedCommits(
   }
 }
 
+/**
+ * True when `child` is `parent` or sits beneath it, compared on path
+ * boundaries. A raw `startsWith` makes `.../fix-1103` look like it is inside
+ * `.../fix-110`, so `done` run from one worktree would reclaim its neighbour.
+ */
+export function isInside(child: string, parent: string): boolean {
+  const rel = path.relative(parent, child);
+  return rel === '' || (rel !== '..' && !rel.startsWith('..' + path.sep) && !path.isAbsolute(rel));
+}
+
 /** One `git worktree list --porcelain` record. */
 interface PorcelainEntry {
   path: string;
@@ -194,44 +213,85 @@ export async function collectWorktrees(repoRoot: string): Promise<WorktreeFacts[
 
   const facts: WorktreeFacts[] = [];
   for (const [i, e] of entries.entries()) {
-    let dirtyFiles = 0;
-    let ageDays = 0;
-    let unmergedCommits = -1;
-    let missing = false;
-    try {
-      await fs.access(e.path);
-    } catch {
-      missing = true;
-    }
-    if (!missing) {
-      try {
-        const status = await git(e.path, ['status', '--porcelain']);
-        dirtyFiles = status ? status.split('\n').length : 0;
-      } catch {
-        dirtyFiles = 0;
-      }
-      try {
-        const st = await fs.stat(e.path);
-        ageDays = Math.floor((now - st.mtimeMs) / 86_400_000);
-      } catch {
-        ageDays = 0;
-      }
-      unmergedCommits = await countUnmergedCommits(e.path, defaultRef);
-    }
-    facts.push({
-      name: path.basename(e.path),
-      path: e.path,
-      branch: e.branch,
-      isPrimary: i === 0,
-      locked: e.locked,
-      dirtyFiles,
-      // A registered worktree whose directory is gone is pure bookkeeping —
-      // `git worktree prune` is the correct fix and is always safe.
-      unmergedCommits: missing ? 0 : unmergedCommits,
-      ageDays: missing ? Number.MAX_SAFE_INTEGER : ageDays,
-    });
+    facts.push(await factsForEntry(e, i === 0, defaultRef, now));
   }
   return facts;
+}
+
+/**
+ * Gather the facts for a single porcelain entry. Shared by `collectWorktrees`
+ * and `refreshFacts` so a re-read is guaranteed to apply the same probes and
+ * the same fail-closed defaults as the original read.
+ */
+async function factsForEntry(
+  e: PorcelainEntry,
+  isPrimary: boolean,
+  defaultRef: string | null,
+  now: number,
+): Promise<WorktreeFacts> {
+  let missing = false;
+  try {
+    await fs.access(e.path);
+  } catch {
+    missing = true;
+  }
+
+  let dirtyFiles = -1;
+  let ageDays = 0;
+  let unmergedCommits = -1;
+  if (!missing) {
+    try {
+      const status = await git(e.path, ['status', '--porcelain']);
+      dirtyFiles = status ? status.split('\n').length : 0;
+    } catch {
+      dirtyFiles = -1;
+    }
+    try {
+      const st = await fs.stat(e.path);
+      ageDays = Math.floor((now - st.mtimeMs) / 86_400_000);
+    } catch {
+      ageDays = 0;
+    }
+    unmergedCommits = await countUnmergedCommits(e.path, defaultRef);
+  }
+
+  return {
+    name: path.basename(e.path),
+    path: e.path,
+    branch: e.branch,
+    isPrimary,
+    locked: e.locked,
+    // A registered worktree whose directory is gone is pure bookkeeping —
+    // `git worktree prune` is the correct fix and is always safe.
+    dirtyFiles: missing ? 0 : dirtyFiles,
+    unmergedCommits: missing ? 0 : unmergedCommits,
+    ageDays: missing ? Number.MAX_SAFE_INTEGER : ageDays,
+  };
+}
+
+/**
+ * Re-read one worktree's facts from git, right now.
+ *
+ * `sweep` collects facts once and then removes sequentially; on a box with 136
+ * worktrees that is minutes of wall-clock, so any verdict taken from the
+ * original snapshot is a claim about the past. An agent that commits into a
+ * worktree mid-sweep leaves the tree CLEAN, so `git worktree remove` — which
+ * only objects to uncommitted changes — would happily remove it, and the stale
+ * `unmergedCommits === 0` would then authorise `branch -D` and destroy the new
+ * commit. Returns null when the worktree is no longer registered, which the
+ * caller must treat as a refusal.
+ */
+export async function refreshFacts(
+  repoRoot: string,
+  target: WorktreeFacts,
+): Promise<WorktreeFacts | null> {
+  const entries = parseWorktreePorcelain(
+    await git(repoRoot, ['worktree', 'list', '--porcelain']),
+  );
+  const idx = entries.findIndex((e) => e.path === target.path);
+  if (idx < 0) return null;
+  const defaultRef = await resolveDefaultRef(repoRoot);
+  return factsForEntry(entries[idx], idx === 0, defaultRef, Date.now());
 }
 
 export interface ReclaimResult {
@@ -257,10 +317,33 @@ export async function reclaimWorktree(
   if (!WORKTREE_NAME_RE.test(facts.name)) {
     return { name: facts.name, removed: false, branchDeleted: false, reason: 'unsafe worktree name' };
   }
-  const verdict = classifyWorktree(facts, graceDays);
-  if (!verdict.reclaimable) {
+  // Decide on facts read NOW, not on the caller's snapshot. Re-reading is the
+  // whole point of this step; reusing `facts` would re-derive the same verdict
+  // from the same stale inputs and prove nothing.
+  let fresh: WorktreeFacts | null;
+  try {
+    fresh = await refreshFacts(repoRoot, facts);
+  } catch (err: any) {
     return {
       name: facts.name,
+      removed: false,
+      branchDeleted: false,
+      reason: `could not re-verify: ${String(err?.stderr || err?.message || err).trim()}`,
+    };
+  }
+  if (!fresh) {
+    return {
+      name: facts.name,
+      removed: false,
+      branchDeleted: false,
+      reason: 'no longer a registered worktree',
+    };
+  }
+
+  const verdict = classifyWorktree(fresh, graceDays);
+  if (!verdict.reclaimable) {
+    return {
+      name: fresh.name,
       removed: false,
       branchDeleted: false,
       reason: verdict.blockers.map(describeBlocker).join(', '),
@@ -268,18 +351,18 @@ export async function reclaimWorktree(
   }
 
   try {
-    await git(repoRoot, ['worktree', 'remove', facts.path]);
+    await git(repoRoot, ['worktree', 'remove', fresh.path]);
   } catch (err: any) {
     const msg = String(err?.stderr || err?.message || err);
     if (/is not a working tree|does not exist/i.test(msg)) {
       await git(repoRoot, ['worktree', 'prune']);
     } else {
-      return { name: facts.name, removed: false, branchDeleted: false, reason: msg.trim() };
+      return { name: fresh.name, removed: false, branchDeleted: false, reason: msg.trim() };
     }
   }
 
   let branchDeleted = false;
-  if (facts.branch) {
+  if (fresh.branch) {
     // Try `-d` first so git's own ancestry check gets to agree when it can.
     // It CANNOT agree under this fleet's rebase-merge: `-d` tests reachability,
     // and a rebase rewrites the SHAs, so it refuses "not fully merged" for a
@@ -289,12 +372,12 @@ export async function reclaimWorktree(
     // correct for rewritten history, so nothing is force-dropped on the
     // caller's say-so alone.
     try {
-      await git(repoRoot, ['branch', '-d', facts.branch]);
+      await git(repoRoot, ['branch', '-d', fresh.branch]);
       branchDeleted = true;
     } catch {
-      if (facts.unmergedCommits === 0) {
+      if (fresh.unmergedCommits === 0) {
         try {
-          await git(repoRoot, ['branch', '-D', facts.branch]);
+          await git(repoRoot, ['branch', '-D', fresh.branch]);
           branchDeleted = true;
         } catch {
           branchDeleted = false;
@@ -302,5 +385,5 @@ export async function reclaimWorktree(
       }
     }
   }
-  return { name: facts.name, removed: true, branchDeleted };
+  return { name: fresh.name, removed: true, branchDeleted };
 }
