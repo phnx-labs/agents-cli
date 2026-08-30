@@ -135,7 +135,16 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
     // A dry-run never delivers, and an override target is an explicit recipient
     // (not the fleet-wide owner) — neither should hop to a peer.
     if (!result.ok && !options.dryRun && options.target === undefined) {
-      result = await forwardOwnerNotifyToPeer(text, channel, target, meta) ?? result;
+      if (options.attachments?.length) {
+        result = {
+          ...result,
+          error: `${result.error ?? 'local delivery failed'}; owner attachments cannot be forwarded to another device`,
+        };
+      } else {
+        result = await forwardOwnerNotifyToPeer(text, channel, target, meta, {
+          envelope: { thread: options.thread, from: options.from },
+        }) ?? result;
+      }
     }
     deliveries.push(result);
   }

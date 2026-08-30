@@ -120,6 +120,27 @@ describe('humans.ts', () => {
     });
   });
 
+  it('falls back to the first addressable channel when every policy id is stale', () => {
+    const home = makeTempHome();
+    const agentsDir = path.join(home, '.agents');
+    fs.mkdirSync(agentsDir, { recursive: true });
+    fs.writeFileSync(path.join(agentsDir, 'humans.yaml'), [
+      'version: 1',
+      'owner:',
+      '  channels:',
+      '    - id: imessage',
+      '      transport: rush',
+      "      to: '+15550000002'",
+      '  policy:',
+      '    normal: [removed-channel]',
+      '',
+    ].join('\n'));
+
+    expect(runHumans(home, 'humans.getOwnerNotifyDestinationsFromHumans()')).toEqual([
+      { channel: 'imessage', to: '+15550000002' },
+    ]);
+  });
+
   it('getOwnerNotifyFromHumans reads the owner.notify shape written by migration', () => {
     const home = makeTempHome();
     const agentsDir = path.join(home, '.agents');

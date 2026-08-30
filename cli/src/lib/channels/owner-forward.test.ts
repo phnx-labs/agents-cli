@@ -131,6 +131,21 @@ describe('forwardOwnerNotifyToPeer', () => {
     expect(tried).toEqual(['studio']); // stopped after the first success
   });
 
+  it('passes portable thread and sender fields to the peer send', async () => {
+    delete process.env[OWNER_FORWARD_GUARD_ENV];
+    let received: unknown;
+    await forwardOwnerNotifyToPeer('ping', 'slack', 'D123', rushOwnerMeta(), {
+      self: 'yosemite-m3',
+      devices,
+      envelope: { thread: 'thread-42', from: 'monitor' },
+      send: async (_machine, _text, _channel, _target, envelope) => {
+        received = envelope;
+        return { ok: true, channel: 'slack', id: 'D123' };
+      },
+    });
+    expect(received).toEqual({ thread: 'thread-42', from: 'monitor' });
+  });
+
   it('skips a peer that reports its own failure and tries the next', async () => {
     delete process.env[OWNER_FORWARD_GUARD_ENV];
     const tried: string[] = [];

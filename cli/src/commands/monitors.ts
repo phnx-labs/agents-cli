@@ -436,8 +436,8 @@ function buildAction(options: Record<string, any>): ActionConfig {
   }
   if (options.notify !== undefined) {
     // --notify may be a bare flag (notify the owner) or carry a channel that
-    // overrides notify.owner.channel. Left unset, the send resolves the owner
-    // channel + target from notify.owner in agents.yaml (one source of truth).
+    // selects one channel. Left unset, the send fans out every addressable
+    // owner.policy.normal destination from humans.yaml (one source of truth).
     const channel = typeof options.notify === 'string' ? options.notify : undefined;
     chosen.push({ type: 'notify', ...(channel ? { notifyChannel: channel } : {}) });
   }
@@ -633,7 +633,7 @@ export function registerMonitorsCommands(program: Command): void {
     .option('--action-timeout <t>', 'Kill the --run action if it runs longer than this (e.g. 10m)')
     .option('--postcondition <cmd>', 'Shell command that must exit 0 after a --run/--routine action settles; otherwise the fire records as no-effect, not ok. {event} is replaced with the fired event summary')
     .option('--routine <name>', 'Fire an existing routine on change')
-    .option('--notify [channel]', 'Notify the owner (notify.owner); [channel] overrides the owner channel')
+    .option('--notify [channel]', 'Notify every normal-policy owner channel; [channel] selects one channel')
     .option('--webhook-out <url>', 'POST the event to this URL')
     // PLACEMENT / hygiene
     .option('--device <name>', 'OWNER (not body placement) — the single machine that evaluates + fires (exactly-once). See docs/concepts.md#placement.')

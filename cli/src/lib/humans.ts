@@ -79,6 +79,8 @@ export function getOwnerNotifyDestinationsFromHumans(): Array<{ channel: string;
       return true;
     });
   if (destinations.length > 0) return destinations;
+  const firstAddressable = channels.find((entry) => entry.id && entry.to);
+  if (firstAddressable?.to) return [{ channel: firstAddressable.id, to: firstAddressable.to }];
   const migrated = owner?.notify;
   if (migrated?.channel && migrated.to) return [migrated];
   return [];
