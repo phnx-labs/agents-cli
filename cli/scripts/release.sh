@@ -1188,10 +1188,17 @@ fetch_main_attestation() {
   #      that has ever prefetched once — the opposite of the intended speed-up.
   # `|| true`-style: a miss (asset not uploaded yet, gh/network error) must NOT
   # abort the release; return non-zero and let the caller poll as today.
-  if ! gh release download "$ATTEST_MAIN_TAG" \
-        --pattern "attest-$tree.json" \
-        --dir "$store" >/dev/null 2>&1; then
-    return 1
+  # Time-bound the download: `gh` sets no HTTP timeout, so a DNS/TCP stall could
+  # otherwise block here indefinitely. Use timeout/gtimeout where present (all
+  # Linux fleet boxes; macOS with coreutils); otherwise run plain — the caller's
+  # 90s poll deadline is computed AFTER this returns, so even an unbounded run
+  # can only add bounded latency, never shrink the poll or fail a live release.
+  if command -v timeout >/dev/null 2>&1; then
+    timeout 15 gh release download "$ATTEST_MAIN_TAG" --pattern "attest-$tree.json" --dir "$store" >/dev/null 2>&1 || return 1
+  elif command -v gtimeout >/dev/null 2>&1; then
+    gtimeout 15 gh release download "$ATTEST_MAIN_TAG" --pattern "attest-$tree.json" --dir "$store" >/dev/null 2>&1 || return 1
+  else
+    gh release download "$ATTEST_MAIN_TAG" --pattern "attest-$tree.json" --dir "$store" >/dev/null 2>&1 || return 1
   fi
   # The downloaded json lands as attest-<tree>.json; `require` scans *.json in the
   # store and re-verifies the exact key, so the stable asset name doesn't have to
@@ -1252,7 +1259,6 @@ wait_for_attestation() {
   local tree="$1"
   local attest_dir
   attest_dir="$(attestation_store_dir)"
-  local deadline=$(( $(date +%s) + 90 ))
   local out
   [[ -n "$tree" ]] || die "missing tree digest for attestation"
   # ADDITIVE FAST PATH: try to pull the pre-produced proof for this tree from the
@@ -1261,6 +1267,10 @@ wait_for_attestation() {
   # with no inline suite. On any miss/error this is a no-op and we fall through to
   # exactly the original poll-then-require. Never dies (best-effort by contract).
   fetch_main_attestation "$tree" "$attest_dir" || true
+  # Start the 90s poll budget AFTER the best-effort prefetch, so a slow `gh` in
+  # fetch_main_attestation can never shrink the poll window and fail a release
+  # that would have succeeded today. The prefetch download is itself time-bounded.
+  local deadline=$(( $(date +%s) + 90 ))
   bold "Waiting for exact-tree attestation ${tree:0:12} (90s P99 budget)..."
   while :; do
     if out="$(scripts/release-attestation.sh require --dir "$attest_dir" --tree "$tree" --repo-root "$REPO_ROOT" 2>/dev/null)"; then
