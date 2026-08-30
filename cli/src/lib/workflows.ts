@@ -23,6 +23,7 @@ import {
   getProjectPluginsDir,
 } from './state.js';
 import { listInstalledVersions, getVersionHomePath } from './installations/versions.js';
+import { dirsContentMatch, normalizeResourceContent } from './resource-content-diff.js';
 
 // WORKFLOW_CAPABLE_AGENTS removed — use `capableAgents('workflows')` from
 // lib/capabilities.ts. The capability matrix on AgentConfig is the single
@@ -1141,15 +1142,15 @@ function writeGooseSubrecipe(workflowPath: string, subrecipeName: string, destDi
   fs.writeFileSync(path.join(destDir, `${subrecipeName}.yaml`), yaml.stringify(recipe), 'utf-8');
 }
 
-function syncWorkflowToGooseRecipe(workflowPath: string, name: string, versionHome: string): { success: boolean; error?: string } {
+/**
+ * Render the main Goose recipe YAML for a workflow — the exact bytes
+ * `syncWorkflowToGooseRecipe` writes to `<name>.yaml`. Extracted so the sync
+ * writer and the doctor content-drift check (`workflowContentMatches`) render
+ * from ONE source and can never disagree. Returns null on invalid frontmatter.
+ */
+function renderGooseRecipeYaml(workflowPath: string, name: string): string | null {
   const frontmatter = parseWorkflowFrontmatter(workflowPath);
-  if (!frontmatter) {
-    return { success: false, error: `Workflow '${name}' has invalid WORKFLOW.md frontmatter` };
-  }
-
-  const recipesDir = path.join(versionHome, '.config', 'goose', 'recipes');
-  const recipePath = path.join(recipesDir, `${name}.yaml`);
-  const subrecipesDir = path.join(recipesDir, `${name}.subrecipes`);
+  if (!frontmatter) return null;
   const body = readWorkflowBody(workflowPath) || frontmatter.description || name;
   const subagents = selectedWorkflowSubagents(workflowPath, frontmatter.allowedAgents);
   const recipe: Record<string, unknown> = {
@@ -1159,7 +1160,6 @@ function syncWorkflowToGooseRecipe(workflowPath: string, name: string, versionHo
     instructions: body,
     prompt: body,
   };
-
   if (frontmatter.model) {
     recipe.settings = { goose_model: frontmatter.model };
   }
@@ -1170,6 +1170,23 @@ function syncWorkflowToGooseRecipe(workflowPath: string, name: string, versionHo
       description: `Workflow subrecipe ${subagentName}`,
     }));
   }
+  return yaml.stringify(recipe);
+}
+
+function syncWorkflowToGooseRecipe(workflowPath: string, name: string, versionHome: string): { success: boolean; error?: string } {
+  const frontmatter = parseWorkflowFrontmatter(workflowPath);
+  if (!frontmatter) {
+    return { success: false, error: `Workflow '${name}' has invalid WORKFLOW.md frontmatter` };
+  }
+
+  const recipesDir = path.join(versionHome, '.config', 'goose', 'recipes');
+  const recipePath = path.join(recipesDir, `${name}.yaml`);
+  const subrecipesDir = path.join(recipesDir, `${name}.subrecipes`);
+  const subagents = selectedWorkflowSubagents(workflowPath, frontmatter.allowedAgents);
+  const recipeYaml = renderGooseRecipeYaml(workflowPath, name);
+  if (recipeYaml == null) {
+    return { success: false, error: `Workflow '${name}' has invalid WORKFLOW.md frontmatter` };
+  }
 
   try {
     fs.mkdirSync(recipesDir, { recursive: true });
@@ -1179,10 +1196,51 @@ function syncWorkflowToGooseRecipe(workflowPath: string, name: string, versionHo
     for (const subagentName of subagents) {
       writeGooseSubrecipe(workflowPath, subagentName, subrecipesDir);
     }
-    fs.writeFileSync(recipePath, yaml.stringify(recipe), 'utf-8');
+    fs.writeFileSync(recipePath, recipeYaml, 'utf-8');
     return { success: true };
   } catch (err) {
     return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * True when workflow `name` materialized in `agent`'s version home byte-matches
+ * what the writer would produce NOW from `sourcePath` — the content-drift
+ * predicate `agents doctor` uses. Layout-aware per the same per-harness map the
+ * writer (`syncWorkflowToVersion`) and detector use: Claude/default copy the
+ * whole WORKFLOW.md tree (recursive dir compare); Kimi/Antigravity/OpenClaw/Grok
+ * render one transformed file; Goose renders a recipe YAML. Antigravity's target
+ * is the shared HOME-global dir, not a per-version path. Returns false when the
+ * home copy is absent (surfaced as `missing` at the name level, not here).
+ */
+export function workflowContentMatches(
+  agent: AgentId,
+  versionHome: string,
+  name: string,
+  sourcePath: string,
+): boolean {
+  const root = workflowTargetRoot(agent, versionHome);
+  const renderedMatches = (homePath: string, expected: string): boolean => {
+    let actual: string;
+    try { actual = fs.readFileSync(homePath, 'utf-8'); } catch { return false; }
+    return normalizeResourceContent(actual) === normalizeResourceContent(expected);
+  };
+  switch (agent) {
+    case 'kimi':
+      return renderedMatches(path.join(root, name, 'SKILL.md'), transformWorkflowForKimi(sourcePath, name));
+    case 'antigravity':
+      return renderedMatches(path.join(root, `${name}.md`), transformWorkflowForAntigravity(sourcePath, name));
+    case 'openclaw':
+      return renderedMatches(path.join(root, `${name}.lobster`), transformWorkflowForOpenClaw(sourcePath, name));
+    case 'grok':
+      return renderedMatches(path.join(root, `${name}.rhai`), transformWorkflowForGrok(sourcePath, name));
+    case 'goose': {
+      const expected = renderGooseRecipeYaml(sourcePath, name);
+      if (expected == null) return false;
+      return renderedMatches(path.join(versionHome, '.config', 'goose', 'recipes', `${name}.yaml`), expected);
+    }
+    default:
+      return dirsContentMatch(sourcePath, path.join(root, name));
   }
 }
 

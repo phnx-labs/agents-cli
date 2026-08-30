@@ -35,6 +35,7 @@ import * as TOML from 'smol-toml';
 import * as yaml from 'yaml';
 import type { AgentId, InstalledSubagent, SubagentFrontmatter } from './types.js';
 import { safeJoin } from './paths.js';
+import { filesContentMatch, normalizeResourceContent } from './resource-content-diff.js';
 import {
   parseSubagentFrontmatter,
   transformSubagentForClaude,
@@ -77,6 +78,23 @@ export interface SubagentTarget {
   occupied(dir: string, name: string): OccupiedEntry[];
   /** Rich metadata for `name`; `null` skips it from the listing. */
   read(dir: string, name: string): SubagentMeta | null;
+  /**
+   * True when the installed subagent `sub` in `dir` byte-matches what `write`
+   * would materialize from `sub.path` NOW — the content-drift check `agents
+   * doctor` uses. Re-renders the CURRENT source through the same transform the
+   * writer uses (never a stored hash), so a prompt-body edit to the source
+   * surfaces as drift even though the filename is unchanged.
+   */
+  matches(dir: string, sub: { name: string; path: string }): boolean;
+}
+
+/** Read a file's UTF-8 content, or null when it is missing/unreadable. */
+function readFileSafe(filePath: string): string | null {
+  try {
+    return fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return null;
+  }
 }
 
 // ── metadata readers (the per-format escape hatch) ───────────────────────────
@@ -197,6 +215,12 @@ function flatFile(opts: {
       if (!frontmatter) return null;
       return { frontmatter, files: [`${name}${opts.ext}`], path: filePath };
     },
+    matches(dir, sub) {
+      const filePath = path.join(dir, `${sub.name}${opts.ext}`);
+      const installed = readFileSafe(filePath);
+      if (installed == null) return false;
+      return normalizeResourceContent(installed) === normalizeResourceContent(opts.transform(sub.path));
+    },
   };
 }
 
@@ -231,6 +255,12 @@ function dirFile(opts: {
       const frontmatter = readMeta(filePath, name);
       if (!frontmatter) return null;
       return { frontmatter, files: [opts.file], path: filePath };
+    },
+    matches(dir, sub) {
+      const filePath = path.join(dir, sub.name, opts.file);
+      const installed = readFileSafe(filePath);
+      if (installed == null) return false;
+      return normalizeResourceContent(installed) === normalizeResourceContent(opts.transform(sub.path));
     },
   };
 }
@@ -275,6 +305,36 @@ function dirCopy(opts: {
         .filter((f) => f.endsWith('.md'))
         .sort();
       return { frontmatter, files, path: subagentDir };
+    },
+    matches(dir, sub) {
+      // dirCopy materializes every source file (with rename) into <dir>/<name>/.
+      // Re-derive the expected file set from source and byte-compare each, so an
+      // edit to any copied file — or an added/removed source file — is drift.
+      const dest = path.join(dir, sub.name);
+      let sourceFiles: string[];
+      try {
+        sourceFiles = fs.readdirSync(sub.path).filter((f) => {
+          try { return fs.statSync(path.join(sub.path, f)).isFile(); } catch { return false; }
+        });
+      } catch {
+        return false;
+      }
+      const expectedDestNames = new Set<string>();
+      for (const file of sourceFiles) {
+        const destName = opts.rename?.[file] ?? file;
+        expectedDestNames.add(destName);
+        if (!filesContentMatch(path.join(sub.path, file), path.join(dest, destName))) return false;
+      }
+      // An extra file left in the installed dir (source file removed) is drift.
+      let destFiles: string[];
+      try {
+        destFiles = fs.readdirSync(dest).filter((f) => {
+          try { return fs.statSync(path.join(dest, f)).isFile(); } catch { return false; }
+        });
+      } catch {
+        return false;
+      }
+      return destFiles.every((f) => expectedDestNames.has(f));
     },
   };
 }
@@ -374,6 +434,23 @@ export function listInstalledSubagentNames(agent: AgentId, home: string): string
   const target = SUBAGENT_TARGETS[agent];
   if (!target) return [];
   return target.names(target.dir(home));
+}
+
+/**
+ * True when subagent `name` installed for `agent` under `home` byte-matches what
+ * the writer would produce NOW from `sourceDir` — the content-drift predicate
+ * `agents doctor` uses. Returns false when the agent has no registry entry
+ * (nothing could have been written) so an unexpected home copy reads as drift.
+ */
+export function subagentContentMatches(
+  agent: AgentId,
+  home: string,
+  name: string,
+  sourceDir: string,
+): boolean {
+  const target = SUBAGENT_TARGETS[agent];
+  if (!target) return false;
+  return target.matches(target.dir(home), { name, path: sourceDir });
 }
 
 /**

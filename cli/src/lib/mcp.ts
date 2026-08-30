@@ -18,7 +18,7 @@ import type { AgentId } from './types.js';
 import { getMcpDir, getUserMcpDir, getProjectAgentsDir, getVersionsDir, getUserAgentsDir } from './state.js';
 import { getBinaryPath, getVersionHomePath } from './installations/versions.js';
 import { IS_WINDOWS, execFileShellSpec } from './platform/index.js';
-import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath, stripJsonComments } from './agents.js';
+import { AGENTS, getMcpConfigPathForHome, getProjectMcpConfigPath, parseMcpConfig, stripJsonComments } from './agents.js';
 import { MCP_TARGETS, mcpWriteUnsupportedReason } from './mcp-registry.js';
 import { isCapable } from './capabilities.js';
 
@@ -949,6 +949,55 @@ export function writeMcpServerConfig(config: McpYamlConfig): string {
   fs.writeFileSync(filePath, content, 'utf-8');
 
   return filePath;
+}
+
+/** The transport-agnostic fields that identify an MCP server across formats. */
+interface McpComparable {
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+}
+
+/**
+ * Canonical string form of an MCP server for a structural, format-agnostic
+ * compare: http servers by url; stdio servers by command + args (order
+ * significant) + env (key-sorted, so serialization order is not drift). Undefined
+ * / empty fields are dropped so `{args: []}` and `{}` compare equal.
+ */
+function mcpCanonical(entry: McpComparable): string {
+  if (entry.url) return JSON.stringify({ url: entry.url });
+  const env = entry.env && Object.keys(entry.env).length > 0
+    ? Object.fromEntries(Object.entries(entry.env).sort(([a], [b]) => a.localeCompare(b)))
+    : undefined;
+  return JSON.stringify({
+    command: entry.command,
+    args: entry.args && entry.args.length > 0 ? entry.args : undefined,
+    env,
+  });
+}
+
+/**
+ * True when MCP server `name` materialized in `agent`'s version home byte-matches
+ * the resolved SOURCE definition `source` — the content-drift predicate `agents
+ * doctor` uses. Parses the home's canonical MCP config for the harness (no
+ * `claude mcp add` shell-out — the on-disk file is parseable) and structurally
+ * compares command/args/env/url. Returns false when the server is absent from
+ * the home (surfaced as `missing`/`extra` at the name level, not here).
+ */
+export function mcpServerMatches(
+  agent: AgentId,
+  versionHome: string,
+  name: string,
+  source: McpYamlConfig,
+): boolean {
+  const homePath = getMcpConfigPathForHome(agent, versionHome);
+  const home = parseMcpConfig(agent, homePath)[name];
+  if (!home) return false;
+  const sourceComparable: McpComparable = source.transport === 'http'
+    ? { url: source.url }
+    : { command: source.command, args: source.args, env: source.env };
+  return mcpCanonical(sourceComparable) === mcpCanonical(home);
 }
 
 /**
