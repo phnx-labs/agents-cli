@@ -223,9 +223,6 @@ export class MonitorEngine {
     try {
       const now = Date.now();
       for (const monitor of this.monitors) {
-        // Re-check enabled at fire time: `this.monitors` is filtered enabled at
-        // load, but a monitor disabled between reloads must not dispatch.
-        if (!monitor.enabled) continue;
         if (!this.isDue(monitor, now)) continue;
         this.lastEval.set(monitor.name, now);
         await this.runMonitor(monitor);

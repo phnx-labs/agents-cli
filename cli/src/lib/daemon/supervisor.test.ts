@@ -467,8 +467,8 @@ describe('ServiceSupervisor', () => {
       await supervisor.stopAll();
     });
 
-    it.each(P3_IDS)('%s: a hanging tick parks at the deadline and never overlaps another tick', async (id) => {
-      const supervisor = new ServiceSupervisor({ parkAfterFailures: 100 });
+    it.each(P3_IDS)('%s: a hanging tick is abandoned at the deadline and force-restarted on backoff (PHNX-3608)', async (id) => {
+      const supervisor = new ServiceSupervisor({ parkAfterFailures: 100, backoffBaseMs: 5_000 });
       class NamedHangingService extends HangingService {
         readonly id = id;
       }
@@ -485,10 +485,50 @@ describe('ServiceSupervisor', () => {
       const health = supervisor.health();
       expect(health[id].consecutiveFailures).toBe(1);
       expect(health[id].lastError).toMatch(/deadline/);
+      expect(health[id].state).toBe('parked');
 
-      await vi.advanceTimersByTimeAsync(5_000); // no next tick or restart may overlap the unresolved promise
-      expect(hanging.ticksStarted).toBe(1);
+      // The backoff restart fires without the unresolved promise ever settling —
+      // a fresh tick starts (and hangs again). The old contract left this at 1
+      // forever, wedging the service for the daemon's life.
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(hanging.ticksStarted).toBeGreaterThanOrEqual(2);
+      expect(good.ticks).toBeGreaterThanOrEqual(1);
+
+      await supervisor.stopAll();
+    });
+
+    it.each(P3_IDS)('%s: a wedged start() is bounded so it parks instead of stalling startAll (PHNX-3608)', async (id) => {
+      // A start() that never resolves must not hang startAll() forever — the
+      // lifecycle deadline turns it into a park + backoff restart. Uses REAL
+      // timers with a tiny deadline: the whole point is that `await startAll`
+      // returns on its own once the deadline fires, which a fake-timer race
+      // (advance-while-awaiting-startAll) cannot express.
+      vi.useRealTimers();
+      class WedgedStartService implements PeriodicService {
+        readonly id = id;
+        readonly intervalMs = 1_000;
+        readonly deadlineMs = 500;
+        async start(): Promise<void> { return new Promise<void>(() => {}); } // never resolves
+        async stop(): Promise<void> {}
+        async restart(): Promise<void> {}
+        async tick(): Promise<void> {}
+        health(): ServiceHealth { return { state: 'running', lastRunMs: 0, consecutiveFailures: 0 }; }
+      }
+      // backoff far out so no restart fires during this short real-time test.
+      const supervisor = new ServiceSupervisor({ lifecycleDeadlineMs: 20, backoffBaseMs: 60_000 });
+      const wedged = new WedgedStartService();
+      const good = new HealthyService('scheduler');
+      supervisor.register(wedged);
+      supervisor.register(good);
+
+      // startAll awaits startOne per service; a wedged start must NOT block the
+      // sibling's boot forever. The 20ms lifecycle deadline lets startAll return.
+      await supervisor.startAll(makeCtx());
       expect(supervisor.health()[id].state).toBe('parked');
+      expect(supervisor.health()[id].lastError).toMatch(/start exceeded deadline/);
+
+      // The sibling started and its immediate first tick ran despite the wedged peer.
+      await new Promise((r) => setTimeout(r, 10));
       expect(good.ticks).toBeGreaterThanOrEqual(1);
 
       await supervisor.stopAll();

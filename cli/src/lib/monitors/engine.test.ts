@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
 import { decideFire, evaluateMonitorOnce, MonitorEngine, shouldEscalateDrought } from './engine.js';
 import { writeState, readState, readLiveness, getMonitorHistoryDir } from './state.js';
+import { writeMonitor, deleteMonitor } from './config.js';
 import type { MonitorConfig } from './config.js';
 
 function monitor(partial: Partial<MonitorConfig>): MonitorConfig {
@@ -148,6 +149,45 @@ describe('MonitorEngine.runMonitor — liveness heartbeat (RUSH-2485)', () => {
     const m = monitor({ name, source: { type: 'ws', wsUrl: 'ws://127.0.0.1:1/' }, condition: { mode: 'every' } });
     await engine.runMonitor(m);
     expect(readLiveness(name)).toBeNull();
+  });
+});
+
+describe('MonitorEngine.tick — a stopped engine dispatches nothing (PHNX-3608)', () => {
+  // Under the external scheduler the supervisor owns the tick timer, so a
+  // stopped engine (its monitors service disabled) must honour stop() in tick()
+  // itself — otherwise the next supervised tick would still fire the last-loaded
+  // monitors even though the engine is stopped.
+  it('tick() runs monitors while started, and no longer dispatches after stop()', async () => {
+    const name = uniq('stopgate');
+    writeMonitor(monitor({ name, source: { type: 'command', command: 'echo x' }, condition: { mode: 'every' } }));
+    try {
+      const engine = new MonitorEngine();
+      engine.start({ externalScheduler: true }); // loads the enabled monitor, no internal timer
+      await engine.tick();
+      const afterFirst = readLiveness(name);
+      expect(afterFirst).not.toBeNull();
+      expect(afterFirst!.checkCount).toBe(1);
+
+      // Disable the service: the supervisor calls stop(). A subsequent supervised
+      // tick must be a no-op — the heartbeat count does not advance.
+      engine.stop();
+      await engine.tick();
+      expect(readLiveness(name)!.checkCount).toBe(1);
+    } finally {
+      deleteMonitor(name);
+    }
+  });
+
+  it('an engine that was never started dispatches nothing on tick()', async () => {
+    const name = uniq('nostart');
+    writeMonitor(monitor({ name, source: { type: 'command', command: 'echo x' }, condition: { mode: 'every' } }));
+    try {
+      const engine = new MonitorEngine();
+      await engine.tick(); // running === false, never loaded
+      expect(readLiveness(name)).toBeNull();
+    } finally {
+      deleteMonitor(name);
+    }
   });
 });
 

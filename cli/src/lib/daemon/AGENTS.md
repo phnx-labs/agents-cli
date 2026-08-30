@@ -17,10 +17,10 @@ sessions (`cli/src/lib/session/remote/watch.ts:245`). This means every
 cross-device feature in this repo is built on top of one primitive (ssh +
 CLI verb), not a shared daemon protocol.
 
-**Two runtime models coexist today (RUSH-3193 plus PHNX-3265 migrated 17 of 18
+**Two runtime models coexist today (RUSH-3193 plus PHNX-3265/PHNX-3608 migrated 18 of 19
 declared services; 1 declared service remains inline).** `cli/src/lib/daemon-services.ts`
-defines `DaemonServiceId` (18 ids:
-`secrets-broker`, `scheduler`, `monitors`, `browser-ipc`,
+defines `DaemonServiceId` (19 ids:
+`secrets-broker`, `scheduler`, `catchup`, `monitors`, `browser-ipc`,
 `webhook-receiver`, `self-heal`, `keychain-reap`, `account-state`,
 `watchdog`, `device-probe`, `state-dir-check`, `session-index`, `auth-sync`,
 `daemon-heartbeat`, `tmux-reap`, `browser-task-reap`, `session-state`,
@@ -28,10 +28,12 @@ defines `DaemonServiceId` (18 ids:
 catalog every id in `runDaemon()` is expected to register under, whichever
 model it uses.
 
-- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 17 services:**
+- **Supervised (`ServiceSupervisor`, `supervisor.ts`), 18 services:**
   `secrets-broker` (`secrets-broker-service.ts`), `browser-ipc`
   (`browser-ipc-service.ts`), `account-state`
-  (`account-state-daemon-service.ts`), `session-index`
+  (`account-state-daemon-service.ts`), `catchup` (`catchup-service.ts`,
+  PHNX-3608 — the scheduler's missed-fire recovery pass, self-gated on the
+  scheduler being booted), `session-index`
   (`session-index-service.ts`), `monitors` (`monitor-engine-service.ts`)
   (all P1/P2), and — since P3 — `watchdog` (`watchdog-service.ts`),
   `device-probe` (`device-probe-service.ts`), `self-heal`

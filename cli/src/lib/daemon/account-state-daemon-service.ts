@@ -53,8 +53,10 @@ export class AccountStateDaemonService extends BasePeriodicService {
 
   protected async onStart(): Promise<void> {
     // Force auth to run on the first post-start tick (and after any restart),
-    // matching the old service's immediate boot refresh of both areas.
-    this.lastAuthMs = 0;
+    // matching the old service's immediate boot refresh of both areas. A
+    // sentinel — not 0 — so the "due" arithmetic holds even when the injected
+    // clock is itself near 0 (tests).
+    this.lastAuthMs = Number.NEGATIVE_INFINITY;
   }
 
   protected async onStop(): Promise<void> {

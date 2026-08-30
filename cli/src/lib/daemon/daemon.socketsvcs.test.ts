@@ -351,8 +351,8 @@ describe('ServiceSupervisor — real socket services (SecretsBrokerService, Brow
     expect(fs.existsSync(getSocketPath())).toBe(true);
     // monitors: the real onStart() constructed a live MonitorEngine.
     expect(monitors.getEngine()).not.toBeNull();
-    // account-state: startAccountStateService() kicks off an immediate usage +
-    // auth refresh synchronously (both stubbed here), so the real body ran.
+    // account-state: the supervised first tick runs usage + auth concurrently
+    // (both stubbed here), so the real onTick body ran (PHNX-3608).
     expect(vi.mocked(runUsageRefreshTick)).toHaveBeenCalled();
     expect(vi.mocked(runFleetCacheWarmTick)).toHaveBeenCalled();
     // secrets-broker: the real onStart() saw an unreachable broker (stubbed) and

@@ -3171,9 +3171,12 @@ nothing but its own view cache.
   surface for this singular process (`start`/`stop`/`restart`/`reload`/
   `status`/`services`/`logs`/`doctor`, `commands/daemon.ts`) — it observes and
   controls the one daemon SING-1 requires, never a second one. Usage and
-  authentication health are first-party account state and run as one in-process
-  daemon service (`lib/account-state-service.ts`); explicit CLI refreshes enter
-  the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
+  authentication health are first-party account state and run as one supervised
+  `PeriodicService` (`lib/daemon/account-state-daemon-service.ts`, PHNX-3608 —
+  previously an un-deadlined dual-`setInterval` in `lib/account-state-service.ts`,
+  now removed) with a real per-tick deadline + AbortSignal so a hung usage refresh
+  is abandoned and restarted instead of latching forever; explicit CLI refreshes
+  enter the same cross-process per-account lease (`lib/refresh-coordinator.ts`). The
   watchdog, device-probe, session-cache-warm, and auto-dispatch ticks
   (RUSH-2353) were briefly promoted to **daemon-owned built-in routines**
   (`lib/builtin-routines.ts`, RUSH-2465) — declarations injected as the lowest
