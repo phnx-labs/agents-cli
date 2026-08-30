@@ -251,6 +251,28 @@ function isAvailableEligible(candidate: RotateCandidate): boolean {
 export const USAGE_DECISION_MAX_AGE_MS = 5 * 60 * 1000;
 
 /**
+ * How old a usage snapshot may be before routing REFUSES to run at all
+ * (NO_VERIFIED_USAGE), as opposed to merely declining to *weight* by its number.
+ *
+ * These are two different risks and now two different bars. Weighting on a
+ * slightly-old number is cheap to get wrong (a floored weight, {@link
+ * USAGE_DECISION_MAX_AGE_MS} = 5 min); refusing to launch at all is expensive to
+ * get wrong — it fails the user's `agents run` outright. The daemon's usage
+ * refresher paces proactive fetches under a fixed per-provider budget
+ * (`usage-refresh.ts`, PROVIDER_HOURLY_BUDGET), so on a multi-account fleet an
+ * IDLE account is deliberately refreshed on a stretched round-robin cadence
+ * (bounded at N × spacing — ~16 min at 8 accounts, ~32 min at 16) rather than
+ * every 5 min, which would 429 the endpoint and park it for up to an hour. A
+ * budget-paced idle reading of 10–30 min is NOT the failure this refusal exists
+ * to catch. That failure is the `yosemite-s1` case: a box whose refresh is
+ * genuinely BROKEN, holding readings 26 h – 2.7 d old. 40 min sits comfortably
+ * above the worst-case budget cadence and still an order of magnitude below the
+ * multi-hour staleness of a broken box — and actively-used accounts refresh for
+ * free via the statusline ingest, so a *busy* account is never even this old.
+ */
+export const USAGE_STALE_REFUSAL_MAX_AGE_MS = 40 * 60 * 1000;
+
+/**
  * Whether this candidate's usage number is recent enough to route on. A missing
  * snapshot is unverified by definition — there is no number to trust.
  *
@@ -271,23 +293,29 @@ export function isUsageVerified(candidate: RotateCandidate, nowMs: number = Date
 }
 
 /**
- * Whether this candidate carries a STALE-but-present usage number: a snapshot
- * with windows whose capture time is older than {@link USAGE_DECISION_MAX_AGE_MS}.
+ * Whether this candidate carries a GENUINELY-STALE usage number: a snapshot with
+ * windows whose capture time is older than {@link USAGE_STALE_REFUSAL_MAX_AGE_MS}.
  *
  * This is the misleading case the initial route must refuse — the number reads
  * "48% used" with the same confidence whether captured a minute or three days
- * ago, and a box whose refresh is failing stays wrong indefinitely. It is
- * deliberately NARROWER than "not verified": a BLIND candidate with no snapshot
- * (or a plan-only meterless one with no windows) carries no number to be misled
- * by — a worker box whose usage endpoint 403s (RUSH-2392), or a meterless Grok
- * login — so it is not "stale", and an entirely-blind pool still draws a pick
- * (PHNX-3392) rather than fail loud with NO_VERIFIED_USAGE.
+ * ago, and a box whose refresh is failing stays wrong indefinitely. Two things
+ * make it NARROWER than "not verified":
+ *   1. It uses the wider REFUSAL bar, not the 5-min weighting bar. A merely
+ *      budget-paced idle account (10–30 min old) is not-verified — so it weights
+ *      at the floor, conservatively — but it is NOT "stale" and must not, on its
+ *      own, drive the whole provider to a NO_VERIFIED_USAGE refusal. Only a
+ *      genuinely broken refresh (hours old) trips this.
+ *   2. A BLIND candidate with no snapshot (or a plan-only meterless one with no
+ *      windows) carries no number to be misled by — a worker box whose usage
+ *      endpoint 403s (RUSH-2392), or a meterless Grok login — so it is not
+ *      "stale", and an entirely-blind pool still draws a pick (PHNX-3392) rather
+ *      than fail loud with NO_VERIFIED_USAGE.
  */
 export function hasStaleUsage(candidate: RotateCandidate, nowMs: number = Date.now()): boolean {
   const snapshot = candidate.usageSnapshot;
   const capturedAt = snapshot?.capturedAt;
   if (!capturedAt || !snapshot?.windows.length) return false;
-  return nowMs - capturedAt.getTime() > USAGE_DECISION_MAX_AGE_MS;
+  return nowMs - capturedAt.getTime() > USAGE_STALE_REFUSAL_MAX_AGE_MS;
 }
 
 function hasUsageAvailable(candidate: RotateCandidate): boolean {
@@ -846,7 +874,7 @@ export function formatNoVerifiedUsageError(
         const staleness = age === null ? 'no usage snapshot' : `usage ${age}m old`;
         return `${c.version} (${staleness})`;
       }).join(', ');
-  const maxAgeMin = Math.round(USAGE_DECISION_MAX_AGE_MS / 60_000);
+  const maxAgeMin = Math.round(USAGE_STALE_REFUSAL_MAX_AGE_MS / 60_000);
   return `agents: NO_VERIFIED_USAGE — no signed-in ${agent} account has usage newer than ${maxAgeMin}m under strategy '${strategy}', so routing refuses to guess on a stale number: ${detail}. Refresh usage (agents view ${agent}) or pin the default with --strategy pinned.`;
 }
 

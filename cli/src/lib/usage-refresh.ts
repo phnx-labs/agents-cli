@@ -82,9 +82,24 @@ export const REFRESH_MAX_MS = REFRESH_INTERVAL_MS;
 export const REFRESH_BURN_DIVISOR = 4;
 /** At most this many live fetches per account per rolling hour (5m cadence ⇒ 12). */
 export const HOURLY_CALL_CAP = 12;
+/** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
+export const USAGE_REFRESH_TICK_MS = 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+/**
+ * Minimum wall-clock spacing between two live usage fetches to ONE network
+ * provider, across all of its accounts. This is the pacing primitive: refreshes
+ * are issued round-robin (stalest account first) no faster than one per spacing,
+ * so aggregate endpoint load is a smooth, fixed rate — never the synchronized
+ * burst-then-stall a plain rolling-hour cap produces when every account falls
+ * due on the same tick. Set to two daemon ticks so the floor-based pacing lands
+ * on exact tick boundaries (no drift): one refresh every other tick ⇒ 30/hr.
+ */
+export const PROVIDER_MIN_REFRESH_SPACING_MS = 2 * USAGE_REFRESH_TICK_MS;
 /**
  * Aggregate live fetches this daemon may spend on ONE network provider's usage
- * endpoint per rolling hour, across ALL of that provider's local accounts.
+ * endpoint per rolling hour, across ALL of that provider's local accounts —
+ * derived from {@link PROVIDER_MIN_REFRESH_SPACING_MS} so the two are always
+ * consistent (HOUR / 120s = 30).
  *
  * The per-account {@link HOURLY_CALL_CAP} alone scales linearly with account
  * count — 8 Claude accounts × 12/hr = ~96 usage calls/hr from one box — and
@@ -95,16 +110,24 @@ export const HOURLY_CALL_CAP = 12;
  * `agents view` showed `S: unavailable` and balanced routing read stale/absent
  * usage. It got WORSE with every account added.
  *
- * This budget caps the daemon's usage traffic at a fixed rate that does NOT grow
- * with account count. 40/hr leaves real headroom under the ~100/hr ceiling for
- * the auth probe (which rides the same endpoint at ~3/hr/account, RUSH-2998) and
- * for foreground `agents view` bursts. The consequence — each account's
- * effective proactive cadence stretches as N grows (roughly one refresh every
- * ceil(N / (budget·tick-share)) — is correct: a slightly older-but-present
- * reading beats a 45-minute 429 park. Applies only to `network:true` providers;
+ * 30/hr is a fixed rate that does NOT grow with account count, and leaves ample
+ * headroom under the ~100/hr ceiling for the auth probe (same endpoint, ~3/hr
+ * per account, RUSH-2998) and foreground `agents view` bursts. Because refreshes
+ * are paced round-robin (stalest first), each account's worst-case proactive
+ * cadence is bounded at N × spacing (8 accounts ⇒ 16 min; 16 ⇒ 32 min) — kept
+ * deliberately under the {@link USAGE_STALE_REFUSAL_MAX_AGE_MS} routing window so
+ * a budget-paced account never reads as "genuinely stale". A slightly
+ * older-but-present reading beats a 45-minute 429 park. Network providers only;
  * grok/codex read local logs and have no rate-limited endpoint.
  */
-export const PROVIDER_HOURLY_BUDGET = 40;
+export const PROVIDER_HOURLY_BUDGET = HOUR_MS / PROVIDER_MIN_REFRESH_SPACING_MS;
+/**
+ * Most refreshes a single tick may catch up after the daemon has been idle/down
+ * (elapsed ≫ spacing). Without this clamp a long gap would grant many tokens at
+ * once and re-synchronize every account into the very burst the spacing exists
+ * to prevent. A small catch-up keeps the load smooth even after a restart.
+ */
+export const PROVIDER_CATCHUP_MAX = 2;
 /**
  * A usage row this recently captured (by the free statusline ingest of a live
  * `agents run`, or any writer) is already fresh — do not spend an API call to
@@ -112,15 +135,12 @@ export const PROVIDER_HOURLY_BUDGET = 40;
  * the proactive budget is reserved for genuinely idle accounts.
  */
 export const STATUSLINE_FRESH_MS = REFRESH_INTERVAL_MS;
-/** How often the daemon wakes to *consider* a refresh pass (due accounts only). */
-export const USAGE_REFRESH_TICK_MS = 60 * 1000;
 /** Consecutive failed live reads before one broken account is quarantined. */
 export const FAILURE_QUARANTINE_THRESHOLD = 3;
 /** A chronic offender waits this long while healthy siblings keep their cadence. */
 export const FAILURE_QUARANTINE_MS = 30 * 60 * 1000;
 const SKIP_JITTER_MIN_MS = 2_000;
 const SKIP_JITTER_RANGE_MS = 3_001;
-const HOUR_MS = 60 * 60 * 1000;
 
 /**
  * One account's refresh state + published headroom. `sessionUsedPercent` /
@@ -293,25 +313,77 @@ function skippedHeadroomEntry(
 
 /**
  * Reschedule an account we skipped because a free statusline ingest already
- * captured it inside {@link STATUSLINE_FRESH_MS}. Carry the prior projection
- * forward and push the next proactive attempt to one interval past that free
- * capture, so the budget is not spent re-refreshing an already-current row.
+ * captured it inside {@link STATUSLINE_FRESH_MS}. The statusline row IS a real,
+ * live sample, so RE-DERIVE headroom (status / minutesToLimit) from it against
+ * the prior sample — otherwise `status`/`minutesToLimit` would freeze at their
+ * last API-refresh value forever for exactly the actively-used accounts that
+ * stay statusline-fresh, and `capacityWeight` reads `minutesToLimit`. No call
+ * timestamp is recorded (this cost zero API budget); the next proactive attempt
+ * is pushed to one interval past the free capture.
  */
 function freshHeadroomEntry(
   prev: HeadroomEntry | null,
+  snapshot: UsageSnapshot,
   now: number,
-  lastCapturedAt: number,
+  capturedAtMs: number,
 ): HeadroomEntry {
+  const headroom = deriveUsageHeadroom(
+    snapshot,
+    prev && prev.capturedAt !== null && prev.sessionUsedPercent !== null
+      ? { capturedAt: prev.capturedAt, usedPercent: prev.sessionUsedPercent }
+      : null,
+  );
+  const session = snapshot.windows.find((window) => window.key === 'session') ?? null;
   return {
-    status: prev?.status ?? null,
-    minutesToLimit: prev?.minutesToLimit ?? null,
-    sessionUsedPercent: prev?.sessionUsedPercent ?? null,
-    capturedAt: prev?.capturedAt ?? null,
-    nextRefreshAt: lastCapturedAt + REFRESH_INTERVAL_MS,
+    status: headroom.status,
+    minutesToLimit: headroom.minutesToLimit,
+    sessionUsedPercent: session?.usedPercent ?? prev?.sessionUsedPercent ?? null,
+    capturedAt: snapshot.capturedAt?.getTime() ?? prev?.capturedAt ?? null,
+    nextRefreshAt: capturedAtMs + REFRESH_INTERVAL_MS,
+    // Not an API call — do NOT record a timestamp (would wrongly spend budget).
     callTimestamps: pruneCallTimestamps(prev?.callTimestamps ?? [], now),
     computedAt: now,
-    consecutiveFailures: prev?.consecutiveFailures ?? 0,
+    consecutiveFailures: 0,
   };
+}
+
+/**
+ * Most-recent live-fetch time per network provider (the max call timestamp
+ * across its accounts, 0 when none), which the smooth per-provider pacing spaces
+ * the next refresh from. Non-network providers are omitted — they have no
+ * rate-limited endpoint to pace.
+ */
+export function providerLastCall(
+  accounts: LocalUsageAccount[],
+  cache: Record<string, HeadroomEntry>,
+): Map<AgentId, number> {
+  const last = new Map<AgentId, number>();
+  for (const account of accounts) {
+    if (!agentUsesNetworkUsage(account.agentId)) continue;
+    if (!last.has(account.agentId)) last.set(account.agentId, 0);
+    for (const ts of cache[account.usageKey]?.callTimestamps ?? []) {
+      if (ts > (last.get(account.agentId) ?? 0)) last.set(account.agentId, ts);
+    }
+  }
+  return last;
+}
+
+/**
+ * How many live fetches the smooth pacing permits a provider THIS tick: one per
+ * elapsed {@link PROVIDER_MIN_REFRESH_SPACING_MS} since its last fetch, clamped
+ * to {@link PROVIDER_CATCHUP_MAX} so a long idle gap (or a cold provider with no
+ * prior fetch) cannot re-burst the whole due set at once. At the daemon's 60 s
+ * tick this yields at most one fetch every other tick in steady state (⇒ the
+ * hourly budget), while a small fleet whose total demand fits under budget is
+ * never throttled — the {@link PROVIDER_HOURLY_BUDGET} rolling cap is the only
+ * gate that binds it.
+ */
+export function providerSpacingTokens(lastCallMs: number, now: number): number {
+  // A cold provider (never fetched) is treated as maximally idle: grant the
+  // catch-up ceiling so a couple of accounts warm immediately without bursting.
+  const elapsed = lastCallMs <= 0 ? Infinity : now - lastCallMs;
+  if (elapsed < PROVIDER_MIN_REFRESH_SPACING_MS) return 0;
+  return Math.min(PROVIDER_CATCHUP_MAX, Math.floor(elapsed / PROVIDER_MIN_REFRESH_SPACING_MS));
 }
 
 function failedHeadroomEntry(prev: HeadroomEntry | null, now: number): HeadroomEntry {
@@ -444,12 +516,13 @@ export interface UsageRefreshDeps {
    */
   backoffUntil: (agentId: AgentId, usageKey?: string) => number | null;
   /**
-   * Epoch ms this account's usage row was last captured in the shared usage
-   * cache (the row the routing hot path reads), or null when absent. Lets the
-   * refresher see the FREE statusline ingest of a live `agents run` and skip a
-   * redundant API refresh of an already-current account (RUSH: provider budget).
+   * The account's current usage row from the shared cache (the row the routing
+   * hot path reads), or null when absent. Lets the refresher see the FREE
+   * statusline ingest of a live `agents run` and, when that row is recent, skip a
+   * redundant API refresh while still re-deriving headroom from it — instead of
+   * spending scarce provider budget re-fetching an already-current account.
    */
-  lastCapturedAt?: (usageKey: string) => number | null;
+  readCachedSnapshot?: (usageKey: string) => UsageSnapshot | null;
 }
 
 export interface UsageRefreshResult {
@@ -488,16 +561,25 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     cache,
     Math.floor(now / USAGE_REFRESH_TICK_MS),
   );
-  // Per-provider rolling-hour budget counter, seeded with calls already spent in
-  // the trailing hour so PROVIDER_HOURLY_BUDGET bounds the true hourly total.
-  // Because accounts are ordered stalest-first, the budget is consumed by the
-  // accounts most in need; fresher ones defer to a later tick (their entry is
-  // left untouched, so they stay due and compete again next tick).
+  // Per-provider pacing. Two gates keep aggregate endpoint load smooth and bounded:
+  //  - a rolling-hour ceiling (PROVIDER_HOURLY_BUDGET) — the hard cap, seeded
+  //    with calls already spent in the trailing hour;
+  //  - a min-spacing token count (PROVIDER_MIN_REFRESH_SPACING_MS) — the smoother,
+  //    which issues refreshes round-robin at a fixed rate instead of the
+  //    synchronized burst-then-stall a plain rolling cap produces when every
+  //    account falls due on the same tick.
+  // Both are per-provider and network-only; accounts are ordered stalest-first, so
+  // the scarce budget always serves the account most in need and none is starved.
   const budgetSpent = providerRecentCalls(accounts, cache, now);
+  const lastCall = providerLastCall(accounts, cache);
+  const spacingTokens = new Map<AgentId, number>();
+  for (const [agent, last] of lastCall) spacingTokens.set(agent, providerSpacingTokens(last, now));
+  const spacingUsed = new Map<AgentId, number>();
   const updates: Record<string, HeadroomEntry> = {};
 
   for (const [index, account] of accounts.entries()) {
     const entry = cache[account.usageKey] ?? null;
+    const network = agentUsesNetworkUsage(account.agentId);
 
     // A penalized account/provider is off-limits — poking it re-arms the
     // penalty (the whole reason usage-backoff exists).
@@ -513,27 +595,33 @@ export async function runUsageRefresh(deps: UsageRefreshDeps): Promise<UsageRefr
     }
 
     // A live `agents run` already refreshed this account's usage row for free via
-    // the statusline ingest — don't spend a scarce API call re-refreshing it.
-    const lastCapturedAt = deps.lastCapturedAt?.(account.usageKey) ?? null;
-    if (lastCapturedAt !== null && now - lastCapturedAt < STATUSLINE_FRESH_MS) {
-      updates[account.usageKey] = freshHeadroomEntry(entry, now, lastCapturedAt);
-      result.skippedFresh += 1;
-      continue;
+    // the statusline ingest — re-derive headroom from that row and skip the API
+    // call. Network providers only: a local-log provider's cache is always its
+    // own last write, so this must not suppress its refresh (grok/codex).
+    if (network) {
+      const cached = deps.readCachedSnapshot?.(account.usageKey) ?? null;
+      const capturedAtMs = cached?.capturedAt?.getTime() ?? null;
+      if (cached && capturedAtMs !== null && now - capturedAtMs < STATUSLINE_FRESH_MS) {
+        updates[account.usageKey] = freshHeadroomEntry(entry, cached, now, capturedAtMs);
+        result.skippedFresh += 1;
+        continue;
+      }
     }
 
     // Global per-provider budget: cap aggregate endpoint traffic so it does not
-    // scale linearly with account count and trip the ~100/hr rate limit. Only
-    // network providers ride a rate-limited endpoint; local-log providers don't.
-    if (agentUsesNetworkUsage(account.agentId)
-      && (budgetSpent.get(account.agentId) ?? 0) >= PROVIDER_HOURLY_BUDGET) {
-      // Leave the entry untouched so this still-due account competes again next
-      // tick, when the rolling window has freed budget — never starved.
-      result.skippedBudget += 1;
-      continue;
-    }
-
-    if (agentUsesNetworkUsage(account.agentId)) {
+    // scale linearly with account count and trip the ~100/hr rate limit, and pace
+    // it smoothly. Non-network providers (local logs) have no endpoint to protect.
+    if (network) {
+      const overHourly = (budgetSpent.get(account.agentId) ?? 0) >= PROVIDER_HOURLY_BUDGET;
+      const overSpacing = (spacingUsed.get(account.agentId) ?? 0) >= (spacingTokens.get(account.agentId) ?? 0);
+      if (overHourly || overSpacing) {
+        // Leave the entry untouched so this still-due account competes again next
+        // tick, when budget/spacing frees — never starved (stalest-first serves it).
+        result.skippedBudget += 1;
+        continue;
+      }
       budgetSpent.set(account.agentId, (budgetSpent.get(account.agentId) ?? 0) + 1);
+      spacingUsed.set(account.agentId, (spacingUsed.get(account.agentId) ?? 0) + 1);
     }
 
     try {

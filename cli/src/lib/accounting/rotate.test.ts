@@ -758,6 +758,31 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: meterless }), NOW)).toBe(false);
   });
 
+  it('two-tier freshness: a budget-paced idle reading is unverified but NOT refusal-stale', () => {
+    // The daemon paces proactive refreshes under a per-provider budget, so a
+    // healthy IDLE account is deliberately refreshed on a stretched round-robin
+    // cadence. A 25-min-old reading is one of those: too old to WEIGHT on (the
+    // 5-min decision bar), but nowhere near the hours-old broken-refresh staleness
+    // the NO_VERIFIED_USAGE refusal exists to catch (40-min bar).
+    const paced = snapshotAt(new Date(NOW - 25 * 60_000), [{ key: 'week', usedPercent: 30 }]);
+    expect(isUsageVerified(candidate({ version: '1.0.0', usageSnapshot: paced }), NOW)).toBe(false);
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: paced }), NOW)).toBe(false);
+    // A genuinely broken refresh (past the 40-min refusal bar) IS refusal-stale.
+    const broken = snapshotAt(new Date(NOW - 45 * 60_000), [{ key: 'week', usedPercent: 30 }]);
+    expect(hasStaleUsage(candidate({ version: '1.0.0', usageSnapshot: broken }), NOW)).toBe(true);
+  });
+
+  it('does NOT refuse a pool where every account is merely budget-paced (10–30 min), only genuinely stale ones', () => {
+    // The BLOCKER: budget pacing + a 5-min refusal bar collapsed an all-idle fleet
+    // to NO_VERIFIED_USAGE. With the wider refusal bar, a fleet of paced-but-not-
+    // broken readings still routes (drawing on the floored weights).
+    const pacedA = candidate({ version: '2.1.181', usageSnapshot: snapshotAt(new Date(NOW - 12 * 60_000), [{ key: 'week', usedPercent: 20 }]) });
+    const pacedB = candidate({ version: '2.1.207', usageSnapshot: snapshotAt(new Date(NOW - 28 * 60_000), [{ key: 'week', usedPercent: 40 }]) });
+    const result = pickBalancedCandidate([pacedA, pacedB], NOW)!;
+    expect(result.noVerifiedUsage).toBe(false);
+    expect(['2.1.181', '2.1.207']).toContain(result.picked.version);
+  });
+
   it('a verified MINORITY does not capture every launch — the 429-throttled regime', () => {
     // The 2026-08-20 incident: the usage endpoint 429-throttles a machine, so
     // each refresh cycle confirms exactly one account. Narrowing to verified

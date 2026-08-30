@@ -10,6 +10,8 @@ import {
   REFRESH_BURN_DIVISOR,
   HOURLY_CALL_CAP,
   PROVIDER_HOURLY_BUDGET,
+  PROVIDER_MIN_REFRESH_SPACING_MS,
+  PROVIDER_CATCHUP_MAX,
   STATUSLINE_FRESH_MS,
   USAGE_REFRESH_TICK_MS,
   FAILURE_QUARANTINE_MS,
@@ -20,6 +22,8 @@ import {
   nextHeadroomEntry,
   orderUsageAccounts,
   providerRecentCalls,
+  providerLastCall,
+  providerSpacingTokens,
   runUsageRefresh,
   readHeadroomEntry,
   writeHeadroomEntries,
@@ -27,6 +31,13 @@ import {
   type HeadroomEntry,
 } from './usage-refresh.js';
 import { setClaudeUsageCachePathForTest, writeClaudeUsageCache, readClaudeUsageCache, type UsageSnapshot } from './accounting/usage.js';
+import {
+  isUsageVerified,
+  hasStaleUsage,
+  USAGE_DECISION_MAX_AGE_MS,
+  USAGE_STALE_REFUSAL_MAX_AGE_MS,
+  type RotateCandidate,
+} from './accounting/rotate.js';
 
 const NOW = 1_800_000_000_000;
 
@@ -359,6 +370,46 @@ describe('providerRecentCalls — aggregate rolling-hour spend per network provi
   });
 });
 
+describe('providerSpacingTokens — smooth per-provider pacing', () => {
+  it('grants a cold provider the catch-up ceiling (warms a couple of accounts, not a burst)', () => {
+    expect(providerSpacingTokens(0, NOW)).toBe(PROVIDER_CATCHUP_MAX);
+  });
+
+  it('grants none until a full spacing has elapsed, then one', () => {
+    const last = NOW - PROVIDER_MIN_REFRESH_SPACING_MS + 1;
+    expect(providerSpacingTokens(last, NOW)).toBe(0);
+    expect(providerSpacingTokens(NOW - PROVIDER_MIN_REFRESH_SPACING_MS, NOW)).toBe(1);
+  });
+
+  it('clamps catch-up after a long idle gap so it cannot re-burst', () => {
+    const longAgo = NOW - 10 * PROVIDER_MIN_REFRESH_SPACING_MS;
+    expect(providerSpacingTokens(longAgo, NOW)).toBe(PROVIDER_CATCHUP_MAX);
+  });
+
+  it('is consistent with the hourly budget (HOUR / spacing)', () => {
+    expect(PROVIDER_HOURLY_BUDGET).toBe(60 * 60 * 1000 / PROVIDER_MIN_REFRESH_SPACING_MS);
+    expect(PROVIDER_MIN_REFRESH_SPACING_MS).toBe(2 * USAGE_REFRESH_TICK_MS);
+  });
+});
+
+describe('providerLastCall — most-recent live fetch per network provider', () => {
+  it('takes the max timestamp across a provider, and ignores non-network providers', () => {
+    const accounts = [
+      { usageKey: 'claude:org=a', agentId: 'claude' as const, fetch: async () => ({ snapshot: null, error: null }) },
+      { usageKey: 'claude:org=b', agentId: 'claude' as const, fetch: async () => ({ snapshot: null, error: null }) },
+      { usageKey: 'grok:user=g', agentId: 'grok' as const, fetch: async () => ({ snapshot: null, error: null }) },
+    ];
+    const cache: Record<string, HeadroomEntry> = {
+      'claude:org=a': { ...baseEntry, callTimestamps: [NOW - 500, NOW - 5_000] },
+      'claude:org=b': { ...baseEntry, callTimestamps: [NOW - 200] },
+      'grok:user=g': { ...baseEntry, callTimestamps: [NOW - 1] },
+    };
+    const last = providerLastCall(accounts, cache);
+    expect(last.get('claude')).toBe(NOW - 200);
+    expect(last.has('grok')).toBe(false);
+  });
+});
+
 describe('provider budget — aggregate endpoint pressure does not scale with N', () => {
   let cacheDir: string;
   let prevHeadroom: string | null;
@@ -376,59 +427,60 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
     fs.rmSync(cacheDir, { recursive: true, force: true });
   });
 
-  it('caps one tick at PROVIDER_HOURLY_BUDGET fetches even with far more due accounts', async () => {
-    const n = PROVIDER_HOURLY_BUDGET + 12; // 8+ accounts is the real case; go well over.
-    let fetches = 0;
-    const accounts = Array.from({ length: n }, (_, i) => ({
-      usageKey: `claude:org=acct-${i}`,
-      agentId: 'claude' as const,
-      fetch: async () => { fetches += 1; return { snapshot: sessionSnap(10, NOW), error: null }; },
-    }));
+  const claudeAccounts = (n: number, fetchImpl?: (key: string, now: number) => void) =>
+    Array.from({ length: n }, (_, i) => {
+      const usageKey = `claude:org=acct-${i}`;
+      return {
+        usageKey,
+        agentId: 'claude' as const,
+        fetch: async () => { fetchImpl?.(usageKey, NOW); return { snapshot: sessionSnap(10, NOW), error: null }; },
+      };
+    });
+
+  it('paces a cold provider to the catch-up ceiling, not the whole due set at once', async () => {
+    const accounts = claudeAccounts(PROVIDER_HOURLY_BUDGET + 12);
     const result = await runUsageRefresh({
       now: NOW,
       listAccounts: async () => accounts,
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
     });
-    expect(result.refreshed).toBe(PROVIDER_HOURLY_BUDGET);
-    expect(result.skippedBudget).toBe(n - PROVIDER_HOURLY_BUDGET);
-    expect(fetches).toBe(PROVIDER_HOURLY_BUDGET);
+    // Spacing caps a single tick at the catch-up ceiling — never the full due set.
+    expect(result.refreshed).toBe(PROVIDER_CATCHUP_MAX);
+    expect(result.skippedBudget).toBe(accounts.length - PROVIDER_CATCHUP_MAX);
   });
 
-  it('holds the aggregate under the budget across multiple ticks in one hour', async () => {
-    const n = PROVIDER_HOURLY_BUDGET + 12;
+  it('holds the aggregate at the hourly budget across a full hour of ticks', async () => {
+    const accounts = claudeAccounts(PROVIDER_HOURLY_BUDGET + 12);
     let fetches = 0;
-    const accounts = Array.from({ length: n }, (_, i) => ({
-      usageKey: `claude:org=acct-${i}`,
-      agentId: 'claude' as const,
-      fetch: async () => { fetches += 1; return { snapshot: sessionSnap(10, NOW), error: null }; },
-    }));
-    // Three ticks 60s apart — all inside one rolling hour. Budget-skipped accounts
-    // stay due and compete again, but the rolling-hour aggregate must not exceed
-    // the budget (the endpoint would 429 otherwise).
-    for (let tick = 0; tick < 3; tick += 1) {
-      await runUsageRefresh({
+    const ticksPerHour = (60 * 60 * 1000) / USAGE_REFRESH_TICK_MS; // 60
+    for (let tick = 0; tick < ticksPerHour; tick += 1) {
+      const r = await runUsageRefresh({
         now: NOW + tick * USAGE_REFRESH_TICK_MS,
         listAccounts: async () => accounts,
         writeUsageCache: writeClaudeUsageCache,
         backoffUntil: () => null,
       });
+      fetches += r.refreshed;
     }
+    // Smooth pacing lands exactly on the budget — one fetch every other tick.
     expect(fetches).toBe(PROVIDER_HOURLY_BUDGET);
   });
 
-  it('spends the budget on the STALEST accounts, deferring the freshest', async () => {
-    const n = PROVIDER_HOURLY_BUDGET + 1; // exactly one account must be deferred.
-    const fetched = new Set<string>();
-    const accounts = Array.from({ length: n }, (_, i) => ({
-      usageKey: `claude:org=acct-${i}`,
-      agentId: 'claude' as const,
-      fetch: async () => { fetched.add(`claude:org=acct-${i}`); return { snapshot: sessionSnap(10, NOW), error: null }; },
-    }));
-    // Seed staggered capture times: acct-0 freshest (NOW-1m), acct-n stalest.
+  it('serves the STALEST account first when spacing frees a token', async () => {
+    const fetched: string[] = [];
+    const accounts = claudeAccounts(4, (key) => fetched.push(key));
+    // Seed staggered capture times: acct-3 stalest, acct-0 freshest. All due.
+    // A recent provider call means spacing grants no token this tick...
     const seed: Record<string, HeadroomEntry> = {};
     accounts.forEach((a, i) => {
-      seed[a.usageKey] = { ...baseEntry, capturedAt: NOW - (i + 1) * 60_000, nextRefreshAt: NOW - 1 };
+      seed[a.usageKey] = {
+        ...baseEntry,
+        capturedAt: NOW - (i + 1) * 60_000,
+        nextRefreshAt: NOW - 1,
+        // last provider call one full spacing ago ⇒ exactly one token this tick.
+        callTimestamps: i === 0 ? [NOW - PROVIDER_MIN_REFRESH_SPACING_MS] : [],
+      };
     });
     writeHeadroomEntries(seed);
 
@@ -438,10 +490,9 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
     });
-    expect(result.refreshed).toBe(PROVIDER_HOURLY_BUDGET);
-    expect(result.skippedBudget).toBe(1);
-    // The single deferred account is the FRESHEST one (acct-0, captured 1m ago).
-    expect(fetched.has('claude:org=acct-0')).toBe(false);
+    expect(result.refreshed).toBe(1);
+    // The one token went to the stalest account (acct-3), not the freshest.
+    expect(fetched).toEqual(['claude:org=acct-3']);
   });
 
   it('never calls a parked (backed-off) account, and it does not consume budget', async () => {
@@ -462,27 +513,41 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
     expect(result.refreshed).toBe(1);
   });
 
-  it('does not API-refresh an account a statusline ingest just captured for free', async () => {
+  it('does not API-refresh an account a statusline ingest just captured, and re-derives its headroom', async () => {
     let fetched = false;
     const key = 'claude:org=statusline-fresh';
+    // Prior sample so the burn projection has something to compute minutesToLimit from.
+    writeHeadroomEntries({
+      [key]: { ...baseEntry, capturedAt: NOW - 10 * 60_000, sessionUsedPercent: 50, nextRefreshAt: NOW - 1, callTimestamps: [] },
+    });
+    // The statusline wrote a fresh row 1 minute ago: 70% used (up from 50%).
+    const fresh = { ...sessionSnap(70, NOW - 60_000) };
     const result = await runUsageRefresh({
       now: NOW,
       listAccounts: async () => [
-        { usageKey: key, agentId: 'claude', fetch: async () => { fetched = true; return { snapshot: sessionSnap(10, NOW), error: null }; } },
+        { usageKey: key, agentId: 'claude', fetch: async () => { fetched = true; return { snapshot: sessionSnap(99, NOW), error: null }; } },
       ],
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
-      // Captured 1 minute ago by the free statusline ingest (< STATUSLINE_FRESH_MS).
-      lastCapturedAt: () => NOW - 60_000,
+      readCachedSnapshot: () => fresh,
     });
     expect(fetched).toBe(false);
     expect(result.skippedFresh).toBe(1);
     expect(result.refreshed).toBe(0);
-    // Rescheduled one interval past the free capture, not re-attempted every tick.
-    expect(readHeadroomEntry(key)?.nextRefreshAt).toBe(NOW - 60_000 + STATUSLINE_FRESH_MS);
+    const entry = readHeadroomEntry(key);
+    // Headroom is RE-DERIVED from the fresh statusline row, not frozen at the old sample.
+    expect(entry?.sessionUsedPercent).toBe(70);
+    expect(entry?.status).not.toBeNull();
+    // Prev sample (50% @ NOW-10m) → fresh (70% @ NOW-1m): 20% over 9 min = 2.22%/min,
+    // 30% left ⇒ 13.5 min to cap — computed from the REAL fresh capture time, not frozen.
+    expect(entry?.minutesToLimit).toBeCloseTo(13.5, 5);
+    // No API call recorded (statusline is free) ⇒ no call timestamp consumed budget.
+    expect(entry?.callTimestamps).toEqual([]);
+    // Rescheduled one interval past the free capture.
+    expect(entry?.nextRefreshAt).toBe(NOW - 60_000 + STATUSLINE_FRESH_MS);
   });
 
-  it('DOES API-refresh an account whose statusline capture has aged past the window', async () => {
+  it('DOES API-refresh an account whose cached row aged past the statusline-fresh window', async () => {
     let fetched = false;
     const result = await runUsageRefresh({
       now: NOW,
@@ -491,10 +556,121 @@ describe('provider budget — aggregate endpoint pressure does not scale with N'
       ],
       writeUsageCache: writeClaudeUsageCache,
       backoffUntil: () => null,
-      lastCapturedAt: () => NOW - (STATUSLINE_FRESH_MS + 60_000), // older than the window
+      readCachedSnapshot: () => sessionSnap(10, NOW - (STATUSLINE_FRESH_MS + 60_000)),
     });
     expect(fetched).toBe(true);
     expect(result.refreshed).toBe(1);
     expect(result.skippedFresh).toBe(0);
+  });
+
+  it('does NOT apply the statusline-fresh skip to a network:false provider (grok refreshes)', async () => {
+    let fetched = false;
+    // grok's cache is always its own last local-log write, so a "recent" capture
+    // must NOT suppress its refresh — only network providers get the skip.
+    const result = await runUsageRefresh({
+      now: NOW,
+      listAccounts: async () => [
+        { usageKey: 'grok:user=g', agentId: 'grok', fetch: async () => { fetched = true; return { snapshot: sessionSnap(10, NOW), error: null }; } },
+      ],
+      writeUsageCache: writeClaudeUsageCache,
+      backoffUntil: () => null,
+      readCachedSnapshot: () => sessionSnap(10, NOW - 1_000), // 1s ago
+    });
+    expect(fetched).toBe(true);
+    expect(result.refreshed).toBe(1);
+    expect(result.skippedFresh).toBe(0);
+  });
+});
+
+describe('BLOCKER reconciliation — a budget-paced fleet never collapses to NO_VERIFIED_USAGE', () => {
+  let cacheDir: string;
+  let prevHeadroom: string | null;
+  let prevUsage: string | null;
+
+  beforeEach(() => {
+    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agents-cli-sim-'));
+    prevHeadroom = setHeadroomCachePathForTest(path.join(cacheDir, '.usage-headroom.json'));
+    prevUsage = setClaudeUsageCachePathForTest(path.join(cacheDir, 'claude-usage.json'));
+  });
+
+  afterEach(() => {
+    setHeadroomCachePathForTest(prevHeadroom);
+    setClaudeUsageCachePathForTest(prevUsage);
+    fs.rmSync(cacheDir, { recursive: true, force: true });
+  });
+
+  // Build the router's freshness view of a provider straight from the usage cache
+  // the daemon just wrote, then apply the REAL rotate gates. This is the seam the
+  // reviewer's blocker lives on: budget-paced cadence vs the routing window.
+  const noVerifiedUsage = (keys: string[], now: number): { refuse: boolean; maxAgeMs: number; verified: number } => {
+    const pool = keys.map((usageKey) => {
+      const snap = readClaudeUsageCache(usageKey);
+      return { usageSnapshot: snap } as unknown as RotateCandidate;
+    });
+    const verified = pool.filter((c) => isUsageVerified(c, now)).length;
+    const refuse = verified === 0 && pool.some((c) => hasStaleUsage(c, now));
+    const maxAgeMs = Math.max(
+      0,
+      ...keys.map((k) => {
+        const cap = readClaudeUsageCache(k)?.capturedAt?.getTime();
+        return cap ? now - cap : 0;
+      }),
+    );
+    return { refuse, maxAgeMs, verified };
+  };
+
+  const runFleet = async (n: number, hours: number) => {
+    const keys = Array.from({ length: n }, (_, i) => `claude:org=acct-${i}`);
+    const accounts = keys.map((usageKey) => ({
+      usageKey,
+      agentId: 'claude' as const,
+      fetch: async () => ({ snapshot: sessionSnap(10, NOW), error: null }),
+    }));
+    const ticks = (hours * 60 * 60 * 1000) / USAGE_REFRESH_TICK_MS;
+    let totalFetches = 0;
+    let everRefused = false;
+    let worstAgeMs = 0;
+    let allWarm = false;
+    for (let tick = 0; tick < ticks; tick += 1) {
+      const now = NOW + tick * USAGE_REFRESH_TICK_MS;
+      const r = await runUsageRefresh({
+        now,
+        listAccounts: async () => accounts.map((a) => ({
+          ...a,
+          fetch: async () => ({ snapshot: sessionSnap(10, now), error: null }),
+        })),
+        writeUsageCache: writeClaudeUsageCache,
+        backoffUntil: () => null,
+      });
+      totalFetches += r.refreshed;
+      // Once every account has a snapshot, the fleet is warm; from then on the
+      // refusal must NEVER fire.
+      if (!allWarm) allWarm = keys.every((k) => readClaudeUsageCache(k) !== null);
+      if (allWarm) {
+        const v = noVerifiedUsage(keys, now);
+        if (v.refuse) everRefused = true;
+        worstAgeMs = Math.max(worstAgeMs, v.maxAgeMs);
+      }
+    }
+    return { totalFetches, everRefused, worstAgeMs, ticks };
+  };
+
+  it('8-account idle fleet: refusal never fires, every account stays under the routing window, load ~budget/hr', async () => {
+    const { totalFetches, everRefused, worstAgeMs, ticks } = await runFleet(8, 3);
+    expect(everRefused).toBe(false);
+    // No account ever reads as genuinely stale (the refusal bar)...
+    expect(worstAgeMs).toBeLessThan(USAGE_STALE_REFUSAL_MAX_AGE_MS);
+    // ...and the worst-case cadence tracks round-robin N × spacing (~16 min for 8
+    // accounts), not the unbounded 40-min stall a plain rolling cap produced.
+    expect(worstAgeMs).toBeLessThan(9 * PROVIDER_MIN_REFRESH_SPACING_MS);
+    // Aggregate endpoint load holds at ~budget/hr (NOT 8×12=96/hr).
+    const perHour = totalFetches / (ticks / ((60 * 60 * 1000) / USAGE_REFRESH_TICK_MS));
+    expect(perHour).toBeLessThanOrEqual(PROVIDER_HOURLY_BUDGET + PROVIDER_CATCHUP_MAX);
+  });
+
+  it('16-account idle fleet (realistic max): still no refusal, cadence still under the window', async () => {
+    const { everRefused, worstAgeMs } = await runFleet(16, 3);
+    expect(everRefused).toBe(false);
+    expect(worstAgeMs).toBeLessThan(USAGE_STALE_REFUSAL_MAX_AGE_MS);
   });
 });
