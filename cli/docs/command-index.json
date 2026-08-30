@@ -9971,7 +9971,7 @@
         },
         {
           "flags": "--kind <kinds>",
-          "description": "Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,promptcuts)",
+          "description": "Restrict to comma-separated resource kinds (commands,skills,hooks,rules,mcp,permissions,subagents,plugins,workflows,memory)",
           "long": "--kind",
           "required": true,
           "optional": false,
