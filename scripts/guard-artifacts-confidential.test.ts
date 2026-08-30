@@ -124,6 +124,19 @@ describe('checkPii', () => {
     expect(checkPii('git configured user@example.invalid for the test.')).toBeNull();
   });
 
+  test('does not flag user@host git-remote / ssh syntax (reviewer #3309)', () => {
+    // SCP / git-remote — colon+path after the host
+    expect(checkPii('clone via git@github.com:phnx-labs/agents-cli.git')).toBeNull();
+    expect(checkPii('git remote add origin git@gitlab.com:org/repo.git')).toBeNull();
+    // bare code-host domain mention
+    expect(checkPii('the git@github.com identity is the deploy key')).toBeNull();
+    // ssh/scp host reference (no colon)
+    expect(checkPii('ssh deploy@build-host.io for the release')).toBeNull();
+    expect(checkPii('scp -r report.html deploy@build-host.io')).toBeNull();
+    // ...but a real personal email in the same file still flags
+    expect(checkPii('owner muqsit@getrush.ai; clone git@github.com:o/r.git')).toMatch(/email/);
+  });
+
   test('flags an absolute home path with a real username', () => {
     expect(checkPii('cd /home/muqsit/src/github.com/foo && bun test')).toMatch(/home path/);
     expect(checkPii('opened /Users/bisma/Desktop/report.html')).toMatch(/home path/);
