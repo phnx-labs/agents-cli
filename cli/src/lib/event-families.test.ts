@@ -57,17 +57,21 @@ describe('applyFamilies / readUnifiedEvents', () => {
     expect(rows.some((r) => r.event === 'secrets.get')).toBe(true);
   });
 
-  it('--include runs keeps only run-dispatch outcomes', () => {
+  it('--include runs keeps run-dispatch outcomes AND the pre-launch marker', () => {
     setup();
     emit('run.dispatched', { module: 'run', agent: 'claude', version: '1', mode: 'plan', outcome: 'ok', exitCode: 0 });
+    emit('run.launch', { module: 'run', agent: 'claude', version: '2.1.219', strategy: 'balanced', signedIn: false, launchedLoggedOut: true, email: null });
     emit('secrets.get', { module: 'secrets' });
     emit('command.end', { module: 'run', command: 'run claude' });
     const rows = readUnifiedEvents({
       includeFamilies: ['runs'],
       limit: 50,
     });
-    expect(rows.length).toBe(1);
-    expect(rows[0].event).toBe('run.dispatched');
+    const events = rows.map((r) => r.event).sort();
+    expect(events).toEqual(['run.dispatched', 'run.launch']);
+    // The pre-launch marker carries the headline logged-out flag.
+    const launch = rows.find((r) => r.event === 'run.launch')!;
+    expect(launch.launchedLoggedOut).toBe(true);
   });
 
   it('--include activity skips ops', () => {
