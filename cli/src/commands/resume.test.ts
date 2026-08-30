@@ -1,5 +1,5 @@
 import { describe, expect, it, afterEach } from 'vitest';
-import { buildResumeRunArgs, buildResumeRemoteArgs } from './resume.js';
+import { buildProvisionalRunArgs, buildResumeRunArgs, buildResumeRemoteArgs } from './resume.js';
 import { consumeResumePinned, RESUME_PINNED_ENV } from '../lib/session/resume-owner.js';
 
 describe('buildResumeRunArgs', () => {
@@ -28,6 +28,24 @@ describe('buildResumeRunArgs', () => {
       '--mode',
       'edit',
       '--headless',
+    ]);
+  });
+});
+
+describe('buildProvisionalRunArgs', () => {
+  it('recreates an unmaterialized Claude identity instead of resuming a transcript that does not exist', () => {
+    expect(buildProvisionalRunArgs(
+      { id: '019fd0c8-b3e9-77a2-a1a4-444698c4d897', agent: 'claude' },
+      undefined,
+      { mode: 'plan', interactive: true },
+    )).toEqual([
+      'run',
+      'claude',
+      '--session-id',
+      '019fd0c8-b3e9-77a2-a1a4-444698c4d897',
+      '--mode',
+      'plan',
+      '--interactive',
     ]);
   });
 });
