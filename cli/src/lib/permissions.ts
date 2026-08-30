@@ -2114,3 +2114,148 @@ export function saveDefaultPermissionSet(set: PermissionSet): { success: boolean
   set.name = DEFAULT_PERMISSION_SET_NAME;
   return savePermissionSet(set);
 }
+
+// ============================================================================
+// Content-drift check (agents doctor, PHNX-3504)
+// ============================================================================
+
+/**
+ * Harnesses whose native permission file carries a per-rule allow/deny list the
+ * writer emits verbatim, so `agents doctor` can verify a group's rules survived
+ * into the version home rule-for-rule. The compare is done in the harness's OWN
+ * native vocabulary (Cursor `Shell(...)`, Droid command arrays, …) — NOT
+ * canonical — because every target's canonical round-trip is lossy
+ * (`lossyBecause` in `permissions-registry.ts`), so a canonical subset check
+ * would false-diff a correctly-synced home.
+ *
+ * Every other allowlist harness (codex/grok/kimi/kiro/antigravity/hermes/copilot)
+ * stores a lossy projection — a sandbox flag, whole-tool gate, per-directory
+ * approval, or a split/merged pattern — with no faithful per-group provenance, so
+ * doctor stays presence-only there and says so (`detail: 'format cannot verify
+ * content'`) rather than faking `ok`.
+ */
+export const PERMISSIONS_REPRESENTABLE: ReadonlySet<AgentId> = new Set<AgentId>([
+  'claude',
+  'opencode',
+  'cursor',
+  'droid',
+  'openclaw',
+]);
+
+interface NativeRuleSets {
+  allow: Set<string>;
+  deny: Set<string>;
+}
+
+function toStringSet(v: unknown): Set<string> {
+  return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+}
+
+function readJsonFileSafe(filePath: string): Record<string, unknown> | null {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+/** allow/deny rule strings in `agent`'s NATIVE vocabulary from its version home. */
+function homeNativePermissionRules(agent: AgentId, versionHome: string): NativeRuleSets | null {
+  const target = PERMISSION_TARGETS[agent];
+  if (!target) return null;
+  const configPath = target.home(versionHome);
+  if (!fs.existsSync(configPath)) return null;
+  switch (agent) {
+    case 'claude':
+    case 'cursor': {
+      const c = readJsonFileSafe(configPath);
+      const perms = (c?.permissions ?? {}) as Record<string, unknown>;
+      return { allow: toStringSet(perms.allow), deny: toStringSet(perms.deny) };
+    }
+    case 'droid': {
+      const c = readJsonFileSafe(configPath);
+      return { allow: toStringSet(c?.commandAllowlist), deny: toStringSet(c?.commandDenylist) };
+    }
+    case 'openclaw': {
+      const c = readJsonFileSafe(configPath);
+      const tools = (c?.tools ?? {}) as Record<string, unknown>;
+      return { allow: toStringSet(tools.alsoAllow), deny: toStringSet(tools.deny) };
+    }
+    case 'opencode': {
+      let c: Record<string, unknown> | null = null;
+      try {
+        c = JSON.parse(stripJsonComments(fs.readFileSync(configPath, 'utf-8'))) as Record<string, unknown>;
+      } catch { return null; }
+      const bash = ((c?.permission as Record<string, unknown> | undefined)?.bash ?? {}) as Record<string, unknown>;
+      const allow = new Set<string>();
+      const deny = new Set<string>();
+      for (const [pattern, action] of Object.entries(bash)) {
+        if (action === 'allow') allow.add(pattern);
+        else if (action === 'deny') deny.add(pattern);
+      }
+      return { allow, deny };
+    }
+    default:
+      return null;
+  }
+}
+
+/** allow/deny rule strings in `agent`'s NATIVE vocabulary the writer WOULD emit. */
+function expectedNativePermissionRules(agent: AgentId, set: PermissionSet): NativeRuleSets {
+  switch (agent) {
+    case 'claude': {
+      const c = convertToClaudeFormat(set);
+      return { allow: new Set(c.permissions.allow), deny: new Set(c.permissions.deny) };
+    }
+    case 'cursor': {
+      const c = convertToCursorFormat(set);
+      return { allow: new Set(c.permissions.allow), deny: new Set(c.permissions.deny ?? []) };
+    }
+    case 'droid': {
+      const c = convertToDroidFormat(set);
+      return { allow: new Set(c.commandAllowlist), deny: new Set(c.commandDenylist) };
+    }
+    case 'openclaw': {
+      const c = convertToOpenClawFormat(set);
+      return { allow: new Set(c.alsoAllow), deny: new Set(c.deny) };
+    }
+    case 'opencode': {
+      const c = convertToOpenCodeFormat(set);
+      const allow = new Set<string>();
+      const deny = new Set<string>();
+      for (const [pattern, action] of Object.entries(c.permission.bash)) {
+        if (action === 'allow') allow.add(pattern);
+        else if (action === 'deny') deny.add(pattern);
+      }
+      return { allow, deny };
+    }
+    default:
+      return { allow: new Set(), deny: new Set() };
+  }
+}
+
+/**
+ * True when permission GROUP `groupName` is faithfully present in `agent`'s
+ * version home — every rule the group renders into that harness's native format
+ * is on disk. Only meaningful for {@link PERMISSIONS_REPRESENTABLE} agents (the
+ * caller keeps the lossy harnesses presence-only); returns true for a lossy
+ * harness or an empty/header group so the caller does not down-rank it.
+ *
+ * The expected rules are re-derived from the CURRENT source group every call
+ * (never a stored hash), so a rule edited/added in the source group surfaces as
+ * drift even though the group name is unchanged (PHNX-3504).
+ */
+export function permissionsGroupMatches(
+  agent: AgentId,
+  versionHome: string,
+  groupName: string,
+): boolean {
+  if (!PERMISSIONS_REPRESENTABLE.has(agent)) return true;
+  const expected = expectedNativePermissionRules(agent, buildPermissionsFromGroups([groupName]));
+  if (expected.allow.size === 0 && expected.deny.size === 0) return true; // header / empty group
+  const home = homeNativePermissionRules(agent, versionHome);
+  if (!home) return false;
+  for (const r of expected.allow) if (!home.allow.has(r)) return false;
+  for (const r of expected.deny) if (!home.deny.has(r)) return false;
+  return true;
+}

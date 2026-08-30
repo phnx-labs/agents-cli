@@ -21,7 +21,13 @@ import { composeRules, composeRulesFromState, type RulesLayer } from './compose.
 // whitespace (if any) is captured so we can preserve it in the output.
 const IMPORT_RE = /(^|\s)@(\S+)/g;
 const MAX_DEPTH = 5;
-const COMPILED_HEADER =
+/**
+ * Header the non-@-import compile path (`agents refresh-rules` → compileRulesForAgent)
+ * prepends to a compiled instruction file. Exported so `doctor-diff` can strip it
+ * before content-comparing a home rules file against the raw preset composition —
+ * a header-compiled home must still reconcile (the header is not source content).
+ */
+export const COMPILED_HEADER =
   '<!-- Auto-compiled by agents-cli from ~/.agents/rules/AGENTS.md + imports.\n' +
   '     Edit the source files under ~/.agents/rules/ — edits to this file will be overwritten on next sync. -->\n\n';
 
