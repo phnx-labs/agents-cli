@@ -39,6 +39,7 @@ import {
 } from '../lib/feed/activity.js';
 import { projectKeyFromCwd } from '../lib/project-key.js';
 import { postFeedStatus } from '../lib/feed-post.js';
+import { linearIssueUrl } from '../lib/session/linear.js';
 import {
   parseFeedPostLevel,
   planFeedBroadcast,
@@ -855,6 +856,7 @@ async function broadcastPostedEvent(
     text: event.detail ?? '',
     level,
     ticket,
+    ticketUrl: linearIssueUrl(ticket),
     project: event.project,
     agent: event.agent,
     host: event.host,

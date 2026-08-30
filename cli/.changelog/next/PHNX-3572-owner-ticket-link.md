@@ -1,0 +1,1 @@
+- **Include clickable ticket links in every feed broadcast (PHNX-3572).** Ticket-backed posts now put the canonical Linear URL in the shared message delivered to private owner destinations and configured Slack channel sinks; repeated URL lines are deduplicated. Source: `cli/src/lib/feed-broadcast.ts`, `cli/src/commands/feed.ts`.
