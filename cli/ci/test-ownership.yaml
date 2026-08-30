@@ -310,6 +310,13 @@ testless:
   - .agents/**
   - assets/**
   - skills/**
+  # demo/ moved under assets/, and openspec/ + root agents.yaml + NPM_CONSOLIDATION.md
+  # were retired (PHNX-3229); kept mapped so those deletions/renames — which the
+  # selector reads as delete+add — never read as unmapped, same as apps/ext above.
+  - demo/**
+  - openspec/**
+  - agents.yaml
+  - NPM_CONSOLIDATION.md
   - native/**
   - apps/ios/**
   - cli/menubar/**
