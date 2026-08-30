@@ -342,31 +342,47 @@ export default {
       // skips the read entirely (nothing consumes it).
       const needExisting = !noRevision || auth.kind === 'phoenix';
       const existing = needExisting ? await env.BUCKET.get(path) : null;
-      let declared = 0;
-      let charge = 0;
-      let quotaLimits = null;
+      // Enforcement measures the REAL request body, never a client-declared size.
+      // A spoofed-low content-length must NOT (a) slip an oversized body past the
+      // per-file cap, (b) let real bytes exceed the total quota, or — most
+      // dangerously — (c) reach the destructive revision-copy + canonical
+      // overwrite before the size is known and DESTROY the existing page. So for a
+      // Phoenix write we buffer the body bounded by the plan's per-file cap and
+      // reject on the REAL size BEFORE any write; only then do we copy the
+      // revision and store the buffered bytes. BYO streams unbuffered (uncapped,
+      // its own bucket).
+      let putBody = request.body;
       if (auth.kind === 'phoenix') {
-        // content-length is the authoritative declared size; x-share-bytes is the
-        // CLI's belt-and-suspenders header for a proxy that strips content-length.
-        declared = parseInt(request.headers.get('content-length') || request.headers.get('x-share-bytes') || '', 10);
-        if (!Number.isFinite(declared) || declared < 0) {
-          return json({ error: 'content-length required' }, 411);
+        const limits = planLimits((await readUsage(env, auth.owner)).usage.plan);
+        // Fast-reject an HONEST oversized content-length without reading the body.
+        // A dishonest (absent or lied-low) length falls through to the bounded
+        // read below, which measures the truth.
+        const declaredLen = parseInt(request.headers.get('content-length') || '', 10);
+        if (Number.isFinite(declaredLen) && declaredLen > limits.maxFileBytes) {
+          return json({ error: 'file too large', maxBytes: limits.maxFileBytes, gotBytes: declaredLen }, 413);
         }
+        // readBodyBounded aborts the moment it passes the cap, so a chunked/
+        // streaming body can never buffer more than the cap (+ one chunk).
+        const read = await readBodyBounded(request, limits.maxFileBytes);
+        if (read.oversize) {
+          return json({ error: 'file too large', maxBytes: limits.maxFileBytes, gotBytes: read.size }, 413);
+        }
+        const realBytes = read.size;
         const existingSize = existing && typeof existing.size === 'number' ? existing.size : 0;
         const newCanonical = !existing;
         // Keeping a revision retains the old canonical bytes AND adds the new
-        // ones, so storage grows by the full declared size. A no-revision or first
-        // publish grows by declared minus the bytes it replaces (may be negative
-        // on a shrink; the ledger clamps at >= 0).
-        charge = (!noRevision && existing) ? declared : declared - existingSize;
+        // ones, so storage grows by the full new size. A no-revision or first
+        // publish grows by new minus the bytes it replaces (may be negative on a
+        // shrink; the ledger clamps at >= 0).
+        const charge = (!noRevision && existing) ? realBytes : realBytes - existingSize;
         const charged = await chargeShareWrite(env, auth, {
           charge: charge,
           newCanonical: newCanonical,
-          fileBytes: declared,
+          fileBytes: realBytes,
           countRate: true,
         });
-        if (charged.error) return charged.error;
-        quotaLimits = charged.limits;
+        if (charged.error) return charged.error; // rejected BEFORE any destructive write
+        putBody = read.bytes;
       }
 
       if (!noRevision && existing) {
@@ -380,26 +396,10 @@ export default {
         });
       }
 
-      const putRes = await env.BUCKET.put(path, request.body, {
+      await env.BUCKET.put(path, putBody, {
         httpMetadata: { contentType },
         customMetadata,
       });
-      // Spoof backstop (managed only): R2 reports the stored object's real byte
-      // size. Reconcile the ledger against it, and if a hand-crafted client lied
-      // low on content-length to slip past the per-file cap, undo the write and
-      // refund. For legit CLI traffic (a materialized Buffer) declared === real,
-      // so this is a no-op on the happy path.
-      if (auth.kind === 'phoenix' && quotaLimits && putRes && typeof putRes.size === 'number') {
-        const realSize = putRes.size;
-        if (realSize > quotaLimits.maxFileBytes) {
-          await env.BUCKET.delete(path);
-          await refundShareWrite(env, auth.owner, { refund: charge, freeCanonical: !existing });
-          return json({ error: 'file too large', maxBytes: quotaLimits.maxFileBytes, gotBytes: realSize }, 413);
-        }
-        if (realSize !== declared) {
-          await adjustUsageBytes(env, auth.owner, realSize - declared);
-        }
-      }
       // A managed republish may change the title/description. Invalidate only
       // its generated sibling so the next crawler receives a fresh card; BYO
       // publishes send no OG metadata and keep their explicitly uploaded cover.
@@ -1606,14 +1606,37 @@ async function chargeShareWrite(env, auth, params) {
   return { limits: out.limits };
 }
 
-// Post-write bytes-only reconcile: correct the ledger by (realSize - declared)
-// after R2 reports the true stored size. Never rejects.
-async function adjustUsageBytes(env, owner, delta) {
-  if (!delta) return;
-  await withUsage(env, owner, function (usage) {
-    usage.bytes = Math.max(0, usage.bytes + delta);
-    return { commit: usage };
-  });
+// Read a request body fully into memory, BOUNDED: abort the moment it exceeds
+// maxBytes, so a chunked/streaming body can never buffer more than the cap (plus
+// one in-flight chunk) and OOM the Worker. Returns { oversize: true, size } once
+// the cap is passed (size is a lower bound, >= cap), else { bytes, size } with
+// the exact bytes. A body-less request yields an empty buffer. This is what lets
+// enforcement key on the REAL size instead of a spoofable declared header.
+async function readBodyBounded(request, maxBytes) {
+  if (!request.body || typeof request.body.getReader !== 'function') {
+    const buf = await request.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    if (bytes.byteLength > maxBytes) return { oversize: true, size: bytes.byteLength };
+    return { bytes: bytes, size: bytes.byteLength };
+  }
+  const reader = request.body.getReader();
+  const chunks = [];
+  let size = 0;
+  while (true) {
+    const step = await reader.read();
+    if (step.done) break;
+    const chunk = step.value;
+    size += chunk.byteLength;
+    if (size > maxBytes) {
+      try { await reader.cancel(); } catch (e) { /* best-effort */ }
+      return { oversize: true, size: size };
+    }
+    chunks.push(chunk);
+  }
+  const out = new Uint8Array(size);
+  let offset = 0;
+  for (let i = 0; i < chunks.length; i++) { out.set(chunks[i], offset); offset += chunks[i].byteLength; }
+  return { bytes: out, size: size };
 }
 
 // Refund on DELETE / expiry. Never rejects, never creates a ledger: if the owner
