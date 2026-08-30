@@ -110,12 +110,31 @@ export function planOwnerForward(
  * unreachable / not a dialable device / answered with unparseable output —
  * every one of which means "try the next peer".
  */
-export type PeerOwnerSender = (machine: string, text: string, channel: string, target: string) => Promise<SendResult | undefined>;
+export interface PeerOwnerEnvelope {
+  thread?: string;
+  from?: string;
+}
 
-async function sendOnPeer(machine: string, text: string, channel: string, target: string): Promise<SendResult | undefined> {
+export type PeerOwnerSender = (
+  machine: string,
+  text: string,
+  channel: string,
+  target: string,
+  envelope?: PeerOwnerEnvelope,
+) => Promise<SendResult | undefined>;
+
+async function sendOnPeer(
+  machine: string,
+  text: string,
+  channel: string,
+  target: string,
+  envelope: PeerOwnerEnvelope = {},
+): Promise<SendResult | undefined> {
   const peer = await resolvePeerTarget(machine);
   if (!peer) return undefined;
   const args = ['send', '--channel', channel, '--to', target, '--text', text, '--json'];
+  if (envelope.thread) args.push('--thread', envelope.thread);
+  if (envelope.from) args.push('--from', envelope.from);
   // Reuse the one injection-tested remote-command builder every `--device`
   // dispatch uses (posix `bash -lc` / Windows `-EncodedCommand`), rather than a
   // second hand-rolled quoting path on a security-sensitive seam. The env map is
@@ -148,7 +167,7 @@ export async function forwardOwnerNotifyToPeer(
   channel: string,
   target: string,
   meta: Meta,
-  opts: { self?: string; devices?: DeviceProfile[]; send?: PeerOwnerSender } = {},
+  opts: { self?: string; devices?: DeviceProfile[]; send?: PeerOwnerSender; envelope?: PeerOwnerEnvelope } = {},
 ): Promise<SendResult | undefined> {
   // Cheap, I/O-free gate first: a box that already received a forward, or an
   // owner channel that isn't the macOS-only rush family, can never forward — so
@@ -171,7 +190,7 @@ export async function forwardOwnerNotifyToPeer(
 
   const send = opts.send ?? sendOnPeer;
   for (const machine of plan.candidates) {
-    const result = await send(machine, text, channel, target);
+    const result = await send(machine, text, channel, target, opts.envelope);
     if (result?.ok) return result;
   }
   return undefined;

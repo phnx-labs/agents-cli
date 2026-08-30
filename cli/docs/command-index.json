@@ -14453,7 +14453,7 @@
             },
             {
               "flags": "--notify [channel]",
-              "description": "Notify the owner (notify.owner); [channel] overrides the owner channel",
+              "description": "Notify every normal-policy owner channel; [channel] selects one channel",
               "long": "--notify",
               "required": false,
               "optional": true,

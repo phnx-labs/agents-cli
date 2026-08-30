@@ -379,6 +379,13 @@ describe.skipIf(process.platform === 'win32')('sendToOwner forwards over SSH on 
     expect(fs.existsSync(sshRecord)).toBe(false);
   });
 
+  it('fails loud instead of claiming a cross-device attachment was delivered', async () => {
+    const result = await sendToOwner('ship it', { meta: ownerMeta, attachments: ['/tmp/evidence.png'] });
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain('attachments cannot be forwarded');
+    expect(fs.existsSync(sshRecord)).toBe(false);
+  });
+
   it('does not forward for a Linux-capable transport — only the rush family hops', async () => {
     const meta = {
       notify: { owner: { channel: 'telegram', to: 'c1' }, transports: { telegram: 'openclaw-telegram' } },
