@@ -2,8 +2,6 @@
 
 ## 1.22.64
 
-- **Remote provisional Claude tabs reopen once instead of bouncing across the fleet (PHNX-3587).** When VS Code reloaded before an offloaded Claude launch had written its first transcript, `agents sessions resume` found the dispatcher's synthetic session row, hopped to the target, then let the target search the fleet and rediscover the same synthetic row. The repeated routing printed reconnect banners and eventually returned to the shell without Claude. An owner hop now performs one local lookup: it resumes a materialized transcript, or recreates the exact forced Claude session identity when the transcript has not materialized yet. Source: `src/commands/resume.ts`.
-
 - **`agents accounts attach` bootstraps a keychain-less Linux worker (PHNX-3502).**
   Attaching a Claude account to a version home on a headless worker now seeds the
   home's identity and writes its `.oauth_token` from the account's non-rotating
