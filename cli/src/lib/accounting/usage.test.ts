@@ -1819,11 +1819,13 @@ describe('getUsageInfo(codex) — usage is scoped to the current login', () => {
 
 describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
   let home: string;
-  // Grok's log resolution falls back to the shared real home (os.homedir()),
-  // so pin HOME to a temp dir for the whole block — otherwise these tests would
-  // read the developer's real ~/.grok/logs/unified.jsonl and go non-deterministic.
+  // Grok's log resolution falls back to the shared real home
+  // (AGENTS_REAL_HOME || os.homedir()), so pin BOTH to a temp dir for the whole
+  // block — otherwise these tests would read the developer's real
+  // ~/.grok/logs/unified.jsonl and go non-deterministic.
   let sharedHome: string;
   let prevHome: string | undefined;
+  let prevRealHome: string | undefined;
   const HOUR = 60 * 60 * 1000;
   const DAY = 24 * HOUR;
 
@@ -1831,11 +1833,15 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     home = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-'));
     sharedHome = fs.mkdtempSync(path.join(os.tmpdir(), 'grok-usage-shared-'));
     prevHome = process.env.HOME;
+    prevRealHome = process.env.AGENTS_REAL_HOME;
     process.env.HOME = sharedHome;
+    process.env.AGENTS_REAL_HOME = sharedHome;
   });
   afterEach(() => {
     if (prevHome === undefined) delete process.env.HOME;
     else process.env.HOME = prevHome;
+    if (prevRealHome === undefined) delete process.env.AGENTS_REAL_HOME;
+    else process.env.AGENTS_REAL_HOME = prevRealHome;
     fs.rmSync(home, { recursive: true, force: true });
     fs.rmSync(sharedHome, { recursive: true, force: true });
   });
