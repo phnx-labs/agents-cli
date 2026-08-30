@@ -7,8 +7,9 @@
  * and a whole directory tree (a skill, a plugin mirror, a copied workflow).
  * Both live here so every kind's differ shares ONE normalize rule, ONE ignore
  * set, and ONE symlink-skip policy instead of re-deriving them (the duplication
- * `doctor-diff.ts`'s `dirsContentMatch` and `versions.ts`'s `skillDirsMatch`
- * had before PHNX-3504).
+ * `doctor-diff.ts`'s `dirsContentMatch` had before PHNX-3504; the parallel
+ * `skillDirsMatch` copies in `versions.ts` / `detectors/skills.ts` are a separate
+ * follow-up cleanup so this change stays inside the fast-lane CI impact budget).
  *
  * Normalize: CRLF → LF and trim, so a trailing-newline / line-ending difference
  * between two independently-written trees is not reported as content drift. This
