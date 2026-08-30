@@ -254,6 +254,36 @@ has no per-viewer login, so `share open` fails loud pointing at
 the mint, which the CLI turns into an `agents artifacts share update` hint
 (`share.ts` `runShareOpen`).
 
+## Quotas & limits — managed publishing (PHNX-3542)
+
+The managed endpoint (`share.agents-cli.sh`) is shared infrastructure, so a
+Phoenix-identity publish is metered per user. Every authenticated PUT is charged
+against a per-user usage ledger — a single R2 object at `__usage/<owner>`, updated
+with a conditional-put compare-and-swap loop (the same primitive the metadata-edit
+PATCH uses; no Durable Object, no extra binding). The **free** tier:
+
+| Limit | Free tier | Over-limit response |
+|---|---|---|
+| Total stored bytes | 200 MiB | `413` `storage limit reached` |
+| Canonical pages | 150 | `413` `artifact limit reached` |
+| Per-file size | 20 MiB | `413` `file too large` |
+| Publishes per hour | 60 | `429` `rate limit …` (+ `Retry-After`) |
+
+A managed PUT that declares no size (neither `content-length` nor the CLI's
+`x-share-bytes` header) is refused with `411 content-length required` — the Worker
+must know the size before it stores anything. The quota counts **canonical pages
+plus their retained revisions**; a republish that keeps a revision is charged the
+full new size (the old bytes stay as a revision). Server-generated **OG covers and
+view counters are overhead, excluded from the quota**. Deleting a page refunds its
+bytes and object slot; an expired page is refunded on its lazy delete.
+
+The `SHARE_PLANS` map in `worker-template.ts` is the plan seam — only `free` is
+defined today; paid tiers and the field that sets a user's plan arrive with
+billing (follow-up). Enforcement is **managed-only**: a **BYO** deployment (a
+`WRITE_TOKEN` publish to the operator's own Cloudflare bucket) writes at the
+operator's own cost and **skips all four limits** — a deliberate policy, not a
+silent gap.
+
 ## Related
 
 - [observability.md](observability.md) — the publication boundary (bearer-gated

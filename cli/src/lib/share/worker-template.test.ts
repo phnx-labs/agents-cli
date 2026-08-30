@@ -47,6 +47,14 @@ function makeEnv() {
         // The Worker forwards request.body (a ReadableStream) — consume it so the
         // fake records a real byte size, exactly as R2 would.
         const buf = body == null ? Buffer.alloc(0) : Buffer.from(await new Response(body as BodyInit).arrayBuffer());
+        // Consuming the body yielded the event loop, so re-verify the precondition
+        // right before the write — real R2 CAS is atomic, and without this
+        // re-check two concurrent conditional puts could both pass the earlier
+        // check and clobber each other (a TOCTOU the fake would otherwise add).
+        if (opts.onlyIf?.etagMatches) {
+          const now = store.get(key);
+          if (!now || now.etag !== opts.onlyIf.etagMatches) return null;
+        }
         const rawHttp = opts.httpMetadata as { contentType?: string } | Headers | undefined;
         const httpMetadata = rawHttp instanceof Headers
           ? { contentType: rawHttp.get('content-type') ?? undefined }
@@ -63,6 +71,19 @@ function makeEnv() {
         });
         return { etag, httpEtag: `"${etag}"`, size: buf.length };
       },
+      // Real R2 head() returns the object's metadata (incl. size) with no body —
+      // the Worker uses it to size a page before DELETE for the quota refund.
+      head: async (key: string) => {
+        const item = store.get(key);
+        if (!item) return null;
+        return {
+          customMetadata: item.customMetadata,
+          uploaded: new Date(item.uploaded),
+          etag: item.etag,
+          httpEtag: `"${item.etag}"`,
+          size: item.size,
+        };
+      },
       get: async (key: string) => {
         const item = store.get(key);
         if (!item) return null;
@@ -72,6 +93,10 @@ function makeEnv() {
           uploaded: new Date(item.uploaded),
           etag: item.etag,
           httpEtag: `"${item.etag}"`,
+          // Real R2 get() exposes size on the returned body object; the Worker
+          // reads existing.size for the quota charge math and obj.size on the
+          // expiry lazy-delete refund.
+          size: item.size,
           // R2 objects expose text()/arrayBuffer(); the Worker reads text() to
           // inject the attribution bar, so the fake must too.
           text: async () => Buffer.from(item.body).toString('utf8'),
@@ -103,6 +128,7 @@ function makeEnv() {
 
 let loadedWorker: Promise<any> | undefined;
 let originalHooks: Record<string, unknown> | undefined;
+let fetchWrapped = false;
 
 async function loadWorker() {
   // The Worker source is an ES module. A data: URI used to work, but HMAC
@@ -117,6 +143,26 @@ async function loadWorker() {
   const worker = await loadedWorker;
   if (!originalHooks) originalHooks = { ...worker.hooks };
   Object.assign(worker.hooks, originalHooks);
+  // Emulate the HTTP layer the Worker runs behind (PHNX-3542): a real managed
+  // PUT always carries its body size — Cloudflare populates content-length, and
+  // the CLI additionally sends x-share-bytes. content-length is a *forbidden*
+  // header name (unsettable via `new Request`), so the harness declares the size
+  // through x-share-bytes for any PUT that omits it, matching what a real publish
+  // carries. A test that asserts the missing-size 411 sends an explicit
+  // non-numeric x-share-bytes, which is present and so left untouched here.
+  if (!fetchWrapped) {
+    const rawFetch = worker.default.fetch.bind(worker.default);
+    worker.default.fetch = async (request: Request, env: unknown, ctx?: unknown) => {
+      if (request.method === 'PUT' && !request.headers.get('x-share-bytes') && !request.headers.get('content-length')) {
+        const buf = Buffer.from(await request.arrayBuffer());
+        const headers = new Headers(request.headers);
+        headers.set('x-share-bytes', String(buf.length));
+        request = new Request(request.url, { method: 'PUT', headers, body: buf });
+      }
+      return rawFetch(request, env, ctx);
+    };
+    fetchWrapped = true;
+  }
   return worker;
 }
 
@@ -2180,5 +2226,168 @@ describe('owner interactive visibility control + page stats (bar live)', () => {
     expect(res.status).toBe(200);
     const payload = await res.json();
     expect(payload.count).toBe(1);
+  });
+});
+
+describe('PHNX-3542 per-user storage quota, rate limit, and size cap', () => {
+  const MiB = 1024 * 1024;
+  const OWNER = 'u1';
+
+  function setupPhoenix(worker: any, env: any) {
+    env.PHOENIX_ID_BASE = 'https://phoenix.test';
+    worker.hooks.verifyPhoenixToken = async (req: Request) =>
+      req.headers.get('authorization') ? { userId: OWNER, email: 'octocat@acme.com' } : null;
+  }
+
+  async function phoenixPut(worker: any, env: any, key: string, body: string, headers: Record<string, string> = {}) {
+    return worker.default.fetch(
+      new Request(`https://share.test/${key}`, {
+        method: 'PUT',
+        headers: {
+          authorization: 'Bearer phoenix',
+          'content-type': 'text/html; charset=utf-8',
+          'x-share-bytes': String(Buffer.byteLength(body)),
+          ...headers,
+        },
+        body,
+      }),
+      env,
+    );
+  }
+
+  function seedUsage(store: Map<string, StoredObject>, usage: Record<string, unknown>) {
+    const body = Buffer.from(JSON.stringify(usage));
+    store.set(`__usage/${OWNER}`, {
+      body,
+      httpMetadata: { contentType: 'application/json' },
+      customMetadata: {},
+      uploaded: new Date().toISOString(),
+      size: body.length,
+      etag: 'usage-seed',
+    });
+  }
+
+  function readLedger(store: Map<string, StoredObject>): any {
+    const item = store.get(`__usage/${OWNER}`);
+    if (!item) return null;
+    return JSON.parse(item.body.toString('utf8'));
+  }
+
+  it('rejects a file over the per-file size cap with 413', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    setupPhoenix(worker, env);
+    // A tiny body but a declared size over the 20 MiB per-file cap — rejected
+    // before any R2 write.
+    const res = await phoenixPut(worker, env, 'octocat/big', 'tiny-decoy', { 'x-share-bytes': String(21 * MiB) });
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe('file too large');
+  });
+
+  it('411s a managed PUT that declares no usable size', async () => {
+    const worker = await loadWorker();
+    const { env } = makeEnv();
+    setupPhoenix(worker, env);
+    // A present-but-non-numeric declared size (as a length-stripping proxy or a
+    // hand-crafted client would leave it) parses to NaN → fail loud with 411.
+    const res = await phoenixPut(worker, env, 'octocat/nolen', 'body', { 'x-share-bytes': 'not-a-number' });
+    expect(res.status).toBe(411);
+    expect((await res.json()).error).toBe('content-length required');
+  });
+
+  it('rejects the (maxObjects + 1)th canonical page with 413', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env);
+    // Seed a ledger already at the object cap (rlStart=0 so the rate window
+    // resets and the 60/hr limit does not fire first).
+    seedUsage(store, { bytes: 0, count: 150, plan: 'free', rlStart: 0, rlUsed: 0 });
+    const res = await phoenixPut(worker, env, 'octocat/over-limit', '<title>one more</title>');
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe('artifact limit reached');
+  });
+
+  it('rejects a publish that exceeds the total byte quota with 413', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env);
+    seedUsage(store, { bytes: 200 * MiB, count: 1, plan: 'free', rlStart: 0, rlUsed: 0 });
+    const res = await phoenixPut(worker, env, 'octocat/spill', '<title>over quota</title>');
+    expect(res.status).toBe(413);
+    expect((await res.json()).error).toBe('storage limit reached');
+  });
+
+  it('rate-limits past the hourly publish cap with 429 + Retry-After', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env);
+    // Seed the window as fresh and already at the cap so the next publish is #61.
+    seedUsage(store, { bytes: 0, count: 0, plan: 'free', rlStart: Date.now(), rlUsed: 60 });
+    const res = await phoenixPut(worker, env, 'octocat/too-fast', '<title>rapid</title>');
+    expect(res.status).toBe(429);
+    expect((await res.json()).error).toContain('rate limit');
+    const retryAfter = Number(res.headers.get('retry-after'));
+    expect(retryAfter).toBeGreaterThan(0);
+    expect(retryAfter).toBeLessThanOrEqual(3600);
+  });
+
+  it('charges each authed PUT and refunds bytes + object count on DELETE', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env);
+
+    const page1 = 'a'.repeat(100);
+    const page2 = 'b'.repeat(50);
+    expect((await phoenixPut(worker, env, 'octocat/plan', page1)).status).toBe(200);
+    expect((await phoenixPut(worker, env, 'octocat/plan2', page2)).status).toBe(200);
+
+    const afterPublish = readLedger(store);
+    expect(afterPublish.count).toBe(2);
+    expect(afterPublish.bytes).toBe(150);
+
+    const del = await worker.default.fetch(
+      new Request('https://share.test/octocat/plan', {
+        method: 'DELETE',
+        headers: { authorization: 'Bearer phoenix' },
+      }),
+      env,
+    );
+    expect(del.status).toBe(200);
+
+    const afterDelete = readLedger(store);
+    expect(afterDelete.count).toBe(1);
+    expect(afterDelete.bytes).toBe(50);
+  });
+
+  it('holds the object count under concurrent publishes (CAS, no lost increment)', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    setupPhoenix(worker, env);
+    // Seed an EXISTING empty ledger so both writers hit the conditional-put CAS
+    // path (a fresh-key create is unconditional by design); one wins, the other
+    // re-reads and retries, so neither increment is lost.
+    seedUsage(store, { bytes: 0, count: 0, plan: 'free', rlStart: Date.now(), rlUsed: 0 });
+    const [a, b] = await Promise.all([
+      phoenixPut(worker, env, 'octocat/a', 'x'.repeat(10)),
+      phoenixPut(worker, env, 'octocat/b', 'y'.repeat(20)),
+    ]);
+    expect(a.status).toBe(200);
+    expect(b.status).toBe(200);
+    const ledger = readLedger(store);
+    expect(ledger.count).toBe(2);
+    expect(ledger.bytes).toBe(30);
+  });
+
+  it('BYO WRITE_TOKEN publishes skip every quota, rate, and size limit', async () => {
+    const worker = await loadWorker();
+    const { env, store } = makeEnv();
+    // A 25 MiB declared upload plus 200 rapid publishes — all allowed for BYO,
+    // and no usage ledger is ever created.
+    await put(worker, env, 'byo/big', 'decoy', { 'x-share-bytes': String(25 * MiB) });
+    for (let i = 0; i < 200; i++) {
+      await put(worker, env, `byo/page-${i}`, 'hello', { 'x-share-bytes': String(5) });
+    }
+    const usageKeys = [...store.keys()].filter((k) => k.startsWith('__usage/'));
+    expect(usageKeys).toEqual([]);
   });
 });

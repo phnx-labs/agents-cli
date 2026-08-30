@@ -43,7 +43,11 @@ visibility levels (`ShareVisibility`, `src/lib/share/publish.ts`): `public`
 gallery-hidden), `me` (owner-only, Phoenix-gated), and `org` (anyone at the
 **sharer's** email domain, Phoenix-gated). `org` is refused on a public-inbox
 domain (`PUBLIC_INBOX_DOMAINS` in `src/lib/share/worker-template.ts`), so it needs a
-workspace-domain Google account, never a personal `gmail.com`. The full model is
+workspace-domain Google account, never a personal `gmail.com`. Managed publishes
+are metered per user against a free-tier storage quota, object limit, per-file size
+cap, and publish rate limit (a CAS ledger at `__usage/<owner>`; fails loud with
+`413`/`429`/`411`), while a BYO `WRITE_TOKEN` publish to the operator's own bucket
+skips all four (PHNX-3542). The full model is
 [`docs/share.md`](docs/share.md); the publication boundary is
 [`docs/observability.md`](docs/observability.md).
 
