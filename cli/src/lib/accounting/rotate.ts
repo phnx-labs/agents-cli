@@ -1023,8 +1023,12 @@ function readRotationStamp(agent: AgentId): string | null {
   return null;
 }
 
-/** Cap on candidates serialized into a rotation decision event — bounds the
- *  log line while still covering a full fleet's account pool (~19 today). */
+/** Cap on candidates serialized into a rotation decision event — a pathological
+ *  backstop on the log line; a real fleet is ~19 accounts, well under it. The
+ *  candidates are emitted as a keyed OBJECT (not an array) so the event sink's
+ *  generic `sanitizeNested` does not truncate them to its 10-element array cap
+ *  (feed/events.ts) — an object is recursed uncapped, so the whole pool up to
+ *  this bound survives. */
 const ROTATION_EVENT_CANDIDATE_CAP = 32;
 
 /**
@@ -1056,7 +1060,11 @@ function describeRotationCandidate(c: RotateCandidate, nowMs: number): Record<st
     email: c.email,
     version: c.version,
     signedIn: c.signedIn,
-    authVerdict: c.authVerdict,
+    // NOT `authVerdict`: the event sink's generic sanitizer redacts any payload
+    // key matching /auth/i to "[REDACTED]" (feed/events.ts SENSITIVE_PAYLOAD_KEY),
+    // which would silently blank this field on every row. `credentialVerdict`
+    // carries the same value ('revoked'/null/…) past the redaction.
+    credentialVerdict: c.authVerdict,
     usageStatus: c.usageStatus,
     tier,
     source: snap?.source ?? null,
@@ -1122,9 +1130,38 @@ export function buildRotationDecisionEvent(
     healthy: rotation.healthy.length,
     excluded: rotation.excluded.length,
     freshness: tally,
-    candidates: pool.slice(0, ROTATION_EVENT_CANDIDATE_CAP).map((c) => describeRotationCandidate(c, nowMs)),
+    // Keyed by the candidate's local version home (unique per candidate on a
+    // device) rather than an array, so the sink cannot truncate it to 10 (see
+    // ROTATION_EVENT_CANDIDATE_CAP). The key is structural only — cross-device
+    // identity is each row's `usageKey`. `candidatesTotal` reveals any overflow
+    // past the cap.
+    candidates: Object.fromEntries(
+      pool.slice(0, ROTATION_EVENT_CANDIDATE_CAP).map((c) => [c.version, describeRotationCandidate(c, nowMs)]),
+    ),
     candidatesTotal: pool.length,
   };
+}
+
+/**
+ * Build AND emit a rotation decision event without ever letting an observability
+ * bug crash a live route. `emit` swallows its own IO errors, but the payload
+ * ARGUMENT is evaluated before `emit` is called, so a future null-deref inside
+ * `describeRotationCandidate` would otherwise propagate into `resolveRunVersion`
+ * and abort the launch. This wraps both build and emit, so the worst case is a
+ * lost log line, never a failed run.
+ */
+function emitRotationDecision(
+  event: 'rotation.resolved' | 'rotation.unresolved',
+  rotation: RotateResult,
+  agent: AgentId,
+  strategy: RunStrategy,
+  extra: EventPayload = {},
+): void {
+  try {
+    emit(event, { ...buildRotationDecisionEvent(rotation, agent, strategy), ...extra });
+  } catch {
+    /* observability must never break a route */
+  }
 }
 
 /**
@@ -1187,8 +1224,7 @@ export async function resolveRunVersion(
   const refuseStaleUsage = (
     rotation: RotateResult,
   ): { version: string | null; rotation: RotateResult; noVerifiedUsage: true } => {
-    emit('rotation.unresolved', {
-      ...buildRotationDecisionEvent(rotation, agent, strategy),
+    emitRotationDecision('rotation.unresolved', rotation, agent, strategy, {
       reason: 'no_verified_usage',
     });
     return { version: null, rotation, noVerifiedUsage: true };
@@ -1208,7 +1244,7 @@ export async function resolveRunVersion(
       // trap through the pinned path — PR #3295 review).
       if (rotation && rotation.noVerifiedUsage) return refuseStaleUsage(rotation);
       if (rotation) {
-        emit('rotation.resolved', buildRotationDecisionEvent(rotation, agent, strategy));
+        emitRotationDecision('rotation.resolved', rotation, agent, strategy);
         return { version: rotation.picked.version, rotation };
       }
       return {
@@ -1239,7 +1275,7 @@ export async function resolveRunVersion(
       }
       recordRotationPick(agent, rotation.picked.version);
     }
-    emit('rotation.resolved', buildRotationDecisionEvent(rotation, agent, strategy));
+    emitRotationDecision('rotation.resolved', rotation, agent, strategy);
     return { version: rotation.picked.version, rotation };
   }
 

@@ -30,6 +30,7 @@ import {
   type RotateResult,
   type FailoverArmingContext,
 } from './rotate.js';
+import { emit, _resetForTest } from '../feed/events.js';
 import { getVersionsDir } from '../state.js';
 import { invalidateInstalledVersionsCache } from '../installations/versions.js';
 import { runWithFallback } from '../exec.js';
@@ -1315,7 +1316,7 @@ describe('buildRotationDecisionEvent (the observability contract for a bad pick)
     windows: Array<{ key: string; usedPercent: number }>;
   };
   const byKey = (ev: ReturnType<typeof buildRotationDecisionEvent>, key: string) =>
-    (ev.candidates as EventCandidate[]).find((c) => c.usageKey === key)!;
+    Object.values(ev.candidates as Record<string, EventCandidate>).find((c) => c.usageKey === key)!;
 
   it('records the pick identity, per-candidate tier/staleness, and a freshness tally', () => {
     const now = Date.now();
@@ -1360,6 +1361,47 @@ describe('buildRotationDecisionEvent (the observability contract for a bad pick)
     expect(l.eligible).toBe(false);
     expect(l.excludedReason).toBe('rate_limited');
     expect(byKey(ev, 'claude:org=verified').eligible).toBe(true);
+  });
+
+  // The two blockers PR #3320 review caught both lived at the emit()/sanitizer
+  // boundary, which the in-memory assertions above never cross. This drives a
+  // real emit() into a redirected sink and reads the persisted JSONL back, so a
+  // regression that (a) redacts a field by name or (b) truncates the candidate
+  // set is caught where it actually happens.
+  it('survives the real emit() sanitizer: credentialVerdict not redacted, no 10-item truncation', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rot-ev-'));
+    const logPath = path.join(dir, 'events.jsonl');
+    try {
+      _resetForTest(logPath);
+      // 15 candidates: an ARRAY would be truncated to 10 by sanitizeNested; the
+      // keyed-object form must keep all 15.
+      const pool = Array.from({ length: 15 }, (_, i) =>
+        candidate({ version: `2.1.${i}`, usageKey: `claude:org=${i}`,
+          authVerdict: i === 0 ? 'revoked' : null }));
+      const ev = buildRotationDecisionEvent(
+        { picked: pool[0], healthy: pool, excluded: [], usageUnverified: false },
+        'claude', 'balanced',
+      );
+      emit('rotation.resolved', ev);
+
+      const lines = fs.readFileSync(logPath, 'utf-8').trim().split('\n').filter(Boolean);
+      const rec = JSON.parse(lines[lines.length - 1]) as {
+        candidates: Record<string, { usageKey: string; credentialVerdict: unknown }>;
+        candidatesTotal: number;
+      };
+      // All 15 persisted (not capped at 10), count intact.
+      expect(Object.keys(rec.candidates)).toHaveLength(15);
+      expect(rec.candidatesTotal).toBe(15);
+      // The org key (uuid-shaped) is NOT mistaken for a token and redacted.
+      expect(rec.candidates['2.1.0'].usageKey).toBe('claude:org=0');
+      // The verdict field carries its real value, not the "[REDACTED]" sentinel
+      // it would if the key still matched /auth/i.
+      expect(rec.candidates['2.1.0'].credentialVerdict).toBe('revoked');
+      expect(rec.candidates['2.1.1'].credentialVerdict).toBeNull();
+    } finally {
+      _resetForTest();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it('names the fallback the router was forced into (blind draw / refused)', () => {
