@@ -168,7 +168,8 @@ type ActiveContext = 'terminal' | 'teams' | 'cloud' | 'headless';
 
 /** The SessionMeta fields the live-row backfill reads — the enrichment a running process cannot report. */
 export type BackfillMeta = Pick<SessionMeta,
-  'version' | 'account' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness'
+  'version' | 'account' | 'timestamp' | 'label' | 'ticketId' | 'prUrl' | 'prNumber' | 'origin' | 'routineName' | 'harness' |
+  'tokenCount' | 'durationMs' | 'subAgentCount'
 >;
 
 export function backfillActiveRowsFromMeta(
@@ -191,6 +192,9 @@ export function backfillActiveRowsFromMeta(
     if (!s.origin && m.origin) s.origin = m.origin;
     if (!s.routineName && m.routineName) s.routineName = m.routineName;
     if (!s.harness && m.harness) s.harness = m.harness;
+    if (s.tokenCount == null && m.tokenCount != null) s.tokenCount = m.tokenCount;
+    if (s.durationMs == null && m.durationMs != null) s.durationMs = m.durationMs;
+    if (s.subAgentCount == null && m.subAgentCount != null) s.subAgentCount = m.subAgentCount;
   }
 }
 
@@ -396,6 +400,15 @@ export interface ActiveSession {
   spawnedTeam?: string;
   /** Files/screenshots attached to the session prompt. */
   attachments?: SessionAttachment[];
+  /** Total tokens and elapsed duration from the indexed transcript. */
+  tokenCount?: number;
+  durationMs?: number;
+  /** Number of subagents launched, persisted by the index scanner. */
+  subAgentCount?: number;
+  /** Durable documents created in the live transcript tail. */
+  artifacts?: import('./highlights.js').ProducedArtifact[];
+  /** Created plan document singled out for plan-first consumers. */
+  planFile?: string;
   sessionFile?: string;
   startedAtMs?: number;
   /**
@@ -1277,6 +1290,8 @@ function applyState(base: Omit<ActiveSession, 'status'>, state: SessionState | u
     createdTickets: state.createdTickets,
     spawnedTeam: state.spawnedTeam,
     attachments: state.attachments,
+    artifacts: state.artifacts,
+    planFile: state.planFile,
     rateLimited: state.rateLimited,
   };
 }

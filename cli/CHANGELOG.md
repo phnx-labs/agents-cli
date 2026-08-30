@@ -8,6 +8,8 @@
 
 ## 1.22.62
 
+- **Live session rows carry outcome-card metrics and deliverables (PHNX-3574).** `agents sessions --active --json` and `agents sessions watch --json` now enrich each live row with indexed `tokenCount`, `durationMs`, and `subAgentCount`, plus created plan/artifact documents detected by the existing bounded transcript-tail state engine. Thin clients such as AGI EXT can render the initial request, progress, deliverables, team fan-out, runtime, and token use from the one canonical stream without polling or parsing transcripts themselves. Source: `cli/src/lib/session/active.ts`, `cli/src/lib/session/state.ts`.
+
 - **Owner notifications fan out across the configured normal-severity channels (PHNX-3567).** `agents send --to owner`, deprecated `agents notify`, monitor notifications, and an important feed's owner sink now attempt every addressable entry named by `owner.policy.normal` in `humans.yaml`, instead of silently selecting only the first. Each Rush-backed destination that cannot deliver on a Linux worker forwards its explicit channel and target to a capable Mac, avoiding both shell quoting and policy re-expansion/duplicate sends. Partial failures stay visible while successful channels still deliver; legacy single-channel configs retain their old behavior. Source: `cli/src/lib/humans.ts`, `cli/src/lib/notify.ts`, `cli/src/lib/channels/owner-forward.ts`, `cli/src/lib/feed-broadcast.ts`.
 
 ## 1.22.61

@@ -19,6 +19,8 @@ import * as path from 'path';
 import type { SessionAttachment, SessionEvent, TodoItem, TodoProgress } from './types.js';
 import { isCompletedTodoStatus, SNAPSHOT_TODO_TOOLS, summarizeToolUse } from './parse.js';
 import { isShellExecTool } from './shell-programs.js';
+import { classifyFileChanges } from './digest.js';
+import { extractArtifacts, type ProducedArtifact } from './highlights.js';
 
 // TodoItem / TodoProgress moved to ./types.ts so SessionMeta can carry `todos`
 // without a state↔types import cycle; re-exported here for existing importers.
@@ -122,6 +124,10 @@ export interface SessionState {
    * checklist, notably for remote/device-dispatched agents with no local stream.
    */
   todos?: TodoProgress;
+  /** Durable documents created in the bounded transcript slice. */
+  artifacts?: ProducedArtifact[];
+  /** First created plan document, for consumers that give plans special treatment. */
+  planFile?: string;
   /** Last few assistant turns (most-recent last), one line each — panel context. */
   tail?: string[];
   lastActivityMs?: number;
@@ -747,6 +753,8 @@ export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}
   const state = inferActivity(events, ctx);
   const { pr, ticket, createdTickets, spawnedTeam, attachments } = detectDurableSignals(events);
   const worktree = detectWorktree(ctx.cwd, ctx.gitBranch);
+  const artifacts = extractArtifacts(classifyFileChanges(events));
+  const planFile = artifacts.find((artifact) => artifact.bucket === 'plans')?.path;
   // Rate-limit: scan the most recent assistant messages + tool errors (tail-first).
   let rateLimited = false;
   for (let i = events.length - 1; i >= 0 && i >= events.length - 12; i--) {
@@ -770,6 +778,8 @@ export function inferSessionState(events: SessionEvent[], ctx: StateContext = {}
     createdTickets,
     spawnedTeam,
     attachments,
+    artifacts: artifacts.length > 0 ? artifacts : undefined,
+    planFile,
     rateLimited: rateLimited || undefined,
   };
 }
