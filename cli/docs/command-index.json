@@ -11058,6 +11058,24 @@
               "negate": false
             },
             {
+              "flags": "--test",
+              "description": "Run a connection test before saving (default: ask on a terminal)",
+              "long": "--test",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-test",
+              "description": "Skip the pre-save connection test",
+              "long": "--no-test",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
+            },
+            {
               "flags": "-h, --help",
               "description": "Show help",
               "short": "-h",
@@ -11164,6 +11182,24 @@
               "optional": false,
               "variadic": false,
               "negate": false
+            },
+            {
+              "flags": "--test",
+              "description": "Run a connection test after saving (default: ask on a terminal)",
+              "long": "--test",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-test",
+              "description": "Skip the connection test",
+              "long": "--no-test",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
             },
             {
               "flags": "-h, --help",
@@ -11278,6 +11314,24 @@
               "optional": false,
               "variadic": false,
               "negate": false
+            },
+            {
+              "flags": "--test",
+              "description": "Run a connection test before saving (default: ask on a terminal)",
+              "long": "--test",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": false
+            },
+            {
+              "flags": "--no-test",
+              "description": "Skip the pre-save connection test",
+              "long": "--no-test",
+              "required": false,
+              "optional": false,
+              "variadic": false,
+              "negate": true
             },
             {
               "flags": "-h, --help",
