@@ -14,7 +14,7 @@ Excluded (same as `agents --help`): commands Commander marks hidden (e.g. `remov
 and internal subcommands), plus the deprecated aliases and tombstones registered inline in
 src/index.ts (`perms`, `exec`, `jobs`, `cron`, `check`, `resources`, `hq`, `_internal`).
 
-_67 command groups · 548 commands._
+_68 command groups · 552 commands._
 
 ## accounts — Browse native logins and manage provider account bundles
 
@@ -901,4 +901,13 @@ agents workflows add [source]   Install workflows from a source (GitHub, local) 
 agents workflows list [agent]   Show installed workflows and which agent versions they are synced to
 agents workflows remove [name]  Remove a workflow from version homes (interactive picker if no name given)
 agents workflows view [name]    Read workflow details (description, subagents, model, MCP)
+```
+
+## worktree — Inspect and reclaim PR-bound agent worktrees
+
+```
+agents worktree              Inspect and reclaim PR-bound agent worktrees
+agents worktree done [name]  Reclaim one finished worktree (defaults to the current one)
+agents worktree list         List worktrees in this repo with their reclaim state
+agents worktree sweep        Reclaim every finished worktree in this repo
 ```
