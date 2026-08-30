@@ -230,6 +230,65 @@ Resolved open items:
 - **Droid**: `FACTORY_API_KEY` is real but agents-cli wires nothing — a gap to
   close if we want droid selectable as an `agents accounts` provider.
 
+## Which credential a run injects — keyed on DEVICE ROLE, not run mode (PHNX-3502)
+
+The map above says which credential *types* exist. This says which one a given
+`agents run` actually authenticates with — the rule that governs
+`buildExecEnv` → the harness adapter's `applyExecConfigEnv`
+([`harness/adapters/claude.ts`](../src/lib/harness/adapters/claude.ts)).
+
+**A harness has two credentials, and a box carries at most one of them:**
+
+- **Native interactive login** (`.claude/.credentials.json`, scope `user:profile`,
+  behind Claude Code's Touch-ID/keychain-ACL item). A **headed** box holds this —
+  `personal`/`desktop` (`isHeadedDeviceRole`, `device-config.ts`), the seat a human
+  actually logged in at (e.g. `zion`). It is untouchable per the invariants above.
+- **Setup-token** (the `auth` bundle → `.oauth_token` → `CLAUDE_CODE_OAUTH_TOKEN`,
+  scope `user:inference`). This is the **worker** credential — a non-interactive,
+  non-rotating, 1-year OAuth token for runs with **no human present**. A worker
+  device carries this and no native login.
+
+**The routing rule is one predicate — `isHeadedDeviceRole(ctx.deviceRole)`, NOT
+`ctx.interactive`:**
+
+| run | worker device | headed (`personal`/`desktop`) |
+|---|---|---|
+| interactive TUI | **inject setup-token** | defer to native login |
+| headless one-shot | inject setup-token | defer to native login |
+
+"Interactive" means "this opens a TUI," **not** "a human with a keychain login is
+present." An interactive run on a worker is a *remotely dispatched* TUI
+(`agents run claude --interactive --device <worker>`), not someone sitting at that
+box — so it authenticates with the same setup-token headless runs use. Symmetrically,
+a *headless* one-shot on the user's own `personal` laptop (`agents run claude "fix
+the bug"`) MUST use that box's native login, never the setup-token (RUSH-2395 — gating
+on `ctx.interactive` alone hijacked the laptop's login onto the setup-token).
+
+**Two bugs this rule closes, one on each side of the diagonal:**
+
+- **PHNX-3502** — the old `if (ctx.interactive || headedDevice)` deferred *any*
+  interactive run to the native login. On a keychain-less worker there is no
+  `.credentials.json` to defer to **and** the setup-token it does hold was never
+  injected, so `agents run claude --interactive --device <worker>` landed on Claude
+  Code's login/theme-picker screen with a perfectly good credential sitting unused.
+- **RUSH-2395** — the mirror image: keying on run mode sent a *headless* laptop run
+  onto the setup-token and took the human's hand-driven sessions off their login.
+
+Keying on device role — not run mode — is the single fix for both.
+
+### Establishing the worker credential (non-interactive login)
+
+The setup-token is not a file you hand-copy; a worker gets one by **minting** it —
+`agents auth mint claude` (alias `agents accounts mint`), which drives `claude
+setup-token` through its device-code OAuth flow and seeds the result as a named
+account (`driveSetupTokenMint`, [`auth-mint.ts`](../src/lib/auth-mint.ts), PHNX-2364).
+The *authorize* step still needs a browser pointed at the right account: the fleet's
+logins accumulate in **browser profiles** (`agents browser profiles logins`), so
+minting for a specific account means authorizing in the profile signed into that
+account — the profile-switch friction is real and lives here, at mint time, not at
+run time. Once minted and synced (`agents accounts sync <name> --device <worker>`),
+every run on that worker authenticates from it with zero Touch ID and no human.
+
 ## The Touch ID fix (concrete)
 
 Only the **token-acquisition step** changes — no endpoint/header change (the usage

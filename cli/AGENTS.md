@@ -851,7 +851,16 @@ capacity, so like `personal` it is excluded from `--device auto` (both are in
 `NEVER_AUTO`), but it IS a headed box with a real interactive login, so for the
 Claude auth strategy it sits in the SAME "headed" bucket as `personal`
 (`isHeadedDeviceRole`, `device-config.ts`) — it authenticates from its own
-per-version login, never the worker setup-token. The one display consequence:
+per-version login, never the worker setup-token. **Which credential a run injects
+is keyed on DEVICE ROLE, not run mode** (`isHeadedDeviceRole`, not `ctx.interactive`,
+in `applyExecConfigEnv`): a worker authenticates EVERY run — interactive dispatched
+TUI or headless — from its `user:inference` setup-token (the non-interactive worker
+credential, minted via `agents auth mint claude`), while a headed box uses its native
+`user:profile` login for both. Keying on run mode instead is the PHNX-3502 (worker
+`--interactive --device` → login screen, the setup-token sitting unused) / RUSH-2395
+(headless laptop run → hijacked the human's login) bug pair. Full model:
+[`cli/docs/credential-management.md` §Which credential a run injects](docs/credential-management.md).
+The one display consequence:
 because a `personal` box is by definition the interactive seat, `agents devices
 list` folds the `★ interactive` star INTO the `personal` role rather than
 printing both (the star still shows for a non-personal box pinned as
