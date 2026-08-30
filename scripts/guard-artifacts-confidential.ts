@@ -110,12 +110,14 @@ const SAFE_EMAIL_DOMAIN_RE = /(?:^|@)(?:[\w.-]*\.)?(?:example\.(?:com|org|net)|t
 // personal email, so a bare mention of one is not PII.
 const CODE_HOST_DOMAINS = new Set(['github.com', 'gitlab.com', 'bitbucket.org', 'git.sr.ht', 'codeberg.org']);
 const EMAIL_RE = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
-// A line that invokes ssh/scp/rsync/sftp uses `user@host` as a host reference,
-// not an email — the host can be any argument (`scp -r src user@host`), so we
-// scan the whole line prefix, not a fixed window. `git` is intentionally NOT in
-// this list (too common a word); git remotes are handled by the `:path` check
-// and the code-host allowlist instead.
-const SSH_CONTEXT_RE = /\b(?:ssh|scp|rsync|sftp)\b/i;
+// A line that invokes ssh/scp/rsync/sftp uses `user@host` as a host argument,
+// not an email — the host can be any argument (`scp -r src user@host`). We
+// capture everything from the command keyword to the match: it's a host arg only
+// when that span is shell-argument text with no prose punctuation (`:`/`,`), so
+// prose like "ssh notes: contact user@real.com" is NOT excluded. `git` is
+// intentionally absent (too common a word); git remotes are handled by the
+// `:path` check and the code-host allowlist instead.
+const SSH_CONTEXT_RE = /\b(?:ssh|scp|rsync|sftp)\b([^\n]*)$/i;
 
 // Absolute home paths. `runner` is the GitHub-hosted CI user and appears in
 // legitimate public CI logs/paths, so it is allowlisted; a real operator
@@ -127,13 +129,15 @@ export function checkPii(text: string): string | null {
   for (const m of text.matchAll(EMAIL_RE)) {
     const email = m[0];
     const idx = m.index ?? 0;
-    // SCP / git-remote syntax `user@host:path` — a colon+path right after the
-    // "email" means it's a remote reference, not an address.
-    if (text[idx + email.length] === ':') continue;
-    // A line that runs ssh/scp/rsync/sftp uses `user@host` as a host reference,
-    // not an address — scan from the start of this line up to the match.
+    // SCP / git-remote `user@host:path` — a colon IMMEDIATELY followed by a path
+    // char (not prose like "email@x.com: note") means it's a remote reference.
+    if (/^:[A-Za-z0-9_~./]/.test(text.slice(idx + email.length, idx + email.length + 2))) continue;
+    // ssh/scp/rsync/sftp host argument: the command keyword governs this host,
+    // i.e. it appears earlier on the SAME line with only shell-arg text (no prose
+    // ':'/',') between it and the host. Excludes prose that merely mentions ssh.
     const lineStart = text.lastIndexOf('\n', idx - 1) + 1;
-    if (SSH_CONTEXT_RE.test(text.slice(lineStart, idx))) continue;
+    const sshCtx = SSH_CONTEXT_RE.exec(text.slice(lineStart, idx));
+    if (sshCtx && !/[:,]/.test(sshCtx[1] ?? '')) continue;
     const domain = email.slice(email.indexOf('@') + 1).toLowerCase();
     if (SAFE_EMAIL_ALLOW.has(email.toLowerCase())) continue;
     if (SAFE_EMAIL_DOMAIN_RE.test(domain)) continue;

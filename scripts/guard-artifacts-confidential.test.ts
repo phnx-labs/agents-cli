@@ -137,6 +137,15 @@ describe('checkPii', () => {
     expect(checkPii('owner muqsit@getrush.ai; clone git@github.com:o/r.git')).toMatch(/email/);
   });
 
+  test('still flags a real email even when the line mentions ssh in prose (#3309 re-review)', () => {
+    // "ssh" here is a NOUN, not a command governing the email — must still flag.
+    expect(checkPii('ssh notes: contact muqsit@getrush.ai for prod access')).toMatch(/email/);
+    // a colon that is prose punctuation (not a scp path) must not skip the email
+    expect(checkPii('escalation email muqsit@getrush.ai: reach out on call')).toMatch(/email/);
+    // ssh mentioned, then a separate clause with a real email
+    expect(checkPii('run the ssh setup, then email someone@gmail.com about it')).toMatch(/email/);
+  });
+
   test('flags an absolute home path with a real username', () => {
     expect(checkPii('cd /home/muqsit/src/github.com/foo && bun test')).toMatch(/home path/);
     expect(checkPii('opened /Users/bisma/Desktop/report.html')).toMatch(/home path/);
