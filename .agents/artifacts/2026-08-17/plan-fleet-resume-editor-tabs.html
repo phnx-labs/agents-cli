@@ -1,0 +1,402 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Fleet Resume reopens remote sessions as panel terminals, not agent tabs</title>
+<style>
+:root{--font-body:Inter,Inter,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;--font-display:Inter,Inter,system-ui,sans-serif;--font-mono:"JetBrains Mono","JetBrains Mono","SFMono-Regular",Consolas,monospace;}
+@page{margin:24px}
+:root{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;--content-width:980px;--page-padding:24px;--mobile-page-padding:16px;--hero-top:40px;--hero-bottom:28px;--section-spacing:36px;--figure-spacing:22px;--panel-padding:16px;--footer-spacing:64px;--print-margin:24px;--code:#0c0f0d;--code-text:#e7ece8;--radius:10px}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}}
+:root[data-theme="light"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}
+:root[data-theme="dark"]{color-scheme:dark;--bg:#0a0a0a;--surface:#111312;--surface-alt:#161a18;--line:#26302a;--text:#e7ece8;--muted:#8b938c;--accent:#a3e635;--accent-alt:#5ad6c0;--warn:#f5c451;--danger:#ff6b6b;--artifact-fg:#e7ece8;--artifact-muted:#8b938c;--artifact-accent:#a3e635;}
+@media print{:root,:root[data-theme="light"],:root[data-theme="dark"]{color-scheme:light;--bg:#faf9f6;--surface:#ffffff;--surface-alt:#f2f4f0;--line:#e2e6df;--text:#1a1c1a;--muted:#5c655c;--accent:#4d7c0f;--accent-alt:#0e7490;--warn:#b45309;--danger:#dc2626;--artifact-fg:#1a1c1a;--artifact-muted:#5c655c;--artifact-accent:#4d7c0f;}}
+.reader-highlight{background:color-mix(in srgb,var(--warn) 38%,var(--bg));color:inherit;border-radius:2px;box-decoration-break:clone;-webkit-box-decoration-break:clone;cursor:pointer}.reader-highlight:hover{background:color-mix(in srgb,var(--warn) 55%,var(--bg))}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font-family:var(--font-body);line-height:1.6;-webkit-font-smoothing:antialiased;transition:background-color .15s ease,color .15s ease}main{width:100%;max-width:var(--content-width);min-width:0;margin:0 auto;padding:24px var(--page-padding) 80px}.document-header{display:flex;align-items:center;justify-content:flex-end;min-height:42px;border-bottom:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.header-label{min-width:0;margin-right:auto;padding-right:12px;overflow-wrap:anywhere;color:var(--text);font-weight:650}.theme-toggle{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;height:30px;padding:0 12px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--muted);font:500 12px/1 var(--font-mono);cursor:pointer}.theme-toggle:hover{color:var(--accent);border-color:var(--accent)}.theme-toggle:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.hero{padding:var(--hero-top) 0 var(--hero-bottom);border-bottom:1px solid var(--line)}.kicker{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;font-family:var(--font-mono);font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--accent);font-weight:500}.kicker-part{color:var(--accent)}.kicker-separator{color:var(--muted);padding:0 2px}.status-badge{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:999px;border:1px solid color-mix(in srgb,var(--warn) 40%,var(--line));background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn);font-family:var(--font-mono);font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;line-height:1}.status-badge.status-implementing,.status-badge.status-in-progress,.status-badge.status-review,.status-badge.status-done,.status-badge.status-complete{border-color:color-mix(in srgb,var(--accent) 40%,var(--line));background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent)}.hero h1{font-family:var(--font-display);font-size:clamp(30px,4vw,44px);line-height:1.1;margin:12px 0 14px;letter-spacing:-.01em}.summary{max-width:760px;color:var(--muted);font-size:17px;margin:0}.meta{display:grid;gap:14px;margin-top:20px}.facts-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.meta-block{display:grid;gap:8px}.meta-label{font-family:var(--font-mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted);font-weight:500}.meta-row{display:flex;flex-wrap:wrap;gap:8px;list-style:none;margin:0;padding:0}.chip{display:inline-flex;align-items:center;gap:4px;max-width:100%;border:1px solid var(--line);background:var(--surface);border-radius:999px;padding:4px 11px;color:var(--muted);font-family:var(--font-mono);font-size:11.5px;line-height:1.5}.chip-value{color:var(--text);overflow-wrap:anywhere}.chip-icon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;fill:currentColor;flex:0 0 auto}.chip-favicon{display:inline-block;width:12px;height:12px;margin-right:5px;vertical-align:-1.5px;border-radius:2px;object-fit:contain;flex:0 0 auto}.chip-value a{color:inherit;text-decoration:none}.chip-value a:hover{text-decoration:underline}.provenance-line{margin:0;color:var(--muted);font-family:var(--font-mono);font-size:12.5px;line-height:1.7}.provenance-line a{color:var(--accent-alt);text-decoration:none}.provenance-line a:hover{text-decoration:underline}.provenance-part{color:var(--muted)}.meta-sep{margin:0 7px;opacity:.45}.toc{display:grid;gap:4px;margin:24px 0 8px;font-family:var(--font-mono);font-size:13px}.toc-item{display:block;padding:2px 0 2px 10px;border-left:2px solid transparent;color:var(--muted);text-decoration:none;overflow-wrap:anywhere}.toc-item.toc-sub{padding-left:24px;font-size:.92em;opacity:.85}.toc-item:hover{color:var(--accent)}.toc-item.is-active{color:var(--accent);border-left-color:var(--accent)}.toc-item.is-active .toc-index{opacity:1}@media (min-width:1380px){.toc{position:fixed;top:88px;left:max(20px,calc(50% - var(--content-width)/2 - 236px));width:212px;max-height:calc(100vh - 132px);overflow-y:auto;margin:0;z-index:5;scrollbar-width:thin}.toc::-webkit-scrollbar{width:6px}.toc::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}}@media (max-width:1379px){.toc-item.toc-sub{display:none}}.code-diff{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;background:var(--code)}.code-diff-pre{margin:0;padding:10px 0;background:none;border:none;border-radius:0;overflow-x:auto;font-family:var(--font-mono);font-size:12.5px;line-height:1.55;color:var(--code-text)}.cd-line{display:block;white-space:pre;padding:0 14px}.cd-sign{display:inline-block;width:1.4ch;color:var(--muted);user-select:none}.cd-add{background:color-mix(in srgb,var(--accent) 15%,transparent)}.cd-add .cd-sign{color:var(--accent)}.cd-del{background:color-mix(in srgb,var(--danger) 15%,transparent)}.cd-del .cd-sign{color:var(--danger)}.cd-hunk,.cd-meta{color:var(--muted);opacity:.8}.code-diff>summary{list-style:none;cursor:pointer;padding:8px 14px;font-family:var(--font-mono);font-size:12px;color:var(--code-text);background:color-mix(in srgb,var(--code-text) 8%,var(--code));border-bottom:1px solid transparent;user-select:none}.code-diff[open]>summary{border-bottom-color:color-mix(in srgb,var(--code-text) 15%,transparent)}.code-diff>summary::-webkit-details-marker{display:none}.code-diff>summary::before{content:"\25B8";display:inline-block;margin-right:7px;color:color-mix(in srgb,var(--code-text) 55%,transparent);font-size:10px;transition:transform .12s ease}.code-diff[open]>summary::before{transform:rotate(90deg)}.checklist{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.checklist-head{font-family:var(--font-mono);font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:10px}.checklist-items{list-style:none;margin:0;padding:0;display:grid;gap:7px}.cl-item{display:flex;align-items:baseline;gap:9px}.cl-box{flex:0 0 auto;font-family:var(--font-mono);font-size:.95em}.cl-done .cl-box{color:var(--accent)}.cl-todo .cl-box{color:var(--muted)}.cl-doing .cl-box{color:var(--warn)}.cl-done .cl-text{color:var(--muted);text-decoration:line-through;text-decoration-color:var(--line)}.toc a{color:var(--muted);text-decoration:none}.toc a:hover{color:var(--accent)}.toc a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.toc-index{color:var(--accent);font-family:var(--font-mono);font-size:.9em}.artifact-body{min-width:0;padding-top:18px;counter-reset:section}h2{font-size:24px;margin:var(--section-spacing) 0 12px;line-height:1.2;letter-spacing:-.01em}.artifact-body>h2{counter-increment:section}.artifact-body>h2::before{content:counter(section,decimal-leading-zero);font-family:var(--font-mono);font-size:.62em;color:var(--accent);margin-right:10px;opacity:.85}h3{font-size:17px;margin:calc(var(--section-spacing) * .78) 0 10px}a{color:var(--accent);text-decoration:none}a:hover{text-decoration:underline}.link-pill{display:inline-flex;align-items:center;gap:4px;max-width:100%;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--surface-alt);color:var(--text);font-size:.92em;line-height:1.35;text-decoration:none;vertical-align:baseline;transition:border-color .12s ease,color .12s ease,background-color .12s ease}.link-pill:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 10%,var(--surface-alt));text-decoration:none}.link-pill:focus-visible{outline:2px solid var(--accent);outline-offset:2px}.link-pill-icon{width:12px;height:12px;flex:0 0 auto;fill:currentColor;opacity:.9}.link-pill-favicon{display:inline-block;width:12px;height:12px;flex:0 0 auto;border-radius:3px;object-fit:contain}.link-pill-text{min-width:0;overflow-wrap:anywhere}.link-pill code{background:none;border:none;padding:0;color:inherit}td .link-pill,li .link-pill{vertical-align:-1px}p,li,dd,figcaption{overflow-wrap:anywhere}pre{background:var(--code);color:var(--code-text);padding:var(--panel-padding);border-radius:12px;overflow:auto;border:1px solid var(--line)}code{font-family:var(--font-mono);font-size:.88em;background:var(--surface-alt);border:1px solid var(--line);border-radius:5px;padding:1.5px 6px;color:var(--accent-alt)}pre code{background:none;border:none;padding:0;color:inherit}table{width:100%;border-collapse:collapse;margin:18px 0}th,td{border-bottom:1px solid var(--line);padding:10px;text-align:left;vertical-align:top}th{font-family:var(--font-mono);font-size:11.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);font-weight:500}blockquote{border-left:3px solid var(--accent);padding-left:var(--panel-padding);color:var(--muted);margin-left:0}img{display:block;max-width:100%;height:auto}svg{max-width:100%;height:auto}.artifact-body>p>img{margin:var(--figure-spacing) auto}.artifact-grid{display:grid;gap:var(--panel-padding);margin:var(--figure-spacing) 0}.artifact-grid-2{grid-template-columns:repeat(2,minmax(0,1fr))}.artifact-grid-3{grid-template-columns:repeat(3,minmax(0,1fr))}.artifact-panel,.artifact-stat{min-width:0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding)}.artifact-panel h3{margin:10px 0 8px;font-size:16px}.artifact-stat-value,.artifact-stat-label{display:block}.artifact-stat-value{color:var(--text);font-family:var(--font-display);font-size:24px;line-height:1.15}.artifact-stat-label{margin-top:6px;color:var(--muted);font-size:13px}.artifact-tag{display:inline-block;--tag-color:var(--muted);background:color-mix(in srgb,var(--tag-color) 12%,transparent);border:1px solid color-mix(in srgb,var(--tag-color) 30%,transparent);border-radius:6px;padding:2px 8px;color:var(--tag-color);font-family:var(--font-mono);font-size:11px;font-weight:600;text-transform:uppercase}.artifact-tag-accent{--tag-color:var(--accent)}.artifact-callout{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-left:3px solid var(--accent);border-radius:0 var(--radius) var(--radius) 0;background:var(--surface-alt);padding:var(--panel-padding)}.artifact-callout-warn{border-left-color:var(--warn)}.artifact-callout-danger{border-left-color:var(--danger)}.artifact-callout strong{color:var(--text)}.artifact-figure{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface);padding:var(--panel-padding);overflow-x:auto}.artifact-figure>img,.artifact-image{width:auto;max-width:100%;height:auto;margin:0 auto}.artifact-figure-diagram{background:#0e120f;border-color:#26302a}.artifact-diagram{display:block;width:100%;height:auto;margin:0 auto}.artifact-figure-tall{width:100%;max-width:394px;margin-left:auto;margin-right:auto}.artifact-figure figcaption{margin-top:12px;color:var(--muted);font-family:var(--font-mono);font-size:12px;text-align:center}.artifact-figure.artifact-figure-diagram figcaption{color:#8b938c}.artifact-legend{display:flex;flex-wrap:wrap;gap:8px 16px;margin:12px 0;color:var(--muted);font-family:var(--font-mono);font-size:11.5px}.artifact-behavior{margin:var(--figure-spacing) 0;border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;display:grid;grid-template-columns:1fr 1fr}.artifact-behavior-panel{padding:var(--panel-padding);background:var(--surface)}.artifact-behavior-panel+.artifact-behavior-panel{border-left:1px solid var(--line)}.artifact-behavior-panel::before{display:block;font-family:var(--font-mono);font-size:10.5px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);font-weight:500;margin-bottom:8px;content:""}.artifact-behavior-panel[data-state="current"]::before{content:"Current"}.artifact-behavior-panel[data-state="proposed"]{background:color-mix(in srgb,var(--accent) 6%,var(--surface))}.artifact-behavior-panel[data-state="proposed"]::before{content:"Proposed";color:var(--accent)}.document-footer{margin-top:var(--footer-spacing);padding-top:18px;border-top:1px solid var(--line);color:var(--muted);font-family:var(--font-mono);font-size:12px}.references-list{margin:0;padding-left:1.6em;display:grid;gap:7px}.reference-item{color:var(--muted)}.reference-item::marker{font-family:var(--font-mono);font-size:.86em;color:var(--muted)}.reference-link{display:inline-flex;align-items:center;gap:7px;max-width:100%;color:var(--text);text-decoration:none;overflow-wrap:anywhere}.reference-link:hover{color:var(--accent);text-decoration:none}.reference-link:hover .reference-text{text-decoration:underline}.reference-host{color:var(--muted);font-family:var(--font-mono);font-size:.82em}.view-count{color:var(--muted);font-family:var(--font-mono);font-size:11.5px;margin-right:12px;white-space:nowrap}
+.artifact-figure-diagram{--artifact-fg:#e7ece8;--artifact-muted:#b7c0b8;--artifact-accent:#a3e635}.artifact-figure.artifact-figure-diagram figcaption{color:var(--artifact-muted)}
+@media(max-width:720px){main{padding:32px var(--mobile-page-padding) 64px}.artifact-grid-2,.artifact-grid-3{grid-template-columns:1fr}.artifact-figure{padding:min(12px,var(--panel-padding))}.artifact-figure-wide .artifact-diagram{min-width:640px}.artifact-behavior{grid-template-columns:1fr}.artifact-behavior-panel+.artifact-behavior-panel{border-left:none;border-top:1px solid var(--line)}table{display:block;max-width:100%;overflow-x:auto}th,td{min-width:140px;overflow-wrap:anywhere}pre{white-space:pre-wrap;overflow-wrap:anywhere}}
+@media print{body{transition:none;-webkit-print-color-adjust:exact;print-color-adjust:exact}.toc,.theme-toggle,.view-count{display:none}.document-header-empty{display:none}main{max-width:none;padding:0}:root[data-pdf-layout="poster"] main{max-width:var(--content-width);margin:0 auto;padding:var(--print-margin)}.chip{background:var(--surface)}.chip-value{color:var(--text)}.provenance-line,.provenance-line a,.facts-line{color:var(--text)}.status-badge{color:var(--text);border-color:var(--line)}h2,h3{break-after:avoid-page}.artifact-figure,.artifact-grid,.artifact-panel,.artifact-stat,.artifact-callout,.artifact-behavior,pre,table,blockquote,.meta{break-inside:avoid}.artifact-figure-wide .artifact-diagram{min-width:0}.artifact-figure-tall{max-width:330px}pre{white-space:pre-wrap;overflow-wrap:anywhere}a{color:var(--text);text-decoration:underline}.link-pill{color:var(--text);text-decoration:none;background:var(--surface);border-color:var(--line);break-inside:avoid}}
+</style>
+</head>
+<body>
+<main>
+<header class="document-header document-header-empty"><span class="view-count" hidden></span><button class="theme-toggle" type="button" aria-label="Toggle color theme" aria-pressed="false" title="Toggle color theme"><span aria-hidden="true">&#9680;</span> theme</button></header>
+<section class="hero">
+<div class="kicker"><span class="kicker-part">agents-cli</span><span class="kicker-separator" aria-hidden="true">&middot;</span><span class="kicker-part">plan</span><span class="status-badge status-draft">draft</span></div>
+<h1>Fleet Resume reopens remote sessions as panel terminals, not agent tabs</h1>
+<p class="summary">The AGI EXT Fleet "Resume" buttons reopen orphaned/crashed remote sessions as small bottom-panel terminals running a hand-rolled <code>ssh -t &lt;host&gt; 'tmux … attach'</code>, bypassing the editor-tab agent-terminal path the command-palette Resume already uses. Route the webview's remote opens through that existing correct path and delete the ad-hoc handlers.
+</p>
+<div class="meta" aria-label="Artifact metadata"><p class="facts-line">Root checkout is on tmp-pr337-review, 5134 commits behind origin/main and missing apps/ext — do the work in a fresh worktree off origin/main.<span class="meta-sep" aria-hidden="true">·</span>The correct path already exists: openResumedSessionTerminal (extension.ts:2593) opens an editor tab and runs `agents sessions resume &lt;id&gt; --vscodium`.<span class="meta-sep" aria-hidden="true">·</span>The bug: settings.vscode.ts case 'focusRemoteSession' (:3033) calls createTerminal with no location =&gt; panel, plus a raw ssh that bypasses CLI fleet routing (the 192.168.1.101 timeout).</p><p class="provenance-line" aria-label="Provenance"><span class="provenance-part"><a href="https://github.com/phnx-labs/agents-cli" target="_blank" rel="noopener">phnx-labs/agents-cli</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">tmp-pr337-review</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">RUSH-new</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Claude</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">Muqsit</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">yosemite-s1</span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part"><a href="agents://session/19333822-f181-4334-8888-cf3ce8189a8d">19333822</a></span><span class="meta-sep" aria-hidden="true">·</span><span class="provenance-part">2026-08-17</span></p></div>
+</section>
+<nav class="toc" aria-label="Artifact sections"><a class="toc-item" href="#focus-for-review" data-toc-for="focus-for-review"><span class="toc-index">01&nbsp;&middot;&nbsp;</span>Focus for review</a><a class="toc-item" href="#intent" data-toc-for="intent"><span class="toc-index">02&nbsp;&middot;&nbsp;</span>Intent</a><a class="toc-item" href="#purpose" data-toc-for="purpose"><span class="toc-index">03&nbsp;&middot;&nbsp;</span>Purpose</a><a class="toc-item" href="#current-architecture-two-resume-paths-one-is-wrong" data-toc-for="current-architecture-two-resume-paths-one-is-wrong"><span class="toc-index">04&nbsp;&middot;&nbsp;</span>Current architecture — two Resume paths, one is wrong</a><a class="toc-item" href="#behavior-current-vs-proposed" data-toc-for="behavior-current-vs-proposed"><span class="toc-index">05&nbsp;&middot;&nbsp;</span>Behavior — current vs proposed</a><a class="toc-item" href="#proposed-changes" data-toc-for="proposed-changes"><span class="toc-index">06&nbsp;&middot;&nbsp;</span>Proposed Changes</a><a class="toc-item" href="#public-interface" data-toc-for="public-interface"><span class="toc-index">07&nbsp;&middot;&nbsp;</span>Public Interface</a><a class="toc-item" href="#files" data-toc-for="files"><span class="toc-index">08&nbsp;&middot;&nbsp;</span>Files</a><a class="toc-item" href="#plan" data-toc-for="plan"><span class="toc-index">09&nbsp;&middot;&nbsp;</span>Plan</a><a class="toc-item" href="#validation" data-toc-for="validation"><span class="toc-index">10&nbsp;&middot;&nbsp;</span>Validation</a><a class="toc-item" href="#risks" data-toc-for="risks"><span class="toc-index">11&nbsp;&middot;&nbsp;</span>Risks</a><a class="toc-item" href="#tracking" data-toc-for="tracking"><span class="toc-index">12&nbsp;&middot;&nbsp;</span>Tracking</a></nav><article class="artifact-body"><h2 id="focus-for-review">Focus for review</h2><ul>
+<li><strong>The gap in one line:</strong> the Fleet <strong>Sessions</strong> webview "Resume" buttons hand-roll
+<code>ssh -t &lt;host&gt; 'tmux -S &lt;sock&gt; attach'</code> into a default <code>createTerminal(...)</code> (bottom panel),
+bypassing the editor-tab agent-terminal machinery the command-palette Resume already uses.</li>
+<li><strong>Recommended fix:</strong> route the webview's remote-session opens through the existing
+<code>openResumedSessionTerminal</code> → <code>agents sessions resume &lt;id&gt; --vscodium</code>, and delete the two
+raw ssh/tmux-attach panel handlers. One correct way to open a remote agent session.</li>
+<li><strong>Scope I'm treating as in-scope:</strong> this also fixes the single-card remote "focus/open" click
+and the <code>focusSession</code> remote fallback — the same defect in sibling handlers.</li>
+<li><strong>Bonus it fixes:</strong> the <code>ssh: connect to host 192.168.1.101 … timed out</code> in the screenshot.
+The raw ssh resolved <code>yosemite-m1</code> to a stale LAN IP because it never went through CLI fleet
+routing. <code>agents sessions resume &lt;id&gt;</code> does.</li>
+</ul>
+<h2 id="intent">Intent</h2><blockquote>
+<p>"I tried resuming using the AGI Ext menu (click Resume) after my IDE closed … it resumed them
+in the terminals. It should probably open them as tabbed agent terminals which open up when you
+normally create these new agent sessions." — the user.</p>
+</blockquote>
+<h2 id="purpose">Purpose</h2><p>The Fleet "Resume" action exists to bring back sessions that stopped progressing (orphaned,
+crashed, abandoned) after an editor restart. Its whole value is returning them to the exact place
+new agent sessions live — <strong>editor tabs</strong> with a harness icon and title. Today it dumps them into
+small bottom-panel terminals running a raw ssh command, so the recovered work looks nothing like a
+running agent, loses tab identity, and (because it skips CLI routing) can fail to connect at all.</p>
+<h2 id="current-architecture-two-resume-paths-one-is-wrong">Current architecture — two Resume paths, one is wrong</h2><div class="artifact-figure-diagram">
+<svg viewBox="0 0 900 320" role="img" aria-label="Two resume paths: command palette opens editor tabs; webview opens panel terminals" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="a" markerWidth="9" markerHeight="9" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 z" fill="#5a6b76"></path></marker></defs>
+
+  <text x="20" y="24" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#a3e635">CORRECT — command palette "Agents: Resume"</text>
+  <rect x="20" y="36" width="180" height="46" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="30" y="58" font-family="JetBrains Mono, monospace" font-size="12" fill="#d7e0e6">agents.resume</text>
+  <text x="30" y="74" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">resumeSessionsBatch</text>
+  <line x1="200" y1="59" x2="252" y2="59" stroke="#5a6b76" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="252" y="36" width="210" height="46" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="262" y="58" font-family="JetBrains Mono, monospace" font-size="12" fill="#d7e0e6">openResumedSessionTerminal</text>
+  <text x="262" y="74" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">extension.ts:2593</text>
+  <line x1="462" y1="59" x2="514" y2="59" stroke="#5a6b76" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="514" y="36" width="366" height="46" rx="8" fill="#0f160a" stroke="#a3e635" stroke-width="1.5"></rect>
+  <text x="524" y="55" font-family="JetBrains Mono, monospace" font-size="11" fill="#d7e0e6">createTerminal({ location: viewColumn.Active })</text>
+  <text x="524" y="74" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">EDITOR TAB · icon · registered · agents sessions resume &lt;id&gt; --vscodium</text>
+
+  <text x="20" y="150" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#f87171">BUGGY — Fleet "Sessions" webview "Resume all / selected"</text>
+  <rect x="20" y="162" width="180" height="46" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="30" y="184" font-family="JetBrains Mono, monospace" font-size="12" fill="#d7e0e6">SessionsPane</text>
+  <text x="30" y="200" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">Resume buttons</text>
+  <line x1="200" y1="185" x2="252" y2="185" stroke="#5a6b76" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="252" y="162" width="210" height="46" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="262" y="184" font-family="JetBrains Mono, monospace" font-size="12" fill="#d7e0e6">openTerminalForAgent</text>
+  <text x="262" y="200" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">postMessage focusRemoteSession</text>
+  <line x1="462" y1="185" x2="514" y2="185" stroke="#5a6b76" stroke-width="1.5" marker-end="url(#a)"></line>
+  <rect x="514" y="162" width="366" height="46" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="524" y="181" font-family="JetBrains Mono, monospace" font-size="11" fill="#d7e0e6">createTerminal({ name: "attach …" })  // no location</text>
+  <text x="524" y="200" font-family="Inter, system-ui, sans-serif" font-size="10" fill="#8a8a8a">PANEL · ssh -t &lt;host&gt; 'tmux -S &lt;sock&gt; attach' (raw, no CLI routing)</text>
+
+  <text x="20" y="250" font-family="Inter, system-ui, sans-serif" font-size="12" fill="#f87171">SAME DEFECT — settings.vscode.ts case 'focusSession' remote fallback (:3159)</text>
+  <rect x="20" y="262" width="860" height="40" rx="8" fill="#16120a" stroke="#f87171" stroke-width="1.5"></rect>
+  <text x="30" y="287" font-family="JetBrains Mono, monospace" font-size="11" fill="#d7e0e6">createTerminal({ name: "attach &lt;id8&gt;" }) + buildRemoteFocusCommand(...)  → PANEL terminal</text>
+</svg>
+</div><h2 id="behavior-current-vs-proposed">Behavior — current vs proposed</h2><div class="artifact-behavior">
+  <div class="artifact-panel" data-state="current" data-evidence="mockup">
+    <h4>Current — bottom panel, "attach …" terminals</h4>
+    <svg viewBox="0 0 460 250" role="img" aria-label="VS Code bottom terminal panel with attach terminals, one timed out" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="460" height="250" fill="#3a0d0d"></rect>
+      <rect x="0" y="0" width="460" height="22" fill="#1f2a30"></rect>
+      <text x="10" y="15" fill="#9fb2bd" font-family="Inter, system-ui, sans-serif" font-size="11">PROBLEMS  OUTPUT  DEBUG  TERMINAL  PORTS</text>
+      <text x="12" y="52" fill="#e6b0b0" font-family="JetBrains Mono, monospace" font-size="11">$ ssh -t 'yosemite-m1' 'tmux -S …/server.sock attach'</text>
+      <text x="12" y="72" fill="#ff8a8a" font-family="JetBrains Mono, monospace" font-size="11">ssh: connect to host 192.168.1.101:22: timed out</text>
+      <rect x="330" y="26" width="130" height="200" fill="#2a0a0a"></rect>
+      <text x="340" y="46" fill="#d7c2c2" font-family="JetBrains Mono, monospace" font-size="11">▷ attach zion…</text>
+      <text x="340" y="66" fill="#d7c2c2" font-family="JetBrains Mono, monospace" font-size="11">▷ attach git st…</text>
+      <text x="340" y="86" fill="#d7c2c2" font-family="JetBrains Mono, monospace" font-size="11">▷ attach crab…</text>
+      <text x="340" y="106" fill="#d7c2c2" font-family="JetBrains Mono, monospace" font-size="11">▷ attach Do…</text>
+      <text x="340" y="126" fill="#d7c2c2" font-family="JetBrains Mono, monospace" font-size="11">▷ attach Con…</text>
+    </svg>
+  </div>
+  <div class="artifact-panel" data-state="proposed" data-evidence="mockup">
+    <h4>Proposed — editor tabs, harness-titled agent terminals</h4>
+    <svg viewBox="0 0 460 250" role="img" aria-label="VS Code editor area with agent terminal tabs" xmlns="http://www.w3.org/2000/svg">
+      <rect x="0" y="0" width="460" height="250" fill="#0e1a12"></rect>
+      <rect x="0" y="0" width="460" height="26" fill="#16241a"></rect>
+      <rect x="6" y="4" width="120" height="20" rx="4" fill="#1f3a28"></rect>
+      <text x="14" y="18" fill="#bfe9cd" font-family="JetBrains Mono, monospace" font-size="11">◆ Claude · zion</text>
+      <rect x="132" y="4" width="120" height="20" rx="4" fill="#14261b"></rect>
+      <text x="140" y="18" fill="#9fd4b0" font-family="JetBrains Mono, monospace" font-size="11">◆ Codex · m1</text>
+      <rect x="258" y="4" width="120" height="20" rx="4" fill="#14261b"></rect>
+      <text x="266" y="18" fill="#9fd4b0" font-family="JetBrains Mono, monospace" font-size="11">◆ Claude · crab</text>
+      <text x="14" y="54" fill="#cfe9d6" font-family="JetBrains Mono, monospace" font-size="11">$ agents sessions resume 71bb3b3b --vscodium</text>
+      <text x="14" y="74" fill="#8fd6a3" font-family="JetBrains Mono, monospace" font-size="11">✔ resumed · CLI routed via tailnet · agent ready</text>
+    </svg>
+  </div>
+</div><h2 id="proposed-changes">Proposed Changes</h2><p><strong>1. Export the correct helper</strong> — add <code>export</code> to <code>openResumedSessionTerminal</code>
+(<code>apps/ext/src/vscode/extension.ts:2593</code>). <code>settings.vscode.ts:19</code> already imports from <code>./extension</code>.</p>
+<p><strong>2. Carry agent type + cwd across the webview boundary</strong> so the helper can resolve the harness:</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  if (a.reply.kind === 'tmux' &amp;&amp; a.reply.muxTarget) {</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">    postMessage({ type: 'focusRemoteSession', host: a.reply.host, muxSocket: a.reply.muxSocket,</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">                  muxTarget: a.reply.muxTarget, sessionId: a.reply.sessionId ?? a.sessionId, label: a.name })</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    postMessage({ type: 'resumeRemoteSession', sessionId: a.reply.sessionId ?? a.sessionId,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">                  agent: a.agentType, host: a.reply.host, cwd: a.cwd, version: a.version, label: a.name })</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">    return</span></span><span class="cd-line cd-ctx"><span class="cd-sign"></span><span class="cd-code">  }</span></span></pre></div><p><strong>3. Replace both raw-ssh panel handlers with the helper</strong> in <code>apps/ext/src/vscode/settings.vscode.ts</code>
+— <code>case 'focusRemoteSession'</code> (<code>:3033-3048</code>) and the remote branch of <code>case 'focusSession'</code>
+(<code>:3167-3169</code>) both collapse to:</p>
+<div class="code-diff"><pre class="code-diff-pre"><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const attach = `tmux -S ${shq(socket)} attach`;</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const cmd = host ? `ssh -t ${shq(host)} ${shq(attach)}` : attach;</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  const term = vscode.window.createTerminal({ name: `attach ${label}` });</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  term.sendText(cmd, true);</span></span><span class="cd-line cd-del"><span class="cd-sign">-</span><span class="cd-code">  term.show(false);</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  await openResumedSessionTerminal(context, {</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">    id: sessionId, shortId: sessionId.slice(0, 8), agent, host, cwd, version,</span></span><span class="cd-line cd-add"><span class="cd-sign">+</span><span class="cd-code">  });</span></span></pre></div><p>Keep the local fast path (<code>isLocalDeviceHost(host)</code> → <code>focusSessionInTerminal(sessionId)</code>), which is
+already correct. Remove <code>buildRemoteFocusCommand</code> if it has no other caller (grep first).</p>
+<h2 id="public-interface">Public Interface</h2><p>No new CLI flag, command, or public API. The change is internal to the extension: it swaps the
+webview <code>postMessage</code> intent name (<code>focusRemoteSession</code> → <code>resumeRemoteSession</code>) and its payload
+(adds <code>agent</code>, <code>cwd</code>, <code>version</code>; drops <code>muxSocket</code>/<code>muxTarget</code>), and reuses the existing
+CLI verb the correct path already calls — <code>agents sessions resume &lt;id&gt; --vscodium</code>. User-visible
+surface changes only in outcome: Resume now yields editor tabs instead of panel terminals.</p>
+<h2 id="files">Files</h2><table>
+<thead>
+<tr>
+<th>File</th>
+<th>Change</th>
+</tr>
+</thead>
+<tbody><tr>
+<td><code>apps/ext/src/vscode/extension.ts</code></td>
+<td><code>export</code> <code>openResumedSessionTerminal</code> (<code>:2593</code>); reference pattern <code>:2620-2631</code></td>
+</tr>
+<tr>
+<td><code>apps/ext/src/vscode/settings.vscode.ts</code></td>
+<td>rewrite <code>case 'focusRemoteSession'</code> (<code>:3033</code>) + remote branch of <code>case 'focusSession'</code> (<code>:3159</code>); import helper (<code>:19</code>)</td>
+</tr>
+<tr>
+<td><code>apps/ext/ui/settings/components/mission-control/UnifiedAgentsPane.tsx</code></td>
+<td><code>openTerminalForAgent</code> (<code>:1718</code>) payload; single-card poster (<code>:1969</code>)</td>
+</tr>
+<tr>
+<td>Reused, unchanged</td>
+<td><code>buildVersionedResumeCommand</code> (<code>core/prewarm.ts:181</code>), <code>needsReconnect</code> (<code>floorModel.ts:220</code>), <code>SessionsPane</code> buttons (<code>:254/259/277</code>)</td>
+</tr>
+</tbody></table>
+<h2 id="plan">Plan</h2><div class="checklist"><div class="checklist-head">0 / 7 done</div><ul class="checklist-items"><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Worktree off <code>origin/main</code>; export <code>openResumedSessionTerminal</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Update webview <code>openTerminalForAgent</code> payload (agent + cwd + version)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Rewrite both remote handlers in <code>settings.vscode.ts</code> to call the helper; drop raw ssh + dead <code>buildRemoteFocusCommand</code></span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Add ext test: webview remote-open intent maps to editor-tab resume (no panel <code>createTerminal</code>, no raw <code>ssh … tmux attach</code>)</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Build VSIX, install on zion, reproduce + verify editor tabs, screenshot</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">CHANGELOG under next <code>apps/ext</code> version; update AGENTS.md/README if the flow is documented</span></li><li class="cl-item cl-todo"><span class="cl-box">○</span><span class="cl-text">Open PR with before/after screenshots; merge on green</span></li></ul></div>
+<h2 id="validation">Validation</h2><pre><code># from the worktree
+apps/ext/scripts/build.sh &lt;version&gt;
+# install the VSIX into the editor on zion (never over the prod publish identity)
+</code></pre>
+<ol>
+<li>Start ≥2 agent sessions on remote hosts; let them go <code>orphaned</code>/<code>abandoned</code> (close tabs / restart window).</li>
+<li>Fleet <strong>Sessions</strong> pane → <strong>Resume all</strong>.</li>
+<li><strong>Expected:</strong> each reopens as an <strong>editor tab</strong> (agent icon, harness-titled — not <code>attach &lt;host&gt;</code>),
+running <code>agents sessions resume &lt;id&gt; --vscodium</code>. No bottom-panel <code>ssh … tmux attach</code>, no
+<code>192.168.1.101</code> timeout.</li>
+<li>Single-card <strong>focus/open</strong> on a remote session → same editor-tab result.</li>
+</ol>
+<div class="artifact-callout">
+The correct behavior already exists (<code>openResumedSessionTerminal</code>). The fix deletes two
+duplicate, wrong surfaces rather than adding a new one — and it fixes the ssh timeout for free,
+because <code>agents sessions resume</code> owns fleet routing while the raw ssh did not.
+</div><h2 id="risks">Risks</h2><table>
+<thead>
+<tr>
+<th>Risk</th>
+<th>Mitigation</th>
+</tr>
+</thead>
+<tbody><tr>
+<td>Remote resume needs a tab chip without a local agent process</td>
+<td>The <code>#2478</code> <code>meta</code> path already labels remote attach tabs; verify it resolves.</td>
+</tr>
+<tr>
+<td><code>focus</code> (join live pane) vs <code>resume</code> (recover) semantics differ</td>
+<td><code>agents sessions resume</code> already "decides attach vs recover"; both still open as editor tabs. File a follow-up if a distinct lightweight join is wanted.</td>
+</tr>
+<tr>
+<td>Missing <code>cwd</code> on some FloorAgents</td>
+<td><code>openResumedSessionTerminal</code> already falls back to workspace/<code>process.cwd()</code>.</td>
+</tr>
+</tbody></table>
+<h2 id="tracking">Tracking</h2><p>Open a RUSH ticket for the fix (AGI project); link this plan and the PR both ways.</p>
+</article>
+
+</main>
+<script type="application/json" id="artifacts-source">{"encoding":"base64","markdown":"LS0tCmtpbmQ6IHBsYW4Kc3VyZmFjZTogbmF0aXZlCnRpdGxlOiAiRmxlZXQgUmVzdW1lIHJlb3BlbnMgcmVtb3RlIHNlc3Npb25zIGFzIHBhbmVsIHRlcm1pbmFscywgbm90IGFnZW50IHRhYnMiCnN1bW1hcnk6ID4KICBUaGUgQUdJIEVYVCBGbGVldCAiUmVzdW1lIiBidXR0b25zIHJlb3BlbiBvcnBoYW5lZC9jcmFzaGVkIHJlbW90ZSBzZXNzaW9ucyBhcyBzbWFsbAogIGJvdHRvbS1wYW5lbCB0ZXJtaW5hbHMgcnVubmluZyBhIGhhbmQtcm9sbGVkIGBzc2ggLXQgPGhvc3Q+ICd0bXV4IOKApiBhdHRhY2gnYCwgYnlwYXNzaW5nCiAgdGhlIGVkaXRvci10YWIgYWdlbnQtdGVybWluYWwgcGF0aCB0aGUgY29tbWFuZC1wYWxldHRlIFJlc3VtZSBhbHJlYWR5IHVzZXMuIFJvdXRlIHRoZQogIHdlYnZpZXcncyByZW1vdGUgb3BlbnMgdGhyb3VnaCB0aGF0IGV4aXN0aW5nIGNvcnJlY3QgcGF0aCBhbmQgZGVsZXRlIHRoZSBhZC1ob2MgaGFuZGxlcnMuCnN0YXR1czogZHJhZnQKdHJhY2tpbmc6ICJSVVNILW5ldyIKZmFjdHM6CiAgLSAiUm9vdCBjaGVja291dCBpcyBvbiB0bXAtcHIzMzctcmV2aWV3LCA1MTM0IGNvbW1pdHMgYmVoaW5kIG9yaWdpbi9tYWluIGFuZCBtaXNzaW5nIGFwcHMvZXh0IOKAlCBkbyB0aGUgd29yayBpbiBhIGZyZXNoIHdvcmt0cmVlIG9mZiBvcmlnaW4vbWFpbi4iCiAgLSAiVGhlIGNvcnJlY3QgcGF0aCBhbHJlYWR5IGV4aXN0czogb3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWwgKGV4dGVuc2lvbi50czoyNTkzKSBvcGVucyBhbiBlZGl0b3IgdGFiIGFuZCBydW5zIGBhZ2VudHMgc2Vzc2lvbnMgcmVzdW1lIDxpZD4gLS12c2NvZGl1bWAuIgogIC0gIlRoZSBidWc6IHNldHRpbmdzLnZzY29kZS50cyBjYXNlICdmb2N1c1JlbW90ZVNlc3Npb24nICg6MzAzMykgY2FsbHMgY3JlYXRlVGVybWluYWwgd2l0aCBubyBsb2NhdGlvbiA9PiBwYW5lbCwgcGx1cyBhIHJhdyBzc2ggdGhhdCBieXBhc3NlcyBDTEkgZmxlZXQgcm91dGluZyAodGhlIDE5Mi4xNjguMS4xMDEgdGltZW91dCkuIgotLS0KCiMjIEZvY3VzIGZvciByZXZpZXcKCi0gKipUaGUgZ2FwIGluIG9uZSBsaW5lOioqIHRoZSBGbGVldCAqKlNlc3Npb25zKiogd2VidmlldyAiUmVzdW1lIiBidXR0b25zIGhhbmQtcm9sbAogIGBzc2ggLXQgPGhvc3Q+ICd0bXV4IC1TIDxzb2NrPiBhdHRhY2gnYCBpbnRvIGEgZGVmYXVsdCBgY3JlYXRlVGVybWluYWwoLi4uKWAgKGJvdHRvbSBwYW5lbCksCiAgYnlwYXNzaW5nIHRoZSBlZGl0b3ItdGFiIGFnZW50LXRlcm1pbmFsIG1hY2hpbmVyeSB0aGUgY29tbWFuZC1wYWxldHRlIFJlc3VtZSBhbHJlYWR5IHVzZXMuCi0gKipSZWNvbW1lbmRlZCBmaXg6Kiogcm91dGUgdGhlIHdlYnZpZXcncyByZW1vdGUtc2Vzc2lvbiBvcGVucyB0aHJvdWdoIHRoZSBleGlzdGluZwogIGBvcGVuUmVzdW1lZFNlc3Npb25UZXJtaW5hbGAg4oaSIGBhZ2VudHMgc2Vzc2lvbnMgcmVzdW1lIDxpZD4gLS12c2NvZGl1bWAsIGFuZCBkZWxldGUgdGhlIHR3bwogIHJhdyBzc2gvdG11eC1hdHRhY2ggcGFuZWwgaGFuZGxlcnMuIE9uZSBjb3JyZWN0IHdheSB0byBvcGVuIGEgcmVtb3RlIGFnZW50IHNlc3Npb24uCi0gKipTY29wZSBJJ20gdHJlYXRpbmcgYXMgaW4tc2NvcGU6KiogdGhpcyBhbHNvIGZpeGVzIHRoZSBzaW5nbGUtY2FyZCByZW1vdGUgImZvY3VzL29wZW4iIGNsaWNrCiAgYW5kIHRoZSBgZm9jdXNTZXNzaW9uYCByZW1vdGUgZmFsbGJhY2sg4oCUIHRoZSBzYW1lIGRlZmVjdCBpbiBzaWJsaW5nIGhhbmRsZXJzLgotICoqQm9udXMgaXQgZml4ZXM6KiogdGhlIGBzc2g6IGNvbm5lY3QgdG8gaG9zdCAxOTIuMTY4LjEuMTAxIOKApiB0aW1lZCBvdXRgIGluIHRoZSBzY3JlZW5zaG90LgogIFRoZSByYXcgc3NoIHJlc29sdmVkIGB5b3NlbWl0ZS1tMWAgdG8gYSBzdGFsZSBMQU4gSVAgYmVjYXVzZSBpdCBuZXZlciB3ZW50IHRocm91Z2ggQ0xJIGZsZWV0CiAgcm91dGluZy4gYGFnZW50cyBzZXNzaW9ucyByZXN1bWUgPGlkPmAgZG9lcy4KCiMjIEludGVudAoKPiAiSSB0cmllZCByZXN1bWluZyB1c2luZyB0aGUgQUdJIEV4dCBtZW51IChjbGljayBSZXN1bWUpIGFmdGVyIG15IElERSBjbG9zZWQg4oCmIGl0IHJlc3VtZWQgdGhlbQo+IGluIHRoZSB0ZXJtaW5hbHMuIEl0IHNob3VsZCBwcm9iYWJseSBvcGVuIHRoZW0gYXMgdGFiYmVkIGFnZW50IHRlcm1pbmFscyB3aGljaCBvcGVuIHVwIHdoZW4geW91Cj4gbm9ybWFsbHkgY3JlYXRlIHRoZXNlIG5ldyBhZ2VudCBzZXNzaW9ucy4iIOKAlCB0aGUgdXNlci4KCiMjIFB1cnBvc2UKClRoZSBGbGVldCAiUmVzdW1lIiBhY3Rpb24gZXhpc3RzIHRvIGJyaW5nIGJhY2sgc2Vzc2lvbnMgdGhhdCBzdG9wcGVkIHByb2dyZXNzaW5nIChvcnBoYW5lZCwKY3Jhc2hlZCwgYWJhbmRvbmVkKSBhZnRlciBhbiBlZGl0b3IgcmVzdGFydC4gSXRzIHdob2xlIHZhbHVlIGlzIHJldHVybmluZyB0aGVtIHRvIHRoZSBleGFjdCBwbGFjZQpuZXcgYWdlbnQgc2Vzc2lvbnMgbGl2ZSDigJQgKiplZGl0b3IgdGFicyoqIHdpdGggYSBoYXJuZXNzIGljb24gYW5kIHRpdGxlLiBUb2RheSBpdCBkdW1wcyB0aGVtIGludG8Kc21hbGwgYm90dG9tLXBhbmVsIHRlcm1pbmFscyBydW5uaW5nIGEgcmF3IHNzaCBjb21tYW5kLCBzbyB0aGUgcmVjb3ZlcmVkIHdvcmsgbG9va3Mgbm90aGluZyBsaWtlIGEKcnVubmluZyBhZ2VudCwgbG9zZXMgdGFiIGlkZW50aXR5LCBhbmQgKGJlY2F1c2UgaXQgc2tpcHMgQ0xJIHJvdXRpbmcpIGNhbiBmYWlsIHRvIGNvbm5lY3QgYXQgYWxsLgoKIyMgQ3VycmVudCBhcmNoaXRlY3R1cmUg4oCUIHR3byBSZXN1bWUgcGF0aHMsIG9uZSBpcyB3cm9uZwoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtZmlndXJlLWRpYWdyYW0iPgo8c3ZnIHZpZXdCb3g9IjAgMCA5MDAgMzIwIiByb2xlPSJpbWciIGFyaWEtbGFiZWw9IlR3byByZXN1bWUgcGF0aHM6IGNvbW1hbmQgcGFsZXR0ZSBvcGVucyBlZGl0b3IgdGFiczsgd2VidmlldyBvcGVucyBwYW5lbCB0ZXJtaW5hbHMiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CiAgPGRlZnM+PG1hcmtlciBpZD0iYSIgbWFya2VyV2lkdGg9IjkiIG1hcmtlckhlaWdodD0iOSIgcmVmWD0iNyIgcmVmWT0iNCIgb3JpZW50PSJhdXRvIj48cGF0aCBkPSJNMCwwIEw4LDQgTDAsOCB6IiBmaWxsPSIjNWE2Yjc2Ii8+PC9tYXJrZXI+PC9kZWZzPgoKICA8dGV4dCB4PSIyMCIgeT0iMjQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEyIiBmaWxsPSIjYTNlNjM1Ij5DT1JSRUNUIOKAlCBjb21tYW5kIHBhbGV0dGUgIkFnZW50czogUmVzdW1lIjwvdGV4dD4KICA8cmVjdCB4PSIyMCIgeT0iMzYiIHdpZHRoPSIxODAiIGhlaWdodD0iNDYiIHJ4PSI4IiBmaWxsPSIjMGYxNjBhIiBzdHJva2U9IiNhM2U2MzUiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzAiIHk9IjU4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Q3ZTBlNiI+YWdlbnRzLnJlc3VtZTwvdGV4dD4KICA8dGV4dCB4PSIzMCIgeT0iNzQiIGZvbnQtZmFtaWx5PSJJbnRlciwgc3lzdGVtLXVpLCBzYW5zLXNlcmlmIiBmb250LXNpemU9IjEwIiBmaWxsPSIjOGE4YThhIj5yZXN1bWVTZXNzaW9uc0JhdGNoPC90ZXh0PgogIDxsaW5lIHgxPSIyMDAiIHkxPSI1OSIgeDI9IjI1MiIgeTI9IjU5IiBzdHJva2U9IiM1YTZiNzYiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+CiAgPHJlY3QgeD0iMjUyIiB5PSIzNiIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI0NiIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyNjIiIHk9IjU4IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Q3ZTBlNiI+b3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWw8L3RleHQ+CiAgPHRleHQgeD0iMjYyIiB5PSI3NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPmV4dGVuc2lvbi50czoyNTkzPC90ZXh0PgogIDxsaW5lIHgxPSI0NjIiIHkxPSI1OSIgeDI9IjUxNCIgeTI9IjU5IiBzdHJva2U9IiM1YTZiNzYiIHN0cm9rZS13aWR0aD0iMS41IiBtYXJrZXItZW5kPSJ1cmwoI2EpIi8+CiAgPHJlY3QgeD0iNTE0IiB5PSIzNiIgd2lkdGg9IjM2NiIgaGVpZ2h0PSI0NiIgcng9IjgiIGZpbGw9IiMwZjE2MGEiIHN0cm9rZT0iI2EzZTYzNSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MjQiIHk9IjU1IiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSIgZmlsbD0iI2Q3ZTBlNiI+Y3JlYXRlVGVybWluYWwoeyBsb2NhdGlvbjogdmlld0NvbHVtbi5BY3RpdmUgfSk8L3RleHQ+CiAgPHRleHQgeD0iNTI0IiB5PSI3NCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPkVESVRPUiBUQUIgwrcgaWNvbiDCtyByZWdpc3RlcmVkIMK3IGFnZW50cyBzZXNzaW9ucyByZXN1bWUgJmx0O2lkJmd0OyAtLXZzY29kaXVtPC90ZXh0PgoKICA8dGV4dCB4PSIyMCIgeT0iMTUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y4NzE3MSI+QlVHR1kg4oCUIEZsZWV0ICJTZXNzaW9ucyIgd2VidmlldyAiUmVzdW1lIGFsbCAvIHNlbGVjdGVkIjwvdGV4dD4KICA8cmVjdCB4PSIyMCIgeT0iMTYyIiB3aWR0aD0iMTgwIiBoZWlnaHQ9IjQ2IiByeD0iOCIgZmlsbD0iIzE2MTIwYSIgc3Ryb2tlPSIjZjg3MTcxIiBzdHJva2Utd2lkdGg9IjEuNSIvPgogIDx0ZXh0IHg9IjMwIiB5PSIxODQiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjEyIiBmaWxsPSIjZDdlMGU2Ij5TZXNzaW9uc1BhbmU8L3RleHQ+CiAgPHRleHQgeD0iMzAiIHk9IjIwMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPlJlc3VtZSBidXR0b25zPC90ZXh0PgogIDxsaW5lIHgxPSIyMDAiIHkxPSIxODUiIHgyPSIyNTIiIHkyPSIxODUiIHN0cm9rZT0iIzVhNmI3NiIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYSkiLz4KICA8cmVjdCB4PSIyNTIiIHk9IjE2MiIgd2lkdGg9IjIxMCIgaGVpZ2h0PSI0NiIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSIyNjIiIHk9IjE4NCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTIiIGZpbGw9IiNkN2UwZTYiPm9wZW5UZXJtaW5hbEZvckFnZW50PC90ZXh0PgogIDx0ZXh0IHg9IjI2MiIgeT0iMjAwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMCIgZmlsbD0iIzhhOGE4YSI+cG9zdE1lc3NhZ2UgZm9jdXNSZW1vdGVTZXNzaW9uPC90ZXh0PgogIDxsaW5lIHgxPSI0NjIiIHkxPSIxODUiIHgyPSI1MTQiIHkyPSIxODUiIHN0cm9rZT0iIzVhNmI3NiIgc3Ryb2tlLXdpZHRoPSIxLjUiIG1hcmtlci1lbmQ9InVybCgjYSkiLz4KICA8cmVjdCB4PSI1MTQiIHk9IjE2MiIgd2lkdGg9IjM2NiIgaGVpZ2h0PSI0NiIgcng9IjgiIGZpbGw9IiMxNjEyMGEiIHN0cm9rZT0iI2Y4NzE3MSIgc3Ryb2tlLXdpZHRoPSIxLjUiLz4KICA8dGV4dCB4PSI1MjQiIHk9IjE4MSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNkN2UwZTYiPmNyZWF0ZVRlcm1pbmFsKHsgbmFtZTogImF0dGFjaCDigKYiIH0pICAvLyBubyBsb2NhdGlvbjwvdGV4dD4KICA8dGV4dCB4PSI1MjQiIHk9IjIwMCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTAiIGZpbGw9IiM4YThhOGEiPlBBTkVMIMK3IHNzaCAtdCAmbHQ7aG9zdCZndDsgJ3RtdXggLVMgJmx0O3NvY2smZ3Q7IGF0dGFjaCcgKHJhdywgbm8gQ0xJIHJvdXRpbmcpPC90ZXh0PgoKICA8dGV4dCB4PSIyMCIgeT0iMjUwIiBmb250LWZhbWlseT0iSW50ZXIsIHN5c3RlbS11aSwgc2Fucy1zZXJpZiIgZm9udC1zaXplPSIxMiIgZmlsbD0iI2Y4NzE3MSI+U0FNRSBERUZFQ1Qg4oCUIHNldHRpbmdzLnZzY29kZS50cyBjYXNlICdmb2N1c1Nlc3Npb24nIHJlbW90ZSBmYWxsYmFjayAoOjMxNTkpPC90ZXh0PgogIDxyZWN0IHg9IjIwIiB5PSIyNjIiIHdpZHRoPSI4NjAiIGhlaWdodD0iNDAiIHJ4PSI4IiBmaWxsPSIjMTYxMjBhIiBzdHJva2U9IiNmODcxNzEiIHN0cm9rZS13aWR0aD0iMS41Ii8+CiAgPHRleHQgeD0iMzAiIHk9IjI4NyIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiIGZpbGw9IiNkN2UwZTYiPmNyZWF0ZVRlcm1pbmFsKHsgbmFtZTogImF0dGFjaCAmbHQ7aWQ4Jmd0OyIgfSkgKyBidWlsZFJlbW90ZUZvY3VzQ29tbWFuZCguLi4pICDihpIgUEFORUwgdGVybWluYWw8L3RleHQ+Cjwvc3ZnPgo8L2Rpdj4KCiMjIEJlaGF2aW9yIOKAlCBjdXJyZW50IHZzIHByb3Bvc2VkCgo8ZGl2IGNsYXNzPSJhcnRpZmFjdC1iZWhhdmlvciI+CiAgPGRpdiBjbGFzcz0iYXJ0aWZhY3QtcGFuZWwiIGRhdGEtc3RhdGU9ImN1cnJlbnQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8aDQ+Q3VycmVudCDigJQgYm90dG9tIHBhbmVsLCAiYXR0YWNoIOKApiIgdGVybWluYWxzPC9oND4KICAgIDxzdmcgdmlld0JveD0iMCAwIDQ2MCAyNTAiIHJvbGU9ImltZyIgYXJpYS1sYWJlbD0iVlMgQ29kZSBib3R0b20gdGVybWluYWwgcGFuZWwgd2l0aCBhdHRhY2ggdGVybWluYWxzLCBvbmUgdGltZWQgb3V0IiB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciPgogICAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iNDYwIiBoZWlnaHQ9IjI1MCIgZmlsbD0iIzNhMGQwZCIvPgogICAgICA8cmVjdCB4PSIwIiB5PSIwIiB3aWR0aD0iNDYwIiBoZWlnaHQ9IjIyIiBmaWxsPSIjMWYyYTMwIi8+CiAgICAgIDx0ZXh0IHg9IjEwIiB5PSIxNSIgZmlsbD0iIzlmYjJiZCIgZm9udC1mYW1pbHk9IkludGVyLCBzeXN0ZW0tdWksIHNhbnMtc2VyaWYiIGZvbnQtc2l6ZT0iMTEiPlBST0JMRU1TICBPVVRQVVQgIERFQlVHICBURVJNSU5BTCAgUE9SVFM8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjEyIiB5PSI1MiIgZmlsbD0iI2U2YjBiMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPiQgc3NoIC10ICd5b3NlbWl0ZS1tMScgJ3RtdXggLVMg4oCmL3NlcnZlci5zb2NrIGF0dGFjaCc8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjEyIiB5PSI3MiIgZmlsbD0iI2ZmOGE4YSIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPnNzaDogY29ubmVjdCB0byBob3N0IDE5Mi4xNjguMS4xMDE6MjI6IHRpbWVkIG91dDwvdGV4dD4KICAgICAgPHJlY3QgeD0iMzMwIiB5PSIyNiIgd2lkdGg9IjEzMCIgaGVpZ2h0PSIyMDAiIGZpbGw9IiMyYTBhMGEiLz4KICAgICAgPHRleHQgeD0iMzQwIiB5PSI0NiIgZmlsbD0iI2Q3YzJjMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPuKWtyBhdHRhY2ggemlvbuKApjwvdGV4dD4KICAgICAgPHRleHQgeD0iMzQwIiB5PSI2NiIgZmlsbD0iI2Q3YzJjMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPuKWtyBhdHRhY2ggZ2l0IHN04oCmPC90ZXh0PgogICAgICA8dGV4dCB4PSIzNDAiIHk9Ijg2IiBmaWxsPSIjZDdjMmMyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+4pa3IGF0dGFjaCBjcmFi4oCmPC90ZXh0PgogICAgICA8dGV4dCB4PSIzNDAiIHk9IjEwNiIgZmlsbD0iI2Q3YzJjMiIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPuKWtyBhdHRhY2ggRG/igKY8L3RleHQ+CiAgICAgIDx0ZXh0IHg9IjM0MCIgeT0iMTI2IiBmaWxsPSIjZDdjMmMyIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+4pa3IGF0dGFjaCBDb27igKY8L3RleHQ+CiAgICA8L3N2Zz4KICA8L2Rpdj4KICA8ZGl2IGNsYXNzPSJhcnRpZmFjdC1wYW5lbCIgZGF0YS1zdGF0ZT0icHJvcG9zZWQiIGRhdGEtZXZpZGVuY2U9Im1vY2t1cCI+CiAgICA8aDQ+UHJvcG9zZWQg4oCUIGVkaXRvciB0YWJzLCBoYXJuZXNzLXRpdGxlZCBhZ2VudCB0ZXJtaW5hbHM8L2g0PgogICAgPHN2ZyB2aWV3Qm94PSIwIDAgNDYwIDI1MCIgcm9sZT0iaW1nIiBhcmlhLWxhYmVsPSJWUyBDb2RlIGVkaXRvciBhcmVhIHdpdGggYWdlbnQgdGVybWluYWwgdGFicyIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICAgICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjQ2MCIgaGVpZ2h0PSIyNTAiIGZpbGw9IiMwZTFhMTIiLz4KICAgICAgPHJlY3QgeD0iMCIgeT0iMCIgd2lkdGg9IjQ2MCIgaGVpZ2h0PSIyNiIgZmlsbD0iIzE2MjQxYSIvPgogICAgICA8cmVjdCB4PSI2IiB5PSI0IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjIwIiByeD0iNCIgZmlsbD0iIzFmM2EyOCIvPgogICAgICA8dGV4dCB4PSIxNCIgeT0iMTgiIGZpbGw9IiNiZmU5Y2QiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj7il4YgQ2xhdWRlIMK3IHppb248L3RleHQ+CiAgICAgIDxyZWN0IHg9IjEzMiIgeT0iNCIgd2lkdGg9IjEyMCIgaGVpZ2h0PSIyMCIgcng9IjQiIGZpbGw9IiMxNDI2MWIiLz4KICAgICAgPHRleHQgeD0iMTQwIiB5PSIxOCIgZmlsbD0iIzlmZDRiMCIgZm9udC1mYW1pbHk9IkpldEJyYWlucyBNb25vLCBtb25vc3BhY2UiIGZvbnQtc2l6ZT0iMTEiPuKXhiBDb2RleCDCtyBtMTwvdGV4dD4KICAgICAgPHJlY3QgeD0iMjU4IiB5PSI0IiB3aWR0aD0iMTIwIiBoZWlnaHQ9IjIwIiByeD0iNCIgZmlsbD0iIzE0MjYxYiIvPgogICAgICA8dGV4dCB4PSIyNjYiIHk9IjE4IiBmaWxsPSIjOWZkNGIwIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+4peGIENsYXVkZSDCtyBjcmFiPC90ZXh0PgogICAgICA8dGV4dCB4PSIxNCIgeT0iNTQiIGZpbGw9IiNjZmU5ZDYiIGZvbnQtZmFtaWx5PSJKZXRCcmFpbnMgTW9ubywgbW9ub3NwYWNlIiBmb250LXNpemU9IjExIj4kIGFnZW50cyBzZXNzaW9ucyByZXN1bWUgNzFiYjNiM2IgLS12c2NvZGl1bTwvdGV4dD4KICAgICAgPHRleHQgeD0iMTQiIHk9Ijc0IiBmaWxsPSIjOGZkNmEzIiBmb250LWZhbWlseT0iSmV0QnJhaW5zIE1vbm8sIG1vbm9zcGFjZSIgZm9udC1zaXplPSIxMSI+4pyUIHJlc3VtZWQgwrcgQ0xJIHJvdXRlZCB2aWEgdGFpbG5ldCDCtyBhZ2VudCByZWFkeTwvdGV4dD4KICAgIDwvc3ZnPgogIDwvZGl2Pgo8L2Rpdj4KCiMjIFByb3Bvc2VkIENoYW5nZXMKCioqMS4gRXhwb3J0IHRoZSBjb3JyZWN0IGhlbHBlcioqIOKAlCBhZGQgYGV4cG9ydGAgdG8gYG9wZW5SZXN1bWVkU2Vzc2lvblRlcm1pbmFsYAooYGFwcHMvZXh0L3NyYy92c2NvZGUvZXh0ZW5zaW9uLnRzOjI1OTNgKS4gYHNldHRpbmdzLnZzY29kZS50czoxOWAgYWxyZWFkeSBpbXBvcnRzIGZyb20gYC4vZXh0ZW5zaW9uYC4KCioqMi4gQ2FycnkgYWdlbnQgdHlwZSArIGN3ZCBhY3Jvc3MgdGhlIHdlYnZpZXcgYm91bmRhcnkqKiBzbyB0aGUgaGVscGVyIGNhbiByZXNvbHZlIHRoZSBoYXJuZXNzOgoKYGBgZGlmZgogICBpZiAoYS5yZXBseS5raW5kID09PSAndG11eCcgJiYgYS5yZXBseS5tdXhUYXJnZXQpIHsKLSAgICBwb3N0TWVzc2FnZSh7IHR5cGU6ICdmb2N1c1JlbW90ZVNlc3Npb24nLCBob3N0OiBhLnJlcGx5Lmhvc3QsIG11eFNvY2tldDogYS5yZXBseS5tdXhTb2NrZXQsCi0gICAgICAgICAgICAgICAgICBtdXhUYXJnZXQ6IGEucmVwbHkubXV4VGFyZ2V0LCBzZXNzaW9uSWQ6IGEucmVwbHkuc2Vzc2lvbklkID8/IGEuc2Vzc2lvbklkLCBsYWJlbDogYS5uYW1lIH0pCisgICAgcG9zdE1lc3NhZ2UoeyB0eXBlOiAncmVzdW1lUmVtb3RlU2Vzc2lvbicsIHNlc3Npb25JZDogYS5yZXBseS5zZXNzaW9uSWQgPz8gYS5zZXNzaW9uSWQsCisgICAgICAgICAgICAgICAgICBhZ2VudDogYS5hZ2VudFR5cGUsIGhvc3Q6IGEucmVwbHkuaG9zdCwgY3dkOiBhLmN3ZCwgdmVyc2lvbjogYS52ZXJzaW9uLCBsYWJlbDogYS5uYW1lIH0pCiAgICAgcmV0dXJuCiAgIH0KYGBgCgoqKjMuIFJlcGxhY2UgYm90aCByYXctc3NoIHBhbmVsIGhhbmRsZXJzIHdpdGggdGhlIGhlbHBlcioqIGluIGBhcHBzL2V4dC9zcmMvdnNjb2RlL3NldHRpbmdzLnZzY29kZS50c2AK4oCUIGBjYXNlICdmb2N1c1JlbW90ZVNlc3Npb24nYCAoYDozMDMzLTMwNDhgKSBhbmQgdGhlIHJlbW90ZSBicmFuY2ggb2YgYGNhc2UgJ2ZvY3VzU2Vzc2lvbidgCihgOjMxNjctMzE2OWApIGJvdGggY29sbGFwc2UgdG86CgpgYGBkaWZmCi0gIGNvbnN0IGF0dGFjaCA9IGB0bXV4IC1TICR7c2hxKHNvY2tldCl9IGF0dGFjaGA7Ci0gIGNvbnN0IGNtZCA9IGhvc3QgPyBgc3NoIC10ICR7c2hxKGhvc3QpfSAke3NocShhdHRhY2gpfWAgOiBhdHRhY2g7Ci0gIGNvbnN0IHRlcm0gPSB2c2NvZGUud2luZG93LmNyZWF0ZVRlcm1pbmFsKHsgbmFtZTogYGF0dGFjaCAke2xhYmVsfWAgfSk7Ci0gIHRlcm0uc2VuZFRleHQoY21kLCB0cnVlKTsKLSAgdGVybS5zaG93KGZhbHNlKTsKKyAgYXdhaXQgb3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWwoY29udGV4dCwgeworICAgIGlkOiBzZXNzaW9uSWQsIHNob3J0SWQ6IHNlc3Npb25JZC5zbGljZSgwLCA4KSwgYWdlbnQsIGhvc3QsIGN3ZCwgdmVyc2lvbiwKKyAgfSk7CmBgYAoKS2VlcCB0aGUgbG9jYWwgZmFzdCBwYXRoIChgaXNMb2NhbERldmljZUhvc3QoaG9zdClgIOKGkiBgZm9jdXNTZXNzaW9uSW5UZXJtaW5hbChzZXNzaW9uSWQpYCksIHdoaWNoIGlzCmFscmVhZHkgY29ycmVjdC4gUmVtb3ZlIGBidWlsZFJlbW90ZUZvY3VzQ29tbWFuZGAgaWYgaXQgaGFzIG5vIG90aGVyIGNhbGxlciAoZ3JlcCBmaXJzdCkuCgojIyBQdWJsaWMgSW50ZXJmYWNlCgpObyBuZXcgQ0xJIGZsYWcsIGNvbW1hbmQsIG9yIHB1YmxpYyBBUEkuIFRoZSBjaGFuZ2UgaXMgaW50ZXJuYWwgdG8gdGhlIGV4dGVuc2lvbjogaXQgc3dhcHMgdGhlCndlYnZpZXcgYHBvc3RNZXNzYWdlYCBpbnRlbnQgbmFtZSAoYGZvY3VzUmVtb3RlU2Vzc2lvbmAg4oaSIGByZXN1bWVSZW1vdGVTZXNzaW9uYCkgYW5kIGl0cyBwYXlsb2FkCihhZGRzIGBhZ2VudGAsIGBjd2RgLCBgdmVyc2lvbmA7IGRyb3BzIGBtdXhTb2NrZXRgL2BtdXhUYXJnZXRgKSwgYW5kIHJldXNlcyB0aGUgZXhpc3RpbmcKQ0xJIHZlcmIgdGhlIGNvcnJlY3QgcGF0aCBhbHJlYWR5IGNhbGxzIOKAlCBgYWdlbnRzIHNlc3Npb25zIHJlc3VtZSA8aWQ+IC0tdnNjb2RpdW1gLiBVc2VyLXZpc2libGUKc3VyZmFjZSBjaGFuZ2VzIG9ubHkgaW4gb3V0Y29tZTogUmVzdW1lIG5vdyB5aWVsZHMgZWRpdG9yIHRhYnMgaW5zdGVhZCBvZiBwYW5lbCB0ZXJtaW5hbHMuCgojIyBGaWxlcwoKfCBGaWxlIHwgQ2hhbmdlIHwKfCAtLS0gfCAtLS0gfAp8IGBhcHBzL2V4dC9zcmMvdnNjb2RlL2V4dGVuc2lvbi50c2AgfCBgZXhwb3J0YCBgb3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWxgIChgOjI1OTNgKTsgcmVmZXJlbmNlIHBhdHRlcm4gYDoyNjIwLTI2MzFgIHwKfCBgYXBwcy9leHQvc3JjL3ZzY29kZS9zZXR0aW5ncy52c2NvZGUudHNgIHwgcmV3cml0ZSBgY2FzZSAnZm9jdXNSZW1vdGVTZXNzaW9uJ2AgKGA6MzAzM2ApICsgcmVtb3RlIGJyYW5jaCBvZiBgY2FzZSAnZm9jdXNTZXNzaW9uJ2AgKGA6MzE1OWApOyBpbXBvcnQgaGVscGVyIChgOjE5YCkgfAp8IGBhcHBzL2V4dC91aS9zZXR0aW5ncy9jb21wb25lbnRzL21pc3Npb24tY29udHJvbC9VbmlmaWVkQWdlbnRzUGFuZS50c3hgIHwgYG9wZW5UZXJtaW5hbEZvckFnZW50YCAoYDoxNzE4YCkgcGF5bG9hZDsgc2luZ2xlLWNhcmQgcG9zdGVyIChgOjE5NjlgKSB8CnwgUmV1c2VkLCB1bmNoYW5nZWQgfCBgYnVpbGRWZXJzaW9uZWRSZXN1bWVDb21tYW5kYCAoYGNvcmUvcHJld2FybS50czoxODFgKSwgYG5lZWRzUmVjb25uZWN0YCAoYGZsb29yTW9kZWwudHM6MjIwYCksIGBTZXNzaW9uc1BhbmVgIGJ1dHRvbnMgKGA6MjU0LzI1OS8yNzdgKSB8CgojIyBQbGFuCgotIFsgXSBXb3JrdHJlZSBvZmYgYG9yaWdpbi9tYWluYDsgZXhwb3J0IGBvcGVuUmVzdW1lZFNlc3Npb25UZXJtaW5hbGAKLSBbIF0gVXBkYXRlIHdlYnZpZXcgYG9wZW5UZXJtaW5hbEZvckFnZW50YCBwYXlsb2FkIChhZ2VudCArIGN3ZCArIHZlcnNpb24pCi0gWyBdIFJld3JpdGUgYm90aCByZW1vdGUgaGFuZGxlcnMgaW4gYHNldHRpbmdzLnZzY29kZS50c2AgdG8gY2FsbCB0aGUgaGVscGVyOyBkcm9wIHJhdyBzc2ggKyBkZWFkIGBidWlsZFJlbW90ZUZvY3VzQ29tbWFuZGAKLSBbIF0gQWRkIGV4dCB0ZXN0OiB3ZWJ2aWV3IHJlbW90ZS1vcGVuIGludGVudCBtYXBzIHRvIGVkaXRvci10YWIgcmVzdW1lIChubyBwYW5lbCBgY3JlYXRlVGVybWluYWxgLCBubyByYXcgYHNzaCDigKYgdG11eCBhdHRhY2hgKQotIFsgXSBCdWlsZCBWU0lYLCBpbnN0YWxsIG9uIHppb24sIHJlcHJvZHVjZSArIHZlcmlmeSBlZGl0b3IgdGFicywgc2NyZWVuc2hvdAotIFsgXSBDSEFOR0VMT0cgdW5kZXIgbmV4dCBgYXBwcy9leHRgIHZlcnNpb247IHVwZGF0ZSBBR0VOVFMubWQvUkVBRE1FIGlmIHRoZSBmbG93IGlzIGRvY3VtZW50ZWQKLSBbIF0gT3BlbiBQUiB3aXRoIGJlZm9yZS9hZnRlciBzY3JlZW5zaG90czsgbWVyZ2Ugb24gZ3JlZW4KCiMjIFZhbGlkYXRpb24KCmBgYGJhc2gKIyBmcm9tIHRoZSB3b3JrdHJlZQphcHBzL2V4dC9zY3JpcHRzL2J1aWxkLnNoIDx2ZXJzaW9uPgojIGluc3RhbGwgdGhlIFZTSVggaW50byB0aGUgZWRpdG9yIG9uIHppb24gKG5ldmVyIG92ZXIgdGhlIHByb2QgcHVibGlzaCBpZGVudGl0eSkKYGBgCgoxLiBTdGFydCDiiaUyIGFnZW50IHNlc3Npb25zIG9uIHJlbW90ZSBob3N0czsgbGV0IHRoZW0gZ28gYG9ycGhhbmVkYC9gYWJhbmRvbmVkYCAoY2xvc2UgdGFicyAvIHJlc3RhcnQgd2luZG93KS4KMi4gRmxlZXQgKipTZXNzaW9ucyoqIHBhbmUg4oaSICoqUmVzdW1lIGFsbCoqLgozLiAqKkV4cGVjdGVkOioqIGVhY2ggcmVvcGVucyBhcyBhbiAqKmVkaXRvciB0YWIqKiAoYWdlbnQgaWNvbiwgaGFybmVzcy10aXRsZWQg4oCUIG5vdCBgYXR0YWNoIDxob3N0PmApLAogICBydW5uaW5nIGBhZ2VudHMgc2Vzc2lvbnMgcmVzdW1lIDxpZD4gLS12c2NvZGl1bWAuIE5vIGJvdHRvbS1wYW5lbCBgc3NoIOKApiB0bXV4IGF0dGFjaGAsIG5vCiAgIGAxOTIuMTY4LjEuMTAxYCB0aW1lb3V0Lgo0LiBTaW5nbGUtY2FyZCAqKmZvY3VzL29wZW4qKiBvbiBhIHJlbW90ZSBzZXNzaW9uIOKGkiBzYW1lIGVkaXRvci10YWIgcmVzdWx0LgoKPGRpdiBjbGFzcz0iYXJ0aWZhY3QtY2FsbG91dCI+ClRoZSBjb3JyZWN0IGJlaGF2aW9yIGFscmVhZHkgZXhpc3RzICg8Y29kZT5vcGVuUmVzdW1lZFNlc3Npb25UZXJtaW5hbDwvY29kZT4pLiBUaGUgZml4IGRlbGV0ZXMgdHdvCmR1cGxpY2F0ZSwgd3Jvbmcgc3VyZmFjZXMgcmF0aGVyIHRoYW4gYWRkaW5nIGEgbmV3IG9uZSDigJQgYW5kIGl0IGZpeGVzIHRoZSBzc2ggdGltZW91dCBmb3IgZnJlZSwKYmVjYXVzZSA8Y29kZT5hZ2VudHMgc2Vzc2lvbnMgcmVzdW1lPC9jb2RlPiBvd25zIGZsZWV0IHJvdXRpbmcgd2hpbGUgdGhlIHJhdyBzc2ggZGlkIG5vdC4KPC9kaXY+CgojIyBSaXNrcwoKfCBSaXNrIHwgTWl0aWdhdGlvbiB8CnwgLS0tIHwgLS0tIHwKfCBSZW1vdGUgcmVzdW1lIG5lZWRzIGEgdGFiIGNoaXAgd2l0aG91dCBhIGxvY2FsIGFnZW50IHByb2Nlc3MgfCBUaGUgYCMyNDc4YCBgbWV0YWAgcGF0aCBhbHJlYWR5IGxhYmVscyByZW1vdGUgYXR0YWNoIHRhYnM7IHZlcmlmeSBpdCByZXNvbHZlcy4gfAp8IGBmb2N1c2AgKGpvaW4gbGl2ZSBwYW5lKSB2cyBgcmVzdW1lYCAocmVjb3Zlcikgc2VtYW50aWNzIGRpZmZlciB8IGBhZ2VudHMgc2Vzc2lvbnMgcmVzdW1lYCBhbHJlYWR5ICJkZWNpZGVzIGF0dGFjaCB2cyByZWNvdmVyIjsgYm90aCBzdGlsbCBvcGVuIGFzIGVkaXRvciB0YWJzLiBGaWxlIGEgZm9sbG93LXVwIGlmIGEgZGlzdGluY3QgbGlnaHR3ZWlnaHQgam9pbiBpcyB3YW50ZWQuIHwKfCBNaXNzaW5nIGBjd2RgIG9uIHNvbWUgRmxvb3JBZ2VudHMgfCBgb3BlblJlc3VtZWRTZXNzaW9uVGVybWluYWxgIGFscmVhZHkgZmFsbHMgYmFjayB0byB3b3Jrc3BhY2UvYHByb2Nlc3MuY3dkKClgLiB8CgojIyBUcmFja2luZwoKT3BlbiBhIFJVU0ggdGlja2V0IGZvciB0aGUgZml4IChBR0kgcHJvamVjdCk7IGxpbmsgdGhpcyBwbGFuIGFuZCB0aGUgUFIgYm90aCB3YXlzLgo="}</script>
+<script>
+(() => {
+  const root = document.documentElement;
+  const button = document.querySelector('.theme-toggle');
+  const media = window.matchMedia('(prefers-color-scheme: dark)');
+  const configured = "system";
+  const stored = () => { try { const value = localStorage.getItem('artifacts-theme'); return value === 'light' || value === 'dark' ? value : null; } catch { return null; } };
+  const preferred = () => stored() || (configured === 'system' ? (media.matches ? 'dark' : 'light') : configured);
+  const apply = (theme, persist) => {
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+    const next = theme === 'dark' ? 'light' : 'dark';
+    button.setAttribute('aria-label', 'Switch to ' + next + ' theme');
+    button.setAttribute('title', 'Switch to ' + next + ' theme');
+    button.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    if (persist) { try { localStorage.setItem('artifacts-theme', theme); } catch {} }
+  };
+  apply(preferred(), false);
+  button.addEventListener('click', () => apply(root.dataset.theme === 'dark' ? 'light' : 'dark', true));
+  media.addEventListener('change', () => { if (configured === 'system' && !stored()) apply(media.matches ? 'dark' : 'light', false); });
+})();
+</script><script>
+(() => {
+  // Scroll-spy: mark the section the reader is currently in. The active heading
+  // is the last one whose top has passed the reading line, so a heading is
+  // "current" from the moment it reaches the top, not when it leaves.
+  const links = [...document.querySelectorAll('.toc-item')];
+  if (links.length) {
+    const targets = links
+      .map((link) => ({ link, heading: document.getElementById(link.dataset.tocFor) }))
+      .filter((entry) => entry.heading);
+    let active = null;
+    let queued = false;
+    const sync = () => {
+      queued = false;
+      const line = 120;
+      let current = targets[0];
+      for (const entry of targets) {
+        if (entry.heading.getBoundingClientRect().top <= line) current = entry;
+        else break;
+      }
+      // Past the end of the document the last section is the one being read.
+      if (window.innerHeight + window.scrollY >= document.body.scrollHeight - 4) current = targets[targets.length - 1];
+      if (!current || current.link === active) return;
+      if (active) active.classList.remove('is-active');
+      active = current.link;
+      active.classList.add('is-active');
+      const rail = active.closest('.toc');
+      if (rail && rail.scrollHeight > rail.clientHeight) {
+        const top = active.offsetTop - rail.clientHeight / 2;
+        rail.scrollTo({ top, behavior: 'smooth' });
+      }
+    };
+    const onScroll = () => { if (!queued) { queued = true; requestAnimationFrame(sync); } };
+    addEventListener('scroll', onScroll, { passive: true });
+    addEventListener('resize', onScroll, { passive: true });
+    sync();
+  }
+
+  // Local read count. Per-browser, keyed by this artifact's own identity, so a
+  // shared link counts each reader's own visits rather than a global total.
+  try {
+    const key = 'artifacts-views:' + location.origin + location.pathname + ':' + (document.title || '');
+    const count = (parseInt(localStorage.getItem(key) || '0', 10) || 0) + 1;
+    localStorage.setItem(key, String(count));
+    const label = document.querySelector('.view-count');
+    if (label) {
+      label.textContent = count === 1 ? 'first read' : count + ' reads';
+      label.hidden = false;
+    }
+  } catch {}
+})();
+</script><script>
+(() => {
+  const root = document.querySelector('.artifact-body');
+  if (!root) return;
+
+  const storageKey = 'artifacts-highlights:' + location.origin + location.pathname + ':' + (document.title || '');
+  const selector = 'h2,h3,p,li,blockquote,pre,figcaption,td,th,dd';
+  const hash = (value) => {
+    let result = 2166136261;
+    for (let index = 0; index < value.length; index += 1) {
+      result ^= value.charCodeAt(index);
+      result = Math.imul(result, 16777619);
+    }
+    return (result >>> 0).toString(36);
+  };
+  const anchors = [...root.querySelectorAll(selector)].filter((element) => !element.parentElement.closest(selector));
+  const bases = [];
+  let section = 'document';
+  for (const anchor of anchors) {
+    if ((anchor.tagName === 'H2' || anchor.tagName === 'H3') && anchor.id) section = anchor.id;
+    const text = (anchor.textContent || '').replace(/\s+/g, ' ').trim();
+    const base = anchor.id ? 'id:' + anchor.id : section + ':' + anchor.tagName.toLowerCase() + ':' + hash(text);
+    bases.push(base);
+  }
+  const totals = new Map();
+  for (const base of bases) totals.set(base, (totals.get(base) || 0) + 1);
+  const occurrences = new Map();
+  for (let index = 0; index < anchors.length; index += 1) {
+    const anchor = anchors[index];
+    const base = bases[index];
+    const occurrence = (occurrences.get(base) || 0) + 1;
+    occurrences.set(base, occurrence);
+    anchor.dataset.readerAnchor = base.startsWith('id:') ? base : base + ':count:' + totals.get(base) + ':occurrence:' + occurrence;
+  }
+  const byId = new Map(anchors.map((anchor) => [anchor.dataset.readerAnchor, anchor]));
+
+  const read = () => {
+    try {
+      const value = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      return Array.isArray(value) ? value.filter((item) => item && item.id && item.start && item.end) : [];
+    } catch { return []; }
+  };
+  let highlights = read();
+  const write = () => { try { localStorage.setItem(storageKey, JSON.stringify(highlights)); } catch {} };
+  const textLength = (anchor) => (anchor.textContent || '').length;
+  const offsetAt = (anchor, node, offset) => {
+    const range = document.createRange();
+    range.selectNodeContents(anchor);
+    try { range.setEnd(node, offset); } catch { return null; }
+    return range.toString().length;
+  };
+  const wrap = (anchor, start, end, id) => {
+    if (end <= start) return;
+    const nodes = [];
+    const walker = document.createTreeWalker(anchor, NodeFilter.SHOW_TEXT);
+    let cursor = 0;
+    let node = walker.nextNode();
+    while (node) {
+      const nodeStart = cursor;
+      const nodeEnd = cursor + node.data.length;
+      if (nodeEnd > start && nodeStart < end) nodes.push([node, Math.max(0, start - nodeStart), Math.min(node.data.length, end - nodeStart)]);
+      cursor = nodeEnd;
+      node = walker.nextNode();
+    }
+    for (let index = nodes.length - 1; index >= 0; index -= 1) {
+      const [textNode, from, to] = nodes[index];
+      if (to <= from) continue;
+      const range = document.createRange();
+      range.setStart(textNode, from);
+      range.setEnd(textNode, to);
+      const mark = document.createElement('mark');
+      mark.className = 'reader-highlight';
+      mark.dataset.highlightId = id;
+      mark.title = 'Click to remove highlight';
+      range.surroundContents(mark);
+    }
+  };
+  const clearMarks = () => {
+    for (const mark of root.querySelectorAll('mark[data-highlight-id]')) mark.replaceWith(...mark.childNodes);
+    for (const anchor of anchors) anchor.normalize();
+  };
+  const render = () => {
+    clearMarks();
+    for (const highlight of highlights) {
+      const first = byId.get(highlight.start.anchor);
+      const last = byId.get(highlight.end.anchor);
+      const firstIndex = anchors.indexOf(first);
+      const lastIndex = anchors.indexOf(last);
+      if (!first || !last || firstIndex < 0 || lastIndex < firstIndex) continue;
+      for (let index = firstIndex; index <= lastIndex; index += 1) {
+        const anchor = anchors[index];
+        wrap(anchor, index === firstIndex ? highlight.start.offset : 0, index === lastIndex ? highlight.end.offset : textLength(anchor), highlight.id);
+      }
+    }
+  };
+
+  root.addEventListener('mouseup', () => {
+    const selection = getSelection();
+    if (!selection || selection.isCollapsed || !selection.rangeCount) return;
+    const range = selection.getRangeAt(0);
+    const startAnchor = range.startContainer.parentElement?.closest('[data-reader-anchor]');
+    const endAnchor = range.endContainer.parentElement?.closest('[data-reader-anchor]');
+    if (!startAnchor || !endAnchor || !root.contains(startAnchor) || !root.contains(endAnchor)) return;
+    const startOffset = offsetAt(startAnchor, range.startContainer, range.startOffset);
+    const endOffset = offsetAt(endAnchor, range.endContainer, range.endOffset);
+    if (startOffset === null || endOffset === null) return;
+    const startIndex = anchors.indexOf(startAnchor);
+    const endIndex = anchors.indexOf(endAnchor);
+    if (startIndex > endIndex || (startIndex === endIndex && startOffset >= endOffset)) return;
+    const candidate = { start: { anchor: startAnchor.dataset.readerAnchor, offset: startOffset }, end: { anchor: endAnchor.dataset.readerAnchor, offset: endOffset } };
+    if (highlights.some((item) => item.start.anchor === candidate.start.anchor && item.start.offset === candidate.start.offset && item.end.anchor === candidate.end.anchor && item.end.offset === candidate.end.offset)) return;
+    highlights.push({ id: Date.now().toString(36) + Math.random().toString(36).slice(2), ...candidate });
+    write();
+    selection.removeAllRanges();
+    render();
+  });
+  root.addEventListener('click', (event) => {
+    const mark = event.target.closest('mark[data-highlight-id]');
+    if (!mark || !root.contains(mark)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    highlights = highlights.filter((item) => item.id !== mark.dataset.highlightId);
+    write();
+    render();
+  });
+  render();
+})();
+</script>
+</body>
+</html>
