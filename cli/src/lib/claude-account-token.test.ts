@@ -6,7 +6,10 @@ import * as path from 'path';
 import {
   claudeAccountTokenKey,
   isValidClaudeSetupToken,
+  readClaudeAccountEmail,
   resolveClaudeSetupToken,
+  resolveClaudeSetupTokenForEmail,
+  seedClaudeWorkerHomeIdentity,
 } from './claude-account-token.js';
 import { buildExecEnv } from './exec.js';
 import {
@@ -337,5 +340,40 @@ describe('isValidClaudeSetupToken', () => {
     expect(isValidClaudeSetupToken('sk-ant-api03-abc')).toBe(false);
     expect(isValidClaudeSetupToken('sk-ant-oat01-')).toBe(false);
     expect(isValidClaudeSetupToken('')).toBe(false);
+  });
+});
+
+describe('resolveClaudeSetupTokenForEmail + seedClaudeWorkerHomeIdentity (worker bootstrap)', () => {
+  it('resolves a setup-token by explicit email with no version-home identity', () => {
+    writeAuthBundle({ [claudeAccountTokenKey('social@swarmify.co')]: 'sk-ant-oat01-social' });
+    expect(resolveClaudeSetupTokenForEmail('social@swarmify.co')).toBe('sk-ant-oat01-social');
+    // An account with no token in the bundle resolves to null, never another account's.
+    expect(resolveClaudeSetupTokenForEmail('nobody@nowhere.dev')).toBeNull();
+    expect(resolveClaudeSetupTokenForEmail('')).toBeNull();
+  });
+
+  it('seeds a signed-out worker home so its account then resolves end to end', () => {
+    writeAuthBundle({ [claudeAccountTokenKey('dev@getrush.ai')]: 'sk-ant-oat01-dev' });
+    const home = makeHome(); // no oauthAccount → reads as signed out
+    expect(readClaudeAccountEmail(home)).toBeNull();
+    expect(resolveClaudeSetupToken(home)).toBeNull();
+    seedClaudeWorkerHomeIdentity(home, 'dev@getrush.ai');
+    expect(readClaudeAccountEmail(home)).toBe('dev@getrush.ai');
+    expect(resolveClaudeSetupToken(home)).toBe('sk-ant-oat01-dev');
+  });
+
+  it('preserves existing .claude.json fields when seeding the identity', () => {
+    const home = makeHome();
+    const cfg = path.join(home, '.claude', '.claude.json');
+    fs.mkdirSync(path.dirname(cfg), { recursive: true });
+    fs.writeFileSync(cfg, JSON.stringify({ numStartups: 7, tipsHistory: { a: 1 }, oauthAccount: { displayName: 'Keep' } }));
+    seedClaudeWorkerHomeIdentity(home, 'tech@prix.dev');
+    const doc = JSON.parse(fs.readFileSync(cfg, 'utf-8')) as {
+      numStartups: number; tipsHistory: Record<string, number>; oauthAccount: { emailAddress: string; displayName: string };
+    };
+    expect(doc.numStartups).toBe(7);
+    expect(doc.tipsHistory).toEqual({ a: 1 });
+    expect(doc.oauthAccount.displayName).toBe('Keep');
+    expect(doc.oauthAccount.emailAddress).toBe('tech@prix.dev');
   });
 });

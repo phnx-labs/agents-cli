@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import chalk from 'chalk';
 import { password, select } from '@inquirer/prompts';
-import { resolveClaudeSetupToken } from '../lib/claude-account-token.js';
+import { readClaudeAccountEmail, resolveClaudeSetupToken, resolveClaudeSetupTokenForEmail, seedClaudeWorkerHomeIdentity } from '../lib/claude-account-token.js';
 import { setHelpSections } from '../lib/help.js';
 import { readMeta, updateMeta } from '../lib/state.js';
 import type { AgentId } from '../lib/types.js';
@@ -93,11 +93,16 @@ export function classifyAttachTarget(target: string): AttachTarget {
  * the credential in the keychain, so `resolveClaudeSetupToken` returns null there and this
  * is a no-op off Linux.
  */
-export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId): void {
+export function writeClaudeInteractiveOauthToken(target: AttachTarget, targetAgent: AgentId, email?: string): void {
   if (process.platform !== 'linux' || targetAgent !== 'claude' || target.kind !== 'installation') return;
   const versionHome = getVersionHomePath('claude', target.version);
   const tokenPath = path.join(versionHome, '.claude', '.oauth_token');
-  const token = resolveClaudeSetupToken(versionHome);
+  // Resolve by the attached account's email when known (a freshly-seeded worker
+  // home the `.claude.json` read below could not key on yet), else by the home's
+  // own recorded identity for a re-point/detach.
+  const token = email
+    ? resolveClaudeSetupTokenForEmail(email, versionHome)
+    : resolveClaudeSetupToken(versionHome);
   // A re-point (attach B over A, or a detach) can leave no setup-token resolving for
   // this version — B's may not be minted yet. A leftover file from the previous binding
   // would silently authenticate interactive runs as the OLD account (the shim's Linux
@@ -563,15 +568,31 @@ agents run codex#work`,
             if (t.kind !== 'device-agent') throw new Error(`${account.agent} authentication is device-scoped. Attach it with 'agents accounts attach ${account.name} ${account.agent}'.`);
           } else {
             if (t.kind !== 'installation') throw new Error(`${account.agent} authentication is per-version. Attach '${account.name}' to a specific ${account.agent}@<version>.`);
-            const identity = await nativeIdentityFromSource(target);
-            if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
+            const versionHome = getVersionHomePath(t.agent, t.version);
+            // Headless-worker bootstrap: a keychain-less Linux worker home never had
+            // an interactive login, so its `.claude.json` carries no identity and
+            // `nativeIdentityFromSource` would reject the attach — yet the account's
+            // non-rotating setup-token is already fleet-synced in the `auth` bundle.
+            // Seed the identity (email only, no rotating credential) so the token
+            // resolves; `writeClaudeInteractiveOauthToken` then writes `.oauth_token`.
+            if (
+              process.platform === 'linux' &&
+              account.agent === 'claude' &&
+              !readClaudeAccountEmail(versionHome) &&
+              resolveClaudeSetupTokenForEmail(account.identityKey)
+            ) {
+              seedClaudeWorkerHomeIdentity(versionHome, account.identityKey);
+            } else {
+              const identity = await nativeIdentityFromSource(target);
+              if (identity.identityKey !== account.identityKey) throw new Error(`'${target}' is signed in to a different identity than account '${account.name}'.`);
+            }
           }
         } else {
           // Provider account: it must be able to authenticate the target's harness.
           getAccountProvider(account.provider).envFor(targetAgent, account.auth);
         }
         bindAccount(name, target);
-        writeClaudeInteractiveOauthToken(t, targetAgent);
+        writeClaudeInteractiveOauthToken(t, targetAgent, account.kind === 'native' && account.agent === 'claude' ? account.identityKey : undefined);
         console.log(chalk.green(`Attached ${account.name} to ${target}.`));
       });
     });
