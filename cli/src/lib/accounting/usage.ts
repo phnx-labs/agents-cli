@@ -370,8 +370,13 @@ export interface UsageSnapshot {
    * MUST NEVER read this field — `isUsageVerified`/`hasStaleUsage`/
    * `hasUsageAvailable`/`deriveUsageStatusFromSnapshot` consult only `windows`,
    * so a stale number rendered here can never make a stale account read as
-   * verified or eligible (the RUSH-2858 property). Never serialized to the
-   * on-disk cache or `--json` (both project `windows` explicitly).
+   * verified or eligible (the RUSH-2858 property). Not a serialized key of its
+   * own, and dropped from `--json` (which projects `windows` explicitly) — but
+   * the READINGS it holds do round-trip through the on-disk cache:
+   * `serializeClaudeUsageSnapshot` persists the union of `windows` and
+   * `staleWindows`, and `deserializeClaudeUsageSnapshot` re-runs the freshness
+   * gate on read to re-partition them (so a collector like Grok that pre-splits
+   * an ended-period reading onto `staleWindows` still survives the round-trip).
    */
   staleWindows?: UsageWindow[];
   // Subscription tier, when the usage source also reports it in the same
@@ -3050,10 +3055,17 @@ function safeStatSync(filePath: string): fs.Stats | null {
  */
 function resolveGrokBillingLogPath(home: string | undefined): string | null {
   const rel = ['.grok', 'logs', 'unified.jsonl'];
-  const requested = path.join(home || os.homedir(), ...rel);
-  if (fs.existsSync(requested)) return requested;
-  const shared = path.join(os.homedir(), ...rel);
-  if (shared !== requested && fs.existsSync(shared)) return shared;
+  const perVersion = path.join(home || os.homedir(), ...rel);
+  try { if (fs.existsSync(perVersion)) return perVersion; } catch { /* unreadable */ }
+  // The user's real shared home, where Grok actually writes. `AGENTS_REAL_HOME`
+  // is the seam every version-home consumer honors (resolveKimiCredentialPath,
+  // resolveAntigravityCredentialPath): a daemon/service-manager child's HOME can
+  // be baked to something other than the account's real home, so os.homedir()
+  // alone is not a reliable stand-in for it.
+  const shared = path.join(process.env.AGENTS_REAL_HOME || os.homedir(), ...rel);
+  if (shared !== perVersion) {
+    try { if (fs.existsSync(shared)) return shared; } catch { /* unreadable */ }
+  }
   return null;
 }
 
