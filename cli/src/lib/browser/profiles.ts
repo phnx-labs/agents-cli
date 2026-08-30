@@ -584,14 +584,16 @@ export async function editProfile(
     (k) => JSON.stringify(current[k]) !== JSON.stringify(merged[k])
   );
 
-  // A target filter only means anything for an Electron app, and the gate must
+  // A target filter only means anything for a profile that reuses an existing
+  // page target rather than creating one — an Electron app or Arc (which crashes
+  // on tab creation, so it drives an open tab / Space, PHNX-2399). The gate must
   // read the MERGED record: `--target-filter x` on a profile that is already
-  // electron is valid, and `--no-electron` on one that still carries a filter is
-  // not. Checking the patch alone would accept both.
-  if (merged.targetFilter && !merged.electron) {
+  // electron/arc is valid, and `--no-electron` on a Chromium profile that still
+  // carries a filter is not. Checking the patch alone would accept both.
+  if (merged.targetFilter && !merged.electron && merged.browser !== 'arc') {
     throw new Error(
-      `--target-filter only applies to an Electron profile. ` +
-        `Pass --electron, or clear the filter with --target-filter ''.`
+      `--target-filter only applies to an Electron or Arc profile. ` +
+        `Pass --electron, use --browser arc, or clear the filter with --target-filter ''.`
     );
   }
 

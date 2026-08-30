@@ -1158,6 +1158,36 @@ describe('editProfile', () => {
     await expect(editProfile('app', { electron: undefined })).rejects.toThrow(/--target-filter/);
   });
 
+  it('accepts a target filter on an Arc profile — Arc drives an existing tab / Space (PHNX-2399)', async () => {
+    // Arc reuses an open tab rather than creating one, so --target-filter is valid
+    // for it (not just Electron). This is the exact `profiles edit arc
+    // --target-filter …` path the docs ship. An ssh endpoint keeps the Linux test
+    // off the macOS-only Arc binary probe, so it exercises the target-filter gate
+    // itself (the gate runs before the binary check).
+    const store: ProfileStore = {
+      browser: {
+        arc: { browser: 'arc', endpoints: ['ssh://muqsit@zion?port=9222'] },
+      },
+    };
+    wire(store);
+
+    await expect(
+      editProfile('arc', { targetFilter: 'url:notion.so' })
+    ).resolves.toMatchObject({ devices: [machineId()] });
+    expect(storedProfile(store, 'arc').targetFilter).toBe('url:notion.so');
+  });
+
+  it('still refuses a target filter on a plain Chromium profile (neither Electron nor Arc)', async () => {
+    const store: ProfileStore = {
+      browser: { plain: { browser: 'chrome', endpoints: ['ssh://muqsit@zion?port=9410'] } },
+    };
+    wire(store);
+
+    await expect(
+      editProfile('plain', { targetFilter: 'url:example.com' })
+    ).rejects.toThrow(/--target-filter/);
+  });
+
   it('clears the description when passed undefined', async () => {
     const store: ProfileStore = {
       browser: { desc: { browser: 'chrome', description: 'old', endpoints: ['cdp://127.0.0.1:9409'] } },
