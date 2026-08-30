@@ -21,8 +21,19 @@ import { ensureLockTarget, withFileLock } from '../fs-atomic.js';
 import { getUserAgentsDir } from '../state.js';
 import { stampProvenance, resetEventProvenanceForTest } from '../event-provenance.js';
 import type { ActorKind } from '../actor.js';
+import { recordSample } from '../perf/spool.js';
 
-/** Lazy perf warehouse write — avoids a hard cycle at module load. */
+/**
+ * Perf warehouse write. SYNCHRONOUS by design (PHNX-3497): `recordSample` is an
+ * `appendFileSync` that never opens SQLite (see perf/spool.ts), so calling it
+ * directly costs one file append and lands the row before this function returns.
+ * It MUST NOT be deferred behind a `void import().then(...)`: the `agent.run`
+ * timer ends at the very tail of `agents run`, and the CLI process exits before
+ * any deferred microtask runs — so a fire-and-forget spool write was silently
+ * lost on every foreground run, leaving the PHNX-3468 startup-phase surface with
+ * no data. (Hooks were unaffected only because their shim appends the spool line
+ * synchronously in bash.)
+ */
 function recordPerfTiming(payload: {
   label: string;
   durationMs: number;
@@ -39,20 +50,17 @@ function recordPerfTiming(payload: {
   try {
     const phases = payload.phases && Object.keys(payload.phases).length > 0 ? payload.phases : undefined;
     const metaJson = phases ? JSON.stringify({ phases }) : undefined;
-    // Dynamic import keeps events.ts free of a load-time dependency on perf/db.
-    void import('../perf/spool.js').then(({ recordSample }) => {
-      recordSample({
-        kind: 'perf.timing',
-        label: payload.label,
-        durationMs: payload.durationMs,
-        status: payload.status,
-        agent: payload.agent,
-        agentVersion: payload.version,
-        sessionId: payload.sessionId,
-        cwd: payload.cwd,
-        metaJson,
-      });
-    }).catch(() => { /* fail soft */ });
+    recordSample({
+      kind: 'perf.timing',
+      label: payload.label,
+      durationMs: payload.durationMs,
+      status: payload.status,
+      agent: payload.agent,
+      agentVersion: payload.version,
+      sessionId: payload.sessionId,
+      cwd: payload.cwd,
+      metaJson,
+    });
   } catch {
     // fail soft
   }
