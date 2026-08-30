@@ -288,7 +288,14 @@ describe('owner destination from humans.yaml', () => {
       `version: 1\nowner:\n  channels:\n    - id: desktop-a\n      transport: desktop\n      to: local\n    - id: desktop-b\n      transport: desktop\n      to: local\n  policy:\n    normal: [desktop-a, desktop-b]\n`,
     );
     const meta = { notify: { transports: { 'desktop-a': 'desktop', 'desktop-b': 'desktop' } } } as Meta;
-    const out = await sendMessage({ text: 'policy probe', to: 'owner', dryRun: true }, meta);
+    const out = await sendMessage({
+      text: 'policy probe',
+      to: 'owner',
+      dryRun: true,
+      thread: 'thread-1',
+      attachments: ['/tmp/evidence.png'],
+      from: 'review',
+    }, meta);
     expect('error' in out).toBe(false);
     if ('error' in out) return;
     expect(out.result.ok).toBe(true);

@@ -31,6 +31,9 @@ export interface OwnerNotifyOptions {
   target?: string;
   /** Resolve + build the delivery but do not actually send. */
   dryRun?: boolean;
+  thread?: string;
+  attachments?: string[];
+  from?: string;
 }
 
 export interface NotifyResult {
@@ -114,9 +117,21 @@ export async function sendToOwner(text: string, options: OwnerNotifyOptions = {}
   const deliveries: SendResult[] = [];
   for (const { channel, to: target } of addressable) {
     const { provider, error } = lookupTransport(channel, meta);
-    let result: SendResult = provider
-      ? await provider.send(text, { target, ownerScoped: options.target === undefined, dryRun: options.dryRun })
-      : { ok: false, channel, id: target, error };
+    let result: SendResult;
+    try {
+      result = provider
+        ? await provider.send(text, {
+            target,
+            ownerScoped: options.target === undefined,
+            dryRun: options.dryRun,
+            thread: options.thread,
+            attachments: options.attachments,
+            from: options.from,
+          })
+        : { ok: false, channel, id: target, error };
+    } catch (err) {
+      result = { ok: false, channel, id: target, error: (err as Error).message };
+    }
     // A dry-run never delivers, and an override target is an explicit recipient
     // (not the fleet-wide owner) — neither should hop to a peer.
     if (!result.ok && !options.dryRun && options.target === undefined) {

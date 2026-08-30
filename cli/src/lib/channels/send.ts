@@ -185,7 +185,13 @@ export async function sendMessage(
     && !input.channel?.trim()
     && (!input.to?.trim() || isOwnerAlias(input.to));
   const result = ownerPolicyRequest
-    ? await sendToOwner(resolved.envelope.text, { meta, dryRun: resolved.envelope.dryRun })
+    ? await sendToOwner(resolved.envelope.text, {
+        meta,
+        dryRun: resolved.envelope.dryRun,
+        thread: resolved.envelope.thread,
+        attachments: resolved.envelope.attachments,
+        from: resolved.envelope.from,
+      })
     : await deliverEnvelope(resolved.envelope, meta);
   return { result, envelope: resolved.envelope };
 }
