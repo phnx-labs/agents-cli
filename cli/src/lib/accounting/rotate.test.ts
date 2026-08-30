@@ -1368,36 +1368,48 @@ describe('buildRotationDecisionEvent (the observability contract for a bad pick)
   // real emit() into a redirected sink and reads the persisted JSONL back, so a
   // regression that (a) redacts a field by name or (b) truncates the candidate
   // set is caught where it actually happens.
-  it('survives the real emit() sanitizer: credentialVerdict not redacted, no 10-item truncation', () => {
+  it('survives the real emit() sanitizer: no redaction, no 10-cap, no shared-version collision', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'rot-ev-'));
     const logPath = path.join(dir, 'events.jsonl');
     try {
       _resetForTest(logPath);
-      // 15 candidates: an ARRAY would be truncated to 10 by sanitizeNested; the
-      // keyed-object form must keep all 15.
+      // 15 candidates. An ARRAY would be truncated to 10 by sanitizeNested. And —
+      // mirroring foldRegistryCandidates (RUSH-3182) — the first three SHARE one
+      // `version` and carry a null `usageKey` (native login + two provider
+      // accounts on the same runVersion); keying the map by version OR usageKey
+      // would collapse them via Object.fromEntries. Index keys must keep all 15,
+      // each distinguishable by accountKey.
       const pool = Array.from({ length: 15 }, (_, i) =>
-        candidate({ version: `2.1.${i}`, usageKey: `claude:org=${i}`,
-          authVerdict: i === 0 ? 'revoked' : null }));
-      const ev = buildRotationDecisionEvent(
+        candidate({
+          version: i < 3 ? '2.1.219' : `2.1.${i}`,
+          accountKey: `claude:account=${i}`,
+          usageKey: i < 3 ? null : `claude:org=${i}`,
+          providerAccount: i < 3 && i > 0 ? `provider-${i}` : undefined,
+          authVerdict: i === 0 ? 'revoked' : null,
+        }));
+      emit('rotation.resolved', buildRotationDecisionEvent(
         { picked: pool[0], healthy: pool, excluded: [], usageUnverified: false },
         'claude', 'balanced',
-      );
-      emit('rotation.resolved', ev);
+      ));
 
       const lines = fs.readFileSync(logPath, 'utf-8').trim().split('\n').filter(Boolean);
       const rec = JSON.parse(lines[lines.length - 1]) as {
-        candidates: Record<string, { usageKey: string; credentialVerdict: unknown }>;
+        candidates: Record<string, { accountKey: string; usageKey: string | null; credentialVerdict: unknown }>;
         candidatesTotal: number;
       };
-      // All 15 persisted (not capped at 10), count intact.
-      expect(Object.keys(rec.candidates)).toHaveLength(15);
+      const entries = Object.values(rec.candidates);
+      // All 15 persisted (not capped at 10, not collapsed by shared version).
+      expect(entries).toHaveLength(15);
       expect(rec.candidatesTotal).toBe(15);
-      // The org key (uuid-shaped) is NOT mistaken for a token and redacted.
-      expect(rec.candidates['2.1.0'].usageKey).toBe('claude:org=0');
-      // The verdict field carries its real value, not the "[REDACTED]" sentinel
-      // it would if the key still matched /auth/i.
-      expect(rec.candidates['2.1.0'].credentialVerdict).toBe('revoked');
-      expect(rec.candidates['2.1.1'].credentialVerdict).toBeNull();
+      // Every distinct account survived — including the 3 that share a version.
+      expect(new Set(entries.map((c) => c.accountKey)).size).toBe(15);
+      const revoked = entries.find((c) => c.accountKey === 'claude:account=0')!;
+      // The verdict carries its real value, not the "[REDACTED]" sentinel it
+      // would if the key still matched /auth/i.
+      expect(revoked.credentialVerdict).toBe('revoked');
+      expect(revoked.credentialVerdict).not.toBe('[REDACTED]');
+      // A uuid-shaped org key is NOT mistaken for a token and redacted.
+      expect(entries.find((c) => c.accountKey === 'claude:account=9')!.usageKey).toBe('claude:org=9');
     } finally {
       _resetForTest();
       fs.rmSync(dir, { recursive: true, force: true });
