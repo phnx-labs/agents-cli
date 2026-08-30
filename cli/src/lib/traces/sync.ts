@@ -360,6 +360,55 @@ export interface TracesIndexShard {
   wastedMsTotal: number;
   /** Time-to-first-tool percentiles across this device's sessions. */
   latency: LatencyInsight;
+  /**
+   * Per-session roster — one flat scalar row per AGENT session (PHNX-3483), the
+   * raw material the Rush console filters and re-aggregates live. Every `stats`
+   * figure above is a pre-rolled scalar over the whole agent corpus; the console
+   * cannot re-derive a filtered headline (e.g. "median for `claude` only") from a
+   * scalar, so it needs the underlying rows. `durationMs` is the ACTIVE duration
+   * (`sessionActiveMs`, the same value backing `stats.medianMs`), and `mode`
+   * encodes the AGENT-vs-INTERACTIVE segmentation (`headless` = an agent run,
+   * `interactive` = a one-shot query) so a mode-split median reproduces
+   * `stats.agentMedianMs` / `stats.interactiveMedianMs`. Utility rows are excluded,
+   * exactly like every other index statistic, so the roster length equals the agent
+   * count (`stats.sessionsImported`). Optional here for schema compatibility with a
+   * shard produced before this field.
+   */
+  sessions?: SessionRosterRow[];
+}
+
+/**
+ * One per-session row in the index roster (PHNX-3483) — flat scalars only, so the
+ * Rush console can filter the session set and re-aggregate the headline metrics
+ * client-side without re-parsing transcripts. Built over AGENT rows only.
+ */
+export interface SessionRosterRow {
+  id: string;
+  /** `label ?? topic ?? classified-topic label`, secret-redacted. */
+  title: string;
+  /** The producing harness (`row.agent`). */
+  harness: string;
+  model: string;
+  /** Short repo name from `project` / `cwd` basename / `git_branch`. */
+  repo: string;
+  /**
+   * `headless` = an agent run (any tool call OR more than 8 messages),
+   * `interactive` = a one-shot query — the SAME split behind
+   * `stats.agentMedianMs` / `stats.interactiveMedianMs`.
+   */
+  mode: 'interactive' | 'headless';
+  /** Corpus topic group of the session; `code` when unclassified. */
+  projectType: TraceTopicGroup;
+  /** Session start, epoch ms. */
+  startedAt: number;
+  /** ACTIVE duration in ms (`sessionActiveMs`); 0 when the span is unmeasured. */
+  durationMs: number;
+  toolCount: number;
+  errorCount: number;
+  needsAttention: boolean;
+  /** Best-effort — omitted when the source figure is unavailable. */
+  costUsd?: number;
+  riskScore?: number;
 }
 
 export interface IndexedSession {
@@ -826,6 +875,38 @@ export function buildIndexShard(
   const driftSignals = computeDriftSignal(prevHistory, todayStats);
   const patternInsights = computeInsights(agentRows, agentCalls, prevShard, phenotypes);
 
+  // Per-session roster (PHNX-3483): one flat scalar row per agent session, the raw
+  // material the Rush console filters and re-aggregates client-side. `durationMs`
+  // reuses `sessionActiveMs` (the value behind `stats.medianMs`), and `mode` reuses
+  // the AGENT-vs-INTERACTIVE predicate from the segmentation above so a mode-split
+  // median of `durationMs` reproduces `stats.agentMedianMs` / `interactiveMedianMs`.
+  const needsAttentionIds = new Set(needsAttention.map((s) => s.id));
+  const sessions: SessionRosterRow[] = agentRows.map((row): SessionRosterRow => {
+    const isAgent = (callsBySession.get(row.id)?.length ?? 0) > 0 || (row.message_count ?? 0) > 8;
+    const durationMs = row.duration_ms == null
+      ? 0
+      : sessionActiveMs(row.duration_ms, callsBySession.get(row.id) ?? [], Date.parse(row.timestamp));
+    const rosterRow: SessionRosterRow = {
+      id: row.id,
+      title: redactSecrets(
+        row.label ?? row.topic ?? topics.get(row.id)?.label ?? 'Untitled session',
+        knownSecrets,
+      ),
+      harness: row.agent,
+      model: row.model ?? 'unknown',
+      repo: row.project ?? (row.cwd ? path.basename(row.cwd) : (row.git_branch ?? 'unknown')),
+      mode: isAgent ? 'headless' : 'interactive',
+      projectType: topics.get(row.id)?.group ?? 'code',
+      startedAt: Date.parse(row.timestamp) || 0,
+      durationMs,
+      toolCount: row.tool_call_count ?? 0,
+      errorCount: errorCounts.get(row.id) ?? 0,
+      needsAttention: needsAttentionIds.has(row.id),
+    };
+    if (row.cost_usd != null) rosterRow.costUsd = row.cost_usd;
+    return rosterRow;
+  });
+
   return {
     schema: 1,
     device,
@@ -871,6 +952,7 @@ export function buildIndexShard(
     failurePatterns: patternInsights.failurePatterns,
     wastedMsTotal: patternInsights.wastedMsTotal,
     latency: patternInsights.latency,
+    sessions,
   };
 }
 

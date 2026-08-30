@@ -69,5 +69,21 @@
     }
   ],
   "wastedMsTotal": 0,
-  "latency": { "firstToolMs": { "p50": 0, "p90": 0, "p99": 0, "max": 0 } }
+  "latency": { "firstToolMs": { "p50": 0, "p90": 0, "p99": 0, "max": 0 } },
+  "sessions": [
+    {
+      "id": "trace-rich-fixture",
+      "title": "Fix trace sync",
+      "harness": "codex",
+      "model": "gpt-test",
+      "repo": "agents-cli",
+      "mode": "headless",
+      "projectType": "code",
+      "startedAt": 1787616000000,
+      "durationMs": 9000,
+      "toolCount": 3,
+      "errorCount": 2,
+      "needsAttention": true
+    }
+  ]
 }
