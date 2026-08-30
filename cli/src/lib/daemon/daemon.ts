@@ -52,6 +52,7 @@ import { BrowserTaskReapService } from './browser-task-reap-service.js';
 import type { ServiceHealth } from './service.js';
 import { emit, emitRoutineEnd } from '../feed/events.js';
 import { readDaemonServicesConfig, isDaemonServiceEnabled, drainDaemonServiceRestartQueue, type DaemonServiceId } from '../daemon-services.js';
+import { sleepSync } from '../fs-atomic.js';
 
 /**
  * The live `ServiceSupervisor` for the current `runDaemon()` invocation, or
@@ -291,6 +292,25 @@ function acquireStartLock(): (() => void) | null {
 }
 
 /**
+ * Stop is a lifecycle mutation just like start/claim, so it must cross the same
+ * lock. A claim can legitimately hold the lock through the incumbent's 5s
+ * graceful window plus the 2s hard-kill backstop; wait beyond that complete
+ * takeover window before failing loud instead of running teardown unlocked.
+ */
+const STOP_LOCK_WAIT_MS = 10_000;
+const STOP_LOCK_POLL_MS = 50;
+
+function acquireStopLock(): (() => void) | null {
+  const deadline = Date.now() + STOP_LOCK_WAIT_MS;
+  for (;;) {
+    const release = acquireStartLock();
+    if (release) return release;
+    if (Date.now() >= deadline) return null;
+    sleepSync(Math.min(STOP_LOCK_POLL_MS, deadline - Date.now()));
+  }
+}
+
+/**
  * Absolute path to the daemon's structured log.
  *
  * Exported because two commands rebuilt the same path from a hardcoded
@@ -333,6 +353,13 @@ export function removeDaemonPid(): void {
   if (fs.existsSync(pidPath)) {
     fs.unlinkSync(pidPath);
   }
+}
+
+/** Remove the pid registration only while it still names the owner we observed. */
+function removeDaemonPidIfOwned(pid: number): boolean {
+  if (readDaemonPid() !== pid) return false;
+  try { fs.unlinkSync(getPidPath()); } catch { /* already removed */ }
+  return readDaemonPid() !== pid;
 }
 
 export interface DaemonHeartbeat {
@@ -380,7 +407,7 @@ function isHeartbeatFresh(hb: DaemonHeartbeat): boolean {
 export function isDaemonWedged(): boolean {
   const pid = readDaemonPid();
   if (!pid) return false;
-  if (!isAlive(pid)) return false;
+  if (!isLiveDaemon(pid)) return false;
   const hb = readHeartbeat();
   if (!hb) return false;
   if (hb.pid !== pid) return false;
@@ -403,30 +430,60 @@ const STOP_KILL_GRACE_MS = 2000;
  * the pid file then reports "stopped" for a running scheduler, and (worse) lets
  * claimDaemonInstance() start a SECOND daemon that double-fires every routine.
  *
- * So: trust the pid file when its pid is alive; otherwise trust a FRESH
- * heartbeat whose pid is alive, and re-adopt the pid file so the desync heals.
- * Returns null only when neither points at a live process (clearing a stale pid
- * file on the way out).
+ * So: trust the pid file only when its pid is a live `__daemon-run`; otherwise
+ * trust a FRESH heartbeat whose pid passes the same identity check. Callers that
+ * already own daemon.lock may request repair, re-adopting the heartbeat pid or
+ * removing the exact stale pid they observed. Read-only liveness probes never
+ * mutate shared state outside that lock.
  */
-function resolveLiveDaemonPid(): number | null {
+function resolveLiveDaemonPid(repair: boolean = false): number | null {
   const pid = readDaemonPid();
-  if (pid !== null && isAlive(pid)) return pid;
+  const pidIdentity = pid !== null ? daemonProcessIdentity(pid) : 'dead';
+  if (pid !== null && pidIdentity === 'daemon') return pid;
   const hb = readHeartbeat();
-  if (hb && isAlive(hb.pid) && isHeartbeatFresh(hb)) {
-    if (pid !== hb.pid) writeDaemonPid(hb.pid); // heal the pid-file/heartbeat desync
+  if (hb && isHeartbeatFresh(hb) && daemonProcessIdentity(hb.pid) === 'daemon') {
+    if (repair && pid !== hb.pid) writeDaemonPid(hb.pid); // lock owner heals the desync
     return hb.pid;
   }
-  if (pid !== null) removeDaemonPid();
+  // A failed command-line inspection is not proof the pid is stale. Leave the
+  // registration intact so a sandbox/permission failure cannot erase the only
+  // owner record and trigger a duplicate daemon.
+  if (repair && pid !== null && pidIdentity !== 'unknown') removeDaemonPidIfOwned(pid);
+  return null;
+}
+
+/** A live recorded pid whose command identity could not be inspected. */
+function unverifiedLiveDaemonPid(): number | null {
+  const pid = readDaemonPid();
+  if (pid !== null && daemonProcessIdentity(pid) === 'unknown') return pid;
+  const hb = readHeartbeat();
+  if (hb && isHeartbeatFresh(hb) && daemonProcessIdentity(hb.pid) === 'unknown') return hb.pid;
   return null;
 }
 
 /**
  * Check whether a daemon is alive — via the pid file, or a fresh heartbeat when
- * the pid file has been lost (see resolveLiveDaemonPid). Heals the pid file as a
- * side effect so a subsequent read is consistent.
+ * the pid file has been lost (see resolveLiveDaemonPid). The observation itself
+ * is read-only; when it finds desync it opportunistically acquires daemon.lock
+ * and repeats the observation there before repairing. A contended probe still
+ * returns the observed liveness without mutating another lifecycle operation's
+ * state.
  */
 export function isDaemonRunning(): boolean {
-  return resolveLiveDaemonPid() !== null;
+  // Fail safe for reporting/start suppression: inability to inspect a live pid
+  // is never permission to declare it dead and launch a duplicate.
+  if (unverifiedLiveDaemonPid() !== null) return true;
+  const recordedPid = readDaemonPid();
+  const livePid = resolveLiveDaemonPid();
+  if (recordedPid === livePid) return livePid !== null;
+
+  const release = acquireStartLock();
+  if (!release) return livePid !== null;
+  try {
+    return resolveLiveDaemonPid(true) !== null;
+  } finally {
+    release();
+  }
 }
 
 /**
@@ -442,9 +499,9 @@ export function isDaemonRunning(): boolean {
  * pid file, this does NOT defer to it — it evicts the incumbent and becomes the
  * survivor, so a second install can never leave two daemons running. Returns true
  * and records our PID once the incumbent is provably dead (its resources
- * released). Returns false ONLY when another `__daemon-run` currently holds the
- * O_EXCL start lock — i.e. a concurrent claimer is mid-takeover and will be the
- * singleton — in which case the caller must exit without touching further state.
+ * released). Returns false when another `__daemon-run` currently holds the
+ * O_EXCL start lock, or when the incumbent cannot be safely identified/evicted,
+ * in which case the caller must exit without touching further state.
  * The read-evict-write is serialized behind the same start lock startDaemon()
  * uses, so two `_run` processes can't both claim in the window between the
  * liveness check and the write.
@@ -460,11 +517,14 @@ export function claimDaemonInstance(): boolean {
   // claimer we bailed for becomes the singleton, so last-wins still holds.
   if (!release) return false;
   try {
+    // Do not overwrite a live-but-uninspectable owner. This is the non-
+    // destructive side of the same fail-closed rule stopDaemon applies.
+    if (unverifiedLiveDaemonPid() !== null) return false;
     // resolveLiveDaemonPid() also consults a fresh heartbeat, so a live daemon
     // whose pid file was lost is still found and evicted — otherwise a missing
     // pid file would let both this instance AND the orphaned incumbent run a
     // JobScheduler at once and double-fire every routine.
-    const existing = resolveLiveDaemonPid();
+    const existing = resolveLiveDaemonPid(true);
     if (existing !== null && existing !== process.pid) {
       // Evict, and WAIT for the incumbent to be provably dead — its graceful
       // handleShutdown releasing the browser IPC binding and the secrets broker
@@ -472,7 +532,7 @@ export function claimDaemonInstance(): boolean {
       // Binding before the release recreates the two-brokers-on-one-socket orphan
       // documented at stopDaemon below, so the pid file is not written until the
       // prior owner is gone.
-      evictIncumbentDaemon(existing);
+      if (!evictIncumbentDaemon(existing)) return false;
     }
     writeDaemonPid(process.pid);
     return true;
@@ -493,23 +553,34 @@ export function claimDaemonInstance(): boolean {
  * grace-then-escalate shape and constants exactly, because the same
  * proof-of-release requirement applies.
  */
-function evictIncumbentDaemon(pid: number): void {
+function evictIncumbentDaemon(pid: number): boolean {
+  const beforeSignal = daemonProcessIdentity(pid);
+  if (beforeSignal === 'dead' || beforeSignal === 'other') return true;
+  if (beforeSignal === 'unknown') return false;
+
   if (process.platform === 'win32') {
     // No graceful termination signal on Windows — take the incumbent down and
     // still wait for the kill to land before the caller binds anything (mirrors
     // stopDaemon's win32 branch).
     killTree(pid);
-    waitForExit(pid, STOP_KILL_GRACE_MS);
-    return;
+    if (waitForExit(pid, STOP_KILL_GRACE_MS)) return true;
+    const afterKill = daemonProcessIdentity(pid);
+    return afterKill === 'dead' || afterKill === 'other';
   }
   try {
     process.kill(pid, 'SIGTERM');
   } catch {
-    return; // already gone between resolveLiveDaemonPid() and here
+    const afterSignal = daemonProcessIdentity(pid);
+    return afterSignal === 'dead' || afterSignal === 'other';
   }
-  if (waitForExit(pid, STOP_GRACE_MS)) return; // graceful release complete
+  if (waitForExit(pid, STOP_GRACE_MS)) return true; // graceful release complete
+  const beforeKill = daemonProcessIdentity(pid);
+  if (beforeKill === 'dead' || beforeKill === 'other') return true;
+  if (beforeKill === 'unknown') return false;
   killTree(pid); // positive pid: SIGKILL reaches the daemon, not its job children
-  waitForExit(pid, STOP_KILL_GRACE_MS);
+  if (waitForExit(pid, STOP_KILL_GRACE_MS)) return true;
+  const afterKill = daemonProcessIdentity(pid);
+  return afterKill === 'dead' || afterKill === 'other';
 }
 
 /** Directory that registers every live daemon of THIS device (one per state dir). */
@@ -571,7 +642,7 @@ export function reapStrayDaemons(keepPid: number = process.pid): { reaped: numbe
     return { reaped, details }; // no registry yet — nothing to reap
   }
 
-  const ownerPid = readDaemonPid();
+  const ownerPid = resolveLiveDaemonPid();
   const dropMarker = (name: string): void => {
     try { fs.rmSync(path.join(dir, name), { force: true }); } catch { /* ignore */ }
   };
@@ -586,35 +657,81 @@ export function reapStrayDaemons(keepPid: number = process.pid): { reaped: numbe
 
     // Live pid, but guard against pid reuse: only a real `__daemon-run` is ours.
     // Process ARGS are readable cross-platform (unlike ENV on hardened macOS).
-    if (!isDaemonRunProcess(pid)) { dropMarker(name); continue; }
+    const identity = daemonProcessIdentity(pid);
+    if (identity === 'unknown') {
+      details.push(`could not verify stray daemon pid ${pid}; marker retained`);
+      continue;
+    }
+    if (identity !== 'daemon') { dropMarker(name); continue; }
 
     try {
       process.kill(pid, 'SIGTERM');
+    } catch { /* already gone between the alive check and the signal */ }
+    if (waitForExit(pid, STOP_GRACE_MS)) {
       reaped++;
       details.push(`reaped stray daemon pid ${pid}`);
-    } catch { /* already gone between the alive check and the signal */ }
-    dropMarker(name);
+      dropMarker(name);
+      continue;
+    }
+
+    // The pid may have been recycled during the grace window. Never hard-kill
+    // it unless it still identifies as a daemon; a stale registry marker is all
+    // we own when the command identity changed.
+    const beforeKill = daemonProcessIdentity(pid);
+    if (beforeKill === 'unknown') {
+      details.push(`could not reverify stray daemon pid ${pid}; marker retained`);
+      continue;
+    }
+    if (beforeKill !== 'daemon') {
+      dropMarker(name);
+      continue;
+    }
+    killTree(pid);
+    if (waitForExit(pid, STOP_KILL_GRACE_MS)) {
+      reaped++;
+      details.push(`reaped stray daemon pid ${pid} (escalated)`);
+      dropMarker(name);
+    } else {
+      // Keep the only marker for a process that survived both signals so the
+      // next reaper/doctor can still see it.
+      details.push(`stray daemon pid ${pid} survived SIGKILL`);
+    }
   }
   return { reaped, details };
 }
 
 /**
  * Whether `pid` is a live `agents __daemon-run` process. Reads the process's
- * command line (`ps -p <pid> -o command=`), which — unlike its environment — is
- * visible cross-platform, including on hardened macOS. Guards the reaper against
- * killing an unrelated process that reused a dead registrant's pid.
+ * command line (`ps` on POSIX, Win32_Process on Windows), which — unlike its
+ * environment — is visible on hardened macOS too. Guards every signal boundary
+ * against killing an unrelated process that reused a recorded daemon pid.
  */
-function isDaemonRunProcess(pid: number): boolean {
-  if (process.platform === 'win32') return false;
+type DaemonProcessIdentity = 'daemon' | 'other' | 'dead' | 'unknown';
+
+function daemonProcessIdentity(pid: number): DaemonProcessIdentity {
+  if (!isAlive(pid)) return 'dead';
   try {
-    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return /\b__daemon-run\b/.test(out);
+    const out = process.platform === 'win32'
+      ? execFileSync(
+          'powershell.exe',
+          ['-NoProfile', '-NonInteractive', '-Command', `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
+          { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true, timeout: 5000 },
+        )
+      : execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+          encoding: 'utf-8',
+          stdio: ['ignore', 'pipe', 'ignore'],
+        });
+    // getDaemonLaunch always places __daemon-run last. Matching it anywhere in
+    // the command line mistakes an agent prompt or shell script that merely
+    // mentions the token for the shared daemon.
+    return /(?:^|\s)["']?__daemon-run["']?\s*$/.test(out.trim()) ? 'daemon' : 'other';
   } catch {
-    return false;
+    return 'unknown';
   }
+}
+
+export function isLiveDaemon(pid: number): boolean {
+  return daemonProcessIdentity(pid) === 'daemon';
 }
 
 function rotateLogsIfNeeded(logPath: string): void {
@@ -783,7 +900,7 @@ export async function runDaemon(): Promise<void> {
   // when a concurrent `__daemon-run` currently holds the start lock — that peer
   // is mid-takeover and will be the singleton, so this instance stands down.
   if (!claimDaemonInstance()) {
-    log('WARN', `Another daemon is mid-takeover (holds the start lock); this instance (PID ${process.pid}) is exiting`);
+    log('WARN', `Another daemon owns lifecycle state or is mid-takeover; this instance (PID ${process.pid}) is exiting`);
     // Exit cleanly (0) so a service manager treats it as an orderly no-op
     // rather than a failure to restart-flap on.
     process.exit(0);
@@ -1301,8 +1418,8 @@ export async function runDaemon(): Promise<void> {
     } catch {
       // Already removed with the state dir, or replaced by a newer owner.
     }
-    removeDaemonPid();
-    removeHeartbeat();
+    removeDaemonPidIfOwned(process.pid);
+    if (readHeartbeat()?.pid === process.pid) removeHeartbeat();
     unregisterDaemonInstance();
     process.exit(0);
   });
@@ -1919,7 +2036,7 @@ function waitForPid(timeoutMs: number): number | null {
 export interface StopResidueArtifact {
   label: string;
   present: boolean;
-  /** The file names a pid that is alive and is NOT the daemon we stopped. */
+  /** The file names a live owner, including a stopped target that survived. */
   ownedByLiveOther: boolean;
   reclaim: () => void;
   stillPresent: () => boolean;
@@ -1957,7 +2074,10 @@ export function stopResidueArtifacts(stoppedPid: number | null, survivors: numbe
   artifacts.push({
     label: 'daemon lifetime marker',
     present: fs.existsSync(lifetimePath),
-    ownedByLiveOther: lifetimeOwner !== null && lifetimeOwner !== stoppedPid && isAlive(lifetimeOwner),
+    ownedByLiveOther: lifetimeOwner !== null && (
+      survivors.includes(lifetimeOwner)
+      || (lifetimeOwner !== stoppedPid && isAlive(lifetimeOwner))
+    ),
     reclaim: () => { try { fs.unlinkSync(lifetimePath); } catch { /* raced with a fresh start */ } },
     stillPresent: () => fs.existsSync(lifetimePath),
   });
@@ -1970,7 +2090,10 @@ export function stopResidueArtifacts(stoppedPid: number | null, survivors: numbe
     // A stale heartbeat is not cosmetic: resolveLiveDaemonPid() trusts a FRESH
     // one to re-adopt a daemon whose pid file was lost, so leaving one behind
     // can make a dead daemon read as running.
-    ownedByLiveOther: hb !== null && hb.pid !== stoppedPid && isAlive(hb.pid),
+    ownedByLiveOther: hb !== null && (
+      survivors.includes(hb.pid)
+      || (hb.pid !== stoppedPid && isAlive(hb.pid))
+    ),
     reclaim: () => removeHeartbeat(),
     stillPresent: () => fs.existsSync(heartbeatPath),
   });
@@ -2037,21 +2160,26 @@ export interface DaemonStopResult {
  * and the stop postcondition (`stopDaemon`) already use, so the display and the
  * reaper agree on what a duplicate is.
  */
-export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
-  if (process.platform === 'win32') return [];
+function findStateDirDaemonProcesses(exclude: Set<number>): { live: number[]; unverified: number[] } {
+  const live: number[] = [];
+  const unverified: number[] = [];
+  if (process.platform === 'win32') return { live, unverified };
   const dir = getDaemonInstancesDir();
   let entries: string[];
-  try { entries = fs.readdirSync(dir); } catch { return []; }
-  const found: number[] = [];
+  try { entries = fs.readdirSync(dir); } catch { return { live, unverified }; }
   for (const name of entries) {
     const pid = parseInt(name, 10);
     if (isNaN(pid) || String(pid) !== name) continue; // not a pid marker
     if (exclude.has(pid)) continue;
-    if (!isAlive(pid)) continue;            // dead marker — reaper self-heals it
-    if (!isDaemonRunProcess(pid)) continue; // pid reused by an unrelated process
-    found.push(pid);
+    const identity = daemonProcessIdentity(pid);
+    if (identity === 'daemon') live.push(pid);
+    else if (identity === 'unknown') unverified.push(pid);
   }
-  return found;
+  return { live, unverified };
+}
+
+export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
+  return findStateDirDaemonProcesses(exclude).live;
 }
 
 /**
@@ -2069,11 +2197,69 @@ export function findSurvivingStateDirDaemons(exclude: Set<number>): number[] {
  * never reports success on an unverified stop.
  */
 export function stopDaemon(): DaemonStopResult {
+  const releaseLock = acquireStopLock();
+  if (!releaseLock) {
+    return {
+      ok: false,
+      stoppedPid: null,
+      escalated: false,
+      released: [],
+      surviving: [`daemon lifecycle lock remained held for ${STOP_LOCK_WAIT_MS}ms`],
+      detachedChildren: listLiveRoutineChildren(),
+    };
+  }
+  try {
+    return stopDaemonLocked();
+  } finally {
+    releaseLock();
+  }
+}
+
+interface PathIdentity {
+  dev: number;
+  ino: number;
+}
+
+function readPathIdentity(filePath: string): PathIdentity | null {
+  try {
+    const stat = fs.lstatSync(filePath);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+
+function pathIdentityMatches(filePath: string, expected: PathIdentity): boolean {
+  const current = readPathIdentity(filePath);
+  return current !== null && current.dev === expected.dev && current.ino === expected.ino;
+}
+
+/** daemon.lock is held for this entire read-signal-verify-cleanup transaction. */
+function stopDaemonLocked(): DaemonStopResult {
   const platform = os.platform();
   const released: string[] = [];
   const surviving: string[] = [];
   let escalated = false;
   const reg = serviceManagerRegistrationAllowed();
+
+  const unverifiedPid = unverifiedLiveDaemonPid();
+  if (unverifiedPid !== null) {
+    return {
+      ok: false,
+      stoppedPid: null,
+      escalated: false,
+      released,
+      surviving: [`daemon pid ${unverifiedPid} is live but its __daemon-run identity could not be verified`],
+      detachedChildren: listLiveRoutineChildren(),
+    };
+  }
+
+  // Capture the target and its path-bound resources while lifecycle writers are
+  // excluded. resolveLiveDaemonPid(true) rejects a reused/non-daemon pid before
+  // any service-manager teardown or direct signal and repairs only under lock.
+  const pid = resolveLiveDaemonPid(true);
+  const browserSock = process.platform === 'win32' ? null : getBrowserIpcSocketPath();
+  const browserSockOwner = pid !== null && browserSock ? readPathIdentity(browserSock) : null;
 
   if (platform === 'darwin') {
     const plistPath = getLaunchdPlistPath();
@@ -2112,48 +2298,78 @@ export function stopDaemon(): DaemonStopResult {
     }
   }
 
-  const pid = readDaemonPid();
   if (pid) {
     if (process.platform === 'win32') {
       // Windows has no graceful termination signal — terminate the daemon and
       // its job/browser child tree in one shot (taskkill /T), so stop doesn't
       // report success while children keep running.
-      killTree(pid);
-      escalated = true;
-    } else {
-      try {
-        process.kill(pid, 'SIGTERM');
-      } catch { /* process already exited */ }
-
-      // Wait for it to actually go. This used to be a setTimeout escalation plus
-      // an immediate removeDaemonPid(), which had two failure modes: in a
-      // short-lived process (the npm postinstall) the timer never fired at all,
-      // and clearing the pid file while the old daemon still ran made
-      // isDaemonRunning() report false, so startDaemon() launched a SECOND
-      // daemon. Its hosted broker then unlinked the live socket and rebound,
-      // orphaning the first broker with every unlocked bundle still in its RAM
-      // and unreachable — two brokers on one socket path, seen on a real machine
-      // after an install into a second prefix.
-      if (!waitForExit(pid, STOP_GRACE_MS)) {
+      if (isLiveDaemon(pid)) {
         killTree(pid);
         escalated = true;
         waitForExit(pid, STOP_KILL_GRACE_MS);
       }
+    } else {
+      // Revalidate immediately before the signal: the pid may have exited and
+      // been reused since the ownership snapshot above.
+      if (isLiveDaemon(pid)) {
+        try {
+          process.kill(pid, 'SIGTERM');
+        } catch { /* process already exited */ }
+
+        // Wait for it to actually go. This used to be a setTimeout escalation plus
+        // an immediate removeDaemonPid(), which had two failure modes: in a
+        // short-lived process (the npm postinstall) the timer never fired at all,
+        // and clearing the pid file while the old daemon still ran made
+        // isDaemonRunning() report false, so startDaemon() launched a SECOND
+        // daemon. Its hosted broker then unlinked the live socket and rebound,
+        // orphaning the first broker with every unlocked bundle still in its RAM
+        // and unreachable — two brokers on one socket path, seen on a real machine
+        // after an install into a second prefix.
+        if (!waitForExit(pid, STOP_GRACE_MS) && isLiveDaemon(pid)) {
+          killTree(pid);
+          escalated = true;
+          waitForExit(pid, STOP_KILL_GRACE_MS);
+        }
+      }
     }
   }
 
-  removeDaemonPid();
-
   // ── Assert the postcondition (SING-12) ────────────────────────────────────
   // No `__daemon-run` for this state dir may survive the stop.
-  const survivors = findSurvivingStateDirDaemons(new Set([process.pid]));
-  if (pid && process.platform === 'win32' && isAlive(pid) && !survivors.includes(pid)) {
-    survivors.push(pid); // registry is POSIX-only; check the killed pid directly
+  const stateDirProcesses = findStateDirDaemonProcesses(new Set([process.pid]));
+  const survivors = stateDirProcesses.live;
+  const unverifiedSurvivors = stateDirProcesses.unverified;
+  // The registry is best-effort and may be missing, so always re-check the
+  // direct target as well. This is the only check available on Windows.
+  if (pid && !survivors.includes(pid) && !unverifiedSurvivors.includes(pid)) {
+    const identity = daemonProcessIdentity(pid);
+    if (identity === 'daemon') survivors.push(pid);
+    else if (identity === 'unknown') unverifiedSurvivors.push(pid);
   }
   if (survivors.length > 0) {
     for (const s of survivors) surviving.push(`__daemon-run pid ${s} still alive`);
-  } else if (pid) {
+  }
+  for (const s of unverifiedSurvivors) {
+    surviving.push(`daemon pid ${s} is live but its __daemon-run identity could not be verified`);
+  }
+  const targetStillOwnsResources = pid !== null
+    && (survivors.includes(pid) || unverifiedSurvivors.includes(pid));
+  if (pid && !targetStillOwnsResources) {
     released.push('daemon process');
+  }
+
+  // Delete the registration only after the target is provably gone, and only
+  // if the file still names that target. A replacement value belongs to a
+  // successor (or another writer) and is both preserved and reported.
+  const currentPid = readDaemonPid();
+  if (pid !== null && !targetStillOwnsResources) {
+    if (removeDaemonPidIfOwned(pid)) released.push('daemon pid registration');
+    else if (currentPid === null) released.push('daemon pid registration');
+    else surviving.push(`daemon pid registration changed to ${currentPid} during stop`);
+  } else if (pid === null && currentPid === null) {
+    released.push('daemon pid registration');
+  } else if (pid === null && currentPid !== null) {
+    surviving.push(`daemon pid registration changed to ${currentPid} during stop`);
   }
 
   // Browser IPC binding: on POSIX the listening socket is a filesystem object.
@@ -2161,11 +2377,20 @@ export function stopDaemon(): DaemonStopResult {
   // ungracefully (killTree) and left a stale binding — the owner is provably
   // dead, so reclaim it and report.
   if (process.platform !== 'win32') {
-    const browserSock = getBrowserIpcSocketPath();
-    if (fs.existsSync(browserSock)) {
-      try { fs.unlinkSync(browserSock); } catch { /* raced with a fresh start */ }
-      if (fs.existsSync(browserSock)) surviving.push('browser IPC socket not released');
-      else released.push('browser IPC socket (reclaimed)');
+    if (browserSock && fs.existsSync(browserSock)) {
+      if (browserSockOwner && pathIdentityMatches(browserSock, browserSockOwner) && !targetStillOwnsResources) {
+        try { fs.unlinkSync(browserSock); } catch { /* failed to reclaim the captured binding */ }
+        if (pathIdentityMatches(browserSock, browserSockOwner)) surviving.push('browser IPC socket not released');
+        else if (fs.existsSync(browserSock)) surviving.push('browser IPC socket ownership changed during stop');
+        else released.push('browser IPC socket (reclaimed)');
+      } else {
+        // The path was absent when the target was captured, there was no proven
+        // daemon target, or a successor replaced the inode. In every case this
+        // invocation does not own the current binding and must leave it alone.
+        surviving.push(targetStillOwnsResources
+          ? 'browser IPC socket still owned by a surviving daemon'
+          : 'browser IPC socket ownership could not be verified');
+      }
     } else {
       released.push('browser IPC socket');
     }
@@ -2195,7 +2420,7 @@ export function stopDaemon(): DaemonStopResult {
   // consults to re-adopt a "live" daemon, and a leftover registry entry is what
   // `reapStrayDaemons` enumerates. Same shape as the sockets above — reclaim
   // what a provably dead owner left, never touch what a live one owns.
-  for (const artifact of stopResidueArtifacts(pid, survivors)) {
+  for (const artifact of stopResidueArtifacts(pid, [...survivors, ...unverifiedSurvivors])) {
     if (!artifact.present) { released.push(artifact.label); continue; }
     if (artifact.ownedByLiveOther) { released.push(`${artifact.label} (owned by a live daemon)`); continue; }
     artifact.reclaim();

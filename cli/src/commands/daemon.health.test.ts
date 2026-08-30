@@ -12,6 +12,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { spawn } from 'child_process';
 import {
   DAEMON_TESTS_SUPPORTED,
   makeHome,
@@ -112,14 +113,18 @@ describeDaemon('agents daemon — doctor, logs, stop, reload', () => {
         lastOkAt: null,
       },
     }), 'utf-8');
-    // A live "daemon": this test process, recorded as the pid-file owner, so
-    // getDaemonStatus() reports running against a real live pid.
-    fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(process.pid), 'utf-8');
+    const daemon = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
+    try {
+      // A real daemon-shaped command identity, recorded as the pid-file owner.
+      fs.writeFileSync(path.join(daemonDir, 'daemon.pid'), String(daemon.pid), 'utf-8');
 
-    const res = run(home, ['doctor', '--json']);
-    const problems: string[] = JSON.parse(res.stdout).problems;
-    expect(problems.some((p) => p.includes('consecutive failure'))).toBe(false);
-    expect(problems.some((p) => p.includes('Daemon is not running'))).toBe(false);
+      const res = run(home, ['doctor', '--json']);
+      const problems: string[] = JSON.parse(res.stdout).problems;
+      expect(problems.some((p) => p.includes('consecutive failure'))).toBe(false);
+      expect(problems.some((p) => p.includes('Daemon is not running'))).toBe(false);
+    } finally {
+      daemon.kill('SIGKILL');
+    }
   });
   it('doctor does not flag "not running" once the daemon is disabled for this device', () => {
     // Hosted-service problems can still fire here — the secrets broker/browser

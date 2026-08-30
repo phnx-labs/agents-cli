@@ -42,6 +42,13 @@ import { DIST_ENTRY, REPO_ROOT, installKeychainHermeticity } from './daemon.test
 
 installKeychainHermeticity();
 
+async function spawnDaemonStandIn(): Promise<ReturnType<typeof spawn>> {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1e9)', '__daemon-run'], { stdio: 'ignore' });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  expect(child.pid).toBeTruthy();
+  return child;
+}
+
 // The other half of the registry rule (RUSH-2421 review). The marker is named by
 // pid, so it is unambiguously the stopped daemon's — but it is only RESIDUE once
 // that daemon is DEAD. Deleting it while the process still lives erases the very
@@ -99,6 +106,21 @@ describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)'
     expect(fs.existsSync(markerPath)).toBe(false);
   });
 
+  it('keeps lifetime and heartbeat state when the stopped daemon still survives', () => {
+    const pid = 4242;
+    const lifetimePath = path.join(dir, 'daemon.lifetime');
+    const heartbeatPath = path.join(dir, 'heartbeat.json');
+    fs.writeFileSync(lifetimePath, `${pid}:${Date.now()}`);
+    fs.writeFileSync(heartbeatPath, JSON.stringify({ lastTick: new Date().toISOString(), pid }));
+
+    const lifetime = artifact(pid, 'daemon lifetime marker', [pid]);
+    const heartbeat = artifact(pid, 'daemon heartbeat', [pid]);
+    expect(lifetime.ownedByLiveOther).toBe(true);
+    expect(heartbeat.ownedByLiveOther).toBe(true);
+    expect(fs.existsSync(lifetimePath)).toBe(true);
+    expect(fs.existsSync(heartbeatPath)).toBe(true);
+  });
+
   it.skipIf(process.platform === 'win32')('treats a ZOMBIE stopped daemon as dead, not alive', () => {
     // A SIGKILLed child stays in the process table until its parent reaps it,
     // and kill(pid, 0) SUCCEEDS on a zombie — so an isAlive-keyed rule kept the
@@ -135,8 +157,8 @@ describe('stopResidueArtifacts (RUSH-2421: reclaim only what a DEAD owner left)'
  * secrets-unlock path (src/commands/secrets.ts) now calls after bringing up the
  * standalone secrets broker. It must reuse the single `startDaemon` entrypoint,
  * so the #414 single-instance guard makes a second unlock a no-op rather than a
- * relaunch. We seed the pid file with our own (guaranteed-alive) pid so
- * startDaemon takes its already-running branch and never spawns a real daemon.
+ * relaunch. The pid file names a real daemon-shaped process so the production
+ * command-identity check is exercised rather than bypassed with the test pid.
  */
 describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
   let priorPid: number | null = null;
@@ -148,25 +170,30 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
     else writeDaemonPid(priorPid);
   });
 
-  it('is an idempotent no-op when a daemon is already running', () => {
-    writeDaemonPid(process.pid);
+  it('is an idempotent no-op when a daemon is already running', async () => {
+    const daemon = await spawnDaemonStandIn();
+    writeDaemonPid(daemon.pid!);
     expect(isDaemonRunning()).toBe(true);
 
-    // First unlock brings the daemon "up" — but it's already running, so this
-    // reports the existing owner without spawning a second process.
-    const first = ensureDaemonStarted();
-    expect(first).not.toBeNull();
-    expect(first!.method).toBe('already-running');
-    expect(first!.pid).toBe(process.pid);
+    try {
+      // First unlock brings the daemon "up" — but it's already running, so this
+      // reports the existing owner without spawning a second process.
+      const first = ensureDaemonStarted();
+      expect(first).not.toBeNull();
+      expect(first!.method).toBe('already-running');
+      expect(first!.pid).toBe(daemon.pid);
 
-    // A second unlock (or any later background trigger) is a steady-state
-    // no-op, never a relaunch — the always-on guarantee, not a restart loop.
-    const second = ensureDaemonStarted();
-    expect(second!.method).toBe('already-running');
-    expect(second!.pid).toBe(process.pid);
+      // A second unlock (or any later background trigger) is a steady-state
+      // no-op, never a relaunch — the always-on guarantee, not a restart loop.
+      const second = ensureDaemonStarted();
+      expect(second!.method).toBe('already-running');
+      expect(second!.pid).toBe(daemon.pid);
 
-    // The pid file still points at the single owning process throughout.
-    expect(readDaemonPid()).toBe(process.pid);
+      // The pid file still points at the single owning process throughout.
+      expect(readDaemonPid()).toBe(daemon.pid);
+    } finally {
+      daemon.kill('SIGKILL');
+    }
   });
 
   // RUSH-3021: the vitest suite itself runs under a redirected HOME
@@ -176,8 +203,9 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
   // temp-home teardown rm (ENOTEMPTY; #2860's reviewer flagged the gap).
   // Fails on ungated code: startDaemon() would return a spawn attempt
   // (non-null) and write a pid file.
-  it('refuses to LAUNCH under a redirected HOME (no seam), while reporting stays allowed', () => {
+  it('refuses to LAUNCH under a redirected HOME (no seam), while reporting stays allowed', async () => {
     const savedSeam = process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
+    const daemon = await spawnDaemonStandIn();
     delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
     try {
       removeDaemonPid();
@@ -187,9 +215,10 @@ describe('ensureDaemonStarted (#415: always-on beyond routines)', () => {
 
       // Reporting an already-live daemon is untouched by the gate (the
       // already-running branch sits above it).
-      writeDaemonPid(process.pid);
+      writeDaemonPid(daemon.pid!);
       expect(ensureDaemonStarted()?.method).toBe('already-running');
     } finally {
+      daemon.kill('SIGKILL');
       if (savedSeam === undefined) delete process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME;
       else process.env.AGENTS_SERVICE_MANAGER_ALLOW_REDIRECTED_HOME = savedSeam;
     }
@@ -267,7 +296,7 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
 
   it.skipIf(process.platform === 'win32')(
     'opens after N consecutive failed starts, and the explicit override is still allowed',
-    () => {
+    async () => {
       // Nothing recorded yet — the breaker must start closed, or a healthy box
       // would never auto-start at all. (Asserted on the predicate rather than by
       // calling ensureDaemonStarted, which would spawn a real daemon here.)
@@ -305,9 +334,14 @@ describe('daemon auto-start circuit breaker (RUSH-2418)', () => {
       // gates launching one, not answering "is one up?". Without this ordering a
       // stale streak would make a healthy daemon read as absent to every caller
       // that branches on the return value.
-      writeDaemonPid(process.pid);
-      expect(ensureDaemonStarted()?.method).toBe('already-running');
-      removeDaemonPid();
+      const daemon = await spawnDaemonStandIn();
+      try {
+        writeDaemonPid(daemon.pid!);
+        expect(ensureDaemonStarted()?.method).toBe('already-running');
+        removeDaemonPid();
+      } finally {
+        daemon.kill('SIGKILL');
+      }
 
       // A daemon that actually comes up clears the streak — runDaemon records
       // the success side only once it has claimed — so the breaker closes again.
@@ -584,12 +618,43 @@ describe.skipIf(process.platform === 'win32')(
       expect(child.pid).toBeDefined();
       registerDaemonInstance(child.pid!);
 
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
       const result = reapStrayDaemons();
       expect(result.reaped).toBe(1);
       expect(fs.existsSync(path.join(instancesDir(), String(child.pid)))).toBe(false);
-      await new Promise((r) => setTimeout(r, 250));
+      await Promise.race([
+        exited,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('reaper returned before daemon death')), 2_000)),
+      ]);
       expect(isChildAlive(child.pid!)).toBe(false);
     });
+
+    it('waits for a wedged stray to die, escalates, then removes its marker', async () => {
+      const child = spawn(
+        process.execPath,
+        ['-e', "process.on('SIGTERM', () => {}); setInterval(() => {}, 1e9);", '__daemon-run'],
+        { stdio: 'ignore' },
+      );
+      spawned.push(child);
+      await new Promise((r) => setTimeout(r, 150));
+      expect(child.pid).toBeDefined();
+      registerDaemonInstance(child.pid!);
+      const exited = new Promise<void>((resolve) => child.once('exit', () => resolve()));
+
+      const started = Date.now();
+      const result = reapStrayDaemons();
+      const elapsed = Date.now() - started;
+
+      expect(elapsed).toBeGreaterThan(4_000);
+      expect(result.reaped).toBe(1);
+      expect(result.details).toContain(`reaped stray daemon pid ${child.pid} (escalated)`);
+      expect(fs.existsSync(path.join(instancesDir(), String(child.pid)))).toBe(false);
+      await Promise.race([
+        exited,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('escalated reaper returned before daemon death')), 2_000)),
+      ]);
+      expect(isChildAlive(child.pid!)).toBe(false);
+    }, 15_000);
 
     it('never kills a live pid that is NOT a daemon (pid-reuse guard); only drops the stale marker', async () => {
       const child = spawn('sleep', ['30'], { stdio: 'ignore' });

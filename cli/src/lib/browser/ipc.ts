@@ -59,6 +59,25 @@ const CLOSE_VERBS = new Set<IPCRequest['action']>(['done', 'stop']);
 
 const SOCKET_NAME = 'browser.sock';
 
+interface SocketIdentity {
+  dev: number;
+  ino: number;
+}
+
+function readSocketIdentity(socketPath: string): SocketIdentity | null {
+  try {
+    const stat = fs.lstatSync(socketPath);
+    return { dev: stat.dev, ino: stat.ino };
+  } catch {
+    return null;
+  }
+}
+
+function isSameSocket(socketPath: string, expected: SocketIdentity): boolean {
+  const current = readSocketIdentity(socketPath);
+  return current !== null && current.dev === expected.dev && current.ino === expected.ino;
+}
+
 /**
  * Backstop for {@link BrowserIPCServer.stop} — how long to wait for the socket
  * to be released before unlinking it anyway (RUSH-2421).
@@ -458,6 +477,8 @@ export class BrowserIPCConnection {
 
 export class BrowserIPCServer {
   private server: net.Server | null = null;
+  /** Filesystem identity of the POSIX binding this server created. */
+  private socketIdentity: SocketIdentity | null = null;
   private service: BrowserService;
   /** Live client connections, so {@link stop} can end them rather than wait. */
   private connections = new Set<net.Socket>();
@@ -536,6 +557,7 @@ export class BrowserIPCServer {
       this.server!.listen(socketPath, () => {
         try {
           fs.chmodSync(socketPath, 0o600);
+          this.socketIdentity = readSocketIdentity(socketPath);
           resolve();
         } catch (err) {
           reject(err);
@@ -581,11 +603,31 @@ export class BrowserIPCServer {
   }
 
   private async doStop(): Promise<void> {
-    await this.closeServer();
+    const socketPath = getSocketPath();
+    const owned = this.socketIdentity;
+    let preservedReplacement: string | null = null;
+
+    if (!IS_WINDOWS && owned && readSocketIdentity(socketPath) && !isSameSocket(socketPath, owned)) {
+      // Node/libuv remembers the pathname passed to listen() and unlinks that
+      // pathname during server.close(). If a successor has already replaced the
+      // directory entry, an inode check AFTER close is too late: libuv has
+      // deleted the successor. Move the replacement aside for the close and put
+      // it back before returning. The listening socket stays live across rename.
+      preservedReplacement = `${socketPath}.preserved-${process.pid}-${Date.now()}`;
+      fs.renameSync(socketPath, preservedReplacement);
+    }
+
+    try {
+      await this.closeServer();
+    } finally {
+      if (preservedReplacement && fs.existsSync(preservedReplacement) && !fs.existsSync(socketPath)) {
+        fs.renameSync(preservedReplacement, socketPath);
+      }
+    }
 
     if (!IS_WINDOWS) {
-      const socketPath = getSocketPath();
-      if (fs.existsSync(socketPath)) {
+      this.socketIdentity = null;
+      if (owned && isSameSocket(socketPath, owned)) {
         fs.unlinkSync(socketPath);
       }
     }
