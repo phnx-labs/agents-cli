@@ -35,6 +35,7 @@ export type ModuleLoader = () => Promise<Registrar>;
 // back its register function. Kept as named consts so src/index.ts can compose
 // them into the exact main-branch registration order for the slow path.
 export const loadView: ModuleLoader = async () => (await import('../commands/view.js')).registerViewCommand;
+export const loadWorktree: ModuleLoader = async () => (await import('../commands/worktree.js')).registerWorktreeCommand;
 export const loadInspect: ModuleLoader = async () => (await import('../commands/inspect.js')).registerInspectCommand;
 export const loadFeedback: ModuleLoader = async () => (await import('../commands/feedback.js')).registerFeedbackCommand;
 export const loadCommands: ModuleLoader = async () => (await import('../commands/commands.js')).registerCommandsCommands;
@@ -136,6 +137,7 @@ export const LAZY_COMMAND_NAMES: ReadonlySet<string> = new Set([
 export const COMMAND_LOADERS: Record<string, ModuleLoader[]> = {
   accounts: [loadAccounts],
   view: [loadView],
+  worktree: [loadWorktree],
   inspect: [loadInspect],
   feedback: [loadFeedback],
   commands: [loadCommands],
