@@ -1,0 +1,169 @@
+name: Attest main
+
+# Producer for exact-tree release attestations (RUSH-2666, plan line 336).
+#
+# release.sh already CONSUMES an attestation for `origin/main^{tree}`: its
+# wait_for_attestation() polls the local store for a passing exact-tree proof
+# (release-attestation.sh require) and never rebuilds. The PRODUCER was the
+# missing half — nothing dropped that proof where a fleet release box could
+# find it, so every release wedged at "missing exact attestation key" and a
+# human had to run the suite by hand.
+#
+# This job closes that gap: on every push to main it produces the attestation
+# for the pushed tree (release-attestation-produce.sh, which runs the full
+# suite fail-closed and packs the exact pretested tarball) and uploads it to a
+# ROLLING GitHub Release under a FIXED tag (`main-attestations`). Assets are
+# named by tree hash (`attest-<tree>.json` + the packed `.tgz`), so a consumer
+# on any box downloads the exact one for the tree it is releasing. Old-tree
+# assets simply never match a new `origin/main^{tree}` — "invalidate on base
+# advance" falls out of tree-keying for free.
+#
+# This is purely ADDITIVE and FAIL-SAFE: it can only make releases faster.
+# If this job has not run yet, errored, or the tree is not attested, release.sh
+# falls back to exactly today's behavior (poll the local store). The producer
+# never gates a merge and is not a required check.
+
+on:
+  push:
+    branches: ['main']
+    # Mirror the inputs the attestation key hashes (release-attestation.sh:
+    # candidateTree + lockfileDigest + policyVersion + toolchain). The tree
+    # digest covers all of cli/**, so a change anywhere under cli/ (including
+    # the lockfile and the vitest/ci-scope policy files) must re-produce. Scope
+    # to cli/** so docs-only / non-cli commits don't burn a full-suite run for
+    # a tree no release will ever ask about — but if in any doubt the tree hash
+    # is the real gate, and an over-trigger is harmless (the consumer only ever
+    # asks for the exact origin/main tree it is releasing).
+    paths:
+      - 'cli/**'
+      - '.github/workflows/attest-main.yml'
+
+# Overlapping merges must not race to clobber the rolling release. Serialize on
+# a fixed group; do NOT cancel-in-progress — a producer run that started for an
+# earlier tree should finish and publish its (still-valid, tree-keyed) asset
+# rather than be killed, since a release for that earlier tree may still want it.
+concurrency:
+  group: attest-main
+  cancel-in-progress: false
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: write # create/update the rolling `main-attestations` release + upload assets
+    defaults:
+      run:
+        working-directory: cli
+    env:
+      # Fixed tag for the rolling attestation release. Assets are per-tree, so
+      # many trees' proofs coexist under this one tag until pruned.
+      ATTEST_TAG: main-attestations
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+
+      - name: Resolve the pushed tree
+        id: tree
+        run: |
+          set -euo pipefail
+          tree="$(git rev-parse "${{ github.sha }}^{tree}")"
+          echo "tree=$tree" >> "$GITHUB_OUTPUT"
+          echo "Attesting commit ${{ github.sha }} (tree $tree)"
+
+      # Skip the full suite if this exact tree is already attested on the rolling
+      # release. A push that only touched non-key inputs (or a re-run) can share a
+      # prior tree's proof, and re-running the ~13k-test suite for a byte-identical
+      # tree buys nothing. Fail-safe: if the download misses, or gh errors, we fall
+      # through to produce it. Never gates anything.
+      - name: Short-circuit if the tree is already attested
+        id: existing
+        run: |
+          set -euo pipefail
+          tree='${{ steps.tree.outputs.tree }}'
+          if gh release download "$ATTEST_TAG" \
+               --repo "${{ github.repository }}" \
+               --pattern "attest-$tree.json" \
+               --dir "$RUNNER_TEMP/existing" 2>/dev/null \
+             && [ -f "$RUNNER_TEMP/existing/attest-$tree.json" ]; then
+            echo "already=true" >> "$GITHUB_OUTPUT"
+            echo "Tree $tree already attested on $ATTEST_TAG — skipping the suite."
+          else
+            echo "already=false" >> "$GITHUB_OUTPUT"
+            echo "No prior attestation for $tree — producing it."
+          fi
+
+      # The producer runs the FULL suite in its own throwaway worktree, whose
+      # `bun install --frozen-lockfile` rebuilds node_modules there. Two native
+      # deps are host/global rather than per-worktree, so provision them once here
+      # or the suite fails and the producer refuses to attest (fail-closed → no
+      # asset → release.sh falls back to today's behavior, but never gains speed):
+      #   - node-pty: the shipped prebuilt covers Linux, so no explicit build is
+      #     needed on ubuntu (ci.yml only builds it for macOS/Windows).
+      #   - Playwright's chromium lives in the shared ~/.cache/ms-playwright, so
+      #     installing it once makes it visible to the worktree's suite too. Same
+      #     invocation the nightly matrix (ci.yml) uses on Linux.
+      - name: Install Playwright chromium for the suite
+        if: steps.existing.outputs.already != 'true'
+        run: bunx playwright install --with-deps chromium
+
+      - name: Produce the exact-tree attestation
+        if: steps.existing.outputs.already != 'true'
+        env:
+          # The store the producer writes into; we upload from it below.
+          RELEASE_ATTESTATION_DIR: ${{ runner.temp }}/attest-store
+        run: |
+          set -euo pipefail
+          # --test-here pins the suite to THIS runner: GitHub Actions has no
+          # `agents` fleet, so the producer's default fleet auto-pick/shard
+          # would fail. This is the one supported single-box route in CI, and it
+          # matches how ci.yml runs `bun run test`. CLI-only attestation (no
+          # --with-helpers): the tarball ships no helper bundle (RUSH-3100), so
+          # the manifest step is skipped and no macOS signing box is needed.
+          scripts/release-attestation-produce.sh "${{ github.sha }}" --test-here
+
+      - name: Upload the tree-keyed attestation + tarball to the rolling release
+        if: steps.existing.outputs.already != 'true'
+        env:
+          RELEASE_ATTESTATION_DIR: ${{ runner.temp }}/attest-store
+        run: |
+          set -euo pipefail
+          tree='${{ steps.tree.outputs.tree }}'
+          store="$RELEASE_ATTESTATION_DIR"
+
+          # The producer wrote <store>/<key>.json (key = content hash) + a copy of
+          # the packed tarball alongside it. Re-resolve the exact record for THIS
+          # tree via release-attestation.sh require (never trust a stray file), then
+          # publish it under the STABLE, tree-keyed asset name a consumer can find.
+          attest="$(scripts/release-attestation.sh require --dir "$store" --tree "$tree" --repo-root "$GITHUB_WORKSPACE")"
+          tgz_json="$(scripts/release-attestation.sh tarball --file "$attest" --require-file)"
+          tgz="$(jq -r .path <<<"$tgz_json")"
+          if [ -z "$tgz" ] || [ ! -f "$tgz" ]; then
+            echo "packed tarball missing — refusing to publish an incomplete proof" >&2
+            exit 1
+          fi
+
+          staged="$RUNNER_TEMP/attest-upload"
+          mkdir -p "$staged"
+          # STABLE, tree-keyed name so release.sh can `--pattern attest-<tree>.json`.
+          cp "$attest" "$staged/attest-$tree.json"
+          cp "$tgz" "$staged/$(basename "$tgz")"
+
+          # Create the rolling release once, then clobber-upload per-tree assets.
+          # --verify-tag is NOT used: this fixed tag is a container, not a git tag
+          # pointing at a release commit. Create it against the default branch.
+          if ! gh release view "$ATTEST_TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release create "$ATTEST_TAG" \
+              --repo "${{ github.repository }}" \
+              --title "main tree attestations (rolling)" \
+              --notes "Pre-produced exact-tree release attestations for origin/main. Assets are keyed by tree hash (attest-<tree>.json + the packed tarball); release.sh downloads the one matching the tree it is releasing. Old trees coexist until pruned." \
+              --target "${{ github.sha }}" \
+              || echo "release create raced with a concurrent run; continuing to upload"
+          fi
+          gh release upload "$ATTEST_TAG" "$staged"/* \
+            --repo "${{ github.repository }}" --clobber
+          echo "Uploaded attest-$tree.json + $(basename "$tgz") to $ATTEST_TAG"
