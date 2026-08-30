@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   CLAUDE_STATUSLINE_COMMAND,
+  formatReminderPart,
   ingestClaudeStatusLineUsage,
   installClaudeStatusLine,
   isStatusLineSelfReference,
@@ -42,6 +43,23 @@ describe('Claude native status line', () => {
       },
     }, 'zion', 'agents-cli · rush-3194')).toBe(
       'zion · Opus 5 · agents-cli · rush-3194 · 5h 1% · 7d 80%',
+    );
+  });
+
+  it('appends a dimmed reminder part after the usage windows when present', () => {
+    expect(renderClaudeStatusLine({
+      model: { display_name: 'Opus 5' },
+      rate_limits: { five_hour: { used_percentage: 1 }, seven_day: { used_percentage: 80 } },
+    }, 'zion', '', formatReminderPart('Move with confidence'))).toBe(
+      'zion · Opus 5 · 5h 1% · 7d 80% · \x1b[2m◆ Move with confidence\x1b[22m',
+    );
+  });
+
+  it('omits the reminder part when there is no reminder', () => {
+    expect(formatReminderPart(undefined)).toBe('');
+    expect(formatReminderPart('  ')).toBe('');
+    expect(renderClaudeStatusLine({ model: { display_name: 'Opus 5' } }, 'zion', '', '')).toBe(
+      'zion · Opus 5',
     );
   });
 
