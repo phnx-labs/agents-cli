@@ -37,11 +37,13 @@ import { invalidateInstalledVersionsCache, getVersionHomePath } from '../install
 import { runWithFallback } from '../exec.js';
 import type { AgentId } from '../types.js';
 import {
+  deriveUsageStatusFromSnapshot,
   mergeClaudeUsageCacheWindows,
   noteClaudeSessionLimit,
   readClaudeUsageCache,
   setClaudeUsageCachePathForTest,
   type UsageSnapshot,
+  type UsageWindow,
   type UsageWindowKey,
 } from './usage.js';
 
@@ -633,6 +635,44 @@ describe('routing refuses to decide on usage it cannot verify', () => {
     snapshotAt(new Date(NOW - 60_000), [{ key: 'week', usedPercent }]);
   const dayOld = (usedPercent: number) =>
     snapshotAt(new Date(NOW - 26 * 3600 * 1000), [{ key: 'week', usedPercent }]);
+
+  it('a last-known window the VIEW renders (staleWindows) stays unverified and never rate-limits routing', () => {
+    // The display fix (last-known + age in `agents view`) must not leak into
+    // routing. A snapshot whose only reading is an expired 100% session window —
+    // moved to `staleWindows` so the view can show "S: █████ 100% · 6h old" —
+    // must read to the router exactly as a blind snapshot did before: unverified,
+    // not stale (no number in `windows`), and NOT rate-limited by that 100%.
+    const staleSession: UsageWindow = {
+      key: 'session',
+      label: 'Session',
+      shortLabel: 'S',
+      usedPercent: 100,
+      resetsAt: new Date(NOW - 60 * 60 * 1000),
+      windowMinutes: 300,
+    };
+    const viewOnly: UsageSnapshot = {
+      source: 'last_seen',
+      sourceLabel: 'cached',
+      capturedAt: new Date(NOW - 6 * 60 * 60 * 1000),
+      windows: [],
+      staleWindows: [staleSession],
+    };
+    const c = candidate({ version: '2.1.181', usageSnapshot: viewOnly });
+
+    // Routing gate: no fresh number to trust.
+    expect(isUsageVerified(c, NOW)).toBe(false);
+    expect(hasStaleUsage(c, NOW)).toBe(false);
+    // The expired 100% must not make the account read as rate-limited/ineligible —
+    // deriveUsageStatusFromSnapshot only ever consults `windows`.
+    expect(deriveUsageStatusFromSnapshot(viewOnly)).toBeNull();
+    expect(readinessFromCandidate(c)).toEqual({ ready: true });
+
+    // And it is never PICKED as verified when a genuinely fresh account exists.
+    const verified = candidate({ version: '2.1.219', usageSnapshot: fresh(90) });
+    const result = pickBalancedCandidate([c, verified], NOW)!;
+    expect(result.picked.version).toBe('2.1.219');
+    expect(result.usageUnverified).toBe(false);
+  });
 
   it('never picks a day-old candidate while a verified one exists — even when the stale one looks emptier', () => {
     const stale = candidate({ version: '2.1.181', usageSnapshot: dayOld(48) });

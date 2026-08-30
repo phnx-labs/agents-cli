@@ -362,6 +362,18 @@ export interface UsageSnapshot {
   sourceLabel: string;
   capturedAt: Date | null;
   windows: UsageWindow[];
+  /**
+   * Last-known windows the freshness gate DROPPED from `windows` — expired by
+   * `resetsAt`/`windowMinutes`, or from a rolled-over billing period. VIEW-ONLY:
+   * `agents view` renders these with a staleness age ("30% · 6h old") so the
+   * user always sees the last number instead of a bare "unavailable". Routing
+   * MUST NEVER read this field — `isUsageVerified`/`hasStaleUsage`/
+   * `hasUsageAvailable`/`deriveUsageStatusFromSnapshot` consult only `windows`,
+   * so a stale number rendered here can never make a stale account read as
+   * verified or eligible (the RUSH-2858 property). Never serialized to the
+   * on-disk cache or `--json` (both project `windows` explicitly).
+   */
+  staleWindows?: UsageWindow[];
   // Subscription tier, when the usage source also reports it in the same
   // response (Kimi's /usages returns membership.level). Account-level plan
   // otherwise comes from the local auth file via AccountInfo.plan; this field
@@ -943,14 +955,25 @@ export function formatUsageSummary(
       0,
       snapshot.windows.filter((w) => w.key !== 'sonnet_week').length - selected.length,
     );
+    // Last-known windows the freshness gate dropped (see UsageSnapshot.staleWindows).
+    // Rendered with an age suffix so a stale reading stays visible instead of a
+    // bare "unavailable"; never in `snapshot.windows`, so routing never sees them.
+    const now = new Date();
+    const staleWindows = snapshot.staleWindows ?? [];
+    const staleByKey = new Map(staleWindows.map((w) => [w.key, w]));
     const expected = opts?.expectedWindows;
     const windowsToRender = expected
-      ? expected.map(({ key, shortLabel }) => ({ window: selected.find((item) => item.key === key), shortLabel }))
-      : selected.map((window) => ({ window, shortLabel: window.shortLabel }));
-    const windowParts = windowsToRender.map(({ window, shortLabel }, index) => {
+      ? expected.map(({ key, shortLabel }) => ({ key, window: selected.find((item) => item.key === key), shortLabel }))
+      : selected.map((window) => ({ key: window.key, window, shortLabel: window.shortLabel }));
+    const windowParts = windowsToRender.map(({ key, window, shortLabel }, index) => {
       if (!window) {
-        const missing = chalk.dim(`${shortLabel}: ${NO_DATA.repeat(COMPACT_BAR_LEN)} unavailable`);
-        return index < windowsToRender.length - 1 ? padToWidth(missing, 20) : missing;
+        // A window we expected but have no fresh reading for: render the
+        // last-known value with its age if we still have it, else "unavailable".
+        const stale = staleByKey.get(key as UsageWindowKey);
+        const rendered = stale
+          ? renderStaleUsageWindow(stale, snapshot.capturedAt, shortLabel, now)
+          : chalk.dim(`${shortLabel}: ${NO_DATA.repeat(COMPACT_BAR_LEN)} unavailable`);
+        return index < windowsToRender.length - 1 ? padToWidth(rendered, 20) : rendered;
       }
       const bar = renderCompactUsageBar(window.usedPercent);
       const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
@@ -963,6 +986,15 @@ export function formatUsageSummary(
     }
     if (windowParts.length > 0) {
       parts.push(windowParts.join('  '));
+    } else if (staleWindows.length > 0) {
+      // No fresh bars, but we have last-known readings (e.g. Grok's weekly bar
+      // from an ended billing period): show them with an age suffix rather than
+      // the "run once to refresh" hint, which hid a number we actually had.
+      const cap = opts?.maxWindows ?? staleWindows.length;
+      const rendered = staleWindows
+        .slice(0, cap)
+        .map((w) => renderStaleUsageWindow(w, snapshot.capturedAt, w.shortLabel, now));
+      parts.push(rendered.join('  '));
     } else if (snapshot.refreshHint) {
       parts.push(chalk.dim(snapshot.refreshHint));
     }
@@ -2424,9 +2456,12 @@ function serializeClaudeUsageSnapshot(snapshot: UsageSnapshot): CachedUsageSnaps
  * have burned since. Zeroing-but-keeping it (the previous behavior) rendered a
  * weeks-frozen cache as "S: 0% (now)" with `deriveUsageStatusFromSnapshot` →
  * 'available', so a genuinely rate-limited account read as an idle dispatch
- * candidate (RUSH-2858). Dropping mirrors the Grok collector, and an all-expired
- * snapshot deserializes to null so `readClaudeUsageCache` deletes the entry and
- * callers surface "usage unavailable" plus the recorded throttle reason.
+ * candidate (RUSH-2858). Dropping keeps them out of `windows` (routing stays
+ * blind), but they are preserved on `staleWindows` so the view can render the
+ * last-known number with its age instead of a bare "unavailable" — a row that
+ * carries only stale windows therefore survives (it is worth showing), and only
+ * a row with NOTHING to show — no fresh window, no stale window, no plan, no
+ * refusal — deserializes to null so `readClaudeUsageCache` deletes it.
  *
  * A row that carries a plan survives even with no fresh windows: the plan is a
  * truthful reading in its own right, and losing it is what made the cached view
@@ -2437,16 +2472,23 @@ function deserializeClaudeUsageSnapshot(
   now: Date
 ): UsageSnapshot | null {
   const capturedAt = parseDateValue(snapshot.capturedAt);
-  const windows = snapshot.windows
-    .map((window) => ({
-      key: window.key,
-      label: window.label,
-      shortLabel: window.shortLabel,
-      usedPercent: window.usedPercent,
-      resetsAt: parseDateValue(window.resetsAt),
-      windowMinutes: window.windowMinutes,
-    }))
-    .filter((window) => isCachedUsageWindowFresh(window, capturedAt, now));
+  const deserialized = snapshot.windows.map((window) => ({
+    key: window.key,
+    label: window.label,
+    shortLabel: window.shortLabel,
+    usedPercent: window.usedPercent,
+    resetsAt: parseDateValue(window.resetsAt),
+    windowMinutes: window.windowMinutes,
+  }));
+  const windows = deserialized.filter((window) => isCachedUsageWindowFresh(window, capturedAt, now));
+  // The dropped windows are still the LAST reading we saw for those meters —
+  // routing must not trust them (they stay out of `windows`), but the view
+  // renders them with an age suffix rather than a bare "unavailable" (see
+  // UsageSnapshot.staleWindows). Skip any meter that already has a fresh row.
+  const freshKeys = new Set(windows.map((window) => window.key));
+  const staleWindows = deserialized.filter(
+    (window) => !freshKeys.has(window.key) && !isCachedUsageWindowFresh(window, capturedAt, now),
+  );
 
   const unavailable = deserializeUnavailable(snapshot.unavailable, now);
 
@@ -2460,7 +2502,13 @@ function deserializeClaudeUsageSnapshot(
   // and `deriveUsageStatusFromSnapshot` still returns null for zero windows, so
   // it can never read as a 0% bar or an "available" badge (the RUSH-2858
   // property that made expired windows drop in the first place).
-  if (windows.length === 0 && !unavailable && !snapshot.plan && !snapshot.refreshHint) {
+  if (
+    windows.length === 0 &&
+    staleWindows.length === 0 &&
+    !unavailable &&
+    !snapshot.plan &&
+    !snapshot.refreshHint
+  ) {
     return null;
   }
 
@@ -2469,6 +2517,7 @@ function deserializeClaudeUsageSnapshot(
     sourceLabel: CACHED_CLAUDE_USAGE_SOURCE_LABEL,
     capturedAt,
     windows,
+    staleWindows: staleWindows.length > 0 ? staleWindows : undefined,
     plan: snapshot.plan ?? null,
     refreshHint: snapshot.refreshHint ?? null,
     unavailable,
@@ -2827,6 +2876,65 @@ function formatResetHint(date: Date): string {
   return `${days}d`;
 }
 
+/**
+ * Compact elapsed-time label for a stale reading's age: "30m", "6h", "2d".
+ * Coarse single-unit like {@link formatResetHint}, floored at "1m" so a
+ * just-expired window never reads "0m".
+ */
+function formatAgeShort(diffMs: number): string {
+  const mins = Math.max(1, Math.round(diffMs / 60000));
+  if (mins < 60) return `${mins}m`;
+  const hours = Math.round(mins / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.round(hours / 24);
+  return `${days}d`;
+}
+
+/**
+ * Staleness suffix for a last-known window the freshness gate dropped. A window
+ * whose reset/period boundary passed while the sample itself is still inside its
+ * `windowMinutes` rolled OVER — the number describes a period that is done, so
+ * name it ("period ended 1h ago", e.g. Grok's weekly billing period). A window
+ * that aged past its own `windowMinutes` (Claude's 5h session read never
+ * refreshed in time) is a stale sample of a still-rolling window, so report the
+ * capture age ("6h old"). Falls back to the reset age, then a bare "stale".
+ */
+function formatStaleWindowSuffix(
+  window: UsageWindow,
+  capturedAt: Date | null,
+  now: Date,
+): string {
+  const resetPassed = !!window.resetsAt && window.resetsAt.getTime() <= now.getTime();
+  const captureExpired =
+    !!capturedAt &&
+    window.windowMinutes !== null &&
+    capturedAt.getTime() + window.windowMinutes * 60 * 1000 <= now.getTime();
+  if (resetPassed && !captureExpired) {
+    return `stale (period ended ${formatAgeShort(now.getTime() - window.resetsAt!.getTime())} ago)`;
+  }
+  if (capturedAt) return `${formatAgeShort(now.getTime() - capturedAt.getTime())} old`;
+  if (resetPassed) return `stale (period ended ${formatAgeShort(now.getTime() - window.resetsAt!.getTime())} ago)`;
+  return 'stale';
+}
+
+/**
+ * Render a dropped-but-last-known window as "S: ▍░░░░ 30% · 6h old": the gauge
+ * and percentage exactly as a live bar, then a dim staleness suffix so the
+ * number is always visible and unmistakably not current. VIEW-ONLY — these
+ * windows are never in `snapshot.windows`, so routing never sees them.
+ */
+function renderStaleUsageWindow(
+  window: UsageWindow,
+  capturedAt: Date | null,
+  shortLabel: string,
+  now: Date,
+): string {
+  const bar = renderCompactUsageBar(window.usedPercent);
+  const pct = colorUsage(`${Math.round(window.usedPercent)}%`, window.usedPercent);
+  const suffix = formatStaleWindowSuffix(window, capturedAt, now);
+  return `${chalk.gray(`${shortLabel}:`)} ${bar} ${pct} ${chalk.dim(`· ${suffix}`)}`;
+}
+
 /** Format a reset timestamp as a human-readable relative or absolute time. */
 function formatResetAt(date: Date): string {
   const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
@@ -2896,8 +3004,15 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
     const windows = match.windows.filter((window) =>
       isCachedUsageWindowFresh(window, match.capturedAt, now)
     );
+    // A window from an ended billing period is the LAST reading we saw — routing
+    // must not trust it (kept out of `windows`), but the view renders it with a
+    // "period ended Xh ago" suffix instead of the bare refresh hint. Only when
+    // there is nothing at all to show does the refresh hint stand alone.
+    const staleWindows = match.windows.filter(
+      (window) => !isCachedUsageWindowFresh(window, match.capturedAt, now),
+    );
     const version = options?.cliVersion;
-    const refreshHint = windows.length === 0
+    const refreshHint = windows.length === 0 && staleWindows.length === 0
       ? `run grok${version ? `@${version}` : ''} once to refresh usage`
       : null;
 
@@ -2907,6 +3022,7 @@ async function getGrokUsageInfo(options?: UsageOptions): Promise<UsageInfo> {
         sourceLabel: 'last seen in Grok logs',
         capturedAt: match.capturedAt,
         windows,
+        staleWindows: staleWindows.length > 0 ? staleWindows : undefined,
         plan: match.subscriptionTier,
         refreshHint,
       },

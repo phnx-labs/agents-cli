@@ -491,7 +491,7 @@ describe('expired cached windows are unknown, not 0%', () => {
     expect(snapshot?.windows[0]?.usedPercent).toBe(91);
   });
 
-  it('deserializes an all-expired snapshot to null and deletes the cache entry', () => {
+  it('keeps an all-expired snapshot as last-known windows, out of `windows`', () => {
     const twoWeeksAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
     writeClaudeUsageCache(usageKey, {
       source: 'live',
@@ -503,11 +503,20 @@ describe('expired cached windows are unknown, not 0%', () => {
       ],
     });
 
-    expect(readClaudeUsageCache(usageKey)).toBeNull();
+    const snapshot = readClaudeUsageCache(usageKey);
 
-    // Self-cleaning: the dead entry is gone, not resurrected on the next read.
+    // Routing still sees nothing: no fresh window means the RUSH-2858 property
+    // holds — deriveUsageStatusFromSnapshot is null, so it is never "available".
+    expect(snapshot?.windows).toEqual([]);
+    expect(deriveUsageStatusFromSnapshot(snapshot)).toBeNull();
+    // But the last-known readings are preserved for the VIEW to render with age.
+    expect(snapshot?.staleWindows?.map((w) => w.key)).toEqual(['session', 'week']);
+    expect(snapshot?.staleWindows?.find((w) => w.key === 'session')?.usedPercent).toBe(100);
+
+    // The row survives — there is a last-known number worth showing, so it is
+    // NOT pruned the way a truly empty row is.
     const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
-    expect(raw[usageKey]).toBeUndefined();
+    expect(raw[usageKey]).toBeDefined();
   });
 
   it('keeps a meterless plan-only row so the cached read matches the refreshed one', () => {
@@ -533,6 +542,44 @@ describe('expired cached windows are unknown, not 0%', () => {
     // The row survives the read that used to delete it.
     const raw = JSON.parse(fs.readFileSync(path.join(cacheDir, 'claude-usage.json'), 'utf-8'));
     expect(raw[usageKey]?.plan).toBe('SuperGrok Heavy');
+  });
+
+  it('renders a stale claude session window as the last-known value with its age', () => {
+    // The freeze case: the 5h session window was last read 6h ago and never
+    // refreshed (Anthropic 429'd the usage endpoint), so it expired; the weekly
+    // window is still fresh. The view must show the last session number + age,
+    // not "S: ┄┄┄┄┄ unavailable".
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000);
+    writeClaudeUsageCache(usageKey, {
+      source: 'live',
+      sourceLabel: 'live',
+      capturedAt: sixHoursAgo,
+      windows: [
+        // Session captured 6h ago: its 5h window (300m) has aged out.
+        window({ key: 'session', shortLabel: 'S', usedPercent: 30, resetsAt: new Date(sixHoursAgo.getTime() + 5 * 60 * 60 * 1000), windowMinutes: 300 }),
+        // Weekly still fresh (resets 3d out).
+        window({ key: 'week', shortLabel: 'W', usedPercent: 62 }),
+      ],
+    });
+
+    const snapshot = readClaudeUsageCache(usageKey);
+    expect(snapshot?.windows.map((w) => w.key)).toEqual(['week']);
+    expect(snapshot?.staleWindows?.map((w) => w.key)).toEqual(['session']);
+
+    const rendered = formatUsageSummary(null, snapshot, 3, {
+      expectedWindows: [
+        { key: 'session', shortLabel: 'S' },
+        { key: 'week', shortLabel: 'W' },
+      ],
+    });
+    // The last-known session number is visible with its capture age, and the
+    // fresh weekly bar renders normally beside it.
+    expect(rendered).toContain('S:');
+    expect(rendered).toContain('30%');
+    expect(rendered).toContain('6h old');
+    expect(rendered).not.toContain('unavailable');
+    expect(rendered).toContain('W:');
+    expect(rendered).toContain('62%');
   });
 
   it('still drops a row with neither windows, a refusal, nor a plan', () => {
@@ -1778,7 +1825,7 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     expect(info.snapshot?.plan).toBe('X Premium+');
   });
 
-  it('drops expired billing windows so stale 100% is not rate-limited', async () => {
+  it('keeps an ended billing window out of `windows` but shows it as last-known', async () => {
     const now = Date.now();
     writeBillingLine({
       tsMs: now - DAY,
@@ -1789,12 +1836,20 @@ describe('getUsageInfo(grok) — last-seen billing from unified.jsonl', () => {
     });
 
     const info = await getUsageInfo('grok', { home, cliVersion: '0.2.118' });
+    // Routing stays honest: the ended-period bar never enters `windows`, so a
+    // stale 100% cannot read as rate-limited.
     expect(info.snapshot?.windows).toEqual([]);
     expect(info.snapshot?.plan).toBe('SuperGrok Heavy');
-    expect(info.snapshot?.refreshHint).toBe('run grok@0.2.118 once to refresh usage');
-    expect(formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot)).toContain(
-      'run grok@0.2.118 once to refresh usage',
-    );
+    // A last-known reading exists, so the refresh hint no longer stands alone —
+    // and the view renders the number with a "period ended" age instead of the
+    // old numberless "run grok once to refresh usage".
+    expect(info.snapshot?.refreshHint).toBeNull();
+    expect(info.snapshot?.staleWindows?.[0]?.usedPercent).toBe(100);
+    const rendered = formatUsageSummary(info.snapshot?.plan ?? null, info.snapshot);
+    expect(rendered).toContain('W:');
+    expect(rendered).toContain('100%');
+    expect(rendered).toContain('period ended');
+    expect(rendered).not.toContain('run grok@0.2.118 once to refresh usage');
   });
 
   it('reports a benign no-recent-usage marker when no log file exists yet (RUSH-3040)', async () => {
