@@ -588,14 +588,18 @@ export function parseCodex(filePath: string): SessionEvent[] {
  * Returns every path in order (a multi-file patch emits multiple paths so
  * artifact discovery sees each file — RUSH-1410). Empty when unparseable.
  */
-export function applyPatchTargetPaths(input: string): string[] {
-  const paths: string[] = [];
-  const re = /^\*\*\* (?:Update|Add|Delete) File: (.+)$/gm;
+export function applyPatchTargets(input: string): Array<{ path: string; op: 'Add' | 'Update' | 'Delete' }> {
+  const targets: Array<{ path: string; op: 'Add' | 'Update' | 'Delete' }> = [];
+  const re = /^\*\*\* (Update|Add|Delete) File: (.+)$/gm;
   for (const m of input.matchAll(re)) {
-    const p = m[1].trim();
-    if (p) paths.push(p);
+    const p = m[2].trim();
+    if (p) targets.push({ path: p, op: m[1] as 'Add' | 'Update' | 'Delete' });
   }
-  return paths;
+  return targets;
+}
+
+export function applyPatchTargetPaths(input: string): string[] {
+  return applyPatchTargets(input).map((target) => target.path);
 }
 
 /** @deprecated Prefer applyPatchTargetPaths — kept for single-file call sites. */
@@ -764,13 +768,14 @@ export function parseCodexContent(content: string): SessionEvent[] {
         const execCommand = rawName === 'exec' ? codexExecCommand(input) : undefined;
         // Multi-file patches: one tool_use per file so artifact discovery sees
         // every path (RUSH-1410). Single-file / non-patch keep one event.
-        const patchPaths = isApplyPatch ? applyPatchTargetPaths(input) : [];
+        const patchTargets = isApplyPatch ? applyPatchTargets(input) : [];
         const tool = isApplyPatch ? 'Edit' : rawName;
         const truncatedInput = input.length > 500 ? input.slice(0, 497) + '...' : input;
 
-        const emitOne = (patchPath: string | undefined) => {
+        const emitOne = (patchPath: string | undefined, patchOp?: 'Add' | 'Update' | 'Delete') => {
           const args: any = { input: truncatedInput };
           if (patchPath) args.file_path = patchPath;
+          if (patchOp) args.patch_op = patchOp;
           if (execCommand) args.command = execCommand;
           const callId = payload.call_id || payload.id;
           if (callId) callMap.set(callId, { name: tool, args });
@@ -786,8 +791,8 @@ export function parseCodexContent(content: string): SessionEvent[] {
           });
         };
 
-        if (isApplyPatch && patchPaths.length > 0) {
-          for (const p of patchPaths) emitOne(p);
+        if (isApplyPatch && patchTargets.length > 0) {
+          for (const target of patchTargets) emitOne(target.path, target.op);
         } else {
           emitOne(undefined);
         }

@@ -34,6 +34,17 @@ describe('classifyFileChanges', () => {
     expect(changes.filter(c => c.path === 'src/n.ts')).toEqual([{ path: 'src/n.ts', op: 'created' }]);
   });
 
+  it('preserves Codex apply_patch Add/Delete operations', () => {
+    const add = tool('Edit', 'docs/plan.md');
+    add.args = { file_path: 'docs/plan.md', patch_op: 'Add' };
+    const del = tool('Edit', 'docs/old.md');
+    del.args = { file_path: 'docs/old.md', patch_op: 'Delete' };
+    expect(classifyFileChanges([add, del])).toEqual([
+      { path: 'docs/plan.md', op: 'created' },
+      { path: 'docs/old.md', op: 'deleted' },
+    ]);
+  });
+
   it('a deletion wins over an earlier create/modify', () => {
     const changes = classifyFileChanges([tool('Write', 'tmp/x'), tool('Bash', undefined, 'rm tmp/x')]);
     expect(changes).toContainEqual({ path: 'tmp/x', op: 'deleted' });
